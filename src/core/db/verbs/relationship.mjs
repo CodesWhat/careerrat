@@ -113,7 +113,15 @@ function sourcingText(app) {
 function shouldClearSourcingCta(app) {
   const text = sourcingText(app);
   if (!text) return false;
-  return /\b(relationship|recruiter|warm path|contact|source|sourcing)\b/.test(text);
+  // Only CTA-shaped sourcing prompts clear: explicit relationship-sourcing
+  // vocabulary, or a find/source verb paired with a sourcing noun. Bare nouns
+  // are not enough — "Call the recruiter back at 3pm" or "Confirm contact
+  // info with HR" are real reminders, and a lead landing for that company
+  // must never silently replace them (or wipe their due date).
+  return (
+    /\brelationship\b|\bsourcing\b|\bwarm path\b/.test(text) ||
+    /\b(?:find|source)\b[^.!?]*\b(?:recruiter|contact|warm|referral)\b/.test(text)
+  );
 }
 
 function appendConversation(app, conversation) {

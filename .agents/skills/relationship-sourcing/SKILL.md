@@ -235,3 +235,40 @@ careerrat tracker
 
 If outreach is needed, hand the approved contact and context to `email-comms` for a
 draft. Never send automatically.
+
+---
+
+## Conversational workspace path
+
+In the Ask workspace, two narrow pieces of this skill are native: the app runs
+typed intents directly in `workspace-agent.mjs`, not this skill's browser
+steps. A terminal or external-agent run still follows STEP 0 → 5 exactly as
+written, and the actual people search always happens there — the app never
+drives LinkedIn or Wellfound itself.
+
+- **Recording a contact the candidate found** (`relationship.record-lead`).
+  Self-reports like "I found a recruiter at Acme on LinkedIn, named Jordan
+  Lee" or "add Casey Wu as a hiring manager at Globex" offer a "Record the
+  contact you found" chip. No consent gate applies: the candidate did the
+  finding, so there is nothing for CareerRat to be permitted to do. The lead
+  lands in `relationshipLeads[]` with `status: review` through the same
+  upsert verb (same dedupe, same CTA clearing) and is approved or rejected in
+  the Network tab like any sourced lead. The company links to a tracked
+  application when one matches; an untracked company still records, just
+  without the link. Notes and titles are checked for the candidate's private
+  current pay figure and refused if it appears.
+- **Requesting a sourcing run** (`relationship.source-request`). Requests like
+  "find a recruiter at Acme" or "who can refer me at Globex" offer a "Request
+  people sourcing" chip. The handler checks `mayRun` for `relationship_sourcing`
+  per platform: with every platform off it refuses and points at Settings;
+  with at least one allowed it returns a handoff card showing each platform's
+  real consent state and, when the linked application has no pending next
+  action, writes `nextAction: "Run relationship-sourcing for <Company>"` so
+  the request survives reload. That CTA deliberately uses this skill's
+  sourcing vocabulary: STEP 4's lead upsert auto-clears it to the review CTA
+  the moment leads land, in the same transaction. An existing next action is
+  never overwritten.
+- **What stays here.** Searching the platforms, the one-browser rule, halting
+  on login walls, and every provider interaction remain this skill's agent
+  path. Approval, rejection, and outreach handoff to `email-comms` are
+  unchanged.

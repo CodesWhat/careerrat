@@ -1264,6 +1264,10 @@ function AskBarTurn({
   const calendarWriteArtifact = turn.artifacts?.find(
     (artifact) => artifact.kind === "calendar_write"
   );
+  const sourcingHandoffArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "sourcing_handoff"
+  );
+  const leadReceiptArtifact = turn.artifacts?.find((artifact) => artifact.kind === "lead_receipt");
   const nextActions = Array.isArray(turn.metadata?.nextActions) ? turn.metadata.nextActions : [];
 
   return (
@@ -1315,6 +1319,8 @@ function AskBarTurn({
       {issueReportArtifact ? <IssueReportCard artifact={issueReportArtifact} /> : null}
       {issueFiledArtifact ? <IssueFiledCard artifact={issueFiledArtifact} /> : null}
       {calendarWriteArtifact ? <CalendarWriteCard artifact={calendarWriteArtifact} /> : null}
+      {sourcingHandoffArtifact ? <SourcingHandoffCard artifact={sourcingHandoffArtifact} /> : null}
+      {leadReceiptArtifact ? <LeadReceiptCard artifact={leadReceiptArtifact} /> : null}
       {handoffArtifact ? <ApplicationHandoffCard artifact={handoffArtifact} /> : null}
       {nextActions.length ? (
         <div className="ask-bar__next-actions">
@@ -2395,6 +2401,60 @@ function CalendarWriteCard({ artifact }) {
       {companyRole ? <p>{companyRole}</p> : null}
       <p className="ask-bar__screening-note">
         {[calendarWriteProviderLabel(artifact.provider), dateLabel].filter(Boolean).join(" · ")}
+      </p>
+    </section>
+  );
+}
+
+// sourcing_handoff (relationship-sourcing skill) — an acknowledgment that the
+// request was recorded, not a result (nothing has succeeded yet), so the
+// badge stays neutral rather than badge--ok. Same receipt chrome as
+// CalendarWriteCard above, no left-edge accent.
+function SourcingHandoffCard({ artifact }) {
+  const platforms = Array.isArray(artifact.platforms) ? artifact.platforms : [];
+  let note =
+    "Run the relationship-sourcing skill from your agent or terminal. New leads land in the Network tab for your review.";
+  if (artifact.ctaRecorded) {
+    note += " A reminder was added to this job's next action.";
+  }
+  return (
+    <section className="ask-bar__strategy-apply" aria-label="Sourcing requested">
+      <div className="ask-bar__strategy-review-head">
+        <strong>Sourcing requested</strong>
+        <span className="badge badge--muted">Handoff</span>
+      </div>
+      {artifact.company ? <p>{artifact.company}</p> : null}
+      {platforms.map((platform) => (
+        <p key={platform.platform}>
+          {[
+            settingsPlatformLabel(platform.platform),
+            platform.allowed ? "Allowed" : "Off in Settings",
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </p>
+      ))}
+      <p className="ask-bar__screening-note">{note}</p>
+    </section>
+  );
+}
+
+// lead_receipt (relationship-sourcing skill) — a candidate-reviewed lead
+// landed in Network; same receipt chrome, badge--warn to match
+// ScreeningAnswersCard's "needs your review" signal.
+function LeadReceiptCard({ artifact }) {
+  return (
+    <section className="ask-bar__strategy-apply" aria-label="Contact recorded">
+      <div className="ask-bar__strategy-review-head">
+        <strong>Contact recorded</strong>
+        <span className="badge badge--warn">Review first</span>
+      </div>
+      <p>{artifact.name}</p>
+      <p>{[artifact.type, artifact.company].filter(Boolean).join(" at ")}</p>
+      <p className="ask-bar__screening-note">
+        {[settingsPlatformLabel(artifact.platform), "Approve or reject it in the Network tab."]
+          .filter(Boolean)
+          .join(" · ")}
       </p>
     </section>
   );

@@ -69,6 +69,8 @@ export const WORKSPACE_INTENT_ENTITY_TYPES = Object.freeze({
   "outcome.record": ["application"],
   "outcome.record-request": ["workspace"],
   "calendar.record-write": ["workspace"],
+  "relationship.record-lead": ["workspace"],
+  "relationship.source-request": ["workspace"],
   "profile.enrich": ["candidate"],
   "issue.report": ["workspace"],
   "issue.record-filed": ["workspace"],

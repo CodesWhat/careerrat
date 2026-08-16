@@ -38,6 +38,7 @@ import {
 import { companyProposalBatchGet } from "../db/verbs/company-discovery.mjs";
 import { companyHealthSet } from "../db/verbs/company-health.mjs";
 import { intakeOne } from "../db/verbs/intake.mjs";
+import { relationshipLeadUpsertBatch } from "../db/verbs/relationship.mjs";
 import { sourcedPromote, sourcedSetStatus, sourcedUpsertBatch } from "../db/verbs/sourced.mjs";
 import { companyDiscoveryCadenceState } from "../discovery/company-discovery-cadence.mjs";
 import { applyCompanyProposalDecision } from "../discovery/company-proposal-decisions.mjs";
@@ -155,6 +156,8 @@ const EXECUTABLE_INTENTS = new Set([
   "issue.report",
   "issue.record-filed",
   "calendar.record-write",
+  "relationship.record-lead",
+  "relationship.source-request",
 ]);
 
 function compactCandidateSnapshot({ repoRoot, env }) {
@@ -4216,6 +4219,206 @@ export async function executeWorkspaceIntent({
       });
     }
 
+    if (normalized.type === "relationship.record-lead") {
+      const name = String(input.name || "")
+        .trim()
+        .slice(0, 120);
+      const companyInput = String(input.company || "")
+        .trim()
+        .slice(0, 120);
+      // A reference with no matchable tokens ("...", bare punctuation) is not
+      // a company at all — refuse rather than persisting junk via the
+      // untracked-company fallback below.
+      if (!name || !companyInput || !companyReferenceTokens(companyInput).length) {
+        throw actionError(
+          "Give the person's name and the company, like: add Jordan Lee as a recruiter at Acme.",
+          "RELATIONSHIP_LEAD_INVALID"
+        );
+      }
+
+      // A company CareerRat isn't tracking yet still gets the lead recorded —
+      // it just falls back to the raw company string instead of a linked
+      // application, rather than blocking the record.
+      let company = companyInput;
+      let applicationId = null;
+      try {
+        const resolved = resolveReferencedCompany({
+          repoRoot,
+          env,
+          companyReference: companyInput,
+          notFoundCode: "RELATIONSHIP_LEAD_COMPANY_UNTRACKED",
+        });
+        company = resolved.company;
+        applicationId = resolved.recordType === "application" ? resolved.id : null;
+      } catch (error) {
+        if (error?.code !== "RELATIONSHIP_LEAD_COMPANY_UNTRACKED") throw error;
+      }
+
+      const LEAD_TYPES = ["Recruiter", "Decision maker", "Referral", "Contact"];
+      const rawType = String(input.type || "")
+        .trim()
+        .toLowerCase();
+      const type = LEAD_TYPES.find((candidate) => candidate.toLowerCase() === rawType) || "Contact";
+
+      const LEAD_PLATFORMS = new Set(["linkedin", "wellfound"]);
+      const rawPlatform = String(input.platform || "")
+        .trim()
+        .toLowerCase();
+      const platform = LEAD_PLATFORMS.has(rawPlatform) ? rawPlatform : "linkedin";
+
+      const url = safeExternalHttpUrl(input.url);
+      const title = String(input.title || "")
+        .trim()
+        .slice(0, 120);
+      const basis = String(input.basis || "")
+        .trim()
+        .slice(0, 120);
+
+      // Both guards: the literal current_base token and the phrase-based
+      // current-salary check, since basis/title are user-typed free text.
+      if (findCurrentBaseToken(`${basis}\n${title}`) || findCompLeak(`${basis}\n${title}`)) {
+        throw actionError(
+          "That note still contains your private current pay figure. Remove it, then try again.",
+          "RELATIONSHIP_LEAD_COMP_LEAK"
+        );
+      }
+
+      const at = requestDate(now).toISOString();
+      const operation = relationshipLeadUpsertBatch({
+        repoRoot,
+        env,
+        leads: [
+          {
+            company,
+            ...(applicationId ? { applicationId } : {}),
+            name,
+            type,
+            ...(title ? { title } : {}),
+            platform,
+            ...(url ? { url } : {}),
+            ...(basis ? { basis } : {}),
+            status: "review",
+            foundAt: at,
+          },
+        ],
+      });
+      const lead = operation.leads.find(
+        (candidate) =>
+          candidate.company === company &&
+          candidate.name === name &&
+          candidate.platform === platform
+      );
+
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: `Recorded ${name} for your review in the Network tab.`,
+        artifacts: [
+          {
+            kind: "lead_receipt",
+            leadId: lead?.id || null,
+            name,
+            company,
+            applicationId: applicationId || null,
+            type,
+            platform,
+            status: "review",
+            at,
+          },
+        ],
+        metadata: { state: "recorded", type, platform },
+        operationResult: operation,
+        now,
+      });
+    }
+
+    if (normalized.type === "relationship.source-request") {
+      const companyInput = String(input.company || "")
+        .trim()
+        .slice(0, 120);
+      let company;
+      let applicationId = null;
+      let recordType = null;
+      try {
+        const resolved = resolveReferencedCompany({
+          repoRoot,
+          env,
+          companyReference: companyInput,
+          notFoundCode: "RELATIONSHIP_SOURCING_COMPANY_REQUIRED",
+          notFoundMessage:
+            "Name the company you want people sourcing for, like: find a recruiter at Acme.",
+        });
+        company = resolved.company;
+        recordType = resolved.recordType;
+        applicationId = recordType === "application" ? resolved.id : null;
+      } catch (error) {
+        // Untracked companies still get a handoff, but only when the
+        // reference has real tokens — "..." or bare punctuation would
+        // otherwise slip through as a nonsense company name.
+        if (
+          error?.code === "RELATIONSHIP_SOURCING_COMPANY_REQUIRED" &&
+          companyReferenceTokens(companyInput).length
+        ) {
+          company = companyInput;
+        } else {
+          throw error;
+        }
+      }
+
+      const platforms = ["linkedin", "wellfound"].map((platform) => ({
+        platform,
+        allowed: mayRun({ capability: "relationship_sourcing", platform, root: repoRoot, env })
+          .allowed,
+      }));
+      if (platforms.every((entry) => !entry.allowed)) {
+        throw actionError(
+          "Relationship sourcing isn't turned on yet. Turn it on in Settings first.",
+          "RELATIONSHIP_SOURCING_NOT_ALLOWED"
+        );
+      }
+
+      // A durable CTA only gets written when the linked application has no
+      // nextAction of its own yet — never overwrite an existing one. The CTA
+      // text must keep "relationship" and "sourcing" in it: relationshipLead
+      // upsert's auto-clear regex (verbs/relationship.mjs) matches on that
+      // vocabulary to flip this CTA to the lead-review CTA once a lead lands.
+      let ctaRecorded = false;
+      if (recordType === "application" && applicationId) {
+        const application = applicationForIntent({ repoRoot, env, id: applicationId });
+        if (!application.nextAction) {
+          appSetFields({
+            repoRoot,
+            env,
+            id: applicationId,
+            patch: { nextAction: `Run relationship-sourcing for ${company}`, nextActionDue: null },
+          });
+          ctaRecorded = true;
+        }
+      }
+
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: `Sourcing requested for ${company}. Run the relationship-sourcing skill from your agent or terminal to search; new leads land in the Network tab for your review.`,
+        artifacts: [
+          {
+            kind: "sourcing_handoff",
+            company,
+            applicationId: applicationId || null,
+            platforms,
+            ctaRecorded,
+            at: requestDate(now).toISOString(),
+          },
+        ],
+        metadata: { state: "requested", ctaRecorded },
+        now,
+      });
+    }
+
     if (normalized.type === "scheduling.prepare") {
       const communication = communicationForIntent({
         repoRoot,
@@ -5870,6 +6073,89 @@ function calendarRecordWriteFromText(text) {
   return { provider, event: title ? { title } : {} };
 }
 
+function relationshipLeadTypeFromMatch(raw) {
+  const normalized = String(raw || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+  if (normalized === "hiring manager" || normalized === "decision maker") return "Decision maker";
+  if (normalized === "recruiter") return "Recruiter";
+  if (normalized === "referral") return "Referral";
+  return "Contact";
+}
+
+// "found a recruiter at Acme, named Jordan Lee" / "add Jordan Lee as a
+// recruiter at Acme" — a self-report of a contact the candidate already
+// found, not a request for CareerRat to go find one. Returns null (rather
+// than routing with a blank name) when a pattern matches but the name group
+// comes back empty after trim, so it fails closed to other matchers/AI
+// capture instead of ever recording an unnamed lead.
+function relationshipRecordLeadFromText(text) {
+  const value = String(text || "").trim();
+  if (!value) return null;
+
+  let match = value.match(
+    /^(?:i\s+)?(?:just\s+)?found\s+(?:a\s+|an\s+)?(recruiter|hiring\s+manager|decision\s+maker|referral|contact)\s+at\s+(.+?)(?:\s+on\s+(linkedin|wellfound))?\s*[,:]?\s+named?\s+(.+?)\s*[.?!]*$/i
+  );
+  if (match) {
+    const name = match[4].trim();
+    if (!name) return null;
+    return {
+      input: {
+        type: relationshipLeadTypeFromMatch(match[1]),
+        company: match[2].trim(),
+        platform: match[3] ? match[3].toLowerCase() : undefined,
+        name,
+      },
+    };
+  }
+
+  match = value.match(
+    /^add\s+(.+?)\s+as\s+(?:a\s+|an\s+)?(recruiter|hiring\s+manager|decision\s+maker|referral|contact)\s+at\s+(.+?)(?:\s+on\s+(linkedin|wellfound))?\s*[.?!]*$/i
+  );
+  if (match) {
+    const name = match[1].trim();
+    if (!name) return null;
+    return {
+      input: {
+        name,
+        type: relationshipLeadTypeFromMatch(match[2]),
+        company: match[3].trim(),
+        platform: match[4] ? match[4].toLowerCase() : undefined,
+      },
+    };
+  }
+
+  return null;
+}
+
+// "find a recruiter at Acme" / "who do I know at Acme" / "get me a warm
+// intro to Acme" — a consent-checked sourcing handoff. This never drives a
+// browser itself; it only records the request and, when consent allows it,
+// points the candidate at the relationship-sourcing skill.
+function relationshipSourceRequestFromText(text) {
+  const value = String(text || "").trim();
+  if (!value) return null;
+
+  let match = value.match(
+    /^(?:please\s+)?(?:can\s+you\s+)?find\s+(?:me\s+)?(?:a\s+|an\s+)?(?:recruiter|hiring\s+manager|decision\s+maker|warm\s+(?:path|contact|intro)|contact|referral)\s+(?:at|for)\s+(.+?)\s*[.?!]*$/i
+  );
+  if (!match) {
+    match = value.match(
+      /^(?:please\s+)?who\s+(?:do\s+i\s+know|can\s+refer\s+me)\s+at\s+(.+?)\s*[.?!]*$/i
+    );
+  }
+  if (!match) {
+    match = value.match(
+      /^(?:please\s+)?(?:get\s+(?:me\s+)?(?:a\s+)?)?warm\s+intro\s+(?:to|at|into)\s+(.+?)\s*[.?!]*$/i
+    );
+  }
+  if (!match) return null;
+  const company = match[1].trim();
+  if (!company) return null;
+  return { input: { company } };
+}
+
 const ACTION_PREVIEW_RULES = [
   {
     test: (text) => Boolean(screeningQuestionRequestFromText(text)),
@@ -6210,12 +6496,17 @@ const ACTION_PREVIEW_RULES = [
     }),
   },
   // ORDERING REQUIREMENT: settings.explain / settings.apply / issue.report /
-  // calendar.record-write MUST stay above the terminal search.run catch-all
-  // immediately below — that rule matches a bare "check"/"search"/"find"/"run"
-  // verb near "jobs/roles/postings/boards/sources" and would otherwise never
-  // let phrasings like "turn off status polling", "check my settings",
-  // "report a bug", or "I added the interview to my calendar" reach these
-  // rules first.
+  // calendar.record-write / relationship.record-lead / relationship.source-request
+  // MUST stay above the terminal search.run catch-all immediately below — that
+  // rule matches a bare "check"/"search"/"find"/"run" verb near
+  // "jobs/roles/postings/boards/sources" and would otherwise never let
+  // phrasings like "turn off status polling", "check my settings", "report a
+  // bug", "I added the interview to my calendar", or "find a recruiter at
+  // Acme" reach these rules first. relationship.record-lead MUST also stay
+  // above relationship.source-request: both match "recruiter at <company>"
+  // vocabulary, but only record-lead's patterns require a person's name, so
+  // the more specific self-report rule has to win before the generic sourcing
+  // request rule gets a chance.
   {
     test: (text) => Boolean(settingsExplainFromText(text)),
     label: "Show my settings",
@@ -6254,6 +6545,24 @@ const ACTION_PREVIEW_RULES = [
       type: "calendar.record-write",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
       input: calendarRecordWriteFromText(text),
+    }),
+  },
+  {
+    test: (text) => Boolean(relationshipRecordLeadFromText(text)),
+    label: "Record the contact you found",
+    intent: (text) => ({
+      type: "relationship.record-lead",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: relationshipRecordLeadFromText(text).input,
+    }),
+  },
+  {
+    test: (text) => Boolean(relationshipSourceRequestFromText(text)),
+    label: "Request people sourcing",
+    intent: (text) => ({
+      type: "relationship.source-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: relationshipSourceRequestFromText(text).input,
     }),
   },
   {

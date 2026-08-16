@@ -1176,6 +1176,46 @@ test("relationshipLeadUpsertBatch stores review leads, dedupes company/name/plat
   assert.ok(activityRow(db, result.event.id));
 });
 
+test("relationshipLeadUpsertBatch never clobbers a real reminder that only mentions a sourcing noun", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+
+  // "Call the recruiter back" is an appointment, not a sourcing CTA — a lead
+  // landing for this company must leave it (and its due date) untouched.
+  const seeded = JSON.parse(
+    db.prepare("SELECT data FROM applications WHERE id = ?").get("app-non-interview").data
+  );
+  db.prepare("UPDATE applications SET data = ? WHERE id = ?").run(
+    JSON.stringify({
+      ...seeded,
+      nextAction: "Call the recruiter back at 3pm",
+      nextActionDue: "2030-01-05",
+    }),
+    "app-non-interview"
+  );
+
+  const result = relationshipLeadUpsertBatch({
+    repoRoot,
+    leads: [
+      {
+        applicationId: "app-non-interview",
+        company: "Initech",
+        name: "Casey Wu",
+        platform: "linkedin",
+      },
+    ],
+  });
+
+  assert.equal(result.count, 1);
+  assert.deepEqual(result.updatedApplications, []);
+  const app = JSON.parse(
+    db.prepare("SELECT data FROM applications WHERE id = ?").get("app-non-interview").data
+  );
+  assert.equal(app.nextAction, "Call the recruiter back at 3pm");
+  assert.equal(app.nextActionDue, "2030-01-05");
+});
+
 test("relationshipLeadSetStatus approves or rejects leads and updates linked app action state in the same transaction", () => {
   const repoRoot = tempRepo();
   seedFixture(repoRoot);

@@ -29,6 +29,7 @@ import { calendarBusyUpsert } from "../src/core/db/verbs/calendar.mjs";
 import { candidateConfigGet, candidateConfigPatch } from "../src/core/db/verbs/candidate.mjs";
 import { commUpsert } from "../src/core/db/verbs/comm.mjs";
 import { intakeCapture, intakeUpdate } from "../src/core/db/verbs/intake.mjs";
+import { relationshipLeadUpsertBatch } from "../src/core/db/verbs/relationship.mjs";
 import { sourcedUpsertBatch } from "../src/core/db/verbs/sourced.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import {
@@ -63,6 +64,11 @@ function readApplication(repoRoot, id) {
   const row = openDb({ repoRoot, env: {} })
     .prepare("SELECT data FROM applications WHERE id = ?")
     .get(id);
+  return row ? JSON.parse(row.data) : null;
+}
+
+function readKv(repoRoot, key) {
+  const row = openDb({ repoRoot, env: {} }).prepare("SELECT data FROM kv WHERE key = ?").get(key);
   return row ? JSON.parse(row.data) : null;
 }
 
@@ -6120,6 +6126,345 @@ test("calendar.record-write artifact carries exactly the calendar_write contract
   assert.equal(artifact.company, "Temporal Labs");
   assert.equal(artifact.role, "Applied AI Engineer");
   assert.ok(artifact.at);
+});
+
+// ---------------------------------------------------------------------------
+// relationship.record-lead / relationship.source-request — the
+// relationship-sourcing skill's self-report and consent-checked sourcing
+// handoff (workspace-agent.mjs ~4222/~4324). record-lead records a contact
+// the candidate already found (never consent-gated — it writes nothing to a
+// platform). source-request is gated on real relationship_sourcing consent
+// per platform (mayRun(), consent.mjs) and, only when the linked application
+// has no nextAction of its own yet, writes a durable sourcing CTA that a
+// landed lead later flips to the lead-review CTA (verbs/relationship.mjs
+// shouldClearSourcingCta).
+// ---------------------------------------------------------------------------
+
+test("relationship.record-lead: happy path for a tracked company canonicalizes type/platform and persists the lead", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-lumon", company: "Lumon Industries" });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "relationship.record-lead",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { name: "Jordan Lee", company: "Lumon", type: "recruiter", platform: "wellfound" },
+    },
+  });
+
+  const message = result.messages.at(-1);
+  assert.equal(message.text, "Recorded Jordan Lee for your review in the Network tab.");
+  const artifact = message.artifacts[0];
+  assert.equal(artifact.kind, "lead_receipt");
+  assert.equal(artifact.name, "Jordan Lee");
+  assert.equal(artifact.company, "Lumon Industries");
+  assert.equal(artifact.applicationId, "app-lumon");
+  assert.equal(artifact.type, "Recruiter");
+  assert.equal(artifact.platform, "wellfound");
+  assert.equal(artifact.status, "review");
+  assert.ok(artifact.leadId);
+
+  const stored = readKv(repoRoot, "relationshipLeads");
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0].name, "Jordan Lee");
+  assert.equal(stored[0].company, "Lumon Industries");
+  assert.equal(stored[0].applicationId, "app-lumon");
+  assert.equal(stored[0].type, "Recruiter");
+  assert.equal(stored[0].platform, "wellfound");
+  assert.equal(stored[0].status, "review");
+});
+
+test("relationship.record-lead: an untracked company still records the lead, with applicationId null and the company recorded as given", async () => {
+  const repoRoot = tempRepo();
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "relationship.record-lead",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        name: "Riley Chen",
+        company: "Umbrella Corp",
+        type: "recruiter",
+        platform: "linkedin",
+      },
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.applicationId, null);
+  assert.equal(artifact.company, "Umbrella Corp");
+
+  const stored = readKv(repoRoot, "relationshipLeads");
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0].company, "Umbrella Corp");
+  assert.equal(stored[0].applicationId, undefined);
+});
+
+test("relationship.record-lead: a missing name throws RELATIONSHIP_LEAD_INVALID", async () => {
+  const repoRoot = tempRepo();
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "relationship.record-lead",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { company: "Acme", type: "recruiter" },
+      },
+    }),
+    (error) => error.code === "RELATIONSHIP_LEAD_INVALID"
+  );
+});
+
+test("relationship.record-lead: a basis note carrying the current_base token throws RELATIONSHIP_LEAD_COMP_LEAK", async () => {
+  const repoRoot = tempRepo();
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "relationship.record-lead",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {
+          name: "Jordan Lee",
+          company: "Acme",
+          type: "recruiter",
+          basis: "Mentioned my current_base is 180000 during the intro call.",
+        },
+      },
+    }),
+    (error) => error.code === "RELATIONSHIP_LEAD_COMP_LEAK"
+  );
+});
+
+test("relationship.record-lead: a phrase-based current-salary mention in the basis also throws RELATIONSHIP_LEAD_COMP_LEAK", async () => {
+  const repoRoot = tempRepo();
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "relationship.record-lead",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {
+          name: "Jordan Lee",
+          company: "Acme",
+          basis: "Said the band beats what I currently make.",
+        },
+      },
+    }),
+    (error) => error.code === "RELATIONSHIP_LEAD_COMP_LEAK"
+  );
+});
+
+test("relationship.record-lead: a punctuation-only company reference throws RELATIONSHIP_LEAD_INVALID instead of recording junk", async () => {
+  const repoRoot = tempRepo();
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "relationship.record-lead",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { name: "Jordan Lee", company: "..." },
+      },
+    }),
+    (error) => error.code === "RELATIONSHIP_LEAD_INVALID"
+  );
+});
+
+test("relationship.source-request: a punctuation-only company reference throws RELATIONSHIP_SOURCING_COMPANY_REQUIRED", async () => {
+  const repoRoot = tempRepo();
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "relationship.source-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { company: "..." },
+      },
+    }),
+    (error) => error.code === "RELATIONSHIP_SOURCING_COMPANY_REQUIRED"
+  );
+});
+
+test("relationship.record-lead: an unrecognized type falls back to Contact and an unrecognized platform falls back to linkedin", async () => {
+  const repoRoot = tempRepo();
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "relationship.record-lead",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { name: "Sam Park", company: "Acme", type: "wizard", platform: "carrier-pigeon" },
+    },
+  });
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.type, "Contact");
+  assert.equal(artifact.platform, "linkedin");
+});
+
+test("relationship.source-request: zero relationship_sourcing consent throws RELATIONSHIP_SOURCING_NOT_ALLOWED", async () => {
+  const repoRoot = tempRepo();
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "relationship.source-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { company: "Acme" },
+      },
+    }),
+    (error) => error.code === "RELATIONSHIP_SOURCING_NOT_ALLOWED"
+  );
+});
+
+test("relationship.source-request: partial platform consent produces a per-platform receipt and records the sourcing CTA exactly once", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-lumon", company: "Lumon Industries" });
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "automation",
+    patch: {
+      setup_mode: "advanced",
+      capabilities: {
+        relationship_sourcing: { enabled: true, platforms: { linkedin: true } },
+      },
+      consent: { linkedin: true },
+    },
+  });
+
+  const first = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "relationship.source-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { company: "Lumon" },
+    },
+  });
+
+  const artifact = first.messages.at(-1).artifacts[0];
+  assert.equal(artifact.kind, "sourcing_handoff");
+  assert.deepEqual(artifact.platforms, [
+    { platform: "linkedin", allowed: true },
+    { platform: "wellfound", allowed: false },
+  ]);
+  assert.equal(artifact.ctaRecorded, true);
+
+  let app = readApplication(repoRoot, "app-lumon");
+  assert.equal(app.nextAction, "Run relationship-sourcing for Lumon Industries");
+
+  const second = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "relationship.source-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { company: "Lumon" },
+    },
+  });
+
+  // The CTA never overwrites an existing nextAction, so a second request
+  // against the same still-pending CTA records nothing new.
+  assert.equal(second.messages.at(-1).artifacts[0].ctaRecorded, false);
+  app = readApplication(repoRoot, "app-lumon");
+  assert.equal(app.nextAction, "Run relationship-sourcing for Lumon Industries");
+});
+
+test("relationship.source-request: a landed relationship lead flips the sourcing CTA to the lead-review CTA", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-lumon", company: "Lumon Industries" });
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "automation",
+    patch: {
+      setup_mode: "advanced",
+      capabilities: {
+        relationship_sourcing: { enabled: true, platforms: { linkedin: true } },
+      },
+      consent: { linkedin: true },
+    },
+  });
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "relationship.source-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { company: "Lumon" },
+    },
+  });
+
+  let app = readApplication(repoRoot, "app-lumon");
+  assert.equal(app.nextAction, "Run relationship-sourcing for Lumon Industries");
+
+  relationshipLeadUpsertBatch({
+    repoRoot,
+    env: {},
+    leads: [
+      {
+        applicationId: "app-lumon",
+        company: "Lumon Industries",
+        name: "Jordan Lee",
+        platform: "linkedin",
+      },
+    ],
+  });
+
+  app = readApplication(repoRoot, "app-lumon");
+  assert.equal(app.nextAction, "Review relationship leads — approve or reject in Network tab");
+});
+
+test("relationship.source-request: an empty company throws RELATIONSHIP_SOURCING_COMPANY_REQUIRED; an untracked non-empty company still succeeds with applicationId null", async () => {
+  const repoRoot = tempRepo();
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "automation",
+    patch: {
+      setup_mode: "advanced",
+      capabilities: {
+        relationship_sourcing: { enabled: true, platforms: { linkedin: true, wellfound: true } },
+      },
+      consent: { linkedin: true, wellfound: true },
+    },
+  });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "relationship.source-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { company: "" },
+      },
+    }),
+    (error) => error.code === "RELATIONSHIP_SOURCING_COMPANY_REQUIRED"
+  );
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "relationship.source-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { company: "Umbrella Corp" },
+    },
+  });
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.company, "Umbrella Corp");
+  assert.equal(artifact.applicationId, null);
 });
 
 function mountDirect(repoRoot, executeIntentImpl, runTurnImpl, captureIntakeImpl) {
