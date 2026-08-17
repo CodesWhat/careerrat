@@ -1928,6 +1928,25 @@ function companyProposalArtifact(batch = {}, meta = {}) {
   };
 }
 
+// Shared by search.run and company.discover: an unresolved (pending) company
+// proposal batch is reopened instead of duplicated. companyDiscoveryCadenceState
+// reports "needs-review" whenever the latest batch still has undecided
+// proposals, so both call sites check that status the same way before ever
+// starting a new discovery batch. Returns the existing batch's artifact, or
+// null when there is nothing pending to reopen.
+function reopenPendingCompanyProposalBatch({ repoRoot, env, cadence, getBatchImpl, trigger }) {
+  if (cadence?.status !== "needs-review" || !cadence.batchId) return null;
+  const batch = getBatchImpl({ repoRoot, env, batchId: cadence.batchId })?.batch;
+  if (!batch) return null;
+  return companyProposalArtifact(batch, trigger ? { trigger } : {});
+}
+
+function companyDiscoveryReviewSentence(count, { also = false } = {}) {
+  if (!count) return null;
+  const lead = also ? "Company discovery also found" : "Company discovery found";
+  return `${lead} ${count} compan${count === 1 ? "y" : "ies"}; ${count === 1 ? "it needs" : "they need"} review.`;
+}
+
 // linkedin_optimize_handoff / linkedin_profile_proposals — support for the
 // linkedin.optimize-request / linkedin.proposal-decide handlers. Mirrors the
 // mail/messages sync handoff shape: capability gates surfaced per key, plus
@@ -3054,6 +3073,38 @@ export async function executeWorkspaceIntent({
     }
 
     if (normalized.type === "company.discover") {
+      // An unresolved proposal batch is reopened instead of duplicated: same
+      // guard as search.run (see reopenPendingCompanyProposalBatch). A
+      // changed discovery context (targeting drift since the pending batch)
+      // still surfaces here because companyDiscoveryCadenceImpl reports that
+      // batch as "needs-review" only while it has undecided proposals; once
+      // it is fully decided, a stale context falls through to "due" below
+      // and a fresh batch is created.
+      const cadence = companyDiscoveryCadenceImpl({ repoRoot, env, now: requestDate(now) });
+      const reopenArtifact = reopenPendingCompanyProposalBatch({
+        repoRoot,
+        env,
+        cadence,
+        getBatchImpl: getCompanyProposalBatchImpl,
+      });
+      if (reopenArtifact) {
+        const proposalCount = reopenArtifact.proposals.length;
+        return appendActionResult({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          text:
+            companyDiscoveryReviewSentence(proposalCount) || "All company proposals are reviewed.",
+          artifacts: [reopenArtifact],
+          metadata: {
+            state: "needs-review",
+            proposalCount,
+            rejectedCount: reopenArtifact.rejected.length,
+          },
+          now,
+        });
+      }
       const requestedCount = Number(input.requestedCount);
       const body = {
         requestedCount:
@@ -4149,19 +4200,15 @@ export async function executeWorkspaceIntent({
             now: requestDate(now),
           });
           companyDiscovery = compactCompanyDiscoveryState(cadence);
-          if (cadence?.status === "needs-review" && cadence.batchId) {
-            const batch = getCompanyProposalBatchImpl({
-              repoRoot,
-              env,
-              batchId: cadence.batchId,
-            })?.batch;
-            if (batch) {
-              companyArtifact = companyProposalArtifact(batch, {
-                trigger: { kind: "search-run", id: artifact.runId },
-              });
-            }
-          } else if (cadence?.due === true) {
-            const trigger = { kind: "search-run", id: artifact.runId };
+          const trigger = { kind: "search-run", id: artifact.runId };
+          companyArtifact = reopenPendingCompanyProposalBatch({
+            repoRoot,
+            env,
+            cadence,
+            getBatchImpl: getCompanyProposalBatchImpl,
+            trigger,
+          });
+          if (!companyArtifact && cadence?.due === true) {
             const proposalOperation = await createCompanyProposalsImpl({
               repoRoot,
               env,
@@ -4197,9 +4244,7 @@ export async function executeWorkspaceIntent({
       const companyReviewCount = companyArtifact?.proposals.length || 0;
       const text = [
         searchResultText({ ...run, purpose: run.purpose || purpose }),
-        companyReviewCount
-          ? `Company discovery also found ${companyReviewCount} compan${companyReviewCount === 1 ? "y" : "ies"}; ${companyReviewCount === 1 ? "it needs" : "they need"} review.`
-          : null,
+        companyDiscoveryReviewSentence(companyReviewCount, { also: true }),
       ]
         .filter(Boolean)
         .join(" ");
