@@ -2,13 +2,20 @@ name: Greptile second opinion
 
 # Opt-in second-opinion review. Greptile never reviews unbidden (greptile.json
 # pins skipReview: AUTOMATIC), so the "second-opinion" label is its only
-# trigger, applied by CodeRabbit's labeling_instructions (.coderabbit.yaml)
-# when the diff is security-sensitive, a large refactor, or review findings
-# conflict with the PR description. See CodesWhat/.github
+# automatic trigger in this workflow, applied by CodeRabbit's
+# labeling_instructions (.coderabbit.yaml) when the diff is security-sensitive,
+# a large refactor, or review findings conflict with the PR description. Manual
+# "@greptileai" comment reviews remain available. See CodesWhat/.github
 # REPOSITORY_ONBOARDING.md.
+#
+# pull_request_target (not pull_request) so labeled fork PRs get a
+# write-scoped token for the summon comment; the job is label-gated (a
+# maintainer applying "second-opinion" is the consent step), and the frozen
+# reusable workflow only validates the head SHA and posts a comment - it
+# never checks out or executes PR code.
 
 on:
-  pull_request:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] label-gated, no PR code checkout
     types: [labeled]
 
 permissions: {}
