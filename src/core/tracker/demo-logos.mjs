@@ -60,12 +60,17 @@ export const DEMO_LOGOS = {
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 export function demoLogoFilePath(company) {
-  const entry =
-    DEMO_LOGOS[
-      String(company || "")
-        .trim()
-        .toLowerCase()
-    ];
-  if (!entry) return null;
+  const key = String(company || "")
+    .trim()
+    .toLowerCase();
+  // Object.hasOwn guard (same idiom as skill-run-route.mjs's tool-profile
+  // check and proxy-core.mjs's resolveUserCap) — DEMO_LOGOS is a plain
+  // object literal, so a bare `DEMO_LOGOS[key]` on a company name that
+  // normalizes to an Object.prototype member ("constructor", "toString",
+  // "hasOwnProperty", "__proto__", ...) returns the inherited prototype
+  // value instead of undefined, and the caller crashes trying to treat it
+  // like a logo entry. See CRASH-evidence-constructor-logo*.log.
+  if (!Object.hasOwn(DEMO_LOGOS, key)) return null;
+  const entry = DEMO_LOGOS[key];
   return join(REPO_ROOT, "assets", "logos", basename(entry.src));
 }
