@@ -115,9 +115,11 @@ ones are worth your time, writes applications from things you've genuinely done,
 drafts your recruiter replies, preps you for interviews, and keeps track of where
 everything stands.
 
-No account, no server, no telemetry. CareerRat never phones home, and your files
-stay on your machine. The one thing that goes out is whatever your AI CLI sends
-to its own provider to do the work, same as any other task you'd give it. See
+No account, no CareerRat server, no telemetry. CareerRat never phones home, and
+your files stay on your machine. What does go out: your AI CLI talks to its own
+provider to do the work, same as any other task you'd give it, and the app
+fetches public resources like job postings and company logos from the services
+that host them. See
 [privacy](https://careerrat.com/docs/advanced/privacy) for the details.
 
 Most job tools match keywords, then spray. CareerRat won't write a single line of
