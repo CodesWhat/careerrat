@@ -5,7 +5,13 @@
 # touches (so the pre-existing lint backlog doesn't block work), while the fast
 # structural guards run every commit because they catch the class of bug that
 # ships green through the test runner — a broken CSS/JS template literal that is
-# never parsed in a browser by the suite. The full test suite runs on push.
+# never parsed in a browser by the suite. The full gate suite runs on push,
+# mirroring CI (see .github/workflows/ci.yml's `qlty` and `knip` jobs).
+
+commit-msg:
+  jobs:
+    - name: conventional-commit
+      run: node scripts/validate-commit-msg.mjs {1}
 
 pre-commit:
   parallel: true
@@ -20,7 +26,25 @@ pre-commit:
       # browser) and every shipped YAML config. Sub-second; safe to run always.
       run: node --test tests/styles.test.mjs tests/client-script.test.mjs tests/config-yaml-parses.test.mjs
 
+# Piped (not parallel): fail fast in the order listed, cheapest checks first,
+# same order as CI's gate jobs.
 pre-push:
+  piped: true
   jobs:
+    - name: biome
+      # Read-only (no --write) — full repo, not just the push's changed files.
+      run: npx biome check .
+    - name: qlty
+      # "changed" mode (diff vs origin/main) — CareerRat is pre-launch and
+      # carries a real doc/YAML backlog (.planning/, examples/, templates/)
+      # that a repo-wide run would fail on immediately. See
+      # scripts/qlty-check-gate.sh and .qlty/qlty.toml.
+      run: ./scripts/qlty-check-gate.sh changed
+    - name: knip
+      # Ratchet baseline: --max-issues pins the CURRENT genuine unused
+      # files/exports/deps count (see knip.json + the gates-tranche report)
+      # so the gate catches new dead code without blocking on the existing
+      # backlog. Lower this number as debt is cleaned up; never raise it.
+      run: npx knip --no-progress --max-issues=170
     - name: tests
       run: npm test
