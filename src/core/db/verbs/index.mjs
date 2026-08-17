@@ -74,6 +74,13 @@ export {
   reconcileOrphanedLaneCIntakeItems,
 } from "./intake.mjs";
 export {
+  linkedinProposalBatchGet,
+  linkedinProposalBatchLatest,
+  linkedinProposalBatchPreflight,
+  linkedinProposalBatchPut,
+  linkedinProposalDecide,
+} from "./linkedin-proposals.mjs";
+export {
   PUBLIC_INTEL_REVIEW_ACTIONS,
   publicBoardIntelUpsert,
   publicCareersPageUpsert,

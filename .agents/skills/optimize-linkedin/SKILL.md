@@ -190,8 +190,24 @@ bucket (per the Artifact Contract — a profile doc isn't a per-company round), 
 surface, with a one-line rationale and the backing evidence claim id for each change.
 Present the same diff inline to the user.
 
-**If `profile_apply` is off, you are done here** — this document is the deliverable. The
-user applies the edits by hand. Do not push to write-back.
+**Record the batch for in-app review (same pass, after the doc):** persist the same
+per-surface diff as a pending proposal batch so the Ask workspace can render it for
+per-field approval:
+
+```
+careerrat data linkedin-proposals record --data '<json>' --write
+```
+
+where `<json>` is `{ "surfaces": [{ "surfaceId", "surface", "current", "proposed",
+"rationale", "evidenceRef" }] }`. The verb scans the entire batch payload, every surface
+field and property, not just proposed/rationale, and refuses the whole batch on any
+`current_base`/comp guard hit anywhere in it — fix the offending surface and re-record.
+This closes the Artifact Contract's two-places rule: the Downloads doc plus this
+on-record batch.
+
+**If `profile_apply` is off, you are done here** — the document plus the recorded batch
+is the deliverable. The user reviews and approves fields in the app or applies edits by
+hand. Do not push to write-back.
 
 ## STEP 5 — APPLY THE APPROVED EDITS (only if `profile_apply` is allowed)
 
@@ -199,6 +215,12 @@ Only with `profile_apply` allowed, and only after the user approves specific fie
 is **confirm-first PER FIELD, never bulk-auto**: show the before→after for one surface,
 get an explicit yes, write that one field, verify it, then move to the next. Nothing is
 written silently.
+
+If the candidate pre-approved fields in the Ask workspace, read the batch first
+(`careerrat data linkedin-proposals latest`) and take its approved surfaces as the
+work-list — but the in-app approval supplies **what** to apply, never permission to skip
+the live confirmation. Still show each before→after and get a live yes here before
+writing that field, exactly as above.
 
 Drive each surface live (snapshot/read before each action). Session-browser mechanics that
 the live run proved out — apply them tool-agnostically (describe the technique, never name
@@ -240,6 +262,21 @@ For every field written in STEP 5, reload and re-read it live to confirm the new
 present and correct (quote it back to the user). The before→after document from STEP 4
 stays in `~/Downloads/careerrat/` as the record of the pass — write it regardless of whether
 anything was applied.
+
+For each field verified live, flip its batch decision to applied so the in-app card stops
+showing it as approved-but-unwritten:
+
+```
+careerrat data linkedin-proposals mark-applied --batch <id> --surface <surfaceId> --version <n>
+```
+
+Only mark a field applied after the reload-and-re-read confirms it — never on the write
+attempt alone.
+
+Every decision bumps the batch version, and the command above prints the updated batch
+in its response. Each subsequent `mark-applied` call must use the `version` from the
+PREVIOUS call's output, never the original batch's version — re-read the current version
+via `careerrat data linkedin-proposals latest --status null` if you lost track of it.
 
 Then log one event to the Activity Pulse feed (the dashboard's live timeline — see
 **Activity Pulse** in AGENTS.md), actor `agent`:
@@ -320,3 +357,30 @@ changes. The point is an honest profile that reads for the target roles, not a l
 - **Domain-neutral.** No hardcoded companies, roles, titles, codenames, or
   candidate-specific values in this skill. The skill is a field-agnostic procedure; what
   makes it conform to *this* candidate is their `candidate/*.yml` truth bank.
+
+---
+
+## Conversational workspace path
+
+In the Ask workspace, three narrow pieces of this skill are native: the app runs
+typed intents directly in `workspace-agent.mjs`, not this skill's browser steps.
+A terminal or external-agent run still follows STEP 0 onward exactly as written,
+and all profile reading and writing always happens there. The app never opens
+LinkedIn itself.
+
+- **Requesting a profile pass** (`linkedin.optimize-request`). "Optimize my
+  LinkedIn" offers an "Optimize LinkedIn profile" chip. The handler never
+  refuses: the lean no-consent path (pasted profile text) means the skill is
+  always runnable. The receipt shows both capability states honestly (read and
+  suggest; write approved edits) and, when a recorded batch is pending,
+  renders it for review.
+- **Reviewing suggestions** (`linkedin.proposal-decide`). The batch recorded by
+  STEP 4 renders as per-surface before-and-after cards with Approve and Reject
+  buttons. Deciding is ungated: approving stages a field locally and never
+  writes to LinkedIn. A stale click (the batch changed underneath) refuses;
+  fresh decisions re-render the card. Once every surface is decided the batch
+  is reviewed.
+- **What stays here.** Live profile reads, the STEP 5 write-back with its live
+  per-field confirmation, STEP 6 verify-and-log, and the `profile_apply` gate
+  at the point of the write all remain this skill's agent path. STEP 6 flips
+  verified fields to applied so the card stays honest.

@@ -35,6 +35,9 @@
 //   node src/cli/data.mjs source watermark --data <json|json-array> | --data-file <path> [--at <iso>]
 //   node src/cli/data.mjs relationship leads upsert --data <json-array> | --data-file <path>
 //   node src/cli/data.mjs relationship lead set-status <id> <review|approved|rejected> [--at <iso>] [--follow-up-due <iso>] [--note <t>]
+//   node src/cli/data.mjs linkedin-proposals record --data <json> | --data-file <path> [--write]
+//   node src/cli/data.mjs linkedin-proposals latest [--status <s>]
+//   node src/cli/data.mjs linkedin-proposals mark-applied --batch <id> --surface <surfaceId> --version <n> [--reason <t>]
 //   node src/cli/data.mjs candidate init|get
 //   node src/cli/data.mjs candidate patch <profile|targeting|honesty|form-defaults|modes|automation|application-limits> --data <json> | --data-file <path>
 //   node src/cli/data.mjs candidate evidence --data <json-array> | --data-file <path>
@@ -94,6 +97,10 @@ import {
   intakeList,
   intakeOne,
   intakeUpdate,
+  linkedinProposalBatchLatest,
+  linkedinProposalBatchPreflight,
+  linkedinProposalBatchPut,
+  linkedinProposalDecide,
   relationshipLeadSetStatus,
   relationshipLeadUpsertBatch,
   sourcedPromote,
@@ -114,7 +121,13 @@ function parseArgs(argv) {
     else if (a === "--demo") opts.demo = true;
     else if (a === "--clear-interview") opts.clearInterview = true;
     else if (a === "--no-clear-interview") opts.clearInterview = false;
-    else if (a === "--root") opts.root = argv[++i];
+    else if (a === "--write") opts.write = true;
+    else if (a === "--batch") opts.batch = argv[++i];
+    else if (a === "--surface") opts.surface = argv[++i];
+    else if (a === "--version") {
+      const rawVersion = argv[++i];
+      opts.version = /^[1-9]\d*$/.test(rawVersion ?? "") ? Number(rawVersion) : Number.NaN;
+    } else if (a === "--root") opts.root = argv[++i];
     else if (a === "--source") opts.source = argv[++i];
     else if (a === "--data") opts.data = argv[++i];
     else if (a === "--data-file") opts.dataFile = argv[++i];
@@ -209,6 +222,9 @@ try {
       break;
     case "relationship":
       cmdRelationship(sub, rest);
+      break;
+    case "linkedin-proposals":
+      cmdLinkedinProposals(sub, rest);
       break;
     case "candidate":
       cmdCandidate(sub, rest);
@@ -503,6 +519,82 @@ function cmdRelationship(sub, rest) {
 }
 
 // ---------------------------------------------------------------------------
+// linkedin-proposals <sub> — optimize-linkedin's DB-owned confirm-first
+// review state (M... "optimize-linkedin goes native"). `record` mirrors
+// activity.mjs's dry-run-by-default shape: without --write it only previews
+// what would be stored, but the dry-run preview still runs
+// linkedinProposalBatchPreflight first — the same shape/comp-leak validation
+// linkedinProposalBatchPut runs before persisting — so a leaking payload is
+// refused before anything reaches stdout, not just once someone passes
+// --write. Either path's LINKEDIN_PROPOSAL_COMP_LEAK throw is handled by the
+// top-level catch below, same as every other verb's errors.
+// ---------------------------------------------------------------------------
+
+function cmdLinkedinProposals(sub, _rest) {
+  switch (sub) {
+    case "record":
+      return cmdLinkedinProposalsRecord();
+    case "latest":
+      return printResult({
+        ok: true,
+        batch: linkedinProposalBatchLatest({ ...pathCtx, status: opts.status ?? "pending" }),
+      });
+    case "mark-applied":
+      if (!opts.batch || !opts.surface) {
+        fail("linkedin-proposals mark-applied requires --batch <id> --surface <surfaceId>");
+      }
+      if (!Number.isSafeInteger(opts.version) || opts.version < 1) {
+        fail("linkedin-proposals mark-applied requires --version <n>");
+      }
+      return printResult({
+        ok: true,
+        batch: linkedinProposalDecide({
+          ...pathCtx,
+          batchId: opts.batch,
+          surfaceId: opts.surface,
+          action: "applied",
+          version: opts.version,
+          reason: opts.reason,
+        }),
+      });
+    default:
+      return fail(`unknown "linkedin-proposals" command "${sub}". See --help.`);
+  }
+}
+
+function cmdLinkedinProposalsRecord() {
+  const payload = readPayload("linkedin-proposals record");
+  if (!Array.isArray(payload?.surfaces) || payload.surfaces.length === 0) {
+    fail("linkedin-proposals record requires a non-empty surfaces array");
+  }
+
+  // Preflight before EITHER path prints/persists anything — without this a
+  // dry-run (no --write) would serialize a leaking payload straight to
+  // stdout, since only --write used to reach the comp-leak guard.
+  linkedinProposalBatchPreflight({ batch: payload });
+
+  if (!opts.write) {
+    const preview = {
+      id: payload.id || "(assigned on write)",
+      status: "pending",
+      version: 1,
+      surfaces: payload.surfaces.map((surface) => ({ ...surface, decision: null })),
+    };
+    if (opts.json) {
+      console.log(JSON.stringify({ ok: true, dryRun: true, batch: preview }, null, 2));
+    } else {
+      console.log("Proposed linkedin proposal batch:");
+      console.log(JSON.stringify(preview, null, 2));
+      console.log("");
+      console.log("Dry run - pass --write to commit.");
+    }
+    return;
+  }
+
+  return printResult(linkedinProposalBatchPut({ ...pathCtx, batch: payload }));
+}
+
+// ---------------------------------------------------------------------------
 // candidate <sub> — SQLite-primary onboarding/profile/targeting/settings.
 // These verbs intentionally do not export YAML mirrors; write-config owns
 // compatibility output.
@@ -772,6 +864,10 @@ Usage:
 
   node src/cli/data.mjs relationship leads upsert --data <json-array> | --data-file <path>
   node src/cli/data.mjs relationship lead set-status <id> <review|approved|rejected> [--at <iso>] [--follow-up-due <iso>] [--note <t>]
+
+  node src/cli/data.mjs linkedin-proposals record --data <json> | --data-file <path> [--write]
+  node src/cli/data.mjs linkedin-proposals latest [--status <s>]
+  node src/cli/data.mjs linkedin-proposals mark-applied --batch <id> --surface <surfaceId> --version <n> [--reason <t>]
 
   node src/cli/data.mjs candidate init|get
   node src/cli/data.mjs candidate patch <profile|targeting|honesty|form-defaults|modes|automation|application-limits> --data <json> | --data-file <path>

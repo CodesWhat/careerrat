@@ -543,6 +543,16 @@ const RULE_CASES = [
     message: "That status isn't one CareerRat can record. Use one of its tracked stages instead.",
     action: null,
   },
+  {
+    name: "CONFLICT code",
+    err: new ApiError(409, {
+      code: "CONFLICT",
+      error: "linkedin proposal batch version conflict: expected 1, found 2",
+    }),
+    message:
+      "That changed since this card was made, so the click didn't apply. Check the refreshed card and try again.",
+    action: null,
+  },
 ];
 
 describe("resolveErrorCopy — mapped rules", () => {
@@ -616,6 +626,19 @@ describe("resolveErrorCopy — unmapped/generic fallback", () => {
   it("keeps a UserFacingError's raw text out of the technical-details slot", () => {
     const err = new UserFacingError("Advanced mode must be turned on first.");
     expect(resolveErrorCopy(err).detail).toBeNull();
+  });
+
+  // The CONFLICT rule matches on code alone, so a 409 with that code must
+  // never fall through to the generic bucket even though 409 has no
+  // status-based rule of its own.
+  it("does not fall through to the generic message for a 409 with code CONFLICT", () => {
+    const err = new ApiError(409, {
+      code: "CONFLICT",
+      error: "linkedin proposal batch version conflict: expected 1, found 2",
+    });
+    const result = resolveErrorCopy(err);
+    expect(result.message).not.toBe(GENERIC_ERROR_MESSAGE);
+    expect(result.action).toBeNull();
   });
 });
 

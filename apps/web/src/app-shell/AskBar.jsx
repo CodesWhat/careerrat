@@ -1273,6 +1273,12 @@ function AskBarTurn({
   );
   const mailSyncHandoff = turn.artifacts?.find((a) => a?.kind === "mail_sync_handoff");
   const messagesSyncHandoff = turn.artifacts?.find((a) => a?.kind === "messages_sync_handoff");
+  const linkedinOptimizeHandoffArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "linkedin_optimize_handoff"
+  );
+  const linkedinProposalsArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "linkedin_profile_proposals"
+  );
   const statusTransitionProposalArtifact = turn.artifacts?.find(
     (artifact) => artifact.kind === "status_transition_proposal"
   );
@@ -1337,6 +1343,12 @@ function AskBarTurn({
       ) : null}
       {mailSyncHandoff ? <MailSyncHandoffCard artifact={mailSyncHandoff} /> : null}
       {messagesSyncHandoff ? <MessagesSyncHandoffCard artifact={messagesSyncHandoff} /> : null}
+      {linkedinOptimizeHandoffArtifact ? (
+        <LinkedinOptimizeHandoffCard artifact={linkedinOptimizeHandoffArtifact} />
+      ) : null}
+      {linkedinProposalsArtifact ? (
+        <LinkedinProposalsCard artifact={linkedinProposalsArtifact} onRunAction={onRunAction} />
+      ) : null}
       {statusTransitionProposalArtifact ? (
         <StatusTransitionProposalCard
           artifact={statusTransitionProposalArtifact}
@@ -2618,6 +2630,43 @@ function MessagesSyncHandoffCard({ artifact }) {
   );
 }
 
+// linkedin_optimize_handoff (optimize-linkedin skill) — same acknowledgment
+// shape as MessagesSyncHandoffCard above: the request landed, the actual
+// profile read and draft happens in the agent/terminal skill run, not here.
+// Capability rows have no lastRunAt concept (unlike the mail/messages
+// sources), so they're worded On / Off in Settings instead.
+function linkedinCapabilityStatusText(capability) {
+  return capability.allowed ? "On" : "Off in Settings";
+}
+function linkedinBatchWaitingLine(batch) {
+  if (!batch) return "No suggestions waiting. Run the skill to draft some.";
+  const total = Number(batch.total) || 0;
+  return total === 1
+    ? "1 suggestion waiting for your review."
+    : `${total} suggestions waiting for your review.`;
+}
+function LinkedinOptimizeHandoffCard({ artifact }) {
+  const capabilities = Array.isArray(artifact.capabilities) ? artifact.capabilities : [];
+  return (
+    <section className="ask-bar__strategy-apply" aria-label="LinkedIn review requested">
+      <div className="ask-bar__strategy-review-head">
+        <strong>LinkedIn review requested</strong>
+        <span className="badge badge--muted">Handoff</span>
+      </div>
+      {capabilities.map((capability) => (
+        <p key={capability.key}>
+          {[capability.label, linkedinCapabilityStatusText(capability)].filter(Boolean).join(" · ")}
+        </p>
+      ))}
+      <p>{linkedinBatchWaitingLine(artifact.batch)}</p>
+      <p className="ask-bar__screening-note">
+        Run the optimize-linkedin skill from your agent or terminal to read your profile and draft
+        suggestions. Nothing is ever written to LinkedIn from this app.
+      </p>
+    </section>
+  );
+}
+
 // status_transition_proposal (sync-status skill) — a portal-read status that
 // doesn't match a safe auto-apply rule, so it needs a candidate click before
 // it lands in the tracker. Same review-card chrome as StrategyReviewCard's
@@ -2959,6 +3008,84 @@ function CompanyProposalsCard({ artifact, onRunAction }) {
           {rejectedCount} compan{rejectedCount === 1 ? "y was" : "ies were"} screened out.
         </span>
       ) : null}
+    </section>
+  );
+}
+
+// linkedin_profile_proposals (optimize-linkedin skill) — mirrors
+// CompanyProposalsCard above: one article per surface, decide buttons only
+// while the surface is undecided, reusing the same ask-bar__company-proposal*
+// chrome rather than a LinkedIn-specific class set.
+function linkedinProposalBadge(decision) {
+  if (!decision) return { className: "badge--warn", label: "Review first" };
+  if (decision.action === "applied") return { className: "badge--ok", label: "Applied" };
+  if (decision.action === "approve") return { className: "badge--ok", label: "Approved" };
+  return { className: "badge--muted", label: "Rejected" };
+}
+function LinkedinProposalsCard({ artifact, onRunAction }) {
+  const surfaces = Array.isArray(artifact.surfaces) ? artifact.surfaces : [];
+  const [pendingSurfaceId, setPendingSurfaceId] = useState(null);
+  const [pendingAction, setPendingAction] = useState(null);
+  const decideSurface = (surface, action) => {
+    if (pendingSurfaceId) return;
+    setPendingSurfaceId(surface.surfaceId);
+    setPendingAction(action);
+    Promise.resolve(
+      onRunAction?.({
+        label: "Decide LinkedIn suggestion",
+        intent: {
+          type: "linkedin.proposal-decide",
+          entity: { type: "linkedin-proposal", id: artifact.batchId },
+          input: { surfaceId: surface.surfaceId, action, version: artifact.version },
+        },
+      })
+    ).finally(() => {
+      setPendingSurfaceId(null);
+      setPendingAction(null);
+    });
+  };
+  return (
+    <section className="ask-bar__company-proposals" aria-label="LinkedIn suggestions">
+      {surfaces.map((surface) => {
+        const badge = linkedinProposalBadge(surface.decision);
+        const isPendingSurface = pendingSurfaceId === surface.surfaceId;
+        return (
+          <article className="ask-bar__company-proposal" key={surface.surfaceId}>
+            <div className="ask-bar__company-proposal-head">
+              <strong>{surface.surface}</strong>
+              <span className={`badge ${badge.className}`}>{badge.label}</span>
+            </div>
+            <p>Now: {surface.current}</p>
+            <p>Suggested: {surface.proposed}</p>
+            {surface.rationale ? <p>{surface.rationale}</p> : null}
+            {surface.evidenceRef ? (
+              <span className="ask-bar__company-proposal-meta">{surface.evidenceRef}</span>
+            ) : null}
+            {!surface.decision ? (
+              <div className="ask-bar__company-proposal-actions">
+                <Button
+                  variant="secondary"
+                  disabled={Boolean(pendingSurfaceId)}
+                  onClick={() => decideSurface(surface, "approve")}
+                >
+                  {isPendingSurface && pendingAction === "approve" ? "Approving…" : "Approve"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={Boolean(pendingSurfaceId)}
+                  onClick={() => decideSurface(surface, "reject")}
+                >
+                  {isPendingSurface && pendingAction === "reject" ? "Rejecting…" : "Reject"}
+                </Button>
+              </div>
+            ) : null}
+          </article>
+        );
+      })}
+      <p className="ask-bar__screening-note">
+        Approving stages this field. CareerRat never edits LinkedIn directly. Apply it yourself, or
+        run optimize-linkedin with write-back enabled to apply approved fields.
+      </p>
     </section>
   );
 }

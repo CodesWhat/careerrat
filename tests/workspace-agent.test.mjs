@@ -31,6 +31,10 @@ import { calendarBusyUpsert } from "../src/core/db/verbs/calendar.mjs";
 import { candidateConfigGet, candidateConfigPatch } from "../src/core/db/verbs/candidate.mjs";
 import { commUpsert } from "../src/core/db/verbs/comm.mjs";
 import { intakeCapture, intakeUpdate } from "../src/core/db/verbs/intake.mjs";
+import {
+  linkedinProposalBatchGet,
+  linkedinProposalBatchPut,
+} from "../src/core/db/verbs/linkedin-proposals.mjs";
 import { relationshipLeadUpsertBatch } from "../src/core/db/verbs/relationship.mjs";
 import { sourceWatermarkUpsert } from "../src/core/db/verbs/source.mjs";
 import { sourcedUpsertBatch } from "../src/core/db/verbs/sourced.mjs";
@@ -171,7 +175,7 @@ test("migration 010 creates durable workspace thread and ordered message tables"
   const repoRoot = tempRepo();
   const db = openDb({ repoRoot, env: {} });
 
-  assert.equal(ALL_MIGRATIONS.at(-1).id, 10);
+  assert.ok(ALL_MIGRATIONS.at(-1).id >= 10);
   assert.deepEqual(
     { ...db.prepare("SELECT id, name FROM _migrations WHERE id = 10").get() },
     { id: 10, name: "workspace-agent" }
@@ -7633,4 +7637,284 @@ test("messages.sync-request: pure read — application and communication rows ar
   assert.deepEqual(readApplication(repoRoot, app.id), appBefore);
   assert.deepEqual(readCommunication(repoRoot, comm.id), commBefore);
   assert.deepEqual(readSourceIds(repoRoot), sourcesBefore);
+});
+
+// ---------------------------------------------------------------------------
+// linkedin.optimize-request / linkedin.proposal-decide (optimize-linkedin
+// skill — linkedinProposalBatchPut/Get/Latest/Decide in
+// linkedin-proposals.mjs and the two handlers in workspace-agent.mjs).
+// profile_optimize/profile_apply are per-platform capabilities scoped to
+// "linkedin" (see CAPABILITIES in consent.mjs), like mail_access/messaging
+// above, but the handoff card never refuses — it always renders so the
+// candidate can see consent state and turn capabilities on from there. The
+// gate that blocks a browser write lives in the skill, not the handler.
+// ---------------------------------------------------------------------------
+
+function grantLinkedinOptimize(repoRoot, capabilities) {
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "automation",
+    patch: {
+      setup_mode: "advanced",
+      capabilities,
+      consent: { linkedin: true },
+    },
+  });
+}
+
+function seedLinkedinBatch(repoRoot, overrides = {}) {
+  const batch = {
+    surfaces: [
+      {
+        surfaceId: "headline",
+        surface: "Headline",
+        current: "Software Engineer",
+        proposed: "Applied AI Engineer | LLM Systems",
+        rationale: "Matches your targeting focus.",
+        evidenceRef: "evidence/ai-projects.md",
+      },
+      {
+        surfaceId: "about",
+        surface: "About",
+        current: "I build software.",
+        proposed: "I build applied AI systems end to end.",
+        rationale: "Reflects recent evidence entries.",
+        evidenceRef: "evidence/ai-projects.md",
+      },
+    ],
+    ...overrides,
+  };
+  return linkedinProposalBatchPut({ repoRoot, env: {}, batch });
+}
+
+test("linkedin.optimize-request: profile_optimize granted returns handoff capabilities (optimize allowed, apply not) and batch null with no pending batch", async () => {
+  const repoRoot = tempRepo();
+  grantLinkedinOptimize(repoRoot, {
+    profile_optimize: { enabled: true, platforms: { linkedin: true } },
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "linkedin.optimize-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.kind, "linkedin_optimize_handoff");
+  const byKey = Object.fromEntries(artifact.capabilities.map((c) => [c.key, c]));
+  assert.equal(byKey.profile_optimize.allowed, true);
+  assert.equal(byKey.profile_apply.allowed, false);
+  assert.equal(artifact.batch, null);
+});
+
+test("linkedin.optimize-request: a pending batch surfaces its summary in the handoff card and the full proposals artifact", async () => {
+  const repoRoot = tempRepo();
+  grantLinkedinOptimize(repoRoot, {
+    profile_optimize: { enabled: true, platforms: { linkedin: true } },
+  });
+  const { id: batchId } = seedLinkedinBatch(repoRoot);
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "linkedin.optimize-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+
+  const artifacts = result.messages.at(-1).artifacts;
+  const handoff = artifacts.find((a) => a.kind === "linkedin_optimize_handoff");
+  assert.deepEqual(handoff.batch, {
+    id: batchId,
+    createdAt: handoff.batch.createdAt,
+    total: 2,
+    decidedCount: 0,
+    approvedCount: 0,
+  });
+
+  const proposals = artifacts.find((a) => a.kind === "linkedin_profile_proposals");
+  assert.equal(proposals.batchId, batchId);
+  assert.deepEqual(
+    proposals.surfaces.map((s) => [s.surfaceId, s.decision]),
+    [
+      ["headline", null],
+      ["about", null],
+    ]
+  );
+});
+
+test("linkedin.optimize-request: zero consent still succeeds, never refuses, both capabilities disallowed", async () => {
+  const repoRoot = tempRepo();
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "linkedin.optimize-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  const byKey = Object.fromEntries(artifact.capabilities.map((c) => [c.key, c]));
+  assert.equal(byKey.profile_optimize.allowed, false);
+  assert.equal(byKey.profile_apply.allowed, false);
+  assert.equal(artifact.batch, null);
+});
+
+test("linkedin.optimize-request: pure read — application and communication rows are byte-for-byte unchanged", async () => {
+  const repoRoot = tempRepo();
+  grantLinkedinOptimize(repoRoot, {
+    profile_optimize: { enabled: true, platforms: { linkedin: true } },
+  });
+  const app = seedApplication(repoRoot);
+  const comm = seedCommunication(repoRoot);
+  const appBefore = readApplication(repoRoot, app.id);
+  const commBefore = readCommunication(repoRoot, comm.id);
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "linkedin.optimize-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+
+  assert.deepEqual(readApplication(repoRoot, app.id), appBefore);
+  assert.deepEqual(readCommunication(repoRoot, comm.id), commBefore);
+});
+
+test("linkedin.proposal-decide: approve records the decision and leaves metadata.state needs-review while a surface remains undecided", async () => {
+  const repoRoot = tempRepo();
+  const { id: batchId } = seedLinkedinBatch(repoRoot);
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "linkedin.proposal-decide",
+      entity: { type: "linkedin-proposal", id: batchId },
+      input: { surfaceId: "headline", action: "approve", version: 1 },
+    },
+  });
+
+  const last = result.messages.at(-1);
+  assert.equal(last.text, "Recorded: Headline approved.");
+  assert.equal(last.metadata.state, "needs-review");
+  const artifact = last.artifacts[0];
+  assert.equal(artifact.kind, "linkedin_profile_proposals");
+  assert.equal(artifact.version, 2);
+  const headline = artifact.surfaces.find((s) => s.surfaceId === "headline");
+  assert.equal(headline.decision.action, "approve");
+  const about = artifact.surfaces.find((s) => s.surfaceId === "about");
+  assert.equal(about.decision, null);
+});
+
+test("linkedin.proposal-decide: a stale version throws CONFLICT", async () => {
+  const repoRoot = tempRepo();
+  const { id: batchId } = seedLinkedinBatch(repoRoot);
+
+  await assert.rejects(
+    () =>
+      executeWorkspaceIntent({
+        repoRoot,
+        env: {},
+        intent: {
+          type: "linkedin.proposal-decide",
+          entity: { type: "linkedin-proposal", id: batchId },
+          input: { surfaceId: "headline", action: "approve", version: 99 },
+        },
+      }),
+    (error) => {
+      assert.equal(error.code, "CONFLICT");
+      return true;
+    }
+  );
+});
+
+test("linkedin.proposal-decide: deciding the last surface flips metadata.state to complete and the batch status to reviewed", async () => {
+  const repoRoot = tempRepo();
+  const { id: batchId } = seedLinkedinBatch(repoRoot);
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "linkedin.proposal-decide",
+      entity: { type: "linkedin-proposal", id: batchId },
+      input: { surfaceId: "headline", action: "approve", version: 1 },
+    },
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "linkedin.proposal-decide",
+      entity: { type: "linkedin-proposal", id: batchId },
+      input: { surfaceId: "about", action: "reject", version: 2 },
+    },
+  });
+
+  assert.equal(result.messages.at(-1).metadata.state, "complete");
+  assert.equal(linkedinProposalBatchGet({ repoRoot, env: {}, id: batchId }).status, "reviewed");
+});
+
+test('linkedin.proposal-decide: action "applied" is refused with BAD_LINKEDIN_PROPOSAL_ACTION — applied only happens via the skill\'s own verified write, not from Ask', async () => {
+  const repoRoot = tempRepo();
+  const { id: batchId } = seedLinkedinBatch(repoRoot);
+
+  await assert.rejects(
+    () =>
+      executeWorkspaceIntent({
+        repoRoot,
+        env: {},
+        intent: {
+          type: "linkedin.proposal-decide",
+          entity: { type: "linkedin-proposal", id: batchId },
+          input: { surfaceId: "headline", action: "applied", version: 1 },
+        },
+      }),
+    (error) => {
+      assert.equal(error.code, "BAD_LINKEDIN_PROPOSAL_ACTION");
+      return true;
+    }
+  );
+});
+
+test("linkedin.proposal-decide: input.batchId that does not match the selected entity throws BAD_INTENT_ENTITY", async () => {
+  const repoRoot = tempRepo();
+  const { id: batchId } = seedLinkedinBatch(repoRoot);
+
+  await assert.rejects(
+    () =>
+      executeWorkspaceIntent({
+        repoRoot,
+        env: {},
+        intent: {
+          type: "linkedin.proposal-decide",
+          entity: { type: "linkedin-proposal", id: batchId },
+          input: {
+            surfaceId: "headline",
+            action: "approve",
+            version: 1,
+            batchId: "some-other-batch",
+          },
+        },
+      }),
+    (error) => {
+      assert.equal(error.code, "BAD_INTENT_ENTITY");
+      return true;
+    }
+  );
 });
