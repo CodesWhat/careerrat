@@ -616,6 +616,24 @@ export function openInstalledRuntimeTerminal(
 const MAX_RUNTIME_OUTPUT_BYTES = 10 * 1024 * 1024;
 const ANSI_COLOR_SEQUENCE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 
+// runInstalledRuntime's `timeoutMs` has two tiers, both exported so callers
+// pick the right one instead of re-deriving a magic number:
+//   - ONE_SHOT_RUNTIME_TIMEOUT_MS (the default below): sized for bounded,
+//     single-turn calls with no live web research, e.g. evaluate-job,
+//     tailor-application, resume-extract, and every other call-ai.mjs /
+//     skill-runtime.mjs route. 120s comfortably covers one model completion.
+//   - CHAT_SESSION_RUNTIME_TIMEOUT_MS: opted into per-call by
+//     chat-runtime.mjs's runInstalledTurn for interactive chat-session turns
+//     over the Read-less CHAT_RUNTIME_TOOLS profile (research-company,
+//     research-comp, company-health, ...). Those turns do live WebSearch/
+//     WebFetch research and, per wave-4 packaged QA, reliably run past 120s
+//     (two consecutive SSE-confirmed "Installed AI request timed out."
+//     failures on research-company and research-comp). Raising the shared
+//     default would have papered over that instead of fixing it, so this is
+//     a second, wider tier a caller must opt into instead.
+export const ONE_SHOT_RUNTIME_TIMEOUT_MS = 120000;
+export const CHAT_SESSION_RUNTIME_TIMEOUT_MS = 9 * 60 * 1000;
+
 function safeRuntimeDiagnostic(value) {
   return String(value || "")
     .replace(ANSI_COLOR_SEQUENCE, "")
@@ -709,7 +727,7 @@ export async function runInstalledRuntime({
   cwd,
   env = process.env,
   signal,
-  timeoutMs = 120000,
+  timeoutMs = ONE_SHOT_RUNTIME_TIMEOUT_MS,
   spawnImpl = spawn,
   onEvent,
   // Skill this call is running (a directory name under `<repoRoot>/.agents/skills`)

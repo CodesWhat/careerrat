@@ -20,6 +20,7 @@ import {
   resolveAllowedChatSkills,
   resolveCandidateChatContext,
 } from "../src/core/ai/chat-runtime.mjs";
+import { CHAT_SESSION_RUNTIME_TIMEOUT_MS } from "../src/core/ai/installed-runtimes.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 import { APP_SAFE_RUNTIME_TOOLS, CHAT_RUNTIME_TOOLS } from "../src/core/ai/runtime-tools.mjs";
 import { readUsageEvents } from "../src/core/ai/usage-log.mjs";
@@ -1026,7 +1027,7 @@ test("createChatRuntime.startSession (installed route): runs turns through the s
 // project (see tests/installed-runtime.test.mjs for that half of the fix).
 // This test pins the wiring at the chat-runtime layer: both the session's
 // kickoff call and every follow-up postMessage() turn must carry them.
-test("createChatRuntime.startSession (installed route): threads skill + repoRoot into every runInstalledRuntimeImpl call so the CLI can materialize an isolated skill cwd", async () => {
+test("createChatRuntime.startSession (installed route): threads skill + repoRoot + the extended chat-session timeout into every runInstalledRuntimeImpl call so the CLI can materialize an isolated skill cwd and finish real research", async () => {
   const repoRoot = tempRepoWithSkill("research-company");
   try {
     const env = {};
@@ -1050,12 +1051,20 @@ test("createChatRuntime.startSession (installed route): threads skill + repoRoot
       assert.equal(calls[0].skill, "research-company");
       assert.equal(calls[0].repoRoot, repoRoot);
       assert.deepEqual(calls[0].tools, [...CHAT_RUNTIME_TOOLS]);
+      // P0 regression: a live six-axis research turn over WebSearch/WebFetch
+      // reliably exceeds runInstalledRuntime's ONE_SHOT_RUNTIME_TIMEOUT_MS
+      // default (wave-4 packaged QA: two consecutive SSE-confirmed
+      // "Installed AI request timed out." failures on research-company and
+      // research-comp). Every chat-session turn must opt into the wider
+      // CHAT_SESSION_RUNTIME_TIMEOUT_MS tier instead of the one-shot default.
+      assert.equal(calls[0].timeoutMs, CHAT_SESSION_RUNTIME_TIMEOUT_MS);
 
       chatRuntime.postMessage(chatId, "keep going");
       await waitForPredicate(() => idleCount() >= 2);
       assert.equal(calls.length, 2);
       assert.equal(calls[1].skill, "research-company");
       assert.equal(calls[1].repoRoot, repoRoot);
+      assert.equal(calls[1].timeoutMs, CHAT_SESSION_RUNTIME_TIMEOUT_MS);
     } finally {
       chatRuntime.shutdown();
     }

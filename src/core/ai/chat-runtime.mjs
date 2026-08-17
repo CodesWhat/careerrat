@@ -50,7 +50,7 @@ import { join } from "node:path";
 import { candidateArtifactExists, candidateConfigGet } from "../db/verbs.mjs";
 import { computeSetupProgress } from "../onboarding/setup-progress.mjs";
 import { resolveAIRoute } from "./call-ai.mjs";
-import { runInstalledRuntime } from "./installed-runtimes.mjs";
+import { CHAT_SESSION_RUNTIME_TIMEOUT_MS, runInstalledRuntime } from "./installed-runtimes.mjs";
 import { createRuntimeToolPolicy } from "./runtime-tool-policy.mjs";
 import { resolveChatRuntimeTools } from "./runtime-tools.mjs";
 import {
@@ -566,6 +566,22 @@ export function createChatRuntime({
         model:
           String(env.CAREERRAT_INSTALLED_AI_MODEL || env.ANTHROPIC_MODEL || "").trim() || undefined,
         tools: resolveChatRuntimeTools({ skill: session.skill }),
+        // A chat-session turn over CHAT_RUNTIME_TOOLS (WebSearch/WebFetch/
+        // Skill, never Read, see runtime-tools.mjs) does live web research,
+        // not a bounded one-shot completion. runInstalledRuntime's own
+        // ONE_SHOT_RUNTIME_TIMEOUT_MS default reliably killed real six-axis
+        // company research and comp-benchmark turns before they finished
+        // (wave-4 packaged QA, SSE-confirmed on research-company and
+        // research-comp). Every other layer in this request's path is
+        // already turn-duration-agnostic: POST /api/chat/message returns 202
+        // immediately (fire-and-forget, see chat-route.mjs), GET
+        // /api/chat/events is a plain long-lived SSE GET with no server-side
+        // socket timeout (Node's http.Server.timeout defaults to 0 since
+        // v13, and this codebase never overrides it), and the browser's
+        // native EventSource has no fixed deadline and auto-reconnects via
+        // Last-Event-ID replay if the connection drops mid-turn. So this is
+        // the one place a bound actually needs raising.
+        timeoutMs: CHAT_SESSION_RUNTIME_TIMEOUT_MS,
       });
 
       session.transcript.push({ role: "assistant", content: result.text });
