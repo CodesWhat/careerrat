@@ -441,6 +441,48 @@ test("a transient launch failure doesn't permanently disable the provider (P1-1 
 });
 
 // ---------------------------------------------------------------------------
+// A failed goto must not leak the new page. Before the fix, a rejected
+// target.goto() left the page open and never added to `pages`, so it could
+// never be found (and closed) by evictLeastRecentlyUsed — repeated navigation
+// failures would grow real browser tabs without bound.
+// ---------------------------------------------------------------------------
+
+test("openTab closes an untracked page when goto fails, and a later openTab still works (regression)", async () => {
+  let newPageCalls = 0;
+  const closedIndexes = [];
+  const context = {
+    async newPage() {
+      newPageCalls += 1;
+      const index = newPageCalls;
+      const fakePage = minimalFakePage(`https://example.test/page-${index}`);
+      if (index === 1) {
+        fakePage.goto = async () => {
+          throw new Error("net::ERR_NAME_NOT_RESOLVED");
+        };
+      }
+      fakePage.close = async () => {
+        closedIndexes.push(index);
+      };
+      return fakePage;
+    },
+    async close() {},
+  };
+  const ops = createPlaywrightOps({ launchImpl: async () => context, profileDir: "/tmp/profile" });
+
+  await assert.rejects(
+    () => ops.openTab({ url: "https://example.test/bad" }),
+    /ERR_NAME_NOT_RESOLVED/
+  );
+  assert.deepEqual(closedIndexes, [1], "the page from the failed goto was closed");
+
+  const { pageId } = await ops.openTab({ url: "https://example.test/good" });
+  assert.equal(pageId, "page-1", "the failed attempt left no gap in the tracked set's bookkeeping");
+
+  const snapshot = await ops.snapshot({ pageId });
+  assert.equal(snapshot.origin, "https://example.test/page-2");
+});
+
+// ---------------------------------------------------------------------------
 // (b) ops contract
 // ---------------------------------------------------------------------------
 
@@ -545,6 +587,66 @@ test("upload() sets files directly on a file-input ref and drives the filechoose
     { op: "click", index: 2 },
     { op: "chooserSetFiles", index: 2, files: "/tmp/cover.pdf" },
   ]);
+});
+
+// ---------------------------------------------------------------------------
+// Labels come from innerText and can contain embedded newlines or runs of
+// whitespace. Before the fix, formatTreeLine only escaped double quotes, so a
+// multi-line label split a tree line across two physical lines, neither of
+// which carries a ref= token, breaking apply-driver.mjs's line-by-line
+// indent-stack parser. Group labels differing only by whitespace also split
+// into separate groups because buildUploadTreeLines keyed on the raw label.
+// ---------------------------------------------------------------------------
+
+const UPLOAD_CONTROLS_WITH_NEWLINE_LABEL = [
+  { role: "textbox", name: "First Name", required: true },
+  {
+    role: "button",
+    name: "Attach",
+    groupLabel: "Resume/CV*\n(PDF only)",
+    fileInput: true,
+    required: true,
+  },
+  { role: "button", name: "Submit application" },
+];
+
+test("a control label with an embedded newline still produces a parseable upload tree (regression)", async () => {
+  const { launchImpl } = createFakeBrowser({ controls: UPLOAD_CONTROLS_WITH_NEWLINE_LABEL });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  const snapshot = await ops.snapshot({ pageId });
+
+  const treeLines = snapshot.pageText.split("\n").filter((line) => line.trim().startsWith("- "));
+  assert.ok(treeLines.length > 0, "the synthesized tree section is present");
+  for (const line of treeLines) {
+    assert.match(line, /ref=[\w-]+/, `tree line missing a ref= token: ${JSON.stringify(line)}`);
+  }
+
+  const targets = uploadTargetsFromSnapshot(snapshot);
+  const resumeTarget = targets.find((target) => target.kind === "resume");
+  assert.ok(resumeTarget, "uploadTargetsFromSnapshot still finds the resume target");
+  assert.equal(resumeTarget.label, "Resume/CV* (PDF only)");
+});
+
+const UPLOAD_CONTROLS_DUPLICATE_GROUP_WHITESPACE = [
+  { role: "button", name: "Attach", groupLabel: "Documents \n", fileInput: true },
+  { role: "button", name: "Attach More", groupLabel: " Documents", fileInput: true },
+];
+
+test("group labels identical after whitespace normalization collapse into one group (regression)", async () => {
+  const { launchImpl } = createFakeBrowser({
+    controls: UPLOAD_CONTROLS_DUPLICATE_GROUP_WHITESPACE,
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  const snapshot = await ops.snapshot({ pageId });
+
+  const groupHeaderLines = snapshot.pageText
+    .split("\n")
+    .filter((line) => /^- group "/.test(line.trim()));
+  assert.equal(groupHeaderLines.length, 1, "both controls collapse into a single group header");
 });
 
 // ---------------------------------------------------------------------------
@@ -810,4 +912,52 @@ test("createPlaywrightApplyExecutor mirrors createOrcaApplyExecutor's compositio
   assert.equal(result.state, "awaiting-submit");
   assert.equal(result.session.provider, "playwright");
   assert.ok(pageOpens() > 0);
+});
+
+// ---------------------------------------------------------------------------
+// resolveSession()'s profileRoot is only populated when the configured
+// provider is "playwright" — this executor can be constructed regardless of
+// which provider the config names, so it must read session.profile_root
+// straight off the loaded config instead of relying on that provider-gated
+// field (which would otherwise silently drop a custom root).
+// ---------------------------------------------------------------------------
+
+test("createPlaywrightApplyExecutor uses a custom session.profile_root even when the configured provider is not playwright (regression)", async () => {
+  const customRoot = mkdtempSync(join(tmpdir(), "careerrat-profile-root-"));
+  try {
+    const { launchImpl } = createFakeBrowser({ controls: FORM_CONTROLS });
+    let capturedProfileDir = null;
+    const wrappedLaunch = async (args) => {
+      capturedProfileDir = args.profileDir;
+      return launchImpl(args);
+    };
+
+    const execute = createPlaywrightApplyExecutor({
+      repoRoot: "/repo",
+      env: {},
+      loadAutomationImpl: () => ({
+        data: { session: { provider: "extension", profile_root: customRoot } },
+      }),
+      launchImpl: wrappedLaunch,
+      mayRunImpl: () => ({ allowed: true }),
+      candidateConfigGetImpl: () => ({ profile: {}, honesty: {}, "form-defaults": {} }),
+      loadAnswerMapImpl: async () => new Map(),
+      captureQuestionsImpl: async ({ questions }) => ({
+        questions,
+        excluded: [],
+        demographicSectionPresent: false,
+      }),
+    });
+
+    await execute({
+      applicationId: "app-1",
+      application: { id: "app-1" },
+      postingUrl: GREENHOUSE_URL,
+      questionCapture: { state: "captured" },
+    });
+
+    assert.equal(capturedProfileDir, join(customRoot, "apply"));
+  } finally {
+    rmSync(customRoot, { recursive: true, force: true });
+  }
 });

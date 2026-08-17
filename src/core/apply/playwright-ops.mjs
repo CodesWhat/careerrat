@@ -175,9 +175,29 @@ export function collectControls(elements) {
 }
 
 function formatTreeLine({ indent, role, label, ref, required }) {
-  const safeLabel = String(label || "").replace(/"/g, "'");
+  // Backstop: collection time (see the normalizeWhitespace call in snapshot())
+  // already collapses newlines/runs of whitespace in every label, but this
+  // stays defensive so a raw multi-line label can never split a tree line
+  // across physical lines and break the parser's one-line-per-node grammar.
+  const safeLabel = String(label || "")
+    .replace(/"/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
   const flags = required ? `[required, ref=${ref}]` : `[ref=${ref}]`;
   return `${" ".repeat(indent)}- ${role} "${safeLabel}" ${flags}`;
+}
+
+// Labels come from innerText (accessibleName, nearestGroupLabel, legends/
+// headings) and can contain embedded newlines or runs of whitespace. Collapse
+// to single spaces and trim so (1) formatTreeLine never emits a label that
+// spans multiple physical lines, which would break the indent-stack parser in
+// apply-driver.mjs's parsedSnapshotNodes (a continuation line has no ref=
+// token), and (2) buildUploadTreeLines's group-by-label keying doesn't split
+// one logical group into two because of whitespace differences alone.
+function normalizeWhitespace(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 // Builds the Orca-shaped tree lines uploadTargetsFromSnapshot()/parsedSnapshotNodes()
@@ -317,7 +337,16 @@ export function createPlaywrightOps({
     async openTab({ url }) {
       const context = await getContext();
       const target = await context.newPage();
-      await target.goto(url, { waitUntil: "domcontentloaded" });
+      try {
+        await target.goto(url, { waitUntil: "domcontentloaded" });
+      } catch (error) {
+        // A failed goto must not leak the new page. It was never added to
+        // `pages`, so evictLeastRecentlyUsed can never find it to close it,
+        // and repeated navigation failures would grow real browser tabs
+        // without bound.
+        await target.close().catch(() => {});
+        throw error;
+      }
       pageCounter += 1;
       const pageId = `page-${pageCounter}`;
       pages.set(pageId, target);
@@ -328,7 +357,16 @@ export function createPlaywrightOps({
     async snapshot({ pageId }) {
       const target = page(pageId);
       const container = target.locator(CONTROL_SELECTOR);
-      const controls = await container.evaluateAll(collectControls);
+      const rawControls = await container.evaluateAll(collectControls);
+      // Normalize here, at the collection choke point. collectControls itself
+      // runs inside the browser via evaluateAll, so it can't share this helper.
+      // Normalizing before refs/tree lines are built means the driver-side
+      // ref name and the tree line's label are always the same string.
+      const controls = rawControls.map((control) => ({
+        ...control,
+        name: normalizeWhitespace(control.name),
+        groupLabel: control.groupLabel == null ? null : normalizeWhitespace(control.groupLabel),
+      }));
 
       const refs = {};
       const refMap = new Map();
