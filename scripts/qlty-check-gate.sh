@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs the Qlty gate used by both `lefthook` pre-push and CI (see
-# .github/workflows/ci.yml's `qlty` job and lefthook.yml's `qlty` command).
+# .github/workflows/ci-verify.yml's `qlty` job and lefthook.yml's `qlty` command).
 #
 # Default ("changed") mode diffs against origin/main so the gate only
 # enforces the code a push/PR actually touches — CareerRat is pre-launch and

@@ -1,0 +1,36 @@
+name: security-dast
+
+# DAST: ZAP baseline (passive-only) scan against the live production site.
+# careerrat.com is a static-export site (static tier) — there is no server-side
+# app to exercise, so this deliberately stays passive-only (spider + passive
+# rules). No active/full scan against production, ever.
+#
+# Advisory, not gating: this scans the deployed site on a schedule (and on
+# demand), not a PR artifact, so it can't be a required PR status check.
+# fail_action stays false — informational alerts don't fail the run; only a
+# scan execution error does. allow_issue_writing stays false so no
+# `issues: write` permission is needed anywhere in this workflow.
+
+on:
+  schedule:
+    - cron: "10 6 * * 3" # weekly, Wednesday 06:10 UTC (off-peak, distinct from codeql's/security-scorecard's/security-actions.yml's crons)
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  zap-baseline:
+    name: zap-baseline
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Harden the runner (audit all outbound calls)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+      - name: ZAP baseline scan (passive only — careerrat.com is a static-export site)
+        uses: zaproxy/action-baseline@de8ad967d3548d44ef623df22cf95c3b0baf8b25 # v0.15.0
+        with:
+          target: "https://careerrat.com"
+          fail_action: false
+          allow_issue_writing: false
