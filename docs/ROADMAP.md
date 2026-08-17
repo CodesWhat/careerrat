@@ -363,9 +363,10 @@ The current build order is:
    a URL, the open job, or one named saved job, evaluates it first, generates only on KEEP, and
    returns review/export actions without implying submission. Automatic session-browser selection,
    the connected Orca executor, rendered-form capture, deterministic field/file filling, blockers,
-   manual Submit boundary, confirmation re-scan, and screenshot evidence are now wired. Remaining
-   work is multi-step ATS advancement and clean-home packaged acceptance of the entire AI-backed
-   apply chain for pasted and attached input. The rating flow's
+   manual Submit boundary, confirmation re-scan, and screenshot evidence are now wired.
+   Clean-home packaged acceptance of the AI-backed apply chain for pasted and attached input
+   passed 2026-08-17; it found and fixed one gate/status resync defect on the attach-path dedup
+   onto an existing application row. Remaining work is multi-step ATS advancement. The rating flow's
    packed acceptance now completes URL, open-job, named-job, pasted-JD, attached-JD, and
    ambiguity-recovery paths through durable verdict state. Greenhouse and Ashby
    question schemas are captured before packet generation; other ATS forms now use a durable
@@ -429,8 +430,8 @@ The current build order is:
    checking for an executor. An in-browser compose executor that would reach `verified` sends
    directly was evaluated and deferred behind recorded entry criteria (keystroke-safe compose-DOM
    handling, per-account Sent-folder verification, and a distinct Sent-folder read consent
-   capability); recipient provenance, the prior open blocker, is now solved. Headed isolated-home
-   acceptance for the note-capture, handoff, and verification-tier changes remains open. One-off
+   capability); recipient provenance, the prior open blocker, is now solved. Packaged acceptance
+   for the note-capture, handoff, and verification-tier changes passed 2026-08-17. One-off
    screening answers now satisfy
    the same contract with review-before-reuse persistence. Company research, comp benchmarking, and
    company health now satisfy the same typed Ask contract too: natural requests resolve through a
@@ -444,8 +445,13 @@ The current build order is:
    passed on 2026-08-15 against the real server: routing, cached-result reuse, the health write
    path through to the drawer, ambiguity and missing-input recovery, confirmed saves with the
    private-comp refusal, clean no-AI degradation, and restart durability all held with no server
-   errors. Packaged acceptance and a live embedded research session with a real AI runtime remain
-   open for these rows. Search-strategy review now satisfies the same contract too: natural
+   errors. Packaged and live-AI-runtime acceptance on 2026-08-17 found and fixed a real regression
+   (the installed-CLI chat path could not load its own skill, so no session could save a result;
+   `F-103`/PR #84) and closed company-health's row fully, including the CLI and chat-equivalent
+   write paths, the Jobs drawer badge, and the Activity Pulse event. research-company and
+   research-comp now reach real research but are separately blocked by the installed runtime's
+   120s timeout on long turns (PR #92 open); those two rows remain open pending that fix.
+   Search-strategy review now satisfies the same contract too: natural
    phrasings ("review my strategy," "why am I getting filtered out," "what's working in my
    search") resolve to a typed `strategy.review` intent, and the Dashboard's Strategy panel's
    review-trigger CTA submits that identical intent into the durable Ask thread instead of a
@@ -456,9 +462,11 @@ The current build order is:
    recommendation applies individually and confirm-first through `strategy.apply`, routed to the
    same validated gate, comp, fit-band, and learning writers Settings and the CLI already use —
    writing-style suggestions stay present-only, with no automated writer — and `strategy.stamp`
-   records the finished review and clears the dashboard nudge. Headed isolated-home acceptance,
-   packaged acceptance, and a live run against a real AI runtime remain open for this row. The
-   remaining original-skill rows stay tracked in the linked audit.
+   records the finished review and clears the dashboard nudge. Headed isolated-home acceptance
+   passed 2026-08-15; packaged acceptance and a live run against a real AI runtime both passed
+   2026-08-17. A capability-cookie dev-restart recovery gap found in the live-AI pass is tracked as
+   an open issue, not a blocker for this row. The remaining original-skill rows stay tracked in the
+   linked audit.
 5. **Free/public source parity before AI (implemented and accepted)** — the pinned manifest
    accounts for all 74 Career Ops provider modules: 73 public-network adapters run through the
    deterministic registry, and `local-parser` is intentionally excluded with a safety reason.
@@ -476,7 +484,7 @@ The current build order is:
 ### Product-surface acceptance sweep (updated August 14, 2026)
 
 The live result ledger is [`.planning/QA-ACCEPTANCE.md`](../.planning/QA-ACCEPTANCE.md); this
-section remains the release-level source of truth. All 102 recorded findings are fixed and
+section remains the release-level source of truth. All 103 recorded findings are fixed and
 live-retested. The broader skill-to-screen audit above remains active until every user-facing
 original skill has a coherent native path.
 
