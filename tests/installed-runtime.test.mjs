@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -8,6 +16,7 @@ import {
   buildInstalledRuntimeInvocation,
   detectInstalledRuntimes,
   INSTALLED_RUNTIME_DEFINITIONS,
+  materializeIsolatedSkillCwd,
   openInstalledRuntimeTerminal,
   parseCustomCommandString,
   probeCustomRuntimeCommand,
@@ -536,6 +545,225 @@ test("probeCustomRuntimeCommand times out a hanging command using the caller-sup
     assert.equal(result.ok, false);
     assert.equal(result.error, "Timed out after 15s.");
     assert.equal(typeof result.elapsedMs, "number");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// P0 regression — the installed "claude" runtime's Skill tool coming up
+// empty under --safe-mode. CHAT_RUNTIME_TOOLS chat sessions (research-company,
+// research-comp, company-health, research-boards) grant only WebSearch/
+// WebFetch/Skill — no Read — so when --safe-mode blanks the Skill tool's
+// registry, the skill is unreachable and the session freelances instead of
+// emitting its typed careerrat:discovery result. --safe-mode's own --help
+// text says it disables "skills" outright; verified empirically against the
+// real installed CLI that a --safe-mode run's Skill tool lists only
+// Anthropic's fixed built-ins, never a project skill. The fix: when a
+// specific skill is given, spawn against an isolated cwd containing nothing
+// but that skill (materializeIsolatedSkillCwd) with --setting-sources
+// project instead of --safe-mode — verified empirically to expose exactly
+// that one skill at --safe-mode's own ~5k-token baseline cost, not the
+// ~136k a real project cwd produces.
+// ---------------------------------------------------------------------------
+
+function tempRepoWithOneSkill(skillName, body = `# ${skillName}\n`) {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-installed-skill-repo-"));
+  const skillDir = join(repoRoot, ".agents", "skills", skillName);
+  mkdirSync(skillDir, { recursive: true });
+  writeFileSync(join(skillDir, "SKILL.md"), `---\nname: ${skillName}\n---\n${body}`, "utf8");
+  return repoRoot;
+}
+
+test("buildInstalledRuntimeInvocation: a claude call with a materialized skill trades --safe-mode for --setting-sources project", () => {
+  const withSkill = buildInstalledRuntimeInvocation({
+    runtimeId: "claude",
+    executablePath: "/safe/claude",
+    tools: ["WebSearch", "WebFetch", "Skill"],
+    skill: "research-company",
+  });
+  assert.equal(withSkill.args.includes("--safe-mode"), false);
+  const idx = withSkill.args.indexOf("--setting-sources");
+  assert.ok(idx >= 0, "expected --setting-sources in argv");
+  assert.equal(withSkill.args[idx + 1], "project");
+
+  // No skill (or isolation unavailable) — unchanged today's behavior.
+  const withoutSkill = buildInstalledRuntimeInvocation({
+    runtimeId: "claude",
+    executablePath: "/safe/claude",
+    tools: ["Read"],
+  });
+  assert.ok(withoutSkill.args.includes("--safe-mode"));
+  assert.equal(withoutSkill.args.includes("--setting-sources"), false);
+});
+
+test("materializeIsolatedSkillCwd: symlinks exactly the named skill into an isolated .claude/skills/<skill>, nothing else from the project", () => {
+  const repoRoot = tempRepoWithOneSkill("research-company", "Trigger word PROBE.\n");
+  let isolated;
+  try {
+    isolated = materializeIsolatedSkillCwd({ repoRoot, skill: "research-company" });
+    assert.ok(isolated, "expected an isolated cwd path");
+    const skillMdPath = join(isolated, ".claude", "skills", "research-company", "SKILL.md");
+    assert.ok(existsSync(skillMdPath));
+    assert.equal(existsSync(join(isolated, "CLAUDE.md")), false);
+    assert.equal(existsSync(join(isolated, ".agents")), false);
+  } finally {
+    if (isolated) rmSync(isolated, { recursive: true, force: true });
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("materializeIsolatedSkillCwd: returns null (never throws) when the skill or repoRoot is missing", () => {
+  const repoRoot = tempRepoWithOneSkill("research-company");
+  try {
+    assert.equal(materializeIsolatedSkillCwd({ repoRoot, skill: "not-a-real-skill" }), null);
+    assert.equal(materializeIsolatedSkillCwd({ repoRoot: null, skill: "research-company" }), null);
+    assert.equal(materializeIsolatedSkillCwd({ repoRoot, skill: null }), null);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("runInstalledRuntime (claude + skill): spawns against the isolated skill cwd with --setting-sources project, and cleans it up after", async () => {
+  const repoRoot = tempRepoWithOneSkill("research-company", "Trigger word PROBE.\n");
+  const executablePath = join(repoRoot, "fake-claude");
+  writeFileSync(
+    executablePath,
+    `#!/usr/bin/env node
+const { readFileSync, existsSync } = require("node:fs");
+const { join } = require("node:path");
+process.stdin.resume();
+process.stdin.on("end", () => {
+  const cwd = process.cwd();
+  const skillPath = join(cwd, ".claude", "skills", "research-company", "SKILL.md");
+  process.stdout.write(JSON.stringify({
+    type: "result",
+    subtype: "success",
+    result: "ignored",
+    structured_output: {
+      cwd,
+      usedSettingSources: process.argv.includes("--setting-sources"),
+      usedSafeMode: process.argv.includes("--safe-mode"),
+      skillVisible: existsSync(skillPath),
+      skillContent: existsSync(skillPath) ? readFileSync(skillPath, "utf8") : null,
+    },
+  }));
+});
+`,
+    "utf8"
+  );
+  chmodSync(executablePath, 0o755);
+  let capturedIsolatedCwd = null;
+  try {
+    const result = await runInstalledRuntime({
+      runtime: { id: "claude", path: executablePath },
+      prompt: "run research-company",
+      skill: "research-company",
+      repoRoot,
+      cwd: repoRoot, // the caller's ordinary cwd — must be overridden, not used
+      tools: ["WebSearch", "WebFetch", "Skill"],
+      timeoutMs: 5000,
+    });
+    const data = JSON.parse(result.text);
+    capturedIsolatedCwd = data.cwd;
+    assert.notEqual(
+      data.cwd,
+      repoRoot,
+      "must spawn against the isolated cwd, not the caller's repoRoot"
+    );
+    assert.equal(data.usedSettingSources, true);
+    assert.equal(data.usedSafeMode, false);
+    assert.equal(data.skillVisible, true);
+    assert.match(data.skillContent, /PROBE/);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+  // The isolated temp cwd is app-owned and ephemeral — cleaned up once the
+  // call finishes, same contract as the codex output-schema temp dir above.
+  assert.ok(capturedIsolatedCwd, "fixture didn't report a cwd");
+  assert.equal(existsSync(capturedIsolatedCwd), false);
+});
+
+test("runInstalledRuntime (claude + skill, Read granted): skips isolation — the one-shot app-safe profile needs cwd=repoRoot for its SKILL.md's relative workspace reads", async () => {
+  // evaluate-job/tailor-application/resume-extract/... (APP_SAFE_RUNTIME_TOOLS:
+  // Read, Glob, Grep, Skill) instruct relative-path reads like "Open
+  // workspace/tracker.json" that only resolve against the real repoRoot.
+  // Isolating cwd for those would silently break every one of those reads,
+  // so runInstalledRuntime must leave --safe-mode + cwd=repoRoot alone
+  // whenever Read is among the granted tools, even with skill+repoRoot given.
+  const repoRoot = tempRepoWithOneSkill("evaluate-job", "Trigger word PROBE.\n");
+  const executablePath = join(repoRoot, "fake-claude-read");
+  writeFileSync(
+    executablePath,
+    `#!/usr/bin/env node
+process.stdin.resume();
+process.stdin.on("end", () => {
+  process.stdout.write(JSON.stringify({
+    type: "result",
+    subtype: "success",
+    result: "ignored",
+    structured_output: {
+      cwd: process.cwd(),
+      usedSafeMode: process.argv.includes("--safe-mode"),
+      usedSettingSources: process.argv.includes("--setting-sources"),
+    },
+  }));
+});
+`,
+    "utf8"
+  );
+  chmodSync(executablePath, 0o755);
+  try {
+    const result = await runInstalledRuntime({
+      runtime: { id: "claude", path: executablePath },
+      prompt: "run evaluate-job",
+      skill: "evaluate-job",
+      repoRoot,
+      cwd: repoRoot,
+      tools: ["Read", "Glob", "Grep", "Skill"],
+      timeoutMs: 5000,
+    });
+    const data = JSON.parse(result.text);
+    assert.equal(realpathSync(data.cwd), realpathSync(repoRoot));
+    assert.equal(data.usedSafeMode, true);
+    assert.equal(data.usedSettingSources, false);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("runInstalledRuntime (claude, no skill): unchanged --safe-mode behavior at the caller's own cwd", async () => {
+  const root = tempRoot();
+  const executablePath = join(root, "fake-claude-plain");
+  writeFileSync(
+    executablePath,
+    `#!/usr/bin/env node
+process.stdin.resume();
+process.stdin.on("end", () => {
+  process.stdout.write(JSON.stringify({
+    type: "result",
+    subtype: "success",
+    result: "ignored",
+    structured_output: { cwd: process.cwd(), usedSafeMode: process.argv.includes("--safe-mode") },
+  }));
+});
+`,
+    "utf8"
+  );
+  chmodSync(executablePath, 0o755);
+  try {
+    const result = await runInstalledRuntime({
+      runtime: { id: "claude", path: executablePath },
+      prompt: "no skill given",
+      cwd: root,
+      timeoutMs: 5000,
+    });
+    const data = JSON.parse(result.text);
+    // macOS resolves the tmp dir's /var symlink to /private/var inside the
+    // child (process.cwd() reports the real path) — compare realpaths rather
+    // than the raw strings so this isn't platform-flaky.
+    assert.equal(realpathSync(data.cwd), realpathSync(root));
+    assert.equal(data.usedSafeMode, true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
