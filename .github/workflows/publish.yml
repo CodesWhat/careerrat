@@ -40,10 +40,15 @@ jobs:
         with:
           egress-policy: audit # house target is `block` once observed endpoints are allowlisted
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
+          # A publish workflow must not restore a shared dependency cache: a
+          # poisoned cache entry could reach the published npm artifact.
+          package-manager-cache: false
       - name: Install locked dependencies
         run: npm ci
       # Trusted Publishing (OIDC) requires npm >= 11.5.1; pin to latest to be safe.

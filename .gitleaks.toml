@@ -1,0 +1,21 @@
+# Gitleaks config for the security-actions workflow's secret scan. Extends
+# the default ruleset; everything allowlisted below was inspected and is not
+# a secret. New findings anywhere else still fail the scan.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Verified public constants and synthetic test fixtures"
+regexes = [
+  # VDAB's public frontend constant, baked into their own shipped JS bundle
+  # (documented in src/core/providers/career-ops/vendor/vdab.mjs).
+  '''b277002f-e1fa-4fc5-868a-fdab633c3851''',
+  # logo.dev publishable (pk_) token, shipped on purpose as the built-in
+  # image-logo lookup key (see tests/logo-route.test.mjs).
+  '''pk_SgppRPhNTWqQdH-WZX5BWA''',
+]
+paths = [
+  # Provider-conformance fixtures use synthetic dummy credentials.
+  '''tests/fixtures/career-ops/''',
+]

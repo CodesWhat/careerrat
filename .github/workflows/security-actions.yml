@@ -31,6 +31,8 @@ jobs:
         with:
           egress-policy: audit # house target is `block` once observed endpoints are allowlisted
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Lint workflow files
         uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
 
@@ -45,6 +47,8 @@ jobs:
         with:
           egress-policy: audit # house target is `block` once observed endpoints are allowlisted
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: Scan workflows for Actions security anti-patterns
         run: uvx zizmor==1.29.0 .github/workflows/ --min-severity medium
@@ -70,6 +74,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # gitleaks scans full history, not just the checked-out ref
+          persist-credentials: false
       - name: Download gitleaks
         run: |
           set -euo pipefail
@@ -93,5 +98,7 @@ jobs:
         with:
           egress-policy: audit # house target is `block` once observed endpoints are allowlisted
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Check new dependencies for known vulnerabilities
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
