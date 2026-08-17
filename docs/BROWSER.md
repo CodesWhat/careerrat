@@ -140,6 +140,12 @@ careerrat automation session <auto|extension|orca|playwright> --write
 browser plus a best-effort "is it ready?" probe. Settings uses ordinary connection
 language; the candidate never needs to identify a provider during onboarding.
 
+The `extension` provider is agent-driven, turn-by-turn — there's no callable surface
+for CareerRat to run a form-fill script against it, so app-side supervised apply
+(`apply-job`) only ever runs over `orca` or the bundled `playwright` persistent
+profile. When the configured provider is `extension`, apply falls back to the
+agent-in-the-loop handoff instead of claiming a script ran the browser.
+
 ## SPA-host escalation
 
 When a liveness check returns `spa_shell` (Wellfound, Lever, Ashby, and other

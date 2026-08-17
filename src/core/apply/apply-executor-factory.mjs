@@ -1,6 +1,15 @@
 import { loadAutomation } from "../automation/consent.mjs";
-import { resolveSession } from "../automation/session.mjs";
+import { PROVIDERS, resolveSession } from "../automation/session.mjs";
 import { createOrcaApplyExecutor } from "./orca-executor.mjs";
+import { createPlaywrightApplyExecutor } from "./playwright-executor.mjs";
+
+// The extension provider is agent-driven, turn-by-turn (session.mjs "deliberately
+// drives NOTHING") — it has no callable surface for a headless script, so it stays
+// a null/manual-handoff path here on purpose rather than a third executor.
+const EXECUTOR_FACTORIES = {
+  orca: createOrcaApplyExecutor,
+  playwright: createPlaywrightApplyExecutor,
+};
 
 export function createConfiguredApplyExecutor({
   repoRoot,
@@ -15,9 +24,10 @@ export function createConfiguredApplyExecutor({
   } catch {
     return null;
   }
-  if (provider !== "orca") return null;
+  const createExecutor = EXECUTOR_FACTORIES[provider];
+  if (!createExecutor) return null;
 
-  const execute = createOrcaApplyExecutor({ repoRoot, env, ...options });
+  const execute = createExecutor({ repoRoot, env, ...options });
   return async (input) => {
     try {
       return await execute(input);
@@ -26,7 +36,7 @@ export function createConfiguredApplyExecutor({
         available: false,
         verified: false,
         state: "unavailable",
-        reason: `The Orca supervised browser is unavailable: ${String(
+        reason: `The ${PROVIDERS[provider]?.label || provider} is unavailable: ${String(
           error?.message || "browser command failed"
         ).slice(0, 300)}`,
       };
