@@ -35,7 +35,7 @@ reviews:
   related_issues: true
   related_prs: true
   suggested_labels: false
-  auto_apply_labels: false
+  auto_apply_labels: true
   suggested_reviewers: false
   auto_assign_reviewers: false
   enable_prompt_for_ai_agents: true
@@ -83,6 +83,15 @@ reviews:
     - path: "**/*.test.*"
       instructions: |
         Test files. Don't suggest error handling or null checks in test code.
+
+  labeling_instructions:
+    - label: "second-opinion"
+      instructions: |
+        Apply this label when the diff is security-sensitive (auth, release or
+        publish workflows, proxy or socket logic), when it is a large refactor,
+        or when review findings conflict with the author's stated intent in the
+        PR description. Applying the label is the only way this repo triggers a
+        Greptile review, so use it deliberately rather than by default.
 
   finishing_touches:
     docstrings:

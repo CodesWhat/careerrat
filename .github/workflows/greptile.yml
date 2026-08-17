@@ -1,0 +1,24 @@
+name: Greptile second opinion
+
+# Opt-in second-opinion review. Greptile never reviews unbidden (greptile.json
+# pins skipReview: AUTOMATIC), so the "second-opinion" label is its only
+# trigger, applied by CodeRabbit's labeling_instructions (.coderabbit.yaml)
+# when the diff is security-sensitive, a large refactor, or review findings
+# conflict with the PR description. See CodesWhat/.github
+# REPOSITORY_ONBOARDING.md.
+
+on:
+  pull_request:
+    types: [labeled]
+
+permissions: {}
+
+jobs:
+  summon:
+    if: github.event.label.name == 'second-opinion'
+    permissions:
+      pull-requests: write
+    uses: CodesWhat/.github/.github/workflows/greptile-summon.yml@01bf40b06b110946f12a49b82e407d77c6480df7 # frozen 2026-08-17
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+      head_sha: ${{ github.event.pull_request.head.sha }}
