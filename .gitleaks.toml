@@ -1,21 +1,30 @@
 # Gitleaks config for the security-actions workflow's secret scan. Extends
-# the default ruleset; everything allowlisted below was inspected and is not
-# a secret. New findings anywhere else still fail the scan.
+# the default ruleset. Each allowlist below is scoped to the exact files its
+# verified non-secret appears in (condition = "AND" requires both the value
+# and the path to match), so the same string in any other file still fails
+# the scan. New findings anywhere else fail the scan too.
 
 [extend]
 useDefault = true
 
-[allowlist]
-description = "Verified public constants and synthetic test fixtures"
-regexes = [
-  # VDAB's public frontend constant, baked into their own shipped JS bundle
-  # (documented in src/core/providers/career-ops/vendor/vdab.mjs).
-  '''b277002f-e1fa-4fc5-868a-fdab633c3851''',
-  # logo.dev publishable (pk_) token, shipped on purpose as the built-in
-  # image-logo lookup key (see tests/logo-route.test.mjs).
-  '''pk_SgppRPhNTWqQdH-WZX5BWA''',
-]
+[[allowlists]]
+description = "VDAB public frontend constant, baked into their own shipped JS bundle (documented in the vendored provider)"
+condition = "AND"
+regexes = ['''b277002f-e1fa-4fc5-868a-fdab633c3851''']
 paths = [
-  # Provider-conformance fixtures use synthetic dummy credentials.
-  '''tests/fixtures/career-ops/''',
+  '''^src/core/providers/career-ops/vendor/vdab\.mjs$''',
+  '''^tests/fixtures/career-ops/providers/vdab\.conformance\.mjs$''',
 ]
+
+[[allowlists]]
+description = "logo.dev publishable (pk_) token, shipped on purpose as the built-in image-logo lookup key"
+condition = "AND"
+regexes = ['''pk_SgppRPhNTWqQdH-WZX5BWA''']
+paths = [
+  '''^src/cli/logo-route\.mjs$''',
+  '''^tests/logo-route\.test\.mjs$''',
+]
+
+[[allowlists]]
+description = "Provider-conformance fixtures use synthetic dummy credentials"
+paths = ['''^tests/fixtures/career-ops/''']
