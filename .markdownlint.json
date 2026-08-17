@@ -1,0 +1,7 @@
+{
+  "$comment": "qlty-managed markdownlint — see .qlty/qlty.toml. Same rule set as drydock/portwing: the house README shape requires inline HTML (MD033) and long badge lines (MD013), MD024 clashes with changelog headings, MD041 with the centered logo block.",
+  "MD013": false,
+  "MD024": false,
+  "MD033": false,
+  "MD041": false
+}
