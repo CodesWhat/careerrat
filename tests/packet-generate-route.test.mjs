@@ -528,6 +528,75 @@ test("POST /api/packet/gate: reuses existing artifacts.jd when no body is suppli
   }
 });
 
+// Regression for the QA-reproduced bug: a captured JD that resolves to an
+// EXISTING application (trackerMatch company_role dedup) runs a fresh
+// re-evaluation. The verdict landed on the nested `evaluation` object but
+// the top-level gate/status/note — stamped from the FIRST evaluation — never
+// resynced, so the Jobs list showed Stage "Reviewed Hold" next to Fit
+// "Cut" for the same row, and the job-detail header badge contradicted the
+// Evaluate card.
+test("POST /api/packet/gate: a re-evaluation to CUT resyncs top-level gate/status/note", async () => {
+  const repoRoot = tempRepo();
+  // packetGate: "review" seeds the exact stale shape QA hit: nested
+  // evaluation.gate "review" with no top-level gate/status resync from that
+  // first pass (status stays the seed default "reviewed-hold").
+  seedPacketReadyApp(repoRoot, { packetGate: "review" });
+  const server = await bootServer(repoRoot, {
+    packetGateInvoke: async () =>
+      `\`\`\`json\n${JSON.stringify(typedGateVerdict({ gate: "cut" }))}\n\`\`\``,
+  });
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-packet",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.data?.gate, "cut");
+
+    const app = readApp(repoRoot, "app-packet");
+    assert.equal(app.evaluation.gate, "cut");
+    assert.equal(app.gate, "cut", "top-level gate must match the fresh verdict");
+    assert.equal(app.status, "cut", "top-level status must match the fresh verdict");
+    assert.match(app.note, /gate cut/, "top-level note must reflect the fresh verdict");
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/gate: a re-evaluation never regresses an already-applied status", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot, { packetGate: "keep" });
+  // The candidate applied and advanced by hand since the first evaluation.
+  importTrackerFixture(repoRoot, [
+    {
+      id: "app-packet",
+      company: "Acme AI",
+      role: "Applied AI Engineer",
+      status: "interview",
+      fitBasis: "evaluated",
+      fitBucket: "high",
+      evaluation: { gate: "keep" },
+      artifacts: readApp(repoRoot, "app-packet").artifacts,
+    },
+  ]);
+  const server = await bootServer(repoRoot, {
+    packetGateInvoke: async () =>
+      `\`\`\`json\n${JSON.stringify(typedGateVerdict({ gate: "cut" }))}\n\`\`\``,
+  });
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-packet",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.data?.gate, "cut");
+
+    const app = readApp(repoRoot, "app-packet");
+    assert.equal(app.evaluation.gate, "cut", "nested evaluation still refreshes");
+    assert.equal(app.status, "interview", "an already-applied status must never regress");
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/packet/gate: refuses to treat an explicitly partial saved JD as complete", async () => {
   const repoRoot = tempRepo();
   seedPacketReadyApp(repoRoot);
