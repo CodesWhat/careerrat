@@ -26,8 +26,9 @@ You can expect:
 - a fix or mitigation as soon as feasible, depending on severity and release
   safety.
 
-CareerRat coordinates disclosure with the reporter and credits reporters in
-release notes unless they prefer to remain anonymous.
+CareerRat coordinates disclosure with the reporter. Reporter identity stays
+private by default; a reporter is credited in release notes only after they
+explicitly approve both the attribution and its exact wording.
 
 There is no bug bounty program.
 
