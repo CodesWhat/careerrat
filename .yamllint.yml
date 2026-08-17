@@ -1,0 +1,11 @@
+---
+# qlty-managed yamllint — see .qlty/qlty.toml
+extends: default
+rules:
+  document-start: disable
+  truthy: disable
+  line-length: disable
+  # CareerRat's existing workflow comments use a single space before "#"
+  # (e.g. `@<sha> # v1.2.3`); disabled rather than reformatting pre-existing
+  # lines outside this change's scope.
+  comments: disable

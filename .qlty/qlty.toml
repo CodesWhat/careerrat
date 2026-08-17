@@ -1,0 +1,103 @@
+# Qlty config for CareerRat.
+#
+# Biome owns JS/JSON lint + format (see biome.json) and stays OUTSIDE qlty —
+# qlty's biome integration is not enabled here. Qlty covers everything Biome
+# doesn't: shell scripts, Docker, GitHub Actions workflows, YAML, Markdown,
+# dependency/secret scanning. No TypeScript-specific plugins are enabled;
+# CareerRat's CLI, src/, and scripts/ are plain JS.
+#
+# For a guide to configuration, visit https://qlty.sh/d/config
+# Or for a full reference, visit https://qlty.sh/d/qlty-toml
+config_version = "0"
+
+exclude_patterns = [
+  "*_min.*",
+  "*-min.*",
+  "*.min.*",
+  "**/*.d.ts",
+  "**/.yarn/**",
+  "**/bower_components/**",
+  "**/build/**",
+  "**/coverage/**",
+  "**/cache/**",
+  "**/dist/**",
+  "**/generated/**",
+  "**/node_modules/**",
+  "**/target/**",
+  "**/testdata/**",
+  "**/vendor/**",
+  ".qlty/out/**",
+  ".qlty/logs/**",
+  ".qlty/results/**",
+  ".qlty/plugin_cachedir/**",
+  ".claude/**",
+  "src/core/providers/career-ops/vendor/**",
+  "tests/fixtures/**",
+  "package-lock.json",
+]
+
+test_patterns = [
+  "**/test/**",
+  "**/spec/**",
+  "**/*.test.*",
+  "**/*.spec.*",
+  "**/*_test.*",
+  "**/*_spec.*",
+  "**/test_*.*",
+  "**/spec_*.*",
+]
+
+[smells]
+mode = "comment"
+
+[[source]]
+name = "default"
+default = true
+
+[[plugin]]
+name = "actionlint"
+
+[[plugin]]
+name = "checkov"
+
+[[plugin]]
+name = "dockerfmt"
+
+[[plugin]]
+name = "hadolint"
+
+[[plugin]]
+name = "markdownlint"
+mode = "comment"
+# Pinned so the markdownlint ruleset is identical locally and in CI. Left
+# unpinned, qlty resolves whatever markdownlint the installed CLI defaults to,
+# which drifts between a developer's qlty and CI's (latest) qlty — a doc that
+# passed `qlty check --all` locally then failed the CI lint gate.
+version = "0.46.0"
+
+[[plugin]]
+name = "osv-scanner"
+
+[[plugin]]
+name = "radarlint-iac"
+mode = "monitor"
+
+[[plugin]]
+name = "ripgrep"
+mode = "comment"
+
+[[plugin]]
+name = "shellcheck"
+# Pinned to the version GitHub Actions ubuntu-latest pre-installs. qlty
+# otherwise resolves to the latest release and rejects the runner's older
+# binary with "Invalid tool version", failing the lint job.
+version = "0.9.0"
+
+[[plugin]]
+name = "shfmt"
+
+[[plugin]]
+name = "trufflehog"
+
+[[plugin]]
+name = "yamllint"

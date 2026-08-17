@@ -59,3 +59,55 @@ jobs:
         run: npm ci
       - name: Build the web app shell (apps/web)
         run: npm run build --workspace apps/web
+
+  # Qlty (shell/Docker/Actions/YAML lint, secret + dependency scanning — see
+  # .qlty/qlty.toml; Biome stays out of qlty and lints JS/JSON separately).
+  # "changed" mode diffs against origin/main, same as the local pre-push gate
+  # (scripts/qlty-check-gate.sh) — CareerRat is pre-launch and carries a real
+  # doc/YAML backlog a repo-wide run would fail on immediately. Not yet added
+  # to the "Main branch protection" ruleset's required_status_checks, the
+  # same "real, running, but not yet required" posture as web-build above.
+  qlty:
+    name: qlty
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (audit all outbound calls)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # needed so `--upstream origin/main` resolves
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+      - name: Setup Qlty
+        uses: qltysh/qlty-action/install@08a0a862c159eae9b9003081da6663d96efef637 # v2.3.0
+      - name: Qlty check (changed files vs origin/main)
+        run: ./scripts/qlty-check-gate.sh changed
+
+  # Knip (unused files/exports/dependencies — see knip.json). --max-issues
+  # ratchets against the CURRENT genuine backlog documented in the
+  # gates-tranche report (real entries first, targeted ignores only for
+  # verified dynamic-loading false positives) so this catches new dead code
+  # without blocking on existing debt. Not yet in the required_status_checks
+  # ruleset — same posture as qlty/web-build above.
+  knip:
+    name: knip
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (audit all outbound calls)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+      - name: Install dependencies
+        run: npm ci
+      - name: Knip check
+        run: npx knip --no-progress --max-issues=170
