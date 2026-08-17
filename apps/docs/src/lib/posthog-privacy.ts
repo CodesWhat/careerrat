@@ -8,10 +8,10 @@
 // invariants must match exactly, since both feed the same shared PostHog
 // project.
 
-export const POSTHOG_API_HOST = "https://e.codeswhat.com";
-export const POSTHOG_UI_HOST = "https://us.posthog.com";
-export const PRODUCTION_ORIGIN = "https://careerrat.com";
-export const SITE = "careerrat.com";
+const POSTHOG_API_HOST = "https://e.codeswhat.com";
+const POSTHOG_UI_HOST = "https://us.posthog.com";
+const PRODUCTION_ORIGIN = "https://careerrat.com";
+const SITE = "careerrat.com";
 
 const DOCS_PATH_PREFIX = "/docs";
 const OTHER_PATH = "/_other";
