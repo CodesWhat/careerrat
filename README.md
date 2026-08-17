@@ -11,7 +11,7 @@
   <a href="package.json"><img src="https://img.shields.io/badge/node-%3E%3D24-339933?logo=node.js&logoColor=white" alt="Node >=24"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-C9A227" alt="License MIT"></a>
   <br>
-  <a href="https://github.com/CodesWhat/careerrat/actions/workflows/ci.yml"><img src="https://github.com/CodesWhat/careerrat/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://github.com/CodesWhat/careerrat/actions/workflows/ci-verify.yml"><img src="https://github.com/CodesWhat/careerrat/actions/workflows/ci-verify.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="https://securityscorecards.dev/viewer/?uri=github.com/CodesWhat/careerrat"><img src="https://api.scorecard.dev/projects/github.com/CodesWhat/careerrat/badge" alt="OpenSSF Scorecard"></a>
   <br>
   <a href="https://www.npmjs.com/package/careerrat"><img src="https://img.shields.io/npm/dm/careerrat" alt="npm downloads"></a>
