@@ -2,8 +2,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import {
+  DeepIngestDock,
   DeepIngestPriorityNudge,
-  DeepIngestToast,
   deepIngestNeeded,
 } from "./SetupReadinessCard.jsx";
 
@@ -25,11 +25,11 @@ describe("deepIngestNeeded", () => {
   });
 });
 
-describe("DeepIngestToast", () => {
-  it("renders the floating toast with a title, CTA, and dismiss control", () => {
-    const markup = renderWithRouter(<DeepIngestToast onDismiss={() => {}} />);
+describe("DeepIngestDock", () => {
+  it("renders the docked nudge row with a title, CTA, and dismiss control", () => {
+    const markup = renderWithRouter(<DeepIngestDock onDismiss={() => {}} />);
 
-    expect(markup).toContain('class="setup-toast"');
+    expect(markup).toContain('class="ask-bar__nudge"');
     expect(markup).toContain("Go deeper");
     expect(markup).toMatch(/<a[^>]*href="\/deep-ingest"[^>]*>Start deep ingest<\/a>/);
     expect(markup).toMatch(/<button[^>]*aria-label="Dismiss"[^>]*>/);
