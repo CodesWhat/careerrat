@@ -342,7 +342,7 @@ REGISTRY-UPDATED: <yes | no>
 emitted — it never sees whether the user later clicks Add source or Skip. Use only these
 values in chat mode, regardless of how confident the proposals looked:
 
-```
+```text
 AUTO-ADDED: none (chat handoff — writes happen via the Add source/Skip controls, not this turn)
 CONFIRMED-ADDED: awaiting confirmation
 REGISTRY-UPDATED: no (pending — chat handoff)

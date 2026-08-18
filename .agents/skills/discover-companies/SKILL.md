@@ -353,7 +353,7 @@ NEXT: <"run search-jobs sweep" | "awaiting confirmation">
 emitted — it never sees whether the user later clicks Track company or Skip. Use only these
 values in chat mode, regardless of how confident the proposals looked:
 
-```
+```text
 AUTO-ADDED: none (chat handoff — writes happen via the Track company/Skip controls, not this turn)
 CONFIRMED-ADDED: awaiting confirmation
 NEXT: awaiting confirmation
