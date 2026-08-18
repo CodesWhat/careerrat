@@ -14,9 +14,11 @@ import { test } from "node:test";
 
 import {
   buildInstalledRuntimeInvocation,
+  CHAT_SESSION_RUNTIME_TIMEOUT_MS,
   detectInstalledRuntimes,
   INSTALLED_RUNTIME_DEFINITIONS,
   materializeIsolatedSkillCwd,
+  ONE_SHOT_RUNTIME_TIMEOUT_MS,
   openInstalledRuntimeTerminal,
   parseCustomCommandString,
   probeCustomRuntimeCommand,
@@ -427,6 +429,18 @@ test("installed runtime failures distinguish nonzero exit, timeout, and cancella
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// P0 regression: runInstalledRuntime's `timeoutMs` has two named tiers (see
+// installed-runtimes.mjs's own comment above their definitions). Bounded
+// one-shot calls (evaluate-job, tailor-application, resume-extract, ...) must
+// keep the exact ~120s bound they always had. A chat session opts into the
+// wider tier per-call (see tests/chat-runtime.test.mjs's own pin of that
+// wiring); it is never the shared default.
+test("runInstalledRuntime's default timeoutMs is the byte-identical one-shot 120s bound; the chat-session tier is a separate, wider, explicitly-opted-into constant", () => {
+  assert.equal(ONE_SHOT_RUNTIME_TIMEOUT_MS, 120000);
+  assert.equal(CHAT_SESSION_RUNTIME_TIMEOUT_MS, 9 * 60 * 1000);
+  assert.ok(CHAT_SESSION_RUNTIME_TIMEOUT_MS > ONE_SHOT_RUNTIME_TIMEOUT_MS);
 });
 
 test("parseCustomCommandString splits on whitespace and keeps quoted segments intact", () => {
