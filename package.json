@@ -152,12 +152,12 @@
   ],
   "license": "MIT",
   "devDependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.199",
-    "@biomejs/biome": "^2.5.0",
+    "@anthropic-ai/claude-agent-sdk": "0.3.226",
+    "@biomejs/biome": "2.5.7",
     "knip": "6.32.2",
-    "lefthook": "^2.1.9",
-    "playwright": "^1.60.0",
-    "turbo": "^2.9.18"
+    "lefthook": "2.1.10",
+    "playwright": "1.62.1",
+    "turbo": "2.10.9"
   },
   "allowScripts": {
     "electron-winstaller@5.4.0": true,
