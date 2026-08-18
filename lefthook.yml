@@ -6,7 +6,7 @@
 # structural guards run every commit because they catch the class of bug that
 # ships green through the test runner — a broken CSS/JS template literal that is
 # never parsed in a browser by the suite. The full gate suite runs on push,
-# mirroring CI (see .github/workflows/ci.yml's `qlty` and `knip` jobs).
+# mirroring CI (see .github/workflows/ci-verify.yml's `qlty` and `knip` jobs).
 
 commit-msg:
   jobs:
