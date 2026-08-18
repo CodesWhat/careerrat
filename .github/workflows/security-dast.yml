@@ -22,6 +22,7 @@ jobs:
   zap-baseline:
     name: zap-baseline
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions: {}
     steps:
       - name: Harden the runner (audit all outbound calls)
@@ -32,5 +33,8 @@ jobs:
         uses: zaproxy/action-baseline@de8ad967d3548d44ef623df22cf95c3b0baf8b25 # v0.15.0
         with:
           target: "https://careerrat.com"
+          # zaproxy:stable resolved to a digest so the scan image can't change under us
+          docker_name: "ghcr.io/zaproxy/zaproxy@sha256:781a2bdaea47324e7bab583e2263f21d257b0aee61ed51521a5be45f5f5081ef"
+          cmd_options: "-T 10"
           fail_action: false
           allow_issue_writing: false
