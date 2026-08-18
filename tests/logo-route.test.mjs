@@ -19,6 +19,7 @@ import {
 } from "../src/cli/logo-route.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { stringifyYaml } from "../src/core/profile/yaml.mjs";
+import { demoLogoFilePath } from "../src/core/tracker/demo-logos.mjs";
 import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
 
 const cleanupRoots = [];
@@ -260,8 +261,54 @@ test("GET /api/logos/search: missing ?q= is a 400", async () => {
 });
 
 // ---------------------------------------------------------------------------
+// demoLogoFilePath — Object.prototype-member company names must never fall
+// through to the inherited prototype value. Regression coverage for the P0
+// crash: DEMO_LOGOS is a plain object literal, so `DEMO_LOGOS["constructor"]`
+// used to return Function's constructor (no `.src`) instead of undefined,
+// and the caller's basename(entry.src) threw ERR_INVALID_ARG_TYPE, killing
+// the whole tracker:dev process. See CRASH-evidence-constructor-logo*.log.
+// ---------------------------------------------------------------------------
+
+test("demoLogoFilePath: company names that shadow Object.prototype members resolve to null, not a prototype value", () => {
+  for (const name of ["constructor", "toString", "hasOwnProperty", "__proto__", "valueOf"]) {
+    assert.equal(demoLogoFilePath(name), null, `"${name}" must not resolve to a logo entry`);
+  }
+});
+
+test("demoLogoFilePath: a real seeded fixture still resolves (case/whitespace-insensitive)", () => {
+  assert.match(demoLogoFilePath("E Corp"), /e-corp\.png$/);
+  assert.match(demoLogoFilePath("  e corp  "), /e-corp\.png$/);
+});
+
+test("demoLogoFilePath: an unknown company name resolves to null", () => {
+  assert.equal(demoLogoFilePath("Definitely Not A Seeded Fixture"), null);
+});
+
+// ---------------------------------------------------------------------------
 // GET /api/logos/img
 // ---------------------------------------------------------------------------
+
+test("GET /api/logos/img: a company name shadowing Object.prototype (constructor, __proto__, hasOwnProperty) never crashes the server", async () => {
+  const repoRoot = tempRepo();
+  const server = await bootServer(repoRoot, {
+    fetchImpl: async () => new Response("not found", { status: 404 }),
+  });
+  try {
+    for (const name of ["Constructor", "__proto__", "hasOwnProperty"]) {
+      const res = await fetch(`${baseUrl(server)}/api/logos/img?name=${encodeURIComponent(name)}`);
+      // The demo-logo shortcut correctly finds nothing and falls through to
+      // the normal logo.dev name lookup, which the stub 404s — the exact
+      // response code isn't the point, only that the server answered at all
+      // instead of the process dying mid-request.
+      assert.equal(res.status, 404, `"${name}" must not crash or 500`);
+    }
+    // The server must still be alive and serving other requests afterward.
+    const health = await fetch(`${baseUrl(server)}/api/logos/img`);
+    assert.equal(health.status, 400);
+  } finally {
+    await closeServer(server);
+  }
+});
 
 test("GET /api/logos/img: missing ?domain= is a 400", async () => {
   const repoRoot = tempRepo();
