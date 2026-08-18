@@ -439,11 +439,7 @@ test("installed runtime failures distinguish nonzero exit, timeout, and cancella
 // wiring); it is never the shared default.
 test("runInstalledRuntime's default timeoutMs is the byte-identical one-shot 120s bound; the chat-session tier is a separate, wider, explicitly-opted-into constant", () => {
   assert.equal(ONE_SHOT_RUNTIME_TIMEOUT_MS, 120000);
-  assert.ok(
-    CHAT_SESSION_RUNTIME_TIMEOUT_MS >= 8 * 60 * 1000 &&
-      CHAT_SESSION_RUNTIME_TIMEOUT_MS <= 10 * 60 * 1000,
-    "chat-session timeout should sit in the 8-10 minute range this fix chose for live web research"
-  );
+  assert.equal(CHAT_SESSION_RUNTIME_TIMEOUT_MS, 9 * 60 * 1000);
   assert.ok(CHAT_SESSION_RUNTIME_TIMEOUT_MS > ONE_SHOT_RUNTIME_TIMEOUT_MS);
 });
 

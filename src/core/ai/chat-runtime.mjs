@@ -526,6 +526,31 @@ export function createChatRuntime({
     }
   }
 
+  // Drains session.pendingMessages (queued by postMessage's own "a turn is
+  // already in flight" branch below) onto the transcript, in arrival order,
+  // AFTER whatever this just-finished turn appended, then kicks exactly one
+  // follow-up runInstalledTurn call that replays the transcript including
+  // every drained message. One follow-up turn per drain batch, never one per
+  // queued message, so N messages typed during a single in-flight turn still
+  // cost exactly one extra installed-runtime call.
+  //
+  // Returns true when it kicked a follow-up turn. The caller must then emit
+  // the turn's own "result" event via recordAndBroadcast (not dispatchEvents)
+  // so classifyChatEvent's "any result means idle" rule (this file's header
+  // comment on dispatchEvents) never flips the session to idle mid-drain: a
+  // drain-follow-up turn is still a turn in flight, and session.state must
+  // stay "running" for the whole chain, per this fix's design note above
+  // runInstalledTurn.
+  function drainPendingInstalledTurn(session, route) {
+    if (!session.pendingMessages.length) return false;
+    const drained = session.pendingMessages.splice(0);
+    for (const content of drained) {
+      session.transcript.push({ role: "user", content });
+    }
+    session.pumpDone = runInstalledTurn(session, route);
+    return true;
+  }
+
   // Drives one turn of an "installed" chat session. Unlike the SDK path's
   // long-lived push-queue child process, an installed-runtime call is
   // one-shot (see installed-runtimes.mjs's runInstalledRuntime — one spawn,
@@ -543,6 +568,16 @@ export function createChatRuntime({
   // without ending the session); closeSession()'s abort of the session-level
   // controller is chained in below so it still tears down whichever turn
   // happens to be in flight.
+  //
+  // FIX (CodeRabbit Major on PR #92): postMessage() used to push straight
+  // onto session.transcript and kick a second runInstalledTurn even while
+  // session.state === "running" (a turn already in flight), so two overlapping
+  // calls both replaying the transcript and appending assistant replies out
+  // of order, corrupting conversation order (worse under the wider
+  // CHAT_SESSION_RUNTIME_TIMEOUT_MS this route now allows). postMessage now
+  // queues onto session.pendingMessages instead of racing a second turn;
+  // every exit path below (success, interrupted, error) drains that queue
+  // via drainPendingInstalledTurn before letting the session go idle.
   async function runInstalledTurn(session, route) {
     const turnController = new AbortController();
     session.turnAbortController = turnController;
@@ -613,8 +648,12 @@ export function createChatRuntime({
           type: "assistant",
           data: { message: { content: [{ type: "text", text: result.text }] } },
         },
-        { type: "result", data: { ok: true } },
       ]);
+      if (drainPendingInstalledTurn(session, route)) {
+        recordAndBroadcast(session, { type: "result", data: { ok: true } });
+      } else {
+        dispatchEvents(session, [{ type: "result", data: { ok: true } }]);
+      }
     } catch (err) {
       if (session.abortController.signal.aborted) {
         closeSessionInternal(session, "aborted");
@@ -623,14 +662,23 @@ export function createChatRuntime({
       if (turnController.signal.aborted) {
         // interrupt() cancelled just this turn — classifyChatEvent's own
         // "any result -> idle" rule (see this file's header) returns the
-        // session to idle, same as the SDK path after query.interrupt().
-        dispatchEvents(session, [{ type: "result", data: { ok: false, aborted: true } }]);
+        // session to idle, same as the SDK path after query.interrupt(),
+        // UNLESS messages queued up while this turn was in flight, in which
+        // case those must not be lost: drain them into one follow-up turn
+        // instead of dropping to idle.
+        if (drainPendingInstalledTurn(session, route)) {
+          recordAndBroadcast(session, { type: "result", data: { ok: false, aborted: true } });
+        } else {
+          dispatchEvents(session, [{ type: "result", data: { ok: false, aborted: true } }]);
+        }
         return;
       }
-      dispatchEvents(session, [
-        { type: "error", data: { message: err.message } },
-        { type: "result", data: { ok: false, error: err.message } },
-      ]);
+      dispatchEvents(session, [{ type: "error", data: { message: err.message } }]);
+      if (drainPendingInstalledTurn(session, route)) {
+        recordAndBroadcast(session, { type: "result", data: { ok: false, error: err.message } });
+      } else {
+        dispatchEvents(session, [{ type: "result", data: { ok: false, error: err.message } }]);
+      }
     } finally {
       session.abortController.signal.removeEventListener("abort", onSessionAbort);
       if (session.turnAbortController === turnController) session.turnAbortController = null;
@@ -856,6 +904,11 @@ export function createChatRuntime({
       pushQueue: null,
       systemPrompt,
       transcript: [],
+      // Messages submitted while a turn is already in flight (postMessage's
+      // "session.state === 'running'" branch below); never touched by the
+      // SDK (pushQueue) path. drainPendingInstalledTurn flushes this onto
+      // the transcript and kicks one follow-up turn each time a turn ends.
+      pendingMessages: [],
       turnAbortController: null,
       events: [],
       nextEventId: 1,
@@ -923,6 +976,27 @@ export function createChatRuntime({
 
     session.lastActivityAt = now();
     if (session.route.type === "installed") {
+      // For installed sessions session.state is "running" for exactly the
+      // span between a turn starting (startInstalledSession / the kick below)
+      // and its "result" event (classifyChatEvent's own "any result -> idle"
+      // rule, dispatchEvents's only trigger for this transition); nothing
+      // else moves it to/from "running". So session.state === "running" at
+      // this entry point reliably means "a runInstalledTurn call is in
+      // flight right now", checked BEFORE the running-transition block below
+      // (which is a no-op here since the state is already "running").
+      //
+      // A second concurrent runInstalledTurn call would replay the same
+      // transcript out from under the first and append its assistant reply
+      // out of order (the CodeRabbit Major finding on PR #92, worsened by
+      // this branch's own wider CHAT_SESSION_RUNTIME_TIMEOUT_MS widening the
+      // overlap window), so queue instead of racing it. Whichever turn is
+      // in flight drains this queue (drainPendingInstalledTurn) the moment it
+      // finishes, appending every queued message after that turn's own
+      // reply, then kicks exactly one follow-up turn that replays them.
+      if (session.state === "running") {
+        session.pendingMessages.push(trimmed);
+        return { accepted: true };
+      }
       // No push-queue/child process to feed (see runInstalledTurn's own
       // header comment) — the transcript entry itself IS this turn's input;
       // runInstalledTurn replays it (plus everything before it) as the next

@@ -1439,6 +1439,194 @@ test("createChatRuntime.interrupt (installed route): aborts only the in-flight t
 });
 
 // ---------------------------------------------------------------------------
+// CodeRabbit Major, PR #92: postMessage used to push straight onto
+// session.transcript and kick a second concurrent runInstalledTurn even
+// while a first installed turn was still mid-flight, so two overlapping
+// calls could both replay the transcript and append assistant replies out
+// of order. Fix: queue onto session.pendingMessages while a turn is in
+// flight, and drain that queue into exactly one follow-up turn (never one
+// turn per queued message) once the in-flight turn finishes.
+// ---------------------------------------------------------------------------
+
+test("createChatRuntime.postMessage (installed route): a message submitted mid-turn is queued, not raced, one runtime call in flight at a time, transcript order preserved, and both messages get answered", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  try {
+    const env = {};
+    selectInstalledRuntime({ repoRoot, env });
+
+    const calls = [];
+    let active = 0;
+    let maxActive = 0;
+    let releaseFirstCall;
+    const firstCallGate = new Promise((resolve) => {
+      releaseFirstCall = resolve;
+    });
+
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => {
+        throw new Error("Agent SDK must not load for an installed route");
+      },
+      // Turn 1 blocks until the test releases it, turn 2 resolves immediately,
+      // exercising the exact overlap window the fix closes.
+      runInstalledRuntimeImpl: async (args) => {
+        active++;
+        maxActive = Math.max(maxActive, active);
+        calls.push(args);
+        const callIndex = calls.length;
+        if (callIndex === 1) {
+          await firstCallGate;
+        }
+        active--;
+        return { text: `Reply ${callIndex}`, usage: null, model: null };
+      },
+    });
+    try {
+      const { chatId, state } = await chatRuntime.startSession({ skill: "ingest-profile" });
+      assert.equal(state, "running");
+
+      const events = subscribeCollect(chatRuntime, chatId);
+      const idleCount = () =>
+        events.filter((e) => e.type === "chat_state" && e.data.state === "idle").length;
+
+      await waitForPredicate(() => calls.length >= 1);
+      assert.equal(chatRuntime.getSession(chatId).state, "running");
+
+      // The regression: submit a second message while turn 1 is still mid-flight.
+      const postResult = chatRuntime.postMessage(chatId, "message 2");
+      assert.deepEqual(postResult, { accepted: true });
+
+      // Queued, not raced: still only one runtime call, session still "running"
+      // (no idle flicker for a queued drain), and turn 1's own prompt was
+      // already built before the queued message arrived so it can't leak in.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.equal(calls.length, 1);
+      assert.equal(maxActive, 1);
+      assert.equal(chatRuntime.getSession(chatId).state, "running");
+      assert.doesNotMatch(calls[0].prompt, /message 2/);
+
+      releaseFirstCall();
+      await waitForPredicate(() => calls.length >= 2);
+      // The second call only ever started after the first one completed.
+      assert.equal(maxActive, 1);
+
+      await waitForPredicate(() => idleCount() >= 1);
+      assert.equal(chatRuntime.getSession(chatId).state, "idle");
+
+      // Exactly one follow-up turn drained the queue (not one per message):
+      // turn 2's prompt carries assistant 1's reply BEFORE the queued user
+      // message, proving transcript order (user1, assistant1, user2) was
+      // preserved through the drain, and assistant2 lands as its reply.
+      assert.match(calls[1].prompt, /ASSISTANT:\nReply 1[\s\S]*USER:\nmessage 2/);
+
+      const assistantEvents = events.filter((e) => e.type === "assistant");
+      assert.equal(assistantEvents.length, 2);
+      assert.equal(assistantEvents[0].data.message.content[0].text, "Reply 1");
+      assert.equal(assistantEvents[1].data.message.content[0].text, "Reply 2");
+
+      // No idle flicker in between: the session stayed "running" across the
+      // whole drain-and-follow-up chain, so there's exactly one idle
+      // transition total (after the follow-up turn's own result), not two.
+      assert.equal(idleCount(), 1);
+    } finally {
+      chatRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime.interrupt (installed route): a message queued during the aborted turn is not lost, it drains into one follow-up turn instead of being dropped", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  try {
+    const env = {};
+    selectInstalledRuntime({ repoRoot, env });
+
+    const calls = [];
+    let releaseSecondCall;
+    const secondCallGate = new Promise((resolve) => {
+      releaseSecondCall = resolve;
+    });
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => {
+        throw new Error("Agent SDK must not load for an installed route");
+      },
+      // Turn 1 hangs until its signal aborts, then rejects the way the real
+      // runInstalledRuntime does on cancellation. Turn 2 (the drain
+      // follow-up) is gated on the test's own release so the assertions
+      // below can observe the moment right after the drain kicks it;
+      // without this gate turn 2 would resolve before those assertions run.
+      runInstalledRuntimeImpl: async (args) => {
+        calls.push(args);
+        const callIndex = calls.length;
+        if (callIndex === 1) {
+          await new Promise((_resolve, reject) => {
+            args.signal.addEventListener("abort", () => {
+              const err = new Error("Installed AI request was cancelled.");
+              err.code = "RUNTIME_CANCELLED";
+              reject(err);
+            });
+          });
+        } else if (callIndex === 2) {
+          await secondCallGate;
+        }
+        return { text: `Reply ${callIndex}`, usage: null, model: null };
+      },
+    });
+    try {
+      const { chatId, state } = await chatRuntime.startSession({ skill: "ingest-profile" });
+      assert.equal(state, "running");
+
+      const events = subscribeCollect(chatRuntime, chatId);
+      const idleCount = () =>
+        events.filter((e) => e.type === "chat_state" && e.data.state === "idle").length;
+
+      await waitForPredicate(() => calls.length >= 1);
+
+      // Queue a message while turn 1 is still mid-flight, then interrupt it.
+      chatRuntime.postMessage(chatId, "queued while aborting");
+      assert.equal(calls.length, 1);
+
+      const interruptResult = await chatRuntime.interrupt(chatId);
+      assert.equal(interruptResult.chatId, chatId);
+
+      // A queued message must survive the interrupt: it drains into a
+      // follow-up turn rather than being dropped. The drain-triggered
+      // follow-up (turn 2) is gated above, so at this point it has started
+      // but not finished, the session must still read "running", with no
+      // "idle" flicker in between (idle would mean the queued message was
+      // stranded until some later postMessage call happened to notice
+      // pendingMessages was non-empty, which the old code never checked).
+      await waitForPredicate(() => calls.length >= 2);
+      assert.equal(chatRuntime.getSession(chatId).state, "running");
+      assert.equal(idleCount(), 0);
+      assert.match(calls[1].prompt, /queued while aborting/);
+
+      releaseSecondCall();
+      await waitForPredicate(() => idleCount() >= 1);
+      assert.equal(chatRuntime.getSession(chatId).state, "idle");
+      // Exactly one idle transition total: the aborted turn 1 never
+      // flickered idle on its own, only the drain follow-up's own result did.
+      assert.equal(idleCount(), 1);
+
+      const assistantEvents = events.filter((e) => e.type === "assistant");
+      assert.equal(assistantEvents.length, 1);
+      assert.equal(assistantEvents[0].data.message.content[0].text, "Reply 2");
+
+      const closeResult = chatRuntime.closeSession(chatId, "closed");
+      assert.equal(closeResult.state, "closed");
+    } finally {
+      chatRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Real end-to-end integration — the one test in this file that talks to a
 // live model, gated behind ANTHROPIC_API_KEY. Mirrors
 // tests/skill-runtime.test.mjs's own gated INTEGRATION test: never runs in
