@@ -3098,7 +3098,7 @@ export async function executeWorkspaceIntent({
             companyDiscoveryReviewSentence(proposalCount) || "All company proposals are reviewed.",
           artifacts: [reopenArtifact],
           metadata: {
-            state: "needs-review",
+            state: proposalCount ? "needs-review" : "complete",
             proposalCount,
             rejectedCount: reopenArtifact.rejected.length,
           },
