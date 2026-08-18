@@ -5,20 +5,23 @@
 # dismiss stale reviews on push, code-owner review, last-push approval, block force-push,
 # block deletion, no bypass for anyone.
 #
-# Deliberately OMITS two of drydock's rules until careerrat has the matching infra:
-#   - required_status_checks (drydock gates on Build/Lint/Test/E2E) — careerrat has no
-#     PR CI yet and the suite is red; requiring checks that never pass blocks all merges.
-#   - code_scanning (CodeQL) — not enabled on careerrat yet.
-# Add both back here once a green PR CI workflow + CodeQL are in place.
+# required_status_checks lists the eight contexts promoted in #96. Contexts are JOB
+# names, not workflow file names, so renaming a workflow file does not change them.
+# Two PR checks are deliberately NOT required because they fail for reasons unrelated
+# to the code: `qlty check` (Qlty Cloud minutes, distinct from the in-repo `qlty` job)
+# and `Vercel` (deploy quota).
+#
+# Still omits drydock's code_scanning rule: CodeQL runs as the `analyze
+# (javascript-typescript)` required check instead of through the code_scanning rule.
 #
 # Run:  bash scripts/protect-main.sh
 set -euo pipefail
 REPO="CodesWhat/careerrat"
 
 if gh api "repos/$REPO/rulesets" --jq '.[].name' 2>/dev/null | grep -qx "Main branch protection"; then
-  echo "✓ a 'Main branch protection' ruleset already exists on $REPO — nothing to do."
-  echo "  (edit it in the UI or delete + re-run if you want to change it.)"
-  exit 0
+	echo "✓ a 'Main branch protection' ruleset already exists on $REPO — nothing to do."
+	echo "  (edit it in the UI or delete + re-run if you want to change it.)"
+	exit 0
 fi
 
 gh api -X POST "repos/$REPO/rulesets" --input - <<'JSON'
@@ -37,6 +40,20 @@ gh api -X POST "repos/$REPO/rulesets" --input - <<'JSON'
         "require_last_push_approval": true,
         "required_review_thread_resolution": false,
         "allowed_merge_methods": ["merge", "squash", "rebase"]
+    } },
+    { "type": "required_status_checks", "parameters": {
+        "do_not_enforce_on_create": false,
+        "strict_required_status_checks_policy": false,
+        "required_status_checks": [
+          { "context": "structure-guards" },
+          { "context": "gitleaks" },
+          { "context": "zizmor" },
+          { "context": "actionlint" },
+          { "context": "analyze (javascript-typescript)" },
+          { "context": "dependency-review" },
+          { "context": "qlty" },
+          { "context": "knip" }
+        ]
     } }
   ],
   "bypass_actors": []

@@ -296,6 +296,58 @@ nurse, a driver, and an engineer each bring their own config.
   still needed to unlock gating and applying (with per-item hints), and gets out of the way
   once setup is complete.
 
+## Release status (v0.9.0, August 18, 2026)
+
+**v0.9.0 is cut.** `main` carries version 0.9.0, tag `v0.9.0` is pushed, the GitHub
+Release is published, and `CHANGELOG.md` at the repo root is the per-release record
+from here on. It covers PRs #52 through #96. `publish.yml` fires on a published
+GitHub Release, not on a tag push, so tagging alone is always safe.
+
+### Picking this up cold
+
+Open work, none of it blocking the release:
+
+- **Renovate #75 and #76 are unlanded.** Both were rebasing when v0.9.0 was cut.
+  #75 conflicted on `package-lock.json` once #74 merged, which Renovate resolves on
+  its own. #76 is the one that needs a human read: its Vercel build genuinely failed
+  (not the deploy-quota message the other PRs show), and it is the only Renovate PR
+  touching website dependencies. Its `dependency-review` run also failed on a network
+  `fetch failed`, which is an infrastructure blip and just needs a re-run.
+- **Two PRs merged without a CodeRabbit pass.** #77 (an `actions/setup-node` bump)
+  landed on CI gates alone, and #76 never got one either. Cause: the CLI lane's
+  included reviews ran out mid-run. Re-review if you want the every-change-reviewed
+  rule held to the letter.
+- **QA re-runs are owed** for `research-company`, `research-comp`, and
+  `research-boards`, plus the `discover-companies` fourth leg, now that the fixes
+  they were blocked on have shipped (#84, #92, #93). G-09 remains a product decision
+  for Scott, not an engineering task.
+- **Security hardening still staged:** harden-runner is in `audit` mode across
+  workflows and `block` is the target once observed endpoints are allowlisted.
+  Signed tags plus npm attestations and SBOM are tracked in #73.
+
+### Review lanes, and which to use
+
+CodeRabbit meters the PR lane and the CLI lane separately, and knowing this is the
+difference between a fifteen-minute cycle and a four-hour one. Exact quotas depend on
+the plan, so treat the numbers below as what this account did on 2026-08-18 rather
+than documented limits; the rate-limit message always states when the next one frees up.
+
+- **PR lane** (`@coderabbitai full review` as a PR comment): this is what posts inline
+  threads on the PR. In practice it allowed about one review per hour, so a queue of
+  PRs serializes badly.
+- **CLI lane** (`coderabbit review --committed --base main` from a worktree on the
+  branch): a separate budget that allowed 3 reviews before rate-limiting, each
+  finishing in a couple of minutes. Use it for anything mechanical. It leaves no PR
+  comment, so note the outcome yourself if the PR needs a record.
+
+### Gating posture
+
+`main`'s ruleset now requires eight status contexts, promoted from `structure-guards`
+alone in #96: `structure-guards`, `gitleaks`, `zizmor`, `actionlint`,
+`analyze (javascript-typescript)`, `dependency-review`, `qlty`, and `knip`. Two
+failures are expected and never gate: `qlty check` (Qlty Cloud minutes, distinct from
+the in-repo `qlty` job) and `Vercel` (deploy quota). Any other red is real.
+
 ## In progress / up next
 
 The web app is the daily development surface. The conversation-first product and packaged
