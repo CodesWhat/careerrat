@@ -37,8 +37,46 @@ test("root layout suppresses the intentional early html class hydration delta", 
 
   assert.match(layout, /documentElement;?[\s\S]*?\.classList\.add\('js'\)/);
   assert.match(layout, /<html[\s\S]*suppressHydrationWarning/);
-  assert.match(layout, /process\.env\.VERCEL === "1"/);
-  assert.match(layout, /enableVercelAnalytics \? <Analytics \/> : null/);
+});
+
+// House PostHog standard (mirrors CodesWhat/codeswhat.com's own
+// frontend/test/posthog-source.test.mjs template): the site runs the shared
+// cookieless PostHog proxy instead of Vercel Analytics, wired through
+// instrumentation-client.ts rather than a layout-mounted component.
+test("website analytics uses the cookieless house PostHog posture, not Vercel Analytics", async () => {
+  const layout = await readFile("apps/website/src/app/layout.tsx", "utf8");
+  const packageJson = JSON.parse(await readFile("apps/website/package.json", "utf8"));
+  const instrumentation = await readFile("apps/website/instrumentation-client.ts", "utf8");
+
+  assert.doesNotMatch(layout, /@vercel\/(analytics|speed-insights)/);
+  assert.doesNotMatch(layout, /<Analytics\s*\/>/);
+  assert.equal(packageJson.dependencies["@vercel/analytics"], undefined);
+  assert.equal(packageJson.dependencies["@vercel/speed-insights"], undefined);
+  assert.equal(packageJson.dependencies["posthog-js"], "1.417.0");
+
+  assert.match(instrumentation, /posthog\.init\(/);
+  assert.doesNotMatch(layout, /posthog\.init\(/);
+  for (const option of [
+    "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+    "NEXT_PUBLIC_POSTHOG_HOST",
+    "NEXT_PUBLIC_POSTHOG_UI_HOST",
+    "capture_pageview: false",
+    "autocapture: false",
+    "disable_session_recording: true",
+    'persistence: "memory"',
+    'cookieless_mode: "always"',
+    "disable_persistence: true",
+    "capture_performance:",
+  ]) {
+    assert.match(instrumentation, new RegExp(option.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  assert.match(instrumentation, /before_send:/);
+
+  const privacy = await readFile("apps/website/src/lib/posthog-privacy.ts", "utf8");
+  assert.match(privacy, /POSTHOG_API_HOST = "https:\/\/e\.codeswhat\.com"/);
+  assert.match(privacy, /schema_version: 1/);
+  assert.match(privacy, /site: SITE/);
+  assert.match(privacy, /surface: surfaceForPath\(path\)/);
 });
 
 test("website metadata is CareerRat-branded", async () => {

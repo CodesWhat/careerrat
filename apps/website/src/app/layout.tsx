@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
-import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 // Self-hosted variable fonts — no external font CDN at runtime.
@@ -81,8 +80,6 @@ export const viewport: Viewport = {
 const REVEAL_BOOTSTRAP =
   "(function(){var d=document,de=d.documentElement;de.classList.add('js');function revealAll(){var e=d.querySelectorAll('.reveal');for(var i=0;i<e.length;i++)e[i].classList.add('visible');}function failsafe(){if(!window.__careerratRevealArmed)revealAll();}function schedule(){setTimeout(failsafe,1200);}if(d.readyState==='complete'){schedule();}else{window.addEventListener('load',schedule);}})();";
 
-const enableVercelAnalytics = process.env.VERCEL === "1";
-
 export default function RootLayout({
   children,
 }: {
@@ -105,7 +102,6 @@ export default function RootLayout({
           }}
         />
         {children}
-        {enableVercelAnalytics ? <Analytics /> : null}
       </body>
     </html>
   );
