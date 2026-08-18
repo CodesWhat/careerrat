@@ -732,6 +732,51 @@ process.stdin.on("end", () => {
   }
 });
 
+test("runInstalledRuntime (claude + skill, Glob/Grep without Read): still skips isolation — any repo-inspecting tool needs cwd=repoRoot", async () => {
+  // Read is not the only tool that resolves against the repository: Glob and
+  // Grep inspect files relative to cwd too. A profile granting either without
+  // Read must keep --safe-mode + cwd=repoRoot exactly like the Read case.
+  const repoRoot = tempRepoWithOneSkill("evaluate-job", "Trigger word PROBE.\n");
+  const executablePath = join(repoRoot, "fake-claude-grep");
+  writeFileSync(
+    executablePath,
+    `#!/usr/bin/env node
+process.stdin.resume();
+process.stdin.on("end", () => {
+  process.stdout.write(JSON.stringify({
+    type: "result",
+    subtype: "success",
+    result: "ignored",
+    structured_output: {
+      cwd: process.cwd(),
+      usedSafeMode: process.argv.includes("--safe-mode"),
+      usedSettingSources: process.argv.includes("--setting-sources"),
+    },
+  }));
+});
+`,
+    "utf8"
+  );
+  chmodSync(executablePath, 0o755);
+  try {
+    const result = await runInstalledRuntime({
+      runtime: { id: "claude", path: executablePath },
+      prompt: "run evaluate-job",
+      skill: "evaluate-job",
+      repoRoot,
+      cwd: repoRoot,
+      tools: ["Glob", "Grep", "Skill"],
+      timeoutMs: 5000,
+    });
+    const data = JSON.parse(result.text);
+    assert.equal(realpathSync(data.cwd), realpathSync(repoRoot));
+    assert.equal(data.usedSafeMode, true);
+    assert.equal(data.usedSettingSources, false);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("runInstalledRuntime (claude, no skill): unchanged --safe-mode behavior at the caller's own cwd", async () => {
   const root = tempRoot();
   const executablePath = join(root, "fake-claude-plain");

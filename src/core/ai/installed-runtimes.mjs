@@ -752,7 +752,8 @@ export async function runInstalledRuntime({
     // WebFetch/Skill, never Read — see runtime-tools.mjs's own "structural
     // prompt-injection boundary" comment) has no such dependency, so it's the
     // only shape this isolation is safe for.
-    if (runtime.id === "claude" && skill && !tools.includes("Read")) {
+    const requiresRepoCwd = ["Read", "Glob", "Grep"].some((tool) => tools.includes(tool));
+    if (runtime.id === "claude" && skill && !requiresRepoCwd) {
       skillCwd = materializeIsolatedSkillCwd({ repoRoot, skill });
     }
     const invocation = buildInstalledRuntimeInvocation({
