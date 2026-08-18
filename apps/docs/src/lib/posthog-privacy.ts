@@ -78,7 +78,8 @@ function getRawPath(properties: Record<string, unknown>): unknown {
   if (typeof properties.$pathname === "string") return properties.$pathname;
   if (typeof properties.$current_url !== "string") return undefined;
   try {
-    return new URL(properties.$current_url).pathname;
+    const url = new URL(properties.$current_url);
+    return url.origin === PRODUCTION_ORIGIN ? url.pathname : undefined;
   } catch {
     return undefined;
   }
