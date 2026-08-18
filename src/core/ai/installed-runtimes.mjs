@@ -3,7 +3,19 @@
 // spawn the resolved executable directly with fixed argv and shell:false.
 
 import { spawn, spawnSync } from "node:child_process";
-import { accessSync, chmodSync, constants, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  accessSync,
+  chmodSync,
+  constants,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
@@ -245,6 +257,12 @@ export function buildInstalledRuntimeInvocation({
   schemaPath,
   model,
   tools = [],
+  // Set by runInstalledRuntime only once it has actually materialized an
+  // isolated cwd for this skill (see materializeIsolatedSkillCwd below) —
+  // never trust a bare skill *name* here, since --setting-sources project
+  // is only safe when the spawn's cwd is guaranteed to contain nothing but
+  // that one skill.
+  skill,
 } = {}) {
   const common = {
     command: executablePath,
@@ -259,8 +277,21 @@ export function buildInstalledRuntimeInvocation({
       // CLAUDE.md here is both unnecessary and extremely expensive: in a real
       // CareerRat checkout it added ~136k input tokens and pushed a PDF extract
       // beyond the two-minute runtime limit. Safe mode keeps subscription auth
-      // and built-in tools available while isolating this bounded app call.
-      "--safe-mode",
+      // and built-in tools available while isolating this bounded app call —
+      // EXCEPT `--safe-mode`'s own help text is explicit that it disables
+      // "skills" outright, which leaves the Skill tool's registry empty even
+      // for a project-local `.claude/skills/<name>` this call actually wants
+      // (verified against the real installed CLI: a --safe-mode run's Skill
+      // tool lists only Anthropic's fixed built-in skills, never a project
+      // skill). When the caller has already isolated `cwd` to a temp dir
+      // containing nothing but that one skill (runInstalledRuntime's
+      // materializeIsolatedSkillCwd), `--setting-sources project` gets the
+      // same cost/privacy posture --safe-mode promises — confirmed empirically
+      // at ~5k cache-creation input tokens against that isolated cwd, not the
+      // ~136k a real project cwd produces — while the Skill tool actually
+      // resolves the skill. Every other call (no skill / isolation unavailable)
+      // keeps exactly today's --safe-mode behavior.
+      ...(skill ? ["--setting-sources", "project"] : ["--safe-mode"]),
       "--output-format",
       "json",
       "--permission-mode",
@@ -361,6 +392,65 @@ export function sanitizeCodexOutputSchema(value) {
     sanitized.additionalProperties = false;
   }
   return sanitized;
+}
+
+// ---------------------------------------------------------------------------
+// Isolated skill cwd — the fix for the installed "claude" runtime's Skill
+// tool coming up empty under --safe-mode (see buildInstalledRuntimeInvocation's
+// comment above). Builds an app-owned, ephemeral cwd containing nothing but
+// `.claude/skills/<skill>/`, symlinked to this repo's own `.agents/skills/<skill>`
+// (the same source of truth scripts/install-skills.mjs shims into `.claude/skills`
+// for a real checkout) — falling back to a copied tree the same way that
+// script does when symlinks aren't available (e.g. Windows without developer
+// mode). Verified empirically against the real installed CLI: a symlinked
+// skill directory's contents resolve without the CLI walking up to the
+// symlink target's real project root — spawning `claude -p --setting-sources
+// project` from this cwd exposes exactly that one skill (plus Anthropic's
+// fixed built-in skills) at the same ~5k-cache-creation-token cost
+// --safe-mode's own baseline carries, never the real repo's other skills,
+// CLAUDE.md, hooks, or MCP config. Never throws — returns null so callers
+// fall back to plain --safe-mode (today's behavior) if the skill's SKILL.md
+// can't be found or the temp dir can't be created.
+// ---------------------------------------------------------------------------
+
+function copySkillTree(src, dest) {
+  mkdirSync(dest, { recursive: true });
+  for (const entry of readdirSync(src, { withFileTypes: true })) {
+    const from = join(src, entry.name);
+    const to = join(dest, entry.name);
+    if (entry.isDirectory()) copySkillTree(from, to);
+    else if (entry.isFile()) copyFileSync(from, to);
+  }
+}
+
+export function materializeIsolatedSkillCwd({ repoRoot, skill } = {}) {
+  if (!repoRoot || !skill) return null;
+  const sourceDir = join(repoRoot, ".agents", "skills", skill);
+  if (!existsSync(join(sourceDir, "SKILL.md"))) return null;
+
+  let tempDir;
+  try {
+    tempDir = mkdtempSync(join(tmpdir(), "careerrat-skill-cwd-"));
+    chmodSync(tempDir, 0o700);
+    const skillsDir = join(tempDir, ".claude", "skills");
+    mkdirSync(skillsDir, { recursive: true });
+    const dest = join(skillsDir, skill);
+    try {
+      symlinkSync(sourceDir, dest, "dir");
+    } catch {
+      copySkillTree(sourceDir, dest);
+    }
+    return tempDir;
+  } catch {
+    if (tempDir) {
+      try {
+        rmSync(tempDir, { recursive: true, force: true });
+      } catch {
+        // best-effort cleanup only
+      }
+    }
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -526,6 +616,24 @@ export function openInstalledRuntimeTerminal(
 const MAX_RUNTIME_OUTPUT_BYTES = 10 * 1024 * 1024;
 const ANSI_COLOR_SEQUENCE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 
+// runInstalledRuntime's `timeoutMs` has two tiers, both exported so callers
+// pick the right one instead of re-deriving a magic number:
+//   - ONE_SHOT_RUNTIME_TIMEOUT_MS (the default below): sized for bounded,
+//     single-turn calls with no live web research, e.g. evaluate-job,
+//     tailor-application, resume-extract, and every other call-ai.mjs /
+//     skill-runtime.mjs route. 120s comfortably covers one model completion.
+//   - CHAT_SESSION_RUNTIME_TIMEOUT_MS: opted into per-call by
+//     chat-runtime.mjs's runInstalledTurn for interactive chat-session turns
+//     over the Read-less CHAT_RUNTIME_TOOLS profile (research-company,
+//     research-comp, company-health, ...). Those turns do live WebSearch/
+//     WebFetch research and, per wave-4 packaged QA, reliably run past 120s
+//     (two consecutive SSE-confirmed "Installed AI request timed out."
+//     failures on research-company and research-comp). Raising the shared
+//     default would have papered over that instead of fixing it, so this is
+//     a second, wider tier a caller must opt into instead.
+export const ONE_SHOT_RUNTIME_TIMEOUT_MS = 120000;
+export const CHAT_SESSION_RUNTIME_TIMEOUT_MS = 9 * 60 * 1000;
+
 function safeRuntimeDiagnostic(value) {
   return String(value || "")
     .replace(ANSI_COLOR_SEQUENCE, "")
@@ -619,9 +727,19 @@ export async function runInstalledRuntime({
   cwd,
   env = process.env,
   signal,
-  timeoutMs = 120000,
+  timeoutMs = ONE_SHOT_RUNTIME_TIMEOUT_MS,
   spawnImpl = spawn,
   onEvent,
+  // Skill this call is running (a directory name under `<repoRoot>/.agents/skills`)
+  // and the repo root to resolve it against. Both optional — omit either and
+  // this behaves exactly as before (--safe-mode, spawned at `cwd`). When both
+  // are given and the skill's SKILL.md is found, the call spawns instead
+  // against materializeIsolatedSkillCwd()'s isolated cwd with
+  // `--setting-sources project`, so the Skill tool actually resolves this one
+  // skill (see buildInstalledRuntimeInvocation's comment for why --safe-mode
+  // alone can't do that).
+  skill = null,
+  repoRoot = null,
 } = {}) {
   if (!runtime?.id || !runtime?.path) {
     throw runtimeError("No installed AI runtime is selected.", "RUNTIME_NOT_SELECTED");
@@ -631,6 +749,7 @@ export async function runInstalledRuntime({
   }
 
   let tempDir = null;
+  let skillCwd = null;
   try {
     let schemaPath = null;
     if (runtime.id === "codex" && outputSchema) {
@@ -641,6 +760,20 @@ export async function runInstalledRuntime({
         mode: 0o600,
       });
     }
+    // Only isolate cwd for tool profiles that have no Read/Glob/Grep. The
+    // one-shot runtime's app-safe profile (evaluate-job, tailor-application,
+    // resume-extract, ...) grants Read and its own SKILL.md files instruct
+    // relative-path workspace reads ("Open workspace/tracker.json", "Read
+    // candidate/application-limits.yml") that only resolve against the real
+    // repoRoot — isolating cwd there would silently break every one of those
+    // reads. The chat runtime's CHAT_RUNTIME_TOOLS profile (WebSearch/
+    // WebFetch/Skill, never Read — see runtime-tools.mjs's own "structural
+    // prompt-injection boundary" comment) has no such dependency, so it's the
+    // only shape this isolation is safe for.
+    const requiresRepoCwd = ["Read", "Glob", "Grep"].some((tool) => tools.includes(tool));
+    if (runtime.id === "claude" && skill && !requiresRepoCwd) {
+      skillCwd = materializeIsolatedSkillCwd({ repoRoot, skill });
+    }
     const invocation = buildInstalledRuntimeInvocation({
       runtimeId: runtime.id,
       executablePath: runtime.path,
@@ -648,6 +781,11 @@ export async function runInstalledRuntime({
       schemaPath,
       model,
       tools,
+      // Only tell the arg-builder a skill is "ready" once isolation actually
+      // succeeded — never claim --setting-sources project against a plain
+      // repoRoot cwd, which would reintroduce the ~136k-token blowup
+      // --safe-mode exists to prevent.
+      skill: skillCwd ? skill : undefined,
     });
 
     const result = await new Promise((resolve, reject) => {
@@ -655,7 +793,7 @@ export async function runInstalledRuntime({
       try {
         child = spawnImpl(invocation.command, invocation.args, {
           ...invocation.options,
-          cwd,
+          cwd: skillCwd || cwd,
           env,
           detached: process.platform !== "win32",
           stdio: ["pipe", "pipe", "pipe"],
@@ -769,5 +907,6 @@ export async function runInstalledRuntime({
     return { ...result, runtimeId: runtime.id };
   } finally {
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+    if (skillCwd) rmSync(skillCwd, { recursive: true, force: true });
   }
 }

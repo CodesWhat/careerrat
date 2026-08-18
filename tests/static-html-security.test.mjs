@@ -36,6 +36,36 @@ test("the shared policy exposes the complete defense-in-depth header set", () =>
   assert.equal(securityHeaders()["X-Frame-Options"], "DENY");
 });
 
+test("connect-src stays 'self' by default and only widens when a caller opts in", () => {
+  const defaultCsp = buildContentSecurityPolicy();
+  assert.match(defaultCsp, /connect-src 'self';/);
+  assert.doesNotMatch(defaultCsp, /e\.codeswhat\.com/);
+
+  const optedInCsp = buildContentSecurityPolicy({
+    extraConnectSrc: ["https://e.codeswhat.com"],
+  });
+  assert.match(optedInCsp, /connect-src 'self' https:\/\/e\.codeswhat\.com;/);
+});
+
+test("only the public website/docs builds opt into the PostHog ingest proxy", () => {
+  const websiteBuild = JSON.parse(
+    readFileSync(new URL("../apps/website/package.json", import.meta.url), "utf8")
+  ).scripts.build;
+  const docsBuild = JSON.parse(
+    readFileSync(new URL("../apps/docs/package.json", import.meta.url), "utf8")
+  ).scripts.build;
+  assert.match(websiteBuild, /--allow-posthog-proxy/);
+  assert.match(docsBuild, /--allow-posthog-proxy/);
+
+  // The local-first dashboard (apps/web's demo build and the live local dev
+  // server) must never gain a network egress point to an external analytics
+  // host — connect-src stays 'self' there.
+  const buildDemo = readFileSync(new URL("../scripts/build-demo.mjs", import.meta.url), "utf8");
+  const trackerDev = readFileSync(new URL("../src/cli/tracker-dev.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(buildDemo, /--allow-posthog-proxy|extraConnectSrc/);
+  assert.doesNotMatch(trackerDev, /extraConnectSrc|e\.codeswhat\.com/);
+});
+
 test("Vite theme bootstrap is external and Vercel/static-demo configs enforce headers", () => {
   const appIndex = readFileSync(new URL("../apps/web/index.html", import.meta.url), "utf8");
   assert.doesNotMatch(appIndex, /<script(?![^>]*\bsrc=)[^>]*>/i);

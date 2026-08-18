@@ -807,6 +807,11 @@ test("runSkillStream: a selected installed CLI bypasses the Agent SDK and stream
       undefined,
       "an Anthropic-only fast-model override must never be passed to Codex"
     );
+    // Threaded so installed-runtimes.mjs can materialize an isolated skill
+    // cwd for the "claude" runtimeId (see tests/installed-runtime.test.mjs) —
+    // harmless/unused for every other installed runtime, codex included.
+    assert.equal(calls[0].skill, "resume-extract");
+    assert.equal(calls[0].repoRoot, repoRoot);
     assert.deepEqual(calls[0].tools, ["Read"]);
     assert.deepEqual(calls[0].outputSchema, {
       type: "object",

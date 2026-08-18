@@ -3,6 +3,13 @@ import { createHash } from "node:crypto";
 export const STATIC_EDGE_CONTENT_SECURITY_POLICY =
   "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'";
 
+// The shared house PostHog ingest proxy (cookieless, memory-persisted analytics
+// for the public website/docs surface — see apps/website/src/lib/posthog-privacy.ts
+// and apps/docs's copy of it). Only ever passed via extraConnectSrc below, and
+// only by the website/docs static builds: the local-first dashboard (apps/web,
+// tracker-dev) never opts in, so its connect-src stays 'self'.
+export const POSTHOG_INGEST_PROXY = "https://e.codeswhat.com";
+
 export function inlineScriptsFromHtml(html) {
   const scripts = [];
   const pattern = /<script\b(?![^>]*\bsrc\s*=)[^>]*>([\s\S]*?)<\/script>/gi;
@@ -18,6 +25,7 @@ export function buildContentSecurityPolicy({
   inlineScripts = [],
   allowTailwindCdn = false,
   includeFrameAncestors = true,
+  extraConnectSrc = [],
 } = {}) {
   const hashes = [...new Set(inlineScripts.map(scriptHash))];
   const scriptSources = [
@@ -26,6 +34,7 @@ export function buildContentSecurityPolicy({
     ...(allowTailwindCdn ? ["https://cdn.tailwindcss.com"] : []),
     "https://challenges.cloudflare.com",
   ];
+  const connectSources = ["'self'", ...new Set(extraConnectSrc)];
   return [
     "default-src 'self'",
     `script-src ${scriptSources.join(" ")}`,
@@ -33,7 +42,7 @@ export function buildContentSecurityPolicy({
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https:",
     "font-src 'self' data:",
-    "connect-src 'self'",
+    `connect-src ${connectSources.join(" ")}`,
     "frame-src 'self' blob: https://challenges.cloudflare.com",
     "worker-src 'self' blob:",
     "media-src 'self' blob: data:",
@@ -55,7 +64,7 @@ export function securityHeaders({ csp = buildContentSecurityPolicy() } = {}) {
   };
 }
 
-export function hardenStaticHtml(html, { allowTailwindCdn = false } = {}) {
+export function hardenStaticHtml(html, { allowTailwindCdn = false, extraConnectSrc = [] } = {}) {
   const source = String(html || "").replace(
     /<meta\s+http-equiv=["']Content-Security-Policy["'][^>]*>\s*/gi,
     ""
@@ -64,6 +73,7 @@ export function hardenStaticHtml(html, { allowTailwindCdn = false } = {}) {
     inlineScripts: inlineScriptsFromHtml(source),
     allowTailwindCdn,
     includeFrameAncestors: false,
+    extraConnectSrc,
   });
   const meta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
   if (/<head(?:\s[^>]*)?>/i.test(source)) {

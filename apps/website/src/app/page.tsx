@@ -1,5 +1,6 @@
 import DashboardPreview from "@/components/DashboardPreview";
 import SiteInteractions from "@/components/SiteInteractions";
+import { TrackedCtaLink } from "@/components/TrackedCtaLink";
 
 export default function Home() {
   return (
@@ -33,9 +34,9 @@ export default function Home() {
               </a>
             </li>
             <li>
-              <a href="#get" className="nav-cta">
+              <TrackedCtaLink href="#get" className="nav-cta" placement="header">
                 Get CareerRat →
-              </a>
+              </TrackedCtaLink>
             </li>
           </ul>
         </div>
@@ -58,7 +59,7 @@ export default function Home() {
               including Claude Code, Codex, Gemini CLI, and OpenCode.
             </p>
             <div className="hero-actions reveal reveal-delay-3">
-              <a href="#get" className="btn-primary">
+              <TrackedCtaLink href="#get" className="btn-primary" placement="hero">
                 Get started, free &amp; open source
                 <svg
                   width="16"
@@ -76,7 +77,7 @@ export default function Home() {
                     fill="none"
                   />
                 </svg>
-              </a>
+              </TrackedCtaLink>
               <a href="#how-it-works" className="btn-secondary">
                 See how it works
               </a>
@@ -485,9 +486,9 @@ export default function Home() {
                 <li>Calendar, network, library</li>
                   <li>Local data and artifacts you own</li>
               </ul>
-              <a href="#get" className="btn-primary pricing-cta">
+              <TrackedCtaLink href="#get" className="btn-primary pricing-cta" placement="pricing">
                 Get started free
-              </a>
+              </TrackedCtaLink>
             </div>
           </div>
         </div>
@@ -671,9 +672,9 @@ export default function Home() {
               and your data stays put.
             </p>
             <div className="final-actions">
-              <a href="#get" className="btn-primary">
+              <TrackedCtaLink href="#get" className="btn-primary" placement="final">
                 Get CareerRat
-              </a>
+              </TrackedCtaLink>
               <a href="#how-it-works" className="btn-secondary">
                 How it works
               </a>

@@ -58,6 +58,15 @@ vi.mock("react", async (importOriginal) => {
       // Not exercised on this render path (no mount effects run without a
       // real reconciler) — a no-op is correct here, not a stand-in gap.
     },
+    // DashboardPage's own useDeepIngestNudge call (SetupReadinessCard.jsx)
+    // reads its shared dismissal via useSyncExternalStore against a
+    // module-level store. This harness never simulates a real
+    // subscription-driven re-render (every hook here relies on the test
+    // calling DashboardPage() again after a state change), so a plain
+    // getSnapshot() read is enough.
+    useSyncExternalStore(_subscribe, getSnapshot) {
+      return getSnapshot();
+    },
   };
 });
 
