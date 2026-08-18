@@ -257,6 +257,91 @@ export function appSetFields({ repoRoot, env, id, patch } = {}) {
   });
 }
 
+// evaluation.gate -> the status a synced application should carry. Reused
+// verbatim from evaluate-job SKILL.md STEP 9 ("GATE: CUT -> status: cut",
+// "GATE: KEEP or REVIEW -> status: reviewed-hold") rather than inventing a
+// second mapping here.
+const EVALUATION_GATE_STATUS = Object.freeze({
+  keep: "reviewed-hold",
+  review: "reviewed-hold",
+  cut: "cut",
+});
+
+function evaluationGateNote(evaluation) {
+  const gate = String(evaluation?.gate || "review").toLowerCase();
+  const score = evaluation?.fitScore;
+  const parts = [`gate ${gate}`, score == null ? "" : `fit ${score}`].filter(Boolean);
+  return parts.join("; ").slice(0, 60);
+}
+
+// True when `status` is still at or before the gate: unset, the gate-pass
+// hold, or a previous cut. A fresh evaluation is always allowed to resync
+// gate/status/note here. Anything further along (applied, screen, interview,
+// offer, ...) was advanced by a real submission or the candidate's own hand;
+// a later re-evaluation (e.g. a captured JD deduping onto this row per
+// matchTrackerRecord) must never regress it back to reviewed-hold/cut.
+// classifyStage's own keyword rules put the literal status "cut" on the
+// withdrawn rung (order 91), so it needs its own check here rather than the
+// order cutoff alone.
+function isPreApplicationStatus(status) {
+  const value = String(status || "").toLowerCase();
+  if (!value || value === "cut") return true;
+  return classifyStage(value).order <= 0.5;
+}
+
+// appPersistEvaluation({id, evaluation, projection}) — the SOLE write path
+// for a packet-gate verdict landing on an application (see
+// src/core/packet/evaluate.mjs#evaluateAndPersistPacketGate). `projection`
+// carries the fit/comp fields packetEvaluationProjection() already derives
+// from `evaluation` (the nested typed verdict); this verb additionally
+// derives gate/status/note from evaluation.gate IN THE SAME transaction, so
+// the top-level fields can never diverge from the nested verdict the way two
+// separate writes could (the bug this verb fixes: a re-evaluation used to
+// patch `evaluation` only, leaving the old gate/status/note stamped on the
+// row from the FIRST evaluation). Scoped by isPreApplicationStatus() above:
+// an application already past the gate keeps its real pipeline status and
+// only picks up the refreshed evaluation/fit fields.
+export function appPersistEvaluation({ repoRoot, env, id, evaluation, projection } = {}) {
+  if (!evaluation || typeof evaluation !== "object") {
+    throw new Error("appPersistEvaluation: evaluation is required");
+  }
+  return runVerb({ repoRoot, env }, (db) => {
+    const app = requireApp(db, id);
+    const from = app.status;
+    const patch = { ...(projection || {}) };
+    const resynced = isPreApplicationStatus(from);
+    if (resynced) {
+      const raw = String(evaluation.gate || "review").toLowerCase();
+      const gate = raw in EVALUATION_GATE_STATUS ? raw : "review";
+      patch.gate = gate;
+      patch.status = EVALUATION_GATE_STATUS[gate];
+      patch.note = evaluationGateNote(evaluation);
+    }
+    const statusChanged = resynced && patch.status !== from;
+    const updated = shallowMergeOneLevel(app, patch);
+    putRow(db, "applications", id, updated);
+    const meta = bumpMeta(db);
+    const fieldsActivity = statusChanged ? null : applicationFieldsActivity(patch);
+    const event = statusChanged
+      ? logActivityEvent(db, {
+          type: "status_change",
+          title: `${app.company || id} — Status changed to ${activityStatusLabel(patch.status)}`,
+          summary: `Previous status: ${activityStatusLabel(from)}.`,
+          refs: { applicationId: id, company: app.company, role: app.role },
+          tags: [`status:${patch.status}`, "operation:application:status-update"],
+        })
+      : logActivityEvent(db, {
+          type: "status_change",
+          title: `${app.company || id} — ${fieldsActivity.title}`,
+          summary: fieldsActivity.summary,
+          refs: { applicationId: id, company: app.company, role: app.role },
+          tags: ["operation:application:details-update"],
+        });
+    const analytics = statusChanged ? refreshAnalytics(db) : undefined;
+    return { id, from, to: patch.status || from, resynced, meta, event, analytics };
+  });
+}
+
 // appScheduleInterview({id, at, round?, note?, who?}) — the booking action. A
 // real FUTURE interviewAt is what promotes an interview to the dashboard
 // Focus card; a second call while one is already future-set books the NEXT

@@ -15,6 +15,7 @@ import {
   activityAppend,
   analyticsRefresh,
   appCaptureInterviewIntake,
+  appPersistEvaluation,
   appRegisterArtifact,
   appRegisterPacketArtifacts,
   appScheduleInterview,
@@ -97,6 +98,30 @@ function seedFixture(repoRoot) {
       status: "reviewed-hold",
       nextAction: "Find recruiter contact",
       nextActionDue: "2030-01-02",
+    },
+    {
+      id: "app-eval-review-hold",
+      company: "Thornfield Labs",
+      role: "Forward Deployed AI Engineer",
+      status: "reviewed-hold",
+      gate: "review",
+      note: "scanner fit review 0; gate review",
+      fitScore: 55,
+      fitBucket: "stretch",
+      fitBasis: "evaluated",
+      evaluation: { gate: "review", fitScore: 55, fitBucket: "stretch" },
+    },
+    {
+      id: "app-eval-post-apply",
+      company: "Vandelay Industries",
+      role: "Staff Engineer",
+      status: "interview",
+      gate: "keep",
+      note: "gate keep; fit 88",
+      fitScore: 88,
+      fitBucket: "high",
+      fitBasis: "evaluated",
+      evaluation: { gate: "keep", fitScore: 88, fitBucket: "high" },
     },
     {
       id: "app-with-draft",
@@ -215,6 +240,91 @@ test("appSetStatus: a transition that was never in the interview stage clears no
   assert.equal(app.status, "cut");
   assert.equal(app.interviewAt, undefined);
   assert.equal(app.nextInterviewAt, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// appPersistEvaluation: the one write path for a packet-gate verdict landing
+// on an application (src/core/packet/evaluate.mjs). Regression coverage for
+// the QA-reproduced bug where a re-evaluation patched `evaluation` only and
+// left the pre-fix top-level gate/status/note stamped from the FIRST
+// evaluation — see that verb's doc comment in src/core/db/verbs/app.mjs.
+// ---------------------------------------------------------------------------
+
+test("appPersistEvaluation: a cut re-evaluation resyncs top-level gate/status/note on a pre-application row", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+
+  // app-eval-review-hold starts exactly like the QA repro: nested
+  // evaluation.gate "review", but top-level gate "review", status
+  // "reviewed-hold", note "scanner fit review 0; gate review" — the stale
+  // placeholder shape a fresh CUT verdict must overwrite.
+  const cutEvaluation = {
+    applicationId: "app-eval-review-hold",
+    gate: "cut",
+    fitScore: 55,
+    fitBucket: "stretch",
+  };
+  appPersistEvaluation({
+    repoRoot,
+    id: "app-eval-review-hold",
+    evaluation: cutEvaluation,
+    projection: { evaluation: cutEvaluation, fitScore: 55, fitBucket: "stretch" },
+  });
+
+  const row = db.prepare("SELECT data FROM applications WHERE id = ?").get("app-eval-review-hold");
+  const app = JSON.parse(row.data);
+  assert.equal(app.evaluation.gate, "cut");
+  assert.equal(app.gate, "cut", "top-level gate must resync with the new verdict");
+  assert.equal(app.status, "cut", "top-level status must resync with the new verdict");
+  assert.match(
+    app.note,
+    /gate cut/,
+    "top-level note must reflect the new verdict, not the stale scan note"
+  );
+
+  // A real status transition (reviewed-hold -> cut) must log its own event,
+  // same as appSetStatus.
+  const latestEvent = db
+    .prepare("SELECT type, data FROM activity_events ORDER BY rowid DESC LIMIT 1")
+    .get();
+  assert.equal(latestEvent.type, "status_change");
+  assert.match(JSON.parse(latestEvent.data).title, /Status changed to Archived/);
+});
+
+test("appPersistEvaluation: a re-evaluation does not regress a post-apply status", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+
+  // app-eval-post-apply is already at "interview" — the candidate applied
+  // and advanced by hand. A later re-evaluation (e.g. a captured JD deduping
+  // onto this same row) must refresh the nested evaluation/fit fields but
+  // must NOT drag the application back to reviewed-hold/cut.
+  const cutEvaluation = {
+    applicationId: "app-eval-post-apply",
+    gate: "cut",
+    fitScore: 40,
+    fitBucket: "stretch",
+  };
+  appPersistEvaluation({
+    repoRoot,
+    id: "app-eval-post-apply",
+    evaluation: cutEvaluation,
+    projection: { evaluation: cutEvaluation, fitScore: 40, fitBucket: "stretch" },
+  });
+
+  const row = db.prepare("SELECT data FROM applications WHERE id = ?").get("app-eval-post-apply");
+  const app = JSON.parse(row.data);
+  assert.equal(app.evaluation.gate, "cut", "nested evaluation still refreshes");
+  assert.equal(app.fitScore, 40, "fit fields still refresh");
+  assert.equal(app.status, "interview", "post-apply status must never regress");
+  assert.equal(app.gate, "keep", "top-level gate is left alone once the app is past the gate");
+  assert.equal(
+    app.note,
+    "gate keep; fit 88",
+    "top-level note is left alone once the app is past the gate"
+  );
 });
 
 test("chat-first interview intake atomically captures provenance and schedules a real invite", () => {
@@ -573,6 +683,20 @@ test("every domain-action verb bumps version by exactly 1, advances lastUpdatedA
   expectOneBump("appSetFields", () =>
     appSetFields({ repoRoot, id: "app-non-interview", patch: { statusNote: "note added" } })
   );
+  expectOneBump("appPersistEvaluation", () => {
+    const evaluation = {
+      applicationId: "app-eval-review-hold",
+      gate: "cut",
+      fitScore: 55,
+      fitBucket: "stretch",
+    };
+    return appPersistEvaluation({
+      repoRoot,
+      id: "app-eval-review-hold",
+      evaluation,
+      projection: { evaluation, fitScore: 55, fitBucket: "stretch" },
+    });
+  });
   expectOneBump("appScheduleInterview", () =>
     appScheduleInterview({
       repoRoot,
