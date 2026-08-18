@@ -12,7 +12,9 @@ export function dispatchHttpRoute(handler, req, res) {
   try {
     const result = route.handle(req, res);
     if (result && typeof result.then === "function") {
-      result.catch((err) => handleRouteError(err, res));
+      // Promise.resolve normalizes bare thenables (then but no catch) so
+      // rejection handling attaches without itself throwing.
+      Promise.resolve(result).catch((err) => handleRouteError(err, res));
     }
   } catch (err) {
     handleRouteError(err, res);

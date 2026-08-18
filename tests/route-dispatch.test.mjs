@@ -43,11 +43,51 @@ test("dispatchHttpRoute: a synchronous throw in the handler yields a 500, not a 
   try {
     const res = await fetch(baseUrl(server));
     assert.equal(res.status, 500);
+    assert.equal(res.headers.get("content-type"), "application/json; charset=utf-8");
+    assert.equal(res.headers.get("cache-control"), "no-store");
+    assert.deepEqual(await res.json(), { error: "internal_error" });
     // The server must still be alive for the next request.
     const again = await fetch(baseUrl(server));
     assert.equal(again.status, 500);
   } finally {
     await closeServer(server);
+  }
+});
+
+test("dispatchHttpRoute: a rejecting bare thenable (then but no catch) still yields a 500, and a resolving one is left alone", async () => {
+  // A handler returning a then-only thenable must not blow up the boundary
+  // itself: Promise.resolve normalizes it before rejection handling attaches.
+  const server = await bootServer((_req, _res) => ({
+    // biome-ignore lint/suspicious/noThenProperty: a bare thenable is exactly what this test exercises
+    then(_onFulfilled, onRejected) {
+      onRejected(new Error("boom (bare thenable)"));
+      return this;
+    },
+  }));
+  try {
+    const res = await fetch(baseUrl(server));
+    assert.equal(res.status, 500);
+  } finally {
+    await closeServer(server);
+  }
+
+  const okServer = await bootServer((_req, res) => {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("ok");
+    return {
+      // biome-ignore lint/suspicious/noThenProperty: a bare thenable is exactly what this test exercises
+      then(onFulfilled) {
+        onFulfilled("done");
+        return this;
+      },
+    };
+  });
+  try {
+    const res = await fetch(baseUrl(okServer));
+    assert.equal(res.status, 200);
+    assert.equal(await res.text(), "ok");
+  } finally {
+    await closeServer(okServer);
   }
 });
 
