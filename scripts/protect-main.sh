@@ -19,9 +19,9 @@ set -euo pipefail
 REPO="CodesWhat/careerrat"
 
 if gh api "repos/$REPO/rulesets" --jq '.[].name' 2>/dev/null | grep -qx "Main branch protection"; then
-  echo "✓ a 'Main branch protection' ruleset already exists on $REPO — nothing to do."
-  echo "  (edit it in the UI or delete + re-run if you want to change it.)"
-  exit 0
+	echo "✓ a 'Main branch protection' ruleset already exists on $REPO — nothing to do."
+	echo "  (edit it in the UI or delete + re-run if you want to change it.)"
+	exit 0
 fi
 
 gh api -X POST "repos/$REPO/rulesets" --input - <<'JSON'
