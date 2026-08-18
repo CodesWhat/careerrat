@@ -180,6 +180,7 @@ session, keep using STEP 4's CLI confirmation and write procedure instead.
 Before presenting the table, classify each passing board into one of two tiers:
 
 **HIGH-CONFIDENCE** — a board meets ALL of the following:
+
 - Shows real dated listings (visible post date, company name, role title on the listing page)
 - At least one listing is from an identifiable real employer (not a recruiter farm or ghost posting)
 - Canonical root URL resolves cleanly (no redirect loop, no 4xx/5xx)
@@ -196,6 +197,21 @@ This tier drives the STEP 4 auto-add logic below.
 
 ## STEP 4 — Add boards (confirm-first by default; opt-in auto-add for high-confidence)
 
+**External-agent / one-shot CLI runs only.** In conversational chat, this skill runs as an
+embedded session under the `chat` tool profile (`CHAT_RUNTIME_TOOLS`), which has no Bash —
+there is no shell to run `careerrat searches --add-url` from. The STEP 3 Conversational web
+handoff already IS the write mechanism: each `source_proposal` block renders a real Add
+source / Skip control, and clicking it calls the confirm-first write server-side through the
+exact same `addSearchFromUrl`/source-config guards this step's CLI path uses. Skip this
+step's CLI commands, the `careerrat doctor` check, and the optional audit-note/Activity-Pulse
+CLI calls entirely in chat mode — go straight to the **Required output block** below, using
+its chat-mode wording. Do not run or narrate running `careerrat searches --add-url`, and do
+not tell the user a board was added — a chat turn ends before any click on the STEP 3
+controls, so the model never observes whether the user actually added or skipped a proposal.
+Claiming a write here without having run one violates the skill's Honesty Firewall. This
+step's CLI procedure below stays exactly as written for a one-shot, non-embedded
+(external-agent) run, where there is a real shell.
+
 **Default behavior is confirm-first for everything.** Auto-add is only active when the
 user has explicitly opted in during this session by saying something like "auto-add
 high-confidence boards" or "yes, add high-confidence ones without asking."
@@ -205,6 +221,7 @@ source, regardless of tier. Present the proposed-boards table from STEP 3 and as
 boards the user wants added.
 
 **With opt-in (user has stated "auto-add high-confidence boards" or equivalent):**
+
 - HIGH-CONFIDENCE boards: add immediately without per-board confirmation. Report each
   addition as it happens.
 - BORDERLINE / MEDIUM boards: always confirm-first, even with auto-add opted in. Present
@@ -217,6 +234,7 @@ careerrat searches --add-url "<url>" --label "<label>"
 ```
 
 Where `<url>` is:
+
 - For `url-query` boards: the pre-filtered search URL (domain/role terms embedded if
   available), so the embedded filters are preserved exactly as parsed.
 - For `rss` boards: the feed URL.
@@ -229,6 +247,7 @@ discovered board is candidate-specific (it matches *this* user's domain and role
 it must never touch `docs/SOURCES.md` — that file is shipped and published, and writing a
 discovered board there leaks one user's targeting into the public package. The durable record
 of every added board is:
+
 - its entry in source config through `careerrat searches` (DB-backed in DB workspaces,
   legacy `config/search-sources.yml` otherwise), plus
 - the research log recorded in the next step (gitignored `workspace/research/`).
@@ -323,6 +342,16 @@ CONFIRMED-ADDED: <comma-list of labels added after explicit confirmation, or "aw
 REGISTRY-UPDATED: <yes | no>
 ```
 
+**In conversational chat**, the model's turn ends the moment the STEP 3 proposal blocks are
+emitted — it never sees whether the user later clicks Add source or Skip. Use only these
+values in chat mode, regardless of how confident the proposals looked:
+
+```text
+AUTO-ADDED: none (chat handoff — writes happen via the Add source/Skip controls, not this turn)
+CONFIRMED-ADDED: awaiting confirmation
+REGISTRY-UPDATED: no (pending — chat handoff)
+```
+
 ---
 
 ## Rules
@@ -342,7 +371,7 @@ REGISTRY-UPDATED: <yes | no>
   configured sources loaded in STEP 0.
 - **Quality gate.** A board must show at least one real, dated, domain-relevant listing
   to be proposed. An evergreen landing page or talent-pool gate is a rejection.
-- **Use the existing CLI.** Additions go through `careerrat searches --add-url "<url>" --label "<label>"`. Do not edit `config/search-sources.yml` directly.
+- **Use the existing CLI.** Additions go through `careerrat searches --add-url "<url>" --label "<label>"`. Do not edit `config/search-sources.yml` directly. **One-shot CLI runs only** — chat sessions have no Bash and use the STEP 3 typed-block handoff instead; never narrate running this command from a chat session.
 - **Registry write-back.** Record every added board in candidate-owned source config only -
   through `careerrat searches` plus the `workspace/research/` log. NEVER write
   discovered boards to `docs/SOURCES.md`; it ships and is published, so it stays field-neutral.
