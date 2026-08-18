@@ -256,6 +256,7 @@ opted in this session ("auto-add high-confidence companies" or equivalent).
 companies to add. Write nothing before that.
 
 **With opt-in:**
+
 - HIGH-CONFIDENCE companies: add without per-company confirmation; report each as it lands.
 - BORDERLINE / MEDIUM companies: always confirm-first, even with auto-add on.
 

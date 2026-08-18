@@ -180,6 +180,7 @@ session, keep using STEP 4's CLI confirmation and write procedure instead.
 Before presenting the table, classify each passing board into one of two tiers:
 
 **HIGH-CONFIDENCE** — a board meets ALL of the following:
+
 - Shows real dated listings (visible post date, company name, role title on the listing page)
 - At least one listing is from an identifiable real employer (not a recruiter farm or ghost posting)
 - Canonical root URL resolves cleanly (no redirect loop, no 4xx/5xx)
@@ -220,6 +221,7 @@ source, regardless of tier. Present the proposed-boards table from STEP 3 and as
 boards the user wants added.
 
 **With opt-in (user has stated "auto-add high-confidence boards" or equivalent):**
+
 - HIGH-CONFIDENCE boards: add immediately without per-board confirmation. Report each
   addition as it happens.
 - BORDERLINE / MEDIUM boards: always confirm-first, even with auto-add opted in. Present
@@ -232,6 +234,7 @@ careerrat searches --add-url "<url>" --label "<label>"
 ```
 
 Where `<url>` is:
+
 - For `url-query` boards: the pre-filtered search URL (domain/role terms embedded if
   available), so the embedded filters are preserved exactly as parsed.
 - For `rss` boards: the feed URL.
@@ -244,6 +247,7 @@ discovered board is candidate-specific (it matches *this* user's domain and role
 it must never touch `docs/SOURCES.md` — that file is shipped and published, and writing a
 discovered board there leaks one user's targeting into the public package. The durable record
 of every added board is:
+
 - its entry in source config through `careerrat searches` (DB-backed in DB workspaces,
   legacy `config/search-sources.yml` otherwise), plus
 - the research log recorded in the next step (gitignored `workspace/research/`).
