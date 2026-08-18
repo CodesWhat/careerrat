@@ -9,6 +9,10 @@ node_modules/
 # Turborepo build artifacts. Each app owns its local Next/Vite output rules.
 .turbo/
 
+# qlty config (track qlty.toml, ignore the CLI's local cache/output symlinks)
+.qlty/*
+!.qlty/qlty.toml
+
 # apps/web build artifacts (M7 SPA shell) — built fresh, shipped via
 # package.json#files["apps/web/dist"], same "gitignored generated release
 # artifact" pattern as the Next app outputs above.

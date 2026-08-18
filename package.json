@@ -101,6 +101,7 @@
     "desktop:dist": "npm --workspace apps/desktop run dist",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
+    "knip": "knip",
     "format": "biome format --write .",
     "install-skills": "node scripts/install-skills.mjs",
     "install-skills:check": "node scripts/install-skills.mjs --check",
@@ -153,6 +154,7 @@
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.199",
     "@biomejs/biome": "^2.5.0",
+    "knip": "6.32.2",
     "lefthook": "^2.1.9",
     "playwright": "^1.60.0",
     "turbo": "^2.9.18"

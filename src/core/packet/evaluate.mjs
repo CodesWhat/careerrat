@@ -1,4 +1,4 @@
-import { appSetFields } from "../db/verbs/app.mjs";
+import { appPersistEvaluation } from "../db/verbs/app.mjs";
 import { evaluatePacketGate } from "./gate.mjs";
 
 function formatBaseRange(compensation = {}) {
@@ -73,6 +73,11 @@ function persistenceFailure(error) {
 
 // One owner for evaluate + typed persistence. Both the compatibility HTTP
 // endpoint and workspace-main's job.evaluate intent call this operation.
+// appPersistEvaluation (db/verbs/app.mjs) is the actual write: it derives
+// top-level gate/status/note from `evaluation` in the same transaction that
+// stamps the nested typed verdict, so a re-evaluation can never leave the
+// two out of sync (see that verb's doc comment for the pre-application
+// scoping rule).
 export async function evaluateAndPersistPacketGate({
   repoRoot,
   env = process.env,
@@ -85,11 +90,12 @@ export async function evaluateAndPersistPacketGate({
   if (result.status !== 200 || !result.body?.ok || !evaluation?.applicationId) return result;
 
   try {
-    appSetFields({
+    appPersistEvaluation({
       repoRoot,
       env,
       id: evaluation.applicationId,
-      patch: packetEvaluationProjection(evaluation),
+      evaluation,
+      projection: packetEvaluationProjection(evaluation),
     });
   } catch (error) {
     return persistenceFailure(error);

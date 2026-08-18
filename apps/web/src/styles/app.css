@@ -385,65 +385,6 @@ button {
   gap: 8px;
 }
 
-/* ── Deep-ingest nudge toast — no left-edge accent strip (repo standing rule);
- * floats bottom-left, mirroring the capture assistant's bottom-right slot. ── */
-
-.setup-toast {
-  position: fixed;
-  left: clamp(18px, 3vw, 40px);
-  bottom: clamp(18px, 3vw, 34px);
-  z-index: 50;
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  max-width: min(360px, calc(100vw - 32px));
-  padding: 14px;
-  border-radius: 14px;
-  background: rgba(var(--rgb-surface), 0.96);
-  box-shadow: none;
-  -webkit-app-region: no-drag;
-}
-
-.setup-toast__body {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.setup-toast__title {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--ink);
-}
-
-.setup-toast__sub {
-  margin: 0;
-  font-size: 12px;
-  color: var(--ink-soft);
-}
-
-.setup-toast__cta {
-  margin-top: 8px;
-}
-
-.setup-toast__dismiss {
-  flex: 0 0 auto;
-  border: none;
-  background: none;
-  cursor: pointer;
-  color: var(--ink-soft);
-  font-size: 14px;
-  line-height: 1;
-  padding: 2px;
-}
-
-.setup-toast__dismiss:hover {
-  color: var(--ink);
-}
-
 /* ── Product dashboard home ─────────────────────────────────────────────── */
 
 .dashboard-home {
@@ -6372,6 +6313,67 @@ button.chip {
   color: #ffffff;
   opacity: 1;
   cursor: default;
+}
+
+/* Deep-ingest nudge — docked as the top row of `.ask-bar__shell` itself
+ * (SetupReadinessCard.jsx's DeepIngestDock), not a separate floating card:
+ * living inside the same bordered/backgrounded shell as the input means it
+ * can never sit on top of it. Same separator treatment as `.ask-bar__preview`
+ * below. No left-edge accent strip (repo standing rule). */
+
+.ask-bar__nudge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.ask-bar__nudge-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.ask-bar__nudge-title {
+  flex: 0 0 auto;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.ask-bar__nudge-sub {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.ask-bar__nudge-cta {
+  flex: 0 0 auto;
+}
+
+.ask-bar__nudge-dismiss {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px;
+}
+
+.ask-bar__nudge-dismiss:hover {
+  color: var(--ink);
 }
 
 /* Intent preview — ACTION/ANSWER rows, attached to the bar. Never a modal;

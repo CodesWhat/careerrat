@@ -30,6 +30,7 @@ import { appRegisterPacketQuestionCapture, appUpsert } from "../src/core/db/verb
 import { calendarBusyUpsert } from "../src/core/db/verbs/calendar.mjs";
 import { candidateConfigGet, candidateConfigPatch } from "../src/core/db/verbs/candidate.mjs";
 import { commUpsert } from "../src/core/db/verbs/comm.mjs";
+import { companyProposalBatchPut } from "../src/core/db/verbs/company-discovery.mjs";
 import { intakeCapture, intakeUpdate } from "../src/core/db/verbs/intake.mjs";
 import {
   linkedinProposalBatchGet,
@@ -38,6 +39,8 @@ import {
 import { relationshipLeadUpsertBatch } from "../src/core/db/verbs/relationship.mjs";
 import { sourceWatermarkUpsert } from "../src/core/db/verbs/source.mjs";
 import { sourcedUpsertBatch } from "../src/core/db/verbs/sourced.mjs";
+import { buildCompanySeedContext } from "../src/core/discovery/company-context.mjs";
+import { companyDiscoveryFingerprint } from "../src/core/discovery/company-discovery-cadence.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import {
   readResearch,
@@ -3369,6 +3372,199 @@ test("company discovery returns reviewable proposals in workspace-main without w
   });
   assert.doesNotMatch(JSON.stringify(result.messages.at(-1)), /FULL JD BODY/);
   assert.match(result.messages.at(-1).text, /beyond your focus examples/i);
+});
+
+test("company.discover reopens a pending batch instead of creating a duplicate when asked twice", async () => {
+  const repoRoot = tempRepo();
+  let createCalls = 0;
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "company.discover",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { requestedCount: 8 },
+    },
+    companyDiscoveryCadenceImpl: () => ({
+      status: "needs-review",
+      due: false,
+      reason: "pending-review",
+      batchId: "batch-ask-pending",
+      pendingCount: 1,
+    }),
+    createCompanyProposalsImpl: async () => {
+      createCalls += 1;
+      throw new Error("must not create a duplicate batch");
+    },
+    getCompanyProposalBatchImpl: () => ({
+      batch: {
+        batchId: "batch-ask-pending",
+        status: "pending",
+        version: 1,
+        proposals: [
+          {
+            proposalId: "proposal-ask-pending",
+            company: { name: "Ask Pending Co" },
+            version: 1,
+          },
+        ],
+        rejected: [],
+        counts: { seeds: 1, proposals: 1, rejected: 0 },
+      },
+    }),
+  });
+
+  assert.equal(createCalls, 0);
+  const message = result.messages.at(-1);
+  assert.equal(message.artifacts[0].batchId, "batch-ask-pending");
+  assert.equal(message.metadata.state, "needs-review");
+  assert.equal(message.metadata.proposalCount, 1);
+  assert.match(message.text, /1 company.*needs review/i);
+});
+
+test("company.discover with a real db-backed cadence reopens the same-context pending batch across repeated asks, then starts a new batch once the context changes", async () => {
+  const repoRoot = tempRepo();
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Applied AI", priority: "primary", titles: ["Applied AI Engineer"] }],
+      keep_signals: ["customer-facing systems"],
+    },
+  });
+
+  const firstProposal = {
+    proposalId: "proposal-first-ask",
+    company: { name: "First Ask Co" },
+    version: 1,
+  };
+  let createCalls = 0;
+  const first = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "company.discover",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+    createCompanyProposalsImpl: async () => {
+      createCalls += 1;
+      // Mirror createCompanyProposalBatch's own db write so the real,
+      // unmocked companyDiscoveryCadenceImpl sees this batch on the next ask
+      // (the mock stands in for seed generation/scanning, not persistence).
+      companyProposalBatchPut({
+        repoRoot,
+        env: {},
+        batch: {
+          batchId: "cpb-same-context",
+          status: "pending",
+          createdAt: "2026-08-10T12:00:00.000Z",
+          version: 1,
+          contextFingerprint: companyDiscoveryFingerprint(
+            buildCompanySeedContext({ repoRoot, env: {} })
+          ),
+          proposals: [firstProposal],
+          rejected: [],
+          counts: { seeds: 1, proposals: 1, rejected: 0 },
+        },
+      });
+      return {
+        data: {
+          batchId: "cpb-same-context",
+          proposals: [firstProposal],
+          rejected: [],
+          counts: { seeds: 1, proposals: 1, rejected: 0 },
+        },
+        meta: { version: 1, seedSource: "ai" },
+      };
+    },
+    now: () => new Date("2026-08-10T12:00:00.000Z"),
+  });
+  assert.equal(createCalls, 1);
+  assert.equal(first.messages.at(-1).artifacts[0].batchId, "cpb-same-context");
+
+  // Same discovery context, still-pending batch: asking again must reopen the
+  // existing row, not create cpb-same-context's sibling.
+  const second = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "company.discover",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+    createCompanyProposalsImpl: async () => {
+      createCalls += 1;
+      throw new Error("must not create a duplicate batch for the same context");
+    },
+    now: () => new Date("2026-08-10T12:05:00.000Z"),
+  });
+  assert.equal(createCalls, 1);
+  const secondArtifact = second.messages.at(-1).artifacts[0];
+  assert.equal(secondArtifact.batchId, "cpb-same-context");
+  assert.equal(second.messages.at(-1).metadata.state, "needs-review");
+
+  // Resolve the pending proposal, then change the discovery context: the next
+  // ask is due again and legitimately starts a new batch.
+  const resolvedProposal = {
+    ...firstProposal,
+    decision: { action: "reject", status: "rejected" },
+  };
+  companyProposalBatchPut({
+    repoRoot,
+    env: {},
+    batch: {
+      batchId: "cpb-same-context",
+      status: "rejected",
+      createdAt: "2026-08-10T12:00:00.000Z",
+      version: 2,
+      contextFingerprint: companyDiscoveryFingerprint(
+        buildCompanySeedContext({ repoRoot, env: {} })
+      ),
+      proposals: [resolvedProposal],
+      rejected: [],
+      counts: { seeds: 1, proposals: 1, rejected: 0 },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "targeting",
+    patch: {
+      keep_signals: ["customer-facing systems", "agentic developer workflows"],
+    },
+  });
+
+  const thirdProposal = {
+    proposalId: "proposal-changed-context",
+    company: { name: "Changed Context Co" },
+    version: 1,
+  };
+  const third = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "company.discover",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+    createCompanyProposalsImpl: async () => {
+      createCalls += 1;
+      return {
+        data: {
+          batchId: "cpb-changed-context",
+          proposals: [thirdProposal],
+          rejected: [],
+          counts: { seeds: 1, proposals: 1, rejected: 0 },
+        },
+        meta: { version: 1, seedSource: "ai" },
+      };
+    },
+    now: () => new Date("2026-08-10T12:10:00.000Z"),
+  });
+  assert.equal(createCalls, 2);
+  assert.equal(third.messages.at(-1).artifacts[0].batchId, "cpb-changed-context");
 });
 
 test("a confirmed company decision stays in the workspace thread and hands off to search", async () => {
