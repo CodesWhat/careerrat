@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useSyncExternalStore } from "react";
 import { Link } from "react-router-dom";
 
 const DISMISS_KEY = "careerrat.deepIngestToast.dismissed";
@@ -15,20 +15,38 @@ function readDismissed() {
   }
 }
 
+// Module-level store, not per-instance useState — AskBar.jsx and
+// DashboardPage.jsx each call useDeepIngestNudge from their own independent
+// component instance, and both need to observe the SAME dismissal the
+// instant it happens. Per-instance state left the other surface reading a
+// stale `dismissed` until it happened to remount.
+const listeners = new Set();
+let dismissedCache = readDismissed();
+
+function subscribe(callback) {
+  listeners.add(callback);
+  return () => listeners.delete(callback);
+}
+
+function getSnapshot() {
+  return dismissedCache;
+}
+
+function dismissDeepIngest() {
+  dismissedCache = true;
+  try {
+    localStorage.setItem(DISMISS_KEY, "1");
+  } catch {
+    // Storage unavailable — dismissal still holds for this session via the module cache.
+  }
+  for (const listener of listeners) listener();
+}
+
 export function useDeepIngestNudge(setup) {
   const needed = deepIngestNeeded(setup);
-  const [dismissed, setDismissed] = useState(() => readDismissed());
+  const dismissed = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
-  const dismiss = () => {
-    setDismissed(true);
-    try {
-      localStorage.setItem(DISMISS_KEY, "1");
-    } catch {
-      // Storage unavailable — dismissal still holds for this session via state.
-    }
-  };
-
-  return { needed, dismissed, dismiss };
+  return { needed, dismissed, dismiss: dismissDeepIngest };
 }
 
 // DeepIngestDock — docked inline as the top row of AskBar's own

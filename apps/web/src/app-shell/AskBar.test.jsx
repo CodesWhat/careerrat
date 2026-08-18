@@ -77,6 +77,15 @@ vi.mock("react", async (importOriginal) => {
         hooks.pending.push({ index, effect, prevCleanup });
       }
     },
+    // useDeepIngestNudge (SetupReadinessCard.jsx) reads its shared dismissal
+    // via useSyncExternalStore against a module-level store. This harness
+    // never simulates real subscription-driven re-renders (every hook here
+    // relies on the test explicitly calling render() again after an action),
+    // so a plain getSnapshot() read is enough — the subscribe callback is
+    // accepted but never invoked.
+    useSyncExternalStore(_subscribe, getSnapshot) {
+      return getSnapshot();
+    },
   };
 });
 
