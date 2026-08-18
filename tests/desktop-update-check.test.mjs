@@ -40,6 +40,24 @@ describe("compareVersions", () => {
     assert.equal(compareVersions("0.9.0", ""), 1);
     assert.equal(compareVersions("", ""), 0);
   });
+
+  it("ranks a release candidate below the same version's GA release", () => {
+    // The bug this guards: GitHub's /releases/latest only ever returns GA,
+    // so an rc user must compare as older than GA or they never hear about
+    // the version that already shipped.
+    assert.equal(compareVersions("0.9.0-rc.1", "0.9.0"), -1);
+    assert.equal(compareVersions("0.9.0", "0.9.0-rc.1"), 1);
+  });
+
+  it("orders release candidates of the same version numerically", () => {
+    assert.equal(compareVersions("0.9.0-rc.1", "0.9.0-rc.2"), -1);
+    assert.equal(compareVersions("0.9.0-rc.2", "0.9.0-rc.1"), 1);
+  });
+
+  it("orders a release candidate below the next version's GA release", () => {
+    assert.equal(compareVersions("0.9.0-rc.2", "0.9.1"), -1);
+    assert.equal(compareVersions("0.9.1", "0.9.0-rc.2"), 1);
+  });
 });
 
 describe("isNewerVersion", () => {
@@ -103,6 +121,19 @@ describe("resolveUpdateResult", () => {
       releaseUrl: "https://github.com/CodesWhat/careerrat/releases/tag/v0.10.0",
       dmgUrl: "https://example.com/CareerRat-0.10.0-arm64.dmg",
     });
+  });
+
+  it("reports an update available when the running version is a release candidate and GitHub's latest is that version's GA", () => {
+    // GitHub's /releases/latest excludes prereleases, so a pilot user running
+    // "0.9.0-rc.1" who is due for a check always gets the GA release payload
+    // back. They must be notified, not compared as already current.
+    const result = resolveUpdateResult({
+      currentVersion: "0.9.0-rc.1",
+      release: { tag_name: "v0.9.0", html_url: "https://example.com", assets: [] },
+    });
+
+    assert.equal(result.updateAvailable, true);
+    assert.equal(result.version, "0.9.0");
   });
 
   it("reports no update available when already current", () => {

@@ -34,8 +34,10 @@ export const DEFAULT_STATE = Object.freeze({
 
 // --- Pure functions ---------------------------------------------------------
 
-// Parses "1.2.3", "v1.2.3", or "1.2.3-beta.1" into a comparable [major,
-// minor, patch] tuple. Returns null for anything that doesn't parse: callers
+// Parses "1.2.3", "v1.2.3", or "1.2.3-rc.1" into a comparable { core,
+// prerelease } shape: core is a [major, minor, patch] tuple, prerelease is
+// either null (no "-rc.1" suffix) or the array of dot-separated identifiers
+// after the hyphen. Returns null for anything that doesn't parse: callers
 // treat that as "unknown", never as "older".
 function parseVersion(raw) {
   const cleaned = String(raw || "")
@@ -43,18 +45,64 @@ function parseVersion(raw) {
     .replace(/^v/i, "");
   if (!cleaned) return null;
 
-  const [core] = cleaned.split("-");
+  const [core, ...prereleaseParts] = cleaned.split("-");
   const parts = core.split(".").map((part) => Number.parseInt(part, 10));
   if (parts.length === 0 || parts.some((n) => Number.isNaN(n))) return null;
-
   while (parts.length < 3) parts.push(0);
-  return parts;
+
+  // Rejoin with "-" in case the prerelease string itself contained a hyphen
+  // (rare, but valid semver, e.g. "1.0.0-x-y-z").
+  const prereleaseRaw = prereleaseParts.join("-");
+  const prerelease = prereleaseRaw ? prereleaseRaw.split(".") : null;
+
+  return { core: parts, prerelease };
+}
+
+// Semver precedence for the prerelease portion (semver.org section 11): a
+// version with no prerelease outranks the same version with one, so
+// "0.9.0-rc.1" < "0.9.0". This is the case that actually matters here: this
+// repo ships release candidates (publish.yml routes any hyphenated version to
+// the npm "rc" dist-tag), and GitHub's /releases/latest endpoint only ever
+// returns the GA release, so an rc user must compare as older than GA or they
+// are never told the final version shipped.
+//
+// When both sides have a prerelease, compare identifiers left to right:
+// purely-numeric identifiers compare numerically, everything else compares
+// as ASCII strings, a numeric identifier always ranks below an alphanumeric
+// one, and if every shared identifier is equal, the side with fewer
+// identifiers ranks lower ("1.0.0-rc" < "1.0.0-rc.1").
+function comparePrerelease(a, b) {
+  if (!a && !b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+
+  const len = Math.max(a.length, b.length);
+  for (let i = 0; i < len; i += 1) {
+    if (i >= a.length) return -1;
+    if (i >= b.length) return 1;
+
+    const ai = a[i];
+    const bi = b[i];
+    const aNumeric = /^\d+$/.test(ai);
+    const bNumeric = /^\d+$/.test(bi);
+
+    if (aNumeric && bNumeric) {
+      const diff = Number.parseInt(ai, 10) - Number.parseInt(bi, 10);
+      if (diff !== 0) return diff < 0 ? -1 : 1;
+    } else if (aNumeric !== bNumeric) {
+      return aNumeric ? -1 : 1;
+    } else if (ai !== bi) {
+      return ai < bi ? -1 : 1;
+    }
+  }
+  return 0;
 }
 
 // Naive string comparison breaks on "0.9.0" vs "0.10.0" ("0.10.0" < "0.9.0"
-// lexicographically). Compare each dot-separated segment as an integer
-// instead. Returns -1, 0, or 1 (a vs b); unparseable input never outranks
-// parseable input.
+// lexicographically), so the core is compared as integer segments. The
+// prerelease suffix, if either side has one, is then compared per semver
+// precedence above. Returns -1, 0, or 1 (a vs b); unparseable input never
+// outranks parseable input.
 export function compareVersions(a, b) {
   const pa = parseVersion(a);
   const pb = parseVersion(b);
@@ -62,11 +110,12 @@ export function compareVersions(a, b) {
   if (!pa) return -1;
   if (!pb) return 1;
 
-  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
-    const diff = (pa[i] || 0) - (pb[i] || 0);
+  for (let i = 0; i < 3; i += 1) {
+    const diff = (pa.core[i] || 0) - (pb.core[i] || 0);
     if (diff !== 0) return diff < 0 ? -1 : 1;
   }
-  return 0;
+
+  return comparePrerelease(pa.prerelease, pb.prerelease);
 }
 
 export function isNewerVersion(current, candidate) {
