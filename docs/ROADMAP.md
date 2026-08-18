@@ -481,7 +481,7 @@ The current build order is:
    controlled local form. The broader original-skill rows stay active in the linked audit instead
    of being hidden by this gate.
 
-### Product-surface acceptance sweep (updated August 14, 2026)
+### Product-surface acceptance sweep (updated August 17, 2026)
 
 The live result ledger is [`.planning/QA-ACCEPTANCE.md`](../.planning/QA-ACCEPTANCE.md); this
 section remains the release-level source of truth. All 103 recorded findings are fixed and
