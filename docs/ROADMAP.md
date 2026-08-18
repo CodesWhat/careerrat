@@ -314,9 +314,9 @@ Open work, none of it blocking the release:
   touching website dependencies. Its `dependency-review` run also failed on a network
   `fetch failed`, which is an infrastructure blip and just needs a re-run.
 - **Two PRs merged without a CodeRabbit pass.** #77 (an `actions/setup-node` bump)
-  landed on CI gates alone, and #76 never got one either. Cause: the CodeRabbit CLI
-  allows 3 included reviews per hour and we exhausted it. Re-review if you want the
-  every-change-reviewed rule held to the letter.
+  landed on CI gates alone, and #76 never got one either. Cause: the CLI lane's
+  included reviews ran out mid-run. Re-review if you want the every-change-reviewed
+  rule held to the letter.
 - **QA re-runs are owed** for `research-company`, `research-comp`, and
   `research-boards`, plus the `discover-companies` fourth leg, now that the fixes
   they were blocked on have shipped (#84, #92, #93). G-09 remains a product decision
@@ -327,15 +327,18 @@ Open work, none of it blocking the release:
 
 ### Review lanes, and which to use
 
-CodeRabbit has two independent rate limits, and knowing this is the difference
-between a fifteen-minute cycle and a four-hour one:
+CodeRabbit meters the PR lane and the CLI lane separately, and knowing this is the
+difference between a fifteen-minute cycle and a four-hour one. Exact quotas depend on
+the plan, so treat the numbers below as what this account did on 2026-08-18 rather
+than documented limits; the rate-limit message always states when the next one frees up.
 
-- **PR lane** (`@coderabbitai full review` as a PR comment): roughly one review per
-  hour, shared across the whole org. This is what posts inline threads on the PR.
+- **PR lane** (`@coderabbitai full review` as a PR comment): this is what posts inline
+  threads on the PR. In practice it allowed about one review per hour, so a queue of
+  PRs serializes badly.
 - **CLI lane** (`coderabbit review --committed --base main` from a worktree on the
-  branch): 3 included reviews per hour, separate budget, about 70 seconds each. Use
-  this for anything mechanical. It leaves no PR comment, so note the outcome yourself
-  if the PR needs a record.
+  branch): a separate budget that allowed 3 reviews before rate-limiting, each
+  finishing in a couple of minutes. Use it for anything mechanical. It leaves no PR
+  comment, so note the outcome yourself if the PR needs a record.
 
 ### Gating posture
 
