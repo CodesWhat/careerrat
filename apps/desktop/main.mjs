@@ -19,8 +19,17 @@
 // comment) — print "SMOKE OK <url>" and exit 0 (no interaction) once both
 // pass. The scripted verification path for `npx electron . --smoke`.
 
-import { app, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, shell } from "electron";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  nativeImage,
+  nativeTheme,
+  shell,
+} from "electron";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { get as httpGet } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -32,6 +41,15 @@ import {
   startDesktopPdfRenderer,
 } from "./desktop-runtime.mjs";
 import { verifySmokeHttpSurface, verifySmokePdfExport } from "./desktop-smoke.mjs";
+import {
+  CHECK_INTERVAL_MS as UPDATE_CHECK_INTERVAL_MS,
+  DEFAULT_STATE as DEFAULT_UPDATE_STATE,
+  isNewerVersion,
+  runUpdateCheck,
+  shouldNotify,
+  withEnabled,
+  withSkippedVersion,
+} from "./update-check.mjs";
 import { buildBrowserWindowOptions } from "./window-options.mjs";
 
 // --- Trap 1 -----------------------------------------------------------------
@@ -147,6 +165,14 @@ let dev = null;
 let pdfRenderer = null;
 let win = null;
 let shuttingDown = false;
+
+// Update-check (notify-only) state. See the "Update check" block below,
+// defined ahead of createWindow() because createWindow() wires the preload
+// path that exposes it.
+let updateStateDir = null;
+let updateState = { ...DEFAULT_UPDATE_STATE };
+let updateResult = { updateAvailable: false, version: null, releaseUrl: null, dmgUrl: null };
+let updateCheckTimer = null;
 
 // --smoke never renders anything — it's a scripted server-only check (boot,
 // GET /api/health, print, exit). Skipping GPU process bring-up entirely (as
@@ -275,6 +301,11 @@ async function shutdown() {
   delete process.env.CAREERRAT_DESKTOP_PDF_RENDER_URL;
   delete process.env.CAREERRAT_DESKTOP_PDF_RENDER_TOKEN;
   if (activePdfRenderer) await activePdfRenderer.close();
+
+  if (updateCheckTimer) {
+    clearInterval(updateCheckTimer);
+    updateCheckTimer = null;
+  }
 }
 
 function openExternalIfAllowed(target, baseUrl) {
@@ -289,13 +320,156 @@ function openExternalIfAllowed(target, baseUrl) {
   return decision;
 }
 
+// --- Update check (notify-only) ---------------------------------------------
+// Desktop-only, notify-only: checks GitHub's public releases API for a newer
+// tagged release and hands the result to the renderer over the contextBridge
+// exposed by preload/update-check-preload.cjs. Never a shared HTTP route on
+// the embedded engine server, so the plain browser dev app never sees it and
+// the npm CLI's own update-notifier (src/core/update/update-core.mjs) is
+// untouched. Never downloads or installs anything; the renderer's only
+// action is opening the release page through openExternalIfAllowed above.
+// See apps/desktop/update-check.mjs for the pure comparison/scheduling logic.
+const UPDATE_CHECK_PRELOAD_PATH = join(__dirname, "preload", "update-check-preload.cjs");
+const UPDATE_STATE_FILE = "desktop-update-check.json";
+// Let boot settle (server up, window painted) before the first network call.
+const UPDATE_CHECK_INITIAL_DELAY_MS = 5000;
+const UPDATE_IPC = Object.freeze({
+  getState: "careerrat:update-check:get-state",
+  skipVersion: "careerrat:update-check:skip-version",
+  setEnabled: "careerrat:update-check:set-enabled",
+  openRelease: "careerrat:update-check:open-release",
+  result: "careerrat:update-check:result",
+});
+
+function updateStateFilePath() {
+  return join(updateStateDir, UPDATE_STATE_FILE);
+}
+
+function loadUpdateState() {
+  try {
+    const raw = JSON.parse(readFileSync(updateStateFilePath(), "utf8"));
+    return { ...DEFAULT_UPDATE_STATE, ...raw };
+  } catch {
+    return { ...DEFAULT_UPDATE_STATE };
+  }
+}
+
+// Best-effort: a write failure here (e.g. a read-only data root) must never
+// crash the app or surface to the user. Worst case, the next launch simply
+// re-checks sooner than the 24h interval intends.
+function persistUpdateState(state) {
+  try {
+    mkdirSync(updateStateDir, { recursive: true });
+    writeFileSync(updateStateFilePath(), `${JSON.stringify(state)}\n`);
+  } catch (err) {
+    log(`update-check state write failed: ${err.message}`);
+  }
+}
+
+// Derives the current notice from the cached "latest known release" fields
+// in persisted state, without a network call. This is what lets the notice
+// keep showing across relaunches inside the same 24h window, the same
+// cache-and-reuse shape as the npm-side update-notifier
+// (src/core/update/update-core.mjs's readUpdateNotice()).
+function deriveUpdateResultFromState(state) {
+  const version = state.latestVersion || null;
+  const updateAvailable = Boolean(version && isNewerVersion(app.getVersion(), version));
+  return {
+    updateAvailable,
+    version,
+    releaseUrl: state.latestReleaseUrl || null,
+    dmgUrl: state.latestDmgUrl || null,
+  };
+}
+
+function currentUpdateNoticePayload() {
+  return {
+    notify: shouldNotify({ result: updateResult, skippedVersion: updateState.skippedVersion }),
+    enabled: updateState.enabled,
+    version: updateResult.version,
+    releaseUrl: updateResult.releaseUrl,
+    dmgUrl: updateResult.dmgUrl,
+  };
+}
+
+function pushUpdateNoticeToRenderer() {
+  if (win && !win.isDestroyed()) {
+    win.webContents.send(UPDATE_IPC.result, currentUpdateNoticePayload());
+  }
+}
+
+async function performUpdateCheck() {
+  if (!updateStateDir) return;
+
+  const { state: nextState, result, checked, fetchSucceeded } = await runUpdateCheck({
+    currentVersion: app.getVersion(),
+    state: loadUpdateState(),
+  });
+
+  if (!checked) return;
+
+  updateState = fetchSucceeded && result
+    ? {
+        ...nextState,
+        latestVersion: result.version,
+        latestReleaseUrl: result.releaseUrl,
+        latestDmgUrl: result.dmgUrl,
+      }
+    : nextState; // a failed fetch still records lastCheckedAt, never clobbers the last known release
+  persistUpdateState(updateState);
+
+  updateResult = deriveUpdateResultFromState(updateState);
+  pushUpdateNoticeToRenderer();
+}
+
+// Registers the IPC handlers preload/update-check-preload.cjs calls into,
+// primes in-memory state from disk, and schedules the recurring check. Runs
+// exactly once (from app.whenReady()'s non-smoke path), not per-window.
+function startUpdateChecks() {
+  updateStateDir = runtimePaths.careerratHome || app.getPath("userData");
+  updateState = loadUpdateState();
+  updateResult = deriveUpdateResultFromState(updateState);
+
+  ipcMain.handle(UPDATE_IPC.getState, () => currentUpdateNoticePayload());
+
+  ipcMain.handle(UPDATE_IPC.skipVersion, (_event, version) => {
+    updateState = withSkippedVersion(updateState, version);
+    persistUpdateState(updateState);
+    return currentUpdateNoticePayload();
+  });
+
+  ipcMain.handle(UPDATE_IPC.setEnabled, (_event, enabled) => {
+    updateState = withEnabled(updateState, enabled);
+    persistUpdateState(updateState);
+    return currentUpdateNoticePayload();
+  });
+
+  ipcMain.handle(UPDATE_IPC.openRelease, () => {
+    if (updateResult.releaseUrl) openExternalIfAllowed(updateResult.releaseUrl, null);
+    return null;
+  });
+
+  setTimeout(() => {
+    performUpdateCheck().catch((err) => log(`update check failed: ${err.message}`));
+  }, UPDATE_CHECK_INITIAL_DELAY_MS);
+
+  updateCheckTimer = setInterval(() => {
+    performUpdateCheck().catch((err) => log(`update check failed: ${err.message}`));
+  }, UPDATE_CHECK_INTERVAL_MS);
+  updateCheckTimer.unref?.();
+}
+
 function createWindow(url, route, { load = true } = {}) {
   win = new BrowserWindow({
     ...buildBrowserWindowOptions({ dark: nativeTheme.shouldUseDarkColors }),
-    // No preload, no explicit webPreferences overrides — the UI is
-    // server-rendered HTML loaded over loopback HTTP, so Electron's secure
-    // remote-page defaults (nodeIntegration off, contextIsolation on) are
-    // exactly what we want as-is.
+    webPreferences: {
+      // The only preload in this app. Exposes window.careerratDesktopUpdate
+      // for the notify-only update check above. Everything else about the UI
+      // is still server-rendered HTML loaded over loopback HTTP, so Electron's
+      // secure remote-page defaults (nodeIntegration off, contextIsolation on,
+      // sandbox on) are otherwise exactly what we want as-is.
+      preload: UPDATE_CHECK_PRELOAD_PATH,
+    },
   });
 
   // External links (target=_blank) and any navigation away from our own
@@ -488,6 +662,7 @@ app.whenReady().then(async () => {
   }
 
   createWindow(url, route);
+  startUpdateChecks();
 
   // macOS convention: clicking the dock icon with no open windows reopens
   // one instead of doing nothing.

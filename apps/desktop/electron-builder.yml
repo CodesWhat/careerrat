@@ -20,7 +20,9 @@ files:
   - desktop-runtime.mjs
   - desktop-routing.mjs
   - desktop-smoke.mjs
+  - update-check.mjs
   - window-options.mjs
+  - preload/update-check-preload.cjs
   - package.json
 extraResources:
   - from: staging/careerrat
