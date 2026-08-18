@@ -235,6 +235,20 @@ Record each company's tier alongside its verdict; the tier drives STEP 4.
 
 ## STEP 4 — Add companies (confirm-first by default; opt-in auto-add for high-confidence)
 
+**External-agent / one-shot CLI runs only.** In conversational chat, this skill runs as an
+embedded session under the `chat` tool profile (`CHAT_RUNTIME_TOOLS`), which has no Bash —
+there is no shell to run `careerrat companies --add … --write` from. The STEP 3 Conversational
+web handoff already IS the write mechanism: each `company_proposal` block renders a real Track
+company / Skip control, and clicking it calls the confirm-first write server-side through the
+exact same `saveCompanyBoard`/source-config guards this step's CLI path uses. Skip this step's
+CLI commands, the `careerrat doctor` check, and the Activity Pulse CLI call entirely in chat
+mode — go straight to the **Required output block** below, using its chat-mode wording. Do not
+run or narrate running `careerrat companies --add`, and do not tell the user a company was
+added — a chat turn ends before any click on the STEP 3 controls, so the model never observes
+whether the user actually tracked or skipped a proposal. Claiming a write here without having
+run one violates the skill's Honesty Firewall. This step's CLI procedure below stays exactly as
+written for a one-shot, non-embedded (external-agent) run, where there is a real shell.
+
 **Default is confirm-first for everything.** Auto-add is active only when the user has explicitly
 opted in this session ("auto-add high-confidence companies" or equivalent).
 
@@ -242,6 +256,7 @@ opted in this session ("auto-add high-confidence companies" or equivalent).
 companies to add. Write nothing before that.
 
 **With opt-in:**
+
 - HIGH-CONFIDENCE companies: add without per-company confirmation; report each as it lands.
 - BORDERLINE / MEDIUM companies: always confirm-first, even with auto-add on.
 
@@ -335,6 +350,16 @@ CONFIRMED-ADDED: <comma-list added after confirmation, or "awaiting confirmation
 NEXT: <"run search-jobs sweep" | "awaiting confirmation">
 ```
 
+**In conversational chat**, the model's turn ends the moment the STEP 3 proposal blocks are
+emitted — it never sees whether the user later clicks Track company or Skip. Use only these
+values in chat mode, regardless of how confident the proposals looked:
+
+```text
+AUTO-ADDED: none (chat handoff — writes happen via the Track company/Skip controls, not this turn)
+CONFIRMED-ADDED: awaiting confirmation
+NEXT: awaiting confirmation
+```
+
 ---
 
 ## Rules
@@ -358,7 +383,9 @@ NEXT: <"run search-jobs sweep" | "awaiting confirmation">
 - **Comp screen stays internal.** Use `minimum_base` to filter implausible employers; never write
   the figure into the table, an artifact, or any outbound text (Privacy Invariant).
 - **Use the helper.** Additions go through `careerrat companies --add … --write`. Do not edit
-  SQLite source tables or `config/sourced-scan.json` directly.
+  SQLite source tables or `config/sourced-scan.json` directly. **One-shot CLI runs only** — chat
+  sessions have no Bash and use the STEP 3 typed-block handoff instead; never narrate running
+  this command from a chat session.
 - **Quality gate.** A company must be a real employer with at least one current, dated, relevant
   role on a resolvable board to be proposed. An inferred board with no visible roles is borderline
   at best.

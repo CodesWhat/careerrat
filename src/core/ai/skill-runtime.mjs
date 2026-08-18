@@ -560,6 +560,8 @@ export async function runSkillStream({
         runtime: route.runtime,
         prompt,
         cwd: repoRoot,
+        skill,
+        repoRoot,
         env,
         signal,
         // ANTHROPIC_MODEL is also used for route-specific fast-model

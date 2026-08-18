@@ -15,11 +15,7 @@ import {
 import { InlineAlert } from "../components/Toast.jsx";
 import { WORKSPACE_ENTITY } from "../lib/api.js";
 import { DASHBOARD_PREVIEW } from "./dashboardPreviewData.js";
-import {
-  DeepIngestPriorityNudge,
-  DeepIngestToast,
-  useDeepIngestNudge,
-} from "./SetupReadinessCard.jsx";
+import { DeepIngestPriorityNudge, useDeepIngestNudge } from "./SetupReadinessCard.jsx";
 
 // The lower-grid panels show three rows and scroll the rest inside the card, so
 // they carry a real queue rather than a truncated top-N with nothing behind it.
@@ -60,10 +56,6 @@ export function DashboardPage() {
         <InlineAlert message={error.message} action={error.action} detail={error.detail} />
       ) : null}
       {loading ? <p className="dashboard-home__loading">Loading…</p> : null}
-
-      {deepIngest.needed && !deepIngest.dismissed ? (
-        <DeepIngestToast onDismiss={deepIngest.dismiss} />
-      ) : null}
 
       {dashboard ? (
         <>

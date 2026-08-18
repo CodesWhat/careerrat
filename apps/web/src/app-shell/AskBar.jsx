@@ -24,7 +24,9 @@ import { kindLabel } from "../lib/intake-labels.js";
 import { safeExternalHttpUrl } from "../lib/safeExternalUrl.js";
 import { useGlobalShortcut } from "../lib/useGlobalShortcut.js";
 import { ChatPanel } from "../onboarding/ChatPanel.jsx";
+import { DeepIngestDock, useDeepIngestNudge } from "../pages/SetupReadinessCard.jsx";
 import { ASK_BAR_REQUEST_EVENT } from "./ask-events.js";
+import { useDashboardSnapshot } from "./DashboardContext.jsx";
 import { useNeedsYouCount } from "./useNeedsYouCount.js";
 
 // AskBar — the W3 shell-docked ask bar (DESIGN-SPEC.md "Ask bar (component)").
@@ -292,6 +294,8 @@ export function AskBar() {
   const [decideError, setDecideError] = useState(null); // { id, message } | null
   const [needsYouOpen, setNeedsYouOpen] = useState(false);
   const needsYou = useNeedsYouCount();
+  const { setup } = useDashboardSnapshot();
+  const deepIngest = useDeepIngestNudge(setup);
 
   const placeholder = placeholderForRoute(location.pathname, searchParams);
   const openJobId = location.pathname === "/jobs" ? searchParams.get("open") : null;
@@ -773,6 +777,9 @@ export function AskBar() {
         onDragLeave={() => setDragActive(false)}
         onDrop={handleDrop}
       >
+        {deepIngest.needed && !deepIngest.dismissed ? (
+          <DeepIngestDock onDismiss={deepIngest.dismiss} />
+        ) : null}
         {turn ? (
           <AskBarTurn
             turn={turn}

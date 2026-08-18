@@ -77,10 +77,22 @@ vi.mock("react", async (importOriginal) => {
         hooks.pending.push({ index, effect, prevCleanup });
       }
     },
+    // useDeepIngestNudge (SetupReadinessCard.jsx) reads its shared dismissal
+    // via useSyncExternalStore against a module-level store. This harness
+    // never simulates real subscription-driven re-renders (every hook here
+    // relies on the test explicitly calling render() again after an action),
+    // so a plain getSnapshot() read is enough — the subscribe callback is
+    // accepted but never invoked.
+    useSyncExternalStore(_subscribe, getSnapshot) {
+      return getSnapshot();
+    },
   };
 });
 
-// react-router-dom — controllable per test via routerState.
+// react-router-dom — controllable per test via routerState. Link is a plain
+// stand-in (returns the same {type, props} shape expand()/visit() already
+// walk elsewhere in this file) — only needed now that the deep-ingest dock
+// (SetupReadinessCard.jsx's DeepIngestDock) renders one.
 const routerState = vi.hoisted(() => ({
   pathname: "/",
   searchParams: new URLSearchParams(),
@@ -88,6 +100,10 @@ const routerState = vi.hoisted(() => ({
 vi.mock("react-router-dom", () => ({
   useLocation: () => ({ pathname: routerState.pathname }),
   useSearchParams: () => [routerState.searchParams],
+  Link: ({ to, children, ...rest }) => ({
+    type: "a",
+    props: { ...rest, href: to, children },
+  }),
 }));
 
 // The global ⌘K/Ctrl+K hook — mocked wholesale so this file can assert on
@@ -146,6 +162,13 @@ vi.mock("../lib/api.js", () => api);
 
 const dashboardEvents = vi.hoisted(() => ({ emitDashboardChanged: vi.fn() }));
 vi.mock("../lib/dashboard-events.js", () => dashboardEvents);
+
+// DashboardContext — same wholesale-mock shape as DashboardStrategyPanel.test.jsx
+// (pages/DashboardStrategyPanel.test.jsx). Defaults to setup: null (deep-ingest
+// nudge hidden) in beforeEach so every pre-existing test is unaffected; the
+// deep-ingest describe block below overrides it per test.
+const dashboardContext = vi.hoisted(() => ({ useDashboardSnapshot: vi.fn() }));
+vi.mock("./DashboardContext.jsx", () => dashboardContext);
 
 import { AskBar } from "./AskBar.jsx";
 
@@ -397,6 +420,9 @@ beforeEach(() => {
   // runPendingEffects()) fetches this — default to "nothing pending" so
   // tests that don't care about the NEEDS-YOU chip aren't forced to stub it.
   api.listIntake.mockResolvedValue({ items: [] });
+  // Default: no setup snapshot yet, so deepIngestNeeded(null) is false and
+  // the dock stays hidden for every test that doesn't care about it.
+  dashboardContext.useDashboardSnapshot.mockReturnValue({ setup: null });
 });
 
 afterEach(() => {
@@ -4589,5 +4615,67 @@ describe("AskBar — Lane B: NEEDS-YOU chip", () => {
     dismiss.props.onClick();
     await flushMicrotasks();
     expect(api.dismissIntake).toHaveBeenCalledWith("n1");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. Deep-ingest dock (SetupReadinessCard.jsx's DeepIngestDock) — regression
+// coverage for the bug where this nudge rendered as a separate `.setup-toast`
+// fixed to the viewport, overlapping the ask bar's own fixed-bottom
+// positioning and hiding its CTA. It's now a normal child inside the exact
+// same `.ask-bar__shell` card as the input row, so it can never be a
+// separately-positioned overlay again.
+// ---------------------------------------------------------------------------
+
+describe("AskBar — deep-ingest dock", () => {
+  it("stays hidden when deep ingest is already complete", () => {
+    dashboardContext.useDashboardSnapshot.mockReturnValue({
+      setup: { readiness: { deep_ingest_complete: true } },
+    });
+    const tree = render();
+    expect(byClass(tree, "ask-bar__nudge")).toBeFalsy();
+  });
+
+  it("docks in-flow inside the ask-bar shell, ahead of the input row — not a portal/fixed overlay", () => {
+    dashboardContext.useDashboardSnapshot.mockReturnValue({
+      setup: { readiness: { deep_ingest_complete: false } },
+    });
+    const tree = render();
+
+    const shell = byClass(tree, "ask-bar__shell");
+    const nudge = byClass(tree, "ask-bar__nudge");
+    const row = byClass(tree, "ask-bar__row");
+
+    expect(nudge).toBeTruthy();
+    // Same layout container as the input, in normal document order — a
+    // direct child of `.ask-bar__shell`, stacked ahead of `.ask-bar__row`,
+    // rather than an independent fixed-position element elsewhere in the tree.
+    expect(shell.props.children).toContain(nudge);
+    expect(shell.props.children.indexOf(nudge)).toBeLessThan(shell.props.children.indexOf(row));
+    expect(textOf(nudge)).toContain("Go deeper");
+    expect(textOf(nudge)).toContain(
+      "Import your full history so tailoring and matches sharpen up."
+    );
+
+    const cta = byTag(nudge, "a");
+    expect(cta.props.href).toBe("/deep-ingest");
+    expect(textOf(cta)).toBe("Start deep ingest");
+  });
+
+  it("dismissing the dock hides it on the next render", () => {
+    dashboardContext.useDashboardSnapshot.mockReturnValue({
+      setup: { readiness: { deep_ingest_complete: false } },
+    });
+    let tree = render();
+    expect(byClass(tree, "ask-bar__nudge")).toBeTruthy();
+
+    const dismiss = visit(
+      tree,
+      (n) => n.props?.["aria-label"] === "Dismiss" && n.type === "button"
+    )[0];
+    dismiss.props.onClick();
+    tree = render();
+
+    expect(byClass(tree, "ask-bar__nudge")).toBeFalsy();
   });
 });
