@@ -311,15 +311,17 @@ export function appPersistEvaluation({ repoRoot, env, id, evaluation, projection
     const patch = { ...(projection || {}) };
     const resynced = isPreApplicationStatus(from);
     if (resynced) {
-      const gate = String(evaluation.gate || "review").toLowerCase();
+      const raw = String(evaluation.gate || "review").toLowerCase();
+      const gate = raw in EVALUATION_GATE_STATUS ? raw : "review";
       patch.gate = gate;
-      patch.status = EVALUATION_GATE_STATUS[gate] || "reviewed-hold";
+      patch.status = EVALUATION_GATE_STATUS[gate];
       patch.note = evaluationGateNote(evaluation);
     }
     const statusChanged = resynced && patch.status !== from;
     const updated = shallowMergeOneLevel(app, patch);
     putRow(db, "applications", id, updated);
     const meta = bumpMeta(db);
+    const fieldsActivity = statusChanged ? null : applicationFieldsActivity(patch);
     const event = statusChanged
       ? logActivityEvent(db, {
           type: "status_change",
@@ -330,8 +332,8 @@ export function appPersistEvaluation({ repoRoot, env, id, evaluation, projection
         })
       : logActivityEvent(db, {
           type: "status_change",
-          title: `${app.company || id} — ${applicationFieldsActivity(patch).title}`,
-          summary: applicationFieldsActivity(patch).summary,
+          title: `${app.company || id} — ${fieldsActivity.title}`,
+          summary: fieldsActivity.summary,
           refs: { applicationId: id, company: app.company, role: app.role },
           tags: ["operation:application:details-update"],
         });
