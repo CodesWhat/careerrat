@@ -16,6 +16,24 @@ CareerRat's canonical candidate state and local artifacts live on your machine:
 No CareerRat-operated server receives your data. The package is code + skills,
 not a service.
 
+## The packaged desktop app checks for updates
+
+The packaged macOS desktop app makes one outbound request the browser dev app
+and the npm CLI do not: once a day, it sends an unauthenticated `GET` to
+GitHub's public releases API (`api.github.com/repos/CodesWhat/careerrat/releases/latest`)
+to see whether a newer version has shipped. The request carries no candidate
+data, no account or device identifier, and no cookies, only a plain
+User-Agent header GitHub requires of every API caller.
+
+If a newer version is available, the app shows an in-app notice with a link
+to the GitHub release page. You download and install the update yourself; the
+app never downloads, installs, or auto-updates anything on its own. Turn this
+off any time from Settings.
+
+This check is desktop-only. It never runs in the browser dev app, and it has
+nothing to do with the npm CLI's own `careerrat update`, which continues to
+check the npm registry for CLI users.
+
 ## The careerrat.com website
 
 The careerrat.com marketing site and these docs pages use cookieless, anonymous

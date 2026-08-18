@@ -85,3 +85,24 @@ Auto-update readiness means this package is signed/notarized and the release
 process can later attach an updater safely. The current desktop app does not
 install updates itself; users still update the open-core CLI with
 `careerrat update`.
+
+## Update notifications
+
+The packaged app checks GitHub's public releases API
+(`api.github.com/repos/CodesWhat/careerrat/releases/latest`) shortly after
+launch and then once every 24 hours, on by default with an opt-out in
+Settings. This is notify-only: on finding a newer version it shows an in-app
+notice linking to the GitHub release page, the user downloads and installs
+the `.dmg` themselves, and nothing is downloaded, staged, or installed by the
+app. The request is unauthenticated and carries no candidate data.
+
+`apps/desktop/update-check.mjs` holds the pure comparison, resolver, and
+scheduling logic (see `tests/desktop-update-check.test.mjs`); `main.mjs` owns
+the actual fetch, the recurring timer, and reading/writing persisted state
+(last checked time, skipped version, enabled flag) as
+`desktop-update-check.json` under the same `CAREERRAT_HOME` data root
+described above, never inside the signed Resources tree. The renderer never
+talks to GitHub directly: `preload/update-check-preload.cjs` exposes a
+`window.careerratDesktopUpdate` bridge over Electron's contextBridge/IPC, so
+the notice only ever renders inside this Electron shell and never in the
+browser dev app.
