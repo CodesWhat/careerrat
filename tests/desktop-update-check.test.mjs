@@ -271,7 +271,7 @@ describe("fetchLatestRelease", () => {
     const release = await fetchLatestRelease({
       timeoutMs: 20,
       fetchImpl: (_url, { signal }) =>
-        new Promise((resolve, reject) => {
+        new Promise((_resolve, reject) => {
           signal.addEventListener("abort", () => reject(new Error("aborted")));
         }),
     });
