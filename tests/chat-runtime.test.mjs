@@ -1016,6 +1016,54 @@ test("createChatRuntime.startSession (installed route): runs turns through the s
   }
 });
 
+// P0 regression — a CHAT_RUNTIME_TOOLS session (research-company,
+// research-comp, company-health, research-boards) grants only WebSearch/
+// WebFetch/Skill, never Read, so it depends entirely on the Skill tool to
+// reach its own SKILL.md through the installed "claude" CLI. That only works
+// if runInstalledTurn threads `skill` + `repoRoot` through to
+// runInstalledRuntimeImpl on every turn, so installed-runtimes.mjs can
+// materialize an isolated cwd and swap --safe-mode for --setting-sources
+// project (see tests/installed-runtime.test.mjs for that half of the fix).
+// This test pins the wiring at the chat-runtime layer: both the session's
+// kickoff call and every follow-up postMessage() turn must carry them.
+test("createChatRuntime.startSession (installed route): threads skill + repoRoot into every runInstalledRuntimeImpl call so the CLI can materialize an isolated skill cwd", async () => {
+  const repoRoot = tempRepoWithSkill("research-company");
+  try {
+    const env = {};
+    selectInstalledRuntime({ repoRoot, env });
+    const calls = [];
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      runInstalledRuntimeImpl: async (args) => {
+        calls.push(args);
+        return { text: `Reply ${calls.length}`, usage: null, model: null };
+      },
+    });
+    try {
+      const { chatId } = await chatRuntime.startSession({ skill: "research-company" });
+      const events = subscribeCollect(chatRuntime, chatId);
+      const idleCount = () =>
+        events.filter((e) => e.type === "chat_state" && e.data.state === "idle").length;
+      await waitForPredicate(() => idleCount() >= 1);
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].skill, "research-company");
+      assert.equal(calls[0].repoRoot, repoRoot);
+      assert.deepEqual(calls[0].tools, [...CHAT_RUNTIME_TOOLS]);
+
+      chatRuntime.postMessage(chatId, "keep going");
+      await waitForPredicate(() => idleCount() >= 2);
+      assert.equal(calls.length, 2);
+      assert.equal(calls[1].skill, "research-company");
+      assert.equal(calls[1].repoRoot, repoRoot);
+    } finally {
+      chatRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
 test("createChatRuntime (installed route): refreshes canonical onboarding state before every turn", async () => {
   const repoRoot = tempRepoWithSkill("ingest-profile");
   try {

@@ -559,6 +559,8 @@ export function createChatRuntime({
         runtime: route.runtime,
         prompt,
         cwd: repoRoot,
+        skill: session.skill,
+        repoRoot,
         env,
         signal: turnController.signal,
         model:
