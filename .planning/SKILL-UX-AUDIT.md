@@ -157,6 +157,17 @@ generation. Text-only Apply now asks for the application link instead of offerin
 impossible site handoff, and natural requests such as “Prepare the application for …” route
 to the same visible, confirm-first application workflow.
 
+Packaged acceptance on 2026-08-17 exercised the pasted and attached apply chains again and
+found and fixed one gate/status defect on the attach-path dedup: re-evaluating a resolved
+existing application (the attach path matching onto an existing tracked row) refreshed the
+nested evaluation object but left the top-level gate/status/note stale, producing a
+restart-durable contradiction between the Jobs row's stage and its displayed fit. Root cause:
+the evaluation-persist write updated the fit projection but only ever set top-level
+gate/status/note at promotion time. Fix: a single-write-path `appPersistEvaluation` verb now
+derives gate/status/note from the new verdict in the same transaction as the projection write,
+using evaluate-job's documented CUT/KEEP/REVIEW mapping, and never regresses an application
+already past the gate. (PR #85)
+
 ## Original skill inventory
 
 Status meanings:
@@ -171,29 +182,29 @@ Status meanings:
 | Original skill | Current app path | Status | Build gate |
 | --- | --- | --- | --- |
 | `ingest-profile` | Chat-first onboarding, company thesis, editable file pane, and durable graduation into Ask | native | Run clean-home and packaged acceptance for transcript continuity, retry idempotency, restart, and a first search already in flight. |
-| `setup-searches` | Onboarding baseline plus Ask URL/query imports and source toggles, with Settings maintenance | native | Add packaged-install acceptance plus headed authenticated-off and ambiguous-name recovery coverage. |
-| `research-boards` | Ask starts or reopens an embedded guided board search with Add source/Skip review | native | Keep clean-home and packaged acceptance for new-source, duplicate-source, skip-all, and runtime-restart paths. |
-| `discover-companies` | Company-thesis onboarding plus native Ask proposals and Track/Skip decisions | native | Keep clean-home and packaged acceptance for explicit, weekly, targeting-change, and pending-review paths. |
+| `setup-searches` | Onboarding baseline plus Ask URL/query imports and source toggles, with Settings maintenance | native | Packaged-install acceptance passed 2026-08-17 (add/dedup/toggle/receipt/restart). A router-phrasing gap between the promised copy and the shipped add/toggle matchers is filed as a follow-up, not a blocker. Add headed authenticated-off and ambiguous-name recovery coverage. |
+| `research-boards` | Ask starts or reopens an embedded guided board search with Add source/Skip review | native | Session/skill-load path re-verified working 2026-08-17 (PR #84). Chat-text approval claimed writes it never made; the rendered Add source/Skip controls are the real write path (issue #90, skill-text fix in PR #93). Duplicate-source, skip-all, and restart-mid-session coverage still needs a re-run via the rendered controls. |
+| `discover-companies` | Company-thesis onboarding plus native Ask proposals and Track/Skip decisions | native | Explicit-ask, targeting-change, and pending-review-reopen legs passed 2026-08-17 (the reopen leg found and fixed a duplicate-batch defect, PR #91). Weekly-cadence refresh leg not yet re-exercised. |
 | `search-jobs` | Jobs search controls and typed `search.run` Ask preview | native | Preserve as the reference interaction contract while source coverage expands. |
 | `evaluate-job` | Application drawer plus Ask for URLs, pasted/attached JDs, open jobs, and named saved jobs | native | Preserve full-JD capture, typed verdict rendering, deterministic resolution, and ambiguity recovery in clean packed-install acceptance. |
 | `tailor-application` | Ask handles URL, pasted, attached, open-job, and named-job tailoring as a documents-only workflow | native | Preserve the separate tailoring/apply boundary, typed artifacts, and packed URL/paste/file-picker acceptance. |
 | `apply-job` | Ask, deterministic/public and rendered question capture, automatic Orca fill, supervised Submit boundary, confirmation evidence, and manual fallback | partial | Multi-step advancement now covers LinkedIn Easy Apply; extend it to other multi-step ATS flows, add a Playwright executor bridge, and give the extension provider honest not-available messaging (the extension is agent-driven, so a headless server-side bridge is out of scope); preserve verified-only Applied write-back. |
-| `track-outcomes` | Status controls, classified pasted updates, and natural Ask outcome reports | native | Keep ambiguity, missing-reference, and durable write-back coverage in clean-home and packaged acceptance. |
+| `track-outcomes` | Status controls, classified pasted updates, and natural Ask outcome reports | native | Packaged acceptance passed 2026-08-17 (unambiguous durable write, ambiguous non-mutating refusal). Keep ambiguity and missing-reference coverage in ongoing acceptance. |
 | `email-comms` | Draft, note, external-send controls, and natural Ask note-capture, draft, supervised-handoff, and sent-report flows with tiered send verification | native | Keep acceptance coverage; the in-browser compose executor remains future work behind the recorded entry criteria. |
-| `schedule-meeting` | Ask plus job-drawer shortcut reads the saved thread, availability, timezone, and busy blocks; returns a reviewable reply and tentative hold | native | Preserve no-conflict/no-draft behavior, explicit timezone, tentative ICS validity, full-thread artifact reads, and separate confirmed-time write-back in packaged acceptance. |
-| `interview-prep` | Dossier actions, featured interview state, and natural Ask prep with an immediate dossier link | native | Keep saved-JD, missing-JD, ambiguity, and dossier deep-link coverage in packaged acceptance. |
+| `schedule-meeting` | Ask plus job-drawer shortcut reads the saved thread, availability, timezone, and busy blocks; returns a reviewable reply and tentative hold | native | Packaged acceptance passed 2026-08-17 (conflict rejection, explicit-timezone tentative hold with valid ICS, draft-only write-back, independent `interview.schedule` write path, restart durability). A `smallFast`-tier relative-date-resolution flakiness (not a code defect) is recorded as a roadmap note. |
+| `interview-prep` | Dossier actions, featured interview state, and natural Ask prep with an immediate dossier link | native | Packaged acceptance passed 2026-08-17 (evidence-grounded dossier, deep link opens correct drawer, missing-JD and ambiguous-reference recovery copy). |
 | `calendar-sync` | Honest export links (labeled one-way), a Calendar page sync panel showing per-provider readiness from real consent state plus confirmed-write history, and a confirm-first Ask `calendar.record-write` receipt (manual self-reports ungated; automated records consent-gated via `mayRun`) | native | Keep the provenance split (automated requires calendar_sync consent, manual never does), the no-downgrade dedupe policy, honest status vocabulary (Ready/Needs setup/Off, never Connected), and matcher-ordering regression coverage. Live session-browser provider writes remain the skill's agent path. |
 | `ingest-mail` | Ask offers a native `mail.sync-request` entry ("check my email") that hands off to the skill with a receipt card showing per-source reality: Apple Mail listed only on a macOS host (local Mail read, no webmail consent needed), Gmail/Outlook with their `mail_access` `mayRun` state, each source's last-sweep watermark, and the count of email threads awaiting a reply; a non-macOS host with both webmail platforms off refuses toward Settings | native | Keep the receipt-not-sweep boundary (the intent writes nothing; all mail reading, the STEP 5 match/skip review, communications and watermark writes stay the skill's agent path), the email-channel scoping of the needs-reply count, the ingest platform list sourced from `MAIL_ACCESS_INGEST_PLATFORMS` (generic `webmail` stays verification-code-only), and matcher-ordering coverage. Single self-reported recruiter emails remain email-comms territory. |
 | `ingest-messages` | Ask offers a native `messages.sync-request` entry ("check my LinkedIn messages") that hands off to the skill with a receipt card showing each platform's `messaging` `mayRun` state, per-platform last-sweep watermarks, and a LinkedIn-scoped count of message threads awaiting a reply; every platform off refuses toward Settings since no ungated fallback source exists | native | Keep the receipt-not-sweep boundary (zero writes; session-browser reads, relevance classification, escalation, communications and watermark writes stay the skill's agent path), the LinkedIn-only scoping of the needs-reply count (Wellfound records under the shared `portal` channel, so counting it would overclaim — recorded gap, revisit if Wellfound gets its own channel), the platform list sourced from `CAPABILITIES.messaging.platforms`, and matcher-ordering coverage. |
 | `sync-status` | Ask checks per-platform `status_polling` consent and hands off portal reads (`status_sync_handoff` with eligible counts by URL host); a single portal-observed update records natively through the deterministic `status-map` normalizer, auto-applying only confident advances and proposing regress/low-confidence transitions on a review card whose Apply re-validates staleness | native | Keep the propose-before-write split (autoApplicable writes on the reporting click, everything else needs the Apply button), the track-outcomes vocabulary fold (screen/assessment → interview, reviewing → awaiting, round preserved), the stale-proposal refusal, and matcher-ordering coverage. Live portal reads and multi-row batch sweeps stay the skill's agent path; a Jobs-tab batch review queue is a recorded follow-up. |
 | `relationship-sourcing` | Ask resolves the target company, checks per-platform consent, and hands off to the relationship-sourcing agent/CLI run (`sourcing_handoff` with a durable auto-clearing CTA); candidate-found contacts record natively via `relationship.record-lead` into the same review pipeline; approve/reject stays in Network | native | Keep the consent split (source requests gated per platform, candidate self-reports never), the write-once CTA whose vocabulary the lead upsert auto-clears, the comp-figure guard on lead notes, and matcher-ordering regression coverage. Live platform browsing stays the skill's agent path; the Network target-row "Start sourcing" button is a recorded follow-up. |
-| `research-company` | Ask resolves natural company requests ("research Acme") to a fresh cached dossier or an embedded research session, cited and linked to the company | native | Keep clean-home and packaged acceptance for fresh-cache, stale-cache, ambiguous-name, and company-not-found paths. Headed isolated-home acceptance passed 2026-08-15; packaged acceptance and a live embedded session with a real AI runtime remain open. |
-| `research-comp` | Ask resolves natural comp requests ("market comp for a nurse in Denver") to a fresh cached benchmark or an embedded research session, cited to role and location | native | Keep clean-home and packaged acceptance for fresh-cache, stale-cache, and missing-role/location paths. Headed isolated-home acceptance passed 2026-08-15; packaged acceptance and a live embedded session with a real AI runtime remain open. |
+| `research-company` | Ask resolves natural company requests ("research Acme") to a fresh cached dossier or an embedded research session, cited and linked to the company | native | Headed isolated-home acceptance passed 2026-08-15. Packaged/live-AI acceptance on 2026-08-17 found and fixed the installed-CLI skill-load regression (`F-103`/PR #84); the session now reaches real research but is blocked by the installed-runtime's 120s timeout on long turns (PR #92 open). Re-run persistence/staleness/restart coverage once the timeout fix lands. |
+| `research-comp` | Ask resolves natural comp requests ("market comp for a nurse in Denver") to a fresh cached benchmark or an embedded research session, cited to role and location | native | Headed isolated-home acceptance passed 2026-08-15. Packaged/live-AI acceptance on 2026-08-17 found and fixed the installed-CLI skill-load regression (`F-103`/PR #84); missing-role/location recovery copy passed cleanly (deterministic, pre-session), but the full-benchmark session is blocked by the same installed-runtime timeout as research-company (PR #92 open). |
 | `optimize-linkedin` | Ask offers the profile pass through `linkedin.optimize-request` (never refuses: the lean pasted-profile path is always valid), reporting both capability states honestly (`profile_optimize` read+suggest, `profile_apply` write approved edits); the skill records its proposal batch via `careerrat data linkedin-proposals record`, and per-surface before/after cards approve or reject natively through `linkedin.proposal-decide` with stale-version refusal; approved fields stay staged locally until the skill's confirm-first STEP 5 write-back, and STEP 6 flips verified fields to applied via `mark-applied` | native | Keep the write boundary at the skill (deciding in-app stages a field, never writes to LinkedIn; `profile_apply` gates only the live write), the record-time comp guard (`LINKEDIN_PROPOSAL_COMP_LEAK`, all-or-nothing over proposed+rationale), the version-conflict refusal on stale decide clicks, and matcher-ordering regression coverage (literal "linkedin" required; bare "review my profile" stays off). Live profile reads and the per-field confirmed write-back stay the skill's agent path. |
-| `reevaluate-strategy` | Dashboard strategy surface (metrics, source/lane/fit-band performance, quiet pipeline, time-in-stage, cadence nudges, outcome-learning) plus a typed Ask `strategy.review` entry, freshness-gated against the same dashboard review-signal thresholds, with per-recommendation confirm-first `strategy.apply` and a `strategy.stamp` finish action | native | Headed isolated-home acceptance passed 2026-08-15 (freshness gate, confirm-first applies across the gate/comp/fit-band/learning/re-rank writers, no-AI degrade, stamp write-back). Packaged acceptance and a live-AI-runtime run remain. |
+| `reevaluate-strategy` | Dashboard strategy surface (metrics, source/lane/fit-band performance, quiet pipeline, time-in-stage, cadence nudges, outcome-learning) plus a typed Ask `strategy.review` entry, freshness-gated against the same dashboard review-signal thresholds, with per-recommendation confirm-first `strategy.apply` and a `strategy.stamp` finish action | native | Headed isolated-home acceptance passed 2026-08-15; packaged and live-AI-runtime acceptance passed 2026-08-17 (comp/re-rank/writing-style apply types remain live-AI-coverage gaps, not defects). Keep the capability-cookie dev-restart recovery gap (issue #86) tracked until fixed. |
 | `configure` | Settings pages plus native Ask `settings.explain`/`settings.apply`: an allow-listed settings overview card and confirm-first single-setting changes through the existing validated write paths | native | Keep the handler-enforced boundary (consent grants and high-tier capability enables stay in Settings; disable always allowed), the current_base allow-list plus leak backstop, and matcher-ordering regression coverage in acceptance. |
 | `answer-question` | Explicit application/screening questions route through Ask to grounded review cards and confirmed reusable-answer saves | native | Keep profile reuse, evidence-backed prose, NEEDS YOU, self-identification exclusion, tracked-answer append, and restart persistence in regression coverage. |
-| `company-health` | Ask resolves natural health requests ("is Acme a safe place to land") through the company reference resolver to a fresh cached rating or an embedded research session, with a validated `careerrat health record` write path | native | Keep clean-home and packaged acceptance for fresh-cache, stale-cache, ambiguous-name, and not-tracked-company paths. Headed isolated-home acceptance passed 2026-08-15; packaged acceptance and a live embedded session with a real AI runtime remain open. |
+| `company-health` | Ask resolves natural health requests ("is Acme a safe place to land") through the company reference resolver to a fresh cached rating or an embedded research session, with a validated `careerrat health record` write path | native | Headed isolated-home acceptance passed 2026-08-15; packaged and live-AI acceptance passed 2026-08-17 (full end-to-end pass, including the CLI write path, Jobs drawer badge, and Activity Pulse event; the browser Save-to-workspace click itself is schema-verified but not independently browser-confirmed due to a QA-environment flakiness). |
 | `report-issue` | External agent workflow plus native Ask `issue.report`/`issue.record-filed`: a codes-primary redacted draft from the most recent workspace error, reviewed in-card, filed by the user in their own browser via a prefilled GitHub link, with a validated `issue_filed` thread receipt | native | Keep the redaction pipeline (identifier scrub with fail-closed message drop, comp refusal and bare-figure flag, home-path normalization), the never-auto-file boundary, and the strict issue-URL shape check in regression coverage. |
 | `resume-extract` | Internal onboarding helper with visible streamed progress and retry | internal | Keep extraction progress, failure, retry, and manual fallback inside Paul's setup flow. |
 | `intake-extract` | Internal Universal Intake helper with visible progress and review | internal | Keep extraction progress, errors, and decisions inside the invoking Ask capture flow. |
@@ -258,6 +269,17 @@ same durable thread. Manual job sweeps start their deterministic search immediat
 then refresh company discovery every seven days or whenever the targeting thesis
 changes. Pending proposals reopen instead of spawning a duplicate batch.
 
+Headed acceptance on 2026-08-17 found and fixed one leg of this: asking to discover
+companies again while a proposal batch was still awaiting review created a duplicate
+batch row every time, because `company.discover` called the proposal-creation path
+unconditionally instead of reusing `search.run`'s existing reopen guard. Fix:
+`company.discover` now routes through the same shared reopen guard, returning the
+pending batch as-is (`state: needs-review`) instead of minting a sibling row, while
+preserving the existing "changed targeting creates a fresh batch" and "explicit ask
+on a current cadence creates a batch" semantics. (PR #91) Three of the four acceptance
+legs (explicit ask, targeting-change refresh, and now the reopen-not-duplicate path)
+are confirmed; the weekly-cadence refresh leg was not re-exercised in this pass.
+
 ## Recurring job-board discovery
 
 Board research is available after onboarding through ordinary Ask requests such
@@ -268,6 +290,26 @@ recorded in the durable workspace thread, starts or reopens the visible
 configured-source dedup set, and embeds the live progress directly in Ask. Every
 proposed source still requires Add source or Skip. Approved sources write through
 the validated source API, then the receipt links back to Jobs and Settings.
+
+Re-verification on 2026-08-17 against the PR #84 skill-load fix confirmed the
+session itself works correctly (correct argv/isolation, a real screened-boards
+result with well-formed `source_proposal`/`discovery_complete` typed blocks), but
+found a separate, genuine persistence defect: replying to approve specific
+proposals produced an assistant message claiming success ("Locked in ... go on
+the source list") while nothing was actually written. `careerrat data status`,
+`tracker.json`'s `sources` array, and Activity Pulse were all unchanged before and
+after. Root cause (corrected during the fix, PR #93): the web-surface write path
+does exist. The rendered `source_proposal` blocks carry real Add source/Skip
+controls that persist through `POST /api/boards/add` into the same source-config
+write path the CLI uses. The defect is in the skill text: STEP 4 had no chat-mode
+stop before its CLI add loop, so a chat session with no Bash could narrate
+`careerrat searches --add-url` and claim persistence for an in-chat "approve"
+reply that writes nothing. Only the rendered controls write; typed approval text
+does not. Filed as issue #90, fixed in PR #93 by gating STEP 4 to external-agent
+runs and pinning honest chat-mode output values (the same latent gap in
+discover-companies was fixed in the same PR, issue #94). Per-source
+duplicate-no-op, skip-all, and restart-mid-session-resume still need a re-run
+using the rendered Add source controls rather than chat-text approval.
 
 ## Natural source setup
 
@@ -285,7 +327,28 @@ Headed repository-build acceptance passed on 2026-08-14. A fresh zero-record DB
 imported and enabled a Greenhouse board through Ask with no console errors; an
 isolated populated DB also passed exact duplicate no-op, visible-label toggle,
 query add/dedup, continuous follow-up typing, and durable DB/UI receipt checks.
-Packaged-install acceptance remains open.
+
+Packaged-install acceptance passed on 2026-08-17. A clean `npm install -g` of the
+0.8.0 tarball into an isolated home, `CAREERRAT_HOME` pointed at a fresh empty
+directory, seeded a candidate to search-ready through the `careerrat data candidate`
+CLI seams and reached the onboarding graduation gate through one quick-start call.
+Pasting a job-board URL through Ask ("add this job board <url>") produced the typed
+add preview and receipt with Search jobs/Manage sources links; resubmitting the exact
+URL returned the documented no-op ("Nothing changed") confirmed against
+`careerrat searches --json`; adding a keyword search and disabling a named source
+both returned their exact receipt copy and held after a full server kill/restart on
+the same `CAREERRAT_HOME`, with no console errors on Settings post-restart.
+
+One phrasing gap was found and filed as a follow-up, not a blocker: the
+deterministic `source.add`/`source.set-enabled` matchers require a word-bounded
+"board"/"source" token separate from the URL (`looksLikeSourceAdd`) and only accept
+"enable"/"disable" (`sourceToggleFromText`), so a bare "add <url>" or "turn off
+<name>" phrasing falls through to the free-text AI-answer endpoint instead of the
+deterministic path. Under `--no-agent` (no AI runtime configured) that endpoint
+500s. This is a real, reproducible gap between the promised "Ask recognizes explicit
+requests to add a pasted job-board URL" phrasing and the shipped regex, not a
+regression in the deterministic add/dedup/toggle/receipt/restart behavior itself,
+which held under every phrasing actually specced.
 
 ## Natural outcomes, recruiter threads, and interview prep
 
@@ -294,6 +357,16 @@ Ask now treats explicit user reports such as "I applied to the Acme role" and
 It resolves only against saved applications, refuses ambiguous company-only
 references with candidate-safe choices, and leaves every possible match untouched
 until the user is specific.
+
+Packaged-install acceptance passed on 2026-08-17, replicating the 2026-08-15
+repo-checkout pass inside a packaged `CAREERRAT_HOME`. An unambiguous outcome
+report ("I got rejected by Solstice Analytics.") matched the typed
+`outcome.record-request` preview, wrote the rejected status and the verbatim
+report text as the status note, and the same state confirmed in the Jobs drawer
+badge and the dashboard funnel. An ambiguous report against two same-company
+applications ("I got rejected by Nimbus Robotics.") returned the candidate-safe
+refusal naming both saved roles and made zero writes to either row, confirmed
+against the canonical tracker export.
 
 Recruiter draft requests and user-reported sends resolve natural company, role, or
 subject references to the existing communication workflow. Drafting uses the
@@ -325,9 +398,21 @@ against real webmail compose DOMs, per-account compose/Sent verification, and a
 distinct Sent-folder read consent capability separate from today's
 verification-code-only `mail_access`) are recorded for when that work resumes.
 Recipient provenance, previously an open blocker, is now solved by the same
-resolver the handoff uses. Headed acceptance for the note-capture, handoff, and
-verification-tier changes is pending; a separate acceptance pass is in progress
-and its results are not yet recorded here.
+resolver the handoff uses.
+
+Packaged acceptance for the note-capture, handoff, and verification-tier changes
+passed on 2026-08-17 against a real running server (`POST /api/workspace/intent`
+cross-checked against source and the live SQLite DB). Note capture returned a
+durable receipt and landed a `direction:"note"` message row; an empty note and an
+unresolved thread reference each returned their exact recovery copy with no write.
+The ready-case handoff returned the prefilled draft, mailto/Gmail/Outlook compose
+links, and left the thread unsent until the explicit "I sent this" step; the
+no-recipient case returned `to:null` with the documented non-actionable copy. "I
+sent this" recorded `recordingMode:"external_report"` and the exact
+`commMarkSent` supervised-tier activity text. `communication.send` correctly
+refused both a connected-executor gap (`COMMUNICATION_EXECUTOR_UNAVAILABLE`) and a
+non-email channel (`COMMUNICATION_CHANNEL_UNSUPPORTED`), with the channel check
+running before the draft/executor checks.
 
 Natural interview-prep requests resolve only against applications with interview
 context, build the evidence-grounded dossier from the saved JD, and return an
@@ -337,6 +422,35 @@ Codex recruiter draft followed by an external-send report, dossier creation, and
 `/app/jobs?dossier=<application-id>` deep link. Canonical SQLite exports confirmed
 the same status, message history, cleared draft, untouched ambiguous rows, and
 persisted dossier shown in the UI.
+
+Packaged-install acceptance passed on 2026-08-17. The happy path built an
+evidence-grounded dossier from a saved JD, returned the deep link in `nextActions`,
+and opening it showed the built "Interview Packet" content in the drawer, not a
+generic or empty one. A missing-JD reference returned the exact
+`MISSING_JOB_BODY` refusal copy, and an ambiguous reference matching two saved
+interview-stage rows at the same company returned the exact `JOB_REFERENCE_AMBIGUOUS`
+copy listing both candidates by name.
+
+`schedule-meeting`'s packaged leg also passed on 2026-08-17. A proposed time that
+overlapped a saved busy block returned the exact conflict-rejection copy; an
+explicit-timezone reply outside the busy block returned a `tentative_hold` plan
+whose ICS parsed as a valid `VCALENDAR`/`VEVENT` with `STATUS:TENTATIVE`, and the
+thread's draft/status updated without sending or marking anything booked. The
+separate `interview.schedule` write (the job-drawer "Record a confirmed time"
+expander) confirmed independent from the Ask-driven `scheduling.prepare` flow: one
+writes `applications.interviewAt` directly, the other only ever touches
+`communications.draft`, and neither call's write leaked into the other. Both the
+interview timestamp and the drafted-status thread survived a full server
+kill/restart on the same `CAREERRAT_HOME`. One AI-tier flakiness observation, not a
+functional defect: repeated identical-intent calls with a no-year weekday phrasing
+("Wednesday August 26 at 2pm Eastern") produced a false-positive busy-block
+conflict in roughly 4 of 6 attempts, only consistently resolving once the year was
+made explicit. The deterministic `overlapsBusy` guardrail itself behaved correctly
+against whatever slot the `smallFast`-tier model produced each time; the
+inconsistency is in the model's own relative-date resolution, upstream of the
+guardrail. Worth a roadmap note: a deterministic date-resolution pass (or an
+explicit weekday-to-date table in the prompt) ahead of the LLM call, so
+accepted-slot parsing doesn't depend on the model's own date arithmetic.
 
 ## Standalone tailoring
 
@@ -424,8 +538,42 @@ NO_AI_ROUTE message with no stack trace; ambiguity, not-tracked, and
 missing-input cases returned their exact codes and statuses; `research.record`
 persisted a real artifact and refused a `current_base` payload; and every prior
 thread message, rating, and artifact survived a full server restart. No 5xx and
-no console errors were observed. Packaged/clean-install acceptance and a live
-embedded research session with a real AI runtime remain open for these rows.
+no console errors were observed.
+
+Packaged plus live embedded-AI acceptance on 2026-08-17 found a real regression in
+the installed-CLI chat path: every embedded session (research-company, research-comp,
+company-health) opened by stating it could not load the matching packaged skill,
+then free-lanced a well-cited brief via WebSearch/WebFetch alone instead of
+following the skill's confirm-first/citation-hygiene/save contract, and every
+session ended admitting it had no file-write access to save the result. Content
+quality itself held up across all three (real citations, correct current-base
+non-leak, correct decline/recovery copy), but no `company_research_result` /
+`comp_benchmark_result` / `company_health_result` block ever rendered, so
+Save-to-workspace and `research.record`/`company.health-record` never fired from
+that path for any of the three skills. Root cause: `--safe-mode` on the
+installed-CLI chat invocation isolated project-scoped `.claude/skills/` from the
+spawned session, a regression against this section's own architecture description
+(see `F-103`, fixed and live-retested via PR #84). company-health's separate CLI
+write path (`careerrat health record` dry-run → `--write`) was unaffected and
+passed cleanly in the same pass: validation guards, the Jobs drawer badge, and the
+Activity Pulse event all held.
+
+Re-verification against the PR #84 fix branch on 2026-08-17 confirmed the skill
+now loads in every session (no more "isn't installed here"), with the isolated
+temp cwd containing only the one matching skill and nothing else from the project.
+company-health reached a full end-to-end pass: a schema-valid result block on the
+first turn, a correct `fitDelta` withheld until a cross-cut is confirmed, no
+`current_base` mention, and both the CLI write path and the chat write path's
+schema/shape verified equivalent (the literal Save-to-workspace click could not be
+independently completed due to a QA-environment browser-tab reload flakiness, not
+new evidence against the write path). research-company and research-comp now
+reach real six-axis research instead of failing immediately, but are separately
+blocked by the installed-runtime's 120s default timeout on long research turns,
+observed directly via SSE ("Installed AI request timed out.") on two consecutive
+full-research turns and one full-benchmark turn; a fix widening the chat-session
+timeout to 9 minutes is open as PR #92. Packaged/clean-install acceptance for
+company-health is closed; research-company and research-comp remain open pending
+the timeout fix landing and a follow-up re-run.
 
 ## Strategy review in Ask
 
@@ -477,8 +625,59 @@ clearing the dashboard nudge, freshness fresh/force, restart durability, and a
 clean 5xx/stack-trace sweep. The one finding (comp-target/floor applies returned
 the raw config-patch result, leaking `current_base` into the response and durable
 thread) is fixed: apply writers now return scoped summaries only, with a
-serialization regression test. Packaged acceptance and a live run against a real
-AI runtime remain open for this row.
+serialization regression test.
+
+Packaged acceptance (2026-08-17, clean packaged npm install, isolated
+`CAREERRAT_HOME`, no-AI installed runtime) re-ran the full 2026-08-15 isolated-home
+matrix against the packaged tarball. Preview routing, the no-AI manual degrade, the
+`strategy.stamp` finish action and dashboard-nudge clear, the freshness gate
+(fresh/force/nothing-new), and restart durability (stamp/snapshot/nudge state
+bit-identical before and after a kill/restart) all held with a clean 5xx/console
+sweep. The apply-type matrix for gate/comp/fit-band/learning/re-rank/writing-style
+could not be re-exercised here, since the no-AI degrade never populates
+`recommendations`, and that coverage is inherently a live-AI-only surface, a
+code-level fact, not a regression. **Verdict: PASS**, packaged install parity confirmed with
+the 2026-08-15 isolated-home pass.
+
+Live-AI acceptance (2026-08-17, clean packaged npm install plus a live Claude Code
+CLI runtime) seeded an identical returning workspace and triggered `strategy.review`
+from a fresh dashboard nudge. The bounded non-agentic AI call was answered by the
+real Claude Code CLI three separate times, each validating against the review
+schema: headline, 5-7 grounded findings citing exact funnel numbers, and 4-7 typed
+recommendation cards rendering with type-appropriate Apply buttons (manual-type
+cards correctly show no Apply button). A `cut-signal` gate apply and a `keep-signal`
+gate apply, including an idempotent re-apply of an already-listed signal, both
+persisted correctly with no duplicate write and a clean scoped confirmation card, no
+raw model JSON or `current_base`-style leak. `strategy.stamp` on a live-AI-drafted
+review recorded correctly and cleared the dashboard nudge, durable across a full
+restart. Comp-target/floor, re-rank, and writing-style recommendation types did not
+appear in any of the three live-AI runs against this demo dataset (the model's
+proposals were entirely data-driven, matching what the seeded funnel actually
+supports), a scope gap in evidence, not a failure; the no-AI leg's structural
+matrix for those types was already validated against source and fixture data.
+
+One new finding, not fixed per this pass's scope: a fresh per-process capability
+token minted on every `tracker:dev` restart is not re-synced to an open browser tab
+until a full bootstrap navigation. If the dev server's file watcher restarts the
+process mid-session (e.g. a concurrent `careerrat data ...` CLI write against the
+same `CAREERRAT_HOME` while a tab is open), the next state-changing call 401s with
+"local browser capability is missing or invalid," and the frontend has no recovery
+path. It collapses the entire in-progress review card to a bare error line,
+discarding the other pending recommendations and the Finish-review button.
+Reproduced twice, both immediately following a concurrent CLI write; a full page
+reload recovers cleanly. Filed as issue #86; a graceful-401-recovery fix (detect the
+401, re-fetch bootstrap, replay) is recommended over silently discarding
+user-facing state. A secondary, same-root-cause observation: the same stale-cookie
+401 also briefly appeared on plain dashboard background polling in the same window.
+Per-recommendation apply behavior (clicking any single Apply or Finish review
+replaces the entire review card with one confirmation/stamp result, so applying
+every recommendation type from one live review isn't achievable in a single pass)
+was confirmed consistent across three separate applies and reads as intentional
+per-turn confirm-first design, not a defect, flagged for awareness only.
+**Verdict: PASS with findings.** The core live-AI path is solid; the
+capability-cookie/dev-restart interaction (issue #86) and the comp/re-rank/
+writing-style live-coverage gap are documented above, not fixed, per this pass's
+scope.
 
 ## Deterministic source parity
 
@@ -516,6 +715,19 @@ hydration. The packed CLI exposes the pinned 74-provider manifest and Settings
 successfully persisted an enabled RemoteOK source with no HTTP or console errors.
 
 ## Release gate
+
+Packaged-distribution re-verification on 2026-08-17 (main @ `264b9d17`) confirmed the gate still
+holds: the tarball's 545->559 file-count growth since the `F-102` baseline is fully explained by
+named, already-shipped feature commits (apply-driver/Playwright executor, company-health,
+LinkedIn proposals, report-issue, comms recipient, strategy review), a clean isolated-home global
+install produced zero lifecycle warnings, and the full deterministic first-day flow
+(`--version`/`--help`/`init`/`doctor`/dashboard boot) behaved exactly as documented. Procedure
+note for future packaged-acceptance runs: isolation is keyed off `CAREERRAT_HOME`, not the bare
+`HOME` env var (`resolveUserPaths` in `src/core/paths/workspace.mjs`). A run that sets only `HOME`
+and an `npm_config_prefix` pointed inside that fake home stays contained only because both happen
+to live under the same tree; a prefix outside the fake home (e.g. a system-wide global install)
+would not be isolated by `HOME` alone. Future packaged-acceptance runs should set `CAREERRAT_HOME`
+explicitly rather than relying on `HOME` alone.
 
 This audit closes only when:
 

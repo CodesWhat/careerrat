@@ -4,7 +4,7 @@ Started: 2026-08-13
 Reopened: 2026-08-14
 Current tranche completed: 2026-08-15
 
-Gate result: all 102 recorded findings are fixed and live-retested. The clean-home onboarding, Ask
+Gate result: all 103 recorded findings are fixed and live-retested. The clean-home onboarding, Ask
 rate/apply, deterministic-provider, npm install, update/restart, and native Electron checks pass.
 The broader native skill-to-screen build gate remains tracked separately in
 `SKILL-UX-AUDIT.md`.
@@ -1885,3 +1885,37 @@ Test homes:
   deterministic draft and confirmed save against a fresh candidate home, reopened the database to
   verify the exact default and both durable thread records, and verified that the shipped UI bundle
   contains the review card.
+
+### `F-103` Installed-CLI embedded chat sessions cannot load their own skill
+
+- Status: `FIXED`
+- Severity: P1, every embedded chat session (research-company, research-comp, company-health,
+  research-boards, discover-companies) started under an installed CLI runtime could produce
+  content but could never emit the typed result block the app needs to save it.
+- Reproduction: select the installed Claude Code CLI as the embedded runtime, then ask Ask to
+  research a company, benchmark comp, or check company health. Each session opens by stating it
+  cannot load the matching packaged skill ("I couldn't load the research-company skill from this
+  session's registry") and ends by admitting it has no file-write access to save the result.
+- Root cause: `buildInstalledRuntimeInvocation` passed `--safe-mode` on every installed-CLI chat
+  invocation, which isolates project-scoped `.claude/skills/` from the spawned session. The
+  Agent-SDK/BYOK path has an explicit `Options.skills` + `settingSources:['project']` mechanism to
+  load skills despite similar isolation; the installed-CLI path had no equivalent, so it silently
+  degraded to free-lanced web research instead of erroring loudly or falling back.
+- Fix: for Read-less `CHAT_RUNTIME_TOOLS` sessions, materialize an app-owned temp cwd containing
+  only a symlink (copy fallback) to the one matching session skill, and swap `--safe-mode` for
+  `--setting-sources project`. One-shot runtimes that retain `Read` keep `--safe-mode` and
+  `cwd=repoRoot` byte-identical. (PR #84)
+- Regression: installed-runtime, chat-runtime, and skill-runtime suites cover the isolated cwd,
+  the spawn-level argv change, and byte-identical one-shot-runtime behavior.
+- Live retest: PASS on 2026-08-17 against the fix branch. Re-ran research-company, research-comp,
+  company-health, and research-boards against a live Claude Code CLI runtime; every session's
+  spawned argv showed `--setting-sources project` in place of `--safe-mode`, and the isolated cwd
+  contained only the one matching skill symlink. No session opened with "isn't installed here"
+  again. company-health reached a full end-to-end pass (schema-valid result block, CLI and
+  chat-equivalent write paths, Jobs drawer badge, Activity Pulse event, restart-durable).
+  research-company and research-comp now reach real six-axis WebSearch/WebFetch research but are
+  separately blocked by the installed-runtime's 120s timeout on long research turns (fix open as
+  PR #92), and research-boards' skill text let chat turns claim CLI writes they cannot make;
+  the rendered Add source/Skip controls are the real, already-wired write path
+  (filed as issue #90, skill-text fix in PR #93). Both are their own findings, not
+  this regression.
