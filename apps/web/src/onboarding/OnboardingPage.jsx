@@ -97,7 +97,13 @@ export function OnboardingPage() {
   if (phase === "loading") {
     return (
       <div className="onboarding-app">
-        <div className="onboarding-loading">Checking this computer…</div>
+        <div className="onboarding-loading">
+          <span className="onboarding-loading__icon" aria-hidden="true">
+            🖥️
+          </span>
+          <p className="onboarding-loading__text">Checking this computer…</p>
+          <p className="onboarding-loading__hint">This only takes a moment.</p>
+        </div>
       </div>
     );
   }
