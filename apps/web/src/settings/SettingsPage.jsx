@@ -50,6 +50,7 @@ import {
   buildAutomationModePatch,
   buildAutomationSessionPatch,
 } from "./AutomationControls.jsx";
+import { DesktopUpdateSettings } from "./DesktopUpdateSettings.jsx";
 import { mapErrors } from "./error-map.js";
 import { InstalledRuntimeChoices } from "./InstalledRuntimeChoices.jsx";
 import { SourceMaintenance } from "./SourceMaintenance.jsx";
@@ -1544,6 +1545,9 @@ export function SettingsPage() {
           </Button>
         </div>
       </Card>
+
+      {/* Desktop app: renders nothing outside the Electron shell. */}
+      <DesktopUpdateSettings />
     </PageScaffold>
   );
 }
