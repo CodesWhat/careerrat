@@ -154,7 +154,21 @@ export function readUpdateNotice(pathCtx, currentVersion) {
 
 // Refresh the cache in a detached child if it's missing or stale. Returns immediately;
 // the result lands for the NEXT invocation (the standard update-notifier pattern).
+//
+// Opt-out via CAREERRAT_NO_UPDATE_CHECK: the detached child is a real npm-registry
+// network call that writes into CAREERRAT_HOME on its own schedule, unsynchronized
+// with the parent process's exit. Real installs want that (the cache lands before the
+// user's next invocation); a test pointing CAREERRAT_HOME at a tempdir it deletes
+// moments later does not — the write can land mid-delete and throw ENOTEMPTY on a
+// directory that has nothing to do with the thing under test.
 export function refreshUpdateCacheInBackground(pathCtx, root) {
+  // Read the opt-out from the same place everything else in this function reads
+  // its environment. readUpdateCache(pathCtx) resolves CAREERRAT_HOME through
+  // pathCtx.env, so a guard that consulted process.env directly would disagree
+  // with it whenever a caller passed an explicit env, which is exactly what the
+  // tests do.
+  const env = pathCtx?.env ?? process.env;
+  if (String(env.CAREERRAT_NO_UPDATE_CHECK || "").trim()) return;
   const cache = readUpdateCache(pathCtx);
   const fresh = cache?.checkedAtMs && Date.now() - cache.checkedAtMs < CACHE_TTL_MS;
   if (fresh) return;

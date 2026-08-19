@@ -36,3 +36,77 @@ test("refreshUpdateCacheInBackground forces Electron's detached child into Node 
     rmSync(repoRoot, { recursive: true, force: true });
   }
 });
+
+// The detached child writes into CAREERRAT_HOME on its own schedule, seconds
+// after the parent process has already exited. That is correct for a real
+// install: the cache lands in time for the user's next command. It is wrong for
+// a test that points CAREERRAT_HOME at a tempdir and deletes it as soon as
+// spawnSync returns, because the write can land mid-delete and throw ENOTEMPTY
+// on a directory unrelated to whatever was being asserted.
+//
+// Measured before the opt-out existed: a `careerrat doctor` run against a fresh
+// temp home had 0 files at exit and 1 file (internal/update-check.json) seven
+// seconds later.
+test("refreshUpdateCacheInBackground spawns nothing when CAREERRAT_NO_UPDATE_CHECK is set", async () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-update-optout-"));
+  const resultPath = join(repoRoot, "child-ran.txt");
+
+  try {
+    mkdirSync(join(repoRoot, "scripts"), { recursive: true });
+    writeFileSync(
+      join(repoRoot, "scripts/update-check.mjs"),
+      `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(resultPath)}, "ran");\n`
+    );
+
+    const pathCtx = {
+      repoRoot,
+      env: {
+        ...process.env,
+        CAREERRAT_HOME: join(repoRoot, "careerrat-home"),
+        CAREERRAT_NO_UPDATE_CHECK: "1",
+      },
+    };
+    refreshUpdateCacheInBackground(pathCtx, repoRoot);
+
+    // Give a child that should not exist ample time to prove otherwise. The
+    // sibling test above shows the real child lands well inside this window.
+    await waitForFile(resultPath, 2_000);
+    assert.equal(
+      existsSync(resultPath),
+      false,
+      "the detached update child should not have spawned"
+    );
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("refreshUpdateCacheInBackground still spawns when the opt-out is absent or empty", async () => {
+  for (const optOut of [undefined, "", "   "]) {
+    const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-update-onvalue-"));
+    const resultPath = join(repoRoot, "child-ran.txt");
+
+    try {
+      mkdirSync(join(repoRoot, "scripts"), { recursive: true });
+      writeFileSync(
+        join(repoRoot, "scripts/update-check.mjs"),
+        `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(resultPath)}, "ran");\n`
+      );
+
+      const env = { ...process.env, CAREERRAT_HOME: join(repoRoot, "careerrat-home") };
+      if (optOut === undefined) delete env.CAREERRAT_NO_UPDATE_CHECK;
+      else env.CAREERRAT_NO_UPDATE_CHECK = optOut;
+
+      refreshUpdateCacheInBackground({ repoRoot, env }, repoRoot);
+
+      await waitForFile(resultPath);
+      assert.equal(
+        existsSync(resultPath),
+        true,
+        `the update child must still run for opt-out value ${JSON.stringify(optOut)}`
+      );
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  }
+});

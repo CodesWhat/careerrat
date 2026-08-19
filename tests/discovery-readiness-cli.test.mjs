@@ -24,7 +24,13 @@ function runCli(script, args, home) {
 function runCareerRat(args, home) {
   return spawnSync(process.execPath, ["bin/careerrat.mjs", ...args], {
     cwd: ROOT,
-    env: { ...process.env, CAREERRAT_HOME: home },
+    // CAREERRAT_NO_UPDATE_CHECK: bin/careerrat.mjs otherwise fires a detached
+    // background npm-registry check on every invocation. That child writes into
+    // CAREERRAT_HOME on its own schedule, well after this spawnSync returns, and
+    // races the test's own `rmSync(home, { recursive: true, force: true })`
+    // cleanup — an ENOTEMPTY on a tempdir that has nothing to do with the
+    // assertion under test. See src/core/update/update-core.mjs.
+    env: { ...process.env, CAREERRAT_HOME: home, CAREERRAT_NO_UPDATE_CHECK: "1" },
     encoding: "utf8",
   });
 }
