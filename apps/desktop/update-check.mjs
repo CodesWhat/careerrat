@@ -21,7 +21,7 @@ export const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 // A hung connection must never wedge the app. Abort and treat it as a
 // silent failure past this point.
-export const REQUEST_TIMEOUT_MS = 10000;
+const REQUEST_TIMEOUT_MS = 10000;
 
 export const DEFAULT_STATE = Object.freeze({
   enabled: true,
