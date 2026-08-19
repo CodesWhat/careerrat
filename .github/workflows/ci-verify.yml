@@ -1,13 +1,26 @@
 name: ci
 
-# Green PR gate. structure-guards runs a fast fail-early subset — the checks that
-# protect the things unit tests can't reach: the dashboard client <script> must
-# parse as valid JS, the dashboard CSS must be well-formed, every shipped YAML
-# config must parse, and release versions stay in sync. tests runs the full
-# `npm test` suite so the whole thing actually gates PRs, not just this subset.
+# Two jobs, and only one of them currently gates a merge.
 #
-# This job's name ("structure-guards") is the status-check context referenced by the
-# "Main branch protection" ruleset's required_status_checks rule.
+# structure-guards runs a fast fail-early subset: the checks that protect the
+# things unit tests can't reach. The dashboard client <script> must parse as
+# valid JS, the dashboard CSS must be well-formed, every shipped YAML config
+# must parse, and release versions stay in sync. Its job name
+# ("structure-guards") is one of the status-check contexts listed in the "Main
+# branch protection" ruleset's required_status_checks rule.
+#
+# tests runs the full `npm test` suite. It is NOT in that rule's context list,
+# so a red `tests` run does not block a merge today: it is a visible signal,
+# not a gate. Making it required is the intended end state, but it should not
+# happen from a branch whose own fix for the flaky SSE watcher test has not
+# landed on main yet, or every PR in flight starts failing on a timing bug
+# rather than on its own code. Sequence is: land this, then add `tests` to
+# BOTH scripts/protect-main.sh's DESIRED block and the live ruleset, which
+# that script's drift guard will then hold in sync.
+#
+# Do not describe this job as gating merges until that has actually been done.
+# A comment claiming a gate that isn't there is the same class of problem
+# protect-main.sh exists to catch, just written in prose instead of JSON.
 
 on:
   pull_request:
