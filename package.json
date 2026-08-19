@@ -99,6 +99,7 @@
     "desktop": "npm --workspace apps/desktop run dev",
     "desktop:fresh": "CAREERRAT_HOME=.careerrat-fresh npm run desktop",
     "desktop:dist": "npm --workspace apps/desktop run dist",
+    "desktop:release": "npm --workspace apps/desktop run release",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "knip": "knip",
