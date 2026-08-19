@@ -745,16 +745,11 @@ test("previewWorkspaceIntent: 'what should this role pay' resolves through the o
 
 test("previewWorkspaceIntent: pay-verb phrasings map to research.comp across role/job/position vocabulary", () => {
   const repoRoot = tempRepo();
-  // The last two carry a trailing location/scope qualifier. The matcher anchors
-  // its tail so a sentence can't merely START this way and get swallowed, and
-  // these are the phrasings that anchor has to keep letting through.
   for (const text of [
     "what does this job pay",
     "what would this position pay",
     "what does this job earn",
     "what should the role make",
-    "what should this role pay in San Francisco?",
-    "what would this position pay at a Series B",
   ]) {
     const result = previewWorkspaceIntent({ text, repoRoot, env: {} });
     assert.deepEqual(
@@ -770,6 +765,45 @@ test("previewWorkspaceIntent: pay-verb phrasings map to research.comp across rol
       `expected "${text}" to map to research.comp`
     );
   }
+});
+
+test("previewWorkspaceIntent: a trailing 'in <location>' rides along as an explicit override", () => {
+  const repoRoot = tempRepo();
+
+  // The executor fills location from the job row only when the input didn't
+  // carry one, so passing it here is what makes the user's city win over the
+  // job's. Matching the sentence and then dropping "in San Francisco" would
+  // benchmark the wrong market and look authoritative doing it.
+  assert.deepEqual(
+    previewWorkspaceIntent({
+      text: "what should this role pay in San Francisco?",
+      context: { pathname: "/jobs", jobId: "app-acme" },
+      repoRoot,
+      env: {},
+    }).action,
+    {
+      label: "Research market comp",
+      intent: {
+        type: "research.comp",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { location: "San Francisco", jobId: "app-acme" },
+      },
+    }
+  );
+
+  // No open job: the location still rides along, and the executor's existing
+  // RESEARCH_COMP_INPUT_REQUIRED path still catches the missing role on commit.
+  assert.deepEqual(
+    previewWorkspaceIntent({ text: "what does this job pay in Berlin", repoRoot, env: {} }).action,
+    {
+      label: "Research market comp",
+      intent: {
+        type: "research.comp",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { location: "Berlin" },
+      },
+    }
+  );
 });
 
 test("previewWorkspaceIntent: contextual comp phrasings never over-trigger on unrelated pay/company questions", () => {
@@ -802,6 +836,11 @@ test("previewWorkspaceIntent: contextual comp phrasings never over-trigger on un
     "what should the position offer someone relocating internationally",
     "what should this role pay attention to in the first 90 days",
     "what does this job pay attention to when screening candidates",
+    // Trailing clauses that aren't locations. There's no executor field for
+    // company stage or seniority, so matching would mean silently discarding
+    // what the user actually asked about.
+    "what would this position pay at a Series B",
+    "what should this role pay for a staff-level hire",
   ]) {
     assert.equal(
       previewWorkspaceIntent({ text, repoRoot, env: {} }).action,

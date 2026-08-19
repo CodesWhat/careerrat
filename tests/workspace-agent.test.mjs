@@ -882,6 +882,32 @@ test("company.health-request throws COMPANY_NOT_TRACKED for a company with no sa
   );
 });
 
+test("research.comp benchmarks the location the user named, not the job's own", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-remote", location: "Remote (US)" });
+  const calls = [];
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "research.comp",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      // What the AskBar sends for "what should this role pay in San Francisco?"
+      // with that job open: role still comes off the row, location does not.
+      input: { jobId: "app-remote", location: "San Francisco" },
+    },
+    startCompResearchImpl: async (input) => {
+      calls.push(input.request);
+      return { chat: { chatId: "c", skill: "research-comp", state: "running", reused: false } };
+    },
+  });
+
+  assert.deepEqual(calls, [
+    "Benchmark market comp for Applied AI Engineer in San Francisco at Temporal Labs.",
+  ]);
+});
+
 test("research.comp requires role and location when there is no open job to infer them from", async () => {
   const repoRoot = tempRepo();
 

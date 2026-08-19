@@ -6341,14 +6341,27 @@ function compResearchRequestFromText(text) {
   //
   // The tail is anchored rather than left open. Without it the prefix alone
   // matched regardless of what followed, so any sentence that merely started
-  // this way was swallowed. An optional trailing qualifier is allowed so
-  // "what should this role pay in San Francisco?" still counts.
-  if (
-    /^what\s+(?:should|does|would)\s+(?:this|that|the)\s+(?:role|job|position)\s+(?:pay|earn|make)\b(?!\s+attention\b)(?:\s+(?:in|for|at)\s+[^?.!]{1,60})?\s*[.?!]*$/i.test(
+  // this way was swallowed.
+  //
+  // The one trailing clause allowed is `in <somewhere>`, and it is CAPTURED,
+  // not just tolerated. "what should this role pay in San Francisco?" carries a
+  // location the user picked on purpose, usually because it differs from the
+  // job's; matching and then dropping it would benchmark the job's own city and
+  // hand back a confident wrong number, which is worse than not matching. The
+  // executor already prefers an explicit input.location over the job row's, so
+  // returning it here is all the override needs.
+  //
+  // Only `in`. "what would this position pay at a Series B" and "... for a
+  // senior" are not locations, there is no executor field for them, and
+  // silently discarding them is the same failure. They fall through to ordinary
+  // chat, where the question can actually be answered.
+  const payVerbMatch =
+    /^what\s+(?:should|does|would)\s+(?:this|that|the)\s+(?:role|job|position)\s+(?:pay|earn|make)\b(?!\s+attention\b)(?:\s+in\s+([^?.!]{1,60}?))?\s*[.?!]*$/i.exec(
       stripped
-    )
-  ) {
-    return { thisRole: true };
+    );
+  if (payVerbMatch) {
+    const location = (payVerbMatch[1] || "").trim();
+    return location ? { thisRole: true, location } : { thisRole: true };
   }
   return null;
 }
@@ -7068,10 +7081,18 @@ const ACTION_PREVIEW_RULES = [
         // role/location from a plain jobId, so no new intent type is
         // needed. With no open job, fall through to {} so the existing
         // RESEARCH_COMP_INPUT_REQUIRED error path still applies on commit.
+        //
+        // A location the user named ("... pay in San Francisco") rides along
+        // and wins: the executor fills location from the job row only when the
+        // input didn't carry one.
+        const jobId = openJobId(context);
         return {
           type: "research.comp",
           entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-          input: openJobId(context) ? { jobId: openJobId(context) } : {},
+          input: {
+            ...(parsed.location ? { location: parsed.location } : {}),
+            ...(jobId ? { jobId } : {}),
+          },
         };
       }
       return {
