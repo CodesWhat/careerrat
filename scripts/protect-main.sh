@@ -45,15 +45,26 @@ export LC_ALL=C
 REPO="CodesWhat/careerrat"
 RULESET_NAME="Main branch protection"
 
+# Sourced or executed. Sourcing this file (tests/protect-main-verify.test.mjs
+# does) should load DESIRED and the functions and do nothing else: no argument
+# parsing, since the argv belongs to the sourcing script, and no dispatch at the
+# bottom. Executing it behaves exactly as it always has.
+SOURCED=0
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+	SOURCED=1
+fi
+
 VERIFY_ONLY=0
-case "${1:-}" in
---verify) VERIFY_ONLY=1 ;;
-"") ;;
-*)
-	echo "usage: bash scripts/protect-main.sh [--verify]" >&2
-	exit 2
-	;;
-esac
+if [ "$SOURCED" = 0 ]; then
+	case "${1:-}" in
+	--verify) VERIFY_ONLY=1 ;;
+	"") ;;
+	*)
+		echo "usage: bash scripts/protect-main.sh [--verify]" >&2
+		exit 2
+		;;
+	esac
+fi
 
 # The single source of truth. Both the create path and the verify path read this,
 # so they can never disagree about what "correct" means.
@@ -129,21 +140,43 @@ canonicalize() {
   '
 }
 
+# Three outcomes, deliberately distinguished by exit code, because conflating them
+# is how a guard cries wolf: 0 = here it is, 1 = the repo genuinely has no ruleset
+# by this name, 2 = the API call failed so we don't know either way. Swallowing
+# case 2 into case 1 would announce "main is UNPROTECTED" on a network blip or an
+# expired auth, and a guard that panics on a bad wifi connection stops being read.
 live_ruleset() {
-	local id
-	id="$(gh api "repos/$REPO/rulesets" --jq ".[] | select(.name == \"$RULESET_NAME\") | .id" 2>/dev/null || true)"
+	local list id
+	list="$(gh api "repos/$REPO/rulesets" 2>/dev/null)" || return 2
+	id="$(printf '%s' "$list" | jq -r ".[] | select(.name == \"$RULESET_NAME\") | .id" 2>/dev/null)"
 	[ -n "$id" ] || return 1
-	gh api "repos/$REPO/rulesets/$id"
+	gh api "repos/$REPO/rulesets/$id" 2>/dev/null || return 2
 }
 
 verify() {
-	local live
-	if ! live="$(live_ruleset)"; then
+	local live rc
+	live="$(live_ruleset)" || rc=$?
+	if [ "${rc:-0}" = 2 ]; then
+		echo "✗ couldn't read the ruleset list for $REPO — this says nothing about whether" >&2
+		echo "  main is protected, only that the check didn't run. Fix auth/network and re-run:" >&2
+		echo "    gh auth status" >&2
+		return 1
+	fi
+	if [ "${rc:-0}" != 0 ] || [ -z "$live" ]; then
 		echo "✗ no '$RULESET_NAME' ruleset on $REPO — main is UNPROTECTED." >&2
 		echo "  run:  bash scripts/protect-main.sh" >&2
 		return 1
 	fi
+	compare_ruleset "$live"
+}
 
+# The comparison, split out from the fetch so it can be exercised against a
+# fixture without a network round trip. tests/protect-main-verify.test.mjs
+# sources this file and calls it directly with ruleset JSON — a guard whose own
+# drift detection has never been run against an actually-drifted ruleset is
+# just a hope.
+compare_ruleset() {
+	local live="$1"
 	local want got
 	want="$(printf '%s' "$DESIRED" | canonicalize)"
 	got="$(printf '%s' "$live" | canonicalize)"
@@ -196,6 +229,10 @@ verify() {
 	echo "    gh api repos/$REPO/rulesets/{id}/history" >&2
 	return 1
 }
+
+if [ "$SOURCED" = 1 ]; then
+	return 0
+fi
 
 if [ "$VERIFY_ONLY" = 1 ]; then
 	verify
