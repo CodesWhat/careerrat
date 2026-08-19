@@ -10,9 +10,9 @@
 // real comparison over fixture JSON with no network and no `gh` auth.
 //
 // The fixture is the repo's own live ruleset with its server-assigned ids
-// stripped. Each case mutates one field of it with jq, which is what makes the
-// negative cases credible: they differ from the passing case by exactly the
-// drift being tested and nothing else.
+// stripped. Each case mutates one field of it, which is what makes the negative
+// cases credible: they differ from the passing case by exactly the drift being
+// tested and nothing else.
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -53,13 +53,26 @@ compare_ruleset "$(cat)"
   }
 }
 
-// One jq filter over the fixture, so each drift case is a single-field mutation
-// of the ruleset that passes.
-function mutate(filter) {
-  return execFileSync("jq", [filter], { input: MATCHING, encoding: "utf8" });
+// A fresh deep copy of the fixture with one edit applied, so each drift case is
+// a single-field mutation of the ruleset that passes. Done in JS rather than by
+// shelling out to jq: the script needs jq, a test doesn't, and adding an
+// unlisted binary to the repo's dependency surface for test convenience is a
+// bad trade.
+function mutate(edit) {
+  const ruleset = JSON.parse(MATCHING);
+  edit(ruleset, {
+    rule: (type) => ruleset.rules.find((r) => r.type === type),
+    checks: () =>
+      ruleset.rules.find((r) => r.type === "required_status_checks").parameters
+        .required_status_checks,
+  });
+  return JSON.stringify(ruleset, null, 2);
 }
 
-const CHECKS_PATH = '(.rules[] | select(.type=="required_status_checks") | .parameters';
+function setChecks(ruleset, next) {
+  ruleset.rules.find((r) => r.type === "required_status_checks").parameters.required_status_checks =
+    next;
+}
 
 test("a ruleset matching the file passes and names every enforced check", () => {
   const { status, stdout } = compare(MATCHING);
@@ -72,7 +85,12 @@ test("a ruleset matching the file passes and names every enforced check", () => 
 
 test("a required check removed live is reported as protection weaker than the file claims", () => {
   const { status, stderr } = compare(
-    mutate(`${CHECKS_PATH}.required_status_checks) |= map(select(.context != "knip"))`)
+    mutate((rs, at) =>
+      setChecks(
+        rs,
+        at.checks().filter((c) => c.context !== "knip")
+      )
+    )
   );
   assert.equal(status, 1);
   assert.match(stderr, /DRIFT/);
@@ -83,14 +101,18 @@ test("a check enforced live but absent from the file warns that re-creating woul
   // The portwing failure this guard was written for: the file declares FEWER
   // gates than are live, so re-applying it silently drops the difference.
   const { status, stderr } = compare(
-    mutate(`${CHECKS_PATH}.required_status_checks) += [{"context":"CodeQL"}]`)
+    mutate((rs, at) => setChecks(rs, [...at.checks(), { context: "CodeQL" }]))
   );
   assert.equal(status, 1);
   assert.match(stderr, /would REMOVE these[\s\S]*- CodeQL/);
 });
 
 test("enforcement downgraded from active to evaluate is drift", () => {
-  const { status, stderr } = compare(mutate('.enforcement = "evaluate"'));
+  const { status, stderr } = compare(
+    mutate((rs) => {
+      rs.enforcement = "evaluate";
+    })
+  );
   assert.equal(status, 1);
   assert.match(stderr, /"enforcement": "active"/);
   assert.match(stderr, /"enforcement": "evaluate"/);
@@ -98,9 +120,9 @@ test("enforcement downgraded from active to evaluate is drift", () => {
 
 test("required approvals dropped from 2 to 1 is drift", () => {
   const { status, stderr } = compare(
-    mutate(
-      '(.rules[] | select(.type=="pull_request") | .parameters.required_approving_review_count) = 1'
-    )
+    mutate((_rs, at) => {
+      at.rule("pull_request").parameters.required_approving_review_count = 1;
+    })
   );
   assert.equal(status, 1);
   assert.match(stderr, /"required_approving_review_count": 2/);
@@ -112,7 +134,9 @@ test("a bypass actor added live is drift", () => {
   // for protection to stop meaning anything, since every rule still reads as
   // enabled.
   const { status, stderr } = compare(
-    mutate('.bypass_actors = [{"actor_id": 1, "actor_type": "OrganizationAdmin"}]')
+    mutate((rs) => {
+      rs.bypass_actors = [{ actor_id: 1, actor_type: "OrganizationAdmin" }];
+    })
   );
   assert.equal(status, 1);
   assert.match(stderr, /DRIFT/);
@@ -125,9 +149,11 @@ test("server-populated no-op defaults are not reported as drift", () => {
   // Comparing those raw reports drift on a byte-correct ruleset, and a guard
   // that cries wolf on every run stops being read.
   const { status } = compare(
-    mutate(
-      '(.rules[] | select(.type=="pull_request") | .parameters) |= del(.required_reviewers, .dismissal_restriction)'
-    )
+    mutate((_rs, at) => {
+      const params = at.rule("pull_request").parameters;
+      delete params.required_reviewers;
+      delete params.dismissal_restriction;
+    })
   );
   assert.equal(status, 0);
 });
@@ -135,6 +161,6 @@ test("server-populated no-op defaults are not reported as drift", () => {
 test("required checks in a different order are not drift", () => {
   // Ordering is not meaningful to GitHub and does vary between the API's
   // response and the file. Only membership matters.
-  const { status } = compare(mutate(`${CHECKS_PATH}.required_status_checks) |= reverse`));
+  const { status } = compare(mutate((rs, at) => setChecks(rs, [...at.checks()].reverse())));
   assert.equal(status, 0);
 });
