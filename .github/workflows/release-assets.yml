@@ -1,0 +1,51 @@
+name: release-assets
+
+# Detects a GitHub Release that was published without its macOS .dmg attached.
+# v0.9.0 shipped with zero assets because the desktop upload step lives in a
+# separate manual sequence in docs/RELEASE.md and got skipped. This job does
+# not block the release (publish.yml also fires on `release: published`, so
+# npm publish runs alongside this check rather than after it); it is a
+# detector so a missing asset is loud instead of silent. The actual
+# prevention is the draft-first ordering documented in docs/RELEASE.md.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to check, e.g. v0.9.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  check-dmg-asset:
+    name: check dmg asset
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+    steps:
+      - name: Harden the runner (audit all outbound calls)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify the release has a matching .dmg asset
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          assets="$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')"
+          match="$(grep "\.dmg$" <<<"$assets" | grep -F "$version" || true)"
+          if [[ -z "$match" ]]; then
+            echo "::error::Release $RELEASE_TAG has no .dmg asset matching version $version." \
+              "Run \`npm run desktop:release\` to build, notarize, and upload the desktop artifact, then re-run this workflow."
+            exit 1
+          fi
+          echo "Found matching asset: $match"
