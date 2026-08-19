@@ -97,7 +97,7 @@ export function OnboardingPage() {
   if (phase === "loading") {
     return (
       <div className="onboarding-app">
-        <div className="onboarding-loading">
+        <div className="onboarding-loading" role="status">
           <span className="onboarding-loading__icon" aria-hidden="true">
             🖥️
           </span>
