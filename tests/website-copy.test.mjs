@@ -52,7 +52,13 @@ test("website analytics uses the cookieless house PostHog posture, not Vercel An
   assert.doesNotMatch(layout, /<Analytics\s*\/>/);
   assert.equal(packageJson.dependencies["@vercel/analytics"], undefined);
   assert.equal(packageJson.dependencies["@vercel/speed-insights"], undefined);
-  assert.equal(packageJson.dependencies["posthog-js"], "1.417.0");
+  // Pinned to an exact version, not a range: the analytics client is
+  // third-party code running on every page, so it moves when Renovate opens a
+  // reviewed PR and never silently on install. Asserting the pin's shape
+  // rather than one literal version keeps that guarantee without turning
+  // every routine bump into a test failure, which is how this drifted to a
+  // stale 1.417.0 while package.json had already moved to 1.417.1.
+  assert.match(packageJson.dependencies["posthog-js"], /^\d+\.\d+\.\d+$/);
 
   assert.match(instrumentation, /posthog\.init\(/);
   assert.doesNotMatch(layout, /posthog\.init\(/);
