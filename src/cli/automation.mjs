@@ -50,6 +50,21 @@ import { candidateConfigSource } from "../core/profile/config-store.mjs";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
+// Shared by the legacy-YAML and SQLite session handlers below: the parenthetical
+// after "session browser will be: <provider>" and, when the provider can't drive
+// automatic apply (currently just `extension` — see session.mjs), a follow-up line
+// naming that honestly instead of implying every provider works the same way.
+function sessionProviderNote(provider) {
+  return PROVIDERS[provider].preferred
+    ? " (preferred)"
+    : " (fallback — automatic setup is recommended)";
+}
+
+function sessionAutomaticApplyNote(provider) {
+  if (PROVIDERS[provider].automatedApply !== false) return "";
+  return "Note: automatic apply isn't available over the browser extension yet. It still works for agent-driven browsing; run `careerrat automation session playwright --write` for automatic apply.";
+}
+
 function parseArgs(argv) {
   const opts = { positional: [], write: false, json: false, root: ROOT };
   for (let i = 0; i < argv.length; i++) {
@@ -303,9 +318,8 @@ function handleSession(provider) {
   }
   if (!plan.ok) fail(plan.error);
 
-  const preferredNote = PROVIDERS[provider].preferred
-    ? " (preferred)"
-    : " (fallback — extension is preferred)";
+  const preferredNote = sessionProviderNote(provider);
+  const automaticApplyNote = sessionAutomaticApplyNote(provider);
 
   const result = {
     command: "session",
@@ -318,6 +332,7 @@ function handleSession(provider) {
     valid: plan.valid,
     willCreate: !fileExists,
     written: false,
+    automatedApply: PROVIDERS[provider].automatedApply,
   };
 
   if (!plan.changed) {
@@ -356,6 +371,7 @@ function handleSession(provider) {
       console.log(`Proposed change to ${automationDisplay} (${plan.label}):`);
       console.log(diff);
       console.log(`  → session browser will be: ${provider}${preferredNote}`);
+      if (automaticApplyNote) console.log(automaticApplyNote);
       console.log("Dry run - pass --write to commit.");
     }
     process.exit(0);
@@ -379,6 +395,7 @@ function handleSession(provider) {
     if (created) console.log(`Created ${automationDisplay} from the template.`);
     console.log(`Written to ${automationDisplay}: ${plan.path} = ${plan.value}`);
     console.log(`Session browser is now: ${provider}${preferredNote}`);
+    if (automaticApplyNote) console.log(automaticApplyNote);
   }
   process.exit(0);
 }
@@ -458,9 +475,8 @@ function handleDbSession(provider) {
   const nextData = structuredClone(currentData);
   setPath(nextData, parts, provider);
   const changed = previous !== provider;
-  const preferredNote = PROVIDERS[provider].preferred
-    ? " (preferred)"
-    : " (fallback - extension is preferred)";
+  const preferredNote = sessionProviderNote(provider);
+  const automaticApplyNote = sessionAutomaticApplyNote(provider);
   const result = {
     command: "session",
     file: "sqlite:automation",
@@ -472,6 +488,7 @@ function handleDbSession(provider) {
     valid: true,
     willCreate: false,
     written: false,
+    automatedApply: PROVIDERS[provider].automatedApply,
   };
 
   if (!changed) {
@@ -488,6 +505,7 @@ function handleDbSession(provider) {
       console.log(`Proposed change to SQLite automation config (${label}):`);
       console.log(diff);
       console.log(`  → session browser will be: ${provider}${preferredNote}`);
+      if (automaticApplyNote) console.log(automaticApplyNote);
       console.log("Dry run - pass --write to commit.");
     }
     process.exit(0);
@@ -515,6 +533,7 @@ function handleDbSession(provider) {
   } else {
     console.log(`Written to SQLite automation config: ${result.path} = ${provider}`);
     console.log(`Session browser is now: ${provider}${preferredNote}`);
+    if (automaticApplyNote) console.log(automaticApplyNote);
   }
   process.exit(0);
 }

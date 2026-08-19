@@ -8,7 +8,10 @@ export function AutomationSessionChooser({ session, onChange, busy = false }) {
   const effective = String(session?.effectiveProvider || session?.provider || "extension");
   const effectiveLabel = effective.charAt(0).toUpperCase() + effective.slice(1);
   const readiness = session?.presence?.status === "ready" ? "Ready" : "Checked when used";
-  const options = (session?.options || []).map(({ id, label }) => ({ value: id, label }));
+  const options = (session?.options || []).map(({ id, label, automatedApply }) => ({
+    value: id,
+    label: automatedApply === false ? `${label} (no automatic apply yet)` : label,
+  }));
   return (
     <section className="automation-session" aria-labelledby="automation-session-title">
       <div className="automation-mode__heading">

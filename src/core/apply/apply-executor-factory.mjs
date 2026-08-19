@@ -4,9 +4,24 @@ import { createOrcaApplyExecutor } from "./orca-executor.mjs";
 import { createPlaywrightApplyExecutor } from "./playwright-executor.mjs";
 
 // The extension provider is agent-driven, turn-by-turn (session.mjs "deliberately
-// drives NOTHING") — it has no callable surface for a headless script, so it stays
-// a null/manual-handoff path here on purpose rather than a third executor.
+// drives NOTHING") — it has no callable surface for a headless script to run a
+// form-fill against. Rather than leaving that gap to surface as a silent no-op or
+// a raw error further up the stack, this factory hands back an executor that fails
+// immediately and honestly, naming the real state and the working alternative.
+export const EXTENSION_NOT_AVAILABLE_REASON =
+  "The browser extension provider doesn't support automatic apply yet. Switch to the Playwright provider (`careerrat automation session playwright --write`) for supervised apply.";
+
+function createExtensionApplyExecutor() {
+  return async () => ({
+    available: false,
+    verified: false,
+    state: "unavailable",
+    reason: EXTENSION_NOT_AVAILABLE_REASON,
+  });
+}
+
 const EXECUTOR_FACTORIES = {
+  extension: createExtensionApplyExecutor,
   orca: createOrcaApplyExecutor,
   playwright: createPlaywrightApplyExecutor,
 };

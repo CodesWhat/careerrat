@@ -22,6 +22,12 @@ import { join } from "node:path";
 
 export const PROVIDER_PREFERENCE = ["auto", "extension", "orca", "playwright"];
 
+// `automatedApply` marks whether `apply-job`'s scripted/headless apply path
+// (createConfiguredApplyExecutor, src/core/apply/apply-executor-factory.mjs) can
+// drive this provider. `extension` is agent-driven, turn-by-turn only — it still
+// works for interactive, in-the-loop browsing (skills reading pages, agent-driven
+// apply while an agent is live) but has no callable surface for a headless script,
+// so automatic apply on this provider is not available yet.
 export const PROVIDERS = {
   auto: {
     id: "auto",
@@ -29,6 +35,7 @@ export const PROVIDERS = {
     preferred: true,
     needs: "a supported supervised browser available in the current CareerRat session",
     storesCreds: false,
+    automatedApply: true,
   },
   extension: {
     id: "extension",
@@ -36,6 +43,7 @@ export const PROVIDERS = {
     preferred: false,
     needs: "the browser extension installed and signed into the platform",
     storesCreds: false,
+    automatedApply: false,
   },
   orca: {
     id: "orca",
@@ -43,6 +51,7 @@ export const PROVIDERS = {
     preferred: false,
     needs: "CareerRat running inside an Orca workspace with its browser available",
     storesCreds: false,
+    automatedApply: true,
   },
   playwright: {
     id: "playwright",
@@ -50,6 +59,7 @@ export const PROVIDERS = {
     preferred: false,
     needs: "a one-time interactive login per platform (persistent profile reused after)",
     storesCreds: false,
+    automatedApply: true,
   },
 };
 
@@ -193,13 +203,13 @@ export function detectSession({ data, env = process.env } = {}) {
         ? {
             status: "unverified",
             browsers,
-            detail: `${browsers.join(", ")} detected — confirm the extension is installed + signed in (can't be verified from outside the browser)`,
+            detail: `${browsers.join(", ")} detected — confirm the extension is installed + signed in (can't be verified from outside the browser). Automatic apply isn't available on this provider yet; switch to the Playwright provider for it.`,
           }
         : {
             status: "missing",
             browsers: [],
             detail:
-              "no Chrome-family browser found — install Chrome + the session-browser extension (or switch to the Playwright provider)",
+              "no Chrome-family browser found — install Chrome + the session-browser extension (or switch to the Playwright provider). Automatic apply isn't available on this provider yet either way.",
           };
     }
   } catch {

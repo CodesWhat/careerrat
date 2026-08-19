@@ -331,7 +331,12 @@ export function automationStatus({ root = DEFAULT_ROOT, env = process.env } = {}
     effectiveProvider: detectedSession.provider,
     profileRoot: detectedSession.profileRoot,
     presence: detectedSession.presence,
-    options: describeProviders().map(({ id, label, needs }) => ({ id, label, needs })),
+    options: describeProviders().map(({ id, label, needs, automatedApply }) => ({
+      id,
+      label,
+      needs,
+      automatedApply,
+    })),
   };
 
   return {
