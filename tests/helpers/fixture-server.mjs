@@ -5,7 +5,7 @@
 // node:http/node:fs — this only ever needs to serve the plain HTML fixtures
 // under tests/fixtures/**, not act as a general-purpose server.
 
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, realpathSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 // `resolve` is aliased because the listen() Promise executor below binds its own
 // `resolve`. Nothing currently uses the path one inside that scope, so this is
@@ -36,7 +36,9 @@ function contentTypeFor(path) {
 // Binds to 127.0.0.1 on an ephemeral port (0) so parallel test runs never
 // collide, and resolves the real assigned port before returning.
 export function startFixtureServer(rootDir) {
-  const root = resolvePath(rootDir);
+  // realpath, not just resolve: the containment check below compares against
+  // this, and on macOS the temp dir is reached through a symlink.
+  const root = realpathSync(rootDir);
 
   const server = createServer((req, res) => {
     const rawPath = (req.url || "/").split("?")[0].split("#")[0];
@@ -85,11 +87,45 @@ export function startFixtureServer(rootDir) {
       return;
     }
 
-    if (existsSync(filePath) && statSync(filePath).isDirectory()) {
-      filePath = join(filePath, "index.html");
-    }
+    // The lexical check above is necessary but NOT sufficient, which is the one
+    // thing this file got genuinely wrong rather than merely flagged. It reasons
+    // about the path as text, and a symlink is not a text property. A symlink
+    // sitting inside root that points outside it passes the string check, and
+    // then statSync and createReadStream both follow it. That was a real,
+    // demonstrated escape: a request for a linked file returned 200 with the
+    // contents of a file outside the root.
+    //
+    // realpath resolves the link and the containment is re-checked on the
+    // canonical path. Both sides have to be canonical: on macOS the temp dir is
+    // itself reached through a symlink (/var -> /private/var), so comparing a
+    // realpath'd file against a non-realpath'd root would reject everything.
+    //
+    // This also wraps the sync fs calls, which could throw straight out of the
+    // handler if a file vanished between the existence check and the stat. Same
+    // process-killing failure mode as the malformed escape and the read stream,
+    // reached by a third route.
+    try {
+      if (statSync(filePath).isDirectory()) {
+        filePath = join(filePath, "index.html");
+      }
 
-    if (!existsSync(filePath) || !statSync(filePath).isFile()) {
+      const canonical = realpathSync(filePath);
+      if (canonical !== root && !canonical.startsWith(root + sep)) {
+        res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("Forbidden");
+        return;
+      }
+      filePath = canonical;
+
+      if (!statSync(filePath).isFile()) {
+        res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("Not found");
+        return;
+      }
+    } catch {
+      // ENOENT for a missing file or a dangling symlink, EACCES on a directory
+      // that cannot be traversed. None of them should be distinguishable from
+      // "not there" by a caller.
       res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
       res.end("Not found");
       return;

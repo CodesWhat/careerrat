@@ -4,14 +4,28 @@
 // honest answer to that flag has to be a test that shows the containment holds,
 // not a suppression comment.
 //
-// What the original version actually got wrong, for the record: no traversal
-// case below escaped it, because normalize() plus a leading-"../" strip happens
-// to land back inside the root every time. The real defect was `/%`, which threw
-// an uncaught URIError out of the request handler and took the whole server
-// process down mid-test.
+// What the original version actually got wrong, for the record, because the
+// three failures were not equally real and it is worth not flattening them:
+//
+//   - None of the LEXICAL traversal cases below escaped it. normalize() plus a
+//     leading-"../" strip happens to land back inside the root every time, so
+//     the CodeQL path-injection alerts on those were pattern matches.
+//   - The SYMLINK case did escape, and returned 200 with the contents of a file
+//     outside the root. A string comparison cannot see a symlink, so no amount
+//     of care with the path text would have caught it. That one was real.
+//   - `/%` threw an uncaught URIError out of the request handler and took the
+//     whole server process down mid-test, which showed up as some unrelated
+//     test dying rather than this one failing.
 
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -31,6 +45,12 @@ function makeFixtureTree() {
   mkdirSync(prefixSibling);
   writeFileSync(join(prefixSibling, "secret.txt"), "LEAKED-SIBLING");
   writeFileSync(join(base, "outside.txt"), "LEAKED-OUTSIDE");
+
+  // A symlink that lives INSIDE the root and points OUTSIDE it. This is the one
+  // case a purely lexical containment check cannot catch, because the escape is
+  // a filesystem property rather than a property of the path text. Before the
+  // realpath check it returned 200 with the linked file's contents.
+  symlinkSync(join(base, "outside.txt"), join(root, "linked-secret.txt"));
 
   return { root };
 }
@@ -62,6 +82,9 @@ test("fixture server never serves a byte from outside the root", async () => {
     "/..%2ftures-elsewhere/secret.txt",
     "/../fixtures-elsewhere/secret.txt",
     "/....//outside.txt",
+    // Not a lexical escape at all. The path stays inside the root and the
+    // symlink does the escaping, which is why the string check alone missed it.
+    "/linked-secret.txt",
   ];
 
   await withServer(async ({ url }) => {
