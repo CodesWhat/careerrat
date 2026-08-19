@@ -122,7 +122,9 @@ No account, no CareerRat server, no telemetry. CareerRat never phones home, and
 your files stay on your machine. What does go out: your AI CLI talks to its own
 provider to do the work, same as any other task you'd give it, and the app
 fetches public resources like job postings and company logos from the services
-that host them. See
+that host them. The packaged desktop app also checks GitHub once a day for a
+newer release and shows an in-app notice, nothing more; it never downloads or
+installs anything on its own, and it can be turned off in Settings. See
 [privacy](https://careerrat.com/docs/advanced/privacy) for the details.
 
 Most job tools match keywords, then spray. CareerRat won't write a single line of

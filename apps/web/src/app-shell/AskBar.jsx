@@ -27,6 +27,7 @@ import { ChatPanel } from "../onboarding/ChatPanel.jsx";
 import { DeepIngestDock, useDeepIngestNudge } from "../pages/SetupReadinessCard.jsx";
 import { ASK_BAR_REQUEST_EVENT } from "./ask-events.js";
 import { useDashboardSnapshot } from "./DashboardContext.jsx";
+import { UpdateAvailableDock } from "./UpdateAvailableDock.jsx";
 import { useNeedsYouCount } from "./useNeedsYouCount.js";
 
 // AskBar — the W3 shell-docked ask bar (DESIGN-SPEC.md "Ask bar (component)").
@@ -780,6 +781,7 @@ export function AskBar() {
         {deepIngest.needed && !deepIngest.dismissed ? (
           <DeepIngestDock onDismiss={deepIngest.dismiss} />
         ) : null}
+        <UpdateAvailableDock />
         {turn ? (
           <AskBarTurn
             turn={turn}

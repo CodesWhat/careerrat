@@ -15,7 +15,7 @@
       "ignore": ["public/theme-init.js"]
     },
     "apps/desktop": {
-      "entry": ["scripts/*.mjs"]
+      "entry": ["scripts/*.mjs", "preload/*.cjs"]
     }
   }
 }
