@@ -307,7 +307,7 @@ export function createProxyServer({
         dbMeter,
         event,
         onFailure: (error, reason) => {
-          log(`meter db write ${reason} (${error}) — falling back to local usage log`);
+          log(`meter db write ${reason} (${error}), falling back to local usage log`);
           appendUsageEvent(event, { root: meterRoot });
         },
       });
@@ -482,13 +482,13 @@ export { computeCost };
 // has always logged.
 function parseUpstreamHeaders(raw) {
   return parseUpstreamHeadersEnv(raw, {
-    onError: () => log("CAREERRAT_UPSTREAM_HEADERS is not valid JSON — ignoring"),
+    onError: () => log("CAREERRAT_UPSTREAM_HEADERS is not valid JSON, ignoring"),
   });
 }
 
 function parseProxyTokens(raw) {
   return parseProxyTokensEnv(raw, {
-    onError: () => log("CAREERRAT_PROXY_TOKENS is not valid JSON — ignoring"),
+    onError: () => log("CAREERRAT_PROXY_TOKENS is not valid JSON, ignoring"),
   });
 }
 
@@ -498,7 +498,7 @@ function parseUserCapUsd(raw) {
 
 function parseUserCaps(raw) {
   return parseUserCapsEnv(raw, {
-    onError: () => log("CAREERRAT_PROXY_USER_CAPS is not valid JSON — ignoring"),
+    onError: () => log("CAREERRAT_PROXY_USER_CAPS is not valid JSON, ignoring"),
   });
 }
 

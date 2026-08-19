@@ -95,7 +95,7 @@ function runList() {
     const flag = entry.enabled === false ? "✗" : "✓";
     const watermark = entry.lastRunAt ? ` last-run ${entry.lastRunAt}` : " never-run";
     console.log(
-      `${String(i + 1).padStart(2)} ${flag} ${entry.name} — ${entry.careers_url} (${provider})${watermark}`
+      `${String(i + 1).padStart(2)} ${flag} ${entry.name}: ${entry.careers_url} (${provider})${watermark}`
     );
   }
   console.log(`\n${companies.length} tracked ${companies.length === 1 ? "company" : "companies"}.`);
@@ -118,12 +118,12 @@ function runAdd() {
     ? String(requestedProvider).trim().toLowerCase()
     : inferProvider({ careers_url: url });
   if (requestedProvider && !isCompanyProviderSupported(provider)) {
-    console.error(`Unsupported provider — cannot scan with "${requestedProvider}".`);
+    console.error(`Unsupported provider: cannot scan with "${requestedProvider}".`);
     console.error(`CareerRat supports ${PUBLIC_PROVIDER_COUNT} public Career Ops adapters.`);
     return 2;
   }
   if (!provider) {
-    console.error(`Unsupported ATS host — cannot scan "${url}".`);
+    console.error(`Unsupported ATS host: cannot scan "${url}".`);
     console.error(
       `CareerRat supports ${PUBLIC_PROVIDER_COUNT} public Career Ops adapters. For a branded host, pass its known adapter with --provider.`
     );
@@ -148,7 +148,7 @@ function runAdd() {
       );
     } else {
       console.log(
-        `Already tracked: ${duplicate.name} — ${duplicate.careers_url} (${inferProvider(duplicate)})`
+        `Already tracked: ${duplicate.name}, ${duplicate.careers_url} (${inferProvider(duplicate)})`
       );
     }
     return 0;
@@ -164,7 +164,7 @@ function runAdd() {
     if (json) {
       console.log(JSON.stringify({ status: "dry-run", would_add: { ...entry, provider } }));
     } else {
-      console.log(`Dry run — would add: ${name} — ${url} (${provider})`);
+      console.log(`Dry run. Would add: ${name}, ${url} (${provider})`);
       console.log("Pass --write to commit.");
     }
     return 0;
@@ -185,7 +185,7 @@ function runAdd() {
       );
     } else {
       const verb = result.status === "updated" ? "Updated" : "Added";
-      console.log(`${verb} ${result.entry.name} — ${result.entry.careers_url} (${provider})`);
+      console.log(`${verb} ${result.entry.name}: ${result.entry.careers_url} (${provider})`);
       console.log(`${result.total} tracked ${result.total === 1 ? "company" : "companies"} total.`);
     }
     return 0;
@@ -204,7 +204,7 @@ function runAdd() {
       })
     );
   } else {
-    console.log(`Added ${name} — ${url} (${provider})`);
+    console.log(`Added ${name}: ${url} (${provider})`);
     console.log(
       `${next.tracked_companies.length} tracked ${next.tracked_companies.length === 1 ? "company" : "companies"} total.`
     );
@@ -246,7 +246,7 @@ function runRemove() {
       );
     } else {
       console.log(
-        `Dry run — would remove: ${match.name} — ${match.careers_url} (${inferProvider(match) || "unknown"})`
+        `Dry run. Would remove: ${match.name}, ${match.careers_url} (${inferProvider(match) || "unknown"})`
       );
       console.log("Pass --write to commit.");
     }
@@ -274,7 +274,7 @@ function runRemove() {
       JSON.stringify({ status: "removed", name: match.name, total: next.tracked_companies.length })
     );
   } else {
-    console.log(`Removed ${match.name} — ${match.careers_url}`);
+    console.log(`Removed ${match.name}: ${match.careers_url}`);
     console.log(
       `${next.tracked_companies.length} tracked ${next.tracked_companies.length === 1 ? "company" : "companies"} total.`
     );
@@ -322,7 +322,7 @@ function optValueFrom(argv, flag) {
 }
 
 function printHelp() {
-  console.log(`careerrat companies — manage config/sourced-scan.json#tracked_companies
+  console.log(`careerrat companies: manage config/sourced-scan.json#tracked_companies
 
 Usage:
   careerrat companies                                        List tracked companies (default)

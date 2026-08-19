@@ -168,7 +168,7 @@ function cmdAppend(arg) {
           2
         )
       );
-    else console.error(`learnings: refused — ${plan.error}`);
+    else console.error(`learnings: refused, ${plan.error}`);
     process.exit(1);
   }
 
@@ -209,7 +209,7 @@ function cmdAppend(arg) {
     );
   else
     console.log(
-      `Written to ${relPath}: ## ${date} — ${title}${written.created ? " (created)" : ""}`
+      `Written to ${relPath}: ## ${date}: ${title}${written.created ? " (created)" : ""}`
     );
   process.exit(0);
 }
@@ -246,7 +246,7 @@ function fail(msg) {
 }
 
 function printHelp() {
-  console.log(`careerrat learnings — safe read/append for per-role-family learning files
+  console.log(`careerrat learnings: safe read/append for per-role-family learning files
 
 Usage:
   node src/cli/learnings.mjs list [--json]

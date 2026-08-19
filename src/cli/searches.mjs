@@ -189,7 +189,7 @@ function runAddQuery() {
     return 1;
   }
   if (next.searches.length === (config.searches?.length ?? 0)) {
-    if (!json) console.log(`Already present — no duplicate added for "${query}".`);
+    if (!json) console.log(`Already present: no duplicate added for "${query}".`);
   }
   return writeConfig(next, { mode: "add-query", query });
 }
@@ -216,7 +216,7 @@ function runAddProvider() {
     return 1;
   }
   if (next.searches.length === (config.searches?.length ?? 0) && !json) {
-    console.log(`Already present — no duplicate added for provider "${provider}".`);
+    console.log(`Already present: no duplicate added for provider "${provider}".`);
   }
   return writeConfig(next, { mode: "add-provider", provider });
 }
@@ -277,7 +277,7 @@ function warnIfAuthGateClosed(before, after) {
   });
   if (allowed) return;
   console.error(
-    `Note: "${flipped.label || flipped.platform}" is an authenticated source — enabled, but it will NOT run until authenticated_search is allowed for "${flipped.platform}":`
+    `Note: "${flipped.label || flipped.platform}" is an authenticated source, enabled, but it will NOT run until authenticated_search is allowed for "${flipped.platform}":`
   );
   for (const reason of reasons || []) console.error(`  - ${reason}`);
 }
@@ -336,7 +336,7 @@ function printTable(rows) {
     const flag = r.enabled === false ? "✗" : "✓";
     const ran = r.lastRunAt ? ` last-run ${r.lastRunAt}` : "";
     console.log(
-      `${String(r.index).padStart(2)} ${flag} [${r.provider}] ${r.label} — ${r.target}${ran}`
+      `${String(r.index).padStart(2)} ${flag} [${r.provider}] ${r.label}: ${r.target}${ran}`
     );
   }
   printRunReadiness(rows);
@@ -377,7 +377,7 @@ function optValue(flag) {
 }
 
 function printHelp() {
-  console.log(`careerrat searches — build and curate config/search-sources.yml
+  console.log(`careerrat searches: build and curate config/search-sources.yml
 
 Usage:
   careerrat searches                                      Show current searches

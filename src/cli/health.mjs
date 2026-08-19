@@ -85,7 +85,7 @@ function cmdRecord(recordId) {
     if (opts.json) {
       console.log(JSON.stringify({ ok: false, id: recordId, error: err.message }, null, 2));
     } else {
-      console.error(`health: refused — ${err.message}`);
+      console.error(`health: refused, ${err.message}`);
     }
     process.exit(1);
     return;
@@ -122,7 +122,7 @@ function cmdRecord(recordId) {
       console.log(
         `  crossCut:    ${validated.crossCut.length ? validated.crossCut.join(", ") : "none"}`
       );
-      if (preview) console.log(`  target row:  ${preview.table} — ${preview.company || recordId}`);
+      if (preview) console.log(`  target row:  ${preview.table}: ${preview.company || recordId}`);
       else
         console.log(
           `  target row:  not resolved (${preview === null ? "no matching row, or no database yet" : ""})`
@@ -139,7 +139,7 @@ function cmdRecord(recordId) {
     console.log(JSON.stringify({ ok: true, written: true, ...result }, null, 2));
   } else {
     console.log(
-      `Recorded companyHealth for ${recordId} (${result.table}) — ${result.companyHealth.rating}.`
+      `Recorded companyHealth for ${recordId} (${result.table}): ${result.companyHealth.rating}.`
     );
   }
   process.exit(0);
@@ -178,7 +178,7 @@ function fail(msg) {
 }
 
 function printHelp() {
-  console.log(`careerrat health — persist the company-health skill's role-scoped rating
+  console.log(`careerrat health: persist the company-health skill's role-scoped rating
 
 Usage:
   node src/cli/health.mjs record <applicationOrSourcedId> --file FILE [--write] [--json]

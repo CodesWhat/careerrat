@@ -92,7 +92,7 @@ const candidatePath = userPath(pathCtx, fileEntry.candidatePath);
 const candidateDisplay = displayPath(pathCtx, fileEntry.candidatePath);
 if (!existsSync(candidatePath)) {
   fail(
-    `${candidateDisplay} not found — run \`careerrat ingest\` to create your candidate config first.`
+    `${candidateDisplay} not found. Run \`careerrat ingest\` to create your candidate config first.`
   );
 }
 const currentText = readFileSync(candidatePath, "utf8");
@@ -131,7 +131,7 @@ const result = {
 // No-op: already present / identical.
 if (!plan.changed) {
   if (opts.json) console.log(JSON.stringify({ ...result, note: "already present" }, null, 2));
-  else console.log(`No change — ${plan.path} already has "${plan.value}" in ${candidateDisplay}.`);
+  else console.log(`No change: ${plan.path} already has "${plan.value}" in ${candidateDisplay}.`);
   process.exit(0);
 }
 
@@ -349,7 +349,7 @@ function printList(asJson) {
 }
 
 function printHelp() {
-  console.log(`careerrat gate — safe, schema-validated gate write-back
+  console.log(`careerrat gate: safe, schema-validated gate write-back
 
 Usage:
   node src/cli/gate.mjs <type> <value>             Propose (dry run; writes nothing)

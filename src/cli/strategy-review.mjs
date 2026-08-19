@@ -173,7 +173,7 @@ function fail(msg) {
 }
 
 function printHelp() {
-  console.log(`careerrat strategy-review — stamp the last-reviewed marker on the tracker
+  console.log(`careerrat strategy-review: stamp the last-reviewed marker on the tracker
 
 Usage:
   node src/cli/strategy-review.mjs stamp [--at ISO] [--write] [--json]

@@ -835,7 +835,7 @@ function fail(msg) {
 }
 
 function printHelp() {
-  console.log(`careerrat data — sqlite-backed data layer (M6)
+  console.log(`careerrat data: sqlite-backed data layer (M6)
 
 Usage:
   node src/cli/data.mjs status [--json]

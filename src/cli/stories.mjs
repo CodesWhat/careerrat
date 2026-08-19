@@ -200,7 +200,7 @@ function cmdCheck() {
   }
 
   if (!ev.exists)
-    console.error("note: candidate/evidence.yml not found — evidence-id existence not verified.");
+    console.error("note: candidate/evidence.yml not found, evidence-id existence not verified.");
   if (schemaErrors.length > 0) {
     console.error(`Schema errors in ${storiesDisplay()}:`);
     console.error(formatErrors(schemaErrors));
@@ -211,7 +211,7 @@ function cmdCheck() {
   }
   if (ok)
     console.log(
-      `Story bank OK — ${stories.length} stor${stories.length === 1 ? "y" : "ies"}, all tracing to evidence.yml.`
+      `Story bank OK: ${stories.length} stor${stories.length === 1 ? "y" : "ies"}, all tracing to evidence.yml.`
     );
   process.exit(ok ? 0 : 1);
 }
@@ -234,7 +234,7 @@ function cmdGaps() {
     console.log(`All ${competencies.length} competencies have at least one story. No gaps.`);
     return;
   }
-  console.log(`Uncovered competencies (${gaps.length}/${competencies.length}) — no story yet:`);
+  console.log(`Uncovered competencies (${gaps.length}/${competencies.length}), no story yet:`);
   for (const g of gaps) console.log(`  - ${g}`);
   console.log("");
   console.log(
@@ -292,7 +292,7 @@ function cmdMatch(rest) {
   }
   console.log(`Matched stories (${matched.length}):`);
   for (const m of matched) {
-    console.log(`  [${m.score}] ${m.story.id} — ${m.story.title}`);
+    console.log(`  [${m.score}] ${m.story.id}: ${m.story.title}`);
     if (m.matchedSignals.length) console.log(`        signals: ${m.matchedSignals.join(", ")}`);
     if (m.matchedComps.length) console.log(`        competencies: ${m.matchedComps.join(", ")}`);
   }
@@ -320,7 +320,7 @@ function cmdAdd() {
   if (!plan.ok) {
     if (opts.json)
       console.log(JSON.stringify({ ok: false, error: plan.error, errors: plan.errors }, null, 2));
-    else console.error(`stories: refused — ${plan.error}`);
+    else console.error(`stories: refused, ${plan.error}`);
     process.exit(1);
   }
 
@@ -341,7 +341,7 @@ function cmdAdd() {
       );
     } else {
       console.log(
-        `Proposed ${plan.replaced ? "update" : "add"}: story "${plan.story.id}" — ${plan.story.title}`
+        `Proposed ${plan.replaced ? "update" : "add"}: story "${plan.story.id}": ${plan.story.title}`
       );
       console.log(`  evidence: ${(plan.story.evidence_ids || []).join(", ")}`);
       console.log(
@@ -379,10 +379,10 @@ function cmdAdd() {
     );
     if (sync.ok && sync.written)
       console.log(
-        `  ↳ tracker.storyEnrichment synced — ${sync.count} stor${sync.count === 1 ? "y" : "ies"} need context (dashboard will prompt).`
+        `  ↳ tracker.storyEnrichment synced: ${sync.count} stor${sync.count === 1 ? "y" : "ies"} need context (dashboard will prompt).`
       );
     else if (!sync.ok)
-      console.error(`  ↳ note: could not sync tracker.storyEnrichment — ${sync.error}`);
+      console.error(`  ↳ note: could not sync tracker.storyEnrichment: ${sync.error}`);
   }
   process.exit(0);
 }
@@ -470,12 +470,12 @@ function cmdSyncEnrichment() {
     process.exit(sync.ok ? 0 : 1);
   }
   if (!sync.ok) {
-    console.error(`stories: enrichment sync failed — ${sync.error}`);
+    console.error(`stories: enrichment sync failed: ${sync.error}`);
     process.exit(1);
   }
   if (!sync.applicable) {
     console.log(
-      `No workspace/tracker.json yet — nothing to mirror into (${sync.count} stor${sync.count === 1 ? "y" : "ies"} would need context).`
+      `No workspace/tracker.json yet, nothing to mirror into (${sync.count} stor${sync.count === 1 ? "y" : "ies"} would need context).`
     );
     process.exit(0);
   }
@@ -489,7 +489,7 @@ function cmdSyncEnrichment() {
   }
   if (sync.written)
     console.log(
-      `tracker.storyEnrichment updated — ${sync.count} stor${sync.count === 1 ? "y" : "ies"} need context.`
+      `tracker.storyEnrichment updated: ${sync.count} stor${sync.count === 1 ? "y" : "ies"} need context.`
     );
   else console.log(`tracker.storyEnrichment already in sync (${sync.count}).`);
   process.exit(0);
@@ -504,7 +504,7 @@ function fail(msg) {
 }
 
 function printHelp() {
-  console.log(`careerrat stories — safe read/validate/add for the STAR+R story bank
+  console.log(`careerrat stories: safe read/validate/add for the STAR+R story bank
 
 Usage:
   node src/cli/stories.mjs list [--json]
@@ -527,7 +527,7 @@ Commands:
                    Runs automatically after every \`add --write\`.
 
 The story bank (${STORIES_REL_PATH}) is candidate-owned and gitignored. Every story
-must trace to candidate/evidence.yml — add/check refuse a story that cites no
+must trace to candidate/evidence.yml. Add/check refuse a story that cites no
 evidence, an unknown claim id, a missing STAR+R field, placeholder residue, or a
 private comp leak. Writes are atomic.
 
