@@ -4,6 +4,24 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-08-19
+
+### Added
+
+- The desktop app now checks GitHub's public release list once a day and shows an in-app notice when a newer version of CareerRat is available. It never downloads or installs anything on its own, it just tells you a new version exists and points you to it. You can turn the check off entirely from Settings. No candidate data is sent as part of this check (#99).
+- The onboarding "checking this computer" step now has a small animated loading screen instead of a static message, with a reduced-motion fallback for anyone who has that system preference set (#100).
+- The README now links directly to the signed, notarized macOS download so Mac users don't have to hunt for it (#101).
+
+### Fixed
+
+- A broken test on main is fixed, and the test now checks the shape of a dependency pin instead of one exact version, so routine dependency bumps stop breaking it (#102).
+
+### Changed
+
+- The release process now uploads the notarized desktop dmg to the GitHub release itself, and a release that publishes without one is now caught and flagged instead of shipping quietly incomplete (#101).
+- Roadmap notes were corrected after the v0.9.0 handoff to reflect what actually landed (#103).
+- Routine dependency bumps (#75, #76).
+
 ## [0.9.0] - 2026-08-18
 
 ### Added
