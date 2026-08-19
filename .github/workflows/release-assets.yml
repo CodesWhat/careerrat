@@ -47,7 +47,11 @@ jobs:
           fi
           version="${tag#v}"
           assets="$(gh release view "$tag" --json assets --jq '.assets[].name')"
-          match="$(grep "\.dmg$" <<<"$assets" | grep -F "$version" || true)"
+          # Match the version as a whole token, not a substring: a plain
+          # match would accept CareerRat-0.9.10-arm64.dmg for release 0.9.1
+          # and report success for a stale asset.
+          escaped="${version//./\\.}"
+          match="$(grep "\.dmg$" <<<"$assets" | grep -E "(^|[^0-9.])${escaped}([^0-9.]|$)" || true)"
           if [[ -z "$match" ]]; then
             echo "::error::Release $tag has no .dmg asset matching version $version." \
               "Run \`npm run desktop:release\` to build, notarize, and upload the desktop artifact, then re-run this workflow."

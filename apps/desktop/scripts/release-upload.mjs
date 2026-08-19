@@ -33,8 +33,17 @@ if (dmgFiles.length === 0) {
 // electron-builder writes into dist/ without clearing it, so builds from
 // prior versions accumulate there. Upload only the ones matching the version
 // we're actually releasing, and never let a stale artifact ride along.
-const matchingDmgs = dmgFiles.filter((name) => name.includes(version));
-const staleDmgs = dmgFiles.filter((name) => !name.includes(version));
+//
+// Match the version as a whole token rather than a substring: a plain
+// includes() would accept CareerRat-0.9.10-arm64.dmg while releasing 0.9.1,
+// which is exactly how a stale build sneaks into a release.
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const versionToken = new RegExp(`(?<![0-9.])${escapeRegExp(version)}(?![0-9.])`);
+const matchingDmgs = dmgFiles.filter((name) => versionToken.test(name));
+const staleDmgs = dmgFiles.filter((name) => !versionToken.test(name));
 
 if (matchingDmgs.length === 0) {
   fail(
