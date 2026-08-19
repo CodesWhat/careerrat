@@ -263,7 +263,7 @@ export function summarizeThread(thread) {
   const role = thread.role || "";
   const channel = thread.channel || "";
   const summary = thread.summary || "";
-  const next = thread.nextAction || "—";
+  const next = thread.nextAction || "N/A";
   return `[${thread.status}] ${company} – ${role} (${channel}): ${summary} · next: ${next}`;
 }
 
@@ -301,7 +301,7 @@ export function renderThreadNote(thread) {
   lines.push("");
 
   // Next Action
-  lines.push(`**Next Action:** ${thread.nextAction || "—"}`);
+  lines.push(`**Next Action:** ${thread.nextAction || "N/A"}`);
   if (thread.nextActionDue) lines.push(`**Due:** ${thread.nextActionDue}`);
   lines.push("");
 
@@ -313,8 +313,8 @@ export function renderThreadNote(thread) {
     lines.push("_No messages yet._");
   } else {
     for (const msg of messages) {
-      const at = msg.at || "—";
-      lines.push(`- ${at} **${msg.direction}** — ${msg.summary}`);
+      const at = msg.at || "N/A";
+      lines.push(`- ${at} **${msg.direction}**: ${msg.summary}`);
     }
   }
   lines.push("");

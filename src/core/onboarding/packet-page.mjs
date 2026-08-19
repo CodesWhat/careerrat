@@ -30,7 +30,7 @@ export const PACKET_PAGE_HTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Packet — CareerRat</title>
+<title>Packet: CareerRat</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -282,7 +282,7 @@ export const PACKET_PAGE_HTML = `<!doctype html>
 <main>
   <header>
     <h1>Packet</h1>
-    <p class="lede">Review a tailored resume, cover letter, and short answers for a gated application — or generate them live.</p>
+    <p class="lede">Review a tailored resume, cover letter, and short answers for a gated application, or generate them live.</p>
   </header>
 
   <section id="picker-section">
@@ -451,7 +451,7 @@ export const PACKET_PAGE_HTML = `<!doctype html>
 
     var title = document.createElement("span");
     title.className = "packet-row-title";
-    title.textContent = (row.company || "Unknown company") + " — " + (row.role || "Unknown role");
+    title.textContent = (row.company || "Unknown company") + ", " + (row.role || "Unknown role");
     head.appendChild(title);
 
     var dots = document.createElement("span");
@@ -550,7 +550,7 @@ export const PACKET_PAGE_HTML = `<!doctype html>
     var pathLine = document.createElement("div");
     pathLine.className = "artifact-path";
     pathLine.setAttribute("data-hook", "artifact-path");
-    pathLine.textContent = artifact.path || "(inline text — no file path)";
+    pathLine.textContent = artifact.path || "(inline text, no file path)";
     pane.appendChild(pathLine);
 
     if (artifact.binary) {
@@ -594,7 +594,7 @@ export const PACKET_PAGE_HTML = `<!doctype html>
   function renderDetail(data) {
     currentPacket = data;
     detailSection.hidden = false;
-    detailTitle.textContent = (data.company || "Unknown company") + " — " + (data.role || "Unknown role");
+    detailTitle.textContent = (data.company || "Unknown company") + ", " + (data.role || "Unknown role");
     var artifacts = data.artifacts || {};
     renderPane("resume", artifacts.resume);
     renderPane("coverLetter", artifacts.coverLetter);

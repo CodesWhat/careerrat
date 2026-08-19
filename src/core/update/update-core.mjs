@@ -149,7 +149,7 @@ export function readUpdateNotice(pathCtx, currentVersion) {
   const cache = readUpdateCache(pathCtx);
   if (!cache?.latest || !currentVersion) return null;
   if (!isNewer(currentVersion, cache.latest)) return null;
-  return `⬆ careerrat ${currentVersion} → ${cache.latest} available — run \`careerrat update\``;
+  return `⬆ careerrat ${currentVersion} → ${cache.latest} available, run \`careerrat update\``;
 }
 
 // Refresh the cache in a detached child if it's missing or stale. Returns immediately;

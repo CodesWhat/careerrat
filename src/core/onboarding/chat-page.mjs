@@ -38,7 +38,7 @@ export const CHAT_PAGE_HTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Interview — CareerRat</title>
+<title>Interview: CareerRat</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -193,12 +193,12 @@ export const CHAT_PAGE_HTML = `<!doctype html>
 <main>
   <header>
     <h1>Interview</h1>
-    <p class="lede">A conversational interview seeds your profile, targets, evidence, and search config — one question at a time.</p>
+    <p class="lede">A conversational interview seeds your profile, targets, evidence, and search config, one question at a time.</p>
   </header>
 
   <section id="start-section" data-hook="start-section">
     <button id="start-btn" data-hook="start-btn" type="button">Start interview</button>
-    <p class="hint">Runs ingest-profile live. You can leave and come back — the session keeps going.</p>
+    <p class="hint">Runs ingest-profile live. You can leave and come back. The session keeps going.</p>
   </section>
 
   <section id="chat-section" data-hook="chat-section" hidden>
@@ -317,7 +317,7 @@ export const CHAT_PAGE_HTML = `<!doctype html>
       parts.push(f.name + ": " + (f.valid ? "ok" : f.exists ? "invalid" : "missing"));
     }
     var line = document.createElement("div");
-    line.textContent = "Setup progress — " + (parts.join(", ") || "not started yet");
+    line.textContent = "Setup progress: " + (parts.join(", ") || "not started yet");
     progressEl.appendChild(line);
   }
 

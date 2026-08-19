@@ -2053,7 +2053,7 @@ function StrategyStampCard({ artifact }) {
 // communication_note (email-comms free-text note capture) — same card
 // chrome as StrategyStampCard: a plain receipt, no left-edge accent.
 function CommunicationNoteCard({ artifact }) {
-  const title = [artifact.company, artifact.role].filter(Boolean).join(" — ") || "This thread";
+  const title = [artifact.company, artifact.role].filter(Boolean).join(", ") || "This thread";
   return (
     <section className="ask-bar__strategy-apply" aria-label="Note added to thread">
       <div className="ask-bar__strategy-review-head">
@@ -2075,7 +2075,7 @@ function CommunicationNoteCard({ artifact }) {
 // metadata.nextActions entry and renders through the shared block below this
 // card.
 function CommunicationHandoffCard({ artifact }) {
-  const title = [artifact.company, artifact.role].filter(Boolean).join(" — ") || "This thread";
+  const title = [artifact.company, artifact.role].filter(Boolean).join(", ") || "This thread";
   const ready = artifact.state === "ready";
   const links = buildComposeLinks({
     to: artifact.to,
@@ -2437,7 +2437,7 @@ function calendarWriteProviderLabel(provider) {
 
 function CalendarWriteCard({ artifact }) {
   const isManual = artifact.provenance === "manual";
-  const companyRole = [artifact.company, artifact.role].filter(Boolean).join(" — ");
+  const companyRole = [artifact.company, artifact.role].filter(Boolean).join(", ");
   const dateLabel = formatRelativeDate(artifact.eventIso || artifact.at);
   return (
     <section className="ask-bar__strategy-apply" aria-label="Calendar event recorded">

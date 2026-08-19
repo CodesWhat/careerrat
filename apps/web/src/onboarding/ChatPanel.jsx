@@ -421,7 +421,7 @@ export function ChatPanel({
 function resultBlockTitle(block) {
   if (block.kind === "company_research_result") return block.company;
   if (block.kind === "comp_benchmark_result") {
-    return block.location ? `${block.role} — ${block.location}` : block.role;
+    return block.location ? `${block.role}, ${block.location}` : block.role;
   }
   return block.company || "Company health";
 }
@@ -429,5 +429,5 @@ function resultBlockTitle(block) {
 function resultBlockSubtitle(block) {
   if (block.kind === "company_research_result") return "Company research";
   if (block.kind === "comp_benchmark_result") return "Comp benchmark";
-  return `Company health — ${block.companyHealth?.rating || "rated"}`;
+  return `Company health: ${block.companyHealth?.rating || "rated"}`;
 }

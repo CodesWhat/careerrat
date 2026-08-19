@@ -177,7 +177,7 @@ export function assessLegitimacy({ job, targeting, now = new Date(), scanHistory
       });
     }
   } else {
-    gaps.push("no posting date (postedAt/dateOpened) — staleness not assessed");
+    gaps.push("no posting date (postedAt/dateOpened): staleness not assessed");
   }
 
   // --- thin JD (mild) ---
@@ -189,7 +189,7 @@ export function assessLegitimacy({ job, targeting, now = new Date(), scanHistory
       detail: `JD body is ${body.length} chars (< ${cfg.minBodyChars})`,
     });
   } else if (body.length === 0) {
-    gaps.push("no JD body captured — thin-JD not assessed");
+    gaps.push("no JD body captured: thin-JD not assessed");
   }
 
   // --- evergreen via cross-scan history (strong), when available ---
@@ -203,7 +203,7 @@ export function assessLegitimacy({ job, targeting, now = new Date(), scanHistory
       signals.push({
         id: "evergreen-recurring",
         severity: "strong",
-        detail: `seen in ${seen} scans across ${spanDays} days — recurring/evergreen`,
+        detail: `seen in ${seen} scans across ${spanDays} days: recurring/evergreen`,
       });
     }
   }
@@ -216,7 +216,7 @@ export function assessLegitimacy({ job, targeting, now = new Date(), scanHistory
   const reason = suspect
     ? signals.map((s) => s.detail).join("; ")
     : signals.length === 1
-      ? `${signals[0].detail} (single soft signal — not conclusive)`
+      ? `${signals[0].detail} (single soft signal, not conclusive)`
       : "no legitimacy concerns detected";
 
   return { verdict: suspect ? "suspect" : "clear", signals, reason, checked, gaps };

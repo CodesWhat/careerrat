@@ -118,12 +118,12 @@ export function assertNoPrivateLeak(file, path) {
   const leaf = path.split(".").pop();
   if (leaf === "current_base" && file !== "profile") {
     throw new Error(
-      `refusing to write current_base into ${file} — it is a private gate input (profile.yml only)`
+      `refusing to write current_base into ${file}: it is a private gate input (profile.yml only)`
     );
   }
   if (file === "form-defaults" && path.includes("current_base")) {
     throw new Error(
-      "refusing to write current_base into form-defaults.yml — it must never reach an outbound form"
+      "refusing to write current_base into form-defaults.yml: it must never reach an outbound form"
     );
   }
 }

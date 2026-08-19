@@ -421,16 +421,16 @@ function failureReason({ body = {}, invocationError }) {
     ? [stringValue(detail.path), stringValue(detail.message)].filter(Boolean).join(": ")
     : "";
   return sanitizeFailureReason(
-    [message || reasonForCode(body?.code), detailText].filter(Boolean).join(" — ")
+    [message || reasonForCode(body?.code), detailText].filter(Boolean).join(": ")
   );
 }
 
 function providerMessage(rawMessage) {
   const message = stringValue(rawMessage);
   if (!message) return "";
-  const marker = message.indexOf("—");
+  const marker = message.indexOf("{");
   if (marker !== -1) {
-    const candidate = message.slice(marker + 1).trim();
+    const candidate = message.slice(marker).trim();
     try {
       const parsed = JSON.parse(candidate);
       const nested = stringValue(parsed?.error?.message || parsed?.message);

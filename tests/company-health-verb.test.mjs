@@ -113,7 +113,7 @@ test("companyHealthSet writes the full companyHealth object onto an applications
   const event = activityRow(db, result.event.id);
   assert.ok(event, "companyHealthSet must log an activity event");
   assert.equal(event.type, "research");
-  assert.equal(event.data.title, "Company health: Riverside Health — watch");
+  assert.equal(event.data.title, "Company health: Riverside Health, watch");
   assert.equal(event.data.summary, "clinical staffing-scoped as of 2026-08-10 (built-from-data).");
   assert.deepEqual(event.data.refs, {
     company: "Riverside Health",
@@ -154,7 +154,7 @@ test("companyHealthSet writes onto a sourced row and refs sourcedId instead of a
 
   const event = activityRow(db, result.event.id);
   assert.equal(event.type, "research");
-  assert.equal(event.data.title, "Company health: Riverside Health — risky");
+  assert.equal(event.data.title, "Company health: Riverside Health, risky");
   assert.deepEqual(event.data.refs, {
     company: "Riverside Health",
     role: "Registered Nurse",

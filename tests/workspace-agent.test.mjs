@@ -600,7 +600,7 @@ test("company.health starts a visible research chat for a tracked application wi
   assert.deepEqual(result.messages.at(-1).artifacts, [
     {
       kind: "research_chat",
-      title: "Company health — Riverside Health",
+      title: "Company health: Riverside Health",
       chatId: "company-health-chat",
       skill: "company-health",
       state: "running",
@@ -1428,7 +1428,7 @@ test("a confirmed Ask action adds one board URL and keeps the receipt in workspa
   assert.deepEqual(result.messages.at(-1).artifacts, [
     {
       kind: "search_source",
-      title: "remoteok.com — Added",
+      title: "remoteok.com: Added",
       added: true,
       index: 3,
       provider: "remoteok",
@@ -1521,7 +1521,7 @@ test("a confirmed Ask action toggles one deterministically resolved search sourc
   assert.deepEqual(result.messages.at(-1).artifacts, [
     {
       kind: "search_source",
-      title: "LinkedIn search — Disabled",
+      title: "LinkedIn search: Disabled",
       changed: true,
       index: 1,
       provider: "linkedin.com",
@@ -1648,7 +1648,7 @@ test("job evaluation executes behind workspace-main and preserves the typed verd
   );
   assert.deepEqual(result.messages[1].artifacts[0], {
     kind: "job_evaluation",
-    title: "Temporal Labs — Applied AI Engineer — Keep",
+    title: "Temporal Labs, Applied AI Engineer: Keep",
     applicationId: "app-temporal",
     evaluation,
   });
@@ -2838,7 +2838,7 @@ test("document generation executes behind workspace-main and preserves artifact 
   assert.deepEqual(result.messages[1].artifacts[0], {
     kind: "packet_generation",
     purpose: "tailoring",
-    title: "Temporal Labs — Applied AI Engineer — Documents",
+    title: "Temporal Labs, Applied AI Engineer: Documents",
     applicationId: "app-temporal",
     status: "reviewable",
     uploadReady: false,
@@ -3011,7 +3011,7 @@ test("document export executes behind workspace-main and preserves packaged file
   assert.equal(result.operationResult, exported);
   assert.deepEqual(result.messages[1].artifacts[0], {
     kind: "packet_export",
-    title: "Temporal Labs — Applied AI Engineer — Exported files",
+    title: "Temporal Labs, Applied AI Engineer: Exported files",
     applicationId: "app-temporal",
     formats: ["pdf", "docx"],
     artifacts: exported.artifacts,
@@ -3081,7 +3081,7 @@ test("ISSUE-032 search buttons start work in workspace-main and preserve bounded
   );
   assert.deepEqual(result.messages[1].artifacts[0], {
     kind: "search_run",
-    title: "Job search — Searching",
+    title: "Job search: Searching",
     purpose: "manual-search",
     runId: "manual-search-2026-08-09",
     status: "running",
@@ -6633,7 +6633,7 @@ test("relationship.source-request: a landed relationship lead flips the sourcing
   });
 
   app = readApplication(repoRoot, "app-lumon");
-  assert.equal(app.nextAction, "Review relationship leads — approve or reject in Network tab");
+  assert.equal(app.nextAction, "Review relationship leads: approve or reject in Network tab");
 });
 
 test("relationship.source-request: an empty company throws RELATIONSHIP_SOURCING_COMPANY_REQUIRED; an untracked non-empty company still succeeds with applicationId null", async () => {

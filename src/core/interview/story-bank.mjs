@@ -178,7 +178,7 @@ export function validateStories(stories, evidenceClaims = []) {
     if (ids.length === 0) {
       errors.push({
         id: s.id ?? null,
-        message: `${where} cites no evidence_ids — every story must trace to candidate/evidence.yml (no invented narratives)`,
+        message: `${where} cites no evidence_ids: every story must trace to candidate/evidence.yml (no invented narratives)`,
       });
     } else if (haveEvidence) {
       for (const ref of ids) {

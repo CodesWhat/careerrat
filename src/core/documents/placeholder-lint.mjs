@@ -166,8 +166,8 @@ export function assertBuildReady(files) {
   const { clean, findings } = lintArtifacts(files);
   if (clean) return true;
 
-  const lines = findings.map((f) => `  ${f.file}:${f.line}:${f.column} [${f.pattern}] — ${f.text}`);
+  const lines = findings.map((f) => `  ${f.file}:${f.line}:${f.column} [${f.pattern}]: ${f.text}`);
   throw new Error(
-    `Artifact(s) contain unresolved placeholders — not build-ready:\n${lines.join("\n")}`
+    `Artifact(s) contain unresolved placeholders, not build-ready:\n${lines.join("\n")}`
   );
 }

@@ -1232,7 +1232,7 @@ async function fetchRecruitee(entry, fetchImpl) {
   const parsed = new URL(entry.careers_url);
   if (parsed.protocol !== "https:" || !RECRUITEE_HOST_RE.test(parsed.hostname)) {
     throw new Error(
-      `recruitee: untrusted hostname "${parsed.hostname}" — must match <slug>.recruitee.com`
+      `recruitee: untrusted hostname "${parsed.hostname}". Must match <slug>.recruitee.com`
     );
   }
   const apiUrl = `https://${parsed.hostname}/api/offers/`;

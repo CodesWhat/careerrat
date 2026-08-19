@@ -336,7 +336,7 @@ export function createPlaywrightOps({
         "This application's browser tab was closed to free resources. Ask CareerRat to apply again to reopen it."
       );
     }
-    throw new Error(`Unknown or stale ref "${ref}" — snapshot the page again before acting.`);
+    throw new Error(`Unknown or stale ref "${ref}". Snapshot the page again before acting.`);
   }
 
   return {

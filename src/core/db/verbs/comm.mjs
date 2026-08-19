@@ -179,7 +179,7 @@ export function commCaptureInbound({
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "message",
-      title: `${updated.company || id} — inbound message captured`,
+      title: `${updated.company || id}: inbound message captured`,
       summary: cleanSummary,
       refs: {
         applicationId: updated.applicationId || null,
@@ -202,7 +202,7 @@ export function commUpsert({ repoRoot, env, row } = {}) {
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "message",
-      title: `${row.company || row.id} — thread ${existed ? "updated" : "opened"}`,
+      title: `${row.company || row.id}: thread ${existed ? "updated" : "opened"}`,
       refs: { applicationId: row.applicationId || null, company: row.company, role: row.role },
     });
     return { id: row.id, meta, event };
@@ -235,7 +235,7 @@ export function commAppendMessage({ repoRoot, env, id, message } = {}) {
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "message",
-      title: `${comm.company || id} — ${message.direction || "message"} logged`,
+      title: `${comm.company || id}: ${message.direction || "message"} logged`,
       refs: { applicationId: comm.applicationId || null, company: comm.company, role: comm.role },
     });
     return { id, meta, event };
@@ -292,7 +292,7 @@ export function commSetDraft({ repoRoot, env, id, draft, summary, at } = {}) {
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "message",
-      title: `${comm.company || id} — reply drafted`,
+      title: `${comm.company || id}: reply drafted`,
       summary: "A reply is ready for review; nothing was sent.",
       refs: { applicationId: comm.applicationId || null, company: comm.company, role: comm.role },
       tags: ["operation:communication:draft"],
@@ -395,7 +395,7 @@ export function commMarkSent({
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "message",
-      title: `${comm.company || id} — message sent`,
+      title: `${comm.company || id}: message sent`,
       summary:
         tier === "verified"
           ? "Delivery was verified and the saved draft was cleared."

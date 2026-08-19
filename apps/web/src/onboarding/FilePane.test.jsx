@@ -784,7 +784,7 @@ describe("FilePane — Authorization editor (R3, R6)", () => {
     const tree = render({ state });
     const declinedRow = byClass(tree, "file-pane__row--declined")[0];
     expect(declinedRow).toBeTruthy();
-    expect(textOf(declinedRow)).toContain("Declined — won't ask again");
+    expect(textOf(declinedRow)).toContain("Declined, won't ask again");
     expect(byClass(declinedRow, "file-pane__row-next")).toHaveLength(0);
   });
 

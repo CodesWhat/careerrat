@@ -142,7 +142,7 @@ function classifyApp(app) {
 
 const STAGE_LADDER = [
   { id: "sourced", label: "Sourced", order: 0, colorVar: "--text-muted" },
-  { id: "reviewed-hold", label: "Reviewed — hold", order: 0.5, colorVar: "--orange" },
+  { id: "reviewed-hold", label: "Reviewed: hold", order: 0.5, colorVar: "--orange" },
   { id: "applied", label: "Applied", order: 1, colorVar: "--accent" },
   { id: "manual-apply", label: "Manual Apply", order: 1.5, colorVar: "--orange" },
   { id: "screen", label: "Screen", order: 2, colorVar: "--purple" },
@@ -672,7 +672,7 @@ export function buildTodayQueue(trackerData, now, followUpRules) {
     const whenText = fu.overdueDays > 0 ? `${fu.overdueDays}d overdue` : "due today";
     const hasDraft = !!(fu.draft && (fu.draft.body || fu.draft.subject));
     const draftPrompt = fu.role
-      ? `Draft the follow-up email for ${fu.company} — ${fu.role}`
+      ? `Draft the follow-up email for ${fu.company}, ${fu.role}`
       : `Draft the follow-up email for ${fu.company}`;
 
     // Resolve link: prefer the application whose id matches AND whose company matches
@@ -754,7 +754,7 @@ export function buildTodayQueue(trackerData, now, followUpRules) {
     const link = linkedApp?.link || "";
     const hasDraft = !!(fu.draft && (fu.draft.body || fu.draft.subject));
     const draftPrompt = fu.role
-      ? `Draft the follow-up email for ${fu.company} — ${fu.role}`
+      ? `Draft the follow-up email for ${fu.company}, ${fu.role}`
       : `Draft the follow-up email for ${fu.company}`;
 
     items.push({
@@ -763,7 +763,7 @@ export function buildTodayQueue(trackerData, now, followUpRules) {
       sortKey: fu.overdueDays, // lowest priority bucket, sorted by staleness
       company: fu.company,
       role: fu.role || "",
-      action: fu.reason || "No response — consider following up",
+      action: fu.reason || "No response. Consider following up.",
       whenText,
       hasDraft,
       applicationId: fu.applicationId || "",

@@ -443,7 +443,7 @@ export async function draftCoverLetterBlocks({
   // placeholder artifact.
   if (!aiResult.body?.ok) {
     const err = new Error(
-      `document generation needs AI (${aiResult.body?.error?.message || aiResult.body?.code || "AI call failed"}) — check your AI settings and retry`
+      `document generation needs AI (${aiResult.body?.error?.message || aiResult.body?.code || "AI call failed"}). Check your AI settings and retry`
     );
     err.code = "PACKET_AI_UNAVAILABLE";
     err.details = aiResult.body?.error?.code || aiResult.body?.code || null;
@@ -470,7 +470,7 @@ export async function draftCoverLetterBlocks({
       hardGaps.length ? hardGaps : [{ message: "cover-letter draft produced no usable blocks" }]
     ).map((gap) => gap.message);
     const err = new Error(
-      `AI cover-letter draft failed grounding validation (${violationMessages.join("; ")}) — regenerate to retry`
+      `AI cover-letter draft failed grounding validation (${violationMessages.join("; ")}). Regenerate to retry`
     );
     err.code = "PACKET_COVER_INVALID";
     throw err;
@@ -624,7 +624,7 @@ export async function draftResumeProposal({
   // generatePacket only reaches buildSourceArtifacts on success.
   if (!cleanText(context.sourceResume?.text)) {
     const err = new Error(
-      "no source résumé on file — import your résumé (onboarding Resume step) before generating documents"
+      "no source résumé on file. Import your résumé (onboarding Resume step) before generating documents"
     );
     err.code = "NO_SOURCE_RESUME";
     throw err;
@@ -660,7 +660,7 @@ export async function draftResumeProposal({
 
   if (!aiResult.body?.ok) {
     const err = new Error(
-      `document generation needs AI (${aiResult.body?.error?.message || aiResult.body?.code || "AI call failed"}) — check your AI settings and retry`
+      `document generation needs AI (${aiResult.body?.error?.message || aiResult.body?.code || "AI call failed"}). Check your AI settings and retry`
     );
     err.code = "PACKET_AI_UNAVAILABLE";
     err.details = aiResult.body?.error?.code || aiResult.body?.code || null;
@@ -692,7 +692,7 @@ export async function draftResumeProposal({
       const violations =
         retryValidation && !retryValidation.ok ? retryValidation.violations : validation.violations;
       const err = new Error(
-        `AI resume draft failed grounding validation (${violations.join("; ")}) — regenerate to retry`
+        `AI resume draft failed grounding validation (${violations.join("; ")}). Regenerate to retry`
       );
       err.code = "PACKET_RESUME_INVALID";
       throw err;
@@ -1166,7 +1166,7 @@ export async function generatePacket({
   // below and buildSourceArtifacts.
   if (!hasQuestionCapture && applyIntent) {
     const err = new Error(
-      `no application questions captured for "${id}" — capture the form questions first (packet questions step) and retry`
+      `no application questions captured for "${id}". Capture the form questions first (packet questions step) and retry`
     );
     err.code = "BAD_QUESTION_CAPTURE";
     throw err;
@@ -1251,7 +1251,7 @@ export async function generatePacket({
           kind: "answers",
           code: "QUESTION_CAPTURE_DEFERRED",
           message:
-            "answers artifact skipped — no application questions captured yet; capture the form questions (packet questions step), then regenerate, to produce answers",
+            "answers artifact skipped: no application questions captured yet; capture the form questions (packet questions step), then regenerate, to produce answers",
         },
       ]
     : [];

@@ -251,7 +251,7 @@ export function evaluateCompensation({ body, frontmatter, profile, bucket, track
     if (standing === "below" || standing === "thin") {
       return {
         verdict: "estimated-below-floor",
-        reason: `no comp posted; estimated ${range} from ${estimate.basis}${floorText ? `, under your ${floorText} floor` : ""} — likely pass unless strong non-cash benefits`,
+        reason: `no comp posted; estimated ${range} from ${estimate.basis}${floorText ? `, under your ${floorText} floor` : ""}, likely pass unless strong non-cash benefits`,
         band: null,
         estimate,
         confirmNeeded: true,
@@ -261,7 +261,7 @@ export function evaluateCompensation({ body, frontmatter, profile, bucket, track
 
     return {
       verdict: "estimated",
-      reason: `no comp posted; estimated ${range} from ${estimate.basis}${standing === "clear" && floorText ? ` — clears your ${floorText} floor` : ""} (confirm live)`,
+      reason: `no comp posted; estimated ${range} from ${estimate.basis}${standing === "clear" && floorText ? `, clears your ${floorText} floor` : ""} (confirm live)`,
       band: null,
       estimate,
       confirmNeeded: true,
@@ -324,7 +324,7 @@ export function computeCompAnchor({ profile, bucket, comp }) {
   if (c.target_base != null) {
     const rationale =
       comp && comp.verdict === "below-floor"
-        ? "your target base — JD band is below your floor, so anchor up or pass"
+        ? "your target base: JD band is below your floor, so anchor up or pass"
         : "your target base";
     return { value: Number(c.target_base), rationale };
   }

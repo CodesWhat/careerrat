@@ -45,7 +45,7 @@ export function sourcedUpsertBatch({ repoRoot, env, rows } = {}) {
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "sourced",
-      title: `Sourced sweep — ${created} new, ${updated} updated`,
+      title: `Sourced sweep: ${created} new, ${updated} updated`,
       tags: [`count:${rows.length}`],
     });
     const analytics = refreshAnalytics(db);
@@ -80,8 +80,8 @@ export function sourcedSetStatus({ repoRoot, env, id, to, note } = {}) {
     const event = logActivityEvent(db, {
       type: "status_change",
       title: skipped
-        ? `${role.company || id} — Role skipped`
-        : `${role.company || id} — Sourced role status updated`,
+        ? `${role.company || id}: Role skipped`
+        : `${role.company || id}: Sourced role status updated`,
       summary: skipped
         ? note || "Removed this role from active review."
         : `Moved the sourced role to ${String(to).replace(/[-_]/g, " ")}.`,
@@ -117,7 +117,7 @@ export function sourcedPromote({ repoRoot, env, id, appRow } = {}) {
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "applied",
-      title: `${newApp.company || newApp.id} — promoted from sourced`,
+      title: `${newApp.company || newApp.id}: promoted from sourced`,
       refs: { applicationId: newApp.id, company: newApp.company, role: newApp.role },
     });
     const analytics = refreshAnalytics(db);
