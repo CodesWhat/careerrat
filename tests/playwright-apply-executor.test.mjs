@@ -37,6 +37,11 @@ function createFakeBrowser({ controls, bodyText = "" } = {}) {
       },
       async selectOption(arg) {
         actions.push({ op: "selectOption", index, arg });
+        // A real Locator.selectOption() returns the option values it
+        // actually selected — selectOption() now checks that array is
+        // non-empty before trusting a native <select> attempt succeeded, so
+        // this fake has to return one too instead of resolving `undefined`.
+        return [String(arg?.label ?? arg)];
       },
       async setChecked(checked) {
         actions.push({ op: "setChecked", index, checked });
@@ -557,10 +562,13 @@ test("screenshot returns base64 png data", async () => {
 // combobox-index control whose own selectOption() rejects exactly the way a
 // real non-<select> element does ("Element is not a <select> element"), a
 // click() that opens a live option list, an evaluate()/pressSequentially()
-// pair for the optional type-to-filter step, and a page-level
-// locator("[role='option']:visible") with first()/waitFor()/allTextContents()/
-// nth(i).click() reflecting that same filterable list — the same shape a real
-// react-select combobox exposes.
+// pair for the optional type-to-filter step, an evaluate() that reflects the
+// control's own post-selection display value (selectOption() now confirms a
+// click actually selected something before reporting success — see
+// comboboxValue below), and a page-level locator("[role='option']:visible")
+// with first()/waitFor()/allTextContents()/filter({hasText}).first().click()
+// reflecting that same filterable list — the same shape a real react-select
+// combobox exposes.
 // ---------------------------------------------------------------------------
 
 function createFakeComboboxBrowser({ controls, comboboxIndex, options }) {
@@ -568,6 +576,13 @@ function createFakeComboboxBrowser({ controls, comboboxIndex, options }) {
   let currentUrl = "";
   let open = false;
   let filterText = "";
+  // The combobox control's own "display value" — selectOption() now reads
+  // this back (via evaluate()) after every click to CONFIRM a selection
+  // actually took, instead of trusting a click that merely didn't throw.
+  // Only ever set by a successful option click below, exactly mirroring the
+  // real bug this fake pins the fix for: a click on a real Ashby control
+  // resolved cleanly while its value stayed genuinely blank.
+  let comboboxValue = "";
 
   function visibleOptions() {
     if (!open) return [];
@@ -583,6 +598,7 @@ function createFakeComboboxBrowser({ controls, comboboxIndex, options }) {
       return {
         async selectOption(arg) {
           actions.push({ op: "selectOption", index, arg });
+          return [String(arg?.label ?? arg)];
         },
       };
     }
@@ -600,13 +616,19 @@ function createFakeComboboxBrowser({ controls, comboboxIndex, options }) {
         filterText = "";
       },
       async evaluate(fn) {
-        return fn({ tagName: "INPUT", isContentEditable: false });
+        return fn({ tagName: "INPUT", isContentEditable: false, value: comboboxValue });
       },
       async pressSequentially(value) {
         actions.push({ op: "comboboxFilter", index, value });
         filterText = value;
       },
     };
+  }
+
+  function selectOptionByLabel(label) {
+    comboboxValue = label;
+    actions.push({ op: "comboboxSelect", index: comboboxIndex, label });
+    open = false;
   }
 
   function fakeOptionsLocator() {
@@ -621,12 +643,22 @@ function createFakeComboboxBrowser({ controls, comboboxIndex, options }) {
       async allTextContents() {
         return visibleOptions();
       },
-      nth(matchIndex) {
+      // Mirrors real Locator.filter({hasText}).first().click() — the exact
+      // surface selectOption()'s clickOptionByExactText() now drives instead
+      // of a cached nth(index), so this has to model it for the combobox
+      // fallback tests below to exercise the real code path.
+      filter({ hasText }) {
         return {
-          async click() {
-            const label = visibleOptions()[matchIndex];
-            actions.push({ op: "comboboxSelect", index: comboboxIndex, label });
-            open = false;
+          first() {
+            return {
+              async click() {
+                const matches = visibleOptions().filter((text) =>
+                  hasText instanceof RegExp ? hasText.test(text) : text.includes(hasText)
+                );
+                if (matches.length === 0) throw new Error("no option matched filter({hasText})");
+                selectOptionByLabel(matches[0]);
+              },
+            };
           },
         };
       },

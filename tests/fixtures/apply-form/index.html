@@ -25,10 +25,20 @@
       3. An Ashby-shaped type-to-populate combobox ("Citizenship") — an
          [role=combobox] text input that renders ZERO [role=option] nodes on
          click/focus, and only populates them once something is actually
-         typed into it. Its option list deliberately includes an exact match
-         ("Canada") behind a longer substring-containing match ("Canadian
-         Overseas Territory") so option precedence is exercised the same way
-         the Country fixture above exercises it for the click-to-open shape.
+         typed into it, ASYNCHRONOUSLY (debounced) rather than synchronously
+         off the input event, mounted in a PORTAL (a direct child of <body>,
+         not nested inside this field's own container) — the same shape a
+         real Ashby form was measured to use. Its rendered list deliberately
+         includes an exact match ("Canada") behind a longer
+         substring-containing match ("Canadian Overseas Territory"), a
+         duplicate label ("Canada" appears twice), and a non-prefix-matching
+         entry ("Tanzania", present in the results the same way a real
+         Ashby query for "Uni" surfaced "Tanzania"). It ALSO renders in two
+         waves: an interim, inert option list that a click cannot commit a
+         selection through, replaced shortly after by the real,
+         click-handling list — reproducing a real, measured false positive
+         where a click that landed during that interim window resolved with
+         no error while the field itself stayed genuinely blank.
 
       No real ATS URLs are used anywhere in this fixture or its test.
     -->
@@ -76,12 +86,18 @@
             aria-controls="citizenship-listbox"
             autocomplete="off"
           />
-          <div role="listbox" id="citizenship-listbox" hidden></div>
           <input type="hidden" name="citizenship" id="citizenship-value" />
         </div>
 
         <button type="submit">Submit application</button>
       </form>
+
+      <!--
+        citizenship-listbox is intentionally NOT nested inside
+        .typeahead-field above — it's appended straight to <body> below
+        (a portal), the same way a real Ashby-shaped combobox renders its
+        option list outside the input's own container.
+      -->
 
       <!--
         Selection outcomes are echoed here in plain text (rather than left to
@@ -92,6 +108,7 @@
       -->
       <div id="status" aria-live="polite"></div>
     </main>
+    <div role="listbox" id="citizenship-listbox" hidden></div>
     <script>
       (() => {
         function appendStatus(text) {
@@ -157,52 +174,99 @@
         });
 
         // Ashby-shaped type-to-populate combobox: unlike Country above,
-        // click/focus render NOTHING — the option list only exists once
-        // something has actually been typed into the field. Deliberately
-        // ordered so a naive "first substring match wins" search would land
-        // on "Canadian Overseas Territory" (which contains "canada") instead
-        // of the exact "Canada" match that sorts after it.
+        // click/focus render NOTHING, results arrive ASYNCHRONOUSLY
+        // (debounced, not synchronously off the input event) in a PORTAL
+        // (#citizenship-listbox is a direct child of <body>, not nested
+        // inside .typeahead-field — see the comment above the form), and
+        // the list itself renders in TWO WAVES. Ordering/contents are
+        // deliberate: "Canadian Overseas Territory" sorts before the exact
+        // "Canada" match (precedence), "Canada" appears twice (a duplicate
+        // label selectOption() must tolerate without throwing), and
+        // "Tanzania" is present regardless of query the same way a real
+        // Ashby query for "Uni" surfaced "Tanzania" (a non-prefix-matching
+        // entry).
         var CITIZENSHIP_OPTIONS = [
           "Canadian Overseas Territory",
           "Canada",
-          "United States",
-          "United Kingdom",
+          "Canada",
+          "Tanzania",
         ];
+        // Wave 1: an interim option list renders this long after the last
+        // keystroke (debounce) — present in the DOM, but NOT yet wired to
+        // commit a selection. Wave 2: this much longer after wave 1, the
+        // SAME list becomes interactive. A click that lands in the wave-1
+        // window is exactly the real, measured bug: it resolves with no
+        // error while genuinely selecting nothing.
+        var CITIZENSHIP_WAVE1_DELAY_MS = 150;
+        var CITIZENSHIP_WAVE2_DELAY_MS = 400;
 
         var citizenshipInput = document.getElementById("citizenship-input");
         var citizenshipListbox = document.getElementById("citizenship-listbox");
         var citizenshipValue = document.getElementById("citizenship-value");
+        var citizenshipWave1Timer = null;
+        var citizenshipWave2Timer = null;
 
-        function renderCitizenshipOptions(filterText) {
-          var query = String(filterText || "").trim().toLowerCase();
-          citizenshipListbox.innerHTML = "";
-          if (!query) {
-            citizenshipListbox.hidden = true;
-            citizenshipInput.setAttribute("aria-expanded", "false");
-            return;
-          }
-          var matches = CITIZENSHIP_OPTIONS.filter(
-            (option) => option.toLowerCase().indexOf(query) !== -1
-          );
-          matches.forEach((option) => {
-            var choice = document.createElement("div");
-            choice.setAttribute("role", "option");
-            choice.textContent = option;
-            choice.addEventListener("click", () => {
-              citizenshipValue.value = option;
-              citizenshipInput.value = option;
-              citizenshipListbox.hidden = true;
-              citizenshipInput.setAttribute("aria-expanded", "false");
-              appendStatus(`Citizenship selected: ${option}`);
-            });
-            citizenshipListbox.appendChild(choice);
-          });
-          citizenshipListbox.hidden = matches.length === 0;
-          citizenshipInput.setAttribute("aria-expanded", matches.length > 0 ? "true" : "false");
+        function clearCitizenshipTimers() {
+          clearTimeout(citizenshipWave1Timer);
+          clearTimeout(citizenshipWave2Timer);
+          citizenshipWave1Timer = null;
+          citizenshipWave2Timer = null;
         }
 
+        function closeCitizenshipList() {
+          citizenshipListbox.hidden = true;
+          citizenshipListbox.innerHTML = "";
+          citizenshipListbox.dataset.interactive = "false";
+          citizenshipInput.setAttribute("aria-expanded", "false");
+        }
+
+        // ONE delegated listener (not one per option) so the
+        // inert-vs-interactive distinction lives on the container's own
+        // readiness state, not on which handler happens to be wired to a
+        // given node — a real "click landed before hydration finished" bug
+        // doesn't care which option was clicked. A click while
+        // dataset.interactive !== "true" is treated as a dismiss: it
+        // reverts the field to genuinely blank, the same symptom a live
+        // Ashby form showed for the false positive this fixture now
+        // reproduces (not just "value unchanged from whatever was typed").
+        citizenshipListbox.addEventListener("click", (event) => {
+          var optionEl = event.target.closest("[role='option']");
+          if (!optionEl) return;
+          if (citizenshipListbox.dataset.interactive !== "true") {
+            citizenshipInput.value = "";
+            citizenshipValue.value = "";
+            closeCitizenshipList();
+            return;
+          }
+          var option = optionEl.textContent;
+          citizenshipValue.value = option;
+          citizenshipInput.value = option;
+          closeCitizenshipList();
+          appendStatus(`Citizenship selected: ${option}`);
+        });
+
         citizenshipInput.addEventListener("input", () => {
-          renderCitizenshipOptions(citizenshipInput.value);
+          clearCitizenshipTimers();
+          closeCitizenshipList();
+
+          var query = citizenshipInput.value.trim();
+          if (!query) return;
+
+          citizenshipWave1Timer = setTimeout(() => {
+            CITIZENSHIP_OPTIONS.forEach((option) => {
+              var choice = document.createElement("div");
+              choice.setAttribute("role", "option");
+              choice.textContent = option;
+              citizenshipListbox.appendChild(choice);
+            });
+            citizenshipListbox.hidden = false;
+            citizenshipListbox.dataset.interactive = "false";
+            citizenshipInput.setAttribute("aria-expanded", "true");
+
+            citizenshipWave2Timer = setTimeout(() => {
+              citizenshipListbox.dataset.interactive = "true";
+            }, CITIZENSHIP_WAVE2_DELAY_MS);
+          }, CITIZENSHIP_WAVE1_DELAY_MS);
         });
       })();
     </script>

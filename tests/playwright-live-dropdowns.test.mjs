@@ -124,6 +124,16 @@ test("selectOption fails fast with a plain-language human-handoff error when no 
   });
 });
 
+// This is the regression pin for a real, measured false positive: the
+// fixture's Citizenship control renders its option list asynchronously, in
+// a portal, in two waves (an interim list a click can't commit through,
+// replaced shortly after by the real one). Against the PREVIOUSLY committed
+// selectOption() — no verification, an unpaced pressSequentially, and a
+// stale nth(index) click — this test FAILS: selectOption() resolves without
+// throwing (it clicks the interim, inert option) while the field is left
+// genuinely blank, so the status text this test asserts on never appears.
+// It only passes once selectOption() actually confirms the control's own
+// display value before reporting success.
 test("selectOption drives a real Ashby-shaped type-to-populate combobox that renders no options until typed into", {
   skip: !LIVE,
 }, async () => {
@@ -131,14 +141,17 @@ test("selectOption drives a real Ashby-shaped type-to-populate combobox that ren
     const { pageId } = await ops.openTab({ url: FIXTURE_URL });
     const ref = await refFor(ops, pageId, "Citizenship");
 
-    await ops.selectOption({ pageId, ref, value: "United States" });
+    // "Tanzania" is present in the fixture's list regardless of what was
+    // typed (mirroring a real Ashby query for "Uni" surfacing "Tanzania")
+    // and has no other option text it could be confused with.
+    await ops.selectOption({ pageId, ref, value: "Tanzania" });
 
     const after = await ops.snapshot({ pageId });
-    assert.match(after.pageText, /Citizenship selected: United States/);
+    assert.match(after.pageText, /Citizenship selected: Tanzania/);
   });
 });
 
-test("selectOption on the Ashby-shaped combobox prefers the exact match over a longer substring match", {
+test("selectOption on the Ashby-shaped combobox prefers the exact match over a substring match, and tolerates a duplicate label", {
   skip: !LIVE,
 }, async () => {
   await withLiveOps(async (ops) => {
@@ -146,8 +159,11 @@ test("selectOption on the Ashby-shaped combobox prefers the exact match over a l
     const ref = await refFor(ops, pageId, "Citizenship");
 
     // "Canadian Overseas Territory" contains "canada" and is ordered first
-    // in the fixture's option list — a naive first-hit search would land
-    // there instead of the exact "Canada" match.
+    // in the fixture's option list, and "Canada" itself renders TWICE (a
+    // duplicate label) — a naive first-hit search would land on the
+    // substring match, and a naive click-by-index could throw on/mismatch
+    // the duplicate, instead of landing on the exact "Canada" match either
+    // way.
     await ops.selectOption({ pageId, ref, value: "Canada" });
 
     const after = await ops.snapshot({ pageId });
