@@ -544,6 +544,252 @@ test("screenshot returns base64 png data", async () => {
 });
 
 // ---------------------------------------------------------------------------
+// selectOption(): custom [role=combobox] fallback (P0 — real ATS forms almost
+// never use a native <select>; Greenhouse, Ashby, and Lever all route
+// dropdowns through custom react-select-shaped widgets instead, which the
+// original selectOption() couldn't drive at all — see PLAYWRIGHT-OPS.md-style
+// evidence in the fix commit).
+//
+// createFakeBrowser above always resolves selectOption() successfully (it
+// only records the call), which is right for pinning the still-working
+// native-<select> contract but can't exercise the fallback. This fake models
+// the extra Locator surface selectOption() now calls beyond that: a
+// combobox-index control whose own selectOption() rejects exactly the way a
+// real non-<select> element does ("Element is not a <select> element"), a
+// click() that opens a live option list, an evaluate()/fill() pair for the
+// optional type-to-filter step, and a page-level
+// locator("[role='option']:visible") with first()/waitFor()/allTextContents()/
+// nth(i).click() reflecting that same filterable list — the same shape a real
+// react-select combobox exposes.
+// ---------------------------------------------------------------------------
+
+function createFakeComboboxBrowser({ controls, comboboxIndex, options }) {
+  const actions = [];
+  let currentUrl = "";
+  let open = false;
+  let filterText = "";
+
+  function visibleOptions() {
+    if (!open) return [];
+    const query = filterText.trim().toLowerCase();
+    return options.filter((option) => option.toLowerCase().includes(query));
+  }
+
+  function elementLocator(index) {
+    if (index !== comboboxIndex) {
+      // Every other control these tests touch is treated as a real native
+      // <select> — selectOption() against it just has to succeed, the same
+      // contract createFakeBrowser's fake already pins above.
+      return {
+        async selectOption(arg) {
+          actions.push({ op: "selectOption", index, arg });
+        },
+      };
+    }
+    return {
+      async selectOption() {
+        // A real Playwright Locator.selectOption() against a non-<select>
+        // element rejects immediately with exactly this message — reproduced
+        // here so selectOption()'s outer try/catch takes the same fallback
+        // branch it would against a live combobox.
+        throw new Error("Element is not a <select> element");
+      },
+      async click() {
+        actions.push({ op: "comboboxOpen", index });
+        open = true;
+        filterText = "";
+      },
+      async evaluate(fn) {
+        return fn({ tagName: "INPUT", isContentEditable: false });
+      },
+      async fill(value) {
+        actions.push({ op: "comboboxFilter", index, value });
+        filterText = value;
+      },
+    };
+  }
+
+  function fakeOptionsLocator() {
+    return {
+      first() {
+        return {
+          async waitFor() {
+            if (visibleOptions().length === 0) throw new Error("no visible [role='option']");
+          },
+        };
+      },
+      async allTextContents() {
+        return visibleOptions();
+      },
+      nth(matchIndex) {
+        return {
+          async click() {
+            const label = visibleOptions()[matchIndex];
+            actions.push({ op: "comboboxSelect", index: comboboxIndex, label });
+            open = false;
+          },
+        };
+      },
+    };
+  }
+
+  const page = {
+    async goto(url) {
+      currentUrl = url;
+    },
+    url() {
+      return currentUrl;
+    },
+    locator(selector) {
+      if (selector === "body")
+        return {
+          async innerText() {
+            return "";
+          },
+        };
+      if (selector === "[role='option']:visible") return fakeOptionsLocator();
+      return {
+        async evaluateAll() {
+          return controls.map((control, index) => ({
+            index,
+            role: control.role,
+            name: control.name,
+            required: Boolean(control.required),
+            fileInput: Boolean(control.fileInput),
+            groupLabel: control.groupLabel ?? null,
+          }));
+        },
+        nth: elementLocator,
+      };
+    },
+    async screenshot() {
+      return Buffer.from("fake-png-bytes");
+    },
+  };
+
+  const context = {
+    async newPage() {
+      return page;
+    },
+    async close() {},
+  };
+
+  return { actions, launchImpl: async () => context };
+}
+
+const COMBOBOX_FORM_CONTROLS = [
+  { role: "textbox", name: "First Name", required: true },
+  { role: "combobox", name: "Country", required: true },
+  { role: "button", name: "Submit application", required: false },
+];
+
+// Deliberately ordered so the substring match ("United States Minor Outlying
+// Islands" contains "united states") would be the FIRST match found by a
+// naive first-hit search, even though the target value has an exact match
+// later in the list.
+const COUNTRY_OPTIONS = [
+  "United States Minor Outlying Islands",
+  "United States",
+  "Canada",
+  "United Kingdom",
+];
+
+test("selectOption falls back to a custom combobox when the ref isn't a native <select>", async () => {
+  const { launchImpl, actions } = createFakeComboboxBrowser({
+    controls: COMBOBOX_FORM_CONTROLS,
+    comboboxIndex: 1,
+    options: COUNTRY_OPTIONS,
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  await ops.snapshot({ pageId });
+  await ops.selectOption({ pageId, ref: "e2", value: "Canada" });
+
+  assert.deepEqual(actions, [
+    { op: "comboboxOpen", index: 1 },
+    { op: "comboboxSelect", index: 1, label: "Canada" },
+  ]);
+});
+
+test("selectOption prefers an exact option match over a substring match (P1 regression)", async () => {
+  const { launchImpl, actions } = createFakeComboboxBrowser({
+    controls: COMBOBOX_FORM_CONTROLS,
+    comboboxIndex: 1,
+    options: COUNTRY_OPTIONS,
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  await ops.snapshot({ pageId });
+  await ops.selectOption({ pageId, ref: "e2", value: "United States" });
+
+  const selected = actions.find((entry) => entry.op === "comboboxSelect");
+  assert.equal(
+    selected.label,
+    "United States",
+    "the exact match wins even though the substring match sorts first in the option list"
+  );
+});
+
+test("selectOption matches case-insensitively and tolerates surrounding whitespace", async () => {
+  const { launchImpl, actions } = createFakeComboboxBrowser({
+    controls: COMBOBOX_FORM_CONTROLS,
+    comboboxIndex: 1,
+    options: COUNTRY_OPTIONS,
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  await ops.snapshot({ pageId });
+  await ops.selectOption({ pageId, ref: "e2", value: "  canada  " });
+
+  const selected = actions.find((entry) => entry.op === "comboboxSelect");
+  assert.equal(selected.label, "Canada");
+});
+
+test("selectOption on a genuine native <select> ref never touches the combobox fallback (no regression)", async () => {
+  const { launchImpl, actions } = createFakeComboboxBrowser({
+    controls: COMBOBOX_FORM_CONTROLS,
+    comboboxIndex: 1,
+    options: COUNTRY_OPTIONS,
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  await ops.snapshot({ pageId });
+  // ref e1 ("First Name") resolves to control index 0 — the fake's
+  // "always a native <select>" branch — proving the native path still runs
+  // untouched when it's not the combobox-shaped control under test.
+  await ops.selectOption({ pageId, ref: "e1", value: "whatever" });
+
+  assert.deepEqual(actions, [{ op: "selectOption", index: 0, arg: { label: "whatever" } }]);
+});
+
+test("selectOption throws a plain-language human-handoff error naming the field when no option matches (P0)", async () => {
+  const { launchImpl } = createFakeComboboxBrowser({
+    controls: COMBOBOX_FORM_CONTROLS,
+    comboboxIndex: 1,
+    options: COUNTRY_OPTIONS,
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  await ops.snapshot({ pageId });
+
+  await assert.rejects(
+    () => ops.selectOption({ pageId, ref: "e2", value: "Atlantis" }),
+    (error) => {
+      assert.match(error.message, /"Country" dropdown/);
+      assert.match(error.message, /couldn't be set automatically/);
+      assert.match(error.message, /switch to the open browser window/);
+      assert.match(error.message, /choose the correct option yourself/);
+      return true;
+    }
+  );
+});
+
+// ---------------------------------------------------------------------------
 // upload group-tree synthesis: pageText carries an Orca-shaped tree section so
 // apply-driver.mjs's real uploadTargetsFromSnapshot()/parsedSnapshotNodes()
 // (unmodified, imported directly here) can resolve upload targets — this is

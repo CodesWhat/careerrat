@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CareerRat ATS dropdown fixture</title>
+  </head>
+  <body>
+    <!--
+      Reproduces the two dropdown shapes real ATS forms actually use, so
+      tests/playwright-live.test.mjs can drive selectOption() against a real
+      Chromium session without depending on a live third-party site:
+
+      1. A native <select> ("Work authorization") — proves selectOption()'s
+         original, still-correct path keeps working (Lever has a genuine
+         native select and it must never regress).
+
+      2. A react-select-shaped custom combobox ("Country") — an
+         [role=combobox] text input that opens a [role=listbox] of
+         [role=option] elements on click, filters that list as you type, and
+         writes the chosen label into a hidden input on selection. This is
+         the shape Greenhouse and Ashby actually use, and 0 native <select>
+         elements were found on either real form.
+
+      No real ATS URLs are used anywhere in this fixture or its test.
+    -->
+    <main>
+      <h1>Example application</h1>
+      <form id="application-form">
+        <label>
+          First Name
+          <input name="first_name" />
+        </label>
+
+        <label for="work-authorization">Work authorization</label>
+        <select id="work-authorization" name="work_authorization">
+          <option value="">Choose one</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+
+        <div class="combobox-field">
+          <label id="country-label" for="country-input">Country</label>
+          <input
+            id="country-input"
+            type="text"
+            role="combobox"
+            aria-labelledby="country-label"
+            aria-expanded="false"
+            aria-autocomplete="list"
+            aria-controls="country-listbox"
+            autocomplete="off"
+          />
+          <div role="listbox" id="country-listbox" hidden></div>
+          <input type="hidden" name="country" id="country-value" />
+        </div>
+
+        <button type="submit">Submit application</button>
+      </form>
+
+      <!--
+        Selection outcomes are echoed here in plain text (rather than left to
+        infer from element state) so tests/playwright-live.test.mjs can
+        verify a real selectOption() call actually landed, using only the
+        same snapshot().pageText surface the real apply-driver reads — no
+        second, out-of-band Playwright handle needed just for assertions.
+      -->
+      <div id="status" aria-live="polite"></div>
+    </main>
+    <script>
+      (() => {
+        function appendStatus(text) {
+          var status = document.getElementById("status");
+          status.textContent = status.textContent ? `${status.textContent} | ${text}` : text;
+        }
+
+        document.getElementById("work-authorization").addEventListener("change", (event) => {
+          appendStatus(`Work authorization selected: ${event.target.value}`);
+        });
+
+        // Deliberately ordered so a naive "first substring match wins" search
+        // would land on the wrong option: "United States Minor Outlying
+        // Islands" contains "united states" and sorts before the exact
+        // match, so selecting "United States" is a real regression check for
+        // "exact match beats substring", not just a happy-path pick.
+        var OPTIONS = [
+          "United States Minor Outlying Islands",
+          "United States",
+          "Canada",
+          "United Kingdom",
+        ];
+
+        var input = document.getElementById("country-input");
+        var listbox = document.getElementById("country-listbox");
+        var hiddenValue = document.getElementById("country-value");
+
+        function renderOptions(filterText) {
+          var query = String(filterText || "").trim().toLowerCase();
+          var matches = OPTIONS.filter((option) => option.toLowerCase().indexOf(query) !== -1);
+          listbox.innerHTML = "";
+          matches.forEach((option) => {
+            var choice = document.createElement("div");
+            choice.setAttribute("role", "option");
+            choice.textContent = option;
+            choice.addEventListener("click", () => {
+              hiddenValue.value = option;
+              input.value = option;
+              closeListbox();
+              appendStatus(`Country selected: ${option}`);
+            });
+            listbox.appendChild(choice);
+          });
+        }
+
+        function openListbox() {
+          renderOptions(input.value);
+          listbox.hidden = false;
+          input.setAttribute("aria-expanded", "true");
+        }
+
+        function closeListbox() {
+          listbox.hidden = true;
+          input.setAttribute("aria-expanded", "false");
+        }
+
+        input.addEventListener("click", openListbox);
+        input.addEventListener("focus", openListbox);
+        input.addEventListener("input", () => {
+          renderOptions(input.value);
+          listbox.hidden = false;
+          input.setAttribute("aria-expanded", "true");
+        });
+      })();
+    </script>
+  </body>
+</html>

@@ -19,10 +19,20 @@
 
 const CONTROL_SELECTOR = "input, textarea, select, button, [role='button']";
 const MAX_PAGE_TEXT = 20_000;
+// Bounds every Playwright action selectOption() takes (native-select attempt,
+// then each step of the combobox fallback) so a control that can't actually
+// be driven fails in a few seconds, not Playwright's implicit 30s
+// actionability wait. Real ATS forms almost never use a native <select> —
+// Greenhouse/Ashby/Lever all route dropdowns through custom [role=combobox]
+// widgets — so hitting this timeout on the native attempt is the common case,
+// not the exception, and the combobox fallback below is what actually drives
+// the control.
+const SELECT_OPTION_TIMEOUT_MS = 5_000;
 // Bounds how many supervised tabs stay open at once in a long-lived process
 // (e.g. a dev server fielding many applies in a day) — beyond this, the
 // least-recently-used tab is closed to free real browser resources.
 const MAX_OPEN_PAGES = 8;
+
 async function defaultLaunch({ profileDir, headless }) {
   const { chromium } = await import("playwright");
   return chromium.launchPersistentContext(profileDir, {
@@ -145,10 +155,18 @@ export function collectControls(elements) {
         ":scope > legend, :scope > label, :scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6, :scope > [role='heading']"
       );
       let nearest = null;
+      // 0x04 is Node.compareDocumentPosition's FOLLOWING bit (standard,
+      // stable value) — inlined here rather than read off a module-scope
+      // constant. evaluateAll serializes only collectControls's own source
+      // to run in the browser, so a reference to anything declared outside
+      // it (a helper OR a constant, however small) comes back `undefined`
+      // there: this exact mistake, just with a NAMED module-scope constant
+      // instead of a literal, previously threw ReferenceError on every real
+      // ATS page and is the reason this rule gets called out so bluntly.
       for (const candidate of candidates) {
         // querySelectorAll returns matches in document order, so the last
         // candidate that still precedes `el` is the nearest preceding one.
-        if (candidate.compareDocumentPosition(el) & DOCUMENT_POSITION_FOLLOWING) {
+        if (candidate.compareDocumentPosition(el) & 0x04) {
           nearest = candidate;
         }
       }
@@ -260,6 +278,45 @@ function buildUploadTreeLines(controlsWithRef) {
     );
   }
   return lines;
+}
+
+// Case/whitespace-insensitive comparison key for matching a target value
+// against a rendered [role=option]'s text. This runs in Node against strings
+// already pulled out of the page (Locator.allTextContents()), not inside an
+// evaluate() callback, so it's fine as an ordinary module-level helper.
+function normalizeOptionText(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+// Index of the best match for `targetValue` among `optionTexts`, or -1 if
+// none matches at all. An exact match (after normalizing case/whitespace)
+// always wins over a substring match, even when a substring match comes
+// first in the list — e.g. selecting "United States" must not land on
+// "United States Minor Outlying Islands" just because that option happens to
+// render before the exact one.
+function findOptionMatch(optionTexts, targetValue) {
+  const target = normalizeOptionText(targetValue);
+  const exactIndex = optionTexts.findIndex((text) => normalizeOptionText(text) === target);
+  if (exactIndex !== -1) return exactIndex;
+  return optionTexts.findIndex((text) => normalizeOptionText(text).includes(target));
+}
+
+// The product requirement for a dropdown selectOption() genuinely cannot
+// drive: never a silent skip, never a guessed value — a visible handoff to
+// the human, in plain language, naming the field. apply-driver.mjs's
+// fillStep() already catches every field-op error and surfaces
+// `error.message` as that field's unresolved reason (see the `unresolved.push`
+// call around its `await action(ops, pageId)`), so this message IS what the
+// candidate sees.
+function comboboxHandoffError(name) {
+  const trimmed = String(name || "").trim();
+  const subject = trimmed ? `The "${trimmed}" dropdown` : "This dropdown";
+  return new Error(
+    `${subject} couldn't be set automatically. Please switch to the open browser window and choose the correct option yourself.`
+  );
 }
 
 // createPlaywrightOps — bundled-Playwright implementation of the provider-neutral
@@ -384,6 +441,9 @@ export function createPlaywrightOps({
         refMap.set(ref, {
           locator: container.nth(control.index),
           fileInput: Boolean(control.fileInput),
+          // Carried through so selectOption()'s combobox-handoff error can
+          // name the field the same way the rest of the snapshot does.
+          name: control.name,
         });
         refs[ref] = { role: control.role, name: control.name, required: Boolean(control.required) };
       }
@@ -406,13 +466,71 @@ export function createPlaywrightOps({
       await resolveRef(pageId, ref).locator.fill(String(value));
     },
 
+    // Two shapes of dropdown, tried in order:
+    //  1. A native <select> — the original, still-correct path for a form
+    //     like Lever's that genuinely has one. Bounded to a few seconds so a
+    //     control that ISN'T a <select> fails fast instead of riding
+    //     Playwright's 30s default actionability wait (the exact hang
+    //     observed against a real Lever combobox).
+    //  2. A custom combobox widget (react-select and friends: a clickable
+    //     control that opens a [role=option] list) — click to open it,
+    //     optionally type the target value to filter a long/searchable list,
+    //     then click whichever option's text matches. Real ATS forms almost
+    //     never use a native select, so this is the common path in practice.
+    // If neither path can resolve a match, this throws a plain-language
+    // error naming the field instead of silently skipping it or guessing a
+    // value — apply-driver.mjs's fillStep() already surfaces that message as
+    // the field's unresolved reason, which is the visible human handoff.
     async selectOption({ pageId, ref, value }) {
-      const { locator } = resolveRef(pageId, ref);
+      const target = page(pageId);
+      const { locator, name } = resolveRef(pageId, ref);
       const stringValue = String(value);
+
       try {
-        await locator.selectOption({ label: stringValue });
+        try {
+          await locator.selectOption({ label: stringValue }, { timeout: SELECT_OPTION_TIMEOUT_MS });
+        } catch {
+          await locator.selectOption(stringValue, { timeout: SELECT_OPTION_TIMEOUT_MS });
+        }
+        return;
       } catch {
-        await locator.selectOption(stringValue);
+        // Not a native <select> (or otherwise couldn't be driven that way) —
+        // fall through to the combobox path below.
+      }
+
+      try {
+        await locator.click({ timeout: SELECT_OPTION_TIMEOUT_MS });
+
+        const optionsLocator = target.locator("[role='option']:visible");
+        await optionsLocator
+          .first()
+          .waitFor({ state: "visible", timeout: SELECT_OPTION_TIMEOUT_MS });
+
+        let optionTexts = await optionsLocator.allTextContents();
+        let matchIndex = findOptionMatch(optionTexts, stringValue);
+
+        if (matchIndex === -1) {
+          const isTypeable = await locator
+            .evaluate(
+              (el) => el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable
+            )
+            .catch(() => false);
+          if (isTypeable) {
+            await locator.fill(stringValue, { timeout: SELECT_OPTION_TIMEOUT_MS });
+            await optionsLocator
+              .first()
+              .waitFor({ state: "visible", timeout: SELECT_OPTION_TIMEOUT_MS })
+              .catch(() => {});
+            optionTexts = await optionsLocator.allTextContents();
+            matchIndex = findOptionMatch(optionTexts, stringValue);
+          }
+        }
+
+        if (matchIndex === -1) throw new Error("no option matched the target value");
+
+        await optionsLocator.nth(matchIndex).click({ timeout: SELECT_OPTION_TIMEOUT_MS });
+      } catch {
+        throw comboboxHandoffError(name);
       }
     },
 
