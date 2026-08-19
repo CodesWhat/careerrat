@@ -46,6 +46,9 @@ npm install -g careerrat
 careerrat start claude    # or: careerrat start codex
 ```
 
+macOS users can also download the signed, notarized desktop app from the
+[latest release](https://github.com/CodesWhat/careerrat/releases/latest).
+
 That sets up your workspace, opens the local app at `http://localhost:7777`, and
 hands you off to the agent. From there you just talk to it.
 

@@ -2,7 +2,7 @@
   "name": "careerrat",
   "version": "0.9.0",
   "private": false,
-  "packageManager": "npm@11.16.0",
+  "packageManager": "npm@11.19.0",
   "publishConfig": {
     "access": "public"
   },
@@ -99,6 +99,7 @@
     "desktop": "npm --workspace apps/desktop run dev",
     "desktop:fresh": "CAREERRAT_HOME=.careerrat-fresh npm run desktop",
     "desktop:dist": "npm --workspace apps/desktop run dist",
+    "desktop:release": "npm --workspace apps/desktop run release",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "knip": "knip",
@@ -152,12 +153,12 @@
   ],
   "license": "MIT",
   "devDependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.226",
-    "@biomejs/biome": "2.5.7",
+    "@anthropic-ai/claude-agent-sdk": "0.3.233",
+    "@biomejs/biome": "2.5.8",
     "knip": "6.32.2",
     "lefthook": "2.1.10",
     "playwright": "1.62.1",
-    "turbo": "2.10.9"
+    "turbo": "2.10.10"
   },
   "allowScripts": {
     "electron-winstaller@5.4.0": true,
