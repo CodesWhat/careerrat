@@ -13,7 +13,9 @@
     "dist:local": "npm --prefix ../.. run app:build && npm run stage && electron-builder --mac dmg",
     "release:dmg": "node scripts/release-dmg.mjs",
     "verify:release": "node scripts/verify-release.mjs",
-    "dist": "npm run dist:local && npm run release:dmg && npm run verify:release"
+    "dist": "npm run dist:local && npm run release:dmg && npm run verify:release",
+    "release:upload": "node scripts/release-upload.mjs",
+    "release": "npm run dist && npm run release:upload"
   },
   "devDependencies": {
     "electron": "43.0.0",
