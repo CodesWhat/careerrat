@@ -455,7 +455,13 @@ function registerUpdateCheckHandlers() {
   ipcMain.handle(UPDATE_IPC.getState, () => currentUpdateNoticePayload());
 
   ipcMain.handle(UPDATE_IPC.skipVersion, (_event, version) => {
-    updateState = withSkippedVersion(updateState, version);
+    // Coerce at the trust boundary. withSkippedVersion only guards with
+    // `version || null`, so any truthy value (a number, an array, an object)
+    // would be written into desktop-update-check.json. shouldNotify then
+    // compares against it with !==, which a non-string can never satisfy, so
+    // one bad value would quietly break "skip this version" for good.
+    // setEnabled below gets the same treatment via Boolean().
+    updateState = withSkippedVersion(updateState, typeof version === "string" ? version : null);
     persistUpdateState(updateState);
     return currentUpdateNoticePayload();
   });
@@ -488,9 +494,16 @@ function scheduleUpdateChecks() {
 }
 
 function createWindow(url, route, { load = true } = {}) {
+  const windowOptions = buildBrowserWindowOptions({ dark: nativeTheme.shouldUseDarkColors });
   win = new BrowserWindow({
-    ...buildBrowserWindowOptions({ dark: nativeTheme.shouldUseDarkColors }),
+    ...windowOptions,
     webPreferences: {
+      // Spread whatever window-options.mjs set first. It defines no
+      // webPreferences today, so this merge changes nothing right now. It is
+      // here because the alternative silently discards them: the day someone
+      // adds contextIsolation or sandbox over there, a plain replace would
+      // drop it with nothing at either site to say so.
+      ...windowOptions.webPreferences,
       // The only preload in this app. Exposes window.careerratDesktopUpdate
       // for the notify-only update check above. Everything else about the UI
       // is still server-rendered HTML loaded over loopback HTTP, so Electron's
