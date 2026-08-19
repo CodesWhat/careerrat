@@ -502,9 +502,17 @@ export function createPlaywrightOps({
         await locator.click({ timeout: SELECT_OPTION_TIMEOUT_MS });
 
         const optionsLocator = target.locator("[role='option']:visible");
+        // react-select shape: the option list renders right away off the
+        // click above. A type-to-populate shape (Ashby: a plain text input
+        // that renders NO [role=option] nodes until something is typed into
+        // it) times out here instead — caught rather than left to abort the
+        // whole strategy, so control falls through to the typing attempt
+        // below instead of giving up on a list that was never going to open
+        // from a click alone.
         await optionsLocator
           .first()
-          .waitFor({ state: "visible", timeout: SELECT_OPTION_TIMEOUT_MS });
+          .waitFor({ state: "visible", timeout: SELECT_OPTION_TIMEOUT_MS })
+          .catch(() => {});
 
         let optionTexts = await optionsLocator.allTextContents();
         let matchIndex = findOptionMatch(optionTexts, stringValue);
@@ -516,7 +524,12 @@ export function createPlaywrightOps({
             )
             .catch(() => false);
           if (isTypeable) {
-            await locator.fill(stringValue, { timeout: SELECT_OPTION_TIMEOUT_MS });
+            // Real keystrokes, not fill() — a type-to-populate combobox
+            // (Ashby-shaped) listens for input/keydown as the user types to
+            // populate its option list at all; fill() sets the value and
+            // dispatches a single synthetic input event, which this shape of
+            // widget doesn't reliably act on.
+            await locator.pressSequentially(stringValue, { timeout: SELECT_OPTION_TIMEOUT_MS });
             await optionsLocator
               .first()
               .waitFor({ state: "visible", timeout: SELECT_OPTION_TIMEOUT_MS })

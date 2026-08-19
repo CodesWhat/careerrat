@@ -7,9 +7,10 @@
   </head>
   <body>
     <!--
-      Reproduces the two dropdown shapes real ATS forms actually use, so
-      tests/playwright-live.test.mjs can drive selectOption() against a real
-      Chromium session without depending on a live third-party site:
+      Reproduces the three dropdown shapes real ATS forms actually use, so
+      tests/playwright-live.test.mjs and tests/playwright-live-dropdowns.test.mjs
+      can drive selectOption() against a real Chromium session without
+      depending on a live third-party site:
 
       1. A native <select> ("Work authorization") — proves selectOption()'s
          original, still-correct path keeps working (Lever has a genuine
@@ -19,8 +20,15 @@
          [role=combobox] text input that opens a [role=listbox] of
          [role=option] elements on click, filters that list as you type, and
          writes the chosen label into a hidden input on selection. This is
-         the shape Greenhouse and Ashby actually use, and 0 native <select>
-         elements were found on either real form.
+         the shape Greenhouse actually uses.
+
+      3. An Ashby-shaped type-to-populate combobox ("Citizenship") — an
+         [role=combobox] text input that renders ZERO [role=option] nodes on
+         click/focus, and only populates them once something is actually
+         typed into it. Its option list deliberately includes an exact match
+         ("Canada") behind a longer substring-containing match ("Canadian
+         Overseas Territory") so option precedence is exercised the same way
+         the Country fixture above exercises it for the click-to-open shape.
 
       No real ATS URLs are used anywhere in this fixture or its test.
     -->
@@ -53,6 +61,23 @@
           />
           <div role="listbox" id="country-listbox" hidden></div>
           <input type="hidden" name="country" id="country-value" />
+        </div>
+
+        <div class="typeahead-field">
+          <label id="citizenship-label" for="citizenship-input">Citizenship</label>
+          <input
+            id="citizenship-input"
+            type="text"
+            role="combobox"
+            placeholder="Start typing..."
+            aria-labelledby="citizenship-label"
+            aria-expanded="false"
+            aria-autocomplete="list"
+            aria-controls="citizenship-listbox"
+            autocomplete="off"
+          />
+          <div role="listbox" id="citizenship-listbox" hidden></div>
+          <input type="hidden" name="citizenship" id="citizenship-value" />
         </div>
 
         <button type="submit">Submit application</button>
@@ -129,6 +154,55 @@
           renderOptions(input.value);
           listbox.hidden = false;
           input.setAttribute("aria-expanded", "true");
+        });
+
+        // Ashby-shaped type-to-populate combobox: unlike Country above,
+        // click/focus render NOTHING — the option list only exists once
+        // something has actually been typed into the field. Deliberately
+        // ordered so a naive "first substring match wins" search would land
+        // on "Canadian Overseas Territory" (which contains "canada") instead
+        // of the exact "Canada" match that sorts after it.
+        var CITIZENSHIP_OPTIONS = [
+          "Canadian Overseas Territory",
+          "Canada",
+          "United States",
+          "United Kingdom",
+        ];
+
+        var citizenshipInput = document.getElementById("citizenship-input");
+        var citizenshipListbox = document.getElementById("citizenship-listbox");
+        var citizenshipValue = document.getElementById("citizenship-value");
+
+        function renderCitizenshipOptions(filterText) {
+          var query = String(filterText || "").trim().toLowerCase();
+          citizenshipListbox.innerHTML = "";
+          if (!query) {
+            citizenshipListbox.hidden = true;
+            citizenshipInput.setAttribute("aria-expanded", "false");
+            return;
+          }
+          var matches = CITIZENSHIP_OPTIONS.filter(
+            (option) => option.toLowerCase().indexOf(query) !== -1
+          );
+          matches.forEach((option) => {
+            var choice = document.createElement("div");
+            choice.setAttribute("role", "option");
+            choice.textContent = option;
+            choice.addEventListener("click", () => {
+              citizenshipValue.value = option;
+              citizenshipInput.value = option;
+              citizenshipListbox.hidden = true;
+              citizenshipInput.setAttribute("aria-expanded", "false");
+              appendStatus(`Citizenship selected: ${option}`);
+            });
+            citizenshipListbox.appendChild(choice);
+          });
+          citizenshipListbox.hidden = matches.length === 0;
+          citizenshipInput.setAttribute("aria-expanded", matches.length > 0 ? "true" : "false");
+        }
+
+        citizenshipInput.addEventListener("input", () => {
+          renderCitizenshipOptions(citizenshipInput.value);
         });
       })();
     </script>

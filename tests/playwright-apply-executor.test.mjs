@@ -556,8 +556,8 @@ test("screenshot returns base64 png data", async () => {
 // the extra Locator surface selectOption() now calls beyond that: a
 // combobox-index control whose own selectOption() rejects exactly the way a
 // real non-<select> element does ("Element is not a <select> element"), a
-// click() that opens a live option list, an evaluate()/fill() pair for the
-// optional type-to-filter step, and a page-level
+// click() that opens a live option list, an evaluate()/pressSequentially()
+// pair for the optional type-to-filter step, and a page-level
 // locator("[role='option']:visible") with first()/waitFor()/allTextContents()/
 // nth(i).click() reflecting that same filterable list — the same shape a real
 // react-select combobox exposes.
@@ -602,7 +602,7 @@ function createFakeComboboxBrowser({ controls, comboboxIndex, options }) {
       async evaluate(fn) {
         return fn({ tagName: "INPUT", isContentEditable: false });
       },
-      async fill(value) {
+      async pressSequentially(value) {
         actions.push({ op: "comboboxFilter", index, value });
         filterText = value;
       },

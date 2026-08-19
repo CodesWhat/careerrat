@@ -124,6 +124,68 @@ test("selectOption fails fast with a plain-language human-handoff error when no 
   });
 });
 
+test("selectOption drives a real Ashby-shaped type-to-populate combobox that renders no options until typed into", {
+  skip: !LIVE,
+}, async () => {
+  await withLiveOps(async (ops) => {
+    const { pageId } = await ops.openTab({ url: FIXTURE_URL });
+    const ref = await refFor(ops, pageId, "Citizenship");
+
+    await ops.selectOption({ pageId, ref, value: "United States" });
+
+    const after = await ops.snapshot({ pageId });
+    assert.match(after.pageText, /Citizenship selected: United States/);
+  });
+});
+
+test("selectOption on the Ashby-shaped combobox prefers the exact match over a longer substring match", {
+  skip: !LIVE,
+}, async () => {
+  await withLiveOps(async (ops) => {
+    const { pageId } = await ops.openTab({ url: FIXTURE_URL });
+    const ref = await refFor(ops, pageId, "Citizenship");
+
+    // "Canadian Overseas Territory" contains "canada" and is ordered first
+    // in the fixture's option list — a naive first-hit search would land
+    // there instead of the exact "Canada" match.
+    await ops.selectOption({ pageId, ref, value: "Canada" });
+
+    const after = await ops.snapshot({ pageId });
+    assert.match(after.pageText, /Citizenship selected: Canada$/m);
+  });
+});
+
+test("selectOption on the Ashby-shaped combobox fails fast with the human-handoff error when nothing matches", {
+  skip: !LIVE,
+}, async () => {
+  await withLiveOps(async (ops) => {
+    const { pageId } = await ops.openTab({ url: FIXTURE_URL });
+    const ref = await refFor(ops, pageId, "Citizenship");
+
+    const startedAt = Date.now();
+    await assert.rejects(
+      () => ops.selectOption({ pageId, ref, value: "Atlantis" }),
+      (error) => {
+        assert.match(error.message, /"Citizenship" dropdown/);
+        assert.match(error.message, /couldn't be set automatically/);
+        assert.match(error.message, /switch to the open browser window/);
+        return true;
+      }
+    );
+    const elapsedMs = Date.now() - startedAt;
+
+    // Same 15s ceiling the Country-shaped fails-fast test above holds to —
+    // this shape pays for two bounded waits in sequence (the click-to-open
+    // attempt that never opens anything, then the type-to-populate attempt
+    // that also renders nothing for a non-matching value), so it's the
+    // tightest real check against that ceiling.
+    assert.ok(
+      elapsedMs < 15_000,
+      `selectOption should fail fast, not hang — took ${elapsedMs}ms against a local fixture`
+    );
+  });
+});
+
 // Import-time sanity: fileURLToPath just proves FIXTURE_URL resolves to a
 // real file on disk under this repo, catching a typo'd fixture path with a
 // clear assertion instead of an opaque net::ERR_FILE_NOT_FOUND deep inside a
