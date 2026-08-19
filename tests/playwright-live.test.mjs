@@ -1,0 +1,154 @@
+// playwright-live.test.mjs — the ONE test in this suite that launches a REAL
+// Chromium instance through playwright-ops.mjs's real default launchImpl
+// (chromium.launchPersistentContext), instead of the launchImpl stub every
+// other playwright-ops/playwright-executor test injects. Every other test
+// asserts against a fake context/page/locator triple and a hand-rolled DOM
+// stub for collectControls — none of them have ever proven the real
+// collectControls/snapshot/fillField/... path works against an actual page.
+//
+// Gated behind CAREERRAT_LIVE_BROWSER=1 and SKIPPED otherwise. This is
+// mandatory, not a style choice: the lefthook pre-push hook runs the full
+// `node --test` suite on every push, and launching a real Chromium instance
+// on every push would make every push slow and flaky (browser startup time,
+// headless rendering/timing variance). A human or CI job opts in explicitly.
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+
+import { createPlaywrightOps } from "../src/core/apply/playwright-ops.mjs";
+import { startFixtureServer } from "./helpers/fixture-server.mjs";
+
+const FIXTURE_DIR = fileURLToPath(new URL("./fixtures/apply-form/", import.meta.url));
+
+const LIVE = process.env.CAREERRAT_LIVE_BROWSER === "1";
+
+// snapshot().refs is keyed by synthetic "e1"/"e2"/... assigned in DOM/selector
+// order, not by name — every real assertion below needs to resolve a ref from
+// the control's accessible name instead, the same way apply-driver.mjs's real
+// callers do it (matching against snapshot text/labels, never a hardcoded
+// index).
+function refByName(snapshot, name) {
+  const entry = Object.entries(snapshot.refs).find(([, meta]) => meta.name === name);
+  if (!entry) {
+    throw new Error(
+      `No control named ${JSON.stringify(name)} in snapshot. Refs: ${JSON.stringify(snapshot.refs, null, 2)}`
+    );
+  }
+  return entry[0];
+}
+
+test("real Chromium end-to-end: openTab -> snapshot -> fill/select/toggle/upload -> click across 3 steps, stopping before Submit", {
+  skip: !LIVE && "set CAREERRAT_LIVE_BROWSER=1 to run this against a real Chromium instance",
+}, async () => {
+  const profileDir = mkdtempSync(join(tmpdir(), "careerrat-live-profile-"));
+  const resumeDir = mkdtempSync(join(tmpdir(), "careerrat-live-resume-"));
+  const resumePath = join(resumeDir, "resume.pdf");
+  writeFileSync(resumePath, "%PDF-1.4 fake resume content for the live harness test\n");
+
+  const { url: baseUrl, close: closeServer } = await startFixtureServer(FIXTURE_DIR);
+  // No launchImpl override — this is the real default launch path
+  // (chromium.launchPersistentContext) that every other test in the repo
+  // stubs out.
+  const ops = createPlaywrightOps({ profileDir, headless: true });
+
+  try {
+    // --- Step 1: Basics ---
+    const { pageId } = await ops.openTab({ url: `${baseUrl}/step1.html` });
+
+    let snapshot = await ops.snapshot({ pageId });
+    assert.match(snapshot.pageText, /Step 1: Basics/, "landed on step 1");
+    const fullNameRef = refByName(snapshot, "Full name");
+    const emailRef = refByName(snapshot, "Email");
+    const phoneRef = refByName(snapshot, "Phone");
+    const workAuthRef = refByName(snapshot, "Work authorization");
+    let nextRef = refByName(snapshot, "Next");
+    assert.equal(snapshot.refs[fullNameRef].role, "textbox");
+    assert.equal(snapshot.refs[workAuthRef].role, "combobox");
+    assert.equal(snapshot.refs[nextRef].role, "button");
+
+    await ops.fillField({ pageId, ref: fullNameRef, value: "Jordan Rivera" });
+    await ops.fillField({ pageId, ref: emailRef, value: "jordan.rivera@example.test" });
+    await ops.fillField({ pageId, ref: phoneRef, value: "555-0100" });
+    await ops.selectOption({ pageId, ref: workAuthRef, value: "Yes, authorized to work" });
+
+    await ops.clickButton({ pageId, ref: nextRef });
+
+    // clickButton on a real submit button triggers a real navigation.
+    // Assert it actually happened (the new step's h1) AND that every field
+    // genuinely changed in the DOM: this fixture's step1 form submits via
+    // plain GET, so the resulting query string is a real read-back of
+    // exactly what was live in each control's value at submit time — not a
+    // stubbed assumption about what fillField/selectOption did.
+    snapshot = await ops.snapshot({ pageId });
+    assert.match(snapshot.pageText, /Step 2: Documents/, "navigated to step 2");
+    assert.match(snapshot.origin, /full_name=Jordan(\+|%20)Rivera/, "fillField changed full_name");
+    assert.match(
+      snapshot.origin,
+      /email=jordan\.rivera%40example\.test/,
+      "fillField changed email"
+    );
+    assert.match(snapshot.origin, /phone=555-0100/, "fillField changed phone");
+    assert.match(
+      snapshot.origin,
+      /work_authorization=yes/,
+      "selectOption changed work_authorization"
+    );
+
+    // --- Step 2: Documents ---
+    const resumeRef = refByName(snapshot, "Resume/CV");
+    const coverLetterRef = refByName(snapshot, "Cover letter");
+    const agreeRef = refByName(snapshot, "I agree to the terms");
+    nextRef = refByName(snapshot, "Next");
+
+    await ops.toggleField({ pageId, ref: agreeRef, checked: true });
+    await ops.upload({ pageId, ref: resumeRef, files: resumePath });
+    await ops.fillField({
+      pageId,
+      ref: coverLetterRef,
+      value: "I would love to join the team.",
+    });
+
+    // Confirm upload() attached the REAL temp file (not a stub) before
+    // navigating away. A file input's chosen filename never shows up in a
+    // plain GET query string, so the fixture mirrors it into a visible
+    // span on "change" specifically so this is observable through
+    // snapshot()'s body text — no reach into Playwright internals here.
+    snapshot = await ops.snapshot({ pageId });
+    assert.match(
+      snapshot.pageText,
+      /resume\.pdf/,
+      "the real uploaded file's name is reflected in the DOM"
+    );
+
+    await ops.clickButton({ pageId, ref: nextRef });
+
+    snapshot = await ops.snapshot({ pageId });
+    assert.match(snapshot.pageText, /^Review$/m, "navigated to step 3");
+    assert.match(snapshot.origin, /agree_terms=on/, "toggleField genuinely checked the box");
+    assert.match(
+      snapshot.origin,
+      /cover_letter=I(\+|%20)would(\+|%20)love/,
+      "fillField genuinely changed the textarea value"
+    );
+
+    // --- Step 3: Review — the manual Submit boundary ---
+    // CareerRat's product guarantee is that submission is always a human
+    // action. This harness proves the real ops contract CAN reach and
+    // identify the submit control on a real page, then stops — it must
+    // NEVER click "Submit application".
+    const submitRef = refByName(snapshot, "Submit application");
+    assert.equal(snapshot.refs[submitRef].role, "button");
+
+    const shot = await ops.screenshot({ pageId });
+    assert.equal(shot.format, "png");
+    assert.ok(Buffer.from(shot.data, "base64").length > 0, "screenshot captured real bytes");
+  } finally {
+    await ops.close();
+    await closeServer();
+    rmSync(profileDir, { recursive: true, force: true });
+    rmSync(resumeDir, { recursive: true, force: true });
+  }
+});

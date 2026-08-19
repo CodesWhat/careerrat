@@ -23,11 +23,6 @@ const MAX_PAGE_TEXT = 20_000;
 // (e.g. a dev server fielding many applies in a day) — beyond this, the
 // least-recently-used tab is closed to free real browser resources.
 const MAX_OPEN_PAGES = 8;
-// Node.compareDocumentPosition's FOLLOWING bit (standard value, hardcoded so
-// collectControls doesn't depend on a global `Node` reference — it only ever
-// needs `document`/`window`/`CSS`, matching what evaluateAll actually injects).
-const DOCUMENT_POSITION_FOLLOWING = 0x04;
-
 async function defaultLaunch({ profileDir, headless }) {
   const { chromium } = await import("playwright");
   return chromium.launchPersistentContext(profileDir, {
@@ -42,6 +37,17 @@ async function defaultLaunch({ profileDir, headless }) {
 // evaluateAll serializes only this function's own source to run in the browser, so
 // a reference to a sibling module-level helper would be undefined there.
 export function collectControls(elements) {
+  // Node.compareDocumentPosition's FOLLOWING bit (standard value, hardcoded so
+  // this doesn't depend on a global `Node` reference — it only ever needs
+  // `document`/`window`/`CSS`, matching what evaluateAll actually injects).
+  // Declared INSIDE collectControls, not at module scope: the comment above is
+  // load-bearing and a module-scope const is subject to it exactly like a
+  // module-scope helper is. It previously sat outside and threw
+  // "DOCUMENT_POSITION_FOLLOWING is not defined" in the browser on every real
+  // page with a button, which is nearly every ATS form. The stubbed tests could
+  // not catch it because nothing is serialized there.
+  const DOCUMENT_POSITION_FOLLOWING = 0x04;
+
   function isVisible(el) {
     const rect = el.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return false;
