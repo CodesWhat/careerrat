@@ -95,14 +95,16 @@ export function learningsHeader(family) {
 
 Durable, evidence-linked lessons for the **${slug}** role family. Append-only.
 Written by track-outcomes, reevaluate-strategy, and interview-prep; read by
-tailor-application, evaluate-job, and search-jobs. Private — never leaves this
+tailor-application, evaluate-job, and search-jobs. Private, never leaves this
 gitignored directory; never record current_base or any other private gate input.
 `;
 }
 
-// A single dated entry: `## <date> — <title>` then a blank line then the body.
+// A single dated entry: `## <date>: <title>` then a blank line then the body.
+// Entries written before the em-dash copy sweep use `## <date> — <title>`;
+// readers (strategy/review.mjs's compactLearnings) accept both.
 export function formatEntry({ date, title, body }) {
-  const heading = `## ${date} — ${String(title).trim()}`;
+  const heading = `## ${date}: ${String(title).trim()}`;
   return `${heading}\n\n${String(body).trim()}\n`;
 }
 
