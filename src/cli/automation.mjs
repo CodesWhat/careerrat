@@ -610,6 +610,8 @@ function printStatus(asJson) {
   console.log(
     `Session browser: ${session.provider}${session.configuredProvider === "auto" ? " (automatic)" : ""}${session.profileRoot ? ` (profiles: ${session.profileRoot})` : ""}. Change: \`careerrat automation session <auto|extension|orca|playwright> --write\`.`
   );
+  const statusAutomaticApplyNote = sessionAutomaticApplyNote(session.provider);
+  if (statusAutomaticApplyNote) console.log(statusAutomaticApplyNote);
   console.log(
     "Toggle: `careerrat automation enable <capability> [platform] --write`, `consent <platform> --write`."
   );

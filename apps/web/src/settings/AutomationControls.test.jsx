@@ -86,7 +86,7 @@ describe("automation mode and consent controls", () => {
     expect(html).toContain("Chrome extension (Claude-in-Chrome / Codex) (no automatic apply yet)");
     expect(html).not.toContain("Automatic browser connection (no automatic apply yet)");
     expect(html).not.toContain("Playwright persistent profile (no automatic apply yet)");
-    expect(html).toContain("Automatic apply isn't available on this provider yet");
+    expect(html).toContain("Automatic apply isn&#x27;t available on this provider yet");
     expect(html).toContain("switch to the Playwright provider");
   });
 
