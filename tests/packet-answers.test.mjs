@@ -389,7 +389,21 @@ test("draftPacketAnswers sends only non-EEO questions to bounded AI and preserve
     context: PACKET_CONTEXT,
     questions: filteredQuestions,
     call: async (options) => {
-      seenPrompt.push(JSON.stringify(options));
+      // Only the parts that are actually a prompt. JSON.stringify(options)
+      // swept in `options.env`, the spawn environment for the local AI CLI,
+      // which is the entire process environment. That made this assertion
+      // depend on the machine it ran on: a checkout under a directory whose
+      // name happened to contain one of the forbidden words failed here, via
+      // PWD, with nothing wrong in the code under test. It also meant a
+      // genuine failure printed every environment variable, secrets included,
+      // into the test output and therefore into CI logs.
+      seenPrompt.push(
+        JSON.stringify({
+          messages: options.messages,
+          system: options.system,
+          outputSchema: options.outputSchema,
+        })
+      );
       return {
         content: [
           {
