@@ -104,11 +104,37 @@ place.
 2. Get the digest from the published artifact, not a local build, so it
    provably matches what users download: `shasum -a 256` on the downloaded
    dmg.
-3. Verify before opening the PR: `brew style`, `brew audit --cask`, and
-   `brew livecheck` should all pass. The strongest check is a real
-   `brew install --cask` followed by
-   `spctl --assess --type execute --verbose=2` on the installed app, which
-   should report `accepted` / `source=Notarized Developer ID`.
+3. Verify before opening the PR. The cask has to be reachable through a tap
+   for most of these to work, and a bare file path is not, so stage the edited
+   file into the local tap clone first. That is a different directory from the
+   working clone in step 1:
+
+   ```bash
+   tap="$(brew --repository codeswhat/tap)"
+   cp ~/code/codeswhat/homebrew-tap/Casks/careerrat.rb "$tap/Casks/careerrat.rb"
+   brew style "$tap/Casks/careerrat.rb"
+   brew audit --cask codeswhat/tap/careerrat
+   brew livecheck --cask codeswhat/tap/careerrat
+   ```
+
+   Skip `--new`. That flag adds homebrew-cask core rules such as the
+   "repository not notable enough" star count, which do not apply to a private
+   tap.
+
+   The strongest check is a real install of the edited cask, which proves the
+   `sha256` matches the published artifact and that the app Gatekeeper sees is
+   the notarized one:
+
+   ```bash
+   brew install --cask codeswhat/tap/careerrat
+   spctl --assess --type execute --verbose=2 /Applications/CareerRat.app
+   brew uninstall --cask careerrat
+   ```
+
+   `spctl` should report `accepted` and `source=Notarized Developer ID`. Then
+   remove the staged copy so the tap clone is pristine again:
+   `rm "$tap/Casks/careerrat.rb"`. Use `brew uninstall` without `--zap`, since
+   `--zap` deletes the local job search.
 4. Deliver as a reviewed PR against the tap's `main`, matching how idlescreen
    lands. Do not push directly; the tap's `main` is protected.
 

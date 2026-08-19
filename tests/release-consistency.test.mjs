@@ -14,6 +14,16 @@ const UNVERSIONED_APP_PACKAGE_JSON_PATHS = [
   "apps/docs/package.json",
 ];
 
+// Round-trip rather than a NaN check. JS silently normalizes an out-of-range
+// day instead of rejecting it, so `2026-02-30` parses fine and comes back as
+// `2026-03-02`. Only comparing the formatted result to the input catches that.
+// (`2026-13-01` does yield NaN, but the day case does not, so a NaN check
+// alone is not enough.)
+function normalizeCalendarDate(date) {
+  const parsed = new Date(`${date}T00:00:00Z`);
+  return Number.isNaN(parsed.getTime()) ? "invalid" : parsed.toISOString().slice(0, 10);
+}
+
 function findNewestChangelogHeading(changelog) {
   for (const line of changelog.split("\n")) {
     const match = line.match(/^## \[([^\]]+)\](?: - (.+))?/);
@@ -81,11 +91,23 @@ test("CHANGELOG.md's newest release heading has a real YYYY-MM-DD date", async (
     `CHANGELOG.md's newest release heading date "${newest.date}" is not YYYY-MM-DD. Fix the date on the [${newest.version}] heading.`
   );
 
-  const parsed = new Date(`${newest.date}T00:00:00Z`);
-  assert.ok(
-    !Number.isNaN(parsed.getTime()),
+  assert.equal(
+    normalizeCalendarDate(newest.date),
+    newest.date,
     `CHANGELOG.md's newest release heading date "${newest.date}" is not a real calendar date. Fix the date on the [${newest.version}] heading.`
   );
+});
+
+test("the date check rejects dates that only look valid", () => {
+  for (const good of ["2026-08-19", "2024-02-29", "2026-12-31"]) {
+    assert.equal(normalizeCalendarDate(good), good, `${good} should be accepted`);
+  }
+  // Each of these would pass a plain Number.isNaN check: the first three get
+  // silently rolled forward into the next month, so only the round-trip
+  // catches them.
+  for (const bad of ["2026-02-30", "2026-02-29", "2026-04-31", "2026-13-01"]) {
+    assert.notEqual(normalizeCalendarDate(bad), bad, `${bad} should be rejected`);
+  }
 });
 
 // Guard against someone "helpfully" mass-bumping every package.json in the
