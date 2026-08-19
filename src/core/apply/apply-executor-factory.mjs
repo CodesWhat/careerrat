@@ -8,7 +8,7 @@ import { createPlaywrightApplyExecutor } from "./playwright-executor.mjs";
 // form-fill against. Rather than leaving that gap to surface as a silent no-op or
 // a raw error further up the stack, this factory hands back an executor that fails
 // immediately and honestly, naming the real state and the working alternative.
-export const EXTENSION_NOT_AVAILABLE_REASON =
+const EXTENSION_NOT_AVAILABLE_REASON =
   "The browser extension provider doesn't support automatic apply yet. Switch to the Playwright provider (`careerrat automation session playwright --write`) for supervised apply.";
 
 function createExtensionApplyExecutor() {
