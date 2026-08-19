@@ -27,7 +27,9 @@ Before tagging a release:
    `git status --ignored` must not show any of them as staged or tracked.
 5. `docs/ROADMAP.md` (public) updated — shipped items reflect reality, planned
    list current. The private working roadmap lives under `.internal/roadmap/`.
-6. `README.md` version badge / install snippet reflects new version (if any).
+6. `README.md` version badge is still the dynamic npm badge
+   (`img.shields.io/npm/v/careerrat`, not a hardcoded version) and the install
+   snippet still resolves correctly.
 7. `package.json` version bumped.
 8. Git tag created with the concrete release version, for example
    `git tag -s v0.4.0 -m "release: v0.4.0"`, then pushed.
@@ -89,6 +91,29 @@ published release, so re-running it only confirms the repair while the
 flagged release is still the latest one. If a newer release has landed since,
 verify the repaired one directly with
 `gh release view "$tag" --json assets` instead.
+
+### Updating the Homebrew Cask
+
+The cask lives at `Casks/careerrat.rb` in the separate repo
+`CodesWhat/homebrew-tap`, cloned locally at `~/code/codeswhat/homebrew-tap`. It
+is hand-maintained: there is no generator, unlike idlescreen. Update it in
+place.
+
+1. After the GitHub release is published with its `.dmg` attached, update two
+   fields in the cask: `version` and `sha256`.
+2. Get the digest from the published artifact, not a local build, so it
+   provably matches what users download: `shasum -a 256` on the downloaded
+   dmg.
+3. Verify before opening the PR: `brew style`, `brew audit --cask`, and
+   `brew livecheck` should all pass. The strongest check is a real
+   `brew install --cask` followed by
+   `spctl --assess --type execute --verbose=2` on the installed app, which
+   should report `accepted` / `source=Notarized Developer ID`.
+4. Deliver as a reviewed PR against the tap's `main`, matching how idlescreen
+   lands. Do not push directly; the tap's `main` is protected.
+
+`depends_on macos:` must match the `LSMinimumSystemVersion` electron-builder
+bakes into the bundle (currently 12.0, so `:monterey`).
 
 ## Schema Versioning
 
