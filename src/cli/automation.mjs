@@ -57,7 +57,7 @@ const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 function sessionProviderNote(provider) {
   return PROVIDERS[provider].preferred
     ? " (preferred)"
-    : " (fallback — automatic setup is recommended)";
+    : " (fallback; automatic setup is recommended)";
 }
 
 function sessionAutomaticApplyNote(provider) {
