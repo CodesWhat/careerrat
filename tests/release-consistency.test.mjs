@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const SEMVER_PATTERN = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
+// The official grammar from semver.org, not a loose approximation. A hand
+// rolled `\d+\.\d+\.\d+(-...)?` accepts `01.2.3` and `1.2.3-alpha..1` and
+// rejects valid build metadata like `1.2.3+build.7`. Inlined rather than
+// pulling in the `semver` package, which is not a declared dependency here and
+// would trip knip.
+const SEMVER_PATTERN =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 
 // Packages that are deliberately NOT synced to the root version: apps/web
 // (SPA shell, still 0.1.0), apps/website (marketing site, still 0.0.0), and
@@ -96,6 +102,15 @@ test("CHANGELOG.md's newest release heading has a real YYYY-MM-DD date", async (
     newest.date,
     `CHANGELOG.md's newest release heading date "${newest.date}" is not a real calendar date. Fix the date on the [${newest.version}] heading.`
   );
+});
+
+test("the semver check accepts and rejects the right shapes", () => {
+  for (const good of ["0.10.0", "1.2.3", "1.2.3-rc.1", "1.2.3+build.7", "1.2.3-rc.1+build.7"]) {
+    assert.match(good, SEMVER_PATTERN, `${good} should be accepted`);
+  }
+  for (const bad of ["01.2.3", "1.2.3-alpha..1", "1.2", "1.2.3.4", "v1.2.3", ""]) {
+    assert.doesNotMatch(bad, SEMVER_PATTERN, `${bad} should be rejected`);
+  }
 });
 
 test("the date check rejects dates that only look valid", () => {
