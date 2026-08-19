@@ -8,6 +8,7 @@ patch version for bug fixes. While in 0.x, **any minor bump may contain
 breaking changes**; read the release notes before upgrading.
 
 Once 1.0.0 ships, the standard semver compatibility guarantees apply:
+
 - **Patch** (0.x.**y**): backward-compatible bug fixes only.
 - **Minor** (0.**x**.0): backward-compatible new features; may deprecate.
 - **Major** (**x**.0.0): breaking changes; migration notes required.

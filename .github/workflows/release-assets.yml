@@ -8,15 +8,13 @@ name: release-assets
 # detector so a missing asset is loud instead of silent. The actual
 # prevention is the draft-first ordering documented in docs/RELEASE.md.
 
+# workflow_dispatch takes no inputs on purpose: checkov CKV_GHA_7 requires
+# them to be empty, and the only case worth re-checking by hand is the most
+# recent release, which a manual run resolves for itself below.
 on:
   release:
     types: [published]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: "Release tag to check, e.g. v0.9.0"
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -28,7 +26,7 @@ jobs:
     timeout-minutes: 5
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+      EVENT_TAG: ${{ github.event.release.tag_name }}
     steps:
       - name: Harden the runner (audit all outbound calls)
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
@@ -40,11 +38,18 @@ jobs:
       - name: Verify the release has a matching .dmg asset
         run: |
           set -euo pipefail
-          version="${RELEASE_TAG#v}"
-          assets="$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')"
+          # On `release: published` the tag comes from the event. A manual run
+          # has no event payload, so fall back to the latest published release.
+          tag="$EVENT_TAG"
+          if [[ -z "$tag" ]]; then
+            tag="$(gh release view --json tagName --jq '.tagName')"
+            echo "No event tag, checking the latest release: $tag"
+          fi
+          version="${tag#v}"
+          assets="$(gh release view "$tag" --json assets --jq '.assets[].name')"
           match="$(grep "\.dmg$" <<<"$assets" | grep -F "$version" || true)"
           if [[ -z "$match" ]]; then
-            echo "::error::Release $RELEASE_TAG has no .dmg asset matching version $version." \
+            echo "::error::Release $tag has no .dmg asset matching version $version." \
               "Run \`npm run desktop:release\` to build, notarize, and upload the desktop artifact, then re-run this workflow."
             exit 1
           fi
