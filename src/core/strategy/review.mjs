@@ -127,7 +127,13 @@ function compactLearnings({ repoRoot, targeting }) {
       continue;
     }
     if (!text) continue;
-    const headings = [...text.matchAll(/^## (.+?): (.+)$/gm)]
+    // Accepts both separators on purpose. formatEntry() writes `## <date>: <title>`
+    // now, but it wrote `## <date> — <title>` before the em-dash copy sweep, and
+    // learning files are append-only and live in the candidate's own gitignored
+    // workspace. Matching only the new form would make every entry a real user
+    // already has invisible here, silently: this returns headings, so a file that
+    // parses to zero looks identical to a family with no learnings yet.
+    const headings = [...text.matchAll(/^## (.+?)(?::|\s+—)\s*(.+)$/gm)]
       .slice(-MAX_LEARNING_ENTRIES_PER_FAMILY)
       .map(([, date, title]) => ({ date, title: cleanText(title, 160) }));
     if (headings.length) out.push({ family, entries: headings });

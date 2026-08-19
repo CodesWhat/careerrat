@@ -100,7 +100,9 @@ gitignored directory; never record current_base or any other private gate input.
 `;
 }
 
-// A single dated entry: `## <date> — <title>` then a blank line then the body.
+// A single dated entry: `## <date>: <title>` then a blank line then the body.
+// Entries written before the em-dash copy sweep use `## <date> — <title>`;
+// readers (strategy/review.mjs's compactLearnings) accept both.
 export function formatEntry({ date, title, body }) {
   const heading = `## ${date}: ${String(title).trim()}`;
   return `${heading}\n\n${String(body).trim()}\n`;
