@@ -296,7 +296,7 @@ nurse, a driver, and an engineer each bring their own config.
   still needed to unlock gating and applying (with per-item hints), and gets out of the way
   once setup is complete.
 
-## Release status (v0.9.0, August 18, 2026)
+## Release status (v0.9.0, updated August 19, 2026)
 
 **v0.9.0 is cut.** `main` carries version 0.9.0, tag `v0.9.0` is pushed, the GitHub
 Release is published, and `CHANGELOG.md` at the repo root is the per-release record
@@ -305,18 +305,35 @@ GitHub Release, not on a tag push, so tagging alone is always safe.
 
 ### Picking this up cold
 
+**v0.9.0 shipped with no `.dmg` attached.** The artifact was built, signed, and
+notarized locally, but never uploaded, so for a while the Release page offered
+nothing to download. It has since been uploaded and the Release is whole. The
+process hole is closed in #101: `npm run desktop:release` builds and uploads in one
+command, `release-assets.yml` fails any published release missing a version-matching
+`.dmg`, and `docs/RELEASE.md` now creates the Release as a **draft** first so the
+publish event (which is what fires `publish.yml`) cannot happen before the artifact
+exists. The detector runs alongside `publish.yml`, not before it, so the draft-first
+ordering is the actual prevention, not the check.
+
 Open work, none of it blocking the release:
 
-- **Renovate #75 and #76 are unlanded.** Both were rebasing when v0.9.0 was cut.
-  #75 conflicted on `package-lock.json` once #74 merged, which Renovate resolves on
-  its own. #76 is the one that needs a human read: its Vercel build genuinely failed
-  (not the deploy-quota message the other PRs show), and it is the only Renovate PR
-  touching website dependencies. Its `dependency-review` run also failed on a network
-  `fetch failed`, which is an infrastructure blip and just needs a re-run.
+- **Renovate #75 and #76 landed August 19.** An earlier version of this section
+  claimed #76's Vercel build "genuinely failed" as distinct from the deploy-quota
+  message. That was wrong: it was the quota (`upgradeToPro=build-rate-limit`), and
+  the in-repo `web-build` job was green throughout. The `dependency-review` blip
+  cleared on its own. #76 did need a Renovate rebase after #75 merged.
+- **CI does not run the test suite, and a dependency bump broke `main` because of
+  it.** `ci-verify.yml` deliberately runs only the structure guards, since the full
+  suite is expected to be red during pre-launch churn. But `lefthook`'s pre-push hook
+  *does* run the full suite, so when Renovate #76 bumped `posthog-js` past a version
+  literal asserted in `tests/website-copy.test.mjs`, CI stayed green while every
+  push from a clean checkout started failing. Fixed in #102 by asserting the pin's
+  *shape* rather than one literal version. Worth knowing generally: **a green CI on
+  this repo does not mean the tests pass.** Until the suite is hardened at go-live,
+  the pre-push hook is the only thing running it.
 - **Two PRs merged without a CodeRabbit pass.** #77 (an `actions/setup-node` bump)
-  landed on CI gates alone, and #76 never got one either. Cause: the CLI lane's
-  included reviews ran out mid-run. Re-review if you want the every-change-reviewed
-  rule held to the letter.
+  landed on CI gates alone, and #76 never got one either. Re-review if you want the
+  every-change-reviewed rule held to the letter.
 - **QA re-runs are owed** for `research-company`, `research-comp`, and
   `research-boards`, plus the `discover-companies` fourth leg, now that the fixes
   they were blocked on have shipped (#84, #92, #93). G-09 remains a product decision
@@ -327,18 +344,24 @@ Open work, none of it blocking the release:
 
 ### Review lanes, and which to use
 
-CodeRabbit meters the PR lane and the CLI lane separately, and knowing this is the
-difference between a fifteen-minute cycle and a four-hour one. Exact quotas depend on
-the plan, so treat the numbers below as what this account did on 2026-08-18 rather
-than documented limits; the rate-limit message always states when the next one frees up.
+There are two ways to get a CodeRabbit review, and they differ in speed and in what
+they leave behind. An earlier version of this section claimed they draw on separate
+budgets. **They do not.** On 2026-08-19, exhausting the CLI lane also rate-limited a
+`@coderabbitai full review` on a PR, with both reporting the same included-review
+pool and the same reset time. Plan around one shared budget. The rate-limit message
+always states when the next review frees up.
 
-- **PR lane** (`@coderabbitai full review` as a PR comment): this is what posts inline
-  threads on the PR. In practice it allowed about one review per hour, so a queue of
-  PRs serializes badly.
+- **PR lane** (`@coderabbitai full review` as a PR comment): posts inline threads on
+  the PR, so it leaves a durable record. Slower to come back.
 - **CLI lane** (`coderabbit review --committed --base main` from a worktree on the
-  branch): a separate budget that allowed 3 reviews before rate-limiting, each
-  finishing in a couple of minutes. Use it for anything mechanical. It leaves no PR
-  comment, so note the outcome yourself if the PR needs a record.
+  branch): finishes in a couple of minutes, which makes it the one to reach for on
+  mechanical changes. It leaves no PR comment, so note the outcome yourself if the PR
+  needs a record.
+
+Worth knowing: the two lanes do not find the same things. On #99 the CLI returned 4
+findings and the PR lane independently returned 4 more that the CLI missed, including
+a non-atomic state write that would silently re-enable a feature the user had turned
+off. On a change where correctness matters, running both is not redundant.
 
 ### Gating posture
 
