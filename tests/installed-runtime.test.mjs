@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import {
   chmodSync,
   existsSync,
@@ -23,6 +24,7 @@ import {
   parseCustomCommandString,
   probeCustomRuntimeCommand,
   probeInstalledRuntime,
+  RUNTIME_TOOL_PROFILE_UNSUPPORTED,
   runInstalledRuntime,
   runtimeSearchDirectories,
 } from "../src/core/ai/installed-runtimes.mjs";
@@ -30,6 +32,26 @@ import {
   loadInstalledRuntimeSelection,
   writeInstalledRuntimeSelection,
 } from "../src/core/ai/runtime-selection.mjs";
+
+// A minimal fake child_process for runInstalledRuntime's spawnImpl injection
+// point — an EventEmitter with stdout/stderr/stdin EventEmitters, mirroring
+// the shape probeCustomRuntimeCommand's own tests fake below. `stdin.end()`
+// is the spawn's actual write, so that's what schedules the fake process's
+// stdout + close.
+function fakeInstalledChild({ stdout = "", status = 0 } = {}) {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdin = new EventEmitter();
+  child.stdin.end = () => {
+    queueMicrotask(() => {
+      if (stdout) child.stdout.emit("data", Buffer.from(stdout, "utf8"));
+      child.emit("close", status, null);
+    });
+  };
+  child.kill = () => {};
+  return child;
+}
 
 function tempRoot() {
   return mkdtempSync(join(tmpdir(), "careerrat-installed-runtime-"));
@@ -826,4 +848,100 @@ process.stdin.on("end", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Chat-tool-profile boundary — RUNTIME_TOOL_PROFILE_UNSUPPORTED.
+//
+// Codex `exec` (and every other non-claude installed runtime) has no
+// tool-allowlist mechanism at all: `--sandbox read-only` scopes shell writes
+// and network, it does not remove the shell tool or restrict what gets read.
+// CHAT_RUNTIME_TOOLS (runtime-tools.mjs) is a deliberate structural
+// prompt-injection boundary — WebSearch/WebFetch/Skill, never Read — that
+// only the "claude" runtime's `--tools`/`--allowedTools` flags can actually
+// enforce. runInstalledRuntime must fail closed BEFORE spawning whenever a
+// non-claude runtime is asked to run that restricted profile, and must never
+// affect the app-safe one-shot profile those same runtimes already run for
+// evaluate-job/tailor-application/resume-extract.
+// ---------------------------------------------------------------------------
+
+test("runInstalledRuntime fails closed for a non-claude runtime + the restricted chat tool profile, before any spawn (codex)", async () => {
+  let spawnCalls = 0;
+  await assert.rejects(
+    runInstalledRuntime({
+      runtime: { id: "codex", path: "/safe/codex" },
+      prompt: "research this company",
+      tools: ["WebSearch", "WebFetch", "Skill"],
+      spawnImpl: () => {
+        spawnCalls++;
+        throw new Error("spawn must never be reached for an unsupported chat tool profile");
+      },
+    }),
+    (error) => error.code === RUNTIME_TOOL_PROFILE_UNSUPPORTED && error.runtimeId === "codex"
+  );
+  assert.equal(spawnCalls, 0, "the spawn was invoked despite the guard");
+});
+
+test("runInstalledRuntime fails closed for another non-claude runtime + the restricted chat tool profile (opencode) — proves the guard is general, not codex-specific", async () => {
+  let spawnCalls = 0;
+  await assert.rejects(
+    runInstalledRuntime({
+      runtime: { id: "opencode", path: "/safe/opencode" },
+      prompt: "research this company",
+      tools: ["WebSearch", "WebFetch", "Skill"],
+      spawnImpl: () => {
+        spawnCalls++;
+        throw new Error("spawn must never be reached for an unsupported chat tool profile");
+      },
+    }),
+    (error) => error.code === RUNTIME_TOOL_PROFILE_UNSUPPORTED && error.runtimeId === "opencode"
+  );
+  assert.equal(spawnCalls, 0, "the spawn was invoked despite the guard");
+});
+
+test("runInstalledRuntime: claude + the same restricted chat tool profile is unaffected, and still builds --tools/--allowedTools", async () => {
+  const spawnCalls = [];
+  const result = await runInstalledRuntime({
+    runtime: { id: "claude", path: "/safe/claude" },
+    prompt: "research this company",
+    tools: ["WebSearch", "WebFetch", "Skill"],
+    timeoutMs: 2000,
+    spawnImpl: (command, args, options) => {
+      spawnCalls.push({ command, args, options });
+      return fakeInstalledChild({
+        stdout: JSON.stringify({ type: "result", subtype: "success", result: "ok" }),
+      });
+    },
+  });
+  assert.equal(spawnCalls.length, 1, "claude must still spawn for the chat tool profile");
+  const args = spawnCalls[0].args;
+  const toolsIdx = args.indexOf("--tools");
+  assert.ok(toolsIdx >= 0, "expected --tools in argv");
+  assert.equal(args[toolsIdx + 1], "WebSearch,WebFetch,Skill");
+  const allowedIdx = args.indexOf("--allowedTools");
+  assert.ok(allowedIdx >= 0, "expected --allowedTools in argv");
+  assert.equal(args[allowedIdx + 1], "WebSearch,WebFetch,Skill");
+  assert.equal(result.text, "ok");
+});
+
+test("runInstalledRuntime: codex + the app-safe one-shot profile still proceeds and spawns — regression guard proving the fail-closed check does not break Codex on its normal path", async () => {
+  const spawnCalls = [];
+  const result = await runInstalledRuntime({
+    runtime: { id: "codex", path: "/safe/codex" },
+    prompt: "evaluate this job",
+    tools: ["Read", "Glob", "Grep", "Skill"],
+    timeoutMs: 2000,
+    spawnImpl: (command, args, options) => {
+      spawnCalls.push({ command, args, options });
+      return fakeInstalledChild({
+        stdout: `${JSON.stringify({
+          type: "item.completed",
+          item: { type: "agent_message", text: "evaluated" },
+        })}\n`,
+      });
+    },
+  });
+  assert.equal(spawnCalls.length, 1, "codex must still spawn for the app-safe one-shot profile");
+  assert.equal(spawnCalls[0].command, "/safe/codex");
+  assert.equal(result.text, "evaluated");
 });
