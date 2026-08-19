@@ -959,6 +959,23 @@ test("buildStrategyReviewContext reads learning headings written with either sep
       "",
       "Body of the post-sweep entry.",
       "",
+      // computeAppend's date check is prefix-anchored (`/^\d{4}-\d{2}-\d{2}/`,
+      // no `$`), so `careerrat learnings --date 2026-08-10T14:30:00Z` is accepted
+      // and written. A colon separator matched without requiring trailing
+      // whitespace stops at the first colon on the line, which is inside the
+      // time, and the entry parses as date "2026-08-10T14" with the rest of the
+      // timestamp glued onto the front of the title. Silent, and it feeds a
+      // mangled title into strategy review.
+      "## 2026-08-10T14:30:00Z: Panel loops need a written brief",
+      "",
+      "Body of an entry whose date carries a time.",
+      "",
+      // A title may itself contain a colon. The separator is the first colon
+      // FOLLOWED BY whitespace, not the first colon.
+      "## 2026-08-12: Onsite: bring a written question list",
+      "",
+      "Body of an entry whose title contains a colon.",
+      "",
     ].join("\n")
   );
 
@@ -975,9 +992,11 @@ test("buildStrategyReviewContext reads learning headings written with either sep
   );
   assert.deepEqual(
     entry.entries.map((e) => e.date),
-    ["2026-07-01", "2026-08-01"],
-    "both the em-dash entry and the colon entry must be read"
+    ["2026-07-01", "2026-08-01", "2026-08-10T14:30:00Z", "2026-08-12"],
+    "both the em-dash entry and the colon entry must be read, and a date carrying a time must survive intact"
   );
   assert.equal(entry.entries[0].title, "Recruiter screens stall without a comp range");
   assert.equal(entry.entries[1].title, "Take-homes convert better than live coding");
+  assert.equal(entry.entries[2].title, "Panel loops need a written brief");
+  assert.equal(entry.entries[3].title, "Onsite: bring a written question list");
 });

@@ -133,7 +133,17 @@ function compactLearnings({ repoRoot, targeting }) {
     // workspace. Matching only the new form would make every entry a real user
     // already has invisible here, silently: this returns headings, so a file that
     // parses to zero looks identical to a family with no learnings yet.
-    const headings = [...text.matchAll(/^## (.+?)(?::|\s+—)\s*(.+)$/gm)]
+    //
+    // The colon branch requires whitespace after the colon, and that is the whole
+    // reason this parses correctly. `(.+?)` is lazy, so a bare `:` alternative
+    // stops at the FIRST colon on the line, and computeAppend's date check is
+    // prefix-anchored (`/^\d{4}-\d{2}-\d{2}/`, no `$`), so `--date
+    // 2026-08-19T14:30:00Z` is accepted and written. That heading would then parse
+    // as date `2026-08-19T14`, title `30:00Z: ...`, quietly feeding a mangled
+    // title into strategy review. ISO times never put a space after their colons,
+    // so `:\s+` walks past them to the real separator. The em-dash branch keeps
+    // its old shape so nothing that parsed before stops parsing now.
+    const headings = [...text.matchAll(/^## (.+?)(?:\s+—\s+|:\s+)(.+)$/gm)]
       .slice(-MAX_LEARNING_ENTRIES_PER_FAMILY)
       .map(([, date, title]) => ({ date, title: cleanText(title, 160) }));
     if (headings.length) out.push({ family, entries: headings });
