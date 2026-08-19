@@ -174,8 +174,8 @@ export const ANSWER_PAGE_HTML = `<!doctype html>
       <textarea id="question-input" data-hook="question-input" placeholder="paste the form/screening question(s)…"></textarea>
     </div>
     <div class="field">
-      <label for="context-input">Company, Role (optional)</label>
-      <input id="context-input" data-hook="context-input" type="text" placeholder="Company, Role (optional)">
+      <label for="context-input">Company - Role (optional)</label>
+      <input id="context-input" data-hook="context-input" type="text" placeholder="Company - Role (optional)">
     </div>
     <div class="actions">
       <button id="run-btn" data-hook="run-btn" type="button">Draft answer</button>
@@ -290,9 +290,14 @@ export const ANSWER_PAGE_HTML = `<!doctype html>
   function contextFromInput(value) {
     var text = String(value || "").trim();
     if (!text) return {};
-    var parts = text.split(", ");
+    // Deliberately not ", ". The prompt above used to say "Company — Role" and
+    // the em-dash copy sweep first moved it to a comma, but company names carry
+    // commas ("Acme, Inc. - Senior Engineer") and a role rarely does, so a comma
+    // splits in the wrong place on a very ordinary input. " - " is the separator
+    // the prompt asks for now; " — " stays in the ladder because anyone who
+    // learned the old prompt still types it.
+    var parts = text.split(" - ");
     if (parts.length < 2) parts = text.split(" — ");
-    if (parts.length < 2) parts = text.split(" - ");
     if (parts.length < 2) parts = text.split(" -- ");
     return {
       application: {
