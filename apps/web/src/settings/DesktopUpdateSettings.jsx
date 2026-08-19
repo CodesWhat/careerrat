@@ -28,9 +28,14 @@ export function useDesktopUpdateSetting() {
 
   function setEnabled(next) {
     setEnabledState(next);
+    // Bail before touching `saving`: `useDesktopUpdateSetting` is exported on
+    // its own, so a consumer that skips the `available` guard can call this
+    // with no bridge present. Wrapping in Promise.resolve() also settles the
+    // .finally() below even if a real bridge implementation ever returns a
+    // plain value instead of a promise.
+    if (!bridge) return;
     setSaving(true);
-    bridge
-      ?.setEnabled(next)
+    Promise.resolve(bridge.setEnabled(next))
       .catch(() => {
         // Best-effort. Worst case the toggle reflects a state main.mjs never persisted.
       })
