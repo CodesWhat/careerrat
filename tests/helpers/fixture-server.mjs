@@ -38,26 +38,6 @@ function contentTypeFor(path) {
 export function startFixtureServer(rootDir) {
   const root = resolvePath(rootDir);
 
-  // Resolve a request path to a real file inside `root`, or null if it escapes.
-  //
-  // Two things here are load-bearing and were both wrong in the first version.
-  //
-  // First, the request path is joined as `.${requestPath}` so a leading "/" is
-  // read relative to `root` instead of as an absolute filesystem path, and
-  // `resolve` collapses every ".." segment before the check rather than after.
-  // Hand-stripping a leading "../" with a regex only removes the sequences it
-  // happens to anchor on and misses "a/../../etc".
-  //
-  // Second, containment is `=== root || startsWith(root + sep)`, not a bare
-  // `startsWith(root)`. A plain prefix test passes any sibling whose name
-  // extends the root's, so a root of "/tmp/fix" would happily serve
-  // "/tmp/fixtures-elsewhere/secret".
-  function resolveWithinRoot(requestPath) {
-    const candidate = resolvePath(root, `.${requestPath}`);
-    if (candidate !== root && !candidate.startsWith(root + sep)) return null;
-    return candidate;
-  }
-
   const server = createServer((req, res) => {
     const rawPath = (req.url || "/").split("?")[0].split("#")[0];
 
@@ -80,8 +60,26 @@ export function startFixtureServer(rootDir) {
       return;
     }
 
-    let filePath = resolveWithinRoot(requestPath);
-    if (!filePath) {
+    // Two things here are load-bearing and were both wrong in the first version.
+    //
+    // First, the request path is joined as `.${requestPath}` so a leading "/"
+    // is read relative to `root` instead of as an absolute filesystem path, and
+    // resolve collapses every ".." segment before the check rather than after.
+    // Hand-stripping a leading "../" with a regex only removes the sequences it
+    // happens to anchor on and misses "a/../../etc".
+    //
+    // Second, containment is `=== root || startsWith(root + sep)`, not a bare
+    // `startsWith(root)`. A plain prefix test passes any sibling whose name
+    // extends the root's, so a root of "/tmp/fix" would happily serve
+    // "/tmp/fixtures-elsewhere/secret".
+    //
+    // Written inline rather than as a helper returning null on purpose. It read
+    // better as a helper, but CodeQL's js/path-injection flow analysis could not
+    // follow the guard across the function boundary and kept flagging every
+    // downstream fs call. Same behaviour, and the suppression is earned by the
+    // check rather than by an alert dismissal.
+    let filePath = resolvePath(root, `.${requestPath}`);
+    if (filePath !== root && !filePath.startsWith(root + sep)) {
       res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
       res.end("Forbidden");
       return;
