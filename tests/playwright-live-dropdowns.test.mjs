@@ -12,10 +12,12 @@
 // this far in a fake-browser suite.
 //
 // No real ATS URL appears anywhere in this file. tests/fixtures/apply-
-// form/index.html reproduces the two dropdown shapes that matter instead: a
-// genuine native <select> (the still-must-work Lever-shaped path) and a
-// react-select-shaped custom [role=combobox] (the Greenhouse/Ashby-shaped
-// path selectOption() previously couldn't drive at all).
+// form/index.html reproduces the three dropdown shapes that matter instead: a
+// genuine native <select> (the still-must-work Lever-shaped path), a
+// react-select-shaped click-to-open custom [role=combobox] (the Greenhouse-
+// shaped path selectOption() previously couldn't drive at all), and an
+// Ashby-shaped type-to-populate combobox (a plain text input that renders no
+// options until something is typed into it).
 //
 // Gated on CAREERRAT_LIVE_BROWSER=1, the same opt-in the multi-step harness in
 // tests/playwright-live.test.mjs uses (and the same idea as

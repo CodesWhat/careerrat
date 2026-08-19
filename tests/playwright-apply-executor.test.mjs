@@ -571,7 +571,24 @@ test("screenshot returns base64 png data", async () => {
 // combobox exposes.
 // ---------------------------------------------------------------------------
 
-function createFakeComboboxBrowser({ controls, comboboxIndex, options }) {
+function createFakeComboboxBrowser({
+  controls,
+  comboboxIndex,
+  options,
+  // false models an Ashby-shaped input: clicking it renders no options at
+  // all (a type-to-populate control only ever populates its list from
+  // typing), so selectOption() falls through past the click-to-open
+  // strategy into the typing strategy below. true (the default) models the
+  // react-select shape the existing tests below exercise, where the option
+  // list opens right off the click.
+  openOnClick = true,
+  // false models the real P0 this fake exists to guard against: a click on
+  // an option resolves with no error, yet the control's own display value
+  // never actually changes. Only meaningful once the typing strategy is
+  // reached (openOnClick: false) — see the requireDisplayChange regression
+  // test below.
+  applySelectionOnClick = true,
+} = {}) {
   const actions = [];
   let currentUrl = "";
   let open = false;
@@ -611,6 +628,7 @@ function createFakeComboboxBrowser({ controls, comboboxIndex, options }) {
         throw new Error("Element is not a <select> element");
       },
       async click() {
+        if (!openOnClick) return; // Ashby-shaped: a click alone opens nothing
         actions.push({ op: "comboboxOpen", index });
         open = true;
         filterText = "";
@@ -621,14 +639,25 @@ function createFakeComboboxBrowser({ controls, comboboxIndex, options }) {
       async pressSequentially(value) {
         actions.push({ op: "comboboxFilter", index, value });
         filterText = value;
+        // A real <input> reflects keystrokes in its own .value as they're
+        // typed — this is exactly the value matchClickAndConfirm's
+        // requireDisplayChange option must NOT accept as evidence of a
+        // completed selection, since it's set before any option is clicked.
+        comboboxValue = value;
+        open = true; // the list appears as a side effect of typing, not a click
       },
     };
   }
 
   function selectOptionByLabel(label) {
-    comboboxValue = label;
     actions.push({ op: "comboboxSelect", index: comboboxIndex, label });
-    open = false;
+    if (applySelectionOnClick) {
+      comboboxValue = label;
+      open = false;
+    }
+    // else: reproduces the real Ashby P0 this fake guards against — the
+    // click resolves with no error, yet the control's own display value and
+    // open option list never actually change.
   }
 
   function fakeOptionsLocator() {
@@ -642,6 +671,11 @@ function createFakeComboboxBrowser({ controls, comboboxIndex, options }) {
       },
       async allTextContents() {
         return visibleOptions();
+      },
+      // matchClickAndConfirm's requireDisplayChange path reads this after a
+      // click to check whether the option list closed.
+      async count() {
+        return visibleOptions().length;
       },
       // Mirrors real Locator.filter({hasText}).first().click() — the exact
       // surface selectOption()'s clickOptionByExactText() now drives instead
@@ -818,6 +852,99 @@ test("selectOption throws a plain-language human-handoff error naming the field 
       assert.match(error.message, /choose the correct option yourself/);
       return true;
     }
+  );
+});
+
+test("findOptionMatch: an empty target value never falls through to substring matching (P2 regression)", async () => {
+  // Every option's normalized text "includes" the empty string, so without
+  // the early return in findOptionMatch() an unset/blank value would
+  // substring-match the FIRST option in the list and get clicked — the
+  // field silently ends up with an arbitrary value instead of a clean
+  // handoff to the human. openOnClick: false plus the empty value also
+  // means the click-to-open strategy never opens a list and the typing
+  // strategy never has anything to type, so this only passes if the -1
+  // short-circuit fires before either match kind runs.
+  const { launchImpl, actions } = createFakeComboboxBrowser({
+    controls: COMBOBOX_FORM_CONTROLS,
+    comboboxIndex: 1,
+    options: COUNTRY_OPTIONS,
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  await ops.snapshot({ pageId });
+
+  await assert.rejects(
+    () => ops.selectOption({ pageId, ref: "e2", value: "" }),
+    /couldn't be set automatically/
+  );
+  assert.ok(
+    !actions.some((entry) => entry.op === "comboboxSelect"),
+    "an empty value must never result in an option actually being clicked"
+  );
+});
+
+test("selectOption's typeahead strategy (Ashby shape) confirms a real selection via typed keystrokes", async () => {
+  // openOnClick: false forces the click-to-open strategy to find no list at
+  // all, falling through into the typing strategy — the only path that
+  // exercises requireDisplayChange. applySelectionOnClick stays at its
+  // default (true): the option click genuinely commits, so confirmation
+  // must still succeed once real evidence (the display value changing)
+  // exists, not just when a click resolves.
+  const { launchImpl, actions } = createFakeComboboxBrowser({
+    controls: COMBOBOX_FORM_CONTROLS,
+    comboboxIndex: 1,
+    options: COUNTRY_OPTIONS,
+    openOnClick: false,
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  await ops.snapshot({ pageId });
+  await ops.selectOption({ pageId, ref: "e2", value: "United States" });
+
+  assert.ok(
+    actions.some((entry) => entry.op === "comboboxFilter"),
+    "the typing strategy must have actually been reached"
+  );
+  const selected = actions.find((entry) => entry.op === "comboboxSelect");
+  assert.equal(selected.label, "United States");
+});
+
+test("selectOption's typeahead strategy does NOT confirm on the text it typed itself — a click that resolves without ever changing the control's value must be rejected (P0 regression guard)", async () => {
+  // This is the exact false-positive an earlier verification pass fell
+  // into on this feature: the code had already typed "United States" into
+  // the box, so the control's display value contains the target text
+  // whether or not the option click actually committed anything. Before
+  // requireDisplayChange, comboboxSelectionConfirmed(displayValue,
+  // matchedText) would pass on that alone. applySelectionOnClick: false
+  // reproduces the real Ashby bug this guards against — the click resolves
+  // with no error, yet the control's own value and open option list never
+  // change — so confirmation must fail and the field must hand off to the
+  // human instead of silently reporting success.
+  const { launchImpl, actions } = createFakeComboboxBrowser({
+    controls: COMBOBOX_FORM_CONTROLS,
+    comboboxIndex: 1,
+    options: COUNTRY_OPTIONS,
+    openOnClick: false,
+    applySelectionOnClick: false,
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  await ops.snapshot({ pageId });
+
+  await assert.rejects(
+    () => ops.selectOption({ pageId, ref: "e2", value: "United States" }),
+    (error) => {
+      assert.match(error.message, /"Country" dropdown/);
+      assert.match(error.message, /couldn't be set automatically/);
+      return true;
+    }
+  );
+  assert.ok(
+    actions.some((entry) => entry.op === "comboboxFilter"),
+    "the typing strategy must have actually typed the target text in — that's the trap being guarded against"
   );
 });
 

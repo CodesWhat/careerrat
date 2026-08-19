@@ -321,6 +321,11 @@ function normalizeOptionText(value) {
 // render before the exact one.
 function findOptionMatch(optionTexts, targetValue) {
   const target = normalizeOptionText(targetValue);
+  // An empty target must never fall through to substring matching — every
+  // option's text "includes" the empty string, so that would silently click
+  // the first option in the list instead of handing an unset field back to
+  // the human.
+  if (!target) return -1;
   const exactIndex = optionTexts.findIndex((text) => normalizeOptionText(text) === target);
   if (exactIndex !== -1) return exactIndex;
   return optionTexts.findIndex((text) => normalizeOptionText(text).includes(target));
@@ -378,12 +383,25 @@ function comboboxSelectionConfirmed(displayValue, expectedText) {
 // settling that takes longer than one pause. Returns false, never throws,
 // when no attempt confirms — the caller decides what that means for its
 // strategy.
+//
+// `requireDisplayChange` exists because comboboxSelectionConfirmed() alone is
+// the wrong check for a type-to-populate control: the code itself already
+// typed `stringValue` into the box before any option list existed, so the
+// display value contains the target text whether or not the click actually
+// landed on an option. That's not evidence of selection — it's evidence of
+// the code's own prior input, and it's the exact trap that produced a false
+// negative in an earlier verification pass (which used typed text and the
+// accessibility snapshot as proof and concluded a working fix hadn't worked).
+// With this on, confirmation instead requires the pre-click display value to
+// have genuinely changed, or the option list to have closed — either one is
+// real evidence the click committed a selection.
 async function matchClickAndConfirm({
   locator,
   optionsLocator,
   stringValue,
   attempts,
   settleDelayMs,
+  requireDisplayChange = false,
 }) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (settleDelayMs > 0) {
@@ -393,12 +411,20 @@ async function matchClickAndConfirm({
     const matchIndex = findOptionMatch(optionTexts, stringValue);
     if (matchIndex === -1) continue;
     const matchedText = optionTexts[matchIndex];
+    const displayValueBeforeClick = requireDisplayChange
+      ? await readComboboxDisplayValue(locator)
+      : null;
     try {
       await clickOptionByExactText(optionsLocator, matchedText, SELECT_OPTION_TIMEOUT_MS);
     } catch {
       continue;
     }
     const displayValue = await readComboboxDisplayValue(locator);
+    if (requireDisplayChange) {
+      const optionListClosed = (await optionsLocator.count()) === 0;
+      if (displayValue !== displayValueBeforeClick || optionListClosed) return true;
+      continue;
+    }
     if (comboboxSelectionConfirmed(displayValue, matchedText)) return true;
   }
   return false;
@@ -675,6 +701,13 @@ export function createPlaywrightOps({
             stringValue,
             attempts: 2,
             settleDelayMs: TYPEAHEAD_SETTLE_DELAY_MS,
+            // This strategy already typed stringValue into the control
+            // above, so its display value trivially "contains" the target
+            // text before any option is ever clicked — confirming on that
+            // would pass whether or not the click actually selected
+            // anything. Require real evidence instead: the display value
+            // changing, or the option list closing.
+            requireDisplayChange: true,
           });
           if (confirmed) return;
         }
