@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Apply — Step 2</title>
+  </head>
+  <body>
+    <main>
+      <h1>Step 2: Documents</h1>
+      <form action="step3.html" method="get">
+        <p>
+          <label for="resume">Resume/CV</label>
+          <input id="resume" name="resume" type="file" required />
+          <span id="resume-filename"></span>
+        </p>
+        <p>
+          <label for="cover_letter">Cover letter</label>
+          <textarea id="cover_letter" name="cover_letter"></textarea>
+        </p>
+        <p>
+          <label for="agree_terms">I agree to the terms</label>
+          <input id="agree_terms" name="agree_terms" type="checkbox" required />
+        </p>
+        <button type="submit">Next</button>
+      </form>
+    </main>
+    <script>
+      // A file input's chosen name isn't reflected anywhere in a plain GET
+      // form submission (browsers omit file field contents from the query
+      // string), so a test asserting a real file got attached has nothing
+      // else in the DOM to read back. Mirror the chosen filename into this
+      // visible span on change so that check is possible through the ops
+      // snapshot() contract alone, without reaching into Playwright directly.
+      document.getElementById("resume").addEventListener("change", (event) => {
+        var span = document.getElementById("resume-filename");
+        var files = event.target.files;
+        span.textContent = files && files.length ? files[0].name : "";
+      });
+    </script>
+  </body>
+</html>

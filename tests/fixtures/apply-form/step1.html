@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Apply — Step 1</title>
+  </head>
+  <body>
+    <main>
+      <h1>Step 1: Basics</h1>
+      <form action="step2.html" method="get">
+        <p>
+          <label for="full_name">Full name</label>
+          <input id="full_name" name="full_name" type="text" autocomplete="name" required />
+        </p>
+        <p>
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" autocomplete="email" required />
+        </p>
+        <p>
+          <label for="phone">Phone</label>
+          <input id="phone" name="phone" type="tel" autocomplete="tel" />
+        </p>
+        <p>
+          <label for="work_authorization">Work authorization</label>
+          <select id="work_authorization" name="work_authorization" required>
+            <option value="">Choose one</option>
+            <option value="yes">Yes, authorized to work</option>
+            <option value="no">No, I need sponsorship</option>
+          </select>
+        </p>
+        <button type="submit">Next</button>
+      </form>
+    </main>
+  </body>
+</html>
