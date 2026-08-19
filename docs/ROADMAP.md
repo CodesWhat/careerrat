@@ -296,12 +296,36 @@ nurse, a driver, and an engineer each bring their own config.
   still needed to unlock gating and applying (with per-item hints), and gets out of the way
   once setup is complete.
 
-## Release status (v0.9.0, updated August 19, 2026)
+## Release status (v0.10.0, updated August 19, 2026)
 
-**v0.9.0 is cut.** `main` carries version 0.9.0, tag `v0.9.0` is pushed, the GitHub
-Release is published, and `CHANGELOG.md` at the repo root is the per-release record
-from here on. It covers PRs #52 through #96. `publish.yml` fires on a published
-GitHub Release, not on a tag push, so tagging alone is always safe.
+**v0.10.0 is released and published.** npm `dist-tags.latest` is `0.10.0`. The
+GitHub release `v0.10.0` carries a signed, notarized, stapled
+`CareerRat-0.10.0-arm64.dmg`. `publish.yml` fires on a published GitHub Release,
+not on a tag push, so tagging alone is always safe. `CHANGELOG.md` at the repo
+root is the per-release record from here on.
+
+Version drift now has a guard. `tests/release-consistency.test.mjs` checks that
+`package.json`, `apps/desktop/package.json`, and the newest `CHANGELOG.md`
+heading agree, and it is named in `ci-verify.yml`'s explicit test list so it
+actually runs on every PR. That list is explicit on purpose, since the full
+suite is intentionally red during pre-launch churn, so a new test file does
+nothing until it is added there.
+
+A Homebrew cask now exists, `brew install --cask codeswhat/tap/careerrat`, but it
+is pending review as PR #4 on `CodesWhat/homebrew-tap`, not yet available. The
+cask is hand-maintained: careerrat has no cask generator script (idlescreen has
+`scripts/generate-homebrew-cask.sh`; careerrat does not). This is a known gap.
+Every release currently requires hand-editing the cask's `version` and `sha256`
+and opening a tap PR.
+
+Stale branch cleanup is done. `origin` is now just `main`. The branches
+`fix/v0.7-publish`, `dev/v0.7`, `archive/dev-2026-07`, and
+`release/careerrat-0.5.2` were deleted after verifying each had zero commits
+absent from main (the 0.5.2 one is still permanently reachable via tag
+`v0.5.2-careerrat`, which points at the identical SHA).
+
+A local-only branch `backup/pre-public-history` was deliberately kept. It holds
+pre-scrub history containing owner PII and must never be pushed or deleted.
 
 ### Picking this up cold
 

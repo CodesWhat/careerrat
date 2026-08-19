@@ -34,8 +34,8 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: Structure guards (client JS parses, CSS valid, YAML valid)
-        run: node --test tests/client-script.test.mjs tests/styles.test.mjs tests/yaml.test.mjs
+      - name: Structure guards (client JS parses, CSS valid, YAML valid, release versions in sync)
+        run: node --test tests/client-script.test.mjs tests/styles.test.mjs tests/yaml.test.mjs tests/release-consistency.test.mjs
 
   # M7 — builds the apps/web SPA shell. Non-gating (not in the "Main branch
   # protection" ruleset's required_status_checks) until the workspace is
