@@ -6314,8 +6314,31 @@ function compResearchRequestFromText(text) {
   if (match) return { role: stripLeadingArticle(match[1]), location: match[2].trim() };
   match = stripped.match(/^what'?s\s+the\s+market\s+rate\s+for\s+(.+?)\s*[.?!]*$/i);
   if (match) return { role: stripLeadingArticle(match[1]) };
+  // "what's market comp for X" / "what's the market comp for X" — the
+  // question shape with no location clause. A bare "this/that/the
+  // role/job/position" target resolves through the open job instead of a
+  // literal role string (mirrors companyResearchRequestFromText's
+  // thisCompany handling).
+  match = stripped.match(
+    /^(?:what'?s|what\s+is)\s+(?:the\s+)?market\s+comp\s+for\s+(.+?)\s*[.?!]*$/i
+  );
+  if (match) {
+    const captured = match[1].trim();
+    if (/^(?:this|that|the)\s+(?:role|job|position)\b/i.test(captured)) return { thisRole: true };
+    return { role: stripLeadingArticle(captured) };
+  }
   if (/^comp\s+benchmark\b/i.test(stripped)) return {};
   if (/\bsalary\s+research\b.*\b(?:this\s+)?(?:job|role)\b/i.test(stripped)) return {};
+  // "what should/does/would this/that/the role/job/position pay/earn/make/
+  // offer" — pay-verb phrasing scoped to role/job/position vocabulary so it
+  // doesn't over-trigger on unrelated "what should I pay for X" questions.
+  if (
+    /^what\s+(?:should|does|would)\s+(?:this|that|the)\s+(?:role|job|position)\s+(?:pay|earn|make|offer)\b/i.test(
+      stripped
+    )
+  ) {
+    return { thisRole: true };
+  }
   return null;
 }
 
@@ -7027,14 +7050,28 @@ const ACTION_PREVIEW_RULES = [
   {
     test: (text) => Boolean(compResearchRequestFromText(text)),
     label: "Research market comp",
-    intent: (text, context) => ({
-      type: "research.comp",
-      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-      input: {
-        ...compResearchRequestFromText(text),
-        ...(openJobId(context) ? { jobId: openJobId(context) } : {}),
-      },
-    }),
+    intent: (text, context) => {
+      const parsed = compResearchRequestFromText(text);
+      if (parsed.thisRole) {
+        // Bare "this role" reference — the executor already resolves
+        // role/location from a plain jobId, so no new intent type is
+        // needed. With no open job, fall through to {} so the existing
+        // RESEARCH_COMP_INPUT_REQUIRED error path still applies on commit.
+        return {
+          type: "research.comp",
+          entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+          input: openJobId(context) ? { jobId: openJobId(context) } : {},
+        };
+      }
+      return {
+        type: "research.comp",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {
+          ...parsed,
+          ...(openJobId(context) ? { jobId: openJobId(context) } : {}),
+        },
+      };
+    },
   },
   {
     test: (text) => Boolean(companyHealthRequestFromText(text)),

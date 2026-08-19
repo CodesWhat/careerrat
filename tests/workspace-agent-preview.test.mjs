@@ -688,6 +688,142 @@ test("previewWorkspaceIntent: 'research market comp for X in Y' routes to resear
   });
 });
 
+test("previewWorkspaceIntent: 'what's market comp for this role' resolves through the open job", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({
+    text: "what's market comp for this role",
+    context: { pathname: "/jobs", jobId: "app-acme" },
+    repoRoot,
+    env: {},
+  });
+  assert.deepEqual(result.action, {
+    label: "Research market comp",
+    intent: {
+      type: "research.comp",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobId: "app-acme" },
+    },
+  });
+});
+
+test("previewWorkspaceIntent: 'what's market comp for this role' with no open job still fires the chip", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({
+    text: "what's market comp for this role",
+    repoRoot,
+    env: {},
+  });
+  // No open job to resolve role/location from — the executor throws
+  // RESEARCH_COMP_INPUT_REQUIRED on commit (tested in workspace-agent.test.mjs).
+  assert.deepEqual(result.action, {
+    label: "Research market comp",
+    intent: {
+      type: "research.comp",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+});
+
+test("previewWorkspaceIntent: 'what should this role pay' resolves through the open job", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({
+    text: "what should this role pay",
+    context: { pathname: "/jobs", jobId: "app-acme" },
+    repoRoot,
+    env: {},
+  });
+  assert.deepEqual(result.action, {
+    label: "Research market comp",
+    intent: {
+      type: "research.comp",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobId: "app-acme" },
+    },
+  });
+});
+
+test("previewWorkspaceIntent: pay-verb phrasings map to research.comp across role/job/position vocabulary", () => {
+  const repoRoot = tempRepo();
+  for (const text of ["what does this job pay", "what would this position pay"]) {
+    const result = previewWorkspaceIntent({ text, repoRoot, env: {} });
+    assert.deepEqual(
+      result.action,
+      {
+        label: "Research market comp",
+        intent: {
+          type: "research.comp",
+          entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+          input: {},
+        },
+      },
+      `expected "${text}" to map to research.comp`
+    );
+  }
+});
+
+test("previewWorkspaceIntent: contextual comp phrasings never over-trigger on unrelated pay/company questions", () => {
+  const repoRoot = tempRepo();
+
+  // No role/job/position vocabulary — stays ordinary chat, not research.comp.
+  let result = previewWorkspaceIntent({
+    text: "what should I pay for LinkedIn premium",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(result.action, null);
+
+  // Targets "company", not role/job/position — stays ordinary chat.
+  result = previewWorkspaceIntent({
+    text: "what does this company pay its CEO",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(result.action, null);
+
+  // Pre-existing company-research routes stay unaffected by the new
+  // role/job/position matchers.
+  assert.deepEqual(
+    previewWorkspaceIntent({ text: "research this company", repoRoot, env: {} }).action,
+    {
+      label: "Research this company",
+      intent: {
+        type: "research.company-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { companyReference: "" },
+      },
+    }
+  );
+
+  assert.deepEqual(
+    previewWorkspaceIntent({ text: "is this a safe place to land", repoRoot, env: {} }).action,
+    {
+      label: "Check company health",
+      intent: {
+        type: "company.health-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { companyReference: "this" },
+      },
+    }
+  );
+
+  assert.deepEqual(
+    previewWorkspaceIntent({
+      text: "what should I know about this company before the interview",
+      repoRoot,
+      env: {},
+    }).action,
+    {
+      label: "Research this company",
+      intent: {
+        type: "research.company",
+        entity: { type: "company", id: "this-company" },
+        input: { company: "this company" },
+      },
+    }
+  );
+});
+
 test("previewWorkspaceIntent: company-health phrasings map to company.health-request", () => {
   const repoRoot = tempRepo();
   const phrasings = ["is Acme a safe place to land", "how risky is Acme", "any layoffs at Acme"];
