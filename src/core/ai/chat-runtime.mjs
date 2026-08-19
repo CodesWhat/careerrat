@@ -50,7 +50,11 @@ import { join } from "node:path";
 import { candidateArtifactExists, candidateConfigGet } from "../db/verbs.mjs";
 import { computeSetupProgress } from "../onboarding/setup-progress.mjs";
 import { resolveAIRoute } from "./call-ai.mjs";
-import { CHAT_SESSION_RUNTIME_TIMEOUT_MS, runInstalledRuntime } from "./installed-runtimes.mjs";
+import {
+  CHAT_SESSION_RUNTIME_TIMEOUT_MS,
+  RUNTIME_TOOL_PROFILE_UNSUPPORTED,
+  runInstalledRuntime,
+} from "./installed-runtimes.mjs";
 import { createRuntimeToolPolicy } from "./runtime-tool-policy.mjs";
 import { resolveChatRuntimeTools } from "./runtime-tools.mjs";
 import {
@@ -219,6 +223,25 @@ function buildKickoffMessage({ skill, input, declinedFields, candidateContext })
 // single final answer instead of asking one question and waiting. Swapped
 // here for a closing instruction that actually matches a chat turn.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// buildToolProfileUnsupportedMessage — runInstalledTurn's catch block
+// (below) turns installed-runtimes.mjs's RUNTIME_TOOL_PROFILE_UNSUPPORTED
+// into this plain-language explanation instead of relaying the technical
+// error string. `runtimeName` comes from route.runtime.name (the same
+// human-readable label detectInstalledRuntimes()/the "custom" branch of
+// resolveAIRoute already attach to every runtime object), so this reads
+// correctly for opencode/gemini/whatever picked runtime, not just Codex.
+// ---------------------------------------------------------------------------
+
+function buildToolProfileUnsupportedMessage(runtimeName) {
+  return (
+    `${runtimeName} can't run CareerRat's research chats. It has no way to keep local file ` +
+    "access and web access separate, and CareerRat won't combine them. Switch to Claude Code " +
+    `for research chats, or keep using ${runtimeName} for tailoring and apply runs, which don't ` +
+    "need it."
+  );
+}
 
 function buildInstalledChatPrompt({ system, transcript, candidateContext }) {
   const sections = [];
@@ -673,11 +696,24 @@ export function createChatRuntime({
         }
         return;
       }
-      dispatchEvents(session, [{ type: "error", data: { message: err.message } }]);
+      // RUNTIME_TOOL_PROFILE_UNSUPPORTED (installed-runtimes.mjs's fail-closed
+      // guard) means this runtime can never complete a chat turn — the local
+      // file/web access boundary chat sessions require has no way to exist
+      // on it (see this file's header note on CHAT_RUNTIME_TOOLS as a
+      // structural prompt-injection boundary). Surface the plain-language
+      // explanation instead of the technical error string; every other
+      // failure keeps relaying err.message unchanged.
+      const message =
+        err.code === RUNTIME_TOOL_PROFILE_UNSUPPORTED
+          ? buildToolProfileUnsupportedMessage(
+              route.runtime?.name || route.runtime?.id || "This AI runtime"
+            )
+          : err.message;
+      dispatchEvents(session, [{ type: "error", data: { message } }]);
       if (drainPendingInstalledTurn(session, route)) {
-        recordAndBroadcast(session, { type: "result", data: { ok: false, error: err.message } });
+        recordAndBroadcast(session, { type: "result", data: { ok: false, error: message } });
       } else {
-        dispatchEvents(session, [{ type: "result", data: { ok: false, error: err.message } }]);
+        dispatchEvents(session, [{ type: "result", data: { ok: false, error: message } }]);
       }
     } finally {
       session.abortController.signal.removeEventListener("abort", onSessionAbort);

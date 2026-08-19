@@ -9,7 +9,7 @@
 // write-back, abort/close/interrupt) without spawning a CLI subprocess.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -20,7 +20,10 @@ import {
   resolveAllowedChatSkills,
   resolveCandidateChatContext,
 } from "../src/core/ai/chat-runtime.mjs";
-import { CHAT_SESSION_RUNTIME_TIMEOUT_MS } from "../src/core/ai/installed-runtimes.mjs";
+import {
+  CHAT_SESSION_RUNTIME_TIMEOUT_MS,
+  RUNTIME_TOOL_PROFILE_UNSUPPORTED,
+} from "../src/core/ai/installed-runtimes.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 import { APP_SAFE_RUNTIME_TOOLS, CHAT_RUNTIME_TOOLS } from "../src/core/ai/runtime-tools.mjs";
 import { readUsageEvents } from "../src/core/ai/usage-log.mjs";
@@ -36,6 +39,27 @@ import {
 // "custom" runtimeId short-circuits straight to a fixed { id: "custom", path:
 // customCommand } runtime (see call-ai.mjs's resolveAIRoute), same trick
 // tests/skill-runtime.test.mjs uses for its own installed-route coverage.
+// Same deterministic-route trick as selectInstalledRuntime below, but for a
+// real registry id ("codex") instead of "custom" — resolveAIRoute's non-custom
+// branch calls detectInstalledRuntimes({env}), which walks env.PATH plus
+// CAREERRAT_RUNTIME_EXTRA_PATHS (installed-runtimes.mjs's runtimeSearchDirectories).
+// Pointing both at a throwaway bin dir containing a fake "codex" executable
+// makes detection resolve route.runtime = { id: "codex", name: "Codex", ... }
+// without depending on any real CLI being on this machine's PATH — needed
+// here (unlike selectInstalledRuntime's "custom" shortcut) because this
+// suite's tool-profile-boundary test asserts on the registry's real "Codex"
+// display name inside the user-facing error message.
+function selectFakeCodexRuntime({ repoRoot, env }) {
+  const binDir = mkdtempSync(join(tmpdir(), "careerrat-fake-codex-bin-"));
+  const codexPath = join(binDir, "codex");
+  writeFileSync(codexPath, "#!/bin/sh\nexit 0\n", "utf8");
+  chmodSync(codexPath, 0o755);
+  env.PATH = "";
+  env.CAREERRAT_RUNTIME_EXTRA_PATHS = binDir;
+  writeInstalledRuntimeSelection({ repoRoot, env, runtimeId: "codex" });
+  return binDir;
+}
+
 function selectInstalledRuntime({ repoRoot, env }) {
   writeInstalledRuntimeSelection({
     repoRoot,
@@ -1276,6 +1300,78 @@ test("createChatRuntime (installed route): a runtime failure surfaces as an erro
     }
   } finally {
     cleanup(repoRoot);
+  }
+});
+
+// Boundary regression — installed-runtimes.mjs's runInstalledRuntime fails
+// closed (RUNTIME_TOOL_PROFILE_UNSUPPORTED) whenever a non-claude runtime is
+// asked to run the restricted CHAT_RUNTIME_TOOLS profile (see that file's own
+// tests for the guard itself). This proves chat-runtime.mjs's catch block
+// (runInstalledTurn) turns that error code into the plain-language, no-jargon
+// explanation instead of relaying the raw error string, keeps the session
+// open rather than closing it (same contract as any other turn failure), and
+// adapts the runtime's display name dynamically rather than hardcoding
+// "Codex".
+test("createChatRuntime (installed route): a runtime with no tool-allowlist mechanism gets a plain-language error for a network-tool skill, and the session stays open", async () => {
+  const repoRoot = tempRepoWithSkill("company-health");
+  const env = {};
+  const binDir = selectFakeCodexRuntime({ repoRoot, env });
+  try {
+    let implCalls = 0;
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => {
+        throw new Error("Agent SDK must not load for an installed route");
+      },
+      // Simulates the real guard's outcome without re-running the actual
+      // spawn plumbing — installed-runtime.test.mjs already proves the real
+      // runInstalledRuntime throws this exact error/code combination before
+      // any spawn for a non-claude runtime + the chat tool profile.
+      runInstalledRuntimeImpl: async () => {
+        implCalls++;
+        const err = new Error(
+          "Codex has no tool-allowlist mechanism, so it cannot run CareerRat's restricted " +
+            "research-chat tool profile (network access without local file access)."
+        );
+        err.code = RUNTIME_TOOL_PROFILE_UNSUPPORTED;
+        err.runtimeId = "codex";
+        throw err;
+      },
+    });
+    try {
+      const { chatId } = await chatRuntime.startSession({ skill: "company-health" });
+      const events = subscribeCollect(chatRuntime, chatId);
+      await waitForPredicate(() =>
+        events.some((e) => e.type === "chat_state" && e.data.state === "idle")
+      );
+
+      assert.equal(implCalls, 1);
+
+      const errorEvt = events.find((e) => e.type === "error");
+      assert.ok(errorEvt, "expected an error event");
+      assert.equal(
+        errorEvt.data.message,
+        "Codex can't run CareerRat's research chats. It has no way to keep local file access and " +
+          "web access separate, and CareerRat won't combine them. Switch to Claude Code for " +
+          "research chats, or keep using Codex for tailoring and apply runs, which don't need it."
+      );
+      // No AI jargon or error codes leak into the user-facing message.
+      assert.equal(errorEvt.data.message.includes("RUNTIME_TOOL_PROFILE_UNSUPPORTED"), false);
+      assert.equal(errorEvt.data.message.includes("unfortunately"), false);
+      assert.equal(errorEvt.data.message.includes("—"), false);
+
+      // Same contract as any other turn failure: the session survives.
+      assert.equal(chatRuntime.getSession(chatId).state, "idle");
+      const resultEvt = events.filter((e) => e.type === "result").pop();
+      assert.equal(resultEvt.data.ok, false);
+      assert.equal(resultEvt.data.error, errorEvt.data.message);
+    } finally {
+      chatRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+    rmSync(binDir, { recursive: true, force: true });
   }
 });
 

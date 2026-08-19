@@ -18,6 +18,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
+import { APP_SAFE_RUNTIME_TOOLS, CHAT_RUNTIME_TOOLS } from "./runtime-tools.mjs";
 
 export const INSTALLED_RUNTIME_DEFINITIONS = [
   {
@@ -27,6 +28,17 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     commandShape: "claude -p --output-format json",
     authProbe: { args: ["auth", "status"] },
     installUrl: "https://code.claude.com/docs/en/quickstart",
+    // The only installed runtime whose CLI actually has a tool-allowlist
+    // mechanism (`--tools`/`--allowedTools`, wired in
+    // buildInstalledRuntimeInvocation's "claude" branch below). Every other
+    // runtime in this registry ignores the `tools` param entirely — see
+    // runInstalledRuntime's chat-tool-profile guard, which fails closed for
+    // any of them rather than silently granting an unscoped tool surface.
+    // Absent on every other definition means "unsupported," deliberately —
+    // do not add this key anywhere else without also verifying that CLI has
+    // a real per-call tool restriction, the way this one was verified against
+    // the real installed `claude` CLI (see the file header comment).
+    chatToolProfileSupported: true,
   },
   {
     id: "codex",
@@ -651,6 +663,34 @@ function runtimeError(message, code, fields = {}) {
   return error;
 }
 
+// Distinguishes runInstalledRuntime's chat-tool-profile guard (below) from a
+// generic RUNTIME_* failure, the same way "RUNTIME_TOOL_PROFILE_INVALID" lets
+// runtime-tools.mjs's own callers tell a bad profile name apart from a spawn
+// failure.
+export const RUNTIME_TOOL_PROFILE_UNSUPPORTED = "RUNTIME_TOOL_PROFILE_UNSUPPORTED";
+
+// Tools that only ever appear in the restricted chat profile (WebSearch/
+// WebFetch — see runtime-tools.mjs's CHAT_RUNTIME_TOOLS/APP_SAFE_RUNTIME_TOOLS
+// and its own "structural prompt-injection boundary" comment). Computed as a
+// set difference against those two canonical exports rather than duplicated
+// here as a hardcoded tool-name list, so this stays correct automatically if
+// either profile's tool set ever changes. Discriminator choice: a tool-count
+// check or an allowlist of runtime ids would both silently rot the moment a
+// profile's shape changes; comparing against the canonical exports can't.
+const CHAT_ONLY_RUNTIME_TOOLS = new Set(
+  CHAT_RUNTIME_TOOLS.filter((tool) => !APP_SAFE_RUNTIME_TOOLS.includes(tool))
+);
+
+// True when `tools` requests the restricted chat profile (any network-only
+// tool from CHAT_ONLY_RUNTIME_TOOLS), as opposed to the ordinary app-safe
+// one-shot profile (Read/Glob/Grep/Skill) every evaluate-job/tailor-application/
+// resume-extract-style call uses. Only the chat profile is a boundary
+// violation on a runtime with no tool-allowlist mechanism — the app-safe
+// profile never requests network tools, so it's unaffected either way.
+function isRestrictedChatToolProfile(tools) {
+  return Array.isArray(tools) && tools.some((tool) => CHAT_ONLY_RUNTIME_TOOLS.has(tool));
+}
+
 function parseClaudeResult(stdout) {
   let envelope;
   try {
@@ -746,6 +786,29 @@ export async function runInstalledRuntime({
   }
   if (signal?.aborted) {
     throw runtimeError("Installed AI request was cancelled.", "RUNTIME_CANCELLED");
+  }
+  // Shared choke point: every caller (call-ai.mjs, skill-runtime.mjs,
+  // chat-runtime.mjs) reaches a spawn only through this function, so the
+  // fail-closed check belongs here rather than duplicated per caller. Codex
+  // `exec` (and every other non-claude runtime) has no tool-allowlist
+  // mechanism at all — verified against the real installed CLI, see this
+  // file's registry comment on `chatToolProfileSupported` — so there is
+  // nothing to pass a restricted profile through to. Only the restricted
+  // chat profile (network research, no Read) is a boundary violation; the
+  // app-safe one-shot profile these same runtimes already handle for
+  // evaluate-job/tailor-application/resume-extract is unaffected and keeps
+  // spawning exactly as before.
+  if (isRestrictedChatToolProfile(tools)) {
+    const definition = INSTALLED_RUNTIME_DEFINITIONS.find(({ id }) => id === runtime.id);
+    if (!definition?.chatToolProfileSupported) {
+      throw runtimeError(
+        `${definition?.name || runtime.id} has no tool-allowlist mechanism, so it cannot run ` +
+          "CareerRat's restricted research-chat tool profile (network access without local file " +
+          "access).",
+        RUNTIME_TOOL_PROFILE_UNSUPPORTED,
+        { runtimeId: runtime.id }
+      );
+    }
   }
 
   let tempDir = null;
