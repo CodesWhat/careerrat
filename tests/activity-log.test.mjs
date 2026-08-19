@@ -166,6 +166,52 @@ test("appendActivity dedupes on content-derived id (idempotent backfill)", () =>
   }
 });
 
+// Deriving the id is this module saying "identity is a function of content".
+// Passing one in (`careerrat activity append --id ...`) is the caller overriding
+// exactly that, so the content-recomputed comparison must not run: two lines the
+// caller deliberately made distinct would collapse to one, and a dropped event
+// looks like it never happened, where a duplicate is at least visible.
+test("appendActivity honours distinct explicit ids even when the content matches", () => {
+  const root = tempRoot();
+  try {
+    const evt = {
+      type: "message",
+      title: "Acme replied",
+      at: "2026-06-10T00:00:00Z",
+      refs: { applicationId: "a1" },
+    };
+    const first = appendActivity({ ...evt, id: "evt_custom_a" }, { root });
+    const second = appendActivity({ ...evt, id: "evt_custom_b" }, { root });
+    assert.equal(first.deduped, false);
+    assert.equal(second.deduped, false, "a caller-supplied id must not be content-deduped away");
+    assert.deepEqual(
+      readActivity({ root }).map((e) => e.id),
+      ["evt_custom_a", "evt_custom_b"]
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// The other half of the same rule: an explicit id that REPEATS is still a
+// duplicate, on the plain stored-id comparison.
+test("appendActivity still dedupes a repeated explicit id", () => {
+  const root = tempRoot();
+  try {
+    const evt = {
+      type: "message",
+      title: "Acme replied",
+      at: "2026-06-10T00:00:00Z",
+      id: "evt_custom_a",
+    };
+    assert.equal(appendActivity(evt, { root }).deduped, false);
+    assert.equal(appendActivity(evt, { root }).deduped, true);
+    assert.equal(readActivity({ root }).length, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("readActivity skips a malformed trailing line without throwing", () => {
   const root = tempRoot();
   try {

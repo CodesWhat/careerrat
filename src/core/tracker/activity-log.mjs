@@ -287,10 +287,22 @@ export function appendActivity(
     // stored `id` — so a line persisted under an older title wording (e.g.
     // before a copy-only rewrite of the presentation strings) still collapses
     // onto the same logical event instead of duplicating on the next
-    // backfill/append. `e.id === plan.event.id` stays as a cheap fast path
-    // and also covers a caller-supplied explicit id.
+    // backfill/append.
+    //
+    // The recomputed comparison is skipped when the CALLER supplied an explicit
+    // id (`careerrat activity append --id ...`). Deriving the id is this
+    // module's way of saying "identity is a function of content"; passing one in
+    // is the caller overriding exactly that, and content-matching anyway would
+    // silently drop a line the caller deliberately made distinct. Dropping is
+    // the worse direction to fail in: a duplicate is visible and removable, a
+    // missing event looks like it never happened. Callers that don't set an id
+    // (every DB verb, and deriveActivityEvents) are unaffected and still get
+    // the wording-independent collapse this fix exists for.
+    const callerSetId = trimOrNull(input?.id) !== null;
     const newKey = eventId(plan.event);
-    const isDuplicate = existing.some((e) => e.id === plan.event.id || eventId(e) === newKey);
+    const isDuplicate = existing.some(
+      (e) => e.id === plan.event.id || (!callerSetId && eventId(e) === newKey)
+    );
     if (isDuplicate) {
       return { ok: true, deduped: true, event: plan.event, path };
     }
