@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { Card } from "../components/Card.jsx";
 import { Field, Toggle } from "../components/form.jsx";
 
@@ -10,48 +10,88 @@ import { Field, Toggle } from "../components/form.jsx";
 // CAREERRAT_HOME, not a candidate config file.
 const bridge = globalThis.careerratDesktopUpdate;
 
+const EMPTY_STATE = Object.freeze({ enabled: true, saving: false, error: null });
+
+// Module-level store, not per-instance useState. Same reasoning as
+// UpdateAvailableDock.jsx's useDesktopUpdateNotice: this also makes the
+// initial getState() fetch run once at module evaluation instead of inside a
+// useEffect, which never fires under this repo's renderToStaticMarkup-based
+// tests, so the race conditions below are actually exercisable in a test.
+const listeners = new Set();
+let state = EMPTY_STATE;
+// Once the user has touched the toggle, their choice always wins: a late
+// getState() response must never overwrite it with the stale value it was
+// fetched with.
+let userInteracted = false;
+
+function setState(next) {
+  state = { ...state, ...next };
+  for (const listener of listeners) listener();
+}
+
+function subscribe(callback) {
+  listeners.add(callback);
+  return () => listeners.delete(callback);
+}
+
+function getSnapshot() {
+  return state;
+}
+
+// Reads the current setting once. Module-scope, same as
+// UpdateAvailableDock.jsx's own getState() call. Runs exactly once per
+// module evaluation, not per render or per mounted instance. A no-op in the
+// plain browser dev app, where `bridge` is undefined.
+if (bridge) {
+  bridge
+    .getState()
+    .then((result) => {
+      if (userInteracted) return;
+      if (result && typeof result.enabled === "boolean") setState({ enabled: result.enabled });
+    })
+    .catch(() => {
+      // Main process not reachable yet. The toggle keeps its default until it is.
+    });
+}
+
+function setEnabled(next) {
+  userInteracted = true;
+  const previous = state.enabled;
+  setState({ enabled: next, error: null });
+  // Bail before touching `saving`: bridge can be undefined in the plain
+  // browser dev app, where this is unreachable through DesktopUpdateSettings
+  // anyway, but useDesktopUpdateSetting is exported on its own.
+  if (!bridge) return;
+  setState({ saving: true });
+  // Promise.resolve() wrapping settles the .finally() below even if a real
+  // bridge implementation ever returns a plain value instead of a promise.
+  Promise.resolve(bridge.setEnabled(next))
+    .catch(() => {
+      // main.mjs never persisted this: roll the toggle back rather than
+      // leaving it showing a choice that didn't actually take.
+      setState({ enabled: previous, error: "Could not save that. Try again." });
+    })
+    .finally(() => setState({ saving: false }));
+}
+
 export function useDesktopUpdateSetting() {
-  const [enabled, setEnabledState] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!bridge) return;
-    bridge
-      .getState()
-      .then((state) => {
-        if (state && typeof state.enabled === "boolean") setEnabledState(state.enabled);
-      })
-      .catch(() => {
-        // Main process not reachable yet. The toggle keeps its default until it is.
-      });
-  }, []);
-
-  function setEnabled(next) {
-    setEnabledState(next);
-    // Bail before touching `saving`: `useDesktopUpdateSetting` is exported on
-    // its own, so a consumer that skips the `available` guard can call this
-    // with no bridge present. Wrapping in Promise.resolve() also settles the
-    // .finally() below even if a real bridge implementation ever returns a
-    // plain value instead of a promise.
-    if (!bridge) return;
-    setSaving(true);
-    Promise.resolve(bridge.setEnabled(next))
-      .catch(() => {
-        // Best-effort. Worst case the toggle reflects a state main.mjs never persisted.
-      })
-      .finally(() => setSaving(false));
-  }
-
-  return { available: Boolean(bridge), enabled, saving, setEnabled };
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return {
+    available: Boolean(bridge),
+    enabled: snapshot.enabled,
+    saving: snapshot.saving,
+    error: snapshot.error,
+    setEnabled,
+  };
 }
 
 export function DesktopUpdateSettings() {
-  const { available, enabled, saving, setEnabled } = useDesktopUpdateSetting();
+  const { available, enabled, saving, error, setEnabled } = useDesktopUpdateSetting();
   if (!available) return null;
 
   return (
     <Card title="Desktop app">
-      <Field label="Check for updates" htmlFor="desktop-update-check-enabled">
+      <Field label="Check for updates" htmlFor="desktop-update-check-enabled" error={error}>
         <Toggle
           id="desktop-update-check-enabled"
           checked={enabled}
