@@ -20,7 +20,7 @@ function assertNoFluffUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`nofluffjobs: URL must use HTTPS: ${url}`);
   if (!ALLOWED_HOSTS.has(parsed.hostname)) {
-    throw new Error(`nofluffjobs: untrusted hostname "${parsed.hostname}" — must be nofluffjobs.com`);
+    throw new Error(`nofluffjobs: untrusted hostname "${parsed.hostname}". Must be nofluffjobs.com`);
   }
   return parsed;
 }
@@ -106,7 +106,7 @@ function buildRequest(entry, pageTo) {
 
 export function parseNoFluffJobsResponse(json) {
   if (!json || !Array.isArray(json.postings)) {
-    throw new Error(`nofluffjobs: unexpected API response — expected { postings: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`);
+    throw new Error(`nofluffjobs: unexpected API response: expected { postings: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`);
   }
   return json.postings
     .filter(posting => posting && typeof posting === 'object')

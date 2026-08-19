@@ -177,7 +177,7 @@ function storyCards(stories) {
       // Reusability signals: where it has landed, and whether it still needs context.
       if (landed.length) tags.push(tag(`Landed: ${landed.join(", ")}`, "teal"));
       if (openQuestions.length) tags.push(tag("Needs context", "coral"));
-      const lead = metrics[0] ? `${metrics[0]} — ` : "";
+      const lead = metrics[0] ? `${metrics[0]}: ` : "";
       const note = openQuestions.length
         ? compact(`Needs context: ${openQuestions[0]}`, 150)
         : listOrEmpty(story.prompts)[0]

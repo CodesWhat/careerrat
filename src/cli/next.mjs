@@ -106,7 +106,7 @@ function readDoctorJson() {
 }
 
 function printHelp() {
-  console.log(`careerrat next — show the next agent task
+  console.log(`careerrat next: show the next agent task
 
 Usage:
   careerrat next

@@ -140,7 +140,7 @@ function detectPlaywrightProfiles(profileRoot) {
     return {
       status: "missing",
       signedIn: [],
-      detail: `no persistent profiles yet (${profileRoot}) — sign in once per platform`,
+      detail: `no persistent profiles yet (${profileRoot}). Sign in once per platform`,
     };
   }
   const signedIn = readdirSync(profileRoot, { withFileTypes: true })
@@ -151,7 +151,7 @@ function detectPlaywrightProfiles(profileRoot) {
     return {
       status: "missing",
       signedIn: [],
-      detail: `profile root exists but is empty (${profileRoot}) — sign in once per platform`,
+      detail: `profile root exists but is empty (${profileRoot}). Sign in once per platform`,
     };
   }
   return {
@@ -193,13 +193,13 @@ export function detectSession({ data, env = process.env } = {}) {
         ? {
             status: "unverified",
             browsers,
-            detail: `${browsers.join(", ")} detected — confirm the extension is installed + signed in (can't be verified from outside the browser)`,
+            detail: `${browsers.join(", ")} detected. Confirm the extension is installed + signed in (can't be verified from outside the browser)`,
           }
         : {
             status: "missing",
             browsers: [],
             detail:
-              "no Chrome-family browser found — install Chrome + the session-browser extension (or switch to the Playwright provider)",
+              "no Chrome-family browser found. Install Chrome + the session-browser extension (or switch to the Playwright provider)",
           };
     }
   } catch {

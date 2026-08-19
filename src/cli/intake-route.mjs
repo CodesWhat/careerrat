@@ -171,12 +171,12 @@ function isUsableExtractedText(text) {
 // needs_you exactly like before, just with a more specific reason.
 function extractionFailureReason(reason, ext) {
   if (reason === "unsupported-type") {
-    return `automatic text extraction isn't available for "${ext}" files — review it in Inbox and route it manually`;
+    return `automatic text extraction isn't available for "${ext}" files. Review it in Inbox and route it manually`;
   }
   if (reason === "ai-not-configured") {
-    return "this file needs AI-based extraction (PDF/image), but no AI provider is configured — configure one, or paste the content as text instead";
+    return "this file needs AI-based extraction (PDF/image), but no AI provider is configured. Configure one, or paste the content as text instead";
   }
-  return "automatic text extraction failed for this file — review it in Inbox and route it manually";
+  return "automatic text extraction failed for this file. Review it in Inbox and route it manually";
 }
 
 // ---------------------------------------------------------------------------

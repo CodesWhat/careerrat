@@ -777,7 +777,7 @@ export function createChatRuntime({
     if (!allowed.includes(trimmedSkill)) {
       const err = new Error(
         `skill "${trimmedSkill}" is not allowed to run via the chat runtime (allowed: ` +
-          `${allowed.join(", ") || "none"}) — set CAREERRAT_CHAT_SKILLS to opt more in`
+          `${allowed.join(", ") || "none"}), set CAREERRAT_CHAT_SKILLS to opt more in`
       );
       err.code = "SKILL_NOT_ALLOWED";
       err.allowed = allowed;

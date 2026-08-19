@@ -236,14 +236,14 @@ export const DASHBOARD_SCRIPT = `
 
     function buildJobTipHtml(d) {
       var gridItems = [
-        ["Fit",      d.fit || "—"],
-        ["Applied",  d.applied || "—"],
-        ["Base",     d.base || "—"],
-        ["TC",       d.tc || "—"],
-        ["Location", d.loc || "—"],
-        ["Mode",     d.mode || "—"],
-        ["Channel",  d.channel || "—"],
-        ["Status",   d.status || "—"],
+        ["Fit",      d.fit || "N/A"],
+        ["Applied",  d.applied || "N/A"],
+        ["Base",     d.base || "N/A"],
+        ["TC",       d.tc || "N/A"],
+        ["Location", d.loc || "N/A"],
+        ["Mode",     d.mode || "N/A"],
+        ["Channel",  d.channel || "N/A"],
+        ["Status",   d.status || "N/A"],
       ].map(function (pair) {
         return "<div><div class=\\"jt-k\\">" + tipEsc(pair[0]) + "</div><div class=\\"jt-v\\">" + tipEsc(pair[1]) + "</div></div>";
       }).join("");
@@ -885,7 +885,7 @@ export const DASHBOARD_SCRIPT = `
           fitSpan.textContent = prefix + fitN + "% fit";
           fitSpan.style.color = fitColorVal(fitN);
           fitSpan.style.background = "color-mix(in srgb, " + fitColorVal(fitN) + " 16%, var(--surface))";
-          if (isTriage) fitSpan.title = "Triage estimate — not yet evaluated";
+          if (isTriage) fitSpan.title = "Triage estimate, not yet evaluated";
           badges.appendChild(fitSpan);
         }
         // JD link button

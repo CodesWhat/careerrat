@@ -57,7 +57,7 @@ function assertJobstreetUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`jobstreet: URL must use HTTPS: ${url}`);
   if (!ALLOWED_JOBSTREET_HOSTS.has(parsed.hostname))
-    throw new Error(`jobstreet: untrusted hostname "${parsed.hostname}" — must be one of: ${[...ALLOWED_JOBSTREET_HOSTS].join(', ')}`);
+    throw new Error(`jobstreet: untrusted hostname "${parsed.hostname}". Must be one of: ${[...ALLOWED_JOBSTREET_HOSTS].join(', ')}`);
   return url;
 }
 
@@ -196,7 +196,7 @@ export default {
         // If page 1 fails, surface the error. Later pages failing is non-fatal
         // — we return whatever we've collected so far.
         if (page === 1) throw err;
-        console.error(`jobstreet: page ${page} fetch failed — ${err.message}`);
+        console.error(`jobstreet: page ${page} fetch failed: ${err.message}`);
         break;
       }
 

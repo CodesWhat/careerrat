@@ -735,7 +735,7 @@ function assertCleanEvidenceClaims(claims) {
     if (leak) {
       errors.push({
         id: raw?.id ?? null,
-        message: "contains the private current_base field — evidence must never carry it",
+        message: "contains the private current_base field: evidence must never carry it",
       });
     }
   }

@@ -32,12 +32,12 @@ function rowsWithParsedData(db, table) {
 
 function summarizeApplication(row) {
   const when = row.appliedAt ? ` on ${row.appliedAt}` : "";
-  return `You already applied to ${row.company || "this company"} — ${row.role || "this role"}${when}. Current status: ${row.status || "unknown"}.`;
+  return `You already applied to ${row.company || "this company"}, ${row.role || "this role"}${when}. Current status: ${row.status || "unknown"}.`;
 }
 
 function summarizeSourced(row) {
   const fit = row.fitScore != null ? ` (fit ${row.fitScore})` : "";
-  return `This posting is already tracked in sourced as "${row.company || "?"} — ${row.role || "?"}"${fit}.`;
+  return `This posting is already tracked in sourced as "${row.company || "?"}, ${row.role || "?"}"${fit}.`;
 }
 
 function summarize(row) {

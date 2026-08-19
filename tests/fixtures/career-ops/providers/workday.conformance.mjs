@@ -357,7 +357,7 @@ try {
     );
     return errors.map(String);
   };
-  const ADVICE = /raise max_pages on this entry for more/;
+  const ADVICE = /raise max_pages on this entry for more/i;
   const sevenDaysAgo = Date.now() - 7 * 86_400_000;
 
   // scan.mjs without --since — the case that always worked.

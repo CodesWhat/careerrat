@@ -51,7 +51,7 @@ function classifyDeterministically({ inputKind, resolved }) {
   if (inputKind !== "url" || !resolved) return null;
   if (resolved.bodyFetchStatus !== "resolved" || !resolved.provider) return null;
 
-  const label = [resolved.company, resolved.title].filter(Boolean).join(" — ") || "this posting";
+  const label = [resolved.company, resolved.title].filter(Boolean).join(", ") || "this posting";
   return {
     kind: "job-url",
     entities: {
@@ -75,7 +75,7 @@ function needsYouFallback(reason) {
   return {
     kind: "other",
     entities: {},
-    proposedAction: "Could not classify automatically — review manually.",
+    proposedAction: "Could not classify automatically. Review manually.",
     confidence: 0,
     needsUser: true,
     needsUserReason: reason,

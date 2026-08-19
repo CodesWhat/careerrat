@@ -55,7 +55,7 @@ function assertRipplingApiUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`rippling: URL must use HTTPS: ${url}`);
   if (parsed.hostname !== API_HOST) {
-    throw new Error(`rippling: untrusted hostname "${parsed.hostname}" — must be ${API_HOST}`);
+    throw new Error(`rippling: untrusted hostname "${parsed.hostname}". Must be ${API_HOST}`);
   }
   return url;
 }

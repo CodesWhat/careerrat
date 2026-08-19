@@ -137,7 +137,7 @@ export function validateClaims(claims) {
     if (leak) {
       errors.push({
         id: c.id ?? null,
-        message: `${where} contains the private current_base field — evidence must never carry it`,
+        message: `${where} contains the private current_base field: evidence must never carry it`,
       });
     }
   });
@@ -220,7 +220,7 @@ export function writeEvidence({ claims, root = DEFAULT_ROOT, schema = null }) {
     return {
       ok: false,
       error:
-        "serialization round-trip mismatch — refusing to rewrite evidence.yml; edit it manually",
+        "serialization round-trip mismatch: refusing to rewrite evidence.yml; edit it manually",
     };
   }
   // (2) schema validity (when a schema is supplied by the caller).

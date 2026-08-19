@@ -29,7 +29,7 @@ function assertEchojobsUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`echojobs: URL must use HTTPS: ${url}`);
   if (parsed.hostname !== TRUSTED_HOST) {
-    throw new Error(`echojobs: untrusted hostname "${parsed.hostname}" — must be ${TRUSTED_HOST}`);
+    throw new Error(`echojobs: untrusted hostname "${parsed.hostname}". Must be ${TRUSTED_HOST}`);
   }
   return url;
 }
@@ -151,7 +151,7 @@ export default {
       const json = /** @type {any} */ (await ctx.fetchJson(url, { redirect: 'error' }));
       if (!json || !Array.isArray(json.jobs)) {
         throw new Error(
-          `echojobs: unexpected API response on page ${page} — expected { jobs: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
+          `echojobs: unexpected API response on page ${page}: expected { jobs: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
         );
       }
       for (const j of json.jobs) {

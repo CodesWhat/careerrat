@@ -23,7 +23,7 @@ function assertPersonioUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`personio: URL must use HTTPS: ${url}`);
   if (!PERSONIO_HOST_RE.test(parsed.hostname))
-    throw new Error(`personio: untrusted hostname "${parsed.hostname}" — must match <slug>.jobs.personio.(de|com)`);
+    throw new Error(`personio: untrusted hostname "${parsed.hostname}". Must match <slug>.jobs.personio.(de|com)`);
   return url;
 }
 

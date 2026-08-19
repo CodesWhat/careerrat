@@ -125,7 +125,7 @@ export function calendarBusyUpsert({ repoRoot, env, blocks, source } = {}) {
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "system",
-      title: `Calendar busy blocks updated — ${nextBlocks.length} stored`,
+      title: `Calendar busy blocks updated: ${nextBlocks.length} stored`,
       summary: "Opaque start/end windows only; meeting details were not stored.",
       tags: ["calendarBusy"],
       operation: "calendar:busy-upsert",

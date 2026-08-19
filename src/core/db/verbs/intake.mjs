@@ -203,7 +203,7 @@ export function intakeDecide({ repoRoot, env, id, decision, dispatchSummary } = 
     if (decision === "confirm") {
       event = logActivityEvent(db, {
         type: "system",
-        title: `Intake: ${existing.kind || "paste"} confirmed${dispatchSummary ? ` — ${dispatchSummary}` : ""}`,
+        title: `Intake: ${existing.kind || "paste"} confirmed${dispatchSummary ? `, ${dispatchSummary}` : ""}`,
         refs: existing.trackerMatch?.id ? { applicationId: existing.trackerMatch.id } : null,
       });
     }

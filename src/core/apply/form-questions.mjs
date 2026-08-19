@@ -503,7 +503,7 @@ export async function fetchFormQuestions(jobUrl, { fetchImpl = fetch } = {}) {
   const req = buildQuestionsRequest(jobUrl);
   if (!req) {
     throw new Error(
-      `Unsupported host for question-fetch: ${jobUrl} — paste the questions instead (careerrat questions --paste).`
+      `Unsupported host for question-fetch: ${jobUrl}. Paste the questions instead (careerrat questions --paste).`
     );
   }
 
@@ -513,11 +513,11 @@ export async function fetchFormQuestions(jobUrl, { fetchImpl = fetch } = {}) {
   if (!response.ok) {
     if (response.status === 404) {
       throw new Error(
-        `Posting not found (404) at ${req.url} — it may have closed. Paste the questions instead (careerrat questions --paste).`
+        `Posting not found (404) at ${req.url}. It may have closed. Paste the questions instead (careerrat questions --paste).`
       );
     }
     throw new Error(
-      `${req.url} returned HTTP ${response.status} — paste the questions instead (careerrat questions --paste).`
+      `${req.url} returned HTTP ${response.status}. Paste the questions instead (careerrat questions --paste).`
     );
   }
 
@@ -527,7 +527,7 @@ export async function fetchFormQuestions(jobUrl, { fetchImpl = fetch } = {}) {
       json = await response.json();
     } catch {
       throw new Error(
-        `Non-JSON response from Greenhouse at ${req.url} — paste the questions instead (careerrat questions --paste).`
+        `Non-JSON response from Greenhouse at ${req.url}. Paste the questions instead (careerrat questions --paste).`
       );
     }
     return normalizeGreenhouseQuestions(json, {
@@ -541,7 +541,7 @@ export async function fetchFormQuestions(jobUrl, { fetchImpl = fetch } = {}) {
   const posting = extractAshbyAppData(html);
   if (!posting) {
     throw new Error(
-      `Could not find the embedded application form on ${req.url} (Ashby page layout may have changed) — paste the questions instead (careerrat questions --paste).`
+      `Could not find the embedded application form on ${req.url} (Ashby page layout may have changed). Paste the questions instead (careerrat questions --paste).`
     );
   }
   return normalizeAshbyForm(posting, { url: req.url, fetchedAt });

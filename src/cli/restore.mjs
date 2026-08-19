@@ -11,7 +11,7 @@
   const major = parseInt(process.versions.node.split(".")[0], 10);
   if (major < 18) {
     process.stderr.write(
-      `careerrat requires Node.js >= 18 (you have ${process.versions.node}) — please upgrade.\n`
+      `careerrat requires Node.js >= 18 (you have ${process.versions.node}). Please upgrade.\n`
     );
     process.exit(1);
   }

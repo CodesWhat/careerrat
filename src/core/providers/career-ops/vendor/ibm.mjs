@@ -51,7 +51,7 @@ export function buildPostFilter(cfg) {
 export function parseIbmResponse(json) {
   const hits = json && json.hits && Array.isArray(json.hits.hits) ? json.hits.hits : null;
   if (!hits) {
-    throw new Error(`ibm: unexpected API response — expected hits.hits[], got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`);
+    throw new Error(`ibm: unexpected API response: expected hits.hits[], got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`);
   }
 
   const out = [];

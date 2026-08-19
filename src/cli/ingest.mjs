@@ -168,7 +168,7 @@ function runResume(path) {
     return 0;
   }
 
-  console.log("# Resume parse — review before saving to candidate/ files.");
+  console.log("# Resume parse: review before saving to candidate/ files.");
   console.log("# Nothing is written automatically; the interview decides what is true.\n");
   console.log("## Profile seed (candidate/profile.yml)\n");
   console.log(stringifyYaml(profileSeed));
@@ -344,7 +344,7 @@ function optValue(flag) {
 }
 
 function printHelp() {
-  console.log(`careerrat ingest — guided candidate setup
+  console.log(`careerrat ingest: guided candidate setup
 
 Usage:
   careerrat ingest                       Initialize candidate/ from templates, then report status

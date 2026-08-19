@@ -250,7 +250,7 @@ export default {
     // zero results is not an outage, so key off the success count, not the
     // deduped result size — otherwise a legitimately-empty search throws.
     if (succeeded === 0 && errors.length) {
-      throw new Error(`arbeitsagentur: all ${keywords.length} keyword request(s) failed — ${errors[0]}`);
+      throw new Error(`arbeitsagentur: all ${keywords.length} keyword request(s) failed: ${errors[0]}`);
     }
 
     return [...byRef.values()].map(({ refnr, ...job }) => job);

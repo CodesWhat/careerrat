@@ -24,7 +24,7 @@
   const major = parseInt(process.versions.node.split(".")[0], 10);
   if (major < 24) {
     process.stderr.write(
-      `careerrat requires Node.js >= 24 (you have ${process.versions.node}) — please upgrade.\n`
+      `careerrat requires Node.js >= 24 (you have ${process.versions.node}). Please upgrade.\n`
     );
     process.exit(1);
   }
@@ -222,7 +222,7 @@ async function runStart(extra) {
   console.log("• Installing skills…");
   const skillCode = run(join(root, "scripts/install-skills.mjs"), ["--soft"]);
   if (skillCode !== 0) {
-    console.log("  (skill shim reported an issue — AGENTS.md-native agents still work)");
+    console.log("  (skill shim reported an issue, AGENTS.md-native agents still work)");
   }
 
   // 3) Seed a tracker so the local app can boot. Never clobber real data.
@@ -232,7 +232,7 @@ async function runStart(extra) {
       mkdirSync(userPath(pathCtx, "workspace"), { recursive: true });
       copyFileSync(join(root, "templates/tracker.json"), trackerJson);
       console.log(
-        `• Seeded ${displayPath(pathCtx, "workspace/tracker.json")} (demo data — replaced as you add real roles)`
+        `• Seeded ${displayPath(pathCtx, "workspace/tracker.json")} (demo data, replaced as you add real roles)`
       );
     } catch {
       /* non-fatal: the local app simply won't boot until a tracker exists */
@@ -510,7 +510,7 @@ function runUpdate(extra) {
   const latest = latestVersion(opts.tag);
   if (!latest) {
     console.error(
-      `Couldn't resolve careerrat@${opts.tag} — offline, no such dist-tag (e.g. no rc published yet), or npm not on PATH.`
+      `Couldn't resolve careerrat@${opts.tag}: offline, no such dist-tag (e.g. no rc published yet), or npm not on PATH.`
     );
     return 1;
   }
@@ -519,7 +519,7 @@ function runUpdate(extra) {
   if (opts.check) {
     console.log(
       newer
-        ? `Update available: ${current} → ${latest} — run \`careerrat update\` to install.`
+        ? `Update available: ${current} → ${latest}. Run \`careerrat update\` to install.`
         : `Up to date (v${current}; latest@${opts.tag} = v${latest}).`
     );
     return 0;
@@ -545,7 +545,7 @@ function runUpdate(extra) {
     const leaks = findUserDataLeaks(pkg.entries);
     if (leaks.length) {
       console.error(
-        "REFUSING — the published package contains user-data paths (a privacy leak):\n" +
+        "REFUSING. The published package contains user-data paths (a privacy leak):\n" +
           leaks
             .slice(0, 20)
             .map((p) => `    ${p}`)
@@ -553,7 +553,7 @@ function runUpdate(extra) {
       );
       return 1;
     }
-    console.log(`• Privacy guard passed — code-only (${pkg.entries.length} files). Updating…`);
+    console.log(`• Privacy guard passed: code-only (${pkg.entries.length} files). Updating…`);
     extractOver(pkg.tgz, root);
   } catch (err) {
     console.error(err?.message || String(err));
@@ -616,7 +616,7 @@ function notifyUpdateAvailable() {
 }
 
 function printHelp() {
-  console.log(`careerrat — agentic job-search workspace
+  console.log(`careerrat: agentic job-search workspace
 
 Usage: careerrat <command> [options]
 

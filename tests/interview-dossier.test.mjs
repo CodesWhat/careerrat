@@ -172,7 +172,7 @@ test("buildInterviewDossier renders and persists an evidence-grounded dossier", 
 
   assert.equal(result.company, "Temporal Labs");
   assert.equal(result.role, "Applied AI Engineer");
-  assert.equal(result.dossier.title, "Temporal Labs — Applied AI Engineer");
+  assert.equal(result.dossier.title, "Temporal Labs, Applied AI Engineer");
   assert.equal(result.dossier.round, "Hiring manager");
   assert.equal(result.audience, "hiring-manager");
   assert.deepEqual(result.jobSignals, ["agentic workflow", "customer deployment"]);
@@ -189,7 +189,7 @@ test("buildInterviewDossier renders and persists an evidence-grounded dossier", 
     result.dossier.markdown
   );
   assert.deepEqual(readApp(repoRoot, "app-temporal").artifacts.interviewDossier, result.dossier);
-  assert.equal(result.persisted.event.title, "Temporal Labs — Interview dossier created");
+  assert.equal(result.persisted.event.title, "Temporal Labs: Interview dossier created");
   assert.ok(result.persisted.event.tags.includes("operation:application:interview-prep"));
 });
 

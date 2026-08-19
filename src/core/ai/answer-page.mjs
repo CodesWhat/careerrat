@@ -14,7 +14,7 @@ export const ANSWER_PAGE_HTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Answer a question — CareerRat</title>
+<title>Answer a question: CareerRat</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -174,8 +174,8 @@ export const ANSWER_PAGE_HTML = `<!doctype html>
       <textarea id="question-input" data-hook="question-input" placeholder="paste the form/screening question(s)…"></textarea>
     </div>
     <div class="field">
-      <label for="context-input">Company — Role (optional)</label>
-      <input id="context-input" data-hook="context-input" type="text" placeholder="Company — Role (optional)">
+      <label for="context-input">Company, Role (optional)</label>
+      <input id="context-input" data-hook="context-input" type="text" placeholder="Company, Role (optional)">
     </div>
     <div class="actions">
       <button id="run-btn" data-hook="run-btn" type="button">Draft answer</button>
@@ -290,7 +290,8 @@ export const ANSWER_PAGE_HTML = `<!doctype html>
   function contextFromInput(value) {
     var text = String(value || "").trim();
     if (!text) return {};
-    var parts = text.split(" — ");
+    var parts = text.split(", ");
+    if (parts.length < 2) parts = text.split(" — ");
     if (parts.length < 2) parts = text.split(" - ");
     if (parts.length < 2) parts = text.split(" -- ");
     return {

@@ -24,7 +24,7 @@ export const SEARCH_PAGE_HTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Search — CareerRat</title>
+<title>Search: CareerRat</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -179,7 +179,7 @@ export const SEARCH_PAGE_HTML = `<!doctype html>
 <main>
   <header>
     <h1>Search</h1>
-    <p class="lede">Run the deterministic ATS-board sweep across your tracked companies and search sources — no AI model is called by this page.</p>
+    <p class="lede">Run the deterministic ATS-board sweep across your tracked companies and search sources. No AI model is called by this page.</p>
   </header>
 
   <section id="header-strip" class="header-strip">
@@ -204,7 +204,7 @@ export const SEARCH_PAGE_HTML = `<!doctype html>
     <h2>Results</h2>
     <div id="results-summary" data-hook="results-summary" class="results-summary" hidden></div>
     <div id="results-list" data-hook="results-list" class="results-list">
-      <p class="empty-state">No results yet — run a sweep to fetch the latest postings.</p>
+      <p class="empty-state">No results yet. Run a sweep to fetch the latest postings.</p>
     </div>
   </section>
 </main>
@@ -437,7 +437,7 @@ export const SEARCH_PAGE_HTML = `<!doctype html>
       " | filtered by title " + (summary.filteredTitle || 0) +
       " | filtered by location " + (summary.filteredLocation || 0) +
       " | duplicates " + (summary.duplicates || 0);
-    if (summary.date) text = summary.date + " — " + text;
+    if (summary.date) text = summary.date + ": " + text;
     resultsSummary.textContent = text;
   }
 
@@ -450,7 +450,7 @@ export const SEARCH_PAGE_HTML = `<!doctype html>
     if (!offers.length) {
       var empty = document.createElement("p");
       empty.className = "empty-state";
-      empty.textContent = "No results yet — run a sweep to fetch the latest postings.";
+      empty.textContent = "No results yet. Run a sweep to fetch the latest postings.";
       resultsList.appendChild(empty);
       return;
     }

@@ -153,7 +153,7 @@ export function mountSearchRoutes({
 
     if (!hasConfig) {
       sendJson(res, 400, {
-        error: "No search config found — run /onboard write-config first",
+        error: "No search config found. Run /onboard write-config first",
       });
       return;
     }
@@ -412,7 +412,7 @@ export function mountSearchRoutes({
     if (!requested.length) {
       sendJson(res, 422, {
         ok: false,
-        error: { message: "No saved AI search prompts to run — generate or add some first." },
+        error: { message: "No saved AI search prompts to run. Generate or add some first." },
       });
       return;
     }

@@ -114,7 +114,7 @@ export default {
       });
       const rows = parseVacancies(html, origin);
       if (rows.length === 0) {
-        if (page === 1) console.warn(`rheinmetall: page 1 returned no vacancy cards for ${entry.name} — markup may have changed`);
+        if (page === 1) console.warn(`rheinmetall: page 1 returned no vacancy cards for ${entry.name}. Markup may have changed`);
         break; // past the last page
       }
 

@@ -127,7 +127,7 @@ function compactLearnings({ repoRoot, targeting }) {
       continue;
     }
     if (!text) continue;
-    const headings = [...text.matchAll(/^## (.+?) — (.+)$/gm)]
+    const headings = [...text.matchAll(/^## (.+?): (.+)$/gm)]
       .slice(-MAX_LEARNING_ENTRIES_PER_FAMILY)
       .map(([, date, title]) => ({ date, title: cleanText(title, 160) }));
     if (headings.length) out.push({ family, entries: headings });
@@ -403,7 +403,7 @@ function sourcedSetPriority({ repoRoot, env, id, priority, row }) {
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "status_change",
-      title: `${current.company || id} — Re-ranked via strategy review`,
+      title: `${current.company || id}: Re-ranked via strategy review`,
       summary: `Priority set to ${JSON.stringify(priority)}.`,
       refs: { company: current.company, role: current.role },
       tags: ["operation:sourced:priority-update", "skill:reevaluate-strategy"],
@@ -600,7 +600,7 @@ function applyLearning({ repoRoot, env, proposal }) {
       event: {
         type: "system",
         actor: "agent",
-        title: `Learning recorded — ${written.family}`,
+        title: `Learning recorded: ${written.family}`,
         summary: title,
         refs: { family: written.family },
         tags: ["skill:reevaluate-strategy", "operation:learnings:append"],
@@ -633,7 +633,7 @@ export async function applyStrategyRecommendation({
 
   if (type === "writing-style" || type === "other") {
     throw applyError(
-      "This kind of change has no automated writer yet — edit candidate/writing-style.md yourself.",
+      "This kind of change has no automated writer yet. Edit candidate/writing-style.md yourself.",
       "STRATEGY_APPLY_UNSUPPORTED"
     );
   }
@@ -686,7 +686,7 @@ export function stampStrategyReview({ repoRoot, env = process.env, now = () => n
         type: "system",
         actor: "agent",
         title: "Strategy review",
-        summary: `Reviewed — ${marker.snapshot.outcomes} outcomes to date (${marker.snapshot.applied} applied, ${marker.snapshot.advanced} advanced, ${marker.snapshot.rejected} rejected).`,
+        summary: `Reviewed: ${marker.snapshot.outcomes} outcomes to date (${marker.snapshot.applied} applied, ${marker.snapshot.advanced} advanced, ${marker.snapshot.rejected} rejected).`,
         tags: ["skill:reevaluate-strategy", "operation:strategy:review"],
       },
     });

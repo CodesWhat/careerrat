@@ -182,7 +182,7 @@ function fail(msg) {
 }
 
 function printHelp() {
-  console.log(`careerrat analytics — refresh and inspect the persisted outcome-analytics block
+  console.log(`careerrat analytics: refresh and inspect the persisted outcome-analytics block
 
 Usage:
   node src/cli/analytics.mjs refresh [--at ISO] [--write] [--json] [--root DIR]

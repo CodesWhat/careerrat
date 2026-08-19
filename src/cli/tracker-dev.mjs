@@ -806,7 +806,7 @@ function openBrowser(url) {
 }
 
 function printHelp() {
-  process.stdout.write(`careerrat tracker-dev — the embedded /app server (React product shell + local APIs)
+  process.stdout.write(`careerrat tracker-dev: the embedded /app server (React product shell + local APIs)
 
 Usage:
   careerrat tracker-dev                 Serve http://localhost:7777 with live reload
@@ -814,14 +814,14 @@ Usage:
   careerrat tracker-dev --open       Open the page in your browser on start
 
 Routes:
-  GET  /app, /app/*                     Canonical Vite + React product shell (M7) — build via \`npm run app:build\`
+  GET  /app, /app/*                     Canonical Vite + React product shell (M7): build via \`npm run app:build\`
 
 Explicit user-selected chat page:
   GET  /chat                            Conversational ingest-profile interview, turn-by-turn (M2)
 
 Local app APIs:
   GET  /api/health                      { ok, version }
-  GET  /api/runtime/config              { skills: [...] } — the embedded runtime's allowlist
+  GET  /api/runtime/config              { skills: [...] }: the embedded runtime's allowlist
   POST /api/skill/run                   Run a SKILL.md via the embedded Agent SDK runtime (SSE)
   GET  /api/onboard/state               Candidate-file + key + search-config status
   POST /api/onboard/init                Seed candidate/ from templates (never overwrites)
@@ -834,7 +834,7 @@ Local app APIs:
   POST /api/discovery/quick-start       Prepare sources and start/reuse first discovery chat
   POST /api/discovery/next              Start/reuse the current next discovery chat
   POST /api/settings/ai-key             Store a BYOK Anthropic key in .internal/ai.env
-  GET  /api/settings/ai                 { route, keyPresent } — never the key value
+  GET  /api/settings/ai                 { route, keyPresent }: never the key value
   POST /api/chat/start                  Start (or find the live) ingest-profile chat session (M2)
   GET  /api/chat/events                 SSE transcript stream for a chat session (?id=<chatId>)
   POST /api/chat/message                Send the human's next turn to a chat session

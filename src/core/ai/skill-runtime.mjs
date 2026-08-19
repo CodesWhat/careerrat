@@ -370,7 +370,7 @@ export async function loadClaudeAgentSdk() {
   } catch (importErr) {
     const err = new Error(
       "@anthropic-ai/claude-agent-sdk is not installed. It's a devDependency (Phase 0 spike " +
-        "posture) — run `npm install` in this checkout to enable the embedded skill runtime, or " +
+        "posture). Run `npm install` in this checkout to enable the embedded skill runtime, or " +
         "`npm install @anthropic-ai/claude-agent-sdk` standalone."
     );
     err.code = "SDK_NOT_INSTALLED";
@@ -525,7 +525,7 @@ export async function runSkillStream({
   if (!allowed.includes(skill)) {
     const err = new Error(
       `skill "${skill}" is not allowed to run via the embedded runtime (allowed: ` +
-        `${allowed.join(", ") || "none"}) — set CAREERRAT_RUNTIME_SKILLS to opt more in`
+        `${allowed.join(", ") || "none"}), set CAREERRAT_RUNTIME_SKILLS to opt more in`
     );
     err.code = "SKILL_NOT_ALLOWED";
     err.allowed = allowed;

@@ -58,7 +58,7 @@ async function run(arg) {
     const source = saved.frontmatter?.source;
     if (!source || typeof source !== "string") {
       console.error(
-        `Job file has no usable posting URL — expected a "source" key in frontmatter: ${jobPath}`
+        `Job file has no usable posting URL, expected a "source" key in frontmatter: ${jobPath}`
       );
       return 1;
     }
@@ -130,7 +130,7 @@ function summarize(result) {
 }
 
 function printHelp() {
-  console.log(`careerrat questions — fetch a job's real application-form questions, no browser
+  console.log(`careerrat questions: fetch a job's real application-form questions, no browser
 
 Usage:
   careerrat questions <workspace/jobs/foo.md>   Fetch, write foo.md.questions.json

@@ -148,7 +148,7 @@ export default {
             // workday/jobstreet/glints). Track successes directly — a keyword
             // can legitimately match 0 jobs, so seen.size is not the signal.
             if (!succeededOnce) throw err;
-            console.error(`  ⚠ meituan: keyword "${keyword}" page ${pageNo} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
+            console.error(`  ⚠ meituan: keyword "${keyword}" page ${pageNo} failed (${err.message}), keeping the ${seen.size} jobs collected so far`);
             return [...seen.values()];
           }
           const parsed = parseMeituanResponse(json, entry.name || '美团');
@@ -160,7 +160,7 @@ export default {
 
         if (!jobs) {
           if (total && (pageNo - 1) * PAGE_SIZE < total) {
-            console.error(`  ⚠ meituan: keyword "${keyword}" page ${pageNo} still empty after ${EMPTY_RETRIES} retries — keeping the ${seen.size} jobs collected so far`);
+            console.error(`  ⚠ meituan: keyword "${keyword}" page ${pageNo} still empty after ${EMPTY_RETRIES} retries, keeping the ${seen.size} jobs collected so far`);
           }
           break;
         }

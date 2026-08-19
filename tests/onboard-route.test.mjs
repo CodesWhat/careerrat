@@ -1332,7 +1332,7 @@ describe("POST /api/onboard/resume", () => {
         save: false,
       });
       assert.equal(status, 400);
-      assert.equal(body.error, "PDF/DOCX not supported — export resume as text or markdown");
+      assert.equal(body.error, "PDF/DOCX not supported: export resume as text or markdown");
       assert.ok(!existsSync(candidatePath(repoRoot, "candidate/SOURCE_RESUME.md")));
     } finally {
       await closeServer(server);

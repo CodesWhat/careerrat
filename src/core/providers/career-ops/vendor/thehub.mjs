@@ -135,12 +135,12 @@ async function fetchScope(query, maxPages, fallbackCompany, byUrl, ctx, state) {
       jobs = json && json.jobs;
       if (!jobs || !Array.isArray(jobs.docs)) {
         throw new Error(
-          `thehub: unexpected API response on page ${page} — expected { jobs: { docs: [...] } }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
+          `thehub: unexpected API response on page ${page}: expected { jobs: { docs: [...] } }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
         );
       }
     } catch (err) {
       if (!state.succeededOnce) throw err;
-      console.error(`  ⚠ thehub: query "${query}" page ${page} failed (${err.message}) — keeping the ${byUrl.size} jobs collected so far`);
+      console.error(`  ⚠ thehub: query "${query}" page ${page} failed (${err.message}), keeping the ${byUrl.size} jobs collected so far`);
       return false;
     }
     state.succeededOnce = true;

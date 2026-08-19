@@ -70,7 +70,7 @@ export async function resolveJobUrl(
       url: rawUrl,
       provider,
       reason:
-        "SPA-rendered or login-gated host — no session browser available to a headless intake route; " +
+        "SPA-rendered or login-gated host: no session browser available to a headless intake route; " +
         "evaluate-job's own STEP 0 browser-escalation path handles this once confirmed",
     });
   }
