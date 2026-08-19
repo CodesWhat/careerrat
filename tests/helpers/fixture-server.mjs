@@ -7,7 +7,10 @@
 
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer } from "node:http";
-import { extname, join, normalize, sep } from "node:path";
+// `resolve` is aliased because the listen() Promise executor below binds its own
+// `resolve`. Nothing currently uses the path one inside that scope, so this is
+// not a live bug, but the two names collide the moment anyone moves code in.
+import { extname, join, resolve as resolvePath, sep } from "node:path";
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -33,14 +36,53 @@ function contentTypeFor(path) {
 // Binds to 127.0.0.1 on an ephemeral port (0) so parallel test runs never
 // collide, and resolves the real assigned port before returning.
 export function startFixtureServer(rootDir) {
+  const root = resolvePath(rootDir);
+
+  // Resolve a request path to a real file inside `root`, or null if it escapes.
+  //
+  // Two things here are load-bearing and were both wrong in the first version.
+  //
+  // First, the request path is joined as `.${requestPath}` so a leading "/" is
+  // read relative to `root` instead of as an absolute filesystem path, and
+  // `resolve` collapses every ".." segment before the check rather than after.
+  // Hand-stripping a leading "../" with a regex only removes the sequences it
+  // happens to anchor on and misses "a/../../etc".
+  //
+  // Second, containment is `=== root || startsWith(root + sep)`, not a bare
+  // `startsWith(root)`. A plain prefix test passes any sibling whose name
+  // extends the root's, so a root of "/tmp/fix" would happily serve
+  // "/tmp/fixtures-elsewhere/secret".
+  function resolveWithinRoot(requestPath) {
+    const candidate = resolvePath(root, `.${requestPath}`);
+    if (candidate !== root && !candidate.startsWith(root + sep)) return null;
+    return candidate;
+  }
+
   const server = createServer((req, res) => {
-    const requestPath = decodeURIComponent((req.url || "/").split("?")[0].split("#")[0]);
-    // Defends against a request path escaping rootDir via "..": normalize
-    // first, then require the resolved path still starts inside rootDir.
-    const relativePath = normalize(requestPath).replace(/^([.][.][/\\])+/, "");
-    let filePath = join(rootDir, relativePath === sep ? "" : relativePath);
-    if (!filePath.startsWith(rootDir)) {
-      res.writeHead(403);
+    const rawPath = (req.url || "/").split("?")[0].split("#")[0];
+
+    // decodeURIComponent throws URIError on a malformed escape ("%", "%zz").
+    // Uncaught in a request handler that would take the whole server down
+    // mid-test, so a bad path is a 400, not a crash.
+    let requestPath;
+    try {
+      requestPath = decodeURIComponent(rawPath);
+    } catch {
+      res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Bad request");
+      return;
+    }
+
+    // A NUL makes every fs call throw, and it is the classic truncation trick.
+    if (requestPath.includes("\0")) {
+      res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Bad request");
+      return;
+    }
+
+    let filePath = resolveWithinRoot(requestPath);
+    if (!filePath) {
+      res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
       res.end("Forbidden");
       return;
     }
@@ -65,7 +107,14 @@ export function startFixtureServer(rootDir) {
       const { port } = server.address();
       resolve({
         url: `http://127.0.0.1:${port}`,
-        close: () => new Promise((res) => server.close(() => res())),
+        // closeAllConnections() before close(): close() alone only stops new
+        // connections and then waits for idle keep-alive sockets to time out,
+        // which fetch leaves behind. That added ~3s per test to teardown.
+        close: () =>
+          new Promise((res) => {
+            server.closeAllConnections();
+            server.close(() => res());
+          }),
       });
     });
   });
