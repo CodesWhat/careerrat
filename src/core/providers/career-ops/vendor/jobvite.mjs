@@ -99,7 +99,7 @@ function assertJobviteHost(url) {
   if (parsed.protocol !== 'https:')
     throw new Error(`jobvite: URL must use HTTPS: ${url}`);
   if (!ALLOWED_HOSTS.has(parsed.hostname))
-    throw new Error(`jobvite: untrusted hostname "${parsed.hostname}" — must be ${BOARD_HOST} or ${FEED_HOST}`);
+    throw new Error(`jobvite: untrusted hostname "${parsed.hostname}". Must be ${BOARD_HOST} or ${FEED_HOST}`);
   return url;
 }
 
@@ -291,7 +291,7 @@ export default {
 
     if (!eid) {
       const slug = resolveSlug(entry);
-      if (!slug) throw new Error(`jobvite: cannot derive a company id for ${entry.name} — set company_eid: or an api: URL with ?c=`);
+      if (!slug) throw new Error(`jobvite: cannot derive a company id for ${entry.name}, set company_eid: or an api: URL with ?c=`);
       const boardUrl = buildBoardFetchUrl(slug);
       assertJobviteHost(boardUrl);
       // redirect:'error' here, not 'manual'. A board that still redirects once

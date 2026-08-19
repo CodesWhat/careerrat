@@ -34,7 +34,7 @@ function assertManfredUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`manfred: URL must use HTTPS: ${url}`);
   if (parsed.hostname !== TRUSTED_HOST) {
-    throw new Error(`manfred: untrusted hostname "${parsed.hostname}" — must be ${TRUSTED_HOST}`);
+    throw new Error(`manfred: untrusted hostname "${parsed.hostname}". Must be ${TRUSTED_HOST}`);
   }
   return url;
 }
@@ -194,7 +194,7 @@ export default {
     const json = /** @type {any} */ (await ctx.fetchJson(url, { redirect: 'error' }));
     if (!Array.isArray(json)) {
       throw new Error(
-        `manfred: unexpected API response — expected a JSON array of offers, got ${json === null ? 'null' : typeof json}`,
+        `manfred: unexpected API response: expected a JSON array of offers, got ${json === null ? 'null' : typeof json}`,
       );
     }
     const fallbackCompany = entry?.name;

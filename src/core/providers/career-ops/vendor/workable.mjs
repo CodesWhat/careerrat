@@ -115,7 +115,7 @@ function assertWorkableUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`workable: URL must use HTTPS: ${url}`);
   if (!ALLOWED_WORKABLE_HOSTS.has(parsed.hostname)) {
-    throw new Error(`workable: untrusted hostname "${parsed.hostname}" — must be one of: ${[...ALLOWED_WORKABLE_HOSTS].join(', ')}`);
+    throw new Error(`workable: untrusted hostname "${parsed.hostname}". Must be one of: ${[...ALLOWED_WORKABLE_HOSTS].join(', ')}`);
   }
   return url;
 }

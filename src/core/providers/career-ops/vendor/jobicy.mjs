@@ -26,7 +26,7 @@ export default {
     // redirect:'error' prevents SSRF via server-side redirects
     const json = await ctx.fetchJson(FEED_URL, { redirect: 'error' });
     if (!json || !Array.isArray(json.jobs)) {
-      throw new Error(`jobicy: unexpected API response — expected { jobs: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`);
+      throw new Error(`jobicy: unexpected API response: expected { jobs: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`);
     }
 
     return parseJobicyResponse(json, entry.name || 'Jobicy');

@@ -239,7 +239,7 @@ function assertRemotliUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`remotli: URL must use HTTPS: ${url}`);
   if (!HOST_RE.test(parsed.hostname))
-    throw new Error(`remotli: untrusted hostname "${parsed.hostname}" — must be remotli.ch`);
+    throw new Error(`remotli: untrusted hostname "${parsed.hostname}". Must be remotli.ch`);
   return url;
 }
 
@@ -294,7 +294,7 @@ export default {
 
         if (!data || typeof data !== 'object' || !Array.isArray(/** @type {any} */ (data).jobs)) {
           throw new Error(
-            `remotli: unexpected API response — expected { jobs: [...] }, got ${data === null ? 'null' : typeof data}`,
+            `remotli: unexpected API response: expected { jobs: [...] }, got ${data === null ? 'null' : typeof data}`,
           );
         }
 

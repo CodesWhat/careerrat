@@ -31,7 +31,7 @@ function assertPinpointUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`pinpoint: URL must use HTTPS: ${url}`);
   if (!PINPOINT_HOST_RE.test(parsed.hostname)) {
-    throw new Error(`pinpoint: untrusted hostname "${parsed.hostname}" — must match <slug>.pinpointhq.com`);
+    throw new Error(`pinpoint: untrusted hostname "${parsed.hostname}". Must match <slug>.pinpointhq.com`);
   }
   return url;
 }

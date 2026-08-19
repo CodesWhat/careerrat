@@ -27,7 +27,7 @@ function assertLandingUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`landingjobs: URL must use HTTPS: ${url}`);
   if (parsed.hostname !== TRUSTED_HOST) {
-    throw new Error(`landingjobs: untrusted hostname "${parsed.hostname}" — must be ${TRUSTED_HOST}`);
+    throw new Error(`landingjobs: untrusted hostname "${parsed.hostname}". Must be ${TRUSTED_HOST}`);
   }
   return url;
 }
@@ -123,7 +123,7 @@ export default {
     const json = await ctx.fetchJson(FEED_URL, { redirect: 'error' });
     if (!Array.isArray(json)) {
       throw new Error(
-        `landingjobs: unexpected API response — expected a JSON array, got ${json === null ? 'null' : typeof json}`,
+        `landingjobs: unexpected API response: expected a JSON array, got ${json === null ? 'null' : typeof json}`,
       );
     }
     const fallbackCompany = entry?.name;

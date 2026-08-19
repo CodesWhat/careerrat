@@ -20,7 +20,7 @@ function assertJustJoinUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`justjoin: URL must use HTTPS: ${url}`);
   if (!ALLOWED_HOSTS.has(parsed.hostname)) {
-    throw new Error(`justjoin: untrusted hostname "${parsed.hostname}" — must be justjoin.it`);
+    throw new Error(`justjoin: untrusted hostname "${parsed.hostname}". Must be justjoin.it`);
   }
   if (!parsed.pathname.startsWith('/job-offers') && parsed.pathname !== '/api/candidate-api/offers') {
     throw new Error(`justjoin: URL path must be /job-offers or /api/candidate-api/offers: ${url}`);
@@ -79,7 +79,7 @@ function buildApiUrl(entry, from) {
 
 export function parseJustJoinResponse(json) {
   if (!json || !Array.isArray(json.data)) {
-    throw new Error(`justjoin: unexpected API response — expected { data: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`);
+    throw new Error(`justjoin: unexpected API response: expected { data: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`);
   }
   return json.data
     .filter(offer => offer && typeof offer === 'object')
