@@ -393,9 +393,12 @@ test("configured executor fails the extension provider immediately with an hones
   assert.equal(extensionResult.state, "unavailable");
   assert.match(
     extensionResult.reason,
-    /browser extension provider doesn't support automatic apply yet/i
+    /automatic apply isn't available on the .*extension.* provider yet/i
   );
-  assert.match(extensionResult.reason, /playwright/i);
+  // Provider-neutral: the reason must not steer the user at one hardcoded
+  // replacement provider (AGENTS.md Domain-Neutral Rule) — see session.mjs
+  // automaticApplyGap().
+  assert.doesNotMatch(extensionResult.reason, /playwright/i);
 });
 
 test("configured executor connects explicit Orca or automatic Orca detection", async () => {

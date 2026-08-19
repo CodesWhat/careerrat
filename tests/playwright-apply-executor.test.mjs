@@ -872,8 +872,10 @@ test("configured executor fails the extension provider immediately with an hones
   });
   assert.equal(result.available, false);
   assert.equal(result.state, "unavailable");
-  assert.match(result.reason, /browser extension provider doesn't support automatic apply yet/i);
-  assert.match(result.reason, /playwright/i);
+  assert.match(result.reason, /automatic apply isn't available on the .*extension.* provider yet/i);
+  // Provider-neutral: no hardcoded replacement-provider recommendation (AGENTS.md
+  // Domain-Neutral Rule) — see session.mjs automaticApplyGap().
+  assert.doesNotMatch(result.reason, /playwright/i);
 });
 
 test("configured executor still dispatches provider orca to the orca executor", async () => {

@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { after, beforeEach, test } from "node:test";
 import {
   defaultProfileRoot,
+  describeProviders,
   PROVIDER_PREFERENCE,
   profilePath,
   resolveSession,
@@ -79,4 +80,29 @@ test("automatic session setup falls back to the browser extension outside Orca",
   const session = resolveSession({ data: { session: { provider: "auto" } }, env: {} });
   assert.equal(session.configuredProvider, "auto");
   assert.equal(session.provider, "extension");
+});
+
+// Regression: describeProviders() used to report the "auto" descriptor's own
+// literal automatedApply (always true), not what "auto" actually resolves to.
+// Outside Orca, "auto" resolves to the extension provider, which cannot drive
+// apply-job's scripted apply path — the option list (and the JSON
+// `careerrat automation status --json` / Settings both read) must say so.
+test("describeProviders reports automatedApply:false for the auto option outside an Orca workspace", () => {
+  const providers = describeProviders({ env: {} });
+  const auto = providers.find((p) => p.id === "auto");
+  assert.equal(auto.automatedApply, false);
+});
+
+test("describeProviders reports automatedApply:true for the auto option inside an Orca workspace", () => {
+  const providers = describeProviders({ env: { ORCA_WORKTREE_ID: "worktree-123" } });
+  const auto = providers.find((p) => p.id === "auto");
+  assert.equal(auto.automatedApply, true);
+});
+
+test("describeProviders leaves the concrete providers' automatedApply untouched by env", () => {
+  const providers = describeProviders({ env: {} });
+  const byId = Object.fromEntries(providers.map((p) => [p.id, p.automatedApply]));
+  assert.equal(byId.extension, false);
+  assert.equal(byId.orca, true);
+  assert.equal(byId.playwright, true);
 });

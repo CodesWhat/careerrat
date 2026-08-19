@@ -68,7 +68,7 @@ describe("automation mode and consent controls", () => {
           presence: {
             status: "unverified",
             detail:
-              "Google Chrome detected — confirm the extension is installed + signed in (can't be verified from outside the browser). Automatic apply isn't available on this provider yet; switch to the Playwright provider for it.",
+              "Google Chrome detected. Confirm the extension is installed and signed in (can't be verified from outside the browser). Automatic apply isn't available on this provider yet; `careerrat automation status` lists the providers that support it.",
           },
           options: [
             { id: "auto", label: "Automatic browser connection", automatedApply: true },
@@ -87,7 +87,11 @@ describe("automation mode and consent controls", () => {
     expect(html).not.toContain("Automatic browser connection (no automatic apply yet)");
     expect(html).not.toContain("Playwright persistent profile (no automatic apply yet)");
     expect(html).toContain("Automatic apply isn&#x27;t available on this provider yet");
-    expect(html).toContain("switch to the Playwright provider");
+    // The hint must NOT name a replacement provider: which provider to switch to
+    // is the candidate's choice, not something this layer asserts (AGENTS.md
+    // domain-neutral rule). It points at the provider list instead.
+    expect(html).not.toContain("Playwright provider");
+    expect(html).toContain("careerrat automation status");
   });
 
   it("explains permission defaults without asking users to understand setup modes", () => {

@@ -43,7 +43,12 @@ import {
   planSessionEdit,
   resolveEditPath,
 } from "../core/automation/consent.mjs";
-import { PROVIDER_PREFERENCE, PROVIDERS, resolveSession } from "../core/automation/session.mjs";
+import {
+  automaticApplyGap,
+  PROVIDER_PREFERENCE,
+  PROVIDERS,
+  resolveSession,
+} from "../core/automation/session.mjs";
 import { candidateConfigPatch } from "../core/db/verbs.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import { candidateConfigSource } from "../core/profile/config-store.mjs";
@@ -60,9 +65,13 @@ function sessionProviderNote(provider) {
     : " (fallback; automatic setup is recommended)";
 }
 
+// Formats the shared core verdict (session.mjs#automaticApplyGap) for CLI
+// display. The decision itself — whether this provider can drive automatic
+// apply, and what to tell the user — lives in the core automation layer so this
+// CLI and the apply-executor factory can't drift onto two different messages.
 function sessionAutomaticApplyNote(provider) {
-  if (PROVIDERS[provider].automatedApply !== false) return "";
-  return "Note: automatic apply isn't available over the browser extension yet. It still works for agent-driven browsing; run `careerrat automation session playwright --write` for automatic apply.";
+  const gap = automaticApplyGap(provider);
+  return gap ? `Note: ${gap.reason}` : "";
 }
 
 function parseArgs(argv) {

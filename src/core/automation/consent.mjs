@@ -325,13 +325,13 @@ export function automationStatus({ root = DEFAULT_ROOT, env = process.env } = {}
   });
 
   const liveCount = capabilities.reduce((n, c) => n + c.liveCount, 0);
-  const detectedSession = detectSession({ data: cfg });
+  const detectedSession = detectSession({ data: cfg, env });
   const session = {
     provider: detectedSession.configuredProvider,
     effectiveProvider: detectedSession.provider,
     profileRoot: detectedSession.profileRoot,
     presence: detectedSession.presence,
-    options: describeProviders().map(({ id, label, needs, automatedApply }) => ({
+    options: describeProviders({ env }).map(({ id, label, needs, automatedApply }) => ({
       id,
       label,
       needs,

@@ -194,6 +194,36 @@ test("automation consent: status exposes automatic browser setup and the effecti
   assert.ok(status.session.presence?.status);
 });
 
+// Regression for the "auto" option lying about automatic-apply support outside an
+// Orca workspace: it used to read the optimistic literal on the raw `auto`
+// descriptor (always true) instead of what resolveSession() actually resolves
+// "auto" to. Outside Orca that's the extension provider, which genuinely can't
+// drive apply-job's scripted apply path — so the UI (and the JSON `careerrat
+// automation status --json` exposes) must say automatedApply:false there, not
+// true. This is the path that was wrong; a test that only covered the Orca case
+// would have kept passing under the bug.
+test("automation consent: status auto option reports automatedApply:false outside an Orca workspace (resolved to extension, not the optimistic descriptor)", () => {
+  const status = automationStatus({ root, env: {} });
+  const autoOption = status.session.options.find((o) => o.id === "auto");
+  assert.equal(status.session.effectiveProvider, "extension");
+  assert.equal(autoOption.automatedApply, false);
+});
+
+test("automation consent: status auto option reports automatedApply:true inside an Orca workspace", () => {
+  const status = automationStatus({ root, env: { ORCA_WORKTREE_ID: "worktree-123" } });
+  const autoOption = status.session.options.find((o) => o.id === "auto");
+  assert.equal(status.session.effectiveProvider, "orca");
+  assert.equal(autoOption.automatedApply, true);
+});
+
+test("automation consent: status options list concrete providers with their fixed automatedApply, unaffected by env", () => {
+  const status = automationStatus({ root, env: {} });
+  const byId = Object.fromEntries(status.session.options.map((o) => [o.id, o.automatedApply]));
+  assert.equal(byId.extension, false);
+  assert.equal(byId.orca, true);
+  assert.equal(byId.playwright, true);
+});
+
 test("automation consent: status output includes relationship_sourcing platforms", () => {
   const status = automationStatus();
   const cap = status.capabilities.find((c) => c.capability === "relationship_sourcing");
