@@ -110,6 +110,61 @@ describe("UpdateAvailableDock: desktop bridge present", () => {
     delete globalThis.careerratDesktopUpdate;
   });
 
+  it("keeps a push that arrives before the initial getState() response resolves", async () => {
+    // The interleaving finding 4 guards against: a scheduled check finishes
+    // and pushes through onUpdate while the initial getState() request is
+    // still in flight. The late, now-stale getState() response must not
+    // turn around and erase that push.
+    vi.resetModules();
+    let onUpdateCallback;
+    let resolveGetState;
+    globalThis.careerratDesktopUpdate = {
+      getState: vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveGetState = resolve;
+          })
+      ),
+      onUpdate: (cb) => {
+        onUpdateCallback = cb;
+        return () => {};
+      },
+      skipVersion: vi.fn().mockResolvedValue(undefined),
+      openRelease: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const { useDesktopUpdateNotice } = await import("./UpdateAvailableDock.jsx");
+
+    onUpdateCallback({
+      notify: true,
+      enabled: true,
+      version: "0.10.0",
+      releaseUrl: "https://github.com/CodesWhat/careerrat/releases/tag/v0.10.0",
+      dmgUrl: null,
+    });
+    resolveGetState({
+      notify: false,
+      enabled: true,
+      version: null,
+      releaseUrl: null,
+      dmgUrl: null,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    let captured;
+    function Consumer() {
+      captured = useDesktopUpdateNotice();
+      return null;
+    }
+    renderToStaticMarkup(<Consumer />);
+
+    expect(captured.available).toBe(true);
+    expect(captured.version).toBe("0.10.0");
+
+    delete globalThis.careerratDesktopUpdate;
+  });
+
   it("openRelease delegates to the bridge, not a second open path", async () => {
     vi.resetModules();
     const openRelease = vi.fn().mockResolvedValue(undefined);

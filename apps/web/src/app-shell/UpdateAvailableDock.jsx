@@ -40,24 +40,36 @@ function getSnapshot() {
   return state;
 }
 
-// Reads the current notice once and subscribes to future pushes (main.mjs
-// sends one after every completed check, see main.mjs's
-// pushUpdateNoticeToRenderer). Module-scope, same as SetupReadinessCard.jsx's
+// Subscribes to future pushes first, then reads the current notice once.
+// Module-scope, same as SetupReadinessCard.jsx's
 // `let dismissedCache = readDismissed();`. Runs exactly once per module
 // evaluation, not per render or per mounted instance. A no-op in the plain
 // browser dev app, where `bridge` is undefined.
+//
+// Order matters here: getState() and a scheduled check finishing (which
+// pushes through onUpdate) can land in either order. Subscribing to
+// onUpdate first means a push that arrives while getState() is still in
+// flight is never missed. `receivedPush` then makes sure the getState()
+// response, now stale, can't turn around and overwrite that push with the
+// older payload it was fetched with.
 if (bridge) {
+  let receivedPush = false;
+
+  bridge.onUpdate((result) => {
+    receivedPush = true;
+    setState(result);
+  });
+
   bridge
     .getState()
     .then((result) => {
+      if (receivedPush) return;
       if (result) setState(result);
     })
     .catch(() => {
       // No answer from main.mjs yet (very early boot). A later pushed
-      // result from onUpdate below still arrives once a check completes.
+      // result from onUpdate above still arrives once a check completes.
     });
-
-  bridge.onUpdate((result) => setState(result));
 }
 
 function dismissUpdate() {
