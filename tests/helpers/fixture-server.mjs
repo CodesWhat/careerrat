@@ -98,7 +98,16 @@ export function startFixtureServer(rootDir) {
     }
 
     res.writeHead(200, { "Content-Type": contentTypeFor(filePath) });
-    createReadStream(filePath).pipe(res);
+
+    // Same failure mode as the malformed-escape case above: an unhandled
+    // 'error' on the read stream (file removed mid-test, EMFILE under parallel
+    // runs) throws out of the handler and kills the whole node --test process,
+    // not just the one test. Headers are already sent by this point, so there
+    // is no status left to send. Destroying the socket is the honest signal,
+    // and it stops the response hanging open.
+    const stream = createReadStream(filePath);
+    stream.on("error", () => res.destroy());
+    stream.pipe(res);
   });
 
   return new Promise((resolve, reject) => {

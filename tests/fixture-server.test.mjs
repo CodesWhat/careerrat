@@ -11,7 +11,7 @@
 // process down mid-test.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -92,6 +92,46 @@ test("fixture server answers a malformed percent-escape instead of crashing", as
     const stillAlive = await fetch(`${url}/ok.html`);
     assert.equal(stillAlive.status, 200, "server died on the malformed request");
   });
+});
+
+// The stat() checks pass and the 200 headers go out, and only then does the
+// read itself fail. Without an 'error' listener on the read stream this threw
+// out of the request handler and killed the whole `node --test` process, so the
+// symptom was some unrelated test dying rather than this one failing.
+test("fixture server survives a read that fails after the headers are sent", async () => {
+  const { root } = makeFixtureTree();
+  const unreadable = join(root, "unreadable.html");
+  writeFileSync(unreadable, "<p>secret</p>");
+  chmodSync(unreadable, 0o000);
+
+  // Root ignores the mode bits, so in a container running as root there is no
+  // way to provoke the failure at all. Skip rather than assert something false.
+  let readIsActuallyBlocked = false;
+  try {
+    readFileSync(unreadable);
+  } catch {
+    readIsActuallyBlocked = true;
+  }
+
+  const server = await startFixtureServer(root);
+  try {
+    if (!readIsActuallyBlocked) return;
+
+    // Headers are already on the wire, so the client sees a 200 and then a
+    // reset partway through the body. Either the fetch or the body read can be
+    // the thing that rejects depending on timing, so the assertion is only that
+    // the full body never arrives intact.
+    await assert.rejects(async () => {
+      const response = await fetch(`${server.url}/unreadable.html`);
+      await response.text();
+    });
+
+    const stillAlive = await fetch(`${server.url}/ok.html`);
+    assert.equal(stillAlive.status, 200, "server died on the failed read");
+  } finally {
+    chmodSync(unreadable, 0o600);
+    await server.close();
+  }
 });
 
 test("fixture server rejects a NUL byte in the path", async () => {
