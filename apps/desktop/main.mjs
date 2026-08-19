@@ -439,10 +439,15 @@ async function performUpdateCheck() {
   pushUpdateNoticeToRenderer();
 }
 
-// Registers the IPC handlers preload/update-check-preload.cjs calls into,
-// primes in-memory state from disk, and schedules the recurring check. Runs
-// exactly once (from app.whenReady()'s non-smoke path), not per-window.
-function startUpdateChecks() {
+// Registers the IPC handlers preload/update-check-preload.cjs calls into and
+// primes in-memory state from disk. Deliberately separate from
+// scheduleUpdateChecks(): the renderer calls getState() as soon as its bundle
+// evaluates, including under `--smoke`, which never schedules anything. When
+// these two lived in one function, a passing smoke run still logged "No
+// handler registered for careerrat:update-check:get-state" twice, and a green
+// run that prints errors is how people learn to stop reading them. Runs
+// exactly once, not per-window.
+function registerUpdateCheckHandlers() {
   updateStateDir = runtimePaths.careerratHome || app.getPath("userData");
   updateState = loadUpdateState();
   updateResult = deriveUpdateResultFromState(updateState);
@@ -465,7 +470,11 @@ function startUpdateChecks() {
     if (updateResult.releaseUrl) openExternalIfAllowed(updateResult.releaseUrl, null);
     return null;
   });
+}
 
+// Schedules the recurring check. Skipped under `--smoke`, which has no
+// business reaching the network.
+function scheduleUpdateChecks() {
   updateCheckInitialTimer = setTimeout(() => {
     updateCheckInitialTimer = null;
     performUpdateCheck().catch((err) => log(`update check failed: ${err.message}`));
@@ -646,6 +655,10 @@ app.whenReady().then(async () => {
 
   const { url, route } = await boot();
 
+  // Before any window exists, including the smoke window: the renderer asks
+  // for update state as soon as its bundle evaluates.
+  registerUpdateCheckHandlers();
+
   if (isSmoke) {
     try {
       await verifySmokeHttpSurface({ baseUrl: url, route, getOk: httpGetOk });
@@ -681,7 +694,7 @@ app.whenReady().then(async () => {
   }
 
   createWindow(url, route);
-  startUpdateChecks();
+  scheduleUpdateChecks();
 
   // macOS convention: clicking the dock icon with no open windows reopens
   // one instead of doing nothing.
