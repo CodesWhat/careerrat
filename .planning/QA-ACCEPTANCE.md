@@ -1918,4 +1918,29 @@ Test homes:
   PR #92), and research-boards' skill text let chat turns claim CLI writes they cannot make;
   the rendered Add source/Skip controls are the real, already-wired write path
   (filed as issue #90, skill-text fix in PR #93). Both are their own findings, not
-  this regression.
+  this regression. Re-verified 2026-08-19 with both fixes on main: research-company, research-comp,
+  and research-boards were re-run and discover-companies was retested for the first time, all
+  against a live installed Claude Code CLI runtime. Spawned argv for each session showed
+  `--setting-sources project` (`claude -p --setting-sources project --output-format json
+  --permission-mode dontAsk --no-session-persistence --tools WebSearch,WebFetch,Skill
+  --allowedTools WebSearch,WebFetch,Skill`), parented directly by the dev server, never
+  `--safe-mode`. research-company and research-comp both completed real WebSearch/WebFetch runs
+  inside PR #92's 9-minute chat-session timeout with no truncation; the demo workspace's fictional
+  company name correctly failed to resolve on the open web (the honesty firewall refusing to
+  fabricate, not a bug), so the research turns were redirected to a real public company, GitLab
+  Inc., while candidate identity and comp figures stayed synthetic. research-boards and
+  discover-companies both now state in-transcript that writes happen through the rendered
+  Add source / Track company / Skip controls rather than claiming a CLI write the session can't
+  make, matching PR #93's fix — discover-companies' own turn ended with "AUTO-ADDED: none (chat
+  handoff — writes happen via the Track company/Skip controls, not this turn)". All four produced
+  schema-valid typed result blocks the app renders and saves: research-company and research-comp
+  through "Save to workspace" (`workspace/research/*.md`, via the same `research.record` intent
+  the UI calls), research-boards and discover-companies through the boards/company config write
+  path (`search-sources` and `sourced-scan` rows in the `candidate_source_configs` table). Every
+  write was confirmed in durable SQLite/file storage, not just an API response, and all four
+  survived a full server kill-and-restart (new pid, same data read back correctly). Zero browser
+  console errors or warnings across the run. One footnote, not a defect in this fix: the AskBar's
+  free-text intent classifier didn't reliably surface an ACTION chip for research.comp-shaped
+  phrasing during this retest and fell back to a lighter Q&A path instead; worked around by calling
+  the `research.comp` workspace intent directly, the same code path the chip would trigger, which
+  correctly reused the live session instead of spawning a redundant one.
