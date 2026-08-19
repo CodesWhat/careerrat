@@ -1,11 +1,10 @@
 name: ci
 
-# Green PR gate. Runs the structure guards — the checks that protect the things
-# unit tests can't reach: the dashboard client <script> must parse as valid JS, the
-# dashboard CSS must be well-formed, and every shipped YAML config must parse. These
-# are deliberately a SUBSET of `npm test`: the full suite is intentionally red during
-# pre-launch design churn (hardened in a dedicated pass at launch), so gating on it
-# would block every merge. The guards stay green and catch real breakage.
+# Green PR gate. structure-guards runs a fast fail-early subset — the checks that
+# protect the things unit tests can't reach: the dashboard client <script> must
+# parse as valid JS, the dashboard CSS must be well-formed, every shipped YAML
+# config must parse, and release versions stay in sync. tests runs the full
+# `npm test` suite so the whole thing actually gates PRs, not just this subset.
 #
 # This job's name ("structure-guards") is the status-check context referenced by the
 # "Main branch protection" ruleset's required_status_checks rule.
@@ -36,6 +35,33 @@ jobs:
           node-version: 24
       - name: Structure guards (client JS parses, CSS valid, YAML valid, release versions in sync)
         run: node --test tests/client-script.test.mjs tests/styles.test.mjs tests/yaml.test.mjs tests/release-consistency.test.mjs
+
+  # Full suite (`npm test`, i.e. `node --test 'tests/**/*.test.mjs'`) — the real gate,
+  # not just the structure-guards subset. A handful of integration tests self-skip
+  # via node's test-runner `skip:` option when ANTHROPIC_API_KEY isn't set (chat-runtime,
+  # intake-classify, intake-extract, resume-extract, skill-runtime); every other test
+  # is deterministic and runs the same on ubuntu-latest as it does locally. Not yet
+  # added to the "Main branch protection" ruleset's required_status_checks — same
+  # "real, running, but not yet required" posture as web-build/qlty/knip below, until
+  # it's been observed green on GitHub.
+  tests:
+    name: tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (audit all outbound calls)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Install dependencies
+        run: npm ci
+      - name: Full test suite
+        run: npm test
 
   # M7 — builds the apps/web SPA shell. Non-gating (not in the "Main branch
   # protection" ruleset's required_status_checks) until the workspace is
