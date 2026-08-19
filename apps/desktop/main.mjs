@@ -45,6 +45,7 @@ import {
   CHECK_INTERVAL_MS as UPDATE_CHECK_INTERVAL_MS,
   DEFAULT_STATE as DEFAULT_UPDATE_STATE,
   isNewerVersion,
+  mergeCheckedState,
   runUpdateCheck,
   shouldNotify,
   withEnabled,
@@ -172,6 +173,7 @@ let shuttingDown = false;
 let updateStateDir = null;
 let updateState = { ...DEFAULT_UPDATE_STATE };
 let updateResult = { updateAvailable: false, version: null, releaseUrl: null, dmgUrl: null };
+let updateCheckInitialTimer = null;
 let updateCheckTimer = null;
 
 // --smoke never renders anything — it's a scripted server-only check (boot,
@@ -302,6 +304,10 @@ async function shutdown() {
   delete process.env.CAREERRAT_DESKTOP_PDF_RENDER_TOKEN;
   if (activePdfRenderer) await activePdfRenderer.close();
 
+  if (updateCheckInitialTimer) {
+    clearTimeout(updateCheckInitialTimer);
+    updateCheckInitialTimer = null;
+  }
   if (updateCheckTimer) {
     clearInterval(updateCheckTimer);
     updateCheckTimer = null;
@@ -408,14 +414,13 @@ async function performUpdateCheck() {
 
   if (!checked) return;
 
-  updateState = fetchSucceeded && result
-    ? {
-        ...nextState,
-        latestVersion: result.version,
-        latestReleaseUrl: result.releaseUrl,
-        latestDmgUrl: result.dmgUrl,
-      }
-    : nextState; // a failed fetch still records lastCheckedAt, never clobbers the last known release
+  // The fetch above can take up to REQUEST_TIMEOUT_MS. If the Settings
+  // toggle or a "skip this version" landed through the IPC handlers below
+  // while it was in flight, module-level `updateState` already holds that
+  // write (and it was already persisted by its own handler). Re-merge those
+  // user-controlled fields from the live state so this persist can't revert
+  // an opt-out or a skip the user made mid-fetch.
+  updateState = mergeCheckedState({ nextState, fetchSucceeded, result, liveState: updateState });
   persistUpdateState(updateState);
 
   updateResult = deriveUpdateResultFromState(updateState);
@@ -449,9 +454,11 @@ function startUpdateChecks() {
     return null;
   });
 
-  setTimeout(() => {
+  updateCheckInitialTimer = setTimeout(() => {
+    updateCheckInitialTimer = null;
     performUpdateCheck().catch((err) => log(`update check failed: ${err.message}`));
   }, UPDATE_CHECK_INITIAL_DELAY_MS);
+  updateCheckInitialTimer.unref?.();
 
   updateCheckTimer = setInterval(() => {
     performUpdateCheck().catch((err) => log(`update check failed: ${err.message}`));

@@ -141,6 +141,30 @@ export function shouldCheckNow({
   return now - last >= intervalMs;
 }
 
+const ALLOWED_RELEASE_HOST = "github.com";
+
+// Host-pins any URL taken from the GitHub API response before it can reach
+// the renderer or openExternalIfAllowed (main.mjs). decideExternalOpen's own
+// SAFE_EXTERNAL_PROTOCOLS allowlist (desktop-runtime.mjs) already denies any
+// non-https/mailto scheme, so a file:/javascript: URL was never reachable
+// through the normal open path. The residual risk this guards is narrower: a
+// compromised or MITM'd API response could return a plausible https:// URL
+// on an attacker-controlled host, which would pass that protocol check and
+// open in the browser. Pinning to github.com is defense in depth against
+// exactly that. Returns null for anything that doesn't parse, isn't https,
+// or isn't on the pinned host.
+function validateGithubUrl(url) {
+  if (typeof url !== "string" || !url) return null;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:" || parsed.hostname !== ALLOWED_RELEASE_HOST) return null;
+  return url;
+}
+
 function findDmgAssetUrl(assets) {
   if (!Array.isArray(assets)) return null;
   const dmg = assets.find(
@@ -148,7 +172,7 @@ function findDmgAssetUrl(assets) {
       typeof asset?.browser_download_url === "string" &&
       /\.dmg$/i.test(asset?.name || asset.browser_download_url)
   );
-  return dmg?.browser_download_url || null;
+  return validateGithubUrl(dmg?.browser_download_url);
 }
 
 // Takes the current app version plus a parsed GitHub "latest release"
@@ -161,7 +185,7 @@ function findDmgAssetUrl(assets) {
 export function resolveUpdateResult({ currentVersion, release } = {}) {
   const tag = release?.tag_name;
   const version = typeof tag === "string" && tag.trim() ? tag.trim().replace(/^v/i, "") : null;
-  const releaseUrl = typeof release?.html_url === "string" ? release.html_url : null;
+  const releaseUrl = validateGithubUrl(release?.html_url);
   const dmgUrl = findDmgAssetUrl(release?.assets);
 
   const updateAvailable = Boolean(
@@ -188,6 +212,33 @@ export function withSkippedVersion(state, version) {
 
 export function withEnabled(state, enabled) {
   return { ...DEFAULT_STATE, ...state, enabled: Boolean(enabled) };
+}
+
+// Folds one completed check's outcome into persisted state, then re-applies
+// `enabled` and `skippedVersion` from `liveState` last. A check can be in
+// flight for up to REQUEST_TIMEOUT_MS; if the user flips the Settings toggle
+// or skips a version through an IPC handler while it's running, that write
+// already landed on the caller's live in-memory state (and was already
+// persisted by its own handler) by the time the check resolves. Without this
+// re-merge, persisting `nextState` (built from the snapshot the check
+// started with) would silently revert that write, including reverting an
+// opt-out and leaving checks running after the user turned them off.
+export function mergeCheckedState({ nextState, fetchSucceeded, result, liveState }) {
+  const base =
+    fetchSucceeded && result
+      ? {
+          ...nextState,
+          latestVersion: result.version,
+          latestReleaseUrl: result.releaseUrl,
+          latestDmgUrl: result.dmgUrl,
+        }
+      : nextState; // a failed fetch still records lastCheckedAt, never clobbers the last known release
+
+  return {
+    ...base,
+    enabled: liveState.enabled,
+    skippedVersion: liveState.skippedVersion,
+  };
 }
 
 // No auth token, no candidate identifiers, just what GitHub's API requires

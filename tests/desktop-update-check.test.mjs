@@ -8,6 +8,7 @@ import {
   fetchLatestRelease,
   GITHUB_RELEASES_URL,
   isNewerVersion,
+  mergeCheckedState,
   resolveUpdateResult,
   runUpdateCheck,
   shouldCheckNow,
@@ -109,7 +110,8 @@ describe("resolveUpdateResult", () => {
         assets: [
           {
             name: "CareerRat-0.10.0-arm64.dmg",
-            browser_download_url: "https://example.com/CareerRat-0.10.0-arm64.dmg",
+            browser_download_url:
+              "https://github.com/CodesWhat/careerrat/releases/download/v0.10.0/CareerRat-0.10.0-arm64.dmg",
           },
         ],
       },
@@ -119,8 +121,51 @@ describe("resolveUpdateResult", () => {
       updateAvailable: true,
       version: "0.10.0",
       releaseUrl: "https://github.com/CodesWhat/careerrat/releases/tag/v0.10.0",
-      dmgUrl: "https://example.com/CareerRat-0.10.0-arm64.dmg",
+      dmgUrl:
+        "https://github.com/CodesWhat/careerrat/releases/download/v0.10.0/CareerRat-0.10.0-arm64.dmg",
     });
+  });
+
+  it("rejects a release URL that isn't on github.com, even over https", () => {
+    // Defense in depth: a compromised or MITM'd API response returning a
+    // plausible https:// URL on another host must not reach the renderer.
+    const result = resolveUpdateResult({
+      currentVersion: "0.9.0",
+      release: { tag_name: "v0.10.0", html_url: "https://evil.example.com/release", assets: [] },
+    });
+
+    assert.equal(result.releaseUrl, null);
+  });
+
+  it("rejects a release URL that isn't https, even on github.com", () => {
+    const result = resolveUpdateResult({
+      currentVersion: "0.9.0",
+      release: {
+        tag_name: "v0.10.0",
+        html_url: "http://github.com/CodesWhat/careerrat/releases/tag/v0.10.0",
+        assets: [],
+      },
+    });
+
+    assert.equal(result.releaseUrl, null);
+  });
+
+  it("rejects a .dmg asset URL that isn't on github.com", () => {
+    const result = resolveUpdateResult({
+      currentVersion: "0.9.0",
+      release: {
+        tag_name: "v0.10.0",
+        html_url: "https://github.com/CodesWhat/careerrat/releases/tag/v0.10.0",
+        assets: [
+          {
+            name: "CareerRat-0.10.0-arm64.dmg",
+            browser_download_url: "https://evil.example.com/CareerRat-0.10.0-arm64.dmg",
+          },
+        ],
+      },
+    });
+
+    assert.equal(result.dmgUrl, null);
   });
 
   it("reports an update available when the running version is a release candidate and GitHub's latest is that version's GA", () => {
@@ -384,5 +429,46 @@ describe("runUpdateCheck", () => {
     assert.equal(outcome.fetchSucceeded, false);
     assert.equal(outcome.result.updateAvailable, false);
     assert.equal(outcome.state.lastCheckedAt, now);
+  });
+});
+
+describe("mergeCheckedState", () => {
+  it("survives a toggle that lands mid-fetch: enabled/skippedVersion come from liveState, not the pre-fetch snapshot", () => {
+    // Simulates main.mjs's performUpdateCheck: `nextState` is built from a
+    // state snapshot taken before the (up to 10s) fetch started. `liveState`
+    // stands in for module-level `updateState`, which an IPC handler can
+    // have mutated and already persisted while the fetch was in flight, e.g.
+    // the user turning update checks off.
+    const nextState = { ...DEFAULT_STATE, enabled: true, skippedVersion: null, lastCheckedAt: 999 };
+    const liveState = { ...DEFAULT_STATE, enabled: false, skippedVersion: "0.10.0" };
+
+    const merged = mergeCheckedState({
+      nextState,
+      fetchSucceeded: true,
+      result: { updateAvailable: true, version: "0.10.0", releaseUrl: null, dmgUrl: null },
+      liveState,
+    });
+
+    assert.equal(merged.enabled, false);
+    assert.equal(merged.skippedVersion, "0.10.0");
+    // The check's own bookkeeping (lastCheckedAt, the cached release fields)
+    // still comes from the check itself, not the live state.
+    assert.equal(merged.lastCheckedAt, 999);
+    assert.equal(merged.latestVersion, "0.10.0");
+  });
+
+  it("re-merges liveState on a failed fetch too", () => {
+    const nextState = { ...DEFAULT_STATE, enabled: true, skippedVersion: null, lastCheckedAt: 999 };
+    const liveState = { ...DEFAULT_STATE, enabled: false, skippedVersion: null };
+
+    const merged = mergeCheckedState({
+      nextState,
+      fetchSucceeded: false,
+      result: null,
+      liveState,
+    });
+
+    assert.equal(merged.enabled, false);
+    assert.equal(merged.lastCheckedAt, 999);
   });
 });
