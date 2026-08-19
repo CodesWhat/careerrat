@@ -745,7 +745,17 @@ test("previewWorkspaceIntent: 'what should this role pay' resolves through the o
 
 test("previewWorkspaceIntent: pay-verb phrasings map to research.comp across role/job/position vocabulary", () => {
   const repoRoot = tempRepo();
-  for (const text of ["what does this job pay", "what would this position pay"]) {
+  // The last two carry a trailing location/scope qualifier. The matcher anchors
+  // its tail so a sentence can't merely START this way and get swallowed, and
+  // these are the phrasings that anchor has to keep letting through.
+  for (const text of [
+    "what does this job pay",
+    "what would this position pay",
+    "what does this job earn",
+    "what should the role make",
+    "what should this role pay in San Francisco?",
+    "what would this position pay at a Series B",
+  ]) {
     const result = previewWorkspaceIntent({ text, repoRoot, env: {} });
     assert.deepEqual(
       result.action,
@@ -780,6 +790,25 @@ test("previewWorkspaceIntent: contextual comp phrasings never over-trigger on un
     env: {},
   });
   assert.equal(result.action, null);
+
+  // "offer" is not a pay verb. A job offer covers PTO, growth, relocation and
+  // start date, not just money, so these are ordinary questions the user wants
+  // answered — hijacking them into a comp benchmark is worse than missing a chip.
+  // "pay attention" is the same failure from the other direction: the pay verb is
+  // there, but the sentence isn't about money at all.
+  for (const text of [
+    "what should this role offer besides salary, like remote work flexibility and PTO?",
+    "what does this job offer in terms of career growth",
+    "what should the position offer someone relocating internationally",
+    "what should this role pay attention to in the first 90 days",
+    "what does this job pay attention to when screening candidates",
+  ]) {
+    assert.equal(
+      previewWorkspaceIntent({ text, repoRoot, env: {} }).action,
+      null,
+      `expected "${text}" to stay ordinary chat, not route to research.comp`
+    );
+  }
 
   // Pre-existing company-research routes stay unaffected by the new
   // role/job/position matchers.

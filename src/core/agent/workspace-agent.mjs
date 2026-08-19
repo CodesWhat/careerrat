@@ -6329,11 +6329,22 @@ function compResearchRequestFromText(text) {
   }
   if (/^comp\s+benchmark\b/i.test(stripped)) return {};
   if (/\bsalary\s+research\b.*\b(?:this\s+)?(?:job|role)\b/i.test(stripped)) return {};
-  // "what should/does/would this/that/the role/job/position pay/earn/make/
-  // offer" — pay-verb phrasing scoped to role/job/position vocabulary so it
-  // doesn't over-trigger on unrelated "what should I pay for X" questions.
+  // "what should/does/would this/that/the role/job/position pay/earn/make" —
+  // pay-verb phrasing scoped to role/job/position vocabulary so it doesn't
+  // over-trigger on unrelated "what should I pay for X" questions.
+  //
+  // Deliberately excludes "offer": a job offer covers PTO, growth, relocation
+  // and start date, not just money, so "what does this job offer in terms of
+  // career growth" is an ordinary question the user wants answered, not a comp
+  // benchmark request. Hijacking normal Q&A is a worse failure than missing a
+  // chip. "pay attention (to)" is excluded for the same reason.
+  //
+  // The tail is anchored rather than left open. Without it the prefix alone
+  // matched regardless of what followed, so any sentence that merely started
+  // this way was swallowed. An optional trailing qualifier is allowed so
+  // "what should this role pay in San Francisco?" still counts.
   if (
-    /^what\s+(?:should|does|would)\s+(?:this|that|the)\s+(?:role|job|position)\s+(?:pay|earn|make|offer)\b/i.test(
+    /^what\s+(?:should|does|would)\s+(?:this|that|the)\s+(?:role|job|position)\s+(?:pay|earn|make)\b(?!\s+attention\b)(?:\s+(?:in|for|at)\s+[^?.!]{1,60})?\s*[.?!]*$/i.test(
       stripped
     )
   ) {
