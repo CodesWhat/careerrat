@@ -63,12 +63,12 @@ test("formatEntry produces a dated heading, trims the body, ends with one newlin
     title: "  Bullets land  ",
     body: "\n- a\n- b\n\n",
   });
-  assert.equal(entry, "## 2026-06-13 — Bullets land\n\n- a\n- b\n");
+  assert.equal(entry, "## 2026-06-13: Bullets land\n\n- a\n- b\n");
 });
 
 test("countEntries counts entry headings, ignoring the file title", () => {
   assert.equal(
-    countEntries("# Learnings · x\n\n## 2026-01-01 — a\n\nbody\n\n## 2026-01-02 — b\n"),
+    countEntries("# Learnings · x\n\n## 2026-01-01: a\n\nbody\n\n## 2026-01-02: b\n"),
     2
   );
   assert.equal(countEntries(""), 0);
@@ -96,11 +96,11 @@ test("computeAppend on an empty file prepends the header then the entry", () => 
   assert.equal(r.ok, true);
   assert.equal(r.created, true);
   assert.match(r.nextText, /^# Learnings · applied-ai/);
-  assert.match(r.nextText, /## 2026-06-13 — T\n\n- a\n$/);
+  assert.match(r.nextText, /## 2026-06-13: T\n\n- a\n$/);
 });
 
 test("computeAppend on an existing file appends with one blank line and no header", () => {
-  const current = `# Learnings · applied-ai\n\n## 2026-06-12 — old\n\n- prior\n`;
+  const current = `# Learnings · applied-ai\n\n## 2026-06-12: old\n\n- prior\n`;
   const r = computeAppend({
     family: "applied-ai",
     date: "2026-06-13",
@@ -111,7 +111,7 @@ test("computeAppend on an existing file appends with one blank line and no heade
   assert.equal(r.ok, true);
   assert.equal(r.created, false);
   assert.equal(countEntries(r.nextText), 2);
-  assert.match(r.nextText, /- prior\n\n## 2026-06-13 — new\n\n- fresh\n$/);
+  assert.match(r.nextText, /- prior\n\n## 2026-06-13: new\n\n- fresh\n$/);
   // exactly one top-level title remains
   assert.equal((r.nextText.match(/^# /gm) || []).length, 1);
 });
@@ -183,8 +183,8 @@ test("appendLearning + readLearnings + listLearnings round-trip in a tmp root", 
 
     const text = readLearnings("applied-ai", { root });
     assert.equal(countEntries(text), 2);
-    assert.match(text, /## 2026-06-13 — first/);
-    assert.match(text, /## 2026-06-14 — second/);
+    assert.match(text, /## 2026-06-13: first/);
+    assert.match(text, /## 2026-06-14: second/);
 
     const list = listLearnings({ root });
     assert.equal(list.length, 1);

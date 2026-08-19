@@ -52,18 +52,18 @@ function statusEventShape(status, company) {
   if (/interview|screen|onsite|panel|final|loop/.test(s)) {
     return {
       type: "interview",
-      title: `Interview stage — ${company}`,
+      title: `Interview stage: ${company}`,
       summary: "Advanced past application.",
     };
   }
   if (/offer|accepted|signed|hired/.test(s)) {
-    return { type: "offer", title: `Offer — ${company}`, summary: "Reached the offer stage." };
+    return { type: "offer", title: `Offer: ${company}`, summary: "Reached the offer stage." };
   }
   if (/withdraw/.test(s)) {
     return {
       type: "status_change",
       tone: "neutral",
-      title: `Withdrew — ${company}`,
+      title: `Withdrew: ${company}`,
       summary: "Candidate withdrew from consideration.",
     };
   }
@@ -71,7 +71,7 @@ function statusEventShape(status, company) {
     return {
       type: "status_change",
       tone: "warning",
-      title: `Closed — ${company}`,
+      title: `Closed: ${company}`,
       summary: "No longer moving forward.",
     };
   }
@@ -79,8 +79,8 @@ function statusEventShape(status, company) {
     return {
       type: "failure",
       needsUser: true,
-      title: `Blocked — ${company}`,
-      summary: "Application blocked — needs a manual step.",
+      title: `Blocked: ${company}`,
+      summary: "Application blocked, needs a manual step.",
     };
   }
   return null;
@@ -103,7 +103,7 @@ export function deriveActivityEvents(trackerData, { limit = 60 } = {}) {
         type: "applied",
         actor: "agent",
         at: appliedIso,
-        title: `Submitted application — ${company}`,
+        title: `Submitted application: ${company}`,
         summary:
           [app.role, app.channel ? `via ${app.channel}` : null].filter(Boolean).join(" · ") || null,
         refs,
@@ -178,7 +178,7 @@ export function deriveActivityEvents(trackerData, { limit = 60 } = {}) {
       type: "drafted",
       actor: "agent",
       at: dateSource,
-      title: `Drafted reply — ${company}`,
+      title: `Drafted reply: ${company}`,
       summary: comm.draft.subject || comm.summary || null,
       needsUser: false,
       refs: {
@@ -213,7 +213,7 @@ export function deriveActivityEvents(trackerData, { limit = 60 } = {}) {
         type: isOutboundDraft ? "drafted" : "message",
         actor: "agent",
         at: iso,
-        title: isOutboundDraft ? `Drafted reply — ${company}` : `Sent — ${company}`,
+        title: isOutboundDraft ? `Drafted reply: ${company}` : `Sent: ${company}`,
         summary: m.summary || m.subject || null,
         needsUser: false,
         refs: commRefs,
