@@ -29,10 +29,11 @@ import {
   nativeTheme,
   shell,
 } from "electron";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { get as httpGet } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { writeFileAtomic } from "./atomic-write.mjs";
 import { chooseDesktopRoute } from "./desktop-routing.mjs";
 import {
   choosePreferredPort,
@@ -351,6 +352,13 @@ function updateStateFilePath() {
   return join(updateStateDir, UPDATE_STATE_FILE);
 }
 
+// DEFAULT_UPDATE_STATE.enabled is true, so a missing or unreadable state
+// file reads as "checks on". persistUpdateState() below writes atomically
+// specifically so this file only ever ends up missing/corrupt from something
+// outside this app's own write path (disk full mid-rename, the data root
+// deleted out from under it, etc.), never from this app's own write being
+// interrupted. That residual case still opts the user back in; there is no
+// state to recover an explicit "off" from once the file itself is gone.
 function loadUpdateState() {
   try {
     const raw = JSON.parse(readFileSync(updateStateFilePath(), "utf8"));
@@ -362,11 +370,15 @@ function loadUpdateState() {
 
 // Best-effort: a write failure here (e.g. a read-only data root) must never
 // crash the app or surface to the user. Worst case, the next launch simply
-// re-checks sooner than the 24h interval intends.
+// re-checks sooner than the 24h interval intends. Uses writeFileAtomic
+// (temp file + rename) rather than a direct writeFileSync, which truncates
+// the target before writing: a process death mid-write would otherwise leave
+// a corrupt or empty file, and loadUpdateState()'s catch above falls back to
+// DEFAULT_UPDATE_STATE (enabled: true), silently opting a user back into
+// checks after they had turned them off.
 function persistUpdateState(state) {
   try {
-    mkdirSync(updateStateDir, { recursive: true });
-    writeFileSync(updateStateFilePath(), `${JSON.stringify(state)}\n`);
+    writeFileAtomic(updateStateFilePath(), `${JSON.stringify(state)}\n`);
   } catch (err) {
     log(`update-check state write failed: ${err.message}`);
   }
