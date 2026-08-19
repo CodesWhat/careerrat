@@ -7248,10 +7248,55 @@ button.chip {
 
 .onboarding-loading {
   flex: 1;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   color: var(--ink-faint);
   font-size: 14px;
+}
+
+.onboarding-loading__icon {
+  font-size: 40px;
+  line-height: 1;
+  animation: onboarding-loading-tumble 2.4s ease-in-out infinite;
+}
+
+.onboarding-loading__text {
+  margin: 0;
+}
+
+.onboarding-loading__hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-faint-2);
+}
+
+@keyframes onboarding-loading-tumble {
+  0%,
+  12% {
+    transform: rotateY(0deg) translateY(0);
+  }
+
+  50% {
+    transform: rotateY(180deg) translateY(-6px);
+  }
+
+  88%,
+  100% {
+    transform: rotateY(360deg) translateY(0);
+  }
+}
+
+/* Positioned right after the rule it overrides (not folded into the
+ * centralized reduced-motion block above, which sits earlier in the
+ * file and would otherwise lose the cascade tiebreak to this later,
+ * equal-specificity .onboarding-loading__icon rule). */
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-loading__icon {
+    animation: none;
+  }
 }
 
 /* Engine gate/picker — frames 3f (2+ ready) and 3d (0 ready). */
