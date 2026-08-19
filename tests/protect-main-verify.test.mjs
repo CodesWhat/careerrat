@@ -27,6 +27,21 @@ const FIXTURE = fileURLToPath(
 
 const MATCHING = readFileSync(FIXTURE, "utf8");
 
+// compare_ruleset() shells out to jq (canonicalize() is `jq -S ...`), so every
+// test below needs jq on PATH to run at all. Detect presence rather than
+// assume it: this only checks whether the binary exists (`which`), it never
+// invokes jq's functionality from the test itself. Skip honestly instead of
+// failing red on environments without jq installed.
+const HAS_JQ = (() => {
+  try {
+    execFileSync("which", ["jq"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+const JQ_SKIP = HAS_JQ ? false : "requires jq on PATH (compare_ruleset() shells out to it)";
+
 // Source the script (loading DESIRED + the functions, running nothing) and call
 // compare_ruleset with the given JSON on stdin. Returns the exit status plus
 // both streams, since the pass path writes to stdout and every drift report
@@ -74,7 +89,7 @@ function setChecks(ruleset, next) {
     next;
 }
 
-test("a ruleset matching the file passes and names every enforced check", () => {
+test("a ruleset matching the file passes and names every enforced check", { skip: JQ_SKIP }, () => {
   const { status, stdout } = compare(MATCHING);
   assert.equal(status, 0);
   assert.match(stdout, /live protection on .* matches/);
@@ -83,7 +98,9 @@ test("a ruleset matching the file passes and names every enforced check", () => 
   assert.match(stdout, /analyze \(javascript-typescript\)/);
 });
 
-test("a required check removed live is reported as protection weaker than the file claims", () => {
+test("a required check removed live is reported as protection weaker than the file claims", {
+  skip: JQ_SKIP,
+}, () => {
   const { status, stderr } = compare(
     mutate((rs, at) =>
       setChecks(
@@ -97,7 +114,9 @@ test("a required check removed live is reported as protection weaker than the fi
   assert.match(stderr, /DECLARED HERE BUT NOT ENFORCED LIVE[\s\S]*- knip/);
 });
 
-test("a check enforced live but absent from the file warns that re-creating would remove it", () => {
+test("a check enforced live but absent from the file warns that re-creating would remove it", {
+  skip: JQ_SKIP,
+}, () => {
   // The portwing failure this guard was written for: the file declares FEWER
   // gates than are live, so re-applying it silently drops the difference.
   const { status, stderr } = compare(
@@ -107,7 +126,7 @@ test("a check enforced live but absent from the file warns that re-creating woul
   assert.match(stderr, /would REMOVE these[\s\S]*- CodeQL/);
 });
 
-test("enforcement downgraded from active to evaluate is drift", () => {
+test("enforcement downgraded from active to evaluate is drift", { skip: JQ_SKIP }, () => {
   const { status, stderr } = compare(
     mutate((rs) => {
       rs.enforcement = "evaluate";
@@ -118,7 +137,7 @@ test("enforcement downgraded from active to evaluate is drift", () => {
   assert.match(stderr, /"enforcement": "evaluate"/);
 });
 
-test("required approvals dropped from 2 to 1 is drift", () => {
+test("required approvals dropped from 2 to 1 is drift", { skip: JQ_SKIP }, () => {
   const { status, stderr } = compare(
     mutate((_rs, at) => {
       at.rule("pull_request").parameters.required_approving_review_count = 1;
@@ -129,7 +148,7 @@ test("required approvals dropped from 2 to 1 is drift", () => {
   assert.match(stderr, /"required_approving_review_count": 1/);
 });
 
-test("a bypass actor added live is drift", () => {
+test("a bypass actor added live is drift", { skip: JQ_SKIP }, () => {
   // Nobody is allowed to bypass. An actor appearing here is the quietest way
   // for protection to stop meaning anything, since every rule still reads as
   // enabled.
@@ -143,7 +162,7 @@ test("a bypass actor added live is drift", () => {
   assert.match(stderr, /OrganizationAdmin/);
 });
 
-test("server-populated no-op defaults are not reported as drift", () => {
+test("server-populated no-op defaults are not reported as drift", { skip: JQ_SKIP }, () => {
   // The API returns `required_reviewers: []` and a disabled
   // `dismissal_restriction` on every GET whether or not anything set them.
   // Comparing those raw reports drift on a byte-correct ruleset, and a guard
@@ -158,9 +177,36 @@ test("server-populated no-op defaults are not reported as drift", () => {
   assert.equal(status, 0);
 });
 
-test("required checks in a different order are not drift", () => {
+test("required checks in a different order are not drift", { skip: JQ_SKIP }, () => {
   // Ordering is not meaningful to GitHub and does vary between the API's
   // response and the file. Only membership matters.
   const { status } = compare(mutate((rs, at) => setChecks(rs, [...at.checks()].reverse())));
   assert.equal(status, 0);
+});
+
+test("a drift report reaches the remediation advice, not just the diff", { skip: JQ_SKIP }, () => {
+  // This asserts on output printed AFTER the `diff | sed` pipeline, which is
+  // the whole point. The script runs under `set -euo pipefail`, and diff exits
+  // 1 whenever the inputs differ, which on this code path is guaranteed. So
+  // the pipeline's status was 1, set -e fired, and compare_ruleset died right
+  // after printing the diff, swallowing everything below it.
+  //
+  // The swallowed text is the part that matters most: it's the warning NOT to
+  // delete the ruleset and re-create it, which drops main to zero protection
+  // and restores only what this file happens to declare. The guard was
+  // withholding its most dangerous-action warning at exactly the moment it
+  // fired. Every other test here asserts on text printed BEFORE the diff,
+  // which is why they all passed while this was broken.
+  const { status, stderr } = compare(
+    mutate((rs, at) =>
+      setChecks(
+        rs,
+        at.checks().filter((c) => c.context !== "knip")
+      )
+    )
+  );
+  assert.equal(status, 1);
+  assert.match(stderr, /full diff/);
+  assert.match(stderr, /Do NOT delete the ruleset/);
+  assert.match(stderr, /rulesets\/\{id\}\/history/);
 });

@@ -219,7 +219,17 @@ compare_ruleset() {
 	fi
 
 	echo "  full diff (< this file, > live):" >&2
-	diff <(printf '%s\n' "$want") <(printf '%s\n' "$got") | sed 's/^/    /' >&2
+	# diff exits 1 when its inputs differ, which is guaranteed here (that's why this
+	# branch is running at all), and pipefail is on, so a bare pipeline would trip
+	# set -e and cut off the remediation text below before it ever prints. Wrapping
+	# it as an if-condition keeps that exit off the script's back; only diff crashing
+	# outright (rc > 1) or sed itself failing is treated as a real error.
+	if ! diff <(printf '%s\n' "$want") <(printf '%s\n' "$got") | sed 's/^/    /' >&2; then
+		local diff_rc=${PIPESTATUS[0]} sed_rc=${PIPESTATUS[1]}
+		if [ "$diff_rc" -gt 1 ] || [ "$sed_rc" -ne 0 ]; then
+			echo "  (could not render the diff: diff rc=$diff_rc, sed rc=$sed_rc)" >&2
+		fi
+	fi
 	echo >&2
 	echo "  Reconcile by hand. Do NOT delete the ruleset to re-create it: that drops main to" >&2
 	echo "  zero protection, and the re-create restores only what this file declares." >&2
@@ -239,10 +249,25 @@ if [ "$VERIFY_ONLY" = 1 ]; then
 	exit $?
 fi
 
-if live_ruleset >/dev/null 2>&1; then
+# live_ruleset's three exit codes matter here: 0 means create must not run (an
+# existing ruleset would be silently replaced), 1 is the only code that actually
+# licenses a create, and 2 (lookup failed) must not be treated as "absent" or
+# this is the exact overwrite-what-you-can't-see failure this script exists to
+# prevent.
+live_rc=0
+live_ruleset >/dev/null 2>&1 || live_rc=$?
+
+if [ "$live_rc" = 0 ]; then
 	echo "→ a '$RULESET_NAME' ruleset already exists on $REPO — verifying instead of applying."
 	verify
 	exit $?
+fi
+
+if [ "$live_rc" != 1 ]; then
+	echo "✗ couldn't read the ruleset list for $REPO — this says nothing about whether" >&2
+	echo "  main is protected, only that the check didn't run. Fix auth/network and re-run:" >&2
+	echo "    gh auth status" >&2
+	exit 1
 fi
 
 printf '%s' "$DESIRED" | gh api -X POST "repos/$REPO/rulesets" --input -
