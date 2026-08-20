@@ -465,6 +465,10 @@ issue for the detail; this section owns the sequencing and the reason.
 Lanes 1 through 3 are file-disjoint and run in parallel. Lane 4 runs last on purpose: it edits
 files across every other lane, so running it concurrently buys nothing but merge conflicts.
 
+**All four lanes closed on August 20, 2026.** What actually happened is below each lane, because
+the gap between what a queue item predicted and what the work turned out to be is the part worth
+keeping. Three of the four were not where the issue text pointed.
+
 1. **Ask error handling** ([#88](https://github.com/CodesWhat/careerrat/issues/88),
    [#86](https://github.com/CodesWhat/careerrat/issues/86)). Two bugs on the daily surface.
    #88: a deliberate server-side refusal ("only pending supported ATS proposals can be approved")
@@ -474,20 +478,86 @@ files across every other lane, so running it concurrently buys nothing but merge
    `workspace/tracker.json`, and the resulting 401 collapses an entire in-progress review card,
    discarding the other pending recommendations and the Finish-review button. A page reload
    recovers, which is the tell that only the credential was stale and the state was fine.
+
+   **Landed in [#127](https://github.com/CodesWhat/careerrat/pull/127).** #88 was not a banner
+   bug. The server already put the specific message on the wire and propagated the 422 correctly.
+   The defect was one field: `assertApprovalAllowed` threw with the shared `VALIDATION_FAILED`
+   code, which the same file uses for ordinary schema checks, so `errorCopy.js` had nothing
+   specific to match on. It deliberately never shows raw server strings as the primary message,
+   so the refusal fell through to the generic text. The refusals now carry
+   `COMPANY_PROPOSAL_NOT_APPROVABLE`. #86 was two independent frontend defects, one per fix
+   direction on the issue: no retry path existed at all, and `commitAction` overwrote the turn
+   slot at the start of the request so the error branch returned before the artifact render.
+   Found on the way out: the two onboarding surfaces call the same endpoint with no catch at all,
+   so they can't reach even the generic banner
+   ([#128](https://github.com/CodesWhat/careerrat/issues/128)).
 2. **Multi-step ATS advancement.** The last `partial` row in the skill audit. Easy Apply is
    covered; other paginated ATS wizards are not. The interesting problem is confirming you
    actually advanced a step rather than seeing the page re-render, which is the same trap #112
    hit in the small when a combobox confirmed selection by reading back text the code had typed
    itself. The manual Submit boundary and verified-only Applied write-back are non-negotiable.
+
+   **Landed in [#129](https://github.com/CodesWhat/careerrat/pull/129).** One loop now runs for
+   every provider; a single-page form falls out of it naturally when no advance button is found.
+   The re-render trap was the predicted problem and it was the easy half. The two real hazards
+   only appeared once the loop stopped being LinkedIn-only. First, the advance labels include the
+   bare word "continue", so "Continue with LinkedIn" matched, wasn't disqualified by the
+   submit/send tokens, and would have driven a supervised browser onto a third-party auth page.
+   Second, label matching cannot see where a button goes, and the fingerprint check passes for
+   any page change including a navigation off the application entirely, so the loop now blocks
+   when the hostname changes across an advance click. Both were found by reading the generalized
+   code, not in the field. The `apply-job` row moves from `partial` to `native`.
 3. **Standards adoption** ([#73](https://github.com/CodesWhat/careerrat/issues/73)). npm build
    provenance, signed release tags via a tag ruleset (commit signing deliberately not required),
    and the README community routing sentence. Item 3 of that issue, making the full test suite a
    required gate, already landed early in #123 and closes without further work.
+
+   **Landed in [#126](https://github.com/CodesWhat/careerrat/pull/126).** `scripts/protect-tags.sh`
+   mirrors `protect-main.sh`, including the three-way `live_ruleset` exit split (found, absent,
+   lookup failed) so a network blip never announces that tags are unprotected, and the #114
+   pipefail fix so the drift diff can't kill the remediation text. Applied live: ruleset
+   `21092221` blocks deletion, update, and non-fast-forward on `refs/tags/v*` with no bypass
+   actors. `required_signatures` is deliberately absent, matching the ops standards walk-back of
+   2026-08-17: Actions-minted tags cannot carry verifiable signatures without real key
+   management, and the Cosign artifact chain is the signature of record.
+
+   Neither protect script runs automatically. Both are manual, so drift is caught only when
+   someone remembers to run them. A scheduled verify needs a credential with admin read on the
+   rulesets API, which is a secret-management decision rather than a thing to add quietly.
 4. **Knip backlog** ([#81](https://github.com/CodesWhat/careerrat/issues/81)). The `--max-issues`
    ratchet sits at 170 and hides new dead code behind existing debt. One unused file, four unused
    dependencies, one duplicate export alias pair, and 164 unused exports that mostly want
    de-exporting rather than deleting. Target is a ratchet of 0 and a plain `npx knip` gate. **The
    ratchet goes down, never up.**
+
+   **Landed in [#130](https://github.com/CodesWhat/careerrat/pull/130) through
+   [#133](https://github.com/CodesWhat/careerrat/pull/133), ratchet lowered in
+   [#135](https://github.com/CodesWhat/careerrat/pull/135): 170 to 44.** Split into four
+   file-disjoint lanes. The unused file, the duplicate alias, and 123 exports are gone, including
+   500 dead lines in `tracker/dashboard.mjs` (four builders with no caller anywhere, in a file
+   with twenty-plus importers).
+
+   The target of 0 was wrong, and that is the useful finding. The 44 that remain are not debt.
+   Four are fontsource packages both Next apps load by raw file path through `next/font/local`,
+   which knip cannot see and which break the typeface silently if removed, exactly the trap #81
+   warned about. The other 40 are exports named by a skill, doc, comment, or dynamic import with
+   no JS importer: `SAFE_EXTERNAL_PROTOCOLS`, the SSRF guards in `public-http-fetch.mjs`,
+   `RECRUITER_FARM_PHRASES`, `ATS_ROUND_RULES`, and the 14 `api.js` client functions that turned
+   out to be an unwired feature surface rather than dead code
+   ([#134](https://github.com/CodesWhat/careerrat/issues/134)). Six of those are the client half
+   of `company-health` and the research flows, all with live backend routes and no UI that calls
+   them.
+
+   So reaching 0 means teaching knip about those references, not deleting them. Anyone who closes
+   the gap the other way has made the number prettier and the product worse. That reasoning is in
+   the workflow comment, not just here, because the ratchet is where the temptation lives.
+
+**Two things the queue surfaced that are not lanes.** The `tests` gate went required on
+2026-08-20 and immediately flaked on the db-concurrency test, which now means a flaky merge gate
+([#136](https://github.com/CodesWhat/careerrat/issues/136)). And the `ci-verify.yml` header
+claimed `qlty` and `knip` did not gate merges when both are required contexts, which is the exact
+failure that same comment warns about two lines later. Prose has no drift guard. Fixed in #135,
+which now tells the next reader to re-read the live ruleset instead of trusting the paragraph.
 
 ### Skill-to-screen product coherence gate (active August 14, 2026)
 
