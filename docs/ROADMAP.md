@@ -296,7 +296,7 @@ nurse, a driver, and an engineer each bring their own config.
   still needed to unlock gating and applying (with per-item hints), and gets out of the way
   once setup is complete.
 
-## Release status (v0.10.0, updated August 19, 2026)
+## Release status (v0.10.0, updated August 20, 2026)
 
 **v0.10.0 is released and published.** npm `dist-tags.latest` is `0.10.0`. The
 GitHub release `v0.10.0` carries a signed, notarized, stapled
@@ -306,17 +306,16 @@ root is the per-release record from here on.
 
 Version drift now has a guard. `tests/release-consistency.test.mjs` checks that
 `package.json`, `apps/desktop/package.json`, and the newest `CHANGELOG.md`
-heading agree, and it is named in `ci-verify.yml`'s explicit test list so it
-actually runs on every PR. That list is explicit on purpose, since the full
-suite is intentionally red during pre-launch churn, so a new test file does
-nothing until it is added there.
+heading agree. It runs both in `ci-verify.yml`'s fast `structure-guards` subset
+and in the full `tests` job, and both are required contexts, so it cannot be
+skipped.
 
-A Homebrew cask now exists, `brew install --cask codeswhat/tap/careerrat`, but it
-is pending review as PR #4 on `CodesWhat/homebrew-tap`, not yet available. The
-cask is hand-maintained: careerrat has no cask generator script (idlescreen has
-`scripts/generate-homebrew-cask.sh`; careerrat does not). This is a known gap.
-Every release currently requires hand-editing the cask's `version` and `sha256`
-and opening a tap PR.
+A Homebrew cask now exists and is available: `brew install --cask
+codeswhat/tap/careerrat`. PR #4 on `CodesWhat/homebrew-tap` merged August 19,
+2026. The cask is hand-maintained: careerrat has no cask generator script
+(idlescreen has `scripts/generate-homebrew-cask.sh`; careerrat does not). This
+is a known gap. Every release currently requires hand-editing the cask's
+`version` and `sha256` and opening a tap PR.
 
 Stale branch cleanup is done. `origin` is now just `main`. The branches
 `fix/v0.7-publish`, `dev/v0.7`, `archive/dev-2026-07`, and
@@ -326,6 +325,35 @@ absent from main (the 0.5.2 one is still permanently reachable via tag
 
 A local-only branch `backup/pre-public-history` was deliberately kept. It holds
 pre-scrub history containing owner PII and must never be pushed or deleted.
+
+### Landed on main since v0.10.0
+
+Sixteen PRs, all merged, `origin` back to just `main` with every branch and worktree
+cleaned up. Nothing is open.
+
+- **#106, #112**: Playwright live harness, then custom combobox dropdowns in
+  `playwright-ops`. The dropdown fix closes two real traps: an empty target value used
+  to fall through to substring matching and click whichever option happened to be
+  first, and a type-to-populate control could not be verified by reading its display
+  value back, because the code had already typed the target text into the box itself.
+  Selection is now confirmed by the display value *changing* or the option list
+  closing, never by matching text the code put there.
+- **#108**: the extension provider stops claiming automatic-apply support it does not
+  have. `automaticApplyGap()` in `src/core/automation/session.mjs` is the single
+  core-layer verdict; the CLI and the executor factory both format that one result
+  instead of each carrying their own wording, which is how the two messages drifted
+  apart. It deliberately never names a replacement provider.
+- **#109, #123**: the full test suite runs in CI, then becomes a required context.
+- **#110, #113, #116, #118**: update-check race, lockfile version drift plus a guard,
+  AskBar comp-intent classification, and copy-format compatibility.
+- **#114**: `protect-main.sh` fails on drift between the file and the live ruleset,
+  and actually prints its remediation advice when it does.
+- **#117 split into #118 through #121**: the em-dash sweep across user-facing CLI,
+  core, provider, and app copy. Comments and LLM prompt strings keep theirs; the ban
+  is on copy a person reads.
+- **#122**: the old phase-tracking planning scaffolding is gone, 225 files, including
+  `.planning/phases/` and `STATE.md`. `QA-ACCEPTANCE.md`, `architecture/`, and
+  `archive/mockups/` stayed, the last two because tests read them.
 
 ### Picking this up cold
 
@@ -346,22 +374,27 @@ Open work, none of it blocking the release:
   message. That was wrong: it was the quota (`upgradeToPro=build-rate-limit`), and
   the in-repo `web-build` job was green throughout. The `dependency-review` blip
   cleared on its own. #76 did need a Renovate rebase after #75 merged.
-- **CI does not run the test suite, and a dependency bump broke `main` because of
-  it.** `ci-verify.yml` deliberately runs only the structure guards, since the full
-  suite is expected to be red during pre-launch churn. But `lefthook`'s pre-push hook
-  *does* run the full suite, so when Renovate #76 bumped `posthog-js` past a version
-  literal asserted in `tests/website-copy.test.mjs`, CI stayed green while every
-  push from a clean checkout started failing. Fixed in #102 by asserting the pin's
-  *shape* rather than one literal version. Worth knowing generally: **a green CI on
-  this repo does not mean the tests pass.** Until the suite is hardened at go-live,
-  the pre-push hook is the only thing running it.
-- **Two PRs merged without a CodeRabbit pass.** #77 (an `actions/setup-node` bump)
-  landed on CI gates alone, and #76 never got one either. Re-review if you want the
+- **CI runs the full test suite, and it gates.** This used to be the biggest hole in
+  the repo: `ci-verify.yml` ran only the structure guards, so when Renovate #76
+  bumped `posthog-js` past a version literal asserted in `tests/website-copy.test.mjs`,
+  CI stayed green while every push from a clean checkout started failing (fixed in
+  #102 by asserting the pin's *shape* rather than one literal version). The old
+  warning here read "a green CI on this repo does not mean the tests pass." **That is
+  no longer true.** #109 added the `tests` job running `npm test`, #119 fixed the
+  flaky SSE watcher test that made requiring it unsafe, and #123 promoted `tests` to
+  a required status context in both `scripts/protect-main.sh` and the live ruleset.
+  The pre-push hook is no longer the only thing running the suite.
+- **A batch of PRs merged without a CodeRabbit pass.** #77 and #76 landed on CI gates
+  alone. So did #108, #109, #112, #114, #119, #120, #121, #122, and #123, which were
+  merged on August 19 to 20 after the shared CodeRabbit budget ran out for the period
+  (it resets September 1). Each of those got an agent review pass instead, with the
+  findings and the trace posted on the PR. Re-review if you want the
   every-change-reviewed rule held to the letter.
-- **QA re-runs are owed** for `research-company`, `research-comp`, and
-  `research-boards`, plus the `discover-companies` fourth leg, now that the fixes
-  they were blocked on have shipped (#84, #92, #93). G-09 remains a product decision
-  for Scott, not an engineering task.
+- **QA re-runs are done.** `research-company`, `research-comp`, `research-boards`, and
+  the `discover-companies` fourth leg were all re-run August 19, 2026 against a live
+  installed Claude Code CLI runtime, with every write confirmed in durable storage and
+  verified across a server restart. The record is in `.planning/QA-ACCEPTANCE.md`.
+  G-09 remains a product decision for Scott, not an engineering task.
 - **Security hardening still staged:** harden-runner is in `audit` mode across
   workflows and `block` is the target once observed endpoints are allowlisted.
   Signed tags plus npm attestations and SBOM are tracked in #73.
@@ -387,13 +420,35 @@ findings and the PR lane independently returned 4 more that the CLI missed, incl
 a non-atomic state write that would silently re-enable a feature the user had turned
 off. On a change where correctness matters, running both is not redundant.
 
+The CLI paces better than the PR bot on the same budget: it reports "3 included
+reviews currently available" with a 20-minute wait, against the bot's roughly one
+review every 34 minutes. It also reviews `package-lock.json`, which the bot's path
+filter drops. Two traps when checking whether a review actually landed:
+`gh pr view --json comments` reports the author as `coderabbitai` while the REST API
+reports `coderabbitai[bot]`, so filtering on the wrong one silently returns nothing;
+and the only reliable marker of a real review in the body is `walkthrough_start`.
+"Actionable comments posted" never appears, and "rate limit" matches inside real
+reviews too, from the tips block.
+
+**The budget is exhausted for this period and resets September 1, 2026.** Everything
+merged after August 19 went through an agent review pass instead.
+
 ### Gating posture
 
-`main`'s ruleset now requires eight status contexts, promoted from `structure-guards`
-alone in #96: `structure-guards`, `gitleaks`, `zizmor`, `actionlint`,
-`analyze (javascript-typescript)`, `dependency-review`, `qlty`, and `knip`. Two
-failures are expected and never gate: `qlty check` (Qlty Cloud minutes, distinct from
-the in-repo `qlty` job) and `Vercel` (deploy quota). Any other red is real.
+`main`'s ruleset now requires nine status contexts: the eight promoted from
+`structure-guards` alone in #96 (`structure-guards`, `gitleaks`, `zizmor`,
+`actionlint`, `analyze (javascript-typescript)`, `dependency-review`, `qlty`, `knip`)
+plus `tests`, promoted in #123. Two failures are expected and never gate:
+`qlty check` (Qlty Cloud minutes, distinct from the in-repo `qlty` job) and `Vercel`
+(deploy quota). Any other red is real.
+
+`scripts/protect-main.sh` declares that set and `--verify` compares it against the
+live ruleset. Since #114 that comparison is trustworthy: the drift report used to die
+mid-print, because `diff | sed` under `set -euo pipefail` returns non-zero whenever
+the inputs differ, so `set -e` killed the function right after the diff and swallowed
+the remediation block, including the warning not to delete and re-create the ruleset.
+Never toggle, disable, or weaken protection to land something. Clear
+`REVIEW_REQUIRED` by approving with a non-author account instead.
 
 ## In progress / up next
 
