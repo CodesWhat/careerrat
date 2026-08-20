@@ -521,9 +521,18 @@ keeping. Three of the four were not where the issue text pointed.
    2026-08-17: Actions-minted tags cannot carry verifiable signatures without real key
    management, and the Cosign artifact chain is the signature of record.
 
-   Neither protect script runs automatically. Both are manual, so drift is caught only when
-   someone remembers to run them. A scheduled verify needs a credential with admin read on the
-   rulesets API, which is a secret-management decision rather than a thing to add quietly.
+   Both scripts now run weekly from `.github/workflows/quality-ruleset-drift.yml`, plus on
+   demand via `workflow_dispatch`. Non-gating on purpose: it never runs on a pull request, so a
+   credential blip or real drift can't freeze a contributor's merge.
+
+   This was first recorded here as blocked on "a credential with admin read on the rulesets
+   API", and that was wrong. Rulesets are world-readable on a public repo, verified against this
+   one with an unauthenticated request that returned the full rule list, so the default
+   `GITHUB_TOKEN` is more than enough and no secret is stored. The false trail was assuming a
+   permission scope existed: `administration` is not available to `GITHUB_TOKEN` at all, and
+   actionlint rejects it outright. Worth remembering as a pattern, since the gap sat open on a
+   guess about an API nobody had actually called. This does depend on the repo staying public;
+   going private turns it back into a credential problem.
 4. **Knip backlog** ([#81](https://github.com/CodesWhat/careerrat/issues/81)). The `--max-issues`
    ratchet sits at 170 and hides new dead code behind existing debt. One unused file, four unused
    dependencies, one duplicate export alias pair, and 164 unused exports that mostly want
