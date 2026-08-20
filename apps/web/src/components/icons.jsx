@@ -26,23 +26,7 @@ function Svg({ children, ...rest }) {
   );
 }
 
-function FilledSvg({ children, ...rest }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="1em"
-      height="1em"
-      fill="currentColor"
-      aria-hidden="true"
-      focusable="false"
-      {...rest}
-    >
-      {children}
-    </svg>
-  );
-}
-
-export function HomeIcon(props) {
+function HomeIcon(props) {
   return (
     <Svg {...props}>
       <path d="M3 11.5 12 4l9 7.5" />
@@ -60,88 +44,11 @@ export function SettingsIcon(props) {
   );
 }
 
-export function OnboardingIcon(props) {
-  return (
-    <Svg {...props}>
-      <path d="M5 4h9l5 5v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z" />
-      <path d="M14 4v5h5" />
-      <path d="M8.5 13.5h7M8.5 17h5" />
-    </Svg>
-  );
-}
-
-export function JobsIcon(props) {
-  return (
-    <Svg {...props}>
-      <rect x="3.5" y="7.5" width="17" height="12" rx="1.5" />
-      <path d="M8 7.5V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v1.5" />
-      <path d="M3.5 12.5h17" />
-    </Svg>
-  );
-}
-
-export function LibraryIcon(props) {
-  return (
-    <Svg {...props}>
-      <path d="M4.5 4.5h5.5v15H4.5z" />
-      <path d="M13.2 5.1l5 1.4-3.9 14.5-5-1.4z" />
-    </Svg>
-  );
-}
-
-export function NetworkIcon(props) {
-  return (
-    <Svg {...props}>
-      <circle cx="6" cy="6" r="2.4" />
-      <circle cx="18" cy="8" r="2.4" />
-      <circle cx="10" cy="18" r="2.4" />
-      <path d="M8.3 6.9l7.4 0.7M6.8 8.2l2.4 7.5M16.6 10.1l-5 6" />
-    </Svg>
-  );
-}
-
-export function LinkedInIcon(props) {
-  return (
-    <FilledSvg {...props}>
-      <path d="M6.7 8.6H3.8v10.7h2.9V8.6ZM5.2 7.1a1.7 1.7 0 1 0 0-3.4 1.7 1.7 0 0 0 0 3.4ZM9 8.6h2.8v1.5h.04c.4-.8 1.4-1.8 2.9-1.8 3.1 0 3.7 2 3.7 4.7v6.3h-2.9v-5.6c0-1.4 0-3.1-1.9-3.1s-2.2 1.5-2.2 3v5.7H9V8.6Z" />
-    </FilledSvg>
-  );
-}
-
-export function GitHubIcon(props) {
-  return (
-    <FilledSvg {...props}>
-      <path d="M12 2.4A9.7 9.7 0 0 0 8.9 21c.48.09.66-.2.66-.46v-1.7c-2.69.58-3.26-1.14-3.26-1.14-.44-1.12-1.07-1.42-1.07-1.42-.88-.6.07-.59.07-.59.97.07 1.48 1 1.48 1 .86 1.48 2.27 1.05 2.82.8.09-.63.34-1.05.61-1.3-2.14-.24-4.4-1.07-4.4-4.78 0-1.05.38-1.92 1-2.6-.1-.24-.43-1.23.1-2.56 0 0 .81-.26 2.67.99a9.1 9.1 0 0 1 4.86 0c1.85-1.25 2.66-.99 2.66-.99.53 1.33.2 2.32.1 2.56.62.68 1 1.55 1 2.6 0 3.72-2.26 4.54-4.41 4.78.35.3.66.89.66 1.8v2.55c0 .26.18.55.67.46A9.7 9.7 0 0 0 12 2.4Z" />
-    </FilledSvg>
-  );
-}
-
-export function GlobeIcon(props) {
-  return (
-    <Svg {...props}>
-      <circle cx="12" cy="12" r="8.5" />
-      <path d="M3.8 12h16.4" />
-      <path d="M12 3.5c2.2 2.3 3.3 5.1 3.3 8.5s-1.1 6.2-3.3 8.5" />
-      <path d="M12 3.5C9.8 5.8 8.7 8.6 8.7 12s1.1 6.2 3.3 8.5" />
-    </Svg>
-  );
-}
-
 export function CalendarIcon(props) {
   return (
     <Svg {...props}>
       <rect x="3.5" y="5" width="17" height="15.5" rx="1.5" />
       <path d="M3.5 9.5h17M8 3.5v3M16 3.5v3" />
-    </Svg>
-  );
-}
-
-// M9 — the docked capture bar + /inbox nav entry.
-export function InboxIcon(props) {
-  return (
-    <Svg {...props}>
-      <path d="M3.5 12.5h5l1.8 3h3.4l1.8-3h5" />
-      <path d="M5.5 6.5h13l2 6v6.5a1.5 1.5 0 0 1-1.5 1.5h-14A1.5 1.5 0 0 1 3.5 19V12.5z" />
     </Svg>
   );
 }
@@ -199,30 +106,6 @@ export function PaperclipIcon(props) {
   );
 }
 
-export function PencilIcon(props) {
-  return (
-    <Svg {...props}>
-      <path d="M4.5 19.5 8 18.7 18.7 8a2.1 2.1 0 0 0-3-3L5 15.7Z" />
-      <path d="m14.5 6.2 3.3 3.3" />
-    </Svg>
-  );
-}
-
-export function MagicWandIcon(props) {
-  return (
-    <Svg {...props}>
-      <path d="m5 19 9.5-9.5" />
-      <path d="m12.8 7.8 3.4 3.4" />
-      <path d="M18.5 4.5v2.2" />
-      <path d="M17.4 5.6h2.2" />
-      <path d="M8.2 4.2v1.8" />
-      <path d="M7.3 5.1h1.8" />
-      <path d="M19.4 14.2v1.8" />
-      <path d="M18.5 15.1h1.8" />
-    </Svg>
-  );
-}
-
 export function InfoIcon(props) {
   return (
     <Svg {...props}>
@@ -263,7 +146,7 @@ export function BellIcon(props) {
   );
 }
 
-export function SendIcon(props) {
+function SendIcon(props) {
   return (
     <Svg {...props}>
       <path d="M4.5 12.5 20 4l-8.5 15.5-2-6.5-6.5-2Z" />
@@ -280,7 +163,7 @@ export function StarIcon(props) {
   );
 }
 
-export function FlagIcon(props) {
+function FlagIcon(props) {
   return (
     <Svg {...props}>
       <path d="M6 20V4" />
@@ -289,7 +172,7 @@ export function FlagIcon(props) {
   );
 }
 
-export function PhoneIcon(props) {
+function PhoneIcon(props) {
   return (
     <Svg {...props}>
       <path d="M6 3.5h3l1.5 4-2 1.5a11 11 0 0 0 5 5l1.5-2 4 1.5v3a1.5 1.5 0 0 1-1.6 1.5A16.5 16.5 0 0 1 4.5 5.1 1.5 1.5 0 0 1 6 3.5Z" />
@@ -297,7 +180,7 @@ export function PhoneIcon(props) {
   );
 }
 
-export function MailIcon(props) {
+function MailIcon(props) {
   return (
     <Svg {...props}>
       <rect x="3.5" y="5.5" width="17" height="13" rx="1.5" />
@@ -324,7 +207,7 @@ export function ClockIcon(props) {
   );
 }
 
-export function AlertIcon(props) {
+function AlertIcon(props) {
   return (
     <Svg {...props}>
       <path d="M12 4 2.5 20h19Z" />
@@ -333,7 +216,7 @@ export function AlertIcon(props) {
   );
 }
 
-export function ChatIcon(props) {
+function ChatIcon(props) {
   return (
     <Svg {...props}>
       <path d="M4.5 5.5h15v10h-8l-4 3v-3h-3Z" />
@@ -341,7 +224,7 @@ export function ChatIcon(props) {
   );
 }
 
-export function BuildingIcon(props) {
+function BuildingIcon(props) {
   return (
     <Svg {...props}>
       <rect x="5" y="3.5" width="10" height="17" rx="1" />
@@ -351,7 +234,7 @@ export function BuildingIcon(props) {
   );
 }
 
-export function TruckIcon(props) {
+function TruckIcon(props) {
   return (
     <Svg {...props}>
       <rect x="2.5" y="7.5" width="11" height="9" rx="1" />
@@ -367,15 +250,6 @@ export function ListIcon(props) {
     <Svg {...props}>
       <path d="M8 6.5h12M8 12h12M8 17.5h12" />
       <path d="M4 6.5h.01M4 12h.01M4 17.5h.01" />
-    </Svg>
-  );
-}
-
-export function CheckCircleIcon(props) {
-  return (
-    <Svg {...props}>
-      <circle cx="12" cy="12" r="8.5" />
-      <path d="m8.3 12.3 2.5 2.5 5-5.2" />
     </Svg>
   );
 }

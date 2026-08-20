@@ -41,29 +41,9 @@ export const SETUP_ITEM_LABELS = {
   authorization: "Work authorization",
 };
 
-// Bug 2 fix ("receipt lines state things that are not true") — the real
-// candidate file each item's completion actually writes, for the interview's
-// ✓ receipt lines (InterviewSurface.jsx's checkProgressDelta). Every prior
-// receipt hardcoded "TARGETING.YML UPDATED" for every non-resume item, which
-// was wrong for engine (writes nothing at all) and for quickFacts/
-// authorization (write profile.yml, not targeting.yml). `null` means the
-// item's completion writes no candidate file. resume is intentionally
-// omitted — its receipt line depends on whether a résumé was actually
-// uploaded vs. declined, which checkProgressDelta handles as a special case
-// rather than a single static file label.
-export const SETUP_ITEM_FILE = {
-  engine: null,
-  roles: "targeting.yml",
-  companies: "targeting.yml",
-  evidence: "evidence.yml",
-  guardrails: "targeting.yml",
-  quickFacts: "profile.yml",
-  authorization: "profile.yml",
-};
-
 // The compact mono-caps chip row shown in 3a (centered, before docking) —
 // same items, just uppercase short labels.
-export const SETUP_CHIP_LABELS = {
+const SETUP_CHIP_LABELS = {
   engine: "ENGINE",
   resume: "RESUME",
   roles: "ROLES",
@@ -144,7 +124,7 @@ export function setupIsComplete(state) {
   );
 }
 
-export function deterministicSourceCount(state) {
+function deterministicSourceCount(state) {
   const attempted =
     state?.data?.sourcing?.sourceSetup?.deterministicSources?.attempted ??
     state?.deterministicSources?.attempted ??

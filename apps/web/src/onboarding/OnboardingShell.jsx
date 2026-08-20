@@ -71,14 +71,6 @@ export function OnboardingShell({
   );
 }
 
-export function OnboardingCompletionProvider({ completedIndexes = [], children }) {
-  return (
-    <OnboardingCompletionContext.Provider value={completedIndexes}>
-      {children}
-    </OnboardingCompletionContext.Provider>
-  );
-}
-
 export function getOnboardingProgressFooterClassName({
   activeIndex = 0,
   shouldAnimateReveal = false,

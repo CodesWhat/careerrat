@@ -1,19 +1,19 @@
 import { ChipInput, Field, TextField } from "../../components/form.jsx";
 
-export const ROLE_LANE_PRIORITY_OPTIONS = [
+const ROLE_LANE_PRIORITY_OPTIONS = [
   { value: "primary", label: "Primary" },
   { value: "secondary", label: "Secondary" },
   { value: "stretch", label: "Stretch" },
   { value: "oe", label: "OE" },
 ];
 
-export function normalizeRolePriority(priority, index = 0) {
+function normalizeRolePriority(priority, index = 0) {
   if (priority === "adjacent") return "stretch";
   if (ROLE_LANE_PRIORITY_OPTIONS.some((option) => option.value === priority)) return priority;
   return index === 0 ? "primary" : "secondary";
 }
 
-export function normalizeRoleSignals(values) {
+function normalizeRoleSignals(values) {
   return Array.isArray(values)
     ? values.map((value) => String(value || "").trim()).filter(Boolean)
     : [];
@@ -30,10 +30,6 @@ export function normalizeRoleBuckets(buckets) {
       down_signals: normalizeRoleSignals(bucket?.down_signals),
     }))
     .filter((bucket) => bucket.name || bucket.titles.length || bucket.notes);
-}
-
-export function rolePriorityLabel(priority) {
-  return ROLE_LANE_PRIORITY_OPTIONS.find((option) => option.value === priority)?.label ?? "Primary";
 }
 
 export function RoleLaneFields({
