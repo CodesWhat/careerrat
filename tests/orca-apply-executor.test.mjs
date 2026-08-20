@@ -376,16 +376,32 @@ test("Orca executor stops before account creation or password entry", async () =
   );
 });
 
-test("configured executor connects explicit Orca or automatic Orca detection", async () => {
-  assert.equal(
-    createConfiguredApplyExecutor({
-      repoRoot: "/repo",
-      env: {},
-      loadAutomationImpl: () => ({ data: { session: { provider: "extension" } } }),
-    }),
-    null
+test("configured executor fails the extension provider immediately with an honest reason", async () => {
+  const extensionExecute = createConfiguredApplyExecutor({
+    repoRoot: "/repo",
+    env: {},
+    loadAutomationImpl: () => ({ data: { session: { provider: "extension" } } }),
+  });
+  assert.equal(typeof extensionExecute, "function");
+  const extensionResult = await extensionExecute({
+    applicationId: "app-1",
+    application: {},
+    postingUrl: FORM_SNAPSHOT.origin,
+  });
+  assert.equal(extensionResult.available, false);
+  assert.equal(extensionResult.verified, false);
+  assert.equal(extensionResult.state, "unavailable");
+  assert.match(
+    extensionResult.reason,
+    /automatic apply isn't available on the .*extension.* provider yet/i
   );
+  // Provider-neutral: the reason must not steer the user at one hardcoded
+  // replacement provider (AGENTS.md Domain-Neutral Rule) — see session.mjs
+  // automaticApplyGap().
+  assert.doesNotMatch(extensionResult.reason, /playwright/i);
+});
 
+test("configured executor connects explicit Orca or automatic Orca detection", async () => {
   const execute = createConfiguredApplyExecutor({
     repoRoot: "/repo",
     env: {},

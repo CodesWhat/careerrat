@@ -858,13 +858,24 @@ test("configured executor dispatches to the playwright executor for provider pla
   assert.ok(pageOpens() > 0, "the playwright executor actually opened a fake browser tab");
 });
 
-test("configured executor returns null for provider extension (manual handoff, no callable surface)", () => {
+test("configured executor fails the extension provider immediately with an honest reason, not null", async () => {
   const execute = createConfiguredApplyExecutor({
     repoRoot: "/repo",
     env: {},
     loadAutomationImpl: () => ({ data: { session: { provider: "extension" } } }),
   });
-  assert.equal(execute, null);
+  assert.equal(typeof execute, "function");
+  const result = await execute({
+    applicationId: "app-1",
+    application: {},
+    postingUrl: GREENHOUSE_URL,
+  });
+  assert.equal(result.available, false);
+  assert.equal(result.state, "unavailable");
+  assert.match(result.reason, /automatic apply isn't available on the .*extension.* provider yet/i);
+  // Provider-neutral: no hardcoded replacement-provider recommendation (AGENTS.md
+  // Domain-Neutral Rule) — see session.mjs automaticApplyGap().
+  assert.doesNotMatch(result.reason, /playwright/i);
 });
 
 test("configured executor still dispatches provider orca to the orca executor", async () => {
