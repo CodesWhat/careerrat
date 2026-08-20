@@ -19,12 +19,13 @@ name: ci
 #
 # web-build and website-build are the jobs below that run without gating. qlty
 # and knip are both in the required-context list, checked against the live
-# ruleset on 2026-08-20. This header used to name all three as non-gating, which was the
-# exact failure it warns about one line down: a comment describing a gate
-# wrongly is the same problem protect-main.sh exists to catch, written in prose
-# instead of JSON, and prose has no drift guard. Re-read the live ruleset
-# (`gh api repos/CodesWhat/careerrat/rulesets/18182960`) before editing this
-# paragraph rather than trusting what it currently says.
+# ruleset on 2026-08-20. This header used to name qlty and knip as non-gating
+# too, which was the exact failure it warns about one line down: a comment
+# describing a gate wrongly is the same problem protect-main.sh exists to
+# catch, written in prose instead of JSON, and prose has no drift guard.
+# Re-read the live ruleset (`gh api
+# repos/CodesWhat/careerrat/rulesets/18182960`) before editing this paragraph
+# rather than trusting what it currently says.
 
 on:
   pull_request:
