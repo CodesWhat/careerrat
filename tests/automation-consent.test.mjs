@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -17,6 +18,18 @@ import { validate } from "../src/core/profile/schema-validator.mjs";
 import { parseYaml } from "../src/core/profile/yaml.mjs";
 
 const root = join(new URL("..", import.meta.url).pathname);
+
+// The repo root is the right `root` for the tests that read shipped templates and
+// schemas out of the tree. It is the WRONG root for anything asserting on which
+// session provider resolves, because loadAutomation() reads `candidate/automation.yml`
+// under it, and on a machine where CareerRat has actually been set up that file is a
+// real (gitignored) workspace pinning an explicit `session.provider`. An explicit
+// provider short-circuits resolveSession()'s "auto" branch entirely, so the
+// resolution logic under test never runs and the assertion reads the developer's
+// config instead. That passed in CI and in fresh worktrees, where no candidate/
+// exists, and failed only on a set-up machine. An empty directory has no candidate
+// workspace, so these tests get the shipped defaults and exercise the real branch.
+const emptyRoot = mkdtempSync(join(tmpdir(), "careerrat-automation-status-"));
 
 function loadJson(rel) {
   return JSON.parse(readFileSync(join(root, rel), "utf8"));
@@ -203,21 +216,23 @@ test("automation consent: status exposes automatic browser setup and the effecti
 // true. This is the path that was wrong; a test that only covered the Orca case
 // would have kept passing under the bug.
 test("automation consent: status auto option reports automatedApply:false outside an Orca workspace (resolved to extension, not the optimistic descriptor)", () => {
-  const status = automationStatus({ root, env: {} });
+  const status = automationStatus({ root: emptyRoot, env: {} });
   const autoOption = status.session.options.find((o) => o.id === "auto");
+  assert.equal(status.session.provider, "auto", "the default config must leave provider on auto");
   assert.equal(status.session.effectiveProvider, "extension");
   assert.equal(autoOption.automatedApply, false);
 });
 
 test("automation consent: status auto option reports automatedApply:true inside an Orca workspace", () => {
-  const status = automationStatus({ root, env: { ORCA_WORKTREE_ID: "worktree-123" } });
+  const status = automationStatus({ root: emptyRoot, env: { ORCA_WORKTREE_ID: "worktree-123" } });
   const autoOption = status.session.options.find((o) => o.id === "auto");
+  assert.equal(status.session.provider, "auto", "the default config must leave provider on auto");
   assert.equal(status.session.effectiveProvider, "orca");
   assert.equal(autoOption.automatedApply, true);
 });
 
 test("automation consent: status options list concrete providers with their fixed automatedApply, unaffected by env", () => {
-  const status = automationStatus({ root, env: {} });
+  const status = automationStatus({ root: emptyRoot, env: {} });
   const byId = Object.fromEntries(status.session.options.map((o) => [o.id, o.automatedApply]));
   assert.equal(byId.extension, false);
   assert.equal(byId.orca, true);
