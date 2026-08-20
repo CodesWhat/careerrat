@@ -1,0 +1,77 @@
+name: quality-ruleset-drift
+
+# Runs scripts/protect-main.sh --verify and scripts/protect-tags.sh --verify
+# against the live rulesets on a schedule, so drift between what those files
+# declare and what GitHub actually enforces gets caught by a clock instead of
+# by someone remembering.
+#
+# Why this exists: both scripts already detect drift perfectly well, and until
+# now neither ran anywhere automatically. A guard nobody invokes is a guard
+# that reports the state of the world on the last day someone thought to ask.
+# Weakened protection is exactly the kind of change that produces no symptom
+# until the moment it matters.
+#
+# Non-gating on purpose. It runs on a schedule and on demand, never on a pull
+# request, so it cannot block a merge. Drift is an operational problem for
+# whoever owns the repo, not a reason to stop a contributor's PR, and wiring a
+# credential-dependent check into the merge path is how a credential blip turns
+# into a frozen repo.
+#
+# The credential question, since assuming the answer is what kept this from
+# existing: this needs no stored secret and no elevated permission. The roadmap
+# recorded it as blocked on "a credential with admin read on the rulesets API",
+# which was wrong. `GET /repos/{owner}/{repo}/rulesets` is readable on a PUBLIC
+# repo with no authentication at all, verified against this repo on 2026-08-20,
+# and the detail endpoint returns the full rule list too. The default
+# GITHUB_TOKEN clears that bar easily, so `contents: read` is all this job asks
+# for. (There is no `administration` scope available to GITHUB_TOKEN anyway;
+# actionlint rejects it. That was the false trail.)
+#
+# One shape difference worth knowing: an unauthenticated read omits
+# `bypass_actors` where an authenticated one returns `[]`. Both scripts
+# canonicalize with `.bypass_actors // []`, so absent and empty compare equal
+# and this cannot raise false drift.
+#
+# If the API call ever does fail, the scripts distinguish that from real drift
+# by design: a lookup failure says "this says nothing about whether protection
+# is in place, only that the check did not run" and exits 1. A red run here is
+# never ambiguous about which of the two happened.
+#
+# This only works while the repo is public. If careerrat ever goes private,
+# this job starts failing on the lookup, and the fix is a credential, not a
+# rewrite of the scripts.
+
+on:
+  schedule:
+    - cron: "20 6 * * 1" # weekly, Monday 06:20 UTC (off-peak, distinct from the other crons in this repo)
+  workflow_dispatch: # so a human can check right after changing a ruleset, instead of waiting a week
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # rulesets are world-readable on a public repo; see the header note
+    steps:
+      - name: Harden the runner (audit all outbound calls)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify the main branch ruleset matches scripts/protect-main.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/protect-main.sh --verify
+      - name: Verify the release tag ruleset matches scripts/protect-tags.sh
+        # Runs even when the branch check above failed, because "main drifted"
+        # and "tags drifted" are independent facts and finding one should not
+        # hide the other.
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/protect-tags.sh --verify
