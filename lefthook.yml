@@ -42,9 +42,11 @@ pre-push:
       run: ./scripts/qlty-check-gate.sh changed
     - name: knip
       # Ratchet baseline: --max-issues pins the CURRENT genuine unused
-      # files/exports/deps count (see knip.json + the gates-tranche report)
-      # so the gate catches new dead code without blocking on the existing
-      # backlog. Lower this number as debt is cleaned up; never raise it.
-      run: npx knip --no-progress --max-issues=170
+      # files/exports/deps count (see knip.json) so the gate catches new dead
+      # code without blocking on the existing backlog. Lower this number as
+      # debt is cleaned up; never raise it. Keep it identical to the number in
+      # .github/workflows/ci-verify.yml, since a pre-push hook looser than CI
+      # just moves the failure to a slower place.
+      run: npx knip --no-progress --max-issues=44
     - name: tests
       run: npm test

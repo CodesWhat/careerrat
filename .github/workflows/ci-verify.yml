@@ -1,6 +1,6 @@
 name: ci
 
-# Four jobs. Two of them gate a merge, two do not.
+# Five jobs. Four of them gate a merge. web-build is the only one that doesn't.
 #
 # structure-guards runs a fast fail-early subset: the checks that protect the
 # things unit tests can't reach. The dashboard client <script> must parse as
@@ -17,10 +17,14 @@ name: ci
 # scripts/protect-main.sh's DESIRED block and in the live ruleset, and that
 # script's drift guard now holds the two in sync.
 #
-# web-build, qlty, and knip below still run without gating. Keep this header
-# honest about which is which. A comment claiming a gate that isn't there is
-# the same class of problem protect-main.sh exists to catch, just written in
-# prose instead of JSON.
+# web-build is the only job below that runs without gating. qlty and knip are
+# both in the required-context list, checked against the live ruleset on
+# 2026-08-20. This header used to name all three as non-gating, which was the
+# exact failure it warns about one line down: a comment describing a gate
+# wrongly is the same problem protect-main.sh exists to catch, written in prose
+# instead of JSON, and prose has no drift guard. Re-read the live ruleset
+# (`gh api repos/CodesWhat/careerrat/rulesets/18182960`) before editing this
+# paragraph rather than trusting what it currently says.
 
 on:
   pull_request:
@@ -55,7 +59,7 @@ jobs:
   # intake-classify, intake-extract, resume-extract, skill-runtime); every other test
   # is deterministic and runs the same on ubuntu-latest as it does locally. This job's
   # name ("tests") is in the "Main branch protection" ruleset's required_status_checks,
-  # so unlike web-build/qlty/knip below, a red run here blocks the merge.
+  # so unlike web-build below, a red run here blocks the merge.
   tests:
     name: tests
     runs-on: ubuntu-latest
@@ -102,9 +106,11 @@ jobs:
   # .qlty/qlty.toml; Biome stays out of qlty and lints JS/JSON separately).
   # "changed" mode diffs against origin/main, same as the local pre-push gate
   # (scripts/qlty-check-gate.sh) — CareerRat is pre-launch and carries a real
-  # doc/YAML backlog a repo-wide run would fail on immediately. Not yet added
-  # to the "Main branch protection" ruleset's required_status_checks, the
-  # same "real, running, but not yet required" posture as web-build above.
+  # doc/YAML backlog a repo-wide run would fail on immediately. This job IS in
+  # the "Main branch protection" ruleset's required_status_checks, so a red run
+  # blocks the merge. Not to be confused with the separate "qlty check" context
+  # from Qlty Cloud, which is not required and currently fails on every PR
+  # because the account is out of minutes.
   qlty:
     name: qlty
     runs-on: ubuntu-latest
@@ -125,12 +131,24 @@ jobs:
       - name: Qlty check (changed files vs origin/main)
         run: ./scripts/qlty-check-gate.sh changed
 
-  # Knip (unused files/exports/dependencies — see knip.json). --max-issues
-  # ratchets against the CURRENT genuine backlog documented in the
-  # gates-tranche report (real entries first, targeted ignores only for
-  # verified dynamic-loading false positives) so this catches new dead code
-  # without blocking on existing debt. Not yet in the required_status_checks
-  # ruleset — same posture as qlty/web-build above.
+  # Knip (unused files/exports/dependencies, see knip.json). This job IS in the
+  # required_status_checks ruleset, so a red run blocks the merge.
+  #
+  # --max-issues ratchets against the current genuine backlog so the gate
+  # catches NEW dead code without blocking on existing debt. Lower it as debt
+  # is cleaned. Never raise it: raising it is how a ratchet stops being one.
+  #
+  # 44 as of 2026-08-20, down from 170. The remainder is not a to-do list: it
+  # is 4 fontsource packages loaded by raw file path through next/font/local
+  # (invisible to knip, and removing them silently breaks the typeface) plus
+  # 40 exports deliberately kept because a skill, doc, comment, or dynamic
+  # import names them by string with no JS importer for knip to find. Each one
+  # is justified in the commit that spared it (#130 through #133).
+  #
+  # Getting to 0 therefore means teaching knip about those references, not
+  # deleting them: tag the intentional ones and configure knip to exclude the
+  # tag. Anyone who closes the gap by deleting instead has made the number
+  # prettier and the product worse.
   knip:
     name: knip
     runs-on: ubuntu-latest
@@ -148,4 +166,4 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Knip check
-        run: npx knip --no-progress --max-issues=170
+        run: npx knip --no-progress --max-issues=44
