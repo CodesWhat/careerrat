@@ -3,6 +3,7 @@ import { ChipInput, NumberField, TextArea, TextField } from "../components/form.
 import { CheckIcon } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
 import { parseResumeText, removeEvidenceClaim, saveCandidateFile } from "../lib/api.js";
+import { resolveErrorCopy } from "../lib/errorCopy.js";
 import {
   buildSetupItemViewModels,
   detailLineFor,
@@ -491,6 +492,7 @@ function CompaniesRowEditor({
   );
   const [saving, setSaving] = useState(false);
   const [decidingId, setDecidingId] = useState(null);
+  const [decisionError, setDecisionError] = useState(null);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -515,8 +517,18 @@ function CompaniesRowEditor({
   // list only reflects THIS form's own unsaved edits.
   async function handleDecide(proposal, action) {
     setDecidingId(proposal.proposalId);
+    setDecisionError(null);
     try {
       await onDecideCompanyProposal?.(proposal, action);
+    } catch (err) {
+      // Most common failure is the 422 refusal a company with no scannable
+      // job board hits (COMPANY_PROPOSAL_NOT_APPROVABLE in errorCopy.js) --
+      // a normal outcome, not a bug. Attaching the resolved message to this
+      // proposal's own row (instead of a form-wide banner) means a second
+      // click on the same button isn't the only feedback the candidate gets,
+      // and the row is never left looking untouched when the click actually
+      // failed.
+      setDecisionError({ proposalId: proposal.proposalId, message: resolveErrorCopy(err).message });
     } finally {
       setDecidingId(null);
     }
@@ -534,25 +546,30 @@ function CompaniesRowEditor({
           <ul className="file-pane__proposal-list">
             {companyProposals.map((proposal) => (
               <li key={proposal.proposalId} className="file-pane__proposal-row">
-                <span className="file-pane__proposal-name">{proposal.name}</span>
-                <span className="file-pane__proposal-actions">
-                  <button
-                    type="button"
-                    className="file-pane__proposal-accept"
-                    disabled={decidingId === proposal.proposalId}
-                    onClick={() => handleDecide(proposal, "approve-supported-ats")}
-                  >
-                    Accept
-                  </button>
-                  <button
-                    type="button"
-                    className="file-pane__proposal-reject"
-                    disabled={decidingId === proposal.proposalId}
-                    onClick={() => handleDecide(proposal, "reject")}
-                  >
-                    Reject
-                  </button>
-                </span>
+                <div className="file-pane__proposal-main">
+                  <span className="file-pane__proposal-name">{proposal.name}</span>
+                  <span className="file-pane__proposal-actions">
+                    <button
+                      type="button"
+                      className="file-pane__proposal-accept"
+                      disabled={decidingId === proposal.proposalId}
+                      onClick={() => handleDecide(proposal, "approve-supported-ats")}
+                    >
+                      Accept
+                    </button>
+                    <button
+                      type="button"
+                      className="file-pane__proposal-reject"
+                      disabled={decidingId === proposal.proposalId}
+                      onClick={() => handleDecide(proposal, "reject")}
+                    >
+                      Reject
+                    </button>
+                  </span>
+                </div>
+                {decisionError?.proposalId === proposal.proposalId ? (
+                  <InlineAlert message={decisionError.message} />
+                ) : null}
               </li>
             ))}
           </ul>

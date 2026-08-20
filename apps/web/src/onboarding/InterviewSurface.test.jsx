@@ -147,6 +147,7 @@ vi.mock("../settings/AutomationControls.jsx", () => ({
     mode === "advanced" ? { setup_mode: "advanced" } : { setup_mode: "basic" },
 }));
 
+import { UserFacingError } from "../lib/errorCopy.js";
 import {
   conversationNeedsAttention,
   InterviewSurface,
@@ -2151,6 +2152,77 @@ describe("InterviewSurface — confirm blocks (Lane A)", () => {
     const pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
     expect(pill.props.block.status).toBe("error");
     expect(pill.props.block.error).toBe("Paste company names or homepages to continue without AI.");
+  });
+
+  it("a rejected company-proposal decision propagates unchanged instead of being swallowed, and never reloads the pending list", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-1", state: "running" });
+    api.getCompanyProposals.mockResolvedValue({
+      data: {
+        batch: {
+          batchId: "b1",
+          proposals: [{ proposalId: "p1", company: { name: "Acme" }, version: 1 }],
+        },
+      },
+    });
+    const refusal = Object.assign(new api.ApiError("boom"), {
+      status: 422,
+      body: { code: "COMPANY_PROPOSAL_NOT_APPROVABLE", error: "no ats board resolved for Acme" },
+    });
+    api.decideCompanyProposal.mockRejectedValue(refusal);
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    const proposal = captured.filePane.companyProposals[0];
+    const reloadsBefore = api.getCompanyProposals.mock.calls.length;
+
+    await expect(
+      captured.filePane.onDecideCompanyProposal(proposal, "approve-supported-ats")
+    ).rejects.toBe(refusal);
+
+    // Nothing was written, and the pending list was never re-fetched, so the
+    // proposal is still exactly where it was -- FilePane's own catch (see
+    // FilePane.test.jsx) is what attaches the resolved refusal copy to it.
+    expect(api.saveCandidateFile).not.toHaveBeenCalled();
+    expect(api.getCompanyProposals.mock.calls.length).toBe(reloadsBefore);
+  });
+
+  it("a decision that succeeds but whose targeting save fails does not report success, and says the company was accepted", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-1", state: "running" });
+    api.getCompanyProposals.mockResolvedValue({
+      data: {
+        batch: {
+          batchId: "b1",
+          proposals: [{ proposalId: "p1", company: { name: "Acme" }, version: 1 }],
+        },
+      },
+    });
+    api.decideCompanyProposal.mockResolvedValue({ ok: true });
+    api.saveCandidateFile.mockRejectedValue(new Error("ENOSPC: no space left on device"));
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    const proposal = captured.filePane.companyProposals[0];
+    const reloadsBefore = api.getCompanyProposals.mock.calls.length;
+
+    let caught = null;
+    try {
+      await captured.filePane.onDecideCompanyProposal(proposal, "approve-supported-ats");
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(api.decideCompanyProposal).toHaveBeenCalledTimes(1);
+    expect(caught).toBeInstanceOf(UserFacingError);
+    expect(caught.message).toContain("Acme");
+    expect(caught.message).toContain("was accepted");
+    expect(caught.message).toContain("saving");
+    expect(caught.message).not.toContain("ENOSPC");
+    // Reaching the reload would look like nothing went wrong (the proposal
+    // would drop out of the pending list even though targeting.tracked_companies
+    // never got the union write) -- that reload must not run.
+    expect(api.getCompanyProposals.mock.calls.length).toBe(reloadsBefore);
   });
 
   it("the docked header status reads the dynamic total instead of a hardcoded 7", async () => {

@@ -57,12 +57,14 @@ vi.mock("./steps/RoleLaneEditor.jsx", () => ({
 }));
 
 const api = vi.hoisted(() => ({
+  ApiError: class ApiError extends Error {},
   parseResumeText: vi.fn(),
   removeEvidenceClaim: vi.fn(),
   saveCandidateFile: vi.fn(),
 }));
 vi.mock("../lib/api.js", () => api);
 
+import { GENERIC_ERROR_MESSAGE } from "../lib/errorCopy.js";
 import { FilePane } from "./FilePane.jsx";
 
 // ---------------------------------------------------------------------------
@@ -865,5 +867,99 @@ describe("FilePane — company proposal chips (R2)", () => {
     rowByLabel(tree, "Company focus").props.onClick();
     tree = render({ state: EMPTY_STATE });
     expect(byClass(tree, "file-pane__proposal-list")).toHaveLength(0);
+  });
+
+  it("a rejected decision attaches the resolved COMPANY_PROPOSAL_NOT_APPROVABLE copy to that proposal's row, not the generic fallback", async () => {
+    const onDecideCompanyProposal = vi.fn().mockRejectedValue(
+      Object.assign(new api.ApiError("boom"), {
+        status: 422,
+        body: { code: "COMPANY_PROPOSAL_NOT_APPROVABLE", error: "no ats board resolved for Acme" },
+      })
+    );
+    let tree = render({
+      state: EMPTY_STATE,
+      companyProposals: [PROPOSAL],
+      onDecideCompanyProposal,
+    });
+    rowByLabel(tree, "Company focus").props.onClick();
+    tree = render({ state: EMPTY_STATE, companyProposals: [PROPOSAL], onDecideCompanyProposal });
+
+    const acceptButton = byClass(tree, "file-pane__proposal-accept")[0];
+    await acceptButton.props.onClick();
+    await flush();
+
+    tree = render({ state: EMPTY_STATE, companyProposals: [PROPOSAL], onDecideCompanyProposal });
+    const row = byClass(tree, "file-pane__proposal-row")[0];
+    const alert = byTag(row, "inline-alert");
+    expect(alert).toBeTruthy();
+    expect(alert.props.message).toBe(
+      "CareerRat can't track this company yet. It couldn't find a job board it can scan for postings. Skip it for now, or check back once one is found."
+    );
+    expect(alert.props.message).not.toBe(GENERIC_ERROR_MESSAGE);
+    expect(alert.props.message).not.toContain("no ats board resolved");
+  });
+
+  it("does not leave the failed proposal looking untouched-and-pending: the row re-enables its buttons and the error stays scoped to that row alone", async () => {
+    const acme = { proposalId: "p1", name: "Acme", version: 1 };
+    const globex = { proposalId: "p2", name: "Globex", version: 1 };
+    const onDecideCompanyProposal = vi.fn((proposal) =>
+      proposal.proposalId === "p1"
+        ? Promise.reject(
+            Object.assign(new api.ApiError("boom"), {
+              status: 422,
+              body: { code: "COMPANY_PROPOSAL_NOT_APPROVABLE" },
+            })
+          )
+        : Promise.resolve()
+    );
+    let tree = render({
+      state: EMPTY_STATE,
+      companyProposals: [acme, globex],
+      onDecideCompanyProposal,
+    });
+    rowByLabel(tree, "Company focus").props.onClick();
+    tree = render({
+      state: EMPTY_STATE,
+      companyProposals: [acme, globex],
+      onDecideCompanyProposal,
+    });
+
+    const rows = byClass(tree, "file-pane__proposal-row");
+    const acmeAccept = byClass(rows[0], "file-pane__proposal-accept")[0];
+    await acmeAccept.props.onClick();
+    await flush();
+
+    tree = render({
+      state: EMPTY_STATE,
+      companyProposals: [acme, globex],
+      onDecideCompanyProposal,
+    });
+    const rowsAfter = byClass(tree, "file-pane__proposal-row");
+    // The proposal is still presented (never silently removed), but a second
+    // click is no longer the only feedback: the failed row carries its own
+    // alert and its buttons are clickable again.
+    expect(byTag(rowsAfter[0], "inline-alert")).toBeTruthy();
+    expect(byClass(rowsAfter[0], "file-pane__proposal-accept")[0].props.disabled).toBe(false);
+    // The untouched second proposal never picks up the first one's error.
+    expect(byTag(rowsAfter[1], "inline-alert")).toBeUndefined();
+  });
+
+  it("a successful decision clears any prior error and renders no alert (happy path unchanged)", async () => {
+    const onDecideCompanyProposal = vi.fn().mockResolvedValue();
+    let tree = render({
+      state: EMPTY_STATE,
+      companyProposals: [PROPOSAL],
+      onDecideCompanyProposal,
+    });
+    rowByLabel(tree, "Company focus").props.onClick();
+    tree = render({ state: EMPTY_STATE, companyProposals: [PROPOSAL], onDecideCompanyProposal });
+
+    const acceptButton = byClass(tree, "file-pane__proposal-accept")[0];
+    await acceptButton.props.onClick();
+    await flush();
+
+    tree = render({ state: EMPTY_STATE, companyProposals: [PROPOSAL], onDecideCompanyProposal });
+    const row = byClass(tree, "file-pane__proposal-row")[0];
+    expect(byTag(row, "inline-alert")).toBeUndefined();
   });
 });
