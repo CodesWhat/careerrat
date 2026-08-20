@@ -19,12 +19,13 @@ name: ci
 #
 # web-build and website-build are the jobs below that run without gating. qlty
 # and knip are both in the required-context list, checked against the live
-# ruleset on 2026-08-20. This header used to name all three as non-gating, which was the
-# exact failure it warns about one line down: a comment describing a gate
-# wrongly is the same problem protect-main.sh exists to catch, written in prose
-# instead of JSON, and prose has no drift guard. Re-read the live ruleset
-# (`gh api repos/CodesWhat/careerrat/rulesets/18182960`) before editing this
-# paragraph rather than trusting what it currently says.
+# ruleset on 2026-08-20. This header used to name qlty and knip as non-gating
+# too, which was the exact failure it warns about one line down: a comment
+# describing a gate wrongly is the same problem protect-main.sh exists to
+# catch, written in prose instead of JSON, and prose has no drift guard.
+# Re-read the live ruleset (`gh api
+# repos/CodesWhat/careerrat/rulesets/18182960`) before editing this paragraph
+# rather than trusting what it currently says.
 
 on:
   pull_request:
@@ -167,15 +168,13 @@ jobs:
   # catches NEW dead code without blocking on existing debt. Lower it as debt
   # is cleaned. Never raise it: raising it is how a ratchet stops being one.
   #
-  # 32 as of 2026-08-20, down from 170 (44 after #135, then 12 stale api.js
-  # wrappers deleted). The remainder is not a to-do list: it is 4 fontsource
-  # packages loaded by raw file path through next/font/local (invisible to
-  # knip, and removing them silently breaks the typeface) plus 28 exports
-  # deliberately kept. Most are named by a skill, doc, comment, or dynamic
-  # import with no JS importer for knip to find, and each is justified in the
-  # commit that spared it (#130 through #133). Two of them, checkAiKey and
-  # getDiscoveryState, are the opposite case: exported ahead of UI that does
-  # not exist yet, tracked in issue #141.
+  # 30 as of 2026-08-20, down from 170 (44 after #135, 32 after #142 deleted 12
+  # stale api.js wrappers, 30 once #141 wired the two that were kept). The
+  # remainder is not a to-do list: it is 4 fontsource packages loaded by raw
+  # file path through next/font/local (invisible to knip, and removing them
+  # silently breaks the typeface) plus 26 exports named by a skill, doc,
+  # comment, or dynamic import with no JS importer for knip to find. Each one
+  # is justified in the commit that spared it (#130 through #133).
   #
   # Getting to 0 therefore means teaching knip about those references, not
   # deleting them: tag the intentional ones and configure knip to exclude the
@@ -198,4 +197,4 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Knip check
-        run: npx knip --no-progress --max-issues=32
+        run: npx knip --no-progress --max-issues=30

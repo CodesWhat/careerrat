@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({
   addBoard: vi.fn(),
   addSearchQuery: vi.fn(),
+  checkAiKey: vi.fn(),
   getAutomationSettings: vi.fn(),
   getAiSettings: vi.fn(),
   getInstalledAiRuntimes: vi.fn(),
@@ -115,6 +116,20 @@ function findElement(root, predicate) {
   return match;
 }
 
+// One stable class rather than a fresh one per mount, because errorCopy.js's
+// normalize() only reads `code` off an error that passes `instanceof ApiError`.
+// A per-mount class makes that check unsatisfiable from a test, which pushes
+// error-copy assertions onto the raw-string fallbacks instead of the code path
+// the server actually produces.
+class MockApiError extends Error {
+  constructor(status, body) {
+    super(`request failed with status ${status}`);
+    this.name = "ApiError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
 async function mountSettings() {
   vi.resetModules();
   let runtime;
@@ -137,7 +152,7 @@ async function mountSettings() {
     useState: (...args) => runtime.useState(...args),
   }));
   vi.doMock("../lib/api.js", () => ({
-    ApiError: class ApiError extends Error {},
+    ApiError: MockApiError,
     ...api,
   }));
 
@@ -450,5 +465,90 @@ describe("SettingsPage edit surfaces", () => {
       },
       claims: { do_not_fabricate: ["security clearances"] },
     });
+  });
+});
+
+// Issue #141 — POST /api/settings/ai-key/check had no caller: Settings could
+// only validate a newly typed key, with no way to test an already-saved one.
+describe("SettingsPage — test saved key", () => {
+  it("toasts the managed-connection message when the workspace is on the proxy route", async () => {
+    const renderer = await mountLoadedSettings({});
+    api.checkAiKey.mockResolvedValue({ ok: true, route: "proxy", provider: "managed-proxy" });
+
+    await actionButton(renderer, "Test saved key").props.onClick();
+
+    expect(
+      findElement(
+        renderer.output,
+        (el) => el.props?.message === "You're on CareerRat's managed AI connection. It's working."
+      )
+    ).toBeTruthy();
+  });
+
+  it("toasts the saved-key message when a saved provider key validates", async () => {
+    const renderer = await mountLoadedSettings({});
+    api.checkAiKey.mockResolvedValue({ ok: true, route: "byok", provider: "anthropic" });
+
+    await actionButton(renderer, "Test saved key").props.onClick();
+
+    expect(
+      findElement(
+        renderer.output,
+        (el) => el.props?.message === "Your saved AI key checked out. It's ready to use."
+      )
+    ).toBeTruthy();
+  });
+
+  it("renders the missing-key copy with its Open Settings action on a 409", async () => {
+    const renderer = await mountLoadedSettings({});
+    // A real ApiError, not a plain Error: the missing_key rule in errorCopy.js
+    // also matches on the raw string, so a plain Error would pass this test
+    // without ever exercising the `code === "missing_key"` branch, which is the
+    // one the route actually produces and the one #141 makes reachable.
+    api.checkAiKey.mockRejectedValue(
+      new MockApiError(409, {
+        ok: false,
+        code: "missing_key",
+        error: "No AI key is configured yet.",
+      })
+    );
+
+    await actionButton(renderer, "Test saved key").props.onClick();
+
+    const banner = findElement(
+      renderer.output,
+      (el) => el.props?.message === "No AI key is connected yet."
+    );
+    expect(banner).toBeTruthy();
+    expect(banner.props.action).toEqual({ label: "Open Settings", to: "/settings" });
+  });
+
+  it("keeps Save and Test independently busy, so one in flight never disables the other", async () => {
+    const renderer = await mountLoadedSettings({});
+    elementById(renderer, "ai-key").props.onChange("sk-ant-test-key");
+
+    let resolveCheck;
+    api.checkAiKey.mockReturnValue(
+      new Promise((resolve) => {
+        resolveCheck = resolve;
+      })
+    );
+    const checkPromise = actionButton(renderer, "Test saved key").props.onClick();
+    expect(actionButton(renderer, "Save key and use provider").props.disabled).toBe(false);
+    resolveCheck({ ok: true, route: "byok", provider: "anthropic" });
+    await checkPromise;
+
+    let resolveSave;
+    api.validateAndSaveAiKey.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSave = resolve;
+      })
+    );
+    api.selectInstalledAiRuntime.mockResolvedValue({ ok: true });
+    api.getAiSettings.mockResolvedValue({ route: "byok", keyPresent: true });
+    const savePromise = actionButton(renderer, "Save key and use provider").props.onClick();
+    expect(actionButton(renderer, "Test saved key").props.disabled).toBe(false);
+    resolveSave({ ok: true });
+    await savePromise;
   });
 });

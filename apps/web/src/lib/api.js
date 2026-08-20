@@ -231,9 +231,8 @@ export function validateAndSaveAiKey(apiKey, { provider = "anthropic" } = {}) {
   });
 }
 
-// Intentionally exported ahead of a caller: Settings only has Save (which
-// validates a newly typed key), with no way to test an already-saved one.
-// Wiring that trigger is tracked in issue #141.
+// Tests a key that's already saved (as opposed to validateAndSaveAiKey, which
+// checks one just typed), so Settings can offer a "test saved key" action.
 export function checkAiKey({ provider = "anthropic" } = {}) {
   return apiFetch("/api/settings/ai-key/check", {
     method: "POST",
@@ -505,9 +504,8 @@ export function startSearchRun(payload = {}) {
   });
 }
 
-// Intentionally exported ahead of a caller: InterviewSurface.jsx never fetches
-// this, so reloading mid-discovery loses pipeline/lock/guidance state. Wiring
-// that resume path is tracked in issue #141.
+// Lets a reload mid-discovery pick up where the candidate left off, instead of
+// resetting to the pre-discovery CTA.
 export function getDiscoveryState() {
   return apiFetch("/api/discovery/state");
 }
