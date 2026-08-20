@@ -1,6 +1,6 @@
 name: ci
 
-# Two jobs, and only one of them currently gates a merge.
+# Four jobs. Two of them gate a merge, two do not.
 #
 # structure-guards runs a fast fail-early subset: the checks that protect the
 # things unit tests can't reach. The dashboard client <script> must parse as
@@ -9,18 +9,18 @@ name: ci
 # ("structure-guards") is one of the status-check contexts listed in the "Main
 # branch protection" ruleset's required_status_checks rule.
 #
-# tests runs the full `npm test` suite. It is NOT in that rule's context list,
-# so a red `tests` run does not block a merge today: it is a visible signal,
-# not a gate. Making it required is the intended end state, but it should not
-# happen from a branch whose own fix for the flaky SSE watcher test has not
-# landed on main yet, or every PR in flight starts failing on a timing bug
-# rather than on its own code. Sequence is: land this, then add `tests` to
-# BOTH scripts/protect-main.sh's DESIRED block and the live ruleset, which
-# that script's drift guard will then hold in sync.
+# tests runs the full `npm test` suite and is now in that context list too. It
+# was deliberately held back until the flaky SSE watcher test it depends on had
+# landed on main and been observed green there, because requiring it earlier
+# would have failed every PR in flight on a timing bug rather than on its own
+# code. Both halves of that promotion are done: the context is in
+# scripts/protect-main.sh's DESIRED block and in the live ruleset, and that
+# script's drift guard now holds the two in sync.
 #
-# Do not describe this job as gating merges until that has actually been done.
-# A comment claiming a gate that isn't there is the same class of problem
-# protect-main.sh exists to catch, just written in prose instead of JSON.
+# web-build, qlty, and knip below still run without gating. Keep this header
+# honest about which is which. A comment claiming a gate that isn't there is
+# the same class of problem protect-main.sh exists to catch, just written in
+# prose instead of JSON.
 
 on:
   pull_request:
@@ -53,10 +53,9 @@ jobs:
   # not just the structure-guards subset. A handful of integration tests self-skip
   # via node's test-runner `skip:` option when ANTHROPIC_API_KEY isn't set (chat-runtime,
   # intake-classify, intake-extract, resume-extract, skill-runtime); every other test
-  # is deterministic and runs the same on ubuntu-latest as it does locally. Not yet
-  # added to the "Main branch protection" ruleset's required_status_checks — same
-  # "real, running, but not yet required" posture as web-build/qlty/knip below, until
-  # it's been observed green on GitHub.
+  # is deterministic and runs the same on ubuntu-latest as it does locally. This job's
+  # name ("tests") is in the "Main branch protection" ruleset's required_status_checks,
+  # so unlike web-build/qlty/knip below, a red run here blocks the merge.
   tests:
     name: tests
     runs-on: ubuntu-latest
