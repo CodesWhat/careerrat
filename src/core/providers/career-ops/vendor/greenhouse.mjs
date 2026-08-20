@@ -21,7 +21,7 @@ function assertGreenhouseUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`greenhouse: URL must use HTTPS: ${url}`);
   if (!ALLOWED_GREENHOUSE_HOSTS.has(parsed.hostname))
-    throw new Error(`greenhouse: untrusted hostname "${parsed.hostname}" — must be one of: ${[...ALLOWED_GREENHOUSE_HOSTS].join(', ')}`);
+    throw new Error(`greenhouse: untrusted hostname "${parsed.hostname}". Must be one of: ${[...ALLOWED_GREENHOUSE_HOSTS].join(', ')}`);
   return url;
 }
 
@@ -155,7 +155,7 @@ export default {
           // anything, and reading .message off null would throw *inside* the
           // catch, defeating the guarantee above.
           const cause = err instanceof Error ? err.message : String(err);
-          console.error(`⚠️  greenhouse: ${entry.name} /offices enrichment failed — ${cause} (keeping work-model-only locations)`);
+          console.error(`⚠️  greenhouse: ${entry.name} /offices enrichment failed: ${cause} (keeping work-model-only locations)`);
           officeMap = null;
         }
       }

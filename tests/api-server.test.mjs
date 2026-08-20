@@ -486,22 +486,40 @@ test("createDevServer(): boots fine (reconciliation is best-effort) when no db e
 
 // Connect to the SSE stream and resolve the first time `eventName` shows up in
 // the raw text, or reject on timeout. Keeps the whole test comfortably under 5s.
-async function waitForSseEvent(url, eventName, { onConnected, timeoutMs = 4000 } = {}) {
+//
+// `onConnected` is called repeatedly, not once, and that is the whole point.
+// The server watches WORKSPACE_DIR with fs.watch, which is FSEvents-backed on
+// macOS: a write can land in a window where the watch handle exists but the
+// stream isn't delivering yet, and that write is then dropped silently rather
+// than delivered late. A single nudge in that window produces a test that waits
+// the full timeout for an event that is never coming.
+//
+// Measured before this change: 0 failures in 40 runs of this file alone, but 2
+// in 40 runs of the full suite, both at the 4s ceiling. The suite runs files
+// across every core, so the loaded machine is what widens the window. Nudging
+// on an interval closes it without hiding a real break — if the watcher never
+// delivers at all, every nudge misses and the test still fails.
+async function waitForSseEvent(
+  url,
+  eventName,
+  { onConnected, timeoutMs = 4000, nudgeMs = 250 } = {}
+) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let nudge = null;
   try {
     const res = await fetch(url, { signal: controller.signal });
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    let connectedFired = false;
+    let nudges = 0;
     while (true) {
       const { value, done } = await reader.read();
       if (done) throw new Error(`SSE stream closed before "${eventName}" arrived`);
       buffer += decoder.decode(value, { stream: true });
-      if (!connectedFired && buffer.includes("event: hello")) {
-        connectedFired = true;
-        onConnected?.();
+      if (!nudge && buffer.includes("event: hello")) {
+        onConnected?.(nudges++);
+        nudge = setInterval(() => onConnected?.(nudges++), nudgeMs);
       }
       if (buffer.includes(`event: ${eventName}`)) return;
     }
@@ -511,6 +529,7 @@ async function waitForSseEvent(url, eventName, { onConnected, timeoutMs = 4000 }
     }
     throw err;
   } finally {
+    clearInterval(nudge);
     clearTimeout(timeout);
     controller.abort();
   }
@@ -523,10 +542,12 @@ test("changing tracker.json emits a tracker-update SSE event", async () => {
   try {
     const trackerPath = join(resolveUserPaths({ repoRoot }).workspaceDir, "tracker.json");
     await waitForSseEvent(`${baseUrl(dev)}/__livereload`, "tracker-update", {
-      onConnected: () =>
+      // Version bumps per nudge so a repeat write is a real content change,
+      // not a same-bytes rewrite the filesystem could coalesce away.
+      onConnected: (n) =>
         writeFileSync(
           trackerPath,
-          JSON.stringify({ ...MINIMAL_TRACKER, meta: { version: 1 } }),
+          JSON.stringify({ ...MINIMAL_TRACKER, meta: { version: 1 + n } }),
           "utf8"
         ),
     });
@@ -541,8 +562,11 @@ test("touching activity.jsonl emits an activity-update SSE event", async () => {
   const dev = await bootServer(repoRoot);
   try {
     await waitForSseEvent(`${baseUrl(dev)}/__livereload`, "activity-update", {
-      onConnected: () =>
-        defaultAdapter(repoRoot).appendActivity({ type: "system", title: "sse test" }),
+      // Title varies per nudge because appendActivity dedupes on a content
+      // hash: a repeat of the identical event is a no-op that writes nothing,
+      // so it would produce no fs change for the watcher to see.
+      onConnected: (n) =>
+        defaultAdapter(repoRoot).appendActivity({ type: "system", title: `sse test ${n}` }),
     });
   } finally {
     teardown(dev, repoRoot);

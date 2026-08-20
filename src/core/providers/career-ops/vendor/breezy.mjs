@@ -25,7 +25,7 @@ function assertBreezyUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`breezy: URL must use HTTPS: ${url}`);
   if (!BREEZY_HOST_RE.test(parsed.hostname)) {
-    throw new Error(`breezy: untrusted hostname "${parsed.hostname}" — must match <tenant>.breezy.hr`);
+    throw new Error(`breezy: untrusted hostname "${parsed.hostname}". Must match <tenant>.breezy.hr`);
   }
   return url;
 }

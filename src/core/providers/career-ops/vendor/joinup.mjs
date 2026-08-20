@@ -56,7 +56,7 @@ export default {
       const ir = data?.props?.pageProps?.serverState?.initialResults?.jobs?.results;
       hits = Array.isArray(ir) && ir[0]?.hits ? ir[0].hits : [];
     } catch (err) {
-      throw new Error(`joinup: ${entry.name} failed to parse __NEXT_DATA__ — ${err.message}`);
+      throw new Error(`joinup: ${entry.name} failed to parse __NEXT_DATA__: ${err.message}`);
     }
     return hits
       .filter(h => h && h.slug && (h.title || h.headline))

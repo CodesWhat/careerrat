@@ -40,7 +40,7 @@ function assertFeedUrl(url, { explicit = false } = {}) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`teamtailor: URL must use HTTPS: ${url}`);
   if (!explicit && !TEAMTAILOR_HOST_RE.test(parsed.hostname)) {
-    throw new Error(`teamtailor: untrusted hostname "${parsed.hostname}" — must be <slug>.teamtailor.com (or set "provider: teamtailor" to use a branded careers domain)`);
+    throw new Error(`teamtailor: untrusted hostname "${parsed.hostname}". Must be <slug>.teamtailor.com (or set "provider: teamtailor" to use a branded careers domain)`);
   }
   return url;
 }

@@ -1,7 +1,7 @@
 # CareerRat App Product Plan
 
 **Created:** 2026-07-05
-**Purpose:** Carry the v2 product direction into GSD planning after the v1 skill-to-API foundation.
+**Purpose:** Carry the v2 product direction forward from the v1 skill-to-API foundation.
 
 ## Product Shape
 
@@ -48,14 +48,18 @@ The user should be able to:
 - Packet generation still leans on skill-runtime paths instead of app-local evaluate/tailor/answer APIs.
 - The retained skill runtime still exposes broad tools by default and needs a narrower app-safe posture.
 
-## GSD Phase Sequence
+## Delivery Sequence
 
-1. **Phase 6 - Canonical DB App Shell:** Make `/app` the canonical DB-backed surface and demote compatibility exports.
-2. **Phase 7 - Quick Onboarding and Auto Sourcing:** Trigger background search at `search_ready` and show durable run state.
-3. **Phase 8 - Deep Ingest Lane:** Build drop-all intake plus optional role/job-aware AI interview.
-4. **Phase 9 - Public Company Intelligence and Scanner Cascade:** Add no-PII public sync-home and deeper public-page discovery.
-5. **Phase 10 - Local Packet Engine:** Move evaluate/tailor/answers/artifact stamping into local APIs and board-ready exports.
-6. **Phase 11 - Runtime Lockdown and Desktop Release:** Narrow tool runtime, harden Electron packaging, and update product docs.
+All six shipped between 2026-07-05 and 2026-07-06. Kept as the record of what
+the v2 direction actually turned into, since the gap list above is only
+readable against it.
+
+1. **Canonical DB App Shell:** Make `/app` the canonical DB-backed surface and demote compatibility exports.
+2. **Quick Onboarding and Auto Sourcing:** Trigger background search at `search_ready` and show durable run state.
+3. **Deep Ingest Lane:** Build drop-all intake plus optional role/job-aware AI interview.
+4. **Public Company Intelligence and Scanner Cascade:** Add no-PII public sync-home and deeper public-page discovery.
+5. **Local Packet Engine:** Move evaluate/tailor/answers/artifact stamping into local APIs and board-ready exports.
+6. **Runtime Lockdown and Desktop Release:** Narrow tool runtime, harden Electron packaging, and update product docs.
 
 ## Non-Goals
 

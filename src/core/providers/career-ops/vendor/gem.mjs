@@ -112,7 +112,7 @@ function assertGemUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`gem: URL must use HTTPS: ${url}`);
   if (!ALLOWED_GEM_HOSTS.has(parsed.hostname))
-    throw new Error(`gem: untrusted hostname "${parsed.hostname}" — must be one of: ${[...ALLOWED_GEM_HOSTS].join(', ')}`);
+    throw new Error(`gem: untrusted hostname "${parsed.hostname}". Must be one of: ${[...ALLOWED_GEM_HOSTS].join(', ')}`);
   return url;
 }
 

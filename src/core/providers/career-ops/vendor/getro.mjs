@@ -155,8 +155,8 @@ async function resolveCollectionId(entry, ctx, careersUrl) {
   const id = extractCollectionId(html);
   if (!id) {
     throw new Error(
-      `getro: ${label} — could not resolve collection_id from ${careersUrl.href} (no network.id found in ` +
-      `__NEXT_DATA__; page structure may have changed — set getro_collection: N on this entry as a fallback)`,
+      `getro: ${label}: could not resolve collection_id from ${careersUrl.href} (no network.id found in ` +
+      `__NEXT_DATA__; page structure may have changed. Set getro_collection: N on this entry as a fallback)`,
     );
   }
   return id;

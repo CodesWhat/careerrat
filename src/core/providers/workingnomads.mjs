@@ -38,7 +38,7 @@ export async function fetchWorkingNomads(entry = {}, fetchImpl = fetch) {
   const data = await fetchJsonBody(FEED_URL, fetchImpl);
   if (!Array.isArray(data)) {
     throw new Error(
-      `workingnomads: unexpected API response — expected a JSON array, got ${data === null ? "null" : typeof data}`
+      `workingnomads: unexpected API response: expected a JSON array, got ${data === null ? "null" : typeof data}`
     );
   }
 

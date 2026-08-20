@@ -51,6 +51,43 @@ test("package.json and apps/desktop/package.json versions are identical", async 
   );
 });
 
+// package-lock.json carries the version in three places, and `npm version` /
+// `npm install --package-lock-only` update all three. A release that edits
+// package.json by hand does not, which is exactly how the lockfile sat at
+// 0.9.0 while the published package was 0.10.0. A stale lockfile version does
+// not break `npm ci`, so nothing else in the repo notices.
+test("package-lock.json versions match the root package.json version", async () => {
+  const rootPackageJson = JSON.parse(await readFile("package.json", "utf8"));
+  const lockfile = JSON.parse(await readFile("package-lock.json", "utf8"));
+  const desktopPackageJson = JSON.parse(await readFile("apps/desktop/package.json", "utf8"));
+
+  const sites = [
+    {
+      label: "package-lock.json `version`",
+      actual: lockfile.version,
+      expected: rootPackageJson.version,
+    },
+    {
+      label: 'package-lock.json `packages[""].version`',
+      actual: lockfile.packages?.[""]?.version,
+      expected: rootPackageJson.version,
+    },
+    {
+      label: 'package-lock.json `packages["apps/desktop"].version`',
+      actual: lockfile.packages?.["apps/desktop"]?.version,
+      expected: desktopPackageJson.version,
+    },
+  ];
+
+  for (const { label, actual, expected } of sites) {
+    assert.equal(
+      actual,
+      expected,
+      `${label} is ${JSON.stringify(actual)} but the matching package.json is ${expected}. Run \`npm install --package-lock-only\` after bumping the version and commit the result.`
+    );
+  }
+});
+
 test("root package.json version is valid semver", async () => {
   const rootPackageJson = JSON.parse(await readFile("package.json", "utf8"));
 

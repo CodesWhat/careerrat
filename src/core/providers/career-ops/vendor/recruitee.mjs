@@ -18,7 +18,7 @@ function assertRecruiteeUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`recruitee: URL must use HTTPS: ${url}`);
   if (!RECRUITEE_HOST_RE.test(parsed.hostname)) {
-    throw new Error(`recruitee: untrusted hostname "${parsed.hostname}" — must match <slug>.recruitee.com`);
+    throw new Error(`recruitee: untrusted hostname "${parsed.hostname}". Must match <slug>.recruitee.com`);
   }
   return url;
 }

@@ -41,7 +41,7 @@ export async function fetchRemotive(entry = {}, fetchImpl = fetch) {
   const json = await fetchJsonBody(FEED_URL, fetchImpl);
   if (!json || !Array.isArray(json.jobs)) {
     throw new Error(
-      `remotive: unexpected API response — expected { jobs: [...] }, got keys: [${json ? Object.keys(json).join(", ") : "null"}]`
+      `remotive: unexpected API response: expected { jobs: [...] }, got keys: [${json ? Object.keys(json).join(", ") : "null"}]`
     );
   }
 

@@ -45,7 +45,7 @@ function assertFeedUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`a16z-speedrun-talent: URL must use HTTPS: ${url}`);
   if (parsed.hostname !== TRUSTED_HOST) {
-    throw new Error(`a16z-speedrun-talent: untrusted hostname "${parsed.hostname}" — must be ${TRUSTED_HOST}`);
+    throw new Error(`a16z-speedrun-talent: untrusted hostname "${parsed.hostname}". Must be ${TRUSTED_HOST}`);
   }
   return url;
 }
@@ -168,7 +168,7 @@ export default {
       const json = await fetchJsonWithRetry(ctx, url, { redirect: 'error' });
       if (!json || !Array.isArray(json.jobs)) {
         throw new Error(
-          `a16z-speedrun-talent: unexpected API response on page ${page} — expected { jobs: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
+          `a16z-speedrun-talent: unexpected API response on page ${page}: expected { jobs: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
         );
       }
       for (const j of json.jobs) {
@@ -183,7 +183,7 @@ export default {
       if (page + 1 >= maxPages && Number.isInteger(json.total_pages) && json.total_pages > maxPages) {
         const name = typeof fallbackCompany === 'string' && fallbackCompany ? fallbackCompany : 'a16z speedrun talent network';
         console.error(
-          `⚠️  a16z-speedrun-talent: ${name} truncated at max_pages=${maxPages} (${out.length} of ${Number.isInteger(json.total) ? json.total : 'many'} jobs) — raise max_pages on this entry or narrow with q: for more`,
+          `⚠️  a16z-speedrun-talent: ${name} truncated at max_pages=${maxPages} (${out.length} of ${Number.isInteger(json.total) ? json.total : 'many'} jobs). Raise max_pages on this entry or narrow with q: for more`,
         );
       }
     }

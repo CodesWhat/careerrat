@@ -39,7 +39,7 @@ function assertHost(url, host, label) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`wttj: URL must use HTTPS: ${url}`);
   if (parsed.hostname !== host.toLowerCase()) {
-    throw new Error(`wttj: untrusted ${label} hostname "${parsed.hostname}" — must be ${host}`);
+    throw new Error(`wttj: untrusted ${label} hostname "${parsed.hostname}". Must be ${host}`);
   }
   return url;
 }
@@ -142,7 +142,7 @@ function resolveConfig(entry) {
     : [];
   if (queries.length === 0) {
     throw new Error(
-      'wttj: the WTTJ board is global — configure explicit searches via `wttj: { queries: ["…"] }`',
+      'wttj: the WTTJ board is global. Configure explicit searches via `wttj: { queries: ["…"] }`',
     );
   }
   const maxHits =
@@ -198,7 +198,7 @@ export default {
       );
       if (!json || !Array.isArray(json.hits)) {
         throw new Error(
-          `wttj: unexpected Algolia response for query "${query}" — expected { hits: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
+          `wttj: unexpected Algolia response for query "${query}": expected { hits: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
         );
       }
       for (const h of json.hits) {

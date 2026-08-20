@@ -67,7 +67,7 @@ function assertOracleUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`oraclecloud: URL must use HTTPS: ${url}`);
   if (!ORACLE_HOST_RE.test(parsed.hostname)) {
-    throw new Error(`oraclecloud: untrusted hostname "${parsed.hostname}" — must match *.fa[.<region>][.ocs].oraclecloud[1-99].com`);
+    throw new Error(`oraclecloud: untrusted hostname "${parsed.hostname}". Must match *.fa[.<region>][.ocs].oraclecloud[1-99].com`);
   }
   return url;
 }

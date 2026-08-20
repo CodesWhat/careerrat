@@ -28,7 +28,7 @@ function assertGetonbrdUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`getonbrd: URL must use HTTPS: ${url}`);
   if (parsed.hostname !== TRUSTED_HOST) {
-    throw new Error(`getonbrd: untrusted hostname "${parsed.hostname}" — must be ${TRUSTED_HOST}`);
+    throw new Error(`getonbrd: untrusted hostname "${parsed.hostname}". Must be ${TRUSTED_HOST}`);
   }
   return url;
 }
@@ -120,7 +120,7 @@ export default {
       const json = await ctx.fetchJson(url, { redirect: 'error' });
       if (!json || !Array.isArray(json.data)) {
         throw new Error(
-          `getonbrd: unexpected API response on page ${page} — expected { data: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
+          `getonbrd: unexpected API response on page ${page}: expected { data: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
         );
       }
       for (const j of json.data) {

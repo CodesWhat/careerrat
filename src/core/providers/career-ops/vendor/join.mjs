@@ -86,7 +86,7 @@ export default {
       allItems.push(...pageItems);
     }
     if (pageCount === maxPages && reportedPageCount > maxPages && ctxCap === Infinity) {
-      console.error(`⚠️  join: ${entry.name} truncated at max_pages=${maxPages} of ${reportedPageCount} reported pages — raise max_pages on this entry for more`);
+      console.error(`⚠️  join: ${entry.name} truncated at max_pages=${maxPages} of ${reportedPageCount} reported pages. Raise max_pages on this entry for more`);
     }
 
     const companySlug = state.company?.domain || slug;

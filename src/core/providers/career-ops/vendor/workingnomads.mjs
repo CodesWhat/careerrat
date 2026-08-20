@@ -23,7 +23,7 @@ export default {
     // redirect:'error' prevents SSRF via server-side redirects
     const data = await ctx.fetchJson(FEED_URL, { redirect: 'error' });
     if (!Array.isArray(data)) {
-      throw new Error(`workingnomads: unexpected API response — expected a JSON array, got ${data === null ? 'null' : typeof data}`);
+      throw new Error(`workingnomads: unexpected API response: expected a JSON array, got ${data === null ? 'null' : typeof data}`);
     }
 
     return data

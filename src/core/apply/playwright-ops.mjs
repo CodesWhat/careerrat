@@ -19,10 +19,42 @@
 
 const CONTROL_SELECTOR = "input, textarea, select, button, [role='button']";
 const MAX_PAGE_TEXT = 20_000;
+// Bounds every Playwright action selectOption() takes (native-select attempt,
+// then each step of the combobox fallback) so a control that can't actually
+// be driven fails in a few seconds, not Playwright's implicit 30s
+// actionability wait. Real ATS forms almost never use a native <select> —
+// Greenhouse/Ashby/Lever all route dropdowns through custom [role=combobox]
+// widgets — so hitting this timeout on the native attempt is the common case,
+// not the exception, and the combobox fallback below is what actually drives
+// the control.
+const SELECT_OPTION_TIMEOUT_MS = 5_000;
+// Per-character delay while driving a type-to-populate combobox (Ashby
+// shape) with real keystrokes. Measured directly against a live Ashby form:
+// typing the whole target value in one burst (pressSequentially's default,
+// effectively no delay) does not reliably trigger its debounced live-search,
+// where pacing keystrokes ~60ms apart does — this mirrors that working
+// sequence instead of guessing at a smaller number.
+const TYPEAHEAD_KEY_DELAY_MS = 60;
+// Bounds the FIRST wait for a type-to-populate widget's async/debounced
+// option list to render at all, after typing. Deliberately shorter than
+// SELECT_OPTION_TIMEOUT_MS: this wait is only reachable after the
+// click-to-open fallback already burned its own full timeout finding
+// nothing, and the two are additive — see the failure-path budget note on
+// selectOption() below.
+const TYPEAHEAD_OPTIONS_TIMEOUT_MS = 3_000;
+// Bounded pause before a single retry of the match-click-verify cycle
+// against a type-to-populate widget. Real Ashby-shaped widgets have been
+// observed rendering an interim option list (present in the DOM, but not yet
+// wired to commit a selection) that a later async response replaces with the
+// real, click-handling list — a click that lands during that gap resolves
+// with no error and no real selection. This pause gives the real list a
+// bounded chance to arrive before selectOption() gives up.
+const TYPEAHEAD_SETTLE_DELAY_MS = 700;
 // Bounds how many supervised tabs stay open at once in a long-lived process
 // (e.g. a dev server fielding many applies in a day) — beyond this, the
 // least-recently-used tab is closed to free real browser resources.
 const MAX_OPEN_PAGES = 8;
+
 async function defaultLaunch({ profileDir, headless }) {
   const { chromium } = await import("playwright");
   return chromium.launchPersistentContext(profileDir, {
@@ -145,10 +177,18 @@ export function collectControls(elements) {
         ":scope > legend, :scope > label, :scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6, :scope > [role='heading']"
       );
       let nearest = null;
+      // 0x04 is Node.compareDocumentPosition's FOLLOWING bit (standard,
+      // stable value) — inlined here rather than read off a module-scope
+      // constant. evaluateAll serializes only collectControls's own source
+      // to run in the browser, so a reference to anything declared outside
+      // it (a helper OR a constant, however small) comes back `undefined`
+      // there: this exact mistake, just with a NAMED module-scope constant
+      // instead of a literal, previously threw ReferenceError on every real
+      // ATS page and is the reason this rule gets called out so bluntly.
       for (const candidate of candidates) {
         // querySelectorAll returns matches in document order, so the last
         // candidate that still precedes `el` is the nearest preceding one.
-        if (candidate.compareDocumentPosition(el) & DOCUMENT_POSITION_FOLLOWING) {
+        if (candidate.compareDocumentPosition(el) & 0x04) {
           nearest = candidate;
         }
       }
@@ -260,6 +300,149 @@ function buildUploadTreeLines(controlsWithRef) {
     );
   }
   return lines;
+}
+
+// Case/whitespace-insensitive comparison key for matching a target value
+// against a rendered [role=option]'s text. This runs in Node against strings
+// already pulled out of the page (Locator.allTextContents()), not inside an
+// evaluate() callback, so it's fine as an ordinary module-level helper.
+function normalizeOptionText(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+// Index of the best match for `targetValue` among `optionTexts`, or -1 if
+// none matches at all. An exact match (after normalizing case/whitespace)
+// always wins over a substring match, even when a substring match comes
+// first in the list — e.g. selecting "United States" must not land on
+// "United States Minor Outlying Islands" just because that option happens to
+// render before the exact one.
+function findOptionMatch(optionTexts, targetValue) {
+  const target = normalizeOptionText(targetValue);
+  // An empty target must never fall through to substring matching — every
+  // option's text "includes" the empty string, so that would silently click
+  // the first option in the list instead of handing an unset field back to
+  // the human.
+  if (!target) return -1;
+  const exactIndex = optionTexts.findIndex((text) => normalizeOptionText(text) === target);
+  if (exactIndex !== -1) return exactIndex;
+  return optionTexts.findIndex((text) => normalizeOptionText(text).includes(target));
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Clicks the [role=option] node whose text exactly matches `optionText`, via
+// a FRESH locator query at click time rather than a cached index — this is
+// the fix for a real, measured false positive: an async/virtualized option
+// list (Ashby) can replace its DOM nodes between the moment optionTexts is
+// read and the moment the match is clicked, and a stale `nth(index)` click
+// silently lands on whatever now occupies that position instead of failing.
+// `.filter({hasText})` with an anchored, escaped regex requires a WHOLE-TEXT
+// match (not "contains") so a short exact option ("Canada") never matches a
+// longer one that merely contains it ("Canadian Overseas Territory") purely
+// because both satisfy a substring filter; `.first()` tolerates a genuine
+// duplicate label (two options rendering the identical text) by clicking
+// whichever occurrence currently exists.
+async function clickOptionByExactText(optionsLocator, optionText, timeoutMs) {
+  const exact = new RegExp(`^\\s*${escapeRegExp(String(optionText).trim())}\\s*$`);
+  await optionsLocator.filter({ hasText: exact }).first().click({ timeout: timeoutMs });
+}
+
+// Reads back whatever a combobox-shaped control currently displays as its
+// own selection state — an <input>/<textarea>'s `value`, or a
+// contentEditable element's text. selectOption() trusts nothing but this to
+// decide a combobox selection actually took: the P0 this guards against was
+// a real Ashby control where a click resolved with no error and left the
+// field's own value genuinely blank.
+async function readComboboxDisplayValue(locator) {
+  return locator
+    .evaluate((el) => ("value" in el ? String(el.value ?? "") : String(el.textContent ?? "")))
+    .catch(() => "");
+}
+
+function comboboxSelectionConfirmed(displayValue, expectedText) {
+  const expected = normalizeOptionText(expectedText);
+  if (!expected) return false;
+  return normalizeOptionText(displayValue).includes(expected);
+}
+
+// Shared match-click-verify cycle for both combobox fallback strategies
+// (click-to-open and type-to-populate). Never reports success on "the click
+// didn't throw" alone — after clicking, it reads the control's own display
+// value back and only returns true once that value actually reflects the
+// option just clicked. `settleDelayMs`, when set, is paused BEFORE EVERY
+// attempt, including the first: an option list can exist in the DOM before
+// it's actually wired to commit a selection (measured against a real Ashby
+// form — see TYPEAHEAD_SETTLE_DELAY_MS), so reading/clicking the instant a
+// node becomes visible is exactly what produces a false positive, not a
+// missing retry. Retries (bounded by `attempts`) are the backstop for
+// settling that takes longer than one pause. Returns false, never throws,
+// when no attempt confirms — the caller decides what that means for its
+// strategy.
+//
+// `requireDisplayChange` exists because comboboxSelectionConfirmed() alone is
+// the wrong check for a type-to-populate control: the code itself already
+// typed `stringValue` into the box before any option list existed, so the
+// display value contains the target text whether or not the click actually
+// landed on an option. That's not evidence of selection — it's evidence of
+// the code's own prior input, and it's the exact trap that produced a false
+// negative in an earlier verification pass (which used typed text and the
+// accessibility snapshot as proof and concluded a working fix hadn't worked).
+// With this on, confirmation instead requires the pre-click display value to
+// have genuinely changed, or the option list to have closed — either one is
+// real evidence the click committed a selection.
+async function matchClickAndConfirm({
+  locator,
+  optionsLocator,
+  stringValue,
+  attempts,
+  settleDelayMs,
+  requireDisplayChange = false,
+}) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (settleDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, settleDelayMs));
+    }
+    const optionTexts = await optionsLocator.allTextContents();
+    const matchIndex = findOptionMatch(optionTexts, stringValue);
+    if (matchIndex === -1) continue;
+    const matchedText = optionTexts[matchIndex];
+    const displayValueBeforeClick = requireDisplayChange
+      ? await readComboboxDisplayValue(locator)
+      : null;
+    try {
+      await clickOptionByExactText(optionsLocator, matchedText, SELECT_OPTION_TIMEOUT_MS);
+    } catch {
+      continue;
+    }
+    const displayValue = await readComboboxDisplayValue(locator);
+    if (requireDisplayChange) {
+      const optionListClosed = (await optionsLocator.count()) === 0;
+      if (displayValue !== displayValueBeforeClick || optionListClosed) return true;
+      continue;
+    }
+    if (comboboxSelectionConfirmed(displayValue, matchedText)) return true;
+  }
+  return false;
+}
+
+// The product requirement for a dropdown selectOption() genuinely cannot
+// drive: never a silent skip, never a guessed value — a visible handoff to
+// the human, in plain language, naming the field. apply-driver.mjs's
+// fillStep() already catches every field-op error and surfaces
+// `error.message` as that field's unresolved reason (see the `unresolved.push`
+// call around its `await action(ops, pageId)`), so this message IS what the
+// candidate sees.
+function comboboxHandoffError(name) {
+  const trimmed = String(name || "").trim();
+  const subject = trimmed ? `The "${trimmed}" dropdown` : "This dropdown";
+  return new Error(
+    `${subject} couldn't be set automatically. Please switch to the open browser window and choose the correct option yourself.`
+  );
 }
 
 // createPlaywrightOps — bundled-Playwright implementation of the provider-neutral
@@ -384,6 +567,9 @@ export function createPlaywrightOps({
         refMap.set(ref, {
           locator: container.nth(control.index),
           fileInput: Boolean(control.fileInput),
+          // Carried through so selectOption()'s combobox-handoff error can
+          // name the field the same way the rest of the snapshot does.
+          name: control.name,
         });
         refs[ref] = { role: control.role, name: control.name, required: Boolean(control.required) };
       }
@@ -406,14 +592,130 @@ export function createPlaywrightOps({
       await resolveRef(pageId, ref).locator.fill(String(value));
     },
 
+    // Three shapes of dropdown, tried in order. None of them is trusted on
+    // "no exception was thrown" alone — a real Ashby form produced exactly
+    // that false positive (a click resolved cleanly while the field stayed
+    // genuinely blank), so every path below confirms the control's own
+    // display value actually changed before reporting success.
+    //  1. A native <select> — the original, still-correct path for a form
+    //     like Lever's that genuinely has one. Bounded to a few seconds so a
+    //     control that ISN'T a <select> fails fast instead of riding
+    //     Playwright's 30s default actionability wait (the exact hang
+    //     observed against a real Lever combobox). Playwright's own
+    //     selectOption() throws when nothing matches, but its return value
+    //     (the option values it actually selected) is checked too, so an
+    //     edge case where it resolves without throwing yet selects nothing
+    //     still falls through instead of being reported as success.
+    //  2. A click-to-open combobox widget (react-select and friends: a
+    //     clickable control that opens a [role=option] list right away) —
+    //     click to open it, then match/click/confirm.
+    //  3. A type-to-populate combobox (Ashby: a plain text input that
+    //     renders NO [role=option] nodes until something is actually typed
+    //     into it, and populates them asynchronously/debounced after that)
+    //     — real keystrokes (not fill(), and paced, not a single burst),
+    //     then match/click/confirm with one bounded retry for an async list
+    //     that hasn't finished settling yet.
+    // If no path can resolve AND CONFIRM a match, this throws a
+    // plain-language error naming the field instead of silently skipping it,
+    // guessing a value, or reporting a click that didn't actually select
+    // anything — apply-driver.mjs's fillStep() already surfaces that message
+    // as the field's unresolved reason, which is the visible human handoff.
+    //
+    // Failure-path budget (every real ATS control that can't be driven at
+    // all): native attempts fail near-instantly for a non-<select> control,
+    // the click-to-open wait burns up to SELECT_OPTION_TIMEOUT_MS (5s), and
+    // the type-to-populate wait+retries burns up to roughly
+    // TYPEAHEAD_OPTIONS_TIMEOUT_MS + 2 * TYPEAHEAD_SETTLE_DELAY_MS (~4.4s) —
+    // additive, but comfortably under the product's 15s ceiling (measured
+    // worst case under 10s against a live Chromium fixture, see
+    // tests/playwright-live-dropdowns.test.mjs).
     async selectOption({ pageId, ref, value }) {
-      const { locator } = resolveRef(pageId, ref);
+      const target = page(pageId);
+      const { locator, name } = resolveRef(pageId, ref);
       const stringValue = String(value);
-      try {
-        await locator.selectOption({ label: stringValue });
-      } catch {
-        await locator.selectOption(stringValue);
+
+      for (const arg of [{ label: stringValue }, stringValue]) {
+        try {
+          const selected = await locator.selectOption(arg, { timeout: SELECT_OPTION_TIMEOUT_MS });
+          if (selected.length > 0) return;
+        } catch {
+          // Not a native <select> (or this particular match form didn't
+          // hit) — try the next form, then fall through to the combobox
+          // path below.
+        }
       }
+
+      const optionsLocator = target.locator("[role='option']:visible");
+
+      try {
+        await locator.click({ timeout: SELECT_OPTION_TIMEOUT_MS });
+        // react-select shape: the option list renders right away off the
+        // click above. A type-to-populate shape (Ashby) times out here
+        // instead — caught rather than left to abort the whole strategy, so
+        // control falls through to the typing attempt below instead of
+        // giving up on a list that was never going to open from a click
+        // alone.
+        await optionsLocator
+          .first()
+          .waitFor({ state: "visible", timeout: SELECT_OPTION_TIMEOUT_MS })
+          .catch(() => {});
+
+        const confirmed = await matchClickAndConfirm({
+          locator,
+          optionsLocator,
+          stringValue,
+          attempts: 1,
+          settleDelayMs: 0,
+        });
+        if (confirmed) return;
+      } catch {
+        // fall through to the typing strategy below
+      }
+
+      try {
+        const isTypeable = await locator
+          .evaluate(
+            (el) => el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable
+          )
+          .catch(() => false);
+        if (isTypeable) {
+          // Real keystrokes, paced, not fill() — a type-to-populate
+          // combobox (Ashby-shaped) listens for input/keydown as the user
+          // types to populate its option list at all; fill() sets the value
+          // and dispatches a single synthetic input event, and typing the
+          // whole value in one burst doesn't reliably trigger its debounced
+          // live-search either. TYPEAHEAD_KEY_DELAY_MS mirrors the paced
+          // sequence measured to actually work against a live Ashby form.
+          await locator.pressSequentially(stringValue, {
+            timeout: SELECT_OPTION_TIMEOUT_MS,
+            delay: TYPEAHEAD_KEY_DELAY_MS,
+          });
+          await optionsLocator
+            .first()
+            .waitFor({ state: "visible", timeout: TYPEAHEAD_OPTIONS_TIMEOUT_MS })
+            .catch(() => {});
+
+          const confirmed = await matchClickAndConfirm({
+            locator,
+            optionsLocator,
+            stringValue,
+            attempts: 2,
+            settleDelayMs: TYPEAHEAD_SETTLE_DELAY_MS,
+            // This strategy already typed stringValue into the control
+            // above, so its display value trivially "contains" the target
+            // text before any option is ever clicked — confirming on that
+            // would pass whether or not the click actually selected
+            // anything. Require real evidence instead: the display value
+            // changing, or the option list closing.
+            requireDisplayChange: true,
+          });
+          if (confirmed) return;
+        }
+      } catch {
+        // fall through to the handoff error below
+      }
+
+      throw comboboxHandoffError(name);
     },
 
     async toggleField({ pageId, ref, checked }) {

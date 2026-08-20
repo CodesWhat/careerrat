@@ -22,6 +22,12 @@ import { join } from "node:path";
 
 export const PROVIDER_PREFERENCE = ["auto", "extension", "orca", "playwright"];
 
+// `automatedApply` marks whether `apply-job`'s scripted/headless apply path
+// (createConfiguredApplyExecutor, src/core/apply/apply-executor-factory.mjs) can
+// drive this provider. `extension` is agent-driven, turn-by-turn only — it still
+// works for interactive, in-the-loop browsing (skills reading pages, agent-driven
+// apply while an agent is live) but has no callable surface for a headless script,
+// so automatic apply on this provider is not available yet.
 export const PROVIDERS = {
   auto: {
     id: "auto",
@@ -29,6 +35,7 @@ export const PROVIDERS = {
     preferred: true,
     needs: "a supported supervised browser available in the current CareerRat session",
     storesCreds: false,
+    automatedApply: true,
   },
   extension: {
     id: "extension",
@@ -36,6 +43,7 @@ export const PROVIDERS = {
     preferred: false,
     needs: "the browser extension installed and signed into the platform",
     storesCreds: false,
+    automatedApply: false,
   },
   orca: {
     id: "orca",
@@ -43,6 +51,7 @@ export const PROVIDERS = {
     preferred: false,
     needs: "CareerRat running inside an Orca workspace with its browser available",
     storesCreds: false,
+    automatedApply: true,
   },
   playwright: {
     id: "playwright",
@@ -50,6 +59,7 @@ export const PROVIDERS = {
     preferred: false,
     needs: "a one-time interactive login per platform (persistent profile reused after)",
     storesCreds: false,
+    automatedApply: true,
   },
 };
 
@@ -64,8 +74,56 @@ export function profilePath(platform, { profileRoot } = {}) {
   return join(profileRoot || defaultProfileRoot(), String(platform || "default"));
 }
 
-export function describeProviders() {
-  return PROVIDER_PREFERENCE.map((id) => PROVIDERS[id]);
+// resolveAutoTarget — the one piece of resolveSession()'s logic that decides what
+// the "auto" meta-provider actually becomes right now: Orca inside an Orca
+// workspace, the extension otherwise. Shared so describeProviders() can report
+// the SAME resolved provider resolveSession() would pick, instead of each
+// re-deriving it (and risking drift).
+function resolveAutoTarget(env) {
+  return env?.ORCA_WORKTREE_ID ? "orca" : "extension";
+}
+
+// describeProviders — the provider list for display (Settings, `automation
+// status`). "auto" is a meta-choice, not a concrete provider, so its advertised
+// `automatedApply` is resolved against what it actually becomes right now (Orca
+// workspace or not) rather than the descriptor's own optimistic `true`. Outside
+// an Orca workspace, "auto" resolves to the extension executor, which genuinely
+// can't drive automatic apply — reporting `true` there is exactly the UI/runtime
+// mismatch this resolves: the same resolved-provider truth backs both the option
+// list here and the session JSON (consent.mjs#automationStatus).
+export function describeProviders({ env = process.env } = {}) {
+  return PROVIDER_PREFERENCE.map((id) => {
+    const descriptor = PROVIDERS[id];
+    if (id !== "auto") return descriptor;
+    const resolved = resolveAutoTarget(env);
+    return { ...descriptor, automatedApply: PROVIDERS[resolved].automatedApply };
+  });
+}
+
+// automaticApplyGap — the single, provider-neutral verdict on whether a given
+// session provider can drive apply-job's scripted/headless apply path. This is a
+// core-layer decision (what's true about the provider), not a CLI or executor
+// concern, so both `src/cli/automation.mjs` (session/status display) and
+// `src/core/apply/apply-executor-factory.mjs` (the actual executor result) format
+// this SAME result instead of each hardcoding their own copy of "this provider
+// can't do it" — which is exactly how those two messages drifted apart before.
+//
+// Deliberately never names a specific replacement provider: which provider a
+// candidate should switch to is a choice for them to make, not a fact this layer
+// can assert (see AGENTS.md Domain-Neutral Rule — no hardcoded fallback
+// recommendation). Callers point the user at `careerrat automation status` to see
+// the actual provider options rather than one baked-in suggestion.
+export function automaticApplyGap(provider) {
+  const descriptor = PROVIDERS[provider];
+  if (!descriptor || descriptor.automatedApply !== false) return null;
+  return {
+    provider,
+    label: descriptor.label,
+    reason:
+      `Automatic apply isn't available on the ${descriptor.label} provider yet. ` +
+      "Choose a provider that supports automatic apply (see `careerrat automation status`) " +
+      "with `careerrat automation session <provider> --write`.",
+  };
 }
 
 // Resolve the configured session for display. `data` is a loaded automation config
@@ -74,12 +132,7 @@ export function describeProviders() {
 export function resolveSession({ data, env = process.env } = {}) {
   const configuredProvider = data?.session?.provider || "auto";
   const configured = PROVIDERS[configuredProvider] ? configuredProvider : "auto";
-  const provider =
-    configured === "auto" && env?.ORCA_WORKTREE_ID
-      ? "orca"
-      : configured === "auto"
-        ? "extension"
-        : configured;
+  const provider = configured === "auto" ? resolveAutoTarget(env) : configured;
   const profileRoot = data?.session?.profile_root || defaultProfileRoot();
   return {
     provider,
@@ -193,13 +246,13 @@ export function detectSession({ data, env = process.env } = {}) {
         ? {
             status: "unverified",
             browsers,
-            detail: `${browsers.join(", ")} detected. Confirm the extension is installed + signed in (can't be verified from outside the browser)`,
+            detail: `${browsers.join(", ")} detected. Confirm the extension is installed and signed in (can't be verified from outside the browser). Automatic apply isn't available on this provider yet; \`careerrat automation status\` lists the providers that support it.`,
           }
         : {
             status: "missing",
             browsers: [],
             detail:
-              "no Chrome-family browser found. Install Chrome + the session-browser extension (or switch to the Playwright provider)",
+              "No Chrome-family browser found. Install Chrome and the session-browser extension, or pick a different provider with `careerrat automation status`. Automatic apply isn't available on this provider yet either way.",
           };
     }
   } catch {

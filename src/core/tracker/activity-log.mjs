@@ -97,10 +97,31 @@ function hash36(str) {
   return (h >>> 0).toString(36);
 }
 
+// `title` is presentation prose, not a stable identifier — a copy-only rewrite
+// (e.g. swapping em dashes for colons/commas in user-facing strings) must not
+// change the dedupe key, or every existing backfilled event doubles on the
+// next run. Normalize the separator punctuation out of it before hashing:
+// lowercase, collapse dash/colon/semicolon/comma runs (plus the whitespace
+// around them) to a single space. This keeps title's actual discriminating
+// content (company names, counts, statuses) in the key while making it
+// immune to the specific class of edit that bit here.
+function normalizeTitleForId(title) {
+  return String(title || "")
+    .toLowerCase()
+    .replace(/[‐-―\-:;,]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 // A stable id from the event's identifying content, so the same logical event
 // (e.g. re-derived during backfill) always collapses to one line.
 export function eventId({ at, type, title, refs }) {
-  const key = [at || "", type || "", title || "", refs?.applicationId || refs?.url || ""].join("|");
+  const key = [
+    at || "",
+    type || "",
+    normalizeTitleForId(title),
+    refs?.applicationId || refs?.url || "",
+  ].join("|");
   return `evt_${hash36(key)}`;
 }
 
@@ -261,8 +282,30 @@ export function appendActivity(
   const path = activityAbsPath(root);
   // One read serves both the dedupe check and the retention count below.
   const existing = (dedupe || autoPrune) && existsSync(path) ? readActivity({ root }) : [];
-  if (dedupe && existing.some((e) => e.id === plan.event.id)) {
-    return { ok: true, deduped: true, event: plan.event, path };
+  if (dedupe) {
+    // Compare on a key RECOMPUTED under the current eventId() — not the raw
+    // stored `id` — so a line persisted under an older title wording (e.g.
+    // before a copy-only rewrite of the presentation strings) still collapses
+    // onto the same logical event instead of duplicating on the next
+    // backfill/append.
+    //
+    // The recomputed comparison is skipped when the CALLER supplied an explicit
+    // id (`careerrat activity append --id ...`). Deriving the id is this
+    // module's way of saying "identity is a function of content"; passing one in
+    // is the caller overriding exactly that, and content-matching anyway would
+    // silently drop a line the caller deliberately made distinct. Dropping is
+    // the worse direction to fail in: a duplicate is visible and removable, a
+    // missing event looks like it never happened. Callers that don't set an id
+    // (every DB verb, and deriveActivityEvents) are unaffected and still get
+    // the wording-independent collapse this fix exists for.
+    const callerSetId = trimOrNull(input?.id) !== null;
+    const newKey = eventId(plan.event);
+    const isDuplicate = existing.some(
+      (e) => e.id === plan.event.id || (!callerSetId && eventId(e) === newKey)
+    );
+    if (isDuplicate) {
+      return { ok: true, deduped: true, event: plan.event, path };
+    }
   }
 
   mkdirSync(dirname(path), { recursive: true });

@@ -299,7 +299,7 @@ export default {
     if (stopReason === 'cap') {
       const jobsSummary = `${jobs.length}${total !== null ? ` of ${total}` : ''} jobs`;
       if (!syntheticEntries) {
-        console.error(`⚠️  workday: ${entry.name} truncated at max_pages=${maxPages} (${jobsSummary}) — raise max_pages on this entry for more`);
+        console.error(`⚠️  workday: ${entry.name} truncated at max_pages=${maxPages} (${jobsSummary}). Raise max_pages on this entry for more`);
       } else {
         // Workday's CXS backend can report `total` as exactly
         // maxPages*PAGE_SIZE when the real count is far higher (e.g.
