@@ -118,7 +118,7 @@ export default {
         try {
           json = await ctx.fetchJson(u2.toString(), { redirect: 'error' });
         } catch (err) {
-          console.error(`⚠️  jibeapply: ${entry.name} page ${page} fetch failed — ${err.message} (returning ${allJobs.length} jobs fetched so far)`);
+          console.error(`⚠️  jibeapply: ${entry.name} page ${page} fetch failed: ${err.message} (returning ${allJobs.length} jobs fetched so far)`);
           break;
         }
         allJobs.push(...(json.jobs ?? []));
@@ -131,8 +131,8 @@ export default {
       if (Math.ceil(total / pageSize) > maxPages) {
         console.error(
           `⚠️  jibeapply: ${entry.name} has more postings than max_pages allows ` +
-          `(fetched ${allJobs.length} of ${total}) — ` +
-          `set max_pages on this portal entry to raise the cap (current: ${maxPages})`,
+          `(fetched ${allJobs.length} of ${total}). ` +
+          `Set max_pages on this portal entry to raise the cap (current: ${maxPages})`,
         );
       }
     }

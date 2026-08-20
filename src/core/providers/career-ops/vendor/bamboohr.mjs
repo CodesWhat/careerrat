@@ -24,7 +24,7 @@ function assertBambooHRUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`bamboohr: URL must use HTTPS: ${url}`);
   if (!BAMBOOHR_HOST_RE.test(parsed.hostname)) {
-    throw new Error(`bamboohr: untrusted hostname "${parsed.hostname}" — must match <tenant>.bamboohr.com`);
+    throw new Error(`bamboohr: untrusted hostname "${parsed.hostname}". Must match <tenant>.bamboohr.com`);
   }
   return url;
 }

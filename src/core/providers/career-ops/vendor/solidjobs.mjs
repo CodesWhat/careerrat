@@ -26,7 +26,7 @@ function assertUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`solidjobs: URL must use HTTPS: ${url}`);
   if (!ALLOWED_HOSTS.has(parsed.hostname))
-    throw new Error(`solidjobs: untrusted hostname "${parsed.hostname}" — must be solid.jobs`);
+    throw new Error(`solidjobs: untrusted hostname "${parsed.hostname}". Must be solid.jobs`);
   if (!parsed.pathname.startsWith('/public-api/offers/'))
     throw new Error(`solidjobs: URL path must start with /public-api/offers/: ${url}`);
   return url;
@@ -64,7 +64,7 @@ export default {
     // redirect:'error' prevents SSRF via server-side redirects
     const json = await ctx.fetchJson(url, { redirect: 'error' });
     if (!json || !Array.isArray(json.jobs)) {
-      throw new Error(`solidjobs: unexpected API response — expected { jobs: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`);
+      throw new Error(`solidjobs: unexpected API response: expected { jobs: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`);
     }
 
     /** @type {Array<{ title?: string, url?: string, company?: string, locations?: string | string[] }>} */

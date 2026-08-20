@@ -35,7 +35,7 @@ function assertComeetUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`comeet: URL must use HTTPS: ${redactToken(url)}`);
   if (parsed.hostname !== COMEET_API_HOST)
-    throw new Error(`comeet: untrusted hostname "${parsed.hostname}" — must be ${COMEET_API_HOST}`);
+    throw new Error(`comeet: untrusted hostname "${parsed.hostname}". Must be ${COMEET_API_HOST}`);
   if (!parsed.pathname.startsWith('/careers-api/'))
     throw new Error(`comeet: URL path must be the careers-api endpoint: ${redactToken(url)}`);
   return url;

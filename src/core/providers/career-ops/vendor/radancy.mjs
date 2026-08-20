@@ -330,7 +330,7 @@ export default {
           if (totalResults && returned < totalResults) {
             console.error(
               `⚠️  radancy: ${entry.name} truncated at ${returned} of ${totalResults} postings`
-              + ` — raise max_jobs/max_pages on this entry for more`,
+              + `. Raise max_jobs/max_pages on this entry for more`,
             );
           }
           return jobs.slice(0, maxJobs);

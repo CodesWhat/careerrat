@@ -8,9 +8,9 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
@@ -18,7 +18,12 @@ import { appUpsert } from "../src/core/db/verbs/app.mjs";
 import { candidateConfigGet, candidateConfigPatch } from "../src/core/db/verbs/candidate.mjs";
 import { kvUpsert } from "../src/core/db/verbs/shared.mjs";
 import { sourcedUpsertBatch } from "../src/core/db/verbs/sourced.mjs";
-import { readLearnings } from "../src/core/profile/learnings.mjs";
+import {
+  learningsAbsPath,
+  learningsHeader,
+  readLearnings,
+  slugifyFamily,
+} from "../src/core/profile/learnings.mjs";
 import {
   applyStrategyRecommendation,
   buildStrategyReviewContext,
@@ -911,4 +916,87 @@ test("careerrat strategy-review stamp --write (DB mode) shares stampStrategyRevi
   assert.equal(event.type, "system");
   assert.ok(event.tags.includes("skill:reevaluate-strategy"));
   assert.ok(event.tags.includes("operation:strategy:review"));
+});
+
+// ---------------------------------------------------------------------------
+// compactLearnings separator back-compat
+// ---------------------------------------------------------------------------
+
+// formatEntry() writes `## <date>: <title>` since the em-dash copy sweep, but it
+// wrote `## <date> — <title>` before it. Learning files are append-only and live
+// in the candidate's own gitignored workspace, so a real user's file can hold
+// entries in either form, and often both. compactLearnings returning headings
+// means a parse failure is silent: a file that matches nothing is indistinguishable
+// from a family with no learnings yet.
+test("buildStrategyReviewContext reads learning headings written with either separator", () => {
+  const repoRoot = tempRepo();
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        { name: "Applied AI Engineer", priority: "primary", titles: ["Applied AI Engineer"] },
+      ],
+    },
+  });
+
+  // compactLearnings derives families straight from targeting.role_buckets[].name
+  // via slugifyFamily, not through the role classifier.
+  const family = slugifyFamily("Applied AI Engineer");
+  const absPath = learningsAbsPath(family, repoRoot);
+  mkdirSync(dirname(absPath), { recursive: true });
+  writeFileSync(
+    absPath,
+    [
+      learningsHeader(family),
+      "",
+      "## 2026-07-01 — Recruiter screens stall without a comp range",
+      "",
+      "Body of the pre-sweep entry.",
+      "",
+      "## 2026-08-01: Take-homes convert better than live coding",
+      "",
+      "Body of the post-sweep entry.",
+      "",
+      // computeAppend's date check is prefix-anchored (`/^\d{4}-\d{2}-\d{2}/`,
+      // no `$`), so `careerrat learnings --date 2026-08-10T14:30:00Z` is accepted
+      // and written. A colon separator matched without requiring trailing
+      // whitespace stops at the first colon on the line, which is inside the
+      // time, and the entry parses as date "2026-08-10T14" with the rest of the
+      // timestamp glued onto the front of the title. Silent, and it feeds a
+      // mangled title into strategy review.
+      "## 2026-08-10T14:30:00Z: Panel loops need a written brief",
+      "",
+      "Body of an entry whose date carries a time.",
+      "",
+      // A title may itself contain a colon. The separator is the first colon
+      // FOLLOWED BY whitespace, not the first colon.
+      "## 2026-08-12: Onsite: bring a written question list",
+      "",
+      "Body of an entry whose title contains a colon.",
+      "",
+    ].join("\n")
+  );
+
+  const context = buildStrategyReviewContext({
+    repoRoot,
+    env: {},
+    now: new Date("2026-08-15T12:00:00.000Z"),
+  });
+
+  const entry = context.learnings.find((item) => item.family === family);
+  assert.ok(
+    entry,
+    `no learnings entry for family ${family} in ${JSON.stringify(context.learnings)}`
+  );
+  assert.deepEqual(
+    entry.entries.map((e) => e.date),
+    ["2026-07-01", "2026-08-01", "2026-08-10T14:30:00Z", "2026-08-12"],
+    "both the em-dash entry and the colon entry must be read, and a date carrying a time must survive intact"
+  );
+  assert.equal(entry.entries[0].title, "Recruiter screens stall without a comp range");
+  assert.equal(entry.entries[1].title, "Take-homes convert better than live coding");
+  assert.equal(entry.entries[2].title, "Panel loops need a written brief");
+  assert.equal(entry.entries[3].title, "Onsite: bring a written question list");
 });

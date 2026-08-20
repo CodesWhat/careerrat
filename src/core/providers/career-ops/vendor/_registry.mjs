@@ -33,16 +33,16 @@ export async function loadProviders(dir) {
     try {
       mod = await import(pathToFileURL(full).href);
     } catch (err) {
-      console.error(`⚠️  ${file}: failed to load — ${err.message}`);
+      console.error(`⚠️  ${file}: failed to load: ${err.message}`);
       continue;
     }
     const p = mod.default;
     if (!p || typeof p.fetch !== 'function' || !p.id) {
-      console.error(`⚠️  ${file}: skipping — default export must be { id, fetch }`);
+      console.error(`⚠️  ${file}: skipping: default export must be { id, fetch }`);
       continue;
     }
     if (providers.has(p.id)) {
-      console.error(`⚠️  ${file}: duplicate provider id "${p.id}" — keeping first`);
+      console.error(`⚠️  ${file}: duplicate provider id "${p.id}", keeping first`);
       continue;
     }
     providers.set(p.id, p);
@@ -75,7 +75,7 @@ export function resolveProvider(entry, providers, { skipIds = [] } = {}) {
       const hit = localParser.detect?.(entry);
       if (hit) return { provider: localParser };
     } catch (err) {
-      console.error(`⚠️  local-parser: detect() threw for "${entry.name}" — ${err.message}`);
+      console.error(`⚠️  local-parser: detect() threw for "${entry.name}": ${err.message}`);
     }
   }
 
@@ -85,7 +85,7 @@ export function resolveProvider(entry, providers, { skipIds = [] } = {}) {
     try {
       hit = p.detect?.(entry);
     } catch (err) {
-      console.error(`⚠️  ${p.id}: detect() threw for "${entry.name}" — ${err.message}`);
+      console.error(`⚠️  ${p.id}: detect() threw for "${entry.name}": ${err.message}`);
       continue;
     }
     if (hit) return { provider: p };

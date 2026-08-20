@@ -37,6 +37,11 @@ function createFakeBrowser({ controls, bodyText = "" } = {}) {
       },
       async selectOption(arg) {
         actions.push({ op: "selectOption", index, arg });
+        // A real Locator.selectOption() returns the option values it
+        // actually selected — selectOption() now checks that array is
+        // non-empty before trusting a native <select> attempt succeeded, so
+        // this fake has to return one too instead of resolving `undefined`.
+        return [String(arg?.label ?? arg)];
       },
       async setChecked(checked) {
         actions.push({ op: "setChecked", index, checked });
@@ -544,6 +549,406 @@ test("screenshot returns base64 png data", async () => {
 });
 
 // ---------------------------------------------------------------------------
+// selectOption(): custom [role=combobox] fallback (P0 — real ATS forms almost
+// never use a native <select>; Greenhouse, Ashby, and Lever all route
+// dropdowns through custom react-select-shaped widgets instead, which the
+// original selectOption() couldn't drive at all — see PLAYWRIGHT-OPS.md-style
+// evidence in the fix commit).
+//
+// createFakeBrowser above always resolves selectOption() successfully (it
+// only records the call), which is right for pinning the still-working
+// native-<select> contract but can't exercise the fallback. This fake models
+// the extra Locator surface selectOption() now calls beyond that: a
+// combobox-index control whose own selectOption() rejects exactly the way a
+// real non-<select> element does ("Element is not a <select> element"), a
+// click() that opens a live option list, an evaluate()/pressSequentially()
+// pair for the optional type-to-filter step, an evaluate() that reflects the
+// control's own post-selection display value (selectOption() now confirms a
+// click actually selected something before reporting success — see
+// comboboxValue below), and a page-level locator("[role='option']:visible")
+// with first()/waitFor()/allTextContents()/filter({hasText}).first().click()
+// reflecting that same filterable list — the same shape a real react-select
+// combobox exposes.
+// ---------------------------------------------------------------------------
+
+function createFakeComboboxBrowser({
+  controls,
+  comboboxIndex,
+  options,
+  // false models an Ashby-shaped input: clicking it renders no options at
+  // all (a type-to-populate control only ever populates its list from
+  // typing), so selectOption() falls through past the click-to-open
+  // strategy into the typing strategy below. true (the default) models the
+  // react-select shape the existing tests below exercise, where the option
+  // list opens right off the click.
+  openOnClick = true,
+  // false models the real P0 this fake exists to guard against: a click on
+  // an option resolves with no error, yet the control's own display value
+  // never actually changes. Only meaningful once the typing strategy is
+  // reached (openOnClick: false) — see the requireDisplayChange regression
+  // test below.
+  applySelectionOnClick = true,
+} = {}) {
+  const actions = [];
+  let currentUrl = "";
+  let open = false;
+  let filterText = "";
+  // The combobox control's own "display value" — selectOption() now reads
+  // this back (via evaluate()) after every click to CONFIRM a selection
+  // actually took, instead of trusting a click that merely didn't throw.
+  // Only ever set by a successful option click below, exactly mirroring the
+  // real bug this fake pins the fix for: a click on a real Ashby control
+  // resolved cleanly while its value stayed genuinely blank.
+  let comboboxValue = "";
+
+  function visibleOptions() {
+    if (!open) return [];
+    const query = filterText.trim().toLowerCase();
+    return options.filter((option) => option.toLowerCase().includes(query));
+  }
+
+  function elementLocator(index) {
+    if (index !== comboboxIndex) {
+      // Every other control these tests touch is treated as a real native
+      // <select> — selectOption() against it just has to succeed, the same
+      // contract createFakeBrowser's fake already pins above.
+      return {
+        async selectOption(arg) {
+          actions.push({ op: "selectOption", index, arg });
+          return [String(arg?.label ?? arg)];
+        },
+      };
+    }
+    return {
+      async selectOption() {
+        // A real Playwright Locator.selectOption() against a non-<select>
+        // element rejects immediately with exactly this message — reproduced
+        // here so selectOption()'s outer try/catch takes the same fallback
+        // branch it would against a live combobox.
+        throw new Error("Element is not a <select> element");
+      },
+      async click() {
+        if (!openOnClick) return; // Ashby-shaped: a click alone opens nothing
+        actions.push({ op: "comboboxOpen", index });
+        open = true;
+        filterText = "";
+      },
+      async evaluate(fn) {
+        return fn({ tagName: "INPUT", isContentEditable: false, value: comboboxValue });
+      },
+      async pressSequentially(value) {
+        actions.push({ op: "comboboxFilter", index, value });
+        filterText = value;
+        // A real <input> reflects keystrokes in its own .value as they're
+        // typed — this is exactly the value matchClickAndConfirm's
+        // requireDisplayChange option must NOT accept as evidence of a
+        // completed selection, since it's set before any option is clicked.
+        comboboxValue = value;
+        open = true; // the list appears as a side effect of typing, not a click
+      },
+    };
+  }
+
+  function selectOptionByLabel(label) {
+    actions.push({ op: "comboboxSelect", index: comboboxIndex, label });
+    if (applySelectionOnClick) {
+      comboboxValue = label;
+      open = false;
+    }
+    // else: reproduces the real Ashby P0 this fake guards against — the
+    // click resolves with no error, yet the control's own display value and
+    // open option list never actually change.
+  }
+
+  function fakeOptionsLocator() {
+    return {
+      first() {
+        return {
+          async waitFor() {
+            if (visibleOptions().length === 0) throw new Error("no visible [role='option']");
+          },
+        };
+      },
+      async allTextContents() {
+        return visibleOptions();
+      },
+      // matchClickAndConfirm's requireDisplayChange path reads this after a
+      // click to check whether the option list closed.
+      async count() {
+        return visibleOptions().length;
+      },
+      // Mirrors real Locator.filter({hasText}).first().click() — the exact
+      // surface selectOption()'s clickOptionByExactText() now drives instead
+      // of a cached nth(index), so this has to model it for the combobox
+      // fallback tests below to exercise the real code path.
+      filter({ hasText }) {
+        return {
+          first() {
+            return {
+              async click() {
+                const matches = visibleOptions().filter((text) =>
+                  hasText instanceof RegExp ? hasText.test(text) : text.includes(hasText)
+                );
+                if (matches.length === 0) throw new Error("no option matched filter({hasText})");
+                selectOptionByLabel(matches[0]);
+              },
+            };
+          },
+        };
+      },
+    };
+  }
+
+  const page = {
+    async goto(url) {
+      currentUrl = url;
+    },
+    url() {
+      return currentUrl;
+    },
+    locator(selector) {
+      if (selector === "body")
+        return {
+          async innerText() {
+            return "";
+          },
+        };
+      if (selector === "[role='option']:visible") return fakeOptionsLocator();
+      return {
+        async evaluateAll() {
+          return controls.map((control, index) => ({
+            index,
+            role: control.role,
+            name: control.name,
+            required: Boolean(control.required),
+            fileInput: Boolean(control.fileInput),
+            groupLabel: control.groupLabel ?? null,
+          }));
+        },
+        nth: elementLocator,
+      };
+    },
+    async screenshot() {
+      return Buffer.from("fake-png-bytes");
+    },
+  };
+
+  const context = {
+    async newPage() {
+      return page;
+    },
+    async close() {},
+  };
+
+  return { actions, launchImpl: async () => context };
+}
+
+const COMBOBOX_FORM_CONTROLS = [
+  { role: "textbox", name: "First Name", required: true },
+  { role: "combobox", name: "Country", required: true },
+  { role: "button", name: "Submit application", required: false },
+];
+
+// Deliberately ordered so the substring match ("United States Minor Outlying
+// Islands" contains "united states") would be the FIRST match found by a
+// naive first-hit search, even though the target value has an exact match
+// later in the list.
+const COUNTRY_OPTIONS = [
+  "United States Minor Outlying Islands",
+  "United States",
+  "Canada",
+  "United Kingdom",
+];
+
+test("selectOption falls back to a custom combobox when the ref isn't a native <select>", async () => {
+  const { launchImpl, actions } = createFakeComboboxBrowser({
+    controls: COMBOBOX_FORM_CONTROLS,
+    comboboxIndex: 1,
+    options: COUNTRY_OPTIONS,
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  await ops.snapshot({ pageId });
+  await ops.selectOption({ pageId, ref: "e2", value: "Canada" });
+
+  assert.deepEqual(actions, [
+    { op: "comboboxOpen", index: 1 },
+    { op: "comboboxSelect", index: 1, label: "Canada" },
+  ]);
+});
+
+test("selectOption prefers an exact option match over a substring match (P1 regression)", async () => {
+  const { launchImpl, actions } = createFakeComboboxBrowser({
+    controls: COMBOBOX_FORM_CONTROLS,
+    comboboxIndex: 1,
+    options: COUNTRY_OPTIONS,
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  await ops.snapshot({ pageId });
+  await ops.selectOption({ pageId, ref: "e2", value: "United States" });
+
+  const selected = actions.find((entry) => entry.op === "comboboxSelect");
+  assert.equal(
+    selected.label,
+    "United States",
+    "the exact match wins even though the substring match sorts first in the option list"
+  );
+});
+
+test("selectOption matches case-insensitively and tolerates surrounding whitespace", async () => {
+  const { launchImpl, actions } = createFakeComboboxBrowser({
+    controls: COMBOBOX_FORM_CONTROLS,
+    comboboxIndex: 1,
+    options: COUNTRY_OPTIONS,
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  await ops.snapshot({ pageId });
+  await ops.selectOption({ pageId, ref: "e2", value: "  canada  " });
+
+  const selected = actions.find((entry) => entry.op === "comboboxSelect");
+  assert.equal(selected.label, "Canada");
+});
+
+test("selectOption on a genuine native <select> ref never touches the combobox fallback (no regression)", async () => {
+  const { launchImpl, actions } = createFakeComboboxBrowser({
+    controls: COMBOBOX_FORM_CONTROLS,
+    comboboxIndex: 1,
+    options: COUNTRY_OPTIONS,
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  await ops.snapshot({ pageId });
+  // ref e1 ("First Name") resolves to control index 0 — the fake's
+  // "always a native <select>" branch — proving the native path still runs
+  // untouched when it's not the combobox-shaped control under test.
+  await ops.selectOption({ pageId, ref: "e1", value: "whatever" });
+
+  assert.deepEqual(actions, [{ op: "selectOption", index: 0, arg: { label: "whatever" } }]);
+});
+
+test("selectOption throws a plain-language human-handoff error naming the field when no option matches (P0)", async () => {
+  const { launchImpl } = createFakeComboboxBrowser({
+    controls: COMBOBOX_FORM_CONTROLS,
+    comboboxIndex: 1,
+    options: COUNTRY_OPTIONS,
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  await ops.snapshot({ pageId });
+
+  await assert.rejects(
+    () => ops.selectOption({ pageId, ref: "e2", value: "Atlantis" }),
+    (error) => {
+      assert.match(error.message, /"Country" dropdown/);
+      assert.match(error.message, /couldn't be set automatically/);
+      assert.match(error.message, /switch to the open browser window/);
+      assert.match(error.message, /choose the correct option yourself/);
+      return true;
+    }
+  );
+});
+
+test("findOptionMatch: an empty target value never falls through to substring matching (P2 regression)", async () => {
+  // Every option's normalized text "includes" the empty string, so without
+  // the early return in findOptionMatch() an unset/blank value would
+  // substring-match the FIRST option in the list and get clicked — the
+  // field silently ends up with an arbitrary value instead of a clean
+  // handoff to the human. openOnClick: false plus the empty value also
+  // means the click-to-open strategy never opens a list and the typing
+  // strategy never has anything to type, so this only passes if the -1
+  // short-circuit fires before either match kind runs.
+  const { launchImpl, actions } = createFakeComboboxBrowser({
+    controls: COMBOBOX_FORM_CONTROLS,
+    comboboxIndex: 1,
+    options: COUNTRY_OPTIONS,
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  await ops.snapshot({ pageId });
+
+  await assert.rejects(
+    () => ops.selectOption({ pageId, ref: "e2", value: "" }),
+    /couldn't be set automatically/
+  );
+  assert.ok(
+    !actions.some((entry) => entry.op === "comboboxSelect"),
+    "an empty value must never result in an option actually being clicked"
+  );
+});
+
+test("selectOption's typeahead strategy (Ashby shape) confirms a real selection via typed keystrokes", async () => {
+  // openOnClick: false forces the click-to-open strategy to find no list at
+  // all, falling through into the typing strategy — the only path that
+  // exercises requireDisplayChange. applySelectionOnClick stays at its
+  // default (true): the option click genuinely commits, so confirmation
+  // must still succeed once real evidence (the display value changing)
+  // exists, not just when a click resolves.
+  const { launchImpl, actions } = createFakeComboboxBrowser({
+    controls: COMBOBOX_FORM_CONTROLS,
+    comboboxIndex: 1,
+    options: COUNTRY_OPTIONS,
+    openOnClick: false,
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  await ops.snapshot({ pageId });
+  await ops.selectOption({ pageId, ref: "e2", value: "United States" });
+
+  assert.ok(
+    actions.some((entry) => entry.op === "comboboxFilter"),
+    "the typing strategy must have actually been reached"
+  );
+  const selected = actions.find((entry) => entry.op === "comboboxSelect");
+  assert.equal(selected.label, "United States");
+});
+
+test("selectOption's typeahead strategy does NOT confirm on the text it typed itself — a click that resolves without ever changing the control's value must be rejected (P0 regression guard)", async () => {
+  // This is the exact false-positive an earlier verification pass fell
+  // into on this feature: the code had already typed "United States" into
+  // the box, so the control's display value contains the target text
+  // whether or not the option click actually committed anything. Before
+  // requireDisplayChange, comboboxSelectionConfirmed(displayValue,
+  // matchedText) would pass on that alone. applySelectionOnClick: false
+  // reproduces the real Ashby bug this guards against — the click resolves
+  // with no error, yet the control's own value and open option list never
+  // change — so confirmation must fail and the field must hand off to the
+  // human instead of silently reporting success.
+  const { launchImpl, actions } = createFakeComboboxBrowser({
+    controls: COMBOBOX_FORM_CONTROLS,
+    comboboxIndex: 1,
+    options: COUNTRY_OPTIONS,
+    openOnClick: false,
+    applySelectionOnClick: false,
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  await ops.snapshot({ pageId });
+
+  await assert.rejects(
+    () => ops.selectOption({ pageId, ref: "e2", value: "United States" }),
+    (error) => {
+      assert.match(error.message, /"Country" dropdown/);
+      assert.match(error.message, /couldn't be set automatically/);
+      return true;
+    }
+  );
+  assert.ok(
+    actions.some((entry) => entry.op === "comboboxFilter"),
+    "the typing strategy must have actually typed the target text in — that's the trap being guarded against"
+  );
+});
+
+// ---------------------------------------------------------------------------
 // upload group-tree synthesis: pageText carries an Orca-shaped tree section so
 // apply-driver.mjs's real uploadTargetsFromSnapshot()/parsedSnapshotNodes()
 // (unmodified, imported directly here) can resolve upload targets — this is
@@ -858,13 +1263,24 @@ test("configured executor dispatches to the playwright executor for provider pla
   assert.ok(pageOpens() > 0, "the playwright executor actually opened a fake browser tab");
 });
 
-test("configured executor returns null for provider extension (manual handoff, no callable surface)", () => {
+test("configured executor fails the extension provider immediately with an honest reason, not null", async () => {
   const execute = createConfiguredApplyExecutor({
     repoRoot: "/repo",
     env: {},
     loadAutomationImpl: () => ({ data: { session: { provider: "extension" } } }),
   });
-  assert.equal(execute, null);
+  assert.equal(typeof execute, "function");
+  const result = await execute({
+    applicationId: "app-1",
+    application: {},
+    postingUrl: GREENHOUSE_URL,
+  });
+  assert.equal(result.available, false);
+  assert.equal(result.state, "unavailable");
+  assert.match(result.reason, /automatic apply isn't available on the .*extension.* provider yet/i);
+  // Provider-neutral: no hardcoded replacement-provider recommendation (AGENTS.md
+  // Domain-Neutral Rule) — see session.mjs automaticApplyGap().
+  assert.doesNotMatch(result.reason, /playwright/i);
 });
 
 test("configured executor still dispatches provider orca to the orca executor", async () => {

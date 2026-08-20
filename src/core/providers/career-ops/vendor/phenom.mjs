@@ -254,7 +254,7 @@ export default {
     // providers/workday.mjs's identical "raise max_pages" warning).
     if (stopReason === 'cap') {
       const jobsSummary = `${jobs.length}${total !== null ? ` of ${total}` : ''} jobs`;
-      console.error(`⚠️  phenom: ${entry.name} truncated at max_pages=${maxPages} (${jobsSummary}) — raise max_pages on this entry for more`);
+      console.error(`⚠️  phenom: ${entry.name} truncated at max_pages=${maxPages} (${jobsSummary}). Raise max_pages on this entry for more`);
     }
 
     return jobs;

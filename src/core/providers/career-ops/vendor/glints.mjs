@@ -76,7 +76,7 @@ function assertGlintsUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`glints: URL must use HTTPS: ${url}`);
   if (!ALLOWED_GLINTS_HOSTS.has(parsed.hostname))
-    throw new Error(`glints: untrusted hostname "${parsed.hostname}" — must be one of: ${[...ALLOWED_GLINTS_HOSTS].join(', ')}`);
+    throw new Error(`glints: untrusted hostname "${parsed.hostname}". Must be one of: ${[...ALLOWED_GLINTS_HOSTS].join(', ')}`);
   return url;
 }
 
@@ -173,7 +173,7 @@ async function graphqlPage(apiUrl, query, variables, ctx) {
       } catch {
         detail = err.body.slice(0, 200);
       }
-      throw new Error(`glints: HTTP ${err.status} — ${detail}`);
+      throw new Error(`glints: HTTP ${err.status}: ${detail}`);
     }
     throw err;
   }
@@ -220,13 +220,13 @@ export default {
         json = /** @type {any} */ (await graphqlPage(apiUrl, query, variables, ctx));
       } catch (err) {
         if (page === 1) throw err;
-        console.error(`glints: page ${page} fetch failed — ${err.message}`);
+        console.error(`glints: page ${page} fetch failed: ${err.message}`);
         break;
       }
 
       const jobsInPage = json?.data?.searchJobsV3?.jobsInPage;
       if (!Array.isArray(jobsInPage)) {
-        if (page === 1) throw new Error(`glints: unexpected API response — ${JSON.stringify(json).slice(0, 200)}`);
+        if (page === 1) throw new Error(`glints: unexpected API response: ${JSON.stringify(json).slice(0, 200)}`);
         break;
       }
 

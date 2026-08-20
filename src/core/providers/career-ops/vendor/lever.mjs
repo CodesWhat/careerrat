@@ -17,7 +17,7 @@ function assertLeverUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`lever: URL must use HTTPS: ${url}`);
   if (!ALLOWED_LEVER_HOSTS.has(parsed.hostname))
-    throw new Error(`lever: untrusted hostname "${parsed.hostname}" — must be one of: ${[...ALLOWED_LEVER_HOSTS].join(', ')}`);
+    throw new Error(`lever: untrusted hostname "${parsed.hostname}". Must be one of: ${[...ALLOWED_LEVER_HOSTS].join(', ')}`);
   return url;
 }
 

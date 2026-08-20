@@ -45,7 +45,7 @@ export async function fetchRemoteOk(entry = {}, fetchImpl = fetch) {
   const data = await fetchJsonBody(FEED_URL, fetchImpl);
   if (!Array.isArray(data)) {
     throw new Error(
-      `remoteok: unexpected API response — expected a JSON array, got ${data === null ? "null" : typeof data}`
+      `remoteok: unexpected API response: expected a JSON array, got ${data === null ? "null" : typeof data}`
     );
   }
 
