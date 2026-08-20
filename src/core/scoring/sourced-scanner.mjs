@@ -93,7 +93,7 @@ export function computeFamilyOutcomes(apps = [], targeting) {
 
 const DEFAULT_TIMEOUT_MS = 15000;
 
-export function normalizeKeywordList(value) {
+function normalizeKeywordList(value) {
   if (value == null) return [];
   const list = Array.isArray(value) ? value : [value];
   return list
@@ -965,7 +965,7 @@ export async function fetchProvider(provider, entry, fetchImpl = fetch) {
 // Fetch + parse a single RSS source (a config/search-sources.yml entry with an
 // rssUrl, or any { rssUrl | url }) into scanner offers. This is the runtime
 // consumer for the rss.mjs provider.
-export async function fetchRss(source = {}, fetchImpl = fetch) {
+async function fetchRss(source = {}, fetchImpl = fetch) {
   const url = source.rssUrl || source.url;
   if (!url) return [];
   const res = await fetchImpl(url);
@@ -1140,7 +1140,7 @@ async function fetchWorkable(entry, fetchImpl) {
   return parseWorkableMarkdown(text, entry.name);
 }
 
-export function parseWorkableMarkdown(text, companyName) {
+function parseWorkableMarkdown(text, companyName) {
   const jobs = [];
   for (const line of String(text).split("\n")) {
     if (!line.startsWith("|") || !line.includes("[View]")) continue;

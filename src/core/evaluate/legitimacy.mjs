@@ -43,7 +43,7 @@ export const EVERGREEN_PHRASES = [
 
 // Staffing-agency / recruiter-farm tells: the employer is a middleman, not the
 // hiring company. Conservative — only unambiguous agency phrasing.
-export const RECRUITER_FARM_PHRASES = [
+const RECRUITER_FARM_PHRASES = [
   "on behalf of our client",
   "our client is seeking",
   "our client is looking",

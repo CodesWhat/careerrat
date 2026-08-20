@@ -55,7 +55,7 @@ export const CONFIG_FAMILY_CODES = new Set([
 // CONFLICT_CODES / 400 list for the vocabulary). No interpolation — these
 // strings can never carry candidate data because they never read anything
 // but the code itself.
-export const ERROR_CODE_DESCRIPTIONS = {
+const ERROR_CODE_DESCRIPTIONS = {
   JOB_REFERENCE_NOT_FOUND: "A natural-language reference to a saved job did not resolve.",
   JOB_REFERENCE_AMBIGUOUS:
     "A natural-language reference to a saved job matched more than one record.",

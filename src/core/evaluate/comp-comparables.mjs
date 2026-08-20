@@ -37,7 +37,7 @@ function percentile(sortedNums, p) {
  * Normalize a posting's work arrangement to one of remote|hybrid|onsite, or null
  * when unknown. Reads `mode`, falling back to a remote hint in the location text.
  */
-export function normalizeArrangement(mode, loc = "") {
+function normalizeArrangement(mode, loc = "") {
   const m = String(mode || "").toLowerCase();
   if (/\bremote\b/.test(m)) return "remote";
   if (/\bhybrid\b/.test(m)) return "hybrid";
@@ -54,7 +54,7 @@ export function normalizeArrangement(mode, loc = "") {
  * bucket together as "remote". Returns null when the location matches no
  * configured group (so metro-tier matching is skipped, never guessed).
  */
-export function resolveMetroGroup(loc, mode, compFloors) {
+function resolveMetroGroup(loc, mode, compFloors) {
   if (normalizeArrangement(mode, loc) === "remote") return "remote";
   const text = String(loc || "").toLowerCase();
   if (!text) return null;

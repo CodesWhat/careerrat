@@ -55,7 +55,7 @@ import { buildSearchPromptContext, getSearchPrompts } from "./search-prompts.mjs
 
 const AI_WEB_SEARCH_SCHEMA_PATH = "config/ai-web-search.schema.json";
 
-export const AI_WEB_SEARCH_LABELS = Object.freeze({
+const AI_WEB_SEARCH_LABELS = Object.freeze({
   skill: "search-jobs",
   action: "ai-web-search",
   operation: "search:ai-web",
@@ -71,7 +71,7 @@ const MANUAL_FALLBACK = Object.freeze({
 // entry (lean: downshift, standard/full: run). An unrecognized usage_mode
 // (shouldn't happen; normalizeModes() already defaults it) falls back to the
 // standard cap rather than either extreme.
-export const PROMPT_CAP_BY_MODE = Object.freeze({ lean: 1, standard: 3, full: 5 });
+const PROMPT_CAP_BY_MODE = Object.freeze({ lean: 1, standard: 3, full: 5 });
 
 // Sourced-row `gate` for an AI-web-search survivor. This mode's `candidate`
 // context (buildSearchPromptContext) never carries company-history or

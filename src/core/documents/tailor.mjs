@@ -246,7 +246,7 @@ export function validateAtsSafe(markdown) {
  * @param {{ candidate: { full_name: string, email?: string, phone?: string, location?: string, linkedin?: string, github?: string, portfolio?: string } }} profile
  * @returns {string}
  */
-export function buildResumeHeader(profile) {
+function buildResumeHeader(profile) {
   const c = profile.candidate;
   const headerLines = [`# ${c.full_name}`];
 
