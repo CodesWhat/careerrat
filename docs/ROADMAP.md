@@ -449,6 +449,15 @@ plus `tests`, promoted in #123. Two failures are expected and never gate:
 `qlty check` (Qlty Cloud minutes, distinct from the in-repo `qlty` job) and `Vercel`
 (deploy quota). Any other red is real.
 
+Two jobs run without gating: `web-build` and, since 2026-08-20, `website-build`. The
+second exists because nothing was building the marketing site or the docs at all. A
+TypeScript 6 bump turned `baseUrl` in `apps/docs/tsconfig.json` from a deprecation into
+a hard error, the docs build broke on `main`, and every in-repo check stayed green. The
+only signal was the `Vercel` context, and that one fails on deploy quota so routinely
+that a real failure there reads as noise. Which is the general lesson: an expected-red
+check is not a check. If a context is allowed to fail every day, nobody can tell the day
+it fails for a new reason, so the coverage has to live in a job that is normally green.
+
 `scripts/protect-main.sh` declares that set and `--verify` compares it against the
 live ruleset. Since #114 that comparison is trustworthy: the drift report used to die
 mid-print, because `diff | sed` under `set -euo pipefail` returns non-zero whenever
