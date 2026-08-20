@@ -231,6 +231,9 @@ export function validateAndSaveAiKey(apiKey, { provider = "anthropic" } = {}) {
   });
 }
 
+// Intentionally exported ahead of a caller: Settings only has Save (which
+// validates a newly typed key), with no way to test an already-saved one.
+// Wiring that trigger is tracked in issue #141.
 export function checkAiKey({ provider = "anthropic" } = {}) {
   return apiFetch("/api/settings/ai-key/check", {
     method: "POST",
@@ -458,14 +461,6 @@ export function removeEvidenceClaim(id) {
   });
 }
 
-export function writeConfig() {
-  return apiFetch("/api/onboard/write-config", { method: "POST" });
-}
-
-export function startQuickSearch() {
-  return apiFetch("/api/onboard/quick-start", { method: "POST" });
-}
-
 export function getSourcingRun({ purpose } = {}) {
   const params = new URLSearchParams();
   if (purpose) params.set("purpose", purpose);
@@ -510,6 +505,9 @@ export function startSearchRun(payload = {}) {
   });
 }
 
+// Intentionally exported ahead of a caller: InterviewSurface.jsx never fetches
+// this, so reloading mid-discovery loses pipeline/lock/guidance state. Wiring
+// that resume path is tracked in issue #141.
 export function getDiscoveryState() {
   return apiFetch("/api/discovery/state");
 }
@@ -571,15 +569,6 @@ export async function suggestAssist(kind, input) {
   };
 }
 
-// GET /api/logos/search?q= — logo.dev Brand Search proxy. Always 200
-// (never throws for "no token configured" — see logo-route.mjs's own
-// {ok:false, reason:"no-token", results:[]} degrade contract), so this
-// deliberately does NOT go through apiFetch's !res.ok throw path for the
-// no-token case; a genuine network/parse failure still throws.
-export async function searchLogos(query) {
-  return apiFetch(`/api/logos/search?q=${encodeURIComponent(query)}`);
-}
-
 // Not a fetch wrapper — GET /api/logos/img?domain= is meant to be used
 // directly as an <img src>, so the caller gets a URL string to hand to the
 // DOM (which does its own onerror-based fallback to an initials chip on a
@@ -593,16 +582,6 @@ export function logoImageUrl(input) {
   if (name) parts.push(`name=${encodeURIComponent(name)}`);
   parts.push("fallback=initials");
   return `/api/logos/img?${parts.join("&")}`;
-}
-
-// POST /api/boards/preview — deterministic, no persistence; both builders
-// degrade independently (see boards-route.mjs), so a partial preview (one
-// board present, the other's `*Error` set) is a normal 200, not a throw.
-export function previewBoards({ keywords, location, remote, minimumBase, windowHours } = {}) {
-  return apiFetch("/api/boards/preview", {
-    method: "POST",
-    body: JSON.stringify({ keywords, location, remote, minimumBase, windowHours }),
-  });
 }
 
 export function addBoard({ url, label }) {
@@ -735,10 +714,6 @@ export function listIntake({ status, limit } = {}) {
   if (limit) params.set("limit", String(limit));
   const qs = params.toString();
   return apiFetch(`/api/intake/list${qs ? `?${qs}` : ""}`);
-}
-
-export function getIntakeOne(id) {
-  return apiFetch(`/api/intake/one?id=${encodeURIComponent(id)}`);
 }
 
 // Re-runs classification from scratch on the item's original raw_input —
@@ -967,39 +942,6 @@ export function getApplications() {
 // can build the same intent shape without redeclaring the literal.
 export const WORKSPACE_ENTITY = { type: "workspace", id: "workspace-main" };
 
-// research.company — web-searches a company already saved from a job (an
-// application or a still-sourced role) across six domain-neutral axes.
-// `company` is free text; COMPANY_NOT_FOUND/COMPANY_AMBIGUOUS resolve it
-// against saved jobs server-side.
-export function researchCompany({ company } = {}) {
-  return runWorkspaceIntent("research.company", WORKSPACE_ENTITY, { company });
-}
-
-// research.comp — web-searches market comp for a role + location, optionally
-// scoped to one saved company (or a saved job's id, which the workspace
-// agent uses to fill in any of role/location/company left blank).
-// `role`/`location` are required (RESEARCH_COMP_INPUT_REQUIRED when either
-// ends up missing).
-export function researchComp({ role, location, company, jobId } = {}) {
-  return runWorkspaceIntent("research.comp", WORKSPACE_ENTITY, {
-    role,
-    location,
-    ...(company ? { company } : {}),
-    ...(jobId ? { jobId } : {}),
-  });
-}
-
-// company.health — role-scoped health/sentiment rating for one saved job
-// (an application or a still-sourced role); COMPANY_NOT_TRACKED when the
-// named company isn't attached to any saved job yet.
-export function companyHealth({ applicationId, sourcedId, company, force } = {}) {
-  return runWorkspaceIntent(
-    "company.health",
-    applicationId ? { type: "application", id: applicationId } : { type: "sourced", id: sourcedId },
-    { ...(company ? { company } : {}), ...(force ? { force: true } : {}) }
-  );
-}
-
 // research.record / company.health-record — the confirm-first write bridge
 // for an embedded research-company/research-comp/company-health chat
 // session. CHAT_RUNTIME_TOOLS has no Bash, so those sessions can never shell
@@ -1023,39 +965,6 @@ export function recordCompanyHealth({ targetType, targetId, company, companyHeal
     { type: targetType, id: targetId },
     { ...(company ? { company } : {}), companyHealth }
   );
-}
-
-// ---------------------------------------------------------------------------
-// strategy.review / strategy.apply / strategy.stamp (reevaluate-strategy
-// skill) — same runWorkspaceIntent surface as the research trio above. Like
-// researchCompany/researchComp/companyHealth, these have no dedicated caller
-// in this file: the Dashboard's strategy-review CTA (DashboardPage.jsx) and
-// the Ask strategy_review card's Apply button (AskBar.jsx) both hand-build
-// the same {type, entity, input} triple to commitAction/requestAskAction so
-// the run shows up as a live turn in the durable thread, not a bare fetch.
-// These wrappers exist for parity/direct callers and tests.
-// ---------------------------------------------------------------------------
-
-// strategy.review — runs (or re-runs, with force:true) the reevaluate-
-// strategy skill against the tracker. No row to scope to, so it uses the
-// workspace thread as its entity, same as research.company/research.comp.
-export function strategyReview({ force } = {}) {
-  return runWorkspaceIntent("strategy.review", WORKSPACE_ENTITY, {
-    ...(force ? { force: true } : {}),
-  });
-}
-
-// strategy.apply — applies one recommendation row from a strategy_review
-// artifact (the exact object the Apply button received, unmodified).
-export function applyStrategyRecommendation({ recommendation } = {}) {
-  return runWorkspaceIntent("strategy.apply", WORKSPACE_ENTITY, { recommendation });
-}
-
-// strategy.stamp — records that the current strategy review was seen/
-// finished, so buildStrategyReviewTrigger stays quiet until new signal
-// accrues (see dashboard-data.js's STRATEGY_REVIEW_NEW_SIGNAL/COOLDOWN).
-export function stampStrategyReview() {
-  return runWorkspaceIntent("strategy.stamp", WORKSPACE_ENTITY, {});
 }
 
 // ---------------------------------------------------------------------------
@@ -1115,14 +1024,6 @@ export function exportPacketDocuments({ applicationId, formats } = {}) {
 // {path, markdown, html, binary, kind, url, needsYou?}.
 export function getPacket(id) {
   return apiFetch(`/api/packet?id=${encodeURIComponent(id)}`);
-}
-
-// Not a fetch wrapper — GET /api/packet/artifact?id=&kind= is meant to be
-// used directly as a binary embed src (PDF/DOCX), same convention as
-// logoImageUrl above. Only meaningful when the artifact view's own `.url`
-// field (from getPacket) is set (binary artifacts only).
-export function packetArtifactUrl(id, kind) {
-  return `/api/packet/artifact?id=${encodeURIComponent(id)}&kind=${encodeURIComponent(kind)}`;
 }
 
 // ---------------------------------------------------------------------------
