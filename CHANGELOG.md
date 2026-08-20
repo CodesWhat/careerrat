@@ -4,6 +4,22 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Application forms that use custom dropdowns (the kind that filter as you type, rather than a plain select box) now get filled correctly. Two things were wrong: a field with no value set would click whichever option happened to be first in the list instead of leaving the field for you, and a type-to-filter box could report success just from the text CareerRat had typed into it, without an option actually being selected (#112).
+- CareerRat no longer tells you the Chrome extension can drive an automatic apply. It cannot, and now it says so, and points you at `careerrat automation status` to see which providers can (#108).
+- Activity log entries you give your own ID to are no longer silently dropped when they look like an entry that already exists. Setting your own ID is how you say "this one is different," and that is now respected. Entries without an ID still collapse duplicates the way they did (#118).
+- Strategy-review learning entries with a timestamp in the heading parse correctly again, instead of splitting the time in half and feeding a mangled title into the review (#118).
+- Ask now recognizes compensation questions more reliably instead of falling back to a general answer (#116).
+- The desktop update check no longer races with app startup (#110).
+
+### Changed
+
+- Em dashes are out of CareerRat's own copy, across the CLI, the app, and the settings screens (#119, #120, #121).
+- The `careerrat` version, the desktop app version, and the changelog can no longer drift apart from each other unnoticed (#113).
+
 ## [0.10.0] - 2026-08-19
 
 ### Added
