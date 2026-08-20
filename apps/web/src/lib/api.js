@@ -21,7 +21,38 @@ export class ApiError extends Error {
   }
 }
 
-async function apiFetch(path, options = {}) {
+// The exact refusal string request-security.mjs sends when the per-launch
+// HttpOnly capability cookie is missing or doesn't match. The dev server
+// mints a fresh capability on every process start, and the file watcher
+// restarts that process on a concurrent CLI write to a watched workspace
+// file — an open tab's cookie goes stale mid-session with no user action
+// (issue #86). Matched by exact string, not just status 401, so a real
+// auth failure (wrong-origin request, expired session elsewhere, etc.)
+// never gets silently retried and masked.
+const CAPABILITY_INVALID_ERROR = "local browser capability is missing or invalid";
+
+function isCapabilityCredentialError(status, body) {
+  return status === 401 && body?.error === CAPABILITY_INVALID_ERROR;
+}
+
+// Refreshing the cookie is just an ordinary bootstrap GET (request-security.mjs's
+// isHtmlBootstrap sets a fresh Set-Cookie on any GET to /app, unauthenticated) —
+// no dedicated refresh endpoint needed. Multiple requests failing at once
+// (e.g. a burst of calls right after the restart) share one in-flight
+// refresh instead of each firing its own bootstrap GET.
+let capabilityRefresh = null;
+function refreshCapabilityCookie() {
+  if (!capabilityRefresh) {
+    capabilityRefresh = fetch("/app", { method: "GET" })
+      .catch(() => null)
+      .finally(() => {
+        capabilityRefresh = null;
+      });
+  }
+  return capabilityRefresh;
+}
+
+async function apiFetch(path, options = {}, { retried = false } = {}) {
   if (isStaticPreviewApi()) return staticPreviewApiFetch(path, options);
 
   const res = await fetch(path, {
@@ -40,7 +71,17 @@ async function apiFetch(path, options = {}) {
       body = { raw: text };
     }
   }
-  if (!res.ok) throw new ApiError(res.status, body);
+  if (!res.ok) {
+    // One silent retry with a freshly minted cookie — the common case (a
+    // restart that happened while this tab sat idle) never surfaces an
+    // error at all. Never retried twice: if the fresh cookie still 401s,
+    // something else is wrong and that's a real error to surface.
+    if (!retried && isCapabilityCredentialError(res.status, body)) {
+      await refreshCapabilityCookie();
+      return apiFetch(path, options, { retried: true });
+    }
+    throw new ApiError(res.status, body);
+  }
   return body;
 }
 

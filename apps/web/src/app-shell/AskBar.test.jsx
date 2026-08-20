@@ -976,6 +976,78 @@ describe("AskBar — acting", () => {
     expect(buttonByText(tree, "Search the expanded company set")).toBeTruthy();
   });
 
+  // Regression guard for issue #88 — a company proposal the server correctly
+  // refuses to approve (no resolvable ATS board) must surface its own
+  // plain-language reason, not the generic "something went wrong" copy that
+  // reads like a network failure. See errorCopy.js's COMPANY_PROPOSAL_NOT_APPROVABLE
+  // rule and company-proposal-decisions.mjs's assertApprovalAllowed.
+  it("shows a company-proposal refusal as its specific reason, not a generic failure", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(companyActionPreview());
+    const proposal = {
+      proposalId: "proposal-acme",
+      company: { name: "Acme AI" },
+      why: "Matches your applied AI focus.",
+      roleSeen: "Applied AI Engineer",
+      atsProvider: "",
+      confidenceTier: "review",
+      version: 1,
+    };
+    api.runWorkspaceIntent
+      .mockResolvedValueOnce({
+        data: {
+          messages: [
+            {
+              role: "assistant",
+              kind: "action_result",
+              text: "Found 1 new company beyond your focus examples.",
+              artifacts: [
+                {
+                  kind: "company_proposals",
+                  title: "Company discovery: 1 to review",
+                  batchId: "batch-acme",
+                  version: 1,
+                  proposals: [proposal],
+                  rejected: [],
+                  counts: { seeds: 1, proposals: 1, rejected: 0 },
+                  seedSource: "ai",
+                },
+              ],
+              metadata: { state: "needs-review" },
+            },
+          ],
+        },
+      })
+      .mockRejectedValueOnce(
+        new api.ApiError(422, {
+          code: "COMPANY_PROPOSAL_NOT_APPROVABLE",
+          error: { message: "only pending supported ATS proposals can be approved" },
+        })
+      );
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "find more companies for me" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    buttonByText(tree, "Track").props.onClick();
+    await flushMicrotasks();
+    tree = render();
+
+    const error = textOf(byClass(tree, "ask-bar__error"));
+    expect(error).toContain("couldn't find a job board it can scan");
+    expect(error).not.toContain("Something went wrong");
+    expect(error).not.toContain("restart CareerRat");
+    expect(buttonByText(tree, "Try again")).toBeFalsy();
+  });
+
   it("keeps post-setup job-board discovery visible in Ask and returns to Jobs or Settings", async () => {
     api.previewWorkspaceQuery.mockResolvedValue(boardDiscoveryActionPreview());
     api.completeDiscoveryStep.mockResolvedValue({ ok: true });
@@ -4037,6 +4109,72 @@ describe("AskBar — strategy_review / strategy_apply artifacts", () => {
     // The strategy_apply artifact from the apply turn renders its own card.
     const applyCard = byClass(tree, "ask-bar__strategy-apply");
     expect(textOf(applyCard)).toContain("Keep leaning into remote-first roles");
+  });
+
+  // Regression guard for issue #86 — a failed Apply (e.g. a stale-capability
+  // 401 the automatic retry in apiFetch didn't recover from) must not
+  // collapse the whole review down to a bare error line. The other pending
+  // recommendation and the Finish-review action stay usable.
+  it("keeps the review card, its other recommendations, and Finish review visible when an Apply click fails", async () => {
+    const keepSignal = {
+      id: "rec-keep",
+      type: "keep-signal",
+      title: "Keep leaning into remote-first roles",
+      rationale: "Remote-first roles are converting at a higher rate.",
+      evidenceCount: 4,
+      proposal: { signal: "remote-first" },
+    };
+    const compTarget = {
+      id: "rec-comp-target",
+      type: "comp-target",
+      title: "Raise the comp target",
+      rationale: "Recent offers cleared the current target comfortably.",
+      evidenceCount: 2,
+      proposal: { amount: 205000 },
+    };
+    let tree = await runStrategyReviewTurn({
+      text: "Review the findings and recommendations, then finish the review.",
+      artifacts: [
+        {
+          kind: "strategy_review",
+          state: "drafted",
+          generatedAt: "2026-08-15T12:00:00.000Z",
+          reviewSignal: { reviewed: true, outcomes: 7, newOutcomes: 5, daysSince: 3 },
+          reevaluation: null,
+          headline: "Review the findings and recommendations, then finish the review.",
+          findings: [],
+          recommendations: [keepSignal, compTarget],
+        },
+      ],
+      metadata: {
+        state: "drafted",
+        nextActions: [
+          {
+            label: "Finish review",
+            intent: { type: "strategy.stamp", entity: { type: "workspace", id: "workspace-main" } },
+          },
+        ],
+      },
+    });
+
+    // The stale per-launch capability cookie (request-security.mjs) — the
+    // exact 401 apiFetch's own retry-once logic could not recover from.
+    api.runWorkspaceIntent.mockRejectedValueOnce(
+      new api.ApiError(401, { error: "local browser capability is missing or invalid" })
+    );
+
+    buttonByText(byClass(tree, "ask-bar__strategy-recommendation"), "Apply").props.onClick();
+    await flushMicrotasks();
+    tree = render();
+
+    // The error surfaces...
+    expect(textOf(byClass(tree, "ask-bar__error"))).toBeTruthy();
+    // ...but the card, BOTH recommendations, and Finish review are still there.
+    const card = byClass(tree, "ask-bar__strategy-review");
+    expect(card).toBeTruthy();
+    expect(textOf(card)).toContain("Keep leaning into remote-first roles");
+    expect(textOf(card)).toContain("Raise the comp target");
+    expect(buttonByText(tree, "Finish review")).toBeTruthy();
   });
 });
 

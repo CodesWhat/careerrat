@@ -183,10 +183,16 @@ function assertApprovalAllowed(proposal, { userConfirmed = false } = {}) {
   // review-tier proposal without waiting on the auto-gate's confidence bar.
   // It still refuses unsupported_public proposals and anything without a
   // resolved board to approve into.
+  // A distinct code from the generic VALIDATION_FAILED bucket (reused across
+  // unrelated schema/shape checks in this file) so the frontend translation
+  // layer (apps/web/src/lib/errorCopy.js) can give this specific business
+  // refusal its own plain-language copy instead of falling through to the
+  // generic "something went wrong" message, which reads like a network
+  // failure rather than a deliberate server-side refusal (issue #88).
   if (userConfirmed) {
     if (isSupportedAts && hasBoard) return;
     throw makeError("only pending supported ATS proposals can be approved", {
-      code: "VALIDATION_FAILED",
+      code: "COMPANY_PROPOSAL_NOT_APPROVABLE",
       status: 422,
     });
   }
@@ -198,7 +204,7 @@ function assertApprovalAllowed(proposal, { userConfirmed = false } = {}) {
     hasBoard;
   if (!supported) {
     throw makeError("only pending high-confidence supported ATS proposals can be approved", {
-      code: "VALIDATION_FAILED",
+      code: "COMPANY_PROPOSAL_NOT_APPROVABLE",
       status: 422,
     });
   }

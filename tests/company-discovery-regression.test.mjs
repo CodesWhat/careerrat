@@ -600,7 +600,7 @@ test("route status envelopes cover 400, 409, 422, 501, and 502 failures", async 
   });
   assert.equal(response.status, 422);
   assert.equal(response.body.ok, false);
-  assert.equal(response.body.code, "VALIDATION_FAILED");
+  assert.equal(response.body.code, "COMPANY_PROPOSAL_NOT_APPROVABLE");
 });
 
 test("static ownership checks reject generated-file write seams and require supported approval verbs", () => {
