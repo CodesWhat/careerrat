@@ -456,6 +456,39 @@ The web app is the daily development surface. The conversation-first product and
 Electron runtime have completed the acceptance sweep below, including the macOS distribution
 gate:
 
+### The queue (opened August 20, 2026)
+
+This is the working queue. It is here, not spread across GitHub issues, because a queue you have
+to reassemble from an issue list is a queue nobody works through in order. Each lane links its
+issue for the detail; this section owns the sequencing and the reason.
+
+Lanes 1 through 3 are file-disjoint and run in parallel. Lane 4 runs last on purpose: it edits
+files across every other lane, so running it concurrently buys nothing but merge conflicts.
+
+1. **Ask error handling** ([#88](https://github.com/CodesWhat/careerrat/issues/88),
+   [#86](https://github.com/CodesWhat/careerrat/issues/86)). Two bugs on the daily surface.
+   #88: a deliberate server-side refusal ("only pending supported ATS proposals can be approved")
+   renders as a generic "Something went wrong, failed to fetch" banner, so a business rule reads
+   as a network outage. #86: the per-process capability credential is re-minted on every server
+   start, the file watcher restarts the server whenever a concurrent CLI write touches
+   `workspace/tracker.json`, and the resulting 401 collapses an entire in-progress review card,
+   discarding the other pending recommendations and the Finish-review button. A page reload
+   recovers, which is the tell that only the credential was stale and the state was fine.
+2. **Multi-step ATS advancement.** The last `partial` row in the skill audit. Easy Apply is
+   covered; other paginated ATS wizards are not. The interesting problem is confirming you
+   actually advanced a step rather than seeing the page re-render, which is the same trap #112
+   hit in the small when a combobox confirmed selection by reading back text the code had typed
+   itself. The manual Submit boundary and verified-only Applied write-back are non-negotiable.
+3. **Standards adoption** ([#73](https://github.com/CodesWhat/careerrat/issues/73)). npm build
+   provenance, signed release tags via a tag ruleset (commit signing deliberately not required),
+   and the README community routing sentence. Item 3 of that issue, making the full test suite a
+   required gate, already landed early in #123 and closes without further work.
+4. **Knip backlog** ([#81](https://github.com/CodesWhat/careerrat/issues/81)). The `--max-issues`
+   ratchet sits at 170 and hides new dead code behind existing debt. One unused file, four unused
+   dependencies, one duplicate export alias pair, and 164 unused exports that mostly want
+   de-exporting rather than deleting. Target is a ratchet of 0 and a plain `npx knip` gate. **The
+   ratchet goes down, never up.**
+
 ### Skill-to-screen product coherence gate (active August 14, 2026)
 
 The completed acceptance sweep proved the released surfaces and distribution artifacts. A
@@ -603,8 +636,9 @@ The current build order is:
    (the installed-CLI chat path could not load its own skill, so no session could save a result;
    `F-103`/PR #84) and closed company-health's row fully, including the CLI and chat-equivalent
    write paths, the Jobs drawer badge, and the Activity Pulse event. research-company and
-   research-comp now reach real research but are separately blocked by the installed runtime's
-   120s timeout on long turns (PR #92 open); those two rows remain open pending that fix.
+   research-comp were separately blocked by the installed runtime's 120s timeout on long turns
+   until PR #92 widened it to 9 minutes; both rows closed on the 2026-08-19 re-run against a live
+   installed CLI, with every write confirmed in durable storage and read back across a restart.
    Search-strategy review now satisfies the same contract too: natural
    phrasings ("review my strategy," "why am I getting filtered out," "what's working in my
    search") resolve to a typed `strategy.review` intent, and the Dashboard's Strategy panel's
