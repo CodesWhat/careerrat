@@ -190,7 +190,7 @@ const AI_SEARCH_PREP_ERROR =
 // to know on its own, the same way a cache does: no stored prompts at all is
 // always stale, and stored prompts older than the candidate's targeting are
 // stale too since they'd be searching for the wrong thing.
-export function promptsAreStale(prompts, targetingUpdatedAt) {
+function promptsAreStale(prompts, targetingUpdatedAt) {
   const list = Array.isArray(prompts) ? prompts : [];
   if (!list.length) return true;
   if (!targetingUpdatedAt) return false;

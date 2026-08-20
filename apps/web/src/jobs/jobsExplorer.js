@@ -1,4 +1,4 @@
-export const SORT_KEYS = ["action", "company", "role", "base", "mode", "fit", "stage", "applied"];
+const SORT_KEYS = ["action", "company", "role", "base", "mode", "fit", "stage", "applied"];
 
 export const DEFAULT_EXPLORER_STATE = {
   stage: "all",

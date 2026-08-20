@@ -401,12 +401,3 @@ export const PREVIEW_MOCK_DATA = {
     ],
   },
 };
-
-export function getPreviewMockData(snapshot) {
-  return snapshot?.v3 && typeof snapshot.v3 === "object" ? snapshot.v3 : PREVIEW_MOCK_DATA;
-}
-
-export function formatV3Count(value) {
-  if (!Number.isFinite(Number(value))) return "0";
-  return Intl.NumberFormat("en-US").format(Number(value));
-}

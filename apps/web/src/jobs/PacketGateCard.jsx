@@ -10,11 +10,11 @@ import { Card } from "../components/Card.jsx";
 const GATE_LABELS = { keep: "Keep", review: "Review", cut: "Cut" };
 const GATE_TONES = { keep: "ok", review: "warn", cut: "error" };
 
-export function gateTone(gate) {
+function gateTone(gate) {
   return GATE_TONES[String(gate || "").toLowerCase()] || "muted";
 }
 
-export function gateLabel(gate) {
+function gateLabel(gate) {
   return GATE_LABELS[String(gate || "").toLowerCase()] || "Unknown";
 }
 

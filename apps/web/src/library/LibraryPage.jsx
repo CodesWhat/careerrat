@@ -196,7 +196,7 @@ function cardHaystack(card) {
   );
 }
 
-export function filterLibraryCards(cards, filters = {}) {
+function filterLibraryCards(cards, filters = {}) {
   const type = normalize(filters.type || "all");
   const query = normalize(filters.query);
 

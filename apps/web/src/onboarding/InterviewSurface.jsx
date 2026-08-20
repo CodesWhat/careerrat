@@ -269,7 +269,7 @@ function assistantTurnIdentity(message) {
   return JSON.stringify({ text: message.text || "", blocks });
 }
 
-export function pendingConfirmBlocks(messages) {
+function pendingConfirmBlocks(messages) {
   return (Array.isArray(messages) ? messages : [])
     .filter((message) => message?.role === "assistant" && Array.isArray(message.blocks))
     .flatMap((message) => message.blocks)

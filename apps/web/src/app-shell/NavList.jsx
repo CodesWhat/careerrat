@@ -2,7 +2,7 @@ import { NavLink } from "react-router-dom";
 
 // Canonical /app product route map: every visible nav item is a React SPA page
 // served off the shared GET /api/data/dashboard snapshot where it needs app data.
-export const PRIMARY_NAV_ITEMS = [
+const PRIMARY_NAV_ITEMS = [
   { to: "/", label: "Dashboard", end: true },
   { to: "/calendar", label: "Calendar" },
   { to: "/jobs", label: "Jobs" },
