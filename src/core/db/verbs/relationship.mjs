@@ -137,7 +137,7 @@ function updateAppForReview(db, appId) {
   if (!app || !shouldClearSourcingCta(app)) return false;
   putRow(db, "applications", appId, {
     ...app,
-    nextAction: "Review relationship leads — approve or reject in Network tab",
+    nextAction: "Review relationship leads: approve or reject in Network tab",
     nextActionDue: null,
   });
   return true;

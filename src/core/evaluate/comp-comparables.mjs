@@ -186,7 +186,7 @@ export function estimateCompFromComparables({
 
   const tierLabel =
     tier === "metro" ? "same-area" : tier === "mode" ? "same-arrangement" : "same-role-family";
-  const familyNote = catchAll ? " (role family unclassified — rough)" : "";
+  const familyNote = catchAll ? " (role family unclassified, rough)" : "";
 
   return {
     midpointK,

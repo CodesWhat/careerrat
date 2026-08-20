@@ -2055,8 +2055,8 @@ describe("AskBar — acting", () => {
     await flushMicrotasks();
     tree = render();
 
-    expect(textOf(byClass(tree, "ask-bar__error"))).toContain("Acme — Senior AI Engineer");
-    expect(textOf(byClass(tree, "ask-bar__error"))).toContain("Acme — Staff Platform Engineer");
+    expect(textOf(byClass(tree, "ask-bar__error"))).toContain("Acme, Senior AI Engineer");
+    expect(textOf(byClass(tree, "ask-bar__error"))).toContain("Acme, Staff Platform Engineer");
     expect(buttonByText(tree, "Try again")).toBeFalsy();
   });
 
@@ -2364,7 +2364,7 @@ describe("AskBar — acting", () => {
     tree = render();
 
     expect(textOf(tree)).toContain("Note saved");
-    expect(textOf(tree)).toContain("Temporal Labs — Applied AI Engineer");
+    expect(textOf(tree)).toContain("Temporal Labs, Applied AI Engineer");
     expect(textOf(tree)).toContain("Candidate prefers Tuesday afternoon.");
   });
 });
@@ -2957,7 +2957,7 @@ describe("AskBar — calendar_write artifact (CalendarWriteCard)", () => {
     const badge = visit(tree, (n) => hasClass(n, "badge") && hasClass(n, "badge--ok"))[0];
     expect(textOf(badge)).toBe("Synced");
     expect(textOf(tree)).toContain("Calendar event recorded");
-    expect(textOf(tree)).toContain("Temporal Labs — Applied AI Engineer");
+    expect(textOf(tree)).toContain("Temporal Labs, Applied AI Engineer");
     expect(visit(tree, (n) => n.type === "a")).toHaveLength(0);
   });
 
@@ -2980,7 +2980,7 @@ describe("AskBar — calendar_write artifact (CalendarWriteCard)", () => {
 
     const badge = visit(tree, (n) => hasClass(n, "badge") && hasClass(n, "badge--ok"))[0];
     expect(textOf(badge)).toBe("Recorded");
-    expect(textOf(tree)).toContain("Globex — Staff Engineer");
+    expect(textOf(tree)).toContain("Globex, Staff Engineer");
     expect(visit(tree, (n) => n.type === "a")).toHaveLength(0);
   });
 

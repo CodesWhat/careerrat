@@ -30,7 +30,7 @@ export const ONBOARD_PAGE_HTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Set up your workspace — CareerRat</title>
+<title>Set up your workspace: CareerRat</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -168,7 +168,7 @@ export const ONBOARD_PAGE_HTML = `<!doctype html>
 <main>
   <header>
     <h1>Set up your workspace</h1>
-    <p class="lede">A few steps to seed your candidate files locally — nothing on this page calls an AI model.</p>
+    <p class="lede">A few steps to seed your candidate files locally. Nothing on this page calls an AI model.</p>
   </header>
 
   <div class="progress">
@@ -179,7 +179,7 @@ export const ONBOARD_PAGE_HTML = `<!doctype html>
 
   <section id="step-1" data-hook="step-1" class="step">
     <h2>1. Initialize workspace</h2>
-    <p class="hint">Copies starter templates into candidate/ — never overwrites a file that already exists.</p>
+    <p class="hint">Copies starter templates into candidate/. Never overwrites a file that already exists.</p>
     <div class="actions">
       <button id="init-btn" data-hook="init-btn" type="button">Initialize workspace</button>
     </div>
@@ -195,7 +195,7 @@ export const ONBOARD_PAGE_HTML = `<!doctype html>
     <div class="field">
       <label for="resume-file">Or load a file (.txt, .md, .markdown)</label>
       <input id="resume-file" data-hook="resume-file" type="file" accept=".txt,.md,.markdown">
-      <p class="hint">PDF and DOCX aren't supported here — export your resume as plain text or markdown first.</p>
+      <p class="hint">PDF and DOCX aren't supported here. Export your resume as plain text or markdown first.</p>
     </div>
     <div class="actions">
       <button id="resume-submit" data-hook="resume-submit" type="button">Parse resume</button>
@@ -251,8 +251,8 @@ export const ONBOARD_PAGE_HTML = `<!doctype html>
 
   <section id="step-6" data-hook="step-6" class="step" hidden>
     <h2>6. Evidence seed</h2>
-    <p class="hint">Claims pulled from your resume in step 2 — the AI interview will deepen this later.</p>
-    <div id="evidence-list" data-hook="evidence-list" class="result">No claims parsed yet — go back to step 2 and parse a resume.</div>
+    <p class="hint">Claims pulled from your resume in step 2. The AI interview will deepen this later.</p>
+    <div id="evidence-list" data-hook="evidence-list" class="result">No claims parsed yet. Go back to step 2 and parse a resume.</div>
     <div class="actions">
       <button id="evidence-submit" data-hook="evidence-submit" type="button">Save selected claims</button>
     </div>
@@ -262,7 +262,7 @@ export const ONBOARD_PAGE_HTML = `<!doctype html>
 
   <section id="step-7" data-hook="step-7" class="step" hidden>
     <h2>7. AI key (BYOK)</h2>
-    <p class="hint">Stored locally in .internal/ai.env (gitignored, file mode 0600) — it never leaves this machine.</p>
+    <p class="hint">Stored locally in .internal/ai.env (gitignored, file mode 0600). It never leaves this machine.</p>
     <div class="field">
       <label for="ai-key-input">Anthropic API key</label>
       <input id="ai-key-input" data-hook="ai-key-input" type="password" placeholder="sk-ant-…">
@@ -422,7 +422,7 @@ export const ONBOARD_PAGE_HTML = `<!doctype html>
       parts.push(files[i].name + ": " + status);
     }
     var filesLine = document.createElement("div");
-    filesLine.textContent = "Candidate files — " + (parts.join(", ") || "none checked yet");
+    filesLine.textContent = "Candidate files: " + (parts.join(", ") || "none checked yet");
     stateSummary.appendChild(filesLine);
 
     var otherLine = document.createElement("div");
@@ -496,7 +496,7 @@ export const ONBOARD_PAGE_HTML = `<!doctype html>
       var created = (result.body && result.body.created) || [];
       var existing = (result.body && result.body.existing) || [];
       var createdLine = document.createElement("div");
-      createdLine.textContent = "Created: " + (created.join(", ") || "none — already set up");
+      createdLine.textContent = "Created: " + (created.join(", ") || "none, already set up");
       initResult.appendChild(createdLine);
       var existingLine = document.createElement("div");
       existingLine.textContent = "Already present: " + (existing.join(", ") || "none");
@@ -665,7 +665,7 @@ export const ONBOARD_PAGE_HTML = `<!doctype html>
   function renderEvidenceChecklist(claims) {
     evidenceList.textContent = "";
     if (!claims || !claims.length) {
-      evidenceList.textContent = "No claims parsed yet — go back to step 2 and parse a resume.";
+      evidenceList.textContent = "No claims parsed yet. Go back to step 2 and parse a resume.";
       return;
     }
     for (var i = 0; i < claims.length; i++) {
@@ -763,7 +763,7 @@ export const ONBOARD_PAGE_HTML = `<!doctype html>
           })
           .then(function (cfg) {
             aiKeySubmit.disabled = false;
-            aiKeyStatus.textContent = "Configured — route: " + cfg.route + ", key present: " + (cfg.keyPresent ? "yes" : "no");
+            aiKeyStatus.textContent = "Configured, route: " + cfg.route + ", key present: " + (cfg.keyPresent ? "yes" : "no");
           });
       })
       .catch(function (err) {

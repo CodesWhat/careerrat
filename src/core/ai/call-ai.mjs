@@ -568,9 +568,7 @@ export async function callAI({
       capErr.retryable = false;
       throw capErr;
     }
-    throw new Error(
-      `AI request failed: ${res.status} ${res.statusText}${text ? ` — ${text}` : ""}`
-    );
+    throw new Error(`AI request failed: ${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);
   }
 
   if (stream) {

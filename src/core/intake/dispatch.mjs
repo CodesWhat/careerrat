@@ -73,7 +73,7 @@ export function resolveIntakeDispatch({
     case "interview-transcript":
       if (!isUnambiguousApplicationMatch(trackerMatch)) {
         return NEEDS_YOU(
-          "no unambiguous tracked application matched this interview context — choose the application before saving it"
+          "no unambiguous tracked application matched this interview context: choose the application before saving it"
         );
       }
       return {
@@ -85,7 +85,7 @@ export function resolveIntakeDispatch({
     case "status-update": {
       if (!isUnambiguousApplicationMatch(trackerMatch)) {
         return NEEDS_YOU(
-          "no unambiguous tracked application matched this status update — never guess which application it refers to"
+          "no unambiguous tracked application matched this status update: never guess which application it refers to"
         );
       }
       return {
@@ -107,7 +107,7 @@ export function resolveIntakeDispatch({
     }
 
     case "other":
-      return NEEDS_YOU("no specific route matched this paste — a human needs to route it manually");
+      return NEEDS_YOU("no specific route matched this paste: a human needs to route it manually");
 
     default:
       return NEEDS_YOU(`unrecognized intake kind "${kind}"`);

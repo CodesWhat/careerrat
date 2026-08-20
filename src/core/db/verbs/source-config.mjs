@@ -67,12 +67,12 @@ function normalizeCompanyEntry(entry = {}) {
     .toLowerCase();
   const provider = requestedProvider || inferProvider({ careers_url: careersUrl });
   if (requestedProvider && !isCompanyProviderSupported(requestedProvider)) {
-    const err = new Error(`unsupported ATS provider — cannot scan with "${entry.provider}"`);
+    const err = new Error(`unsupported ATS provider: cannot scan with "${entry.provider}"`);
     err.code = "BAD_REQUEST";
     throw err;
   }
   if (!provider) {
-    const err = new Error(`unsupported ATS host — cannot scan "${careersUrl}"`);
+    const err = new Error(`unsupported ATS host: cannot scan "${careersUrl}"`);
     err.code = "BAD_REQUEST";
     throw err;
   }

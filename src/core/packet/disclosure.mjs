@@ -72,7 +72,7 @@ function profileAnswer(category, profile) {
 
   if (category === "workAuthorization") {
     if (authorization.work_authorized === true) {
-      return "Yes — I am legally authorized to work.";
+      return "Yes, I am legally authorized to work.";
     }
     if (authorization.work_authorized === false) return "No.";
     return null;

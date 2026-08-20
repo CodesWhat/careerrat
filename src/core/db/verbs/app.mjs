@@ -79,7 +79,7 @@ function interviewLogisticsNote(at, who) {
   const firstName = String(who || "")
     .trim()
     .split(/\s+/)[0];
-  return `Interview — ${formatted}${firstName ? ` with ${firstName}` : ""}`.slice(0, 60);
+  return `Interview: ${formatted}${firstName ? ` with ${firstName}` : ""}`.slice(0, 60);
 }
 
 // appUpsert({row}) — full-row insert/replace (capture-intake shape): a brand
@@ -92,7 +92,7 @@ export function appUpsert({ repoRoot, env, row } = {}) {
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: existed ? "status_change" : "applied",
-      title: `${row.company || row.id} — ${row.role || "application"} ${existed ? "updated" : "captured"}`,
+      title: `${row.company || row.id}: ${row.role || "application"} ${existed ? "updated" : "captured"}`,
       refs: { applicationId: row.id, company: row.company, role: row.role },
     });
     const analytics = refreshAnalytics(db);
@@ -185,7 +185,7 @@ export function appSetStatus({
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "status_change",
-      title: `${app.company || id} — Status changed to ${activityStatusLabel(to)}`,
+      title: `${app.company || id}: Status changed to ${activityStatusLabel(to)}`,
       summary: `Previous status: ${activityStatusLabel(from)}.`,
       refs: { applicationId: id, company: app.company, role: app.role },
       tags: [`status:${to}`, "operation:application:status-update"],
@@ -248,7 +248,7 @@ export function appSetFields({ repoRoot, env, id, patch } = {}) {
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "status_change",
-      title: `${app.company || id} — ${activity.title}`,
+      title: `${app.company || id}: ${activity.title}`,
       summary: activity.summary,
       refs: { applicationId: id, company: app.company, role: app.role },
       tags: ["operation:application:details-update"],
@@ -325,14 +325,14 @@ export function appPersistEvaluation({ repoRoot, env, id, evaluation, projection
     const event = statusChanged
       ? logActivityEvent(db, {
           type: "status_change",
-          title: `${app.company || id} — Status changed to ${activityStatusLabel(patch.status)}`,
+          title: `${app.company || id}: Status changed to ${activityStatusLabel(patch.status)}`,
           summary: `Previous status: ${activityStatusLabel(from)}.`,
           refs: { applicationId: id, company: app.company, role: app.role },
           tags: [`status:${patch.status}`, "operation:application:status-update"],
         })
       : logActivityEvent(db, {
           type: "status_change",
-          title: `${app.company || id} — ${fieldsActivity.title}`,
+          title: `${app.company || id}: ${fieldsActivity.title}`,
           summary: fieldsActivity.summary,
           refs: { applicationId: id, company: app.company, role: app.role },
           tags: ["operation:application:details-update"],
@@ -375,7 +375,7 @@ export function appScheduleInterview({ repoRoot, env, id, at, round, note, who }
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "interview",
-      title: `${app.company || id} — ${round || "interview"} scheduled`,
+      title: `${app.company || id}: ${round || "interview"} scheduled`,
       refs: { applicationId: id, company: app.company, role: app.role },
     });
     return { id, meta, event };
@@ -450,7 +450,7 @@ export function appCaptureInterviewIntake({
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "interview",
-      title: `${app.company || id} — ${scheduled ? "interview captured" : "interview notes captured"}`,
+      title: `${app.company || id}: ${scheduled ? "interview captured" : "interview notes captured"}`,
       summary: scheduled
         ? "Saved the confirmed interview time and its source context."
         : "Saved interview context without inventing a schedule.",
@@ -531,7 +531,7 @@ export function appRecordRoundOutcome({ repoRoot, env, id, outcome, note, stage,
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "interview",
-      title: `${app.company || id} — ${stage || target.kind || "round"} outcome: ${outcome}`,
+      title: `${app.company || id}: ${stage || target.kind || "round"} outcome: ${outcome}`,
       refs: { applicationId: id, company: app.company, role: app.role },
       tags: [`outcome:${outcome}`],
     });
@@ -563,7 +563,7 @@ export function appRegisterArtifact({ repoRoot, env, id, kind, path, note } = {}
       }[kind] || "Application document saved";
     const event = logActivityEvent(db, {
       type: "tailored",
-      title: `${app.company || id} — ${artifactActivity}`,
+      title: `${app.company || id}: ${artifactActivity}`,
       summary: note || "Saved the document to this application.",
       refs: { applicationId: id, company: app.company, role: app.role },
       tags: [`artifact:${kind}`, "operation:application:artifact-save"],
@@ -612,7 +612,7 @@ export function appRegisterInterviewDossier({ repoRoot, env, id, dossier } = {})
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "interview",
-      title: `${app.company || id} — Interview dossier created`,
+      title: `${app.company || id}: Interview dossier created`,
       summary: `${normalized.round || "Interview"} preparation is ready to review.`,
       refs: { applicationId: id, company: app.company, role: app.role },
       tags: ["artifact:interviewDossier", "operation:application:interview-prep"],
@@ -662,7 +662,7 @@ export function appRegisterPacketQuestionCapture({
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "tailored",
-      title: `${app.company || id} — packet questions captured`,
+      title: `${app.company || id}: packet questions captured`,
       refs: { applicationId: id, company: app.company, role: app.role },
     });
     return { id, meta, event, packetManifest: questionSummary };
@@ -719,7 +719,7 @@ export function appRegisterPacketArtifacts({
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "tailored",
-      title: `${app.company || id} — Tailored application packet created`,
+      title: `${app.company || id}: Tailored application packet created`,
       summary:
         updatedArtifacts.resume && updatedArtifacts.coverLetter
           ? "Created tailored résumé and cover letter."

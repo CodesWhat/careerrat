@@ -140,7 +140,7 @@ const RULE_CASES = [
       },
     }),
     message:
-      "That matches more than one saved job: Acme — Senior AI Engineer; Acme — Staff Platform Engineer. Name the company and role more specifically.",
+      "That matches more than one saved job: Acme, Senior AI Engineer; Acme, Staff Platform Engineer. Name the company and role more specifically.",
     action: null,
   },
   {
@@ -165,7 +165,7 @@ const RULE_CASES = [
       },
     }),
     message:
-      "That matches more than one recruiter thread: Acme — Senior AI Engineer — Interview availability; Acme — Staff Platform Engineer — Application update. Name the company, role, or subject more specifically.",
+      "That matches more than one recruiter thread: Acme, Senior AI Engineer, Interview availability; Acme, Staff Platform Engineer, Application update. Name the company, role, or subject more specifically.",
     action: null,
   },
   {

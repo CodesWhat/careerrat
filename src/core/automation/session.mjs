@@ -193,7 +193,7 @@ function detectPlaywrightProfiles(profileRoot) {
     return {
       status: "missing",
       signedIn: [],
-      detail: `no persistent profiles yet (${profileRoot}) — sign in once per platform`,
+      detail: `no persistent profiles yet (${profileRoot}). Sign in once per platform`,
     };
   }
   const signedIn = readdirSync(profileRoot, { withFileTypes: true })
@@ -204,7 +204,7 @@ function detectPlaywrightProfiles(profileRoot) {
     return {
       status: "missing",
       signedIn: [],
-      detail: `profile root exists but is empty (${profileRoot}) — sign in once per platform`,
+      detail: `profile root exists but is empty (${profileRoot}). Sign in once per platform`,
     };
   }
   return {

@@ -348,7 +348,7 @@ test("chat-first interview intake atomically captures provenance and schedules a
   );
   assert.equal(app.status, "interview");
   assert.equal(app.interviewAt, "2030-01-08T15:00:00.000Z");
-  assert.match(app.interviewNote, /^Interview — /);
+  assert.match(app.interviewNote, /^Interview: /);
   assert.equal(app.conversations.at(-1).kind, "interview");
   assert.equal(app.conversations.at(-1).who, "Jordan Lee");
   assert.equal(
@@ -1290,7 +1290,7 @@ test("relationshipLeadUpsertBatch stores review leads, dedupes company/name/plat
   const app = JSON.parse(
     db.prepare("SELECT data FROM applications WHERE id = ?").get("app-non-interview").data
   );
-  assert.equal(app.nextAction, "Review relationship leads — approve or reject in Network tab");
+  assert.equal(app.nextAction, "Review relationship leads: approve or reject in Network tab");
   assert.equal(app.nextActionDue, null);
 
   const exportedTracker = JSON.parse(
@@ -1814,7 +1814,7 @@ test("application activity names outcomes instead of internal mutation verbs", (
   seedFixture(repoRoot);
 
   const status = appSetStatus({ repoRoot, id: "app-non-interview", to: "applied" });
-  assert.equal(status.event.title, "Initech — Status changed to Applied");
+  assert.equal(status.event.title, "Initech: Status changed to Applied");
   assert.equal(status.event.summary, "Previous status: Saved for review.");
   assert.doesNotMatch(status.event.title, /status\s+reviewed-hold|→/i);
 
@@ -1827,7 +1827,7 @@ test("application activity names outcomes instead of internal mutation verbs", (
       compNote: "$190k-$220k base",
     },
   });
-  assert.equal(evaluation.event.title, "Initech — Fit and compensation updated");
+  assert.equal(evaluation.event.title, "Initech: Fit and compensation updated");
   assert.doesNotMatch(evaluation.event.title, /fields updated/i);
 
   const packet = appRegisterPacketArtifacts({
@@ -1846,7 +1846,7 @@ test("application activity names outcomes instead of internal mutation verbs", (
       artifacts: {},
     },
   });
-  assert.equal(packet.event.title, "Initech — Tailored application packet created");
+  assert.equal(packet.event.title, "Initech: Tailored application packet created");
   assert.equal(packet.event.summary, "Created tailored résumé and cover letter.");
   assert.doesNotMatch(packet.event.title, /registered/i);
 
@@ -1856,7 +1856,7 @@ test("application activity names outcomes instead of internal mutation verbs", (
     kind: "jd",
     path: "workspace/jobs/initech.md",
   });
-  assert.equal(jobDescription.event.title, "Initech — Job description captured");
+  assert.equal(jobDescription.event.title, "Initech: Job description captured");
   assert.doesNotMatch(jobDescription.event.title, /artifact registered/i);
 
   const sourced = sourcedSetStatus({
@@ -1865,7 +1865,7 @@ test("application activity names outcomes instead of internal mutation verbs", (
     to: "cut",
     note: "Outside the target role family.",
   });
-  assert.equal(sourced.event.title, "Umbrella — Role skipped");
+  assert.equal(sourced.event.title, "Umbrella: Role skipped");
   assert.doesNotMatch(sourced.event.title, /sourced\s+sourced|→/i);
 });
 

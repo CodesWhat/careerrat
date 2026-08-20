@@ -23,7 +23,7 @@ test("summarizeDispatch: app_set_status prefers matchedCompany — matchedRole o
       matchedRole: "Staff Software Engineer",
     },
   });
-  assert.equal(summary, 'update E Corp — Staff Software Engineer status to "rejected"');
+  assert.equal(summary, 'update E Corp, Staff Software Engineer status to "rejected"');
 });
 
 test("summarizeDispatch: app_set_status falls back to the bare applicationId when matchedCompany/matchedRole are absent", () => {

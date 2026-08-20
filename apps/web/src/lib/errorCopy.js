@@ -42,7 +42,7 @@ function savedJobAmbiguityMessage(details) {
   const labels = matches
     .slice(0, 5)
     .map(({ company, role }) =>
-      [String(company || "").trim(), String(role || "").trim()].filter(Boolean).join(" — ")
+      [String(company || "").trim(), String(role || "").trim()].filter(Boolean).join(", ")
     )
     .filter(Boolean);
   return labels.length
@@ -57,7 +57,7 @@ function communicationAmbiguityMessage(details) {
     .map(({ company, role, subject }) =>
       [String(company || "").trim(), String(role || "").trim(), String(subject || "").trim()]
         .filter(Boolean)
-        .join(" — ")
+        .join(", ")
     )
     .filter(Boolean);
   return labels.length

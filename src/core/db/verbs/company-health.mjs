@@ -176,7 +176,7 @@ export function companyHealthSet({ repoRoot, env, id, companyHealth } = {}) {
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "research",
-      title: `Company health: ${row.company || id} — ${validated.rating}`,
+      title: `Company health: ${row.company || id}, ${validated.rating}`,
       summary: `${validated.forFunction}-scoped as of ${validated.asOf} (${validated.provenance}).`,
       refs: {
         company: row.company,

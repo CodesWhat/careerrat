@@ -284,7 +284,7 @@ function StrategyMetrics({ metrics }) {
       {items.map((item) => (
         <div className="dashboard__strategy-metric" key={item.key}>
           <span>{item.label}</span>
-          <strong>{item.data.value == null ? "—" : String(item.data.value)}</strong>
+          <strong>{item.data.value == null ? "N/A" : String(item.data.value)}</strong>
           {item.data.rate ? <small>{item.data.rate}</small> : null}
         </div>
       ))}

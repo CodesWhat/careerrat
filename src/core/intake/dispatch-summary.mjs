@@ -25,7 +25,7 @@ export function summarizeDispatch(dispatch) {
     // sanity-check confirm-first exists for.
     const target =
       dispatch.params.matchedCompany && dispatch.params.matchedRole
-        ? `${dispatch.params.matchedCompany} — ${dispatch.params.matchedRole}`
+        ? `${dispatch.params.matchedCompany}, ${dispatch.params.matchedRole}`
         : dispatch.params.applicationId;
     return `update ${target} status to "${dispatch.params.to}"`;
   }

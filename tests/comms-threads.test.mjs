@@ -415,9 +415,9 @@ describe("summarizeThread", () => {
     assert.ok(s.includes("Wait for response"), "should include nextAction");
   });
 
-  it("shows — when nextAction is absent", () => {
+  it("shows N/A when nextAction is absent", () => {
     const t = createThread({ company: "X", role: "Y", channel: "email", summary: "s" });
     const s = summarizeThread(t);
-    assert.ok(s.includes("—"), "should show — for missing nextAction");
+    assert.ok(s.includes("N/A"), "should show N/A for missing nextAction");
   });
 });

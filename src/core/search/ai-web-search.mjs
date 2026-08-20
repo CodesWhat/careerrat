@@ -278,7 +278,7 @@ export async function runAiWebSearch({
 
   if (!selected.length) {
     throwPreconditionError(
-      "No saved AI search prompts to run — generate or add some first.",
+      "No saved AI search prompts to run. Generate or add some first.",
       "NO_SAVED_PROMPTS"
     );
   }
@@ -286,7 +286,7 @@ export async function runAiWebSearch({
   if (modesGate.decision === "downshift") {
     onProgress?.({
       type: "activity",
-      message: `Lean usage mode — running ${selected.length} of ${matching.length} saved prompt${matching.length === 1 ? "" : "s"}.`,
+      message: `Lean usage mode: running ${selected.length} of ${matching.length} saved prompt${matching.length === 1 ? "" : "s"}.`,
     });
   }
   onProgress?.({

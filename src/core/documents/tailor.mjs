@@ -503,10 +503,9 @@ export function buildCoverLetterScaffold({ profile, job, evidence, blocks, bound
   const greeting = company ? `Dear ${company} Hiring Team,` : "Dear Hiring Team,";
 
   // Subject line (informational, not an email header)
-  const subjectParts = ["Re: Application"];
-  if (role) subjectParts.push(role);
-  if (company) subjectParts.push(`at ${company}`);
-  const subject = subjectParts.join(" — ");
+  let subject = "Re: Application";
+  if (role) subject += ` for ${role}`;
+  if (company) subject += ` at ${company}`;
 
   // Sign-off
   const signOff = `Sincerely,\n${name}`;

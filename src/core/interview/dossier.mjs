@@ -171,7 +171,7 @@ export function buildInterviewDossier({
   writeFileSync(fullPath, markdown, "utf8");
 
   const dossier = {
-    title: `${context.app.company || "Unknown company"} — ${context.app.role || "Open role"}`,
+    title: `${context.app.company || "Unknown company"}, ${context.app.role || "Open role"}`,
     round,
     path: displayPath(workspaceDir, fullPath),
     generatedAt,

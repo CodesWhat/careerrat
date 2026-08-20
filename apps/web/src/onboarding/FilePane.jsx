@@ -284,7 +284,7 @@ function FilePaneRow({
       <div className="file-pane__row file-pane__row--declined">
         <span className="file-pane__row-copy">
           <span className="file-pane__row-title">{item.label}</span>
-          <span className="file-pane__row-detail">Declined — won't ask again</span>
+          <span className="file-pane__row-detail">Declined, won't ask again</span>
         </span>
         <button
           type="button"
@@ -530,7 +530,7 @@ function CompaniesRowEditor({
       <ChipInput values={companies} onChange={setCompanies} placeholder="e.g. Stripe" />
       {companyProposals.length ? (
         <>
-          <span className="field__hint">Suggested — accept to add, reject to dismiss.</span>
+          <span className="field__hint">Suggested: accept to add, reject to dismiss.</span>
           <ul className="file-pane__proposal-list">
             {companyProposals.map((proposal) => (
               <li key={proposal.proposalId} className="file-pane__proposal-row">
@@ -584,7 +584,7 @@ function GuardrailsRowEditor({ state, onCommit, onCancel }) {
 
   return (
     <form onSubmit={handleSubmit} className="file-pane__editor">
-      <span className="field__hint">Dealbreakers — anything matching one of these gets cut.</span>
+      <span className="field__hint">Dealbreakers: anything matching one of these gets cut.</span>
       <ChipInput values={signals} onChange={setSignals} placeholder="e.g. Below $200K" />
       <EditorActions onCancel={onCancel} saving={saving} />
     </form>
@@ -609,7 +609,7 @@ function EvidenceRowEditor({ state, onCommit, onCancel }) {
     <div className="file-pane__editor">
       <span className="field__hint">
         {claims.length
-          ? "Claims pulled from your résumé — remove any that don't fit."
+          ? "Claims pulled from your résumé. Remove any that don't fit."
           : "No claims yet."}
       </span>
       <ul className="file-pane__claim-list">
@@ -705,7 +705,7 @@ function QuickFactsRowEditor({ state, onCommit, onCancel }) {
         </label>
       </div>
       <span className="field__hint">
-        Minimum base salary — your walk-away number, not your current pay.
+        Minimum base salary: your walk-away number, not your current pay.
       </span>
       <NumberField
         value={minimumBase}

@@ -47,7 +47,7 @@ function assertSequential(migrations) {
     const expected = index + 1;
     if (migration.id !== expected) {
       throw new Error(
-        `runMigrations: migration list is not sequential — expected id ${expected} at position ${index}, ` +
+        `runMigrations: migration list is not sequential, expected id ${expected} at position ${index}, ` +
           `got id ${migration.id} (name="${migration.name}"). Gaps and out-of-order migrations are rejected.`
       );
     }

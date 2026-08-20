@@ -811,7 +811,7 @@ function resolveReferencedJobRequest({ repoRoot, env, jobReference }) {
       company: String(row.company || "this company").slice(0, 120),
       role: String(row.role || "this role").slice(0, 160),
     }));
-    const choices = safeMatches.map((row) => `${row.company} — ${row.role}`).join("; ");
+    const choices = safeMatches.map((row) => `${row.company}, ${row.role}`).join("; ");
     const error = actionError(
       `That matches more than one saved job: ${choices}. Name the company and role more specifically.`,
       "JOB_REFERENCE_AMBIGUOUS"
@@ -856,7 +856,7 @@ function resolveReferencedApplication({ repoRoot, env, jobReference, interviewOn
       company: String(application.company || "this company").slice(0, 120),
       role: String(application.role || "this role").slice(0, 160),
     }));
-    const choices = safeMatches.map((row) => `${row.company} — ${row.role}`).join("; ");
+    const choices = safeMatches.map((row) => `${row.company}, ${row.role}`).join("; ");
     const error = actionError(
       `That matches more than one saved job: ${choices}. Name the company and role more specifically.`,
       "JOB_REFERENCE_AMBIGUOUS"
@@ -1004,7 +1004,7 @@ function resolveReferencedCommunication({ repoRoot, env, communicationReference 
       subject: String(communication.subject || "this conversation").slice(0, 160),
     }));
     const choices = safeMatches
-      .map((row) => `${row.company} — ${row.role} — ${row.subject}`)
+      .map((row) => `${row.company}, ${row.role}, ${row.subject}`)
       .join("; ");
     const error = actionError(
       `That matches more than one recruiter thread: ${choices}. Name the company, role, or subject more specifically.`,
@@ -1447,7 +1447,7 @@ async function evaluateApplicationRequest({
     text: `Evaluated ${applicationLabel(application)}: ${gateLabel}${evaluation.fitScore == null ? "" : ` (${evaluation.fitScore}/100 fit)`}.`,
     artifact: {
       kind: "job_evaluation",
-      title: `${applicationLabel(application)} — ${gateLabel}`,
+      title: `${applicationLabel(application)}: ${gateLabel}`,
       applicationId,
       evaluation,
     },
@@ -1622,7 +1622,7 @@ function applicationHandoffArtifact(
   if (!url) return null;
   return {
     kind: "application_handoff",
-    title: `${applicationLabel(application)} — Application site`,
+    title: `${applicationLabel(application)}: Application site`,
     applicationId,
     url,
     submissionVerified: false,
@@ -1751,11 +1751,11 @@ function resolvedCommunicationDate(value, now) {
 }
 
 function applicationLabel(app) {
-  return `${app.company || "this company"} — ${app.role || "this role"}`;
+  return `${app.company || "this company"}, ${app.role || "this role"}`;
 }
 
 function communicationLabel(comm) {
-  return [comm.company, comm.role, comm.subject].filter(Boolean).join(" — ") || "this thread";
+  return [comm.company, comm.role, comm.subject].filter(Boolean).join(", ") || "this thread";
 }
 
 function replySubject(comm, input) {
@@ -1864,7 +1864,7 @@ function searchRunArtifact({ run, sources = null, reused = false, parked = false
   const titlePrefix = purpose === "first-search" ? "First job search" : "Job search";
   return {
     kind: "search_run",
-    title: `${titlePrefix} — ${searchStatusLabel(run)}`,
+    title: `${titlePrefix}: ${searchStatusLabel(run)}`,
     purpose,
     runId: run?.id ? String(run.id) : null,
     status: String(run?.status || "not_started"),
@@ -2338,7 +2338,7 @@ export async function executeWorkspaceIntent({
           {
             kind: "screening_answers",
             title: operation.applicationId
-              ? `${operation.company || "Application"} — Screening answers`
+              ? `${operation.company || "Application"}: Screening answers`
               : "Screening answers",
             applicationId: operation.applicationId || null,
             answers: operation.answers || [],
@@ -2451,7 +2451,7 @@ export async function executeWorkspaceIntent({
         artifacts: [
           {
             kind: "communication_thread",
-            title: [company, role, subject].filter(Boolean).join(" — ") || "Recruiter message",
+            title: [company, role, subject].filter(Boolean).join(", ") || "Recruiter message",
             communicationId: operation.id,
           },
         ],
@@ -2509,7 +2509,7 @@ export async function executeWorkspaceIntent({
         artifacts: [
           {
             kind: "interview_context",
-            title: [match.company, match.role].filter(Boolean).join(" — ") || "Interview context",
+            title: [match.company, match.role].filter(Boolean).join(", ") || "Interview context",
             applicationId: match.id,
             path: item.capturedPath || item.sourceFilePath || null,
           },
@@ -2539,7 +2539,7 @@ export async function executeWorkspaceIntent({
         env,
         normalized,
         intentMessage,
-        text: `Prepared the interview packet for ${operation.company} — ${operation.role}.`,
+        text: `Prepared the interview packet for ${operation.company}, ${operation.role}.`,
         artifacts: [
           {
             kind: "interview_dossier",
@@ -2664,7 +2664,7 @@ export async function executeWorkspaceIntent({
       const packetArtifact = {
         kind: "packet_generation",
         purpose: applyIntent ? "application" : "tailoring",
-        title: `${applicationLabel(evaluated.application)} — Documents`,
+        title: `${applicationLabel(evaluated.application)}: Documents`,
         applicationId: captured.applicationId,
         status: packet.status || "reviewable",
         uploadReady: Boolean(packet.uploadReady),
@@ -2790,7 +2790,7 @@ export async function executeWorkspaceIntent({
           {
             kind: "packet_generation",
             purpose: applyIntent ? "application" : "tailoring",
-            title: `${applicationLabel(application)} — Documents`,
+            title: `${applicationLabel(application)}: Documents`,
             applicationId: normalized.entity.id,
             status: operation.status || "reviewable",
             uploadReady: Boolean(operation.uploadReady),
@@ -2847,7 +2847,7 @@ export async function executeWorkspaceIntent({
         artifacts: [
           {
             kind: "packet_export",
-            title: `${applicationLabel(application)} — Exported files`,
+            title: `${applicationLabel(application)}: Exported files`,
             applicationId: normalized.entity.id,
             formats: operation.formats || formats,
             artifacts,
@@ -2897,7 +2897,7 @@ export async function executeWorkspaceIntent({
         artifacts: [
           {
             kind: "search_source",
-            title: `${label} — ${added ? "Added" : "Already configured"}`,
+            title: `${label}: ${added ? "Added" : "Already configured"}`,
             added,
             index: source.index ?? null,
             provider: source.provider || null,
@@ -2947,7 +2947,7 @@ export async function executeWorkspaceIntent({
         artifacts: [
           {
             kind: "search_source",
-            title: `${label} — ${added ? "Added" : "Already configured"}`,
+            title: `${label}: ${added ? "Added" : "Already configured"}`,
             added,
             index: source.index ?? null,
             provider: source.provider || provider,
@@ -3012,7 +3012,7 @@ export async function executeWorkspaceIntent({
         artifacts: [
           {
             kind: "search_source",
-            title: `${label} — ${stateLabel}`,
+            title: `${label}: ${stateLabel}`,
             changed,
             index: source.index ?? null,
             provider: source.provider || null,
@@ -3389,7 +3389,7 @@ export async function executeWorkspaceIntent({
             title:
               type === "company-research"
                 ? `Researched ${artifact.company}`
-                : `Comp benchmark — ${artifact.role}${artifact.location ? ` (${artifact.location})` : ""}`,
+                : `Comp benchmark: ${artifact.role}${artifact.location ? ` (${artifact.location})` : ""}`,
             ...(type === "comp-benchmark"
               ? { summary: compBenchmarkActivitySummary(fm.benchmark) }
               : {}),
@@ -3477,7 +3477,7 @@ export async function executeWorkspaceIntent({
       const operation = await startCompanyHealthImpl({ repoRoot, env, request });
       const artifact = researchChatArtifact(
         operation?.chat || operation?.activeDiscoveryChat || operation,
-        { skill: "company-health", title: `Company health — ${company}` }
+        { skill: "company-health", title: `Company health: ${company}` }
       );
       return appendActionResult({
         repoRoot,
@@ -3584,7 +3584,7 @@ export async function executeWorkspaceIntent({
         draft.state === "fresh"
           ? "Nothing new since your last strategy review."
           : draft.state === "manual"
-            ? `${draft.headline} The AI reviewer wasn't available, so this is the deterministic read — review it, then finish the review.`
+            ? `${draft.headline} The AI reviewer wasn't available, so this is the deterministic read. Review it, then finish the review.`
             : `${draft.headline} Review the findings and recommendations, then finish the review.`;
       return appendActionResult({
         repoRoot,
@@ -4044,7 +4044,7 @@ export async function executeWorkspaceIntent({
         errorMessageDropped: report.state.errorMessageDropped,
       };
       const text = report.state.configHint
-        ? "I put together a redacted bug report, but this looks like it could be a setup problem — Settings or careerrat doctor may fix it faster. Review the report below and file it if you still think it's a defect."
+        ? "I put together a redacted bug report, but this looks like it could be a setup problem. Settings or careerrat doctor may fix it faster. Review the report below and file it if you still think it's a defect."
         : "I put together a redacted bug report for you to review before filing.";
 
       return appendActionResult({
@@ -4085,7 +4085,7 @@ export async function executeWorkspaceIntent({
         env,
         normalized,
         intentMessage,
-        text: rawUrl ? `Recorded — filed at ${rawUrl}.` : "Recorded that you filed the issue.",
+        text: rawUrl ? `Recorded: filed at ${rawUrl}.` : "Recorded that you filed the issue.",
         artifacts: [
           { kind: "issue_filed", url: rawUrl || null, at: requestDate(now).toISOString() },
         ],
@@ -4343,7 +4343,7 @@ export async function executeWorkspaceIntent({
         artifacts: [
           {
             kind: "interview_schedule",
-            title: `${applicationLabel(application)} — ${round}`,
+            title: `${applicationLabel(application)}: ${round}`,
             applicationId: normalized.entity.id,
             at: scheduledAt,
             round,
@@ -5111,7 +5111,7 @@ export async function executeWorkspaceIntent({
         env,
         normalized,
         intentMessage,
-        text: `Noted on ${company} — ${role}.`,
+        text: `Noted on ${company}, ${role}.`,
         artifacts: [
           {
             kind: "communication_note",
@@ -5296,7 +5296,7 @@ export async function executeWorkspaceIntent({
         env,
         id: normalized.entity.id,
         to: "applied",
-        note: "Applied outside CareerRat — reported by user.",
+        note: "Applied outside CareerRat. Reported by user.",
         appliedAt,
       });
       return appendActionResult({
@@ -5505,7 +5505,7 @@ export async function executeWorkspaceIntent({
         artifacts: [
           {
             kind: "application_link_required",
-            title: `${applicationLabel(application)} — Application link needed`,
+            title: `${applicationLabel(application)}: Application link needed`,
             applicationId: normalized.entity.id,
             code: "APPLICATION_URL_REQUIRED",
           },
@@ -5582,7 +5582,7 @@ export async function executeWorkspaceIntent({
             {
               kind: "packet_generation",
               purpose: "application",
-              title: `${applicationLabel(application)} — Documents`,
+              title: `${applicationLabel(application)}: Documents`,
               applicationId: normalized.entity.id,
               status: packet.status || "reviewable",
               uploadReady: Boolean(packet.uploadReady),
@@ -5632,7 +5632,7 @@ export async function executeWorkspaceIntent({
         artifacts: [
           {
             kind: "application_handoff",
-            title: `${applicationLabel(application)} — Application site`,
+            title: `${applicationLabel(application)}: Application site`,
             applicationId: normalized.entity.id,
             url: postingUrl,
             submissionVerified: false,
@@ -5693,7 +5693,7 @@ export async function executeWorkspaceIntent({
             {
               kind: "packet_generation",
               purpose: "application",
-              title: `${applicationLabel(application)} — Documents`,
+              title: `${applicationLabel(application)}: Documents`,
               applicationId: normalized.entity.id,
               status: packet.status || "reviewable",
               uploadReady: Boolean(packet.uploadReady),
@@ -5703,7 +5703,7 @@ export async function executeWorkspaceIntent({
             },
             {
               kind: "application_handoff",
-              title: `${applicationLabel(application)} — Supervised application`,
+              title: `${applicationLabel(application)}: Supervised application`,
               applicationId: normalized.entity.id,
               ...(sessionUrl ? { url: sessionUrl } : {}),
               submissionVerified: false,
@@ -5763,7 +5763,7 @@ export async function executeWorkspaceIntent({
           ? [
               {
                 kind: "application_handoff",
-                title: `${applicationLabel(application)} — Application site`,
+                title: `${applicationLabel(application)}: Application site`,
                 applicationId: normalized.entity.id,
                 url: postingUrl,
                 submissionVerified: false,
@@ -5802,7 +5802,7 @@ export async function executeWorkspaceIntent({
         artifacts: [
           {
             kind: "application_handoff",
-            title: `${applicationLabel(application)} — Supervised application`,
+            title: `${applicationLabel(application)}: Supervised application`,
             applicationId: normalized.entity.id,
             ...(sessionUrl ? { url: sessionUrl } : {}),
             submissionVerified: false,
@@ -5853,7 +5853,7 @@ export async function executeWorkspaceIntent({
       env,
       id: normalized.entity.id,
       to: "applied",
-      note: "Applied on site — submission verified.",
+      note: "Applied on site. Submission verified.",
       appliedAt,
     });
     const confirmation = execution.confirmation

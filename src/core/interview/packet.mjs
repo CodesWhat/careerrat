@@ -147,7 +147,7 @@ export function extractStoryGaps({ jobSignals, evidence }) {
     if (!claim) {
       gaps.push({
         signal,
-        note: "No evidence claim yet — add to candidate/evidence.yml before interview.",
+        note: "No evidence claim yet. Add to candidate/evidence.yml before interview.",
       });
     }
   }
@@ -372,20 +372,20 @@ export function buildLikelyQuestionsSection({ questions, stories }) {
       const ids = Array.isArray(story.evidence_ids) ? story.evidence_ids : [];
       const anchor = `Story "${story.title}"${ids.length ? ` (${ids.join(", ")})` : ""}`;
       return (
-        `**${n}. ${question}** — _Anchor: ${anchor}_\n` +
+        `**${n}. ${question}**: _Anchor: ${anchor}_\n` +
         `> _Script a say-it-verbatim answer from this story. Carry the verbatim metric for any impact / "how do you measure success" question._`
       );
     }
     if (/^why are you interested|^what relevant experience/i.test(question)) {
       return (
-        `**${n}. ${question}** — _Anchor: Positioning Thesis + Top Fit Signals; lead with the strongest Prepared Story_\n` +
+        `**${n}. ${question}**: _Anchor: Positioning Thesis + Top Fit Signals; lead with the strongest Prepared Story_\n` +
         `> _Script a say-it-verbatim answer from the anchor above._`
       );
     }
     const sig = question.match(/experience with (.+?)\?*$/i);
     if (sig) {
       return (
-        `**${n}. ${question}** — _Anchor: JD Signal Match — "${sig[1].trim()}" (use the matched evidence claim)_\n` +
+        `**${n}. ${question}**: _Anchor: JD Signal Match ("${sig[1].trim()}", use the matched evidence claim)_\n` +
         `> _Script a say-it-verbatim answer in plain language from the matched evidence claim._`
       );
     }
@@ -393,7 +393,7 @@ export function buildLikelyQuestionsSection({ questions, stories }) {
     gaps.push(question);
     return (
       `**${n}. 🔴 ${question}**  \n` +
-      `_No backing story or evidence anchor — behavioural gap._\n` +
+      `_No backing story or evidence anchor, behavioural gap._\n` +
       `> _Do NOT improvise. Surface 2 evidence-grounded example angles and ask the candidate to seed a STAR+R story (STEP 2b), then bank it and replace this with the scripted answer._`
     );
   });
@@ -480,7 +480,7 @@ export function renderInterviewPacket({
   const topFitBullets =
     topSignals.length > 0
       ? topSignals.map((s) => `- ${s}`).join("\n")
-      : "_No matched signals yet — add evidence claims to candidate/evidence.yml._";
+      : "_No matched signals yet. Add evidence claims to candidate/evidence.yml._";
 
   // -- JD Signal Match table --------------------------------------------------
   const rows = buildSignalMatchRows(jobSignals, ev);
@@ -492,7 +492,7 @@ export function renderInterviewPacket({
               `| ${escapeCell(r.signal)} | ${escapeCell(r.evidence)} | ${escapeCell(r.howToSay)} |`
           )
           .join("\n")
-      : "| — | — | — |";
+      : "| N/A | N/A | N/A |";
   const signalTable = `| Signal | Evidence | How to say it |\n| --- | --- | --- |\n${tableRows}`;
 
   // -- Likely Questions -------------------------------------------------------
@@ -525,7 +525,7 @@ export function renderInterviewPacket({
   const gapLines =
     gaps.length > 0
       ? gaps.map((g) => `- **${g.signal}**: ${g.note}`).join("\n")
-      : "_All job signals have evidence backing — great!_";
+      : "_All job signals have evidence backing, great!_";
 
   // -- Optional invite notes --------------------------------------------------
   const _inviteBlock = inviteNotes ? `\n> **Invite context:** ${inviteNotes}\n` : "";
@@ -559,21 +559,21 @@ export function renderInterviewPacket({
       ? [
           `## Prepared Stories (STAR+R)`,
           ``,
-          `> _Candidate-owned stories from candidate/stories.yml, matched to this role. Each traces to evidence — use them as answer anchors; don't improvise past them._`,
+          `> _Candidate-owned stories from candidate/stories.yml, matched to this role. Each traces to evidence, use them as answer anchors; don't improvise past them._`,
           ``,
           storyBlock,
           ``,
         ]
       : []),
-    `## Likely Questions — with scripted answers`,
+    `## Likely Questions: with scripted answers`,
     ``,
-    `> _Questions are JD-inferred; answers are scripted from the Prepared Stories and evidence above — say them close to verbatim. Each carries its anchor. Questions flagged 🔴 have no backing story — seed one via STEP 2b (ask the candidate for the anecdote), then replace the flag with the scripted answer. Never improvise a fabricated behavioural answer._`,
+    `> _Questions are JD-inferred; answers are scripted from the Prepared Stories and evidence above, say them close to verbatim. Each carries its anchor. Questions flagged 🔴 have no backing story, seed one via STEP 2b (ask the candidate for the anecdote), then replace the flag with the scripted answer. Never improvise a fabricated behavioural answer._`,
     ``,
     questionBlock,
     ``,
     ...(behaviouralGaps.length > 0
       ? [
-          `## Behavioural Gaps (no backing story — seed before the interview)`,
+          `## Behavioural Gaps (no backing story, seed before the interview)`,
           ``,
           `> _Competencies the JD probes that no banked story covers. For each, surface 2 evidence-grounded example angles, ask the candidate to seed the anecdote, then draft + bank a STAR+R story (STEP 2b). Never fabricate one._`,
           ``,
@@ -627,7 +627,7 @@ function audienceFocusNote(audience, role) {
       );
     case "panel":
       return (
-        "Adapt tone to each panellist — technical depth for engineers, " +
+        "Adapt tone to each panellist: technical depth for engineers, " +
         "impact framing for managers, culture/values for HR. " +
         "Prepare a clear two-minute intro that hits all fit signals."
       );

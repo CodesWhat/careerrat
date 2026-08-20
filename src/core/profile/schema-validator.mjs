@@ -29,7 +29,7 @@ export function formatErrors(errors) {
 function validateNode(data, schema, path, errors) {
   if (schema === true || schema == null) return; // permissive
   if (schema === false) {
-    errors.push({ path, message: "schema is false — no value is valid" });
+    errors.push({ path, message: "schema is false: no value is valid" });
     return;
   }
 
