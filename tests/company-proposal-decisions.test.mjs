@@ -513,7 +513,7 @@ test("decision endpoint fails closed for missing records, stale versions, decide
       expectedVersion: 1,
     });
     assert.equal(response.status, 422, label);
-    assert.equal(response.body.code, "VALIDATION_FAILED");
+    assert.equal(response.body.code, "COMPANY_PROPOSAL_NOT_APPROVABLE");
   }
 
   putBatch(
@@ -628,7 +628,7 @@ test("VER-04 invalid and review-only decisions fail closed without confirmed wri
       expectedVersion: 1,
     });
     assert.equal(response.status, 422, label);
-    assert.equal(response.body.code, "VALIDATION_FAILED", label);
+    assert.equal(response.body.code, "COMPANY_PROPOSAL_NOT_APPROVABLE", label);
   }
 
   putBatch(
@@ -704,7 +704,7 @@ test("failed approve attempts never bump the proposal's own version or record a 
     decisionRequest({ action: "approve-supported-ats", expectedVersion: 1 })
   );
   assert.equal(response.status, 422);
-  assert.equal(response.body.code, "VALIDATION_FAILED");
+  assert.equal(response.body.code, "COMPANY_PROPOSAL_NOT_APPROVABLE");
 
   assert.equal(calls.length, 0);
   const stored = companyProposalBatchGet({ repoRoot, batchId: "batch-acme" }).batch;
@@ -722,7 +722,7 @@ test("failed approve attempts never bump the proposal's own version or record a 
     decisionRequest({ action: "approve-supported-ats", expectedVersion: 1 })
   );
   assert.equal(response.status, 422);
-  assert.equal(response.body.code, "VALIDATION_FAILED");
+  assert.equal(response.body.code, "COMPANY_PROPOSAL_NOT_APPROVABLE");
 });
 
 test("VER-05 userConfirmed lets a user explicitly keep a borderline supported ATS proposal", async () => {
@@ -751,7 +751,7 @@ test("VER-05 userConfirmed lets a user explicitly keep a borderline supported AT
     decisionRequest()
   );
   assert.equal(response.status, 422);
-  assert.equal(response.body.code, "VALIDATION_FAILED");
+  assert.equal(response.body.code, "COMPANY_PROPOSAL_NOT_APPROVABLE");
   assert.equal(calls.length, 0);
 
   // An explicit user keep (userConfirmed: true) IS the review — it approves.
@@ -800,7 +800,7 @@ test("VER-05 userConfirmed still refuses unsupported_public and non-pending prop
     userConfirmed: true,
   });
   assert.equal(response.status, 422);
-  assert.equal(response.body.code, "VALIDATION_FAILED");
+  assert.equal(response.body.code, "COMPANY_PROPOSAL_NOT_APPROVABLE");
 
   putBatch(
     repoRoot,

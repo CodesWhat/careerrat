@@ -444,6 +444,13 @@ export function AskBar() {
     const label = action.label || "Run this action";
     const startedAt = Date.now();
     const turnId = ++turnIdRef.current;
+    // A row inside an already-rendered card (e.g. the strategy_review card's
+    // per-recommendation Apply button, or a company proposal's Track/Skip)
+    // fires commitAction against the SAME single `turn` slot the card is
+    // rendered from. Captured before that slot gets overwritten below, so a
+    // failure — including a stale-capability 401 (issue #86) — can restore
+    // the still-valid card instead of collapsing it to a bare error line.
+    const previousTurn = turn;
     setTurn({
       kind: "action",
       status: "running",
@@ -474,6 +481,12 @@ export function AskBar() {
       if (turnIdRef.current !== turnId) return;
       const isError = last?.kind === "action_error";
       if (!isError) emitDashboardChanged();
+      // A terminal action_error message never carries its own artifacts
+      // (workspaceMessageAppend's action_error shape has no artifacts field),
+      // so an error here falls back to whatever card the prior turn was
+      // already showing rather than rendering a blank one.
+      const fallbackArtifacts = isError ? previousTurn?.artifacts || [] : [];
+      const fallbackMetadata = isError ? previousTurn?.metadata || {} : {};
       setTurn((t) =>
         t
           ? {
@@ -482,8 +495,8 @@ export function AskBar() {
               resultText: isError ? null : last?.text || null,
               error: isError ? last?.text || "The action could not be completed." : null,
               retryable: isError,
-              artifacts: last?.artifacts || [],
-              metadata: last?.metadata || {},
+              artifacts: last?.artifacts?.length ? last.artifacts : fallbackArtifacts,
+              metadata: last?.metadata || fallbackMetadata,
               engine: last?.metadata?.engine || null,
               elapsedMs:
                 typeof last?.metadata?.elapsedMs === "number"
@@ -502,6 +515,8 @@ export function AskBar() {
               status: "error",
               error: resolved.message,
               retryable: resolved.action?.retry === true,
+              artifacts: previousTurn?.artifacts || [],
+              metadata: previousTurn?.metadata || {},
             }
           : t
       );
@@ -1192,7 +1207,14 @@ function AskBarTurn({
     );
   }
 
-  if (turn.status === "error") {
+  // A card-bearing action turn (e.g. one strategy_review recommendation's
+  // Apply, or a company proposal's Track/Skip) that errors still carries the
+  // prior turn's artifacts forward (see commitAction's fallbackArtifacts /
+  // catch-block merge) — fall through to the full artifact render below with
+  // the error banner on top, instead of collapsing the card to a bare error
+  // line. An action with nothing to preserve (the common case) keeps the
+  // original compact error-only render.
+  if (turn.status === "error" && !turn.artifacts?.length) {
     return (
       <div className="ask-bar__turn">
         <p className="ask-bar__error">{turn.error}</p>
@@ -1298,6 +1320,16 @@ function AskBarTurn({
 
   return (
     <div className="ask-bar__turn">
+      {turn.status === "error" ? (
+        <>
+          <p className="ask-bar__error">{turn.error}</p>
+          {turn.retryable ? (
+            <Button variant="secondary" onClick={onRetry}>
+              Try again
+            </Button>
+          ) : null}
+        </>
+      ) : null}
       {turn.resultText ? <p className="ask-bar__summary">{turn.resultText}</p> : null}
       {evaluationArtifact ? <JobEvaluationCard artifact={evaluationArtifact} /> : null}
       {packetArtifact ? <PacketStatus artifact={packetArtifact} /> : null}

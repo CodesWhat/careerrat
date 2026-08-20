@@ -254,6 +254,12 @@ const RULES = [
     action: null,
   },
   {
+    match: ({ code }) => code === "COMPANY_PROPOSAL_NOT_APPROVABLE",
+    message:
+      "CareerRat can't track this company yet. It couldn't find a job board it can scan for postings. Skip it for now, or check back once one is found.",
+    action: null,
+  },
+  {
     match: ({ code }) => code === "RESEARCH_COMP_INPUT_REQUIRED",
     message: "Tell CareerRat the role and the location so it can look up comp for it.",
     action: null,

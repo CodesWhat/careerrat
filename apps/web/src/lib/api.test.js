@@ -114,6 +114,66 @@ describe("streamResumeAi", () => {
   });
 });
 
+describe("apiFetch capability-cookie retry", () => {
+  // Regression guard for issue #86: the dev server mints a fresh per-launch
+  // capability credential on every process start (request-security.mjs), and
+  // the file watcher restarts the process on a concurrent CLI write — an
+  // open tab's cookie goes stale with no user action. The common case must
+  // recover silently: refresh the cookie with an ordinary bootstrap GET, then
+  // replay the exact request once.
+  it("silently refreshes a stale capability cookie and retries the request once", async () => {
+    const responses = [
+      new Response(JSON.stringify({ error: "local browser capability is missing or invalid" }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      }),
+      new Response("", { status: 200 }), // the bootstrap GET that mints a fresh cookie
+      new Response(JSON.stringify({ ok: true, data: { operationResult: { ok: true } } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    ];
+    const fetchMock = vi.fn(async () => responses.shift());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await applyOnSite({ id: "app-1" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[1][0]).toBe("/app");
+    expect(fetchMock.mock.calls[2][0]).toBe("/api/workspace/intent");
+  });
+
+  it("never retries a 401 that is not the stale-capability refusal", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ error: "unauthorized" }), {
+          status: 401,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(applyOnSite({ id: "app-1" })).rejects.toMatchObject({ status: 401 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up after one retry so a genuinely broken credential still surfaces as an error", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ error: "local browser capability is missing or invalid" }), {
+          status: 401,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(applyOnSite({ id: "app-1" })).rejects.toMatchObject({ status: 401 });
+    // original request + one refresh GET + exactly one retry — never a
+    // second refresh/retry cycle.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+});
+
 describe("chat-first workflow actions", () => {
   it("submits visible job actions as typed intents to workspace-main", async () => {
     const fetchMock = vi.fn(
