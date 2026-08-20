@@ -1,0 +1,69 @@
+{
+  "name": "Main branch protection",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "exclude": [],
+      "include": ["refs/heads/main"]
+    }
+  },
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 2,
+        "dismiss_stale_reviews_on_push": true,
+        "required_reviewers": [],
+        "require_code_owner_review": true,
+        "dismissal_restriction": {
+          "enabled": false,
+          "allowed_actors": []
+        },
+        "require_last_push_approval": true,
+        "required_review_thread_resolution": false,
+        "allowed_merge_methods": ["merge", "squash", "rebase"]
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          {
+            "context": "structure-guards"
+          },
+          {
+            "context": "gitleaks"
+          },
+          {
+            "context": "zizmor"
+          },
+          {
+            "context": "actionlint"
+          },
+          {
+            "context": "analyze (javascript-typescript)"
+          },
+          {
+            "context": "dependency-review"
+          },
+          {
+            "context": "qlty"
+          },
+          {
+            "context": "knip"
+          }
+        ]
+      }
+    }
+  ],
+  "bypass_actors": []
+}
