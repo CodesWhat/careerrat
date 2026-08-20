@@ -16,7 +16,7 @@ function optionalNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
-export function packetEvaluationProjection(evaluation) {
+function packetEvaluationProjection(evaluation) {
   const projection = {
     evaluation,
     // Delete the legacy duplicate when this row predates typed evaluation.

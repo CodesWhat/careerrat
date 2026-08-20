@@ -32,7 +32,7 @@ export function readPkgVersion(dir) {
 }
 
 // Minimal semver compare for x.y.z and x.y.z-pre. Returns -1 / 0 / 1 (a vs b).
-export function compareVersions(a, b) {
+function compareVersions(a, b) {
   const parse = (v) => {
     const [core, pre] = String(v || "0.0.0").split("-");
     return { nums: core.split(".").map((n) => Number.parseInt(n, 10) || 0), pre: pre || null };

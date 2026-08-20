@@ -24,13 +24,13 @@ export function readSetupState({ root, env = process.env }) {
   }
 }
 
-export function discoverySkipsFromState(setupState) {
+function discoverySkipsFromState(setupState) {
   if (!setupState || !Array.isArray(setupState.skippedDiscoverySteps)) return [];
   const allowed = new Set(SKIPPABLE_DISCOVERY_STEPS);
   return [...new Set(setupState.skippedDiscoverySteps.filter((step) => allowed.has(step)))];
 }
 
-export function discoveryCompletionsFromState(setupState) {
+function discoveryCompletionsFromState(setupState) {
   if (!setupState || !Array.isArray(setupState.completedDiscoverySteps)) return [];
   const allowed = new Set(SKIPPABLE_DISCOVERY_STEPS);
   return [...new Set(setupState.completedDiscoverySteps.filter((step) => allowed.has(step)))];
@@ -256,14 +256,4 @@ export function formatAgentGuidanceSummary(guidance) {
   if (guidance.reason) lines.push(`Why: ${guidance.reason}`);
   if (guidance.command) lines.push(`CLI helper: ${guidance.command}`);
   return lines;
-}
-
-export function normalizeAgentGuidance(guidance) {
-  if (!guidance || typeof guidance !== "object") return null;
-  const nextSkill = guidance.nextSkill || "";
-  return {
-    ...guidance,
-    title: "Next agent task",
-    ctaLabel: nextSkill ? `Run ${nextSkill}` : guidance.command ? "Run helper" : "Open doctor",
-  };
 }

@@ -27,7 +27,7 @@ const CATEGORY_PATTERNS = [
  * @param {string} label
  * @returns {"workAuthorization"|"sponsorship"|"salary"|"noticePeriod"|null}
  */
-export function classifyDisclosureQuestion(label) {
+function classifyDisclosureQuestion(label) {
   const text = String(label || "");
   for (const [category, pattern] of CATEGORY_PATTERNS) {
     if (pattern.test(text)) return category;

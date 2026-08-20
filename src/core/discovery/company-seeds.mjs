@@ -13,7 +13,7 @@ export const COMPANY_SEED_LABELS = Object.freeze({
 // Distinct operation from COMPANY_SEED_LABELS so usage logging can tell the
 // two bounded-AI calls apart: this one only fills a missing domain_hint on
 // bare-name manual seeds, it never proposes new companies.
-export const COMPANY_SEED_DOMAIN_FILL_LABELS = Object.freeze({
+const COMPANY_SEED_DOMAIN_FILL_LABELS = Object.freeze({
   skill: "discover-companies",
   action: "seed-generate",
   operation: "company-seeds-domain-fill",
@@ -55,7 +55,7 @@ export const companySeedSchema = Object.freeze({
 // Companion schema for COMPANY_SEED_DOMAIN_FILL_LABELS: a name-only lookup,
 // never a proposal. No why/confidence/etc — those already exist on the
 // manual seed being filled.
-export const companySeedDomainFillSchema = Object.freeze({
+const companySeedDomainFillSchema = Object.freeze({
   type: "object",
   required: ["companies"],
   additionalProperties: false,

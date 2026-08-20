@@ -788,7 +788,7 @@ export async function runFirstSearchInBackground({
   }
 }
 
-export function mapSourcingRunForUi(run) {
+function mapSourcingRunForUi(run) {
   if (!run) {
     return {
       status: "not_started",

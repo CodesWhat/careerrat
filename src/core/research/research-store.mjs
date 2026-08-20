@@ -51,7 +51,7 @@ const SOURCED_TYPES = new Set(["company-research", "comp-benchmark"]);
 
 // Fallback staleness window when an artifact omits staleness_days. Type-specific
 // defaults (14d company, 30d comp) live in the skill that writes the frontmatter.
-export const DEFAULT_STALENESS_DAYS = 14;
+const DEFAULT_STALENESS_DAYS = 14;
 
 // ---------------------------------------------------------------------------
 // Slug + paths — the single source of truth, shared by READ and WRITE.
