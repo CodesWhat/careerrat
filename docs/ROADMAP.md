@@ -328,8 +328,15 @@ pre-scrub history containing owner PII and must never be pushed or deleted.
 
 ### Landed on main since v0.10.0
 
-Sixteen PRs, all merged, `origin` back to just `main` with every branch and worktree
-cleaned up. Nothing is open.
+Thirty PRs, all merged, `origin` back to just `main` with every branch and worktree
+cleaned up. The first sixteen (#106 through #123) are below; the fourteen from the
+August 20 queue (#126 through #142) are recorded lane by lane under
+[The queue](#the-queue-opened-august-20-2026), since what each one turned out to be
+matters more than that it merged.
+
+One issue stays open on purpose: [#141](https://github.com/CodesWhat/careerrat/issues/141),
+the mounted-but-unreached API routes, which is being worked now. Renovate's Dependency
+Dashboard (#11) is permanent by design.
 
 - **#106, #112**: Playwright live harness, then custom combobox dropdowns in
   `playwright-ops`. The dropdown fix closes two real traps: an empty target value used
@@ -442,6 +449,15 @@ plus `tests`, promoted in #123. Two failures are expected and never gate:
 `qlty check` (Qlty Cloud minutes, distinct from the in-repo `qlty` job) and `Vercel`
 (deploy quota). Any other red is real.
 
+Two jobs run without gating: `web-build` and, since 2026-08-20, `website-build`. The
+second exists because nothing was building the marketing site or the docs at all. A
+TypeScript 6 bump turned `baseUrl` in `apps/docs/tsconfig.json` from a deprecation into
+a hard error, the docs build broke on `main`, and every in-repo check stayed green. The
+only signal was the `Vercel` context, and that one fails on deploy quota so routinely
+that a real failure there reads as noise. Which is the general lesson: an expected-red
+check is not a check. If a context is allowed to fail every day, nobody can tell the day
+it fails for a new reason, so the coverage has to live in a job that is normally green.
+
 `scripts/protect-main.sh` declares that set and `--verify` compares it against the
 live ruleset. Since #114 that comparison is trustworthy: the drift report used to die
 mid-print, because `diff | sed` under `set -euo pipefail` returns non-zero whenever
@@ -541,32 +557,56 @@ keeping. Three of the four were not where the issue text pointed.
 
    **Landed in [#130](https://github.com/CodesWhat/careerrat/pull/130) through
    [#133](https://github.com/CodesWhat/careerrat/pull/133), ratchet lowered in
-   [#135](https://github.com/CodesWhat/careerrat/pull/135): 170 to 44.** Split into four
-   file-disjoint lanes. The unused file, the duplicate alias, and 123 exports are gone, including
+   [#135](https://github.com/CodesWhat/careerrat/pull/135) and again in
+   [#142](https://github.com/CodesWhat/careerrat/pull/142): 170 to 44 to 32.** Split into four
+   file-disjoint lanes. The unused file, the duplicate alias, and 135 exports are gone, including
    500 dead lines in `tracker/dashboard.mjs` (four builders with no caller anywhere, in a file
    with twenty-plus importers).
 
-   The target of 0 was wrong, and that is the useful finding. The 44 that remain are not debt.
+   The target of 0 was wrong, and that is the useful finding. The 32 that remain are not debt.
    Four are fontsource packages both Next apps load by raw file path through `next/font/local`,
    which knip cannot see and which break the typeface silently if removed, exactly the trap #81
-   warned about. The other 40 are exports named by a skill, doc, comment, or dynamic import with
-   no JS importer: `SAFE_EXTERNAL_PROTOCOLS`, the SSRF guards in `public-http-fetch.mjs`,
-   `RECRUITER_FARM_PHRASES`, `ATS_ROUND_RULES`, and the 14 `api.js` client functions that turned
-   out to be an unwired feature surface rather than dead code
-   ([#134](https://github.com/CodesWhat/careerrat/issues/134)). Six of those are the client half
-   of `company-health` and the research flows, all with live backend routes and no UI that calls
-   them.
+   warned about. Most of the other 28 are exports named by a skill, doc, comment, or dynamic
+   import with no JS importer: `SAFE_EXTERNAL_PROTOCOLS`, the SSRF guards in
+   `public-http-fetch.mjs`, `RECRUITER_FARM_PHRASES`, `ATS_ROUND_RULES`.
 
-   So reaching 0 means teaching knip about those references, not deleting them. Anyone who closes
-   the gap the other way has made the number prettier and the product worse. That reasoning is in
-   the workflow comment, not just here, because the ratchet is where the temptation lives.
+   The 14 unimported `api.js` client functions were recorded here as an unwired feature surface
+   worth preserving ([#134](https://github.com/CodesWhat/careerrat/issues/134)). **That was
+   wrong**, and it is the second time in this queue a lane's premise did not survive contact with
+   the code. Probing each wrapper against its route showed six are stale duplicates of paths the
+   app already reaches another way, and `researchCompany()` had drifted from the live caller's
+   entity shape, so keeping it would have left the wrong contract sitting in the file looking
+   authoritative. Twelve deleted in #142. The two kept, `checkAiKey` and `getDiscoveryState`, call
+   routes that really are orphaned and are being wired now
+   ([#141](https://github.com/CodesWhat/careerrat/issues/141)); each carries a comment saying so,
+   because without one the next knip pass reads them as dead code and the loop starts over.
 
-**Two things the queue surfaced that are not lanes.** The `tests` gate went required on
-2026-08-20 and immediately flaked on the db-concurrency test, which now means a flaky merge gate
-([#136](https://github.com/CodesWhat/careerrat/issues/136)). And the `ci-verify.yml` header
-claimed `qlty` and `knip` did not gate merges when both are required contexts, which is the exact
-failure that same comment warns about two lines later. Prose has no drift guard. Fixed in #135,
-which now tells the next reader to re-read the live ruleset instead of trusting the paragraph.
+   So reaching 0 means teaching knip about the remaining references, not deleting them. Anyone who
+   closes the gap the other way has made the number prettier and the product worse. That reasoning
+   is in the workflow comment, not just here, because the ratchet is where the temptation lives.
+
+**Three things the queue surfaced that are not lanes, all closed the same day.**
+
+The `tests` gate went required on 2026-08-20 and immediately flaked on the db-concurrency test,
+turning the new merge gate flaky on its first day
+([#136](https://github.com/CodesWhat/careerrat/issues/136)). Fixed in
+[#139](https://github.com/CodesWhat/careerrat/pull/139): SQLite's busy handler defaults to no
+retry at all until `PRAGMA busy_timeout` runs, and `applyPragmas` was issuing
+`journal_mode = WAL` first, so the one pragma most likely to contend was the one running with
+zero retry protection. Reordering `busy_timeout` to the front fixes it. `tests/db-pragma-order.test.mjs`
+guards the ordering behaviorally, through the real `openDb()`, so a future refactor that moves the
+line back gets a named failure instead of an intermittent one.
+
+The onboarding surfaces called the proposal-decide endpoint with no catch at all, so a failed
+accept or reject silently did nothing ([#128](https://github.com/CodesWhat/careerrat/issues/128)).
+Fixed in [#140](https://github.com/CodesWhat/careerrat/pull/140), which resolves the error through
+the same `resolveErrorCopy` path the rest of the app uses and renders it inline on the row that
+failed, not as a page-level banner.
+
+And the `ci-verify.yml` header claimed `qlty` and `knip` did not gate merges when both are
+required contexts, which is the exact failure that same comment warns about two lines later. Prose
+has no drift guard. Fixed in #135, which now tells the next reader to re-read the live ruleset
+instead of trusting the paragraph.
 
 ### Skill-to-screen product coherence gate (active August 14, 2026)
 

@@ -6,8 +6,15 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+### Added
+
+- Multi-step application forms now work on any site, not just LinkedIn Easy Apply. CareerRat walks the wizard one step at a time and confirms it actually moved forward before continuing, and a single-page form still just fills and stops. Two safety rails came with it: it will not follow a "Continue with LinkedIn" style sign-in button off the application, and it stops outright if a click takes the browser to a different site. Submit is still always yours to press, and a job is only recorded as Applied after CareerRat sees the confirmation page (#129).
+
 ### Fixed
 
+- When CareerRat declines to approve a company proposal for a real reason, you now see that reason instead of "Something went wrong, failed to fetch." A business rule was reading like a network outage (#127).
+- A strategy review card no longer collapses and loses your other pending recommendations when the app's internal credential goes stale mid-review. There is a retry, and the card keeps its state (#127).
+- Accepting or rejecting a company during onboarding no longer fails silently. If the save doesn't go through, the reason now appears on that row, and an accepted company that can't be saved to your tracked list tells you so and what to do (#128, #140).
 - Application forms that use custom dropdowns (the kind that filter as you type, rather than a plain select box) now get filled correctly. Two things were wrong: a field with no value set would click whichever option happened to be first in the list instead of leaving the field for you, and a type-to-filter box could report success just from the text CareerRat had typed into it, without an option actually being selected (#112).
 - CareerRat no longer tells you the Chrome extension can drive an automatic apply. It cannot, and now it says so, and points you at `careerrat automation status` to see which providers can (#108).
 - Activity log entries you give your own ID to are no longer silently dropped when they look like an entry that already exists. Setting your own ID is how you say "this one is different," and that is now respected. Entries without an ID still collapse duplicates the way they did (#118).
@@ -19,6 +26,9 @@ All notable changes to CareerRat are documented here. This project follows
 
 - Em dashes are out of CareerRat's own copy, across the CLI, the app, and the settings screens (#119, #120, #121).
 - The `careerrat` version, the desktop app version, and the changelog can no longer drift apart from each other unnoticed (#113).
+- Released version tags are now protected against deletion and rewriting, so a published release can't quietly change out from under anyone who already downloaded it (#126).
+- Internal cleanup: about 1,200 lines of code with no caller were removed, including a dozen unused client functions and four dead dashboard builders, and the automated dead-code gate dropped from 170 allowed findings to 32 (#130, #131, #132, #133, #135, #142).
+- Opening the database is no longer vulnerable to a "database is locked" error when the CLI and the app touch it at the same moment. CareerRat sets its retry window as the very first thing it does on a connection, rather than after two other setup steps that could contend (#136, #139).
 
 ## [0.10.0] - 2026-08-19
 
