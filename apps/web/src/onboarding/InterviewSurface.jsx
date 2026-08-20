@@ -1045,6 +1045,13 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
   // "reject". Either way the proposal disappears from the pending list on
   // the next reload.
   async function handleCompanyProposalDecision(proposal, action) {
+    // decideCompanyProposal itself is left uncaught here on purpose: its most
+    // common failure is the 422 refusal a company with no scannable job board
+    // hits (COMPANY_PROPOSAL_NOT_APPROVABLE in errorCopy.js), which is a
+    // normal outcome, not a bug, and nothing was written yet, so letting it
+    // propagate to FilePane's own catch (which resolves it through
+    // errorCopy.js and attaches it to this proposal's row) is the honest
+    // "wasn't accepted" story.
     await decideCompanyProposal({
       batchId: companyProposals.batchId,
       proposalId: proposal.proposalId,
@@ -1055,8 +1062,24 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
     if (action === "approve-supported-ats") {
       const existing = state?.data?.targeting?.tracked_companies ?? [];
       const next = unionCompanyNames(existing, [proposal.name]);
-      await saveCandidateFile("targeting", { tracked_companies: next });
-      await reloadState();
+      try {
+        await saveCandidateFile("targeting", { tracked_companies: next });
+        await reloadState();
+      } catch {
+        // The decision above already succeeded on the backend by this point,
+        // so the proposal is no longer really pending there even though this
+        // catch stops us from reloading the pending list and clearing it
+        // locally. Reporting plain success (or the generic decision-failure
+        // copy, which reads "wasn't accepted") would both be wrong: the
+        // company WAS accepted, but the write that adds it to
+        // targeting.tracked_companies never landed. No rollback of the
+        // server-side decision is attempted; this just throws copy that
+        // tells the candidate the two now disagree so they can add it by
+        // hand or retry the save.
+        throw new UserFacingError(
+          `${proposal.name} was accepted, but saving it to your tracked companies failed. Try again, or add ${proposal.name} to your tracked companies yourself.`
+        );
+      }
     }
     await reloadCompanyProposals();
   }
