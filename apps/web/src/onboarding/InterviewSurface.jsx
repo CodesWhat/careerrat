@@ -12,6 +12,7 @@ import {
   finishOnboarding,
   getAutomationSettings,
   getCompanyProposals,
+  getDiscoveryState,
   getOnboardingDraft,
   getOnboardState,
   parseResumeText,
@@ -1398,6 +1399,7 @@ function CompletionScreen({
   const [searchNotice, setSearchNotice] = useState(null);
   const [finishing, setFinishing] = useState(false);
   const [finishError, setFinishError] = useState(null);
+  const [discoveryStateLoaded, setDiscoveryStateLoaded] = useState(false);
   const disclosureRows = setupDisclosureRows({ state, runtime });
   const graduated = setupCanGraduate(state);
   const durableRun =
@@ -1521,6 +1523,34 @@ function CompletionScreen({
     }
   }
 
+  // A reload mid-discovery loses discoveryChat/firstSearchReady, since both
+  // are only ever populated from the POST responses that kick off discovery.
+  // GET /api/discovery/state carries the same session server-side, so pick
+  // it back up here rather than making the candidate start over.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await getDiscoveryState();
+        if (cancelled) return;
+        if (result?.guidance?.nextSkill === "search-jobs") {
+          setFirstSearchReady(true);
+        } else if (result?.activeDiscoveryChat) {
+          setDiscoveryChat(result.activeDiscoveryChat);
+        }
+      } catch {
+        // A failed resume fetch only means discoveryChat/firstSearchReady
+        // stay whatever the POST responses already set (the pre-existing
+        // behavior) — not worth interrupting the candidate over.
+      } finally {
+        if (!cancelled) setDiscoveryStateLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <div className="onboarding-app">
       <header className="onboarding-app__header">
@@ -1622,7 +1652,7 @@ function CompletionScreen({
             }
             onComplete={handleDiscoveryComplete}
           />
-        ) : graduated ? (
+        ) : !discoveryStateLoaded ? null : graduated ? (
           <button
             type="button"
             className="btn"

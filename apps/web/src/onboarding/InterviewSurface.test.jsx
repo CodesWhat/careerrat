@@ -122,6 +122,7 @@ const api = vi.hoisted(() => ({
   findChatBySkill: vi.fn(),
   getAutomationSettings: vi.fn(),
   getCompanyProposals: vi.fn(),
+  getDiscoveryState: vi.fn(),
   getOnboardingDraft: vi.fn(),
   getOnboardState: vi.fn(),
   getSourcingRun: vi.fn(),
@@ -317,6 +318,7 @@ beforeEach(() => {
   api.findChatBySkill.mockRejectedValue(new Error("no session"));
   api.getOnboardingDraft.mockResolvedValue({ draft: { transcript: [] } });
   api.getOnboardState.mockResolvedValue(NOT_COMPLETE_STATE);
+  api.getDiscoveryState.mockResolvedValue({ ok: true, guidance: null, activeDiscoveryChat: null });
   api.saveOnboardingDraft.mockResolvedValue({ ok: true });
   api.finishOnboarding.mockResolvedValue({ ok: true });
 });
@@ -2781,5 +2783,74 @@ describe("InterviewSurface — completion screen (3e)", () => {
       vi.clearAllTimers();
       vi.useRealTimers();
     }
+  });
+
+  // Issue #141 — GET /api/discovery/state resumes discoveryChat/firstSearchReady
+  // on reload, since both previously only ever came from the POST responses
+  // that kick off discovery.
+  it("resumes an in-flight discovery chat from GET /api/discovery/state on reload", async () => {
+    api.getOnboardState.mockResolvedValue(
+      stateFixture({ doneKeys: ALL_SETUP_KEYS, complete: true })
+    );
+    api.getDiscoveryState.mockResolvedValue({
+      ok: true,
+      guidance: null,
+      activeDiscoveryChat: { chatId: "resumed-chat-1", skill: "research-boards", state: "running" },
+    });
+
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+    await runEffects();
+    await flush();
+    const tree = render({ runtime: RUNTIME });
+
+    const chatPanel = visit(tree, (n) => n.type === "mock-chat-panel")[0];
+    expect(chatPanel).toBeTruthy();
+    expect(chatPanel.props.initialChatId).toBe("resumed-chat-1");
+    expect(chatPanel.props.skill).toBe("research-boards");
+    expect(api.startDiscoveryQuickStart).not.toHaveBeenCalled();
+  });
+
+  it("prefers firstSearchReady over an active chat when guidance already points at search-jobs", async () => {
+    api.getOnboardState.mockResolvedValue(
+      stateFixture({ doneKeys: ALL_SETUP_KEYS, complete: true })
+    );
+    api.getDiscoveryState.mockResolvedValue({
+      ok: true,
+      guidance: { nextSkill: "search-jobs" },
+      activeDiscoveryChat: { chatId: "stale-chat", skill: "discover-companies", state: "running" },
+    });
+
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+    await runEffects();
+    await flush();
+    const tree = render({ runtime: RUNTIME });
+
+    expect(visit(tree, (n) => n.type === "mock-chat-panel")).toHaveLength(0);
+    expect(
+      visit(tree, (n) => n.type === "button" && textOf(n) === "Start first search")[0]
+    ).toBeTruthy();
+  });
+
+  it("degrades quietly when the resume fetch fails, without surfacing an error banner", async () => {
+    api.getOnboardState.mockResolvedValue(
+      stateFixture({ doneKeys: ALL_SETUP_KEYS, complete: true })
+    );
+    api.getDiscoveryState.mockRejectedValue(new Error("network down"));
+
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+    await runEffects();
+    await flush();
+    const tree = render({ runtime: RUNTIME });
+
+    expect(visit(tree, (n) => n.type === "inline-alert")).toHaveLength(0);
+    expect(
+      visit(tree, (n) => n.type === "button" && textOf(n) === "Set up search sources")[0]
+    ).toBeTruthy();
   });
 });

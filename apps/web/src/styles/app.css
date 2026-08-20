@@ -5053,6 +5053,12 @@ button {
   padding-top: 14px;
 }
 
+.settings-advanced-provider__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .automation-mode,
 .automation-matrix {
   display: flex;

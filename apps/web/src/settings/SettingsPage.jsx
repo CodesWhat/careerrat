@@ -16,6 +16,7 @@ import { PageScaffold } from "../components/PageScaffold.jsx";
 import { InlineAlert, Toast } from "../components/Toast.jsx";
 import {
   ApiError,
+  checkAiKey,
   getAiSettings,
   getAutomationSettings,
   getInstalledAiRuntimes,
@@ -478,6 +479,29 @@ export function SettingsPage() {
     }
   }
 
+  async function handleCheckAiKey() {
+    setSaving((s) => ({ ...s, aiCheck: true }));
+    setSectionBanner((b) => ({ ...b, aiCheck: null }));
+    try {
+      const result = await checkAiKey();
+      showToast(
+        result?.route === "proxy"
+          ? "You're on CareerRat's managed AI connection. It's working."
+          : "Your saved AI key checked out. It's ready to use."
+      );
+    } catch (err) {
+      const resolved = resolveErrorCopy(err);
+      setSectionBanner((b) => ({
+        ...b,
+        aiCheck: resolved.action?.retry
+          ? { ...resolved, action: { ...resolved.action, onRetry: handleCheckAiKey } }
+          : resolved,
+      }));
+    } finally {
+      setSaving((s) => ({ ...s, aiCheck: false }));
+    }
+  }
+
   async function handleSelectInstalledAi(runtimeId) {
     setSaving((state) => ({ ...state, aiRuntime: runtimeId }));
     setSectionBanner((state) => ({ ...state, aiRuntime: null }));
@@ -694,6 +718,13 @@ export function SettingsPage() {
             detail={sectionBanner.ai.detail}
           />
         ) : null}
+        {sectionBanner.aiCheck ? (
+          <InlineAlert
+            message={sectionBanner.aiCheck.message}
+            action={sectionBanner.aiCheck.action}
+            detail={sectionBanner.aiCheck.detail}
+          />
+        ) : null}
         <details
           className="settings-advanced-provider"
           open={installedAi?.providerFallback === true}
@@ -717,9 +748,12 @@ export function SettingsPage() {
                 />
               </Field>
             </div>
-            <div>
+            <div className="settings-advanced-provider__actions">
               <Button onClick={handleSaveAiKey} disabled={saving.ai || !aiKeyInput.trim()}>
                 {saving.ai ? "Saving…" : "Save key and use provider"}
+              </Button>
+              <Button variant="secondary" onClick={handleCheckAiKey} disabled={saving.aiCheck}>
+                {saving.aiCheck ? "Checking…" : "Test saved key"}
               </Button>
             </div>
           </div>
