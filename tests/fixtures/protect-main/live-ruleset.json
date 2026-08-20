@@ -22,6 +22,7 @@
         "dismiss_stale_reviews_on_push": true,
         "required_reviewers": [],
         "require_code_owner_review": true,
+        "require_extra_approval_for_unattributed_changes": true,
         "dismissal_restriction": {
           "enabled": false,
           "allowed_actors": []

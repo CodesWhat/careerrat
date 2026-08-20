@@ -312,10 +312,9 @@ skipped.
 
 A Homebrew cask now exists and is available: `brew install --cask
 codeswhat/tap/careerrat`. PR #4 on `CodesWhat/homebrew-tap` merged August 19,
-2026. The cask is hand-maintained: careerrat has no cask generator script
-(idlescreen has `scripts/generate-homebrew-cask.sh`; careerrat does not). This
-is a known gap. Every release currently requires hand-editing the cask's
-`version` and `sha256` and opening a tap PR.
+2026. `scripts/generate-homebrew-cask.sh` now generates the cask body
+(version from `package.json`, `sha256` from the published or a local DMG),
+closing the generator gap. Opening the tap PR is still a manual step.
 
 Stale branch cleanup is done. `origin` is now just `main`. The branches
 `fix/v0.7-publish`, `dev/v0.7`, `archive/dev-2026-07`, and
@@ -323,8 +322,13 @@ Stale branch cleanup is done. `origin` is now just `main`. The branches
 absent from main (the 0.5.2 one is still permanently reachable via tag
 `v0.5.2-careerrat`, which points at the identical SHA).
 
-A local-only branch `backup/pre-public-history` was deliberately kept. It holds
-pre-scrub history containing owner PII and must never be pushed or deleted.
+The local-only branch `backup/pre-public-history` is gone. It held pre-scrub
+history containing owner PII and was deliberately kept off `origin` for that
+reason. On 2026-08-20 the repo directory was deleted and re-cloned, taking the
+branch with it; it never existed anywhere but that local clone, so it's
+unrecoverable. That's not a leak: losing the branch removes the PII copy
+rather than exposing it. Any doc or instruction that still refers to
+`backup/pre-public-history` is describing history, not current state.
 
 ### Landed on main since v0.10.0
 

@@ -17,23 +17,33 @@ Once 1.0.0 ships, the standard semver compatibility guarantees apply:
 
 Before tagging a release:
 
-1. All tests pass: `npm test`
-2. Doctor reports clean: `careerrat doctor`
-3. Placeholder linter is clean: `npm run lint:placeholders`
-4. **Privacy/public-split check** — grep all tracked files (`git ls-files`) for
+1. Version bumped everywhere it lives in lockstep: `package.json`,
+   `apps/desktop/package.json`, and the three sites `package-lock.json` carries
+   it. `npm version <x.y.z> --no-git-tag-version` in the root and in
+   `apps/desktop/` updates all five; editing `package.json` by hand updates
+   one, which is exactly how the lockfile once sat at 0.9.0 while the
+   published package was 0.10.0.
+2. Convert `CHANGELOG.md`'s `## [Unreleased]` section into a
+   `## [x.y.z] - YYYY-MM-DD` heading carrying the new version and today's date.
+3. All tests pass: `npm test`. Run this after steps 1 and 2, not before:
+   `tests/release-consistency.test.mjs` hard-fails unless the newest
+   `CHANGELOG.md` heading matches `package.json`'s version and carries a real
+   date, so a green run here proves the release state, not the pre-release one.
+4. Doctor reports clean: `careerrat doctor`
+5. Placeholder linter is clean: `npm run lint:placeholders`
+6. **Privacy/public-split check** — grep all tracked files (`git ls-files`) for
    the private origin codename and any personal identity strings — must return
    nothing. Confirm that gitignored private paths (the private working roadmap,
    internal JSON artifacts, `candidate/`, `workspace/`) remain untracked:
    `git status --ignored` must not show any of them as staged or tracked.
-5. `docs/ROADMAP.md` (public) updated — shipped items reflect reality, planned
+7. `docs/ROADMAP.md` (public) updated — shipped items reflect reality, planned
    list current. The private working roadmap lives under `.internal/roadmap/`.
-6. `README.md` version badge is still the dynamic npm badge
+8. `README.md` version badge is still the dynamic npm badge
    (`img.shields.io/npm/v/careerrat`, not a hardcoded version) and the install
    snippet still resolves correctly.
-7. `package.json` version bumped.
-8. Git tag created with the concrete release version, for example
+9. Git tag created with the concrete release version, for example
    `git tag -s v0.4.0 -m "release: v0.4.0"`, then pushed.
-9. GitHub release created from the tag with changelog notes.
+10. GitHub release created from the tag with changelog notes.
 
 ### Desktop Pilot Release
 
@@ -95,19 +105,18 @@ verify the repaired one directly with
 ### Updating the Homebrew Cask
 
 The cask lives at `Casks/careerrat.rb` in the separate repo
-`CodesWhat/homebrew-tap`, cloned locally at `~/code/codeswhat/homebrew-tap`. It
-is hand-maintained: there is no generator, unlike idlescreen. Update it in
-place.
+`CodesWhat/homebrew-tap`, cloned locally at `~/code/codeswhat/homebrew-tap`.
+`scripts/generate-homebrew-cask.sh` generates its body; the tap PR itself is
+still opened by hand.
 
-1. After the GitHub release is published with its `.dmg` attached, update two
-   fields in the cask: `version` and `sha256`.
-2. Get the digest from the published artifact, not a local build, so it
-   provably matches what users download: `shasum -a 256` on the downloaded
-   dmg.
-3. Verify before opening the PR. The cask has to be reachable through a tap
-   for most of these to work, and a bare file path is not, so stage the edited
-   file into the local tap clone first. That is a different directory from the
-   working clone in step 1:
+1. After the GitHub release is published with its `.dmg` attached, run
+   `scripts/generate-homebrew-cask.sh --write ~/code/codeswhat/homebrew-tap/Casks/careerrat.rb`.
+   With no `--dmg`, it downloads the published DMG itself and hashes it, so
+   the `sha256` provably matches what users download.
+2. Verify before opening the PR. The cask has to be reachable through a tap
+   for most of these to work, and a bare file path is not, so stage the
+   generated file into the local tap clone first. That is a different
+   directory from the working clone in step 1:
 
    ```bash
    tap="$(brew --repository codeswhat/tap)"
@@ -135,7 +144,7 @@ place.
    remove the staged copy so the tap clone is pristine again:
    `rm "$tap/Casks/careerrat.rb"`. Use `brew uninstall` without `--zap`, since
    `--zap` deletes the local job search.
-4. Deliver as a reviewed PR against the tap's `main`, matching how idlescreen
+3. Deliver as a reviewed PR against the tap's `main`, matching how idlescreen
    lands. Do not push directly; the tap's `main` is protected.
 
 `depends_on macos:` must match the `LSMinimumSystemVersion` electron-builder
