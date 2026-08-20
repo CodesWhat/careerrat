@@ -328,15 +328,14 @@ pre-scrub history containing owner PII and must never be pushed or deleted.
 
 ### Landed on main since v0.10.0
 
-Thirty PRs, all merged, `origin` back to just `main` with every branch and worktree
-cleaned up. The first sixteen (#106 through #123) are below; the fourteen from the
-August 20 queue (#126 through #142) are recorded lane by lane under
+Thirty-three PRs, all merged, `origin` back to just `main` with every branch and
+worktree cleaned up. The first sixteen (#106 through #123) are below; the rest (#126
+through #145) came out of the August 20 queue and are recorded lane by lane under
 [The queue](#the-queue-opened-august-20-2026), since what each one turned out to be
 matters more than that it merged.
 
-One issue stays open on purpose: [#141](https://github.com/CodesWhat/careerrat/issues/141),
-the mounted-but-unreached API routes, which is being worked now. Renovate's Dependency
-Dashboard (#11) is permanent by design.
+**No issues are open.** The only number on the list is Renovate's Dependency Dashboard
+(#11), which is permanent by design and is not a task.
 
 - **#106, #112**: Playwright live harness, then custom combobox dropdowns in
   `playwright-ops`. The dropdown fix closes two real traps: an empty target value used
@@ -558,15 +557,16 @@ keeping. Three of the four were not where the issue text pointed.
    **Landed in [#130](https://github.com/CodesWhat/careerrat/pull/130) through
    [#133](https://github.com/CodesWhat/careerrat/pull/133), ratchet lowered in
    [#135](https://github.com/CodesWhat/careerrat/pull/135) and again in
-   [#142](https://github.com/CodesWhat/careerrat/pull/142): 170 to 44 to 32.** Split into four
-   file-disjoint lanes. The unused file, the duplicate alias, and 135 exports are gone, including
-   500 dead lines in `tracker/dashboard.mjs` (four builders with no caller anywhere, in a file
-   with twenty-plus importers).
+   [#142](https://github.com/CodesWhat/careerrat/pull/142) and
+   [#145](https://github.com/CodesWhat/careerrat/pull/145): 170 to 44 to 32 to 30.** Split into
+   four file-disjoint lanes. The unused file, the duplicate alias, and 135 exports are gone,
+   including 500 dead lines in `tracker/dashboard.mjs` (four builders with no caller anywhere, in
+   a file with twenty-plus importers).
 
-   The target of 0 was wrong, and that is the useful finding. The 32 that remain are not debt.
+   The target of 0 was wrong, and that is the useful finding. The 30 that remain are not debt.
    Four are fontsource packages both Next apps load by raw file path through `next/font/local`,
    which knip cannot see and which break the typeface silently if removed, exactly the trap #81
-   warned about. Most of the other 28 are exports named by a skill, doc, comment, or dynamic
+   warned about. The other 26 are exports named by a skill, doc, comment, or dynamic
    import with no JS importer: `SAFE_EXTERNAL_PROTOCOLS`, the SSRF guards in
    `public-http-fetch.mjs`, `RECRUITER_FARM_PHRASES`, `ATS_ROUND_RULES`.
 
@@ -576,10 +576,34 @@ keeping. Three of the four were not where the issue text pointed.
    the code. Probing each wrapper against its route showed six are stale duplicates of paths the
    app already reaches another way, and `researchCompany()` had drifted from the live caller's
    entity shape, so keeping it would have left the wrong contract sitting in the file looking
-   authoritative. Twelve deleted in #142. The two kept, `checkAiKey` and `getDiscoveryState`, call
-   routes that really are orphaned and are being wired now
-   ([#141](https://github.com/CodesWhat/careerrat/issues/141)); each carries a comment saying so,
-   because without one the next knip pass reads them as dead code and the loop starts over.
+   authoritative. Twelve deleted in #142.
+
+   The two kept, `checkAiKey` and `getDiscoveryState`, called routes that really were orphaned,
+   and both are wired in #145, which is what took the ratchet the last two down to 30. The
+   discovery one was a real restart guarantee the onboarding contract already claimed and did not
+   hold: `CompletionScreen` only ever learned about a discovery session from the POST that started
+   it, so a reload mid-discovery sent the candidate back to the pre-discovery button while the
+   server still had the session. `GET /api/discovery/state` existed for exactly that and had never
+   been called. The other added a Settings control to test an already-saved AI key, which also
+   made `errorCopy.js`'s `missing_key` rule reachable for the first time.
+
+   [#141](https://github.com/CodesWhat/careerrat/issues/141) closed with those two, because the
+   rest of what it listed is not a gap a candidate can feel. Each is one small wire-it-or-delete-it
+   decision, and they live here now rather than in an open issue nobody reads:
+
+   - `POST /api/boards/preview` is a backend built for a Targeting-step preview affordance that
+     was never wired. The wizard's only board call is a direct `addBoard()`.
+   - `POST /api/onboard/quick-start` seeds AI search prompts and gates on `search_ready`, but the
+     wizard starts the first search through `POST /api/sourcing/first-run/start` instead. Nothing
+     is broken, since the sibling satisfies the readiness gate, but two routes that both "start
+     the first search" differently is the kind of thing that gets found during an incident.
+   - `GET /api/logos/search` has no logo picker to serve. Company logos go through the unrelated
+     and heavily used `logoImageUrl()`.
+   - `GET /api/intake/one` is REST symmetry, not a missing feature. The only intake surface
+     renders from the bulk list response and there is no per-item view to deep-link to.
+   - `POST /api/onboard/write-config` is not orphaned at all and is listed only so nobody
+     rediscovers it as such. It is alive through `careerrat ingest --write-config`. Only the web
+     client half was ever unwired, and that half is deleted.
 
    So reaching 0 means teaching knip about the remaining references, not deleting them. Anyone who
    closes the gap the other way has made the number prettier and the product worse. That reasoning
