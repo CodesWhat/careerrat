@@ -113,7 +113,7 @@ export async function readLocalAppHealth(
   }
 }
 
-export function isLoopbackPortAvailable(port) {
+function isLoopbackPortAvailable(port) {
   return new Promise((resolve) => {
     const server = createServer();
     server.unref();

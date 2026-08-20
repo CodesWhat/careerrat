@@ -354,11 +354,10 @@ function privateLeakMessage(text) {
 // went into building the prompt this proposal was drafted against). A story
 // absent from that set (e.g. cited in a cover letter but never included in
 // the answers prompt) is not citable there — grounding is artifact-specific,
-// not a global "any confirmed story anywhere" allowance. `validatePacket
-// EvidenceIds` is kept as the original exported name (alias below) — callers
-// that never pass promptStories (résumé validation never does; no story ids
-// are ever valid there) see byte-identical behavior to before this generalized.
-export function validatePacketGroundedIds({
+// not a global "any confirmed story anywhere" allowance. Callers that never
+// pass promptStories (résumé validation never does; no story ids are ever
+// valid there) see byte-identical behavior to before this generalized.
+export function validatePacketEvidenceIds({
   context = {},
   proposals = [],
   promptStories = [],
@@ -392,8 +391,6 @@ export function validatePacketGroundedIds({
 
   return { ok: gaps.length === 0, gaps };
 }
-
-export const validatePacketEvidenceIds = validatePacketGroundedIds;
 
 function promptForCoverLetter(visibleSources) {
   return [

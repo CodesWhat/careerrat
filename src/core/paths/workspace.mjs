@@ -2,7 +2,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const DEFAULT_PRIVATE_DIR = ".careerrat";
+const DEFAULT_PRIVATE_DIR = ".careerrat";
 
 const DEFAULT_REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const GENERATED_CONFIG_FILES = [

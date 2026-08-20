@@ -23,7 +23,7 @@ export function buildInfoPlistBrandCommands({
   ];
 }
 
-export function resolveDevBrandingPaths({ desktopDir = defaultDesktopDir() } = {}) {
+function resolveDevBrandingPaths({ desktopDir = defaultDesktopDir() } = {}) {
   const repoRoot = join(desktopDir, "../..");
   const electronApp = join(repoRoot, "node_modules/electron/dist/Electron.app");
   const macOsDir = join(electronApp, "Contents/MacOS");
