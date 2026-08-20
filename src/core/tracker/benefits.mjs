@@ -10,7 +10,7 @@
 // Keys are stable identifiers — change emoji/label freely, but don't rename a key
 // without a migration (stored tracker.json rows reference keys).
 
-export const BENEFIT_CATALOG = [
+const BENEFIT_CATALOG = [
   {
     key: "health",
     emoji: "🏥",

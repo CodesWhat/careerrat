@@ -192,7 +192,7 @@ function countryTerms(country) {
   return terms;
 }
 
-export function deriveLocationFilter(profile = {}) {
+function deriveLocationFilter(profile = {}) {
   const loc = profile.location ?? {};
   const places = compactGeoValues([loc.home, ...(loc.relocation ?? [])]);
   const allowedCountries = new Set();

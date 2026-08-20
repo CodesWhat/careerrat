@@ -137,7 +137,7 @@ function walk(node, deltaMs, counter, anchorYmd) {
   return node;
 }
 
-export function daysBetween(fromYmd, toYmd) {
+function daysBetween(fromYmd, toYmd) {
   return Math.round((midnightUtc(toYmd) - midnightUtc(fromYmd)) / DAY_MS);
 }
 

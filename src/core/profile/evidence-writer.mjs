@@ -25,7 +25,7 @@
 // The text/logic ops are pure (unit-testable); the fs touchpoints are thin and
 // isolated at the bottom.
 
-import { existsSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { lintArtifact } from "../documents/placeholder-lint.mjs";
@@ -53,7 +53,7 @@ export const CLAIM_FIELDS = [
   "forbidden_wording",
 ];
 
-export function evidenceAbsPath(root = DEFAULT_ROOT) {
+function evidenceAbsPath(root = DEFAULT_ROOT) {
   return userPath({ repoRoot: root }, EVIDENCE_REL_PATH);
 }
 
@@ -194,14 +194,6 @@ export function computeEvidenceWrite({ newClaim, currentClaims = [] }) {
     existing.push(claim);
   }
   return { ok: true, claim, nextClaims: existing, replaced };
-}
-
-// ---------------------------------------------------------------------------
-// fs touchpoints
-// ---------------------------------------------------------------------------
-
-export function evidenceExists(root = DEFAULT_ROOT) {
-  return existsSync(evidenceAbsPath(root));
 }
 
 // Atomically write the whole evidence bank. Guards against truth-bank corruption:

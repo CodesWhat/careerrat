@@ -1,6 +1,6 @@
 const ANTHROPIC_VERSION = "2023-06-01";
 
-export function normalizeAiProvider(provider) {
+function normalizeAiProvider(provider) {
   const value = String(provider || "anthropic")
     .trim()
     .toLowerCase();
