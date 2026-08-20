@@ -123,7 +123,7 @@ function runFollowUps(data) {
   console.log(`Follow-ups due (${items.length}):`);
   for (const it of items) {
     const overdue = it.overdueDays > 0 ? ` (${it.overdueDays}d overdue)` : "";
-    console.log(`- [${it.kind}] ${it.company || ""} ${it.role || ""}${overdue} — ${it.reason}`);
+    console.log(`- [${it.kind}] ${it.company || ""} ${it.role || ""}${overdue}: ${it.reason}`);
   }
 }
 
@@ -187,7 +187,7 @@ function loadFollowUpRules() {
 }
 
 function printHelp() {
-  console.log(`careerrat tracker — snapshot, summary, follow-ups, verify
+  console.log(`careerrat tracker: snapshot, summary, follow-ups, verify
 
 Usage:
   careerrat tracker                 Snapshot workspace/tracker.json, print a summary

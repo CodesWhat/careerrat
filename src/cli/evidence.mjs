@@ -159,8 +159,7 @@ function cmdCheck() {
     console.error(`Evidence firewall: ${v.errors.length} issue(s):`);
     for (const e of v.errors) console.error(`  - ${e.message}`);
   }
-  if (ok)
-    console.log(`Evidence bank OK — ${claims.length} claim${claims.length === 1 ? "" : "s"}.`);
+  if (ok) console.log(`Evidence bank OK: ${claims.length} claim${claims.length === 1 ? "" : "s"}.`);
   process.exit(ok ? 0 : 1);
 }
 
@@ -184,7 +183,7 @@ function cmdAdd() {
   if (!plan.ok) {
     if (opts.json)
       console.log(JSON.stringify({ ok: false, error: plan.error, errors: plan.errors }, null, 2));
-    else console.error(`evidence: refused — ${plan.error}`);
+    else console.error(`evidence: refused, ${plan.error}`);
     process.exit(1);
   }
 
@@ -205,7 +204,7 @@ function cmdAdd() {
       );
     } else {
       console.log(
-        `Proposed ${plan.replaced ? "update" : "add"}: claim "${plan.claim.id}" — ${plan.claim.claim}`
+        `Proposed ${plan.replaced ? "update" : "add"}: claim "${plan.claim.id}": ${plan.claim.claim}`
       );
       console.log(
         `  bank would hold ${plan.nextClaims.length} claim${plan.nextClaims.length === 1 ? "" : "s"} (${evidenceDisplay()}).`
@@ -243,7 +242,7 @@ function cmdAdd() {
   const written = writeEvidence({ claims: plan.nextClaims, root: opts.root, schema: loadSchema() });
   if (!written.ok) {
     if (opts.json) console.log(JSON.stringify({ ok: false, error: written.error }, null, 2));
-    else console.error(`evidence: refused — ${written.error}`);
+    else console.error(`evidence: refused, ${written.error}`);
     process.exit(1);
   }
   if (opts.json)
@@ -277,7 +276,7 @@ function fail(msg) {
 }
 
 function printHelp() {
-  console.log(`careerrat evidence — safe read/validate/add for the evidence truth bank
+  console.log(`careerrat evidence: safe read/validate/add for the evidence truth bank
 
 Usage:
   node src/cli/evidence.mjs list [--json]

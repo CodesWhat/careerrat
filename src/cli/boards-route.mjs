@@ -480,10 +480,10 @@ export function mountBoardsRoutes({ addRoute, repoRoot, env = process.env }) {
         .trim()
         .toLowerCase();
       if (requestedProvider && !isCompanyProviderSupported(requestedProvider)) {
-        badRequest(`unsupported ATS provider — cannot scan with "${body.provider}"`);
+        badRequest(`unsupported ATS provider: cannot scan with "${body.provider}"`);
       }
       const provider = requestedProvider || inferProvider({ careers_url: url });
-      if (!provider) badRequest(`unsupported ATS host — cannot scan "${url}"`);
+      if (!provider) badRequest(`unsupported ATS host: cannot scan "${url}"`);
       const current = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
       const companies = Array.isArray(current.tracked_companies)
         ? current.tracked_companies.slice()

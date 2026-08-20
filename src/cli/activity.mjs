@@ -155,7 +155,7 @@ function cmdAppend() {
   if (!plan.ok) {
     if (opts.json)
       console.log(JSON.stringify({ ok: false, error: plan.error, errors: plan.errors }, null, 2));
-    else console.error(`activity: refused — ${plan.error}`);
+    else console.error(`activity: refused, ${plan.error}`);
     process.exit(1);
   }
 
@@ -184,8 +184,8 @@ function cmdAppend() {
   else
     console.log(
       written.deduped
-        ? `Already present (id ${written.event.id}) — no write.`
-        : `Written: ${written.event.type} — ${written.event.title}`
+        ? `Already present (id ${written.event.id}), no write.`
+        : `Written: ${written.event.type}: ${written.event.title}`
     );
   process.exit(0);
 }
@@ -264,7 +264,7 @@ function cmdBackfill() {
     console.log(
       `Backfill: ${written} written, ${deduped} already present${refused.length ? `, ${refused.length} refused` : ""}.`
     );
-    for (const r of refused) console.error(`  refused: ${r.title} — ${r.error}`);
+    for (const r of refused) console.error(`  refused: ${r.title}: ${r.error}`);
   }
   process.exit(0);
 }
@@ -278,7 +278,7 @@ function fail(msg) {
 }
 
 function printHelp() {
-  console.log(`careerrat activity — safe read/append for the dashboard Activity Pulse feed
+  console.log(`careerrat activity: safe read/append for the dashboard Activity Pulse feed
 
 Usage:
   node src/cli/activity.mjs list [--limit N] [--json]

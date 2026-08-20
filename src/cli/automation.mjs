@@ -201,7 +201,7 @@ const result = {
 // No-op: already at the target value.
 if (!plan.changed) {
   if (opts.json) console.log(JSON.stringify({ ...result, note: "already set" }, null, 2));
-  else console.log(`No change — ${plan.path} is already ${plan.value} in ${automationDisplay}.`);
+  else console.log(`No change: ${plan.path} is already ${plan.value} in ${automationDisplay}.`);
   process.exit(0);
 }
 
@@ -347,7 +347,7 @@ function handleSession(provider) {
   if (!plan.changed) {
     if (opts.json) console.log(JSON.stringify({ ...result, note: "already set" }, null, 2));
     else
-      console.log(`No change — session provider is already ${plan.value} in ${automationDisplay}.`);
+      console.log(`No change: session provider is already ${plan.value} in ${automationDisplay}.`);
     process.exit(0);
   }
 
@@ -570,7 +570,7 @@ function printVerdict(v, cap, plat) {
   if (v.allowed) {
     console.log(`  ✓ ${cap} on ${plat} is now LIVE (global + platform + consent all on).`);
   } else {
-    console.log(`  ◦ ${cap} on ${plat} still won't run — remaining:`);
+    console.log(`  ◦ ${cap} on ${plat} still won't run, remaining:`);
     for (const r of v.reasons) console.log(`      - ${r}`);
   }
 }
@@ -593,7 +593,7 @@ function printStatus(asJson) {
   console.log("====================");
   console.log("");
   if (!status.exists) {
-    console.log(`Not configured — every capability is OFF (opt-in default).`);
+    console.log(`Not configured: every capability is OFF (opt-in default).`);
     console.log(`No ${loaded.path} yet; the first \`--write\` creates it from the template.`);
     console.log("");
   } else if (!status.valid) {
@@ -608,7 +608,7 @@ function printStatus(asJson) {
   console.log("");
   for (const cap of status.capabilities) {
     const global = cap.enabled ? "on" : "off";
-    console.log(`${cap.capability}  [phase ${cap.phase} · global ${global}] — ${cap.summary}`);
+    console.log(`${cap.capability}  [phase ${cap.phase} · global ${global}]: ${cap.summary}`);
     for (const p of cap.platforms) {
       const mark = p.allowed ? "LIVE " : "  -  ";
       const bits = [`platform ${p.enabled ? "on" : "off"}`, `consent ${p.consent ? "yes" : "no"}`];
@@ -641,7 +641,7 @@ function printList(asJson) {
 }
 
 function printHelp() {
-  console.log(`careerrat automation — opt-in browser-automation config (defaults OFF)
+  console.log(`careerrat automation: opt-in browser-automation config (defaults OFF)
 
 Usage:
   node src/cli/automation.mjs status [--json]          Show the capability/consent matrix
@@ -666,5 +666,5 @@ Options:
 DB mode writes SQLite candidate_automation. Legacy mode patches
 candidate/automation.yml comment-preserving + schema-validated; the first legacy
 write scaffolds it from templates/automation.example.yml. No credentials are ever
-stored — the browser session holds your logins. See docs/BROWSER.md.`);
+stored. The browser session holds your logins. See docs/BROWSER.md.`);
 }

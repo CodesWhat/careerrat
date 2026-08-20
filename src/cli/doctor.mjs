@@ -4,7 +4,7 @@
   const major = parseInt(process.versions.node.split(".")[0], 10);
   if (major < 18) {
     process.stderr.write(
-      `careerrat requires Node.js >= 18 (you have ${process.versions.node}) — please upgrade.\n`
+      `careerrat requires Node.js >= 18 (you have ${process.versions.node}). Please upgrade.\n`
     );
     process.exit(1);
   }
@@ -279,7 +279,7 @@ if (missingUser.length > 0) {
 
 if (learnings.length > 0) {
   console.log(
-    `Learning memory: ${learnings.length} role-family file(s) — ${learnings.map((l) => l.family).join(", ")}.`
+    `Learning memory: ${learnings.length} role-family file(s), ${learnings.map((l) => l.family).join(", ")}.`
   );
   console.log("");
 }
@@ -322,16 +322,16 @@ if (!automation.exists) {
 } else {
   const enabled = automation.capabilities.filter((c) => c.enabled).map((c) => c.capability);
   console.log(
-    `Browser automation: ${automation.liveCount} live capability×platform pair(s)${enabled.length ? ` — enabled: ${enabled.join(", ")}` : " — no capability enabled yet"}.`
+    `Browser automation: ${automation.liveCount} live capability×platform pair(s)${enabled.length ? `, enabled: ${enabled.join(", ")}` : ", no capability enabled yet"}.`
   );
   console.log("");
 }
 
 {
   const pref = sessionBrowser.descriptor?.preferred ? " (preferred)" : "";
-  const setNote = automation.exists ? "" : " — default (unset)";
+  const setNote = automation.exists ? "" : ", default (unset)";
   console.log(
-    `Session browser: ${sessionBrowser.provider}${pref}${setNote} — ${sessionBrowser.presence.detail}.`
+    `Session browser: ${sessionBrowser.provider}${pref}${setNote}, ${sessionBrowser.presence.detail}.`
   );
   console.log(
     "  change with `careerrat automation session <auto|extension|orca|playwright> --write` (see docs/BROWSER.md)."
@@ -349,7 +349,7 @@ if (setup.present) {
   } else {
     const deferred = setup.deferredCount ? `, ${setup.deferredCount} deferred` : "";
     console.log(
-      `Setup: in progress${modeDepth ? ` ${modeDepth}` : ""} — ${setup.stepsRecorded} step(s) recorded${deferred}; resume with \`ingest-profile\` (\`careerrat ingest\`).`
+      `Setup: in progress${modeDepth ? ` ${modeDepth}` : ""}, ${setup.stepsRecorded} step(s) recorded${deferred}; resume with \`ingest-profile\` (\`careerrat ingest\`).`
     );
   }
   console.log("");
@@ -496,7 +496,7 @@ function printSearchReadiness(readiness) {
   }
   if (!readiness.valid) {
     console.log(
-      `- Broad sources: config is invalid — fix ${displayPath(pathCtx, "config/search-sources.yml")}.`
+      `- Broad sources: config is invalid: fix ${displayPath(pathCtx, "config/search-sources.yml")}.`
     );
     if (readiness.error) console.log(`  error: ${readiness.error}`);
     return;
@@ -517,7 +517,7 @@ function printSearchReadiness(readiness) {
 function printCompanyAtsReadiness(readiness) {
   if (!readiness.valid) {
     console.log(
-      `- Company ATS scans: config is invalid — fix ${displayPath(pathCtx, "config/sourced-scan.json")}.`
+      `- Company ATS scans: config is invalid: fix ${displayPath(pathCtx, "config/sourced-scan.json")}.`
     );
     if (readiness.error) console.log(`  error: ${readiness.error}`);
     return;

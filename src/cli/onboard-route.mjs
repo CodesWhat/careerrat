@@ -1437,7 +1437,7 @@ export function mountOnboardRoutes({
     }
     if (looksBinary(text)) {
       sendJson(res, 400, {
-        error: "PDF/DOCX not supported — export resume as text or markdown",
+        error: "PDF/DOCX not supported: export resume as text or markdown",
       });
       return;
     }
@@ -1518,7 +1518,7 @@ export function mountOnboardRoutes({
     const ext = extname(name).toLowerCase();
     if (!RESUME_DOCX_ALLOWED_EXTENSIONS.has(ext)) {
       sendJson(res, 400, {
-        error: `unsupported file type "${ext || name}" — resume-docx accepts DOCX uploads only (.docx)`,
+        error: `unsupported file type "${ext || name}": resume-docx accepts DOCX uploads only (.docx)`,
       });
       return;
     }
@@ -1703,7 +1703,7 @@ export function mountOnboardRoutes({
         status: 400,
         body: {
           error:
-            `unsupported file type "${ext || name}" — resume-ai accepts PDF, image, or text uploads ` +
+            `unsupported file type "${ext || name}": resume-ai accepts PDF, image, or text uploads ` +
             "(.pdf .png .jpg .jpeg .webp .txt .md .markdown)",
         },
       };

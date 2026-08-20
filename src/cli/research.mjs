@@ -124,7 +124,7 @@ function cmdStale() {
     console.log("No stale research artifacts.");
     return;
   }
-  console.log(`Stale research artifacts (${items.length}) — consider refreshing:`);
+  console.log(`Stale research artifacts (${items.length}), consider refreshing:`);
   for (const it of items) {
     console.log(
       `  ${it.company || it.role || it.stem}  (fetched ${it.fetchedAt || "?"})  ${it.relPath}`
@@ -203,7 +203,7 @@ function cmdRecord(arg) {
           2
         )
       );
-    else console.error(`research: refused — ${plan.error}`);
+    else console.error(`research: refused, ${plan.error}`);
     process.exit(1);
   }
 
@@ -279,7 +279,7 @@ function fail(msg) {
 }
 
 function printHelp() {
-  console.log(`careerrat research — safe read/record for web-research artifacts
+  console.log(`careerrat research: safe read/record for web-research artifacts
 
 Usage:
   node src/cli/research.mjs list [--json]

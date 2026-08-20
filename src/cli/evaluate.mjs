@@ -91,7 +91,7 @@ process.exit(result.gate === "KEEP" ? 0 : result.gate === "REVIEW" ? 2 : 1);
 // ---------------------------------------------------------------------------
 
 function printHelp() {
-  console.log(`careerrat evaluate — run the body-read gate on a saved job
+  console.log(`careerrat evaluate: run the body-read gate on a saved job
 
 Usage:
   careerrat evaluate <path-to-job.md>     Emit GATE / FIT / COMP / ACTION

@@ -116,7 +116,7 @@ if (result.docx) {
 // ---------------------------------------------------------------------------
 
 function printHelp() {
-  console.log(`careerrat export — render a tailored artifact or interview packet to PDF or DOCX
+  console.log(`careerrat export: render a tailored artifact or interview packet to PDF or DOCX
 
 Usage:
   careerrat export <input.md> [--pdf] [--docx] [--out <base>] [--title "..."]
@@ -125,7 +125,7 @@ Options:
   --pdf          Render to PDF (default when no format flag given)
   --docx         Render to DOCX (pandoc → soffice → built-in OOXML fallback)
   --ats          PDF: use a standard ATS-safe font stack (Arial/Helvetica/Courier),
-                 no embedded Geist — for the copy that goes through an ATS parser
+                 no embedded Geist, for the copy that goes through an ATS parser
   --out <base>   Output path/basename without extension (default: alongside input)
   --title "..."  Document title (default: input filename stem)
   --help         Show this message
@@ -137,6 +137,6 @@ Examples:
   careerrat export workspace/interview-prep/acme-engineer.md --pdf --out /tmp/packet
 
 Exit codes: 0 success, 1 failure.
-PDF: uses the bundled Playwright Chromium — no setup needed.
+PDF: uses the bundled Playwright Chromium, no setup needed.
 DOCX: auto-detects pandoc, then soffice, then uses built-in OOXML writer.`);
 }
