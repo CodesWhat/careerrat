@@ -21,7 +21,7 @@ function assertSmartRecruitersUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`smartrecruiters: URL must use HTTPS: ${url}`);
   if (!ALLOWED_SMARTRECRUITERS_HOSTS.has(parsed.hostname)) {
-    throw new Error(`smartrecruiters: untrusted hostname "${parsed.hostname}" — must be one of: ${[...ALLOWED_SMARTRECRUITERS_HOSTS].join(', ')}`);
+    throw new Error(`smartrecruiters: untrusted hostname "${parsed.hostname}". Must be one of: ${[...ALLOWED_SMARTRECRUITERS_HOSTS].join(', ')}`);
   }
   return url;
 }

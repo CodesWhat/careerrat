@@ -70,7 +70,7 @@ function assertEightfoldUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`eightfold: URL must use HTTPS: ${url}`);
   if (!EIGHTFOLD_HOST_RE.test(parsed.hostname)) {
-    throw new Error(`eightfold: untrusted hostname "${parsed.hostname}" — must match *.eightfold.ai`);
+    throw new Error(`eightfold: untrusted hostname "${parsed.hostname}". Must match *.eightfold.ai`);
   }
   return url;
 }
@@ -317,7 +317,7 @@ export default {
     }
 
     if (total !== null && all.length < total && maxPages * PAGE_SIZE < total) {
-      console.error(`⚠️  eightfold: ${entry.name} truncated at max_pages=${maxPages} (${all.length} of ${total} jobs) — raise max_pages on this entry for more`);
+      console.error(`⚠️  eightfold: ${entry.name} truncated at max_pages=${maxPages} (${all.length} of ${total} jobs). Raise max_pages on this entry for more`);
     }
 
     return all;

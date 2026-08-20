@@ -54,7 +54,7 @@ function assertFourDayUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`4dayweek: URL must use HTTPS: ${url}`);
   if (parsed.hostname !== TRUSTED_HOST) {
-    throw new Error(`4dayweek: untrusted hostname "${parsed.hostname}" — must be ${TRUSTED_HOST}`);
+    throw new Error(`4dayweek: untrusted hostname "${parsed.hostname}". Must be ${TRUSTED_HOST}`);
   }
   return url;
 }
@@ -143,7 +143,7 @@ export default {
       const json = await ctx.fetchJson(url, { redirect: 'error' });
       if (!json || !Array.isArray(json.jobs)) {
         throw new Error(
-          `4dayweek: unexpected API response on page ${page} — expected { jobs: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
+          `4dayweek: unexpected API response on page ${page}: expected { jobs: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
         );
       }
       for (const j of json.jobs) {

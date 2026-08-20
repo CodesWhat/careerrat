@@ -87,7 +87,7 @@ function assertAshbyUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`ashby: URL must use HTTPS: ${url}`);
   if (!ALLOWED_ASHBY_HOSTS.has(parsed.hostname))
-    throw new Error(`ashby: untrusted hostname "${parsed.hostname}" — must be one of: ${[...ALLOWED_ASHBY_HOSTS].join(', ')}`);
+    throw new Error(`ashby: untrusted hostname "${parsed.hostname}". Must be one of: ${[...ALLOWED_ASHBY_HOSTS].join(', ')}`);
   return url;
 }
 

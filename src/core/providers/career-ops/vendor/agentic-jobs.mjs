@@ -46,7 +46,7 @@ function assertAgenticUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`agentic-jobs: URL must use HTTPS: ${url}`);
   if (parsed.hostname !== TRUSTED_HOST) {
-    throw new Error(`agentic-jobs: untrusted hostname "${parsed.hostname}" — must be ${TRUSTED_HOST}`);
+    throw new Error(`agentic-jobs: untrusted hostname "${parsed.hostname}". Must be ${TRUSTED_HOST}`);
   }
   return url;
 }
@@ -168,7 +168,7 @@ export default {
       // empty page (the API returns `data: []` for that) — fail loudly instead
       // of silently truncating whatever pages were already collected.
       if (!json || !Array.isArray(json.data)) {
-        throw new Error(`agentic-jobs: unexpected API response shape on page ${page} — "data" is missing or not an array`);
+        throw new Error(`agentic-jobs: unexpected API response shape on page ${page}: "data" is missing or not an array`);
       }
       const records = json.data;
       if (total === null) total = typeof json.meta?.total === 'number' ? json.meta.total : null;
@@ -190,7 +190,7 @@ export default {
     }
 
     if (jobs.length === 0) {
-      throw new Error('agentic-jobs: parsed 0 jobs from the API — the response shape likely changed');
+      throw new Error('agentic-jobs: parsed 0 jobs from the API: the response shape likely changed');
     }
     return jobs.slice(0, MAX_JOBS);
   },

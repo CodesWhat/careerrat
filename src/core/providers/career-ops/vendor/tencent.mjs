@@ -121,7 +121,7 @@ export default {
           // workday/jobstreet/glints). Track successes directly — a keyword
           // can legitimately match 0 jobs, so seen.size is not the signal.
           if (!succeededOnce) throw err;
-          console.error(`  ⚠ tencent: keyword "${keyword}" page ${page} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
+          console.error(`  ⚠ tencent: keyword "${keyword}" page ${page} failed (${err.message}), keeping the ${seen.size} jobs collected so far`);
           return [...seen.values()];
         }
         succeededOnce = true;

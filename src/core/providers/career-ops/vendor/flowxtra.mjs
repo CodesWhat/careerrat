@@ -32,7 +32,7 @@ function assertFlowxtraEndpointUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`flowxtra: URL must use HTTPS: ${url}`);
   if (parsed.hostname !== TRUSTED_ENDPOINT_HOST) {
-    throw new Error(`flowxtra: untrusted hostname "${parsed.hostname}" — must be ${TRUSTED_ENDPOINT_HOST}`);
+    throw new Error(`flowxtra: untrusted hostname "${parsed.hostname}". Must be ${TRUSTED_ENDPOINT_HOST}`);
   }
   return url;
 }
@@ -128,7 +128,7 @@ export default {
       const rows = json?.data?.data;
       if (!Array.isArray(rows)) {
         throw new Error(
-          `flowxtra: unexpected API response on page ${page} — expected { data: { data: [...] } }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
+          `flowxtra: unexpected API response on page ${page}: expected { data: { data: [...] } }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
         );
       }
       for (const j of rows) {
