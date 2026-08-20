@@ -36,11 +36,23 @@ export function dbExists({ repoRoot, env } = {}) {
 // every open, not just the first. journal_mode=WAL persists in the file header
 // once written, but re-issuing it is a cheap no-op, so we just always set all
 // four rather than special-casing "first open of this file ever".
+//
+// busy_timeout MUST be the first PRAGMA issued on a fresh connection. SQLite's
+// busy handler is off (0ms) by default, so any statement run before it is set,
+// including this same function's own "PRAGMA journal_mode = WAL", is retried
+// zero times: a fresh connection opening a WAL db that a concurrent process is
+// simultaneously initializing (creating/recovering the -wal/-shm files) can
+// see SQLITE_BUSY_RECOVERY right there and throw immediately instead of
+// waiting the intended 5s. This is issue #136: CI job 96441477889 threw
+// "database is locked" (errcode 261, SQLITE_BUSY_RECOVERY) from exactly this
+// "PRAGMA journal_mode = WAL" call, with busy_timeout still at its default
+// because it hadn't been reached yet. tests/db-pragma-order.test.mjs guards
+// this ordering against a future "tidy up" reorder.
 function applyPragmas(db) {
+  db.exec("PRAGMA busy_timeout = 5000");
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
   db.exec("PRAGMA synchronous = NORMAL");
-  db.exec("PRAGMA busy_timeout = 5000");
 }
 
 export function openDb({ repoRoot, env } = {}) {
