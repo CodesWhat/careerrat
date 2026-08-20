@@ -19,7 +19,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 usage() {
 	echo "Usage: $0 [--version X.Y.Z] [--dmg /path/to.dmg] [--write /path/to/careerrat.rb]" >&2
-	exit 64
+	exit "${1:-64}"
 }
 
 VERSION=""
@@ -44,7 +44,7 @@ while [ $# -gt 0 ]; do
 		shift 2
 		;;
 	-h | --help)
-		usage
+		usage 0
 		;;
 	*)
 		usage
@@ -53,7 +53,15 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$VERSION" ]; then
-	VERSION="$(node -p "require('$REPO_ROOT/package.json').version")"
+	VERSION="$(node -p "require(process.argv[1]).version" "$REPO_ROOT/package.json")"
+fi
+
+# The version lands unescaped inside the cask body and the download URL, so a
+# malformed override (a stray quote, a leading "v") would emit invalid Ruby or
+# a URL that 404s, and the script would still exit 0. Bare X.Y.Z only.
+if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+	echo "error: version must be bare X.Y.Z (got: $VERSION)" >&2
+	exit 65
 fi
 
 TMP_DIR=""

@@ -17,7 +17,12 @@ Once 1.0.0 ships, the standard semver compatibility guarantees apply:
 
 Before tagging a release:
 
-1. `package.json` version bumped.
+1. Version bumped everywhere it lives in lockstep: `package.json`,
+   `apps/desktop/package.json`, and the three sites `package-lock.json` carries
+   it. `npm version <x.y.z> --no-git-tag-version` in the root and in
+   `apps/desktop/` updates all five; editing `package.json` by hand updates
+   one, which is exactly how the lockfile once sat at 0.9.0 while the
+   published package was 0.10.0.
 2. Convert `CHANGELOG.md`'s `## [Unreleased]` section into a
    `## [x.y.z] - YYYY-MM-DD` heading carrying the new version and today's date.
 3. All tests pass: `npm test`. Run this after steps 1 and 2, not before:
