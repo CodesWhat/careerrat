@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CareerRat ATS dropdown fixture</title>
+  </head>
+  <body>
+    <!--
+      Reproduces the three dropdown shapes real ATS forms actually use, so
+      tests/playwright-live.test.mjs and tests/playwright-live-dropdowns.test.mjs
+      can drive selectOption() against a real Chromium session without
+      depending on a live third-party site:
+
+      1. A native <select> ("Work authorization") — proves selectOption()'s
+         original, still-correct path keeps working (Lever has a genuine
+         native select and it must never regress).
+
+      2. A react-select-shaped custom combobox ("Country") — an
+         [role=combobox] text input that opens a [role=listbox] of
+         [role=option] elements on click, filters that list as you type, and
+         writes the chosen label into a hidden input on selection. This is
+         the shape Greenhouse actually uses.
+
+      3. An Ashby-shaped type-to-populate combobox ("Citizenship") — an
+         [role=combobox] text input that renders ZERO [role=option] nodes on
+         click/focus, and only populates them once something is actually
+         typed into it, ASYNCHRONOUSLY (debounced) rather than synchronously
+         off the input event, mounted in a PORTAL (a direct child of <body>,
+         not nested inside this field's own container) — the same shape a
+         real Ashby form was measured to use. Its rendered list deliberately
+         includes an exact match ("Canada") behind a longer
+         substring-containing match ("Canadian Overseas Territory"), a
+         duplicate label ("Canada" appears twice), and a non-prefix-matching
+         entry ("Tanzania", present in the results the same way a real
+         Ashby query for "Uni" surfaced "Tanzania"). It ALSO renders in two
+         waves: an interim, inert option list that a click cannot commit a
+         selection through, replaced shortly after by the real,
+         click-handling list — reproducing a real, measured false positive
+         where a click that landed during that interim window resolved with
+         no error while the field itself stayed genuinely blank.
+
+      No real ATS URLs are used anywhere in this fixture or its test.
+    -->
+    <main>
+      <h1>Example application</h1>
+      <form id="application-form">
+        <label>
+          First Name
+          <input name="first_name" />
+        </label>
+
+        <label for="work-authorization">Work authorization</label>
+        <select id="work-authorization" name="work_authorization">
+          <option value="">Choose one</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+
+        <div class="combobox-field">
+          <label id="country-label" for="country-input">Country</label>
+          <input
+            id="country-input"
+            type="text"
+            role="combobox"
+            aria-labelledby="country-label"
+            aria-expanded="false"
+            aria-autocomplete="list"
+            aria-controls="country-listbox"
+            autocomplete="off"
+          />
+          <div role="listbox" id="country-listbox" hidden></div>
+          <input type="hidden" name="country" id="country-value" />
+        </div>
+
+        <div class="typeahead-field">
+          <label id="citizenship-label" for="citizenship-input">Citizenship</label>
+          <input
+            id="citizenship-input"
+            type="text"
+            role="combobox"
+            placeholder="Start typing..."
+            aria-labelledby="citizenship-label"
+            aria-expanded="false"
+            aria-autocomplete="list"
+            aria-controls="citizenship-listbox"
+            autocomplete="off"
+          />
+          <input type="hidden" name="citizenship" id="citizenship-value" />
+        </div>
+
+        <button type="submit">Submit application</button>
+      </form>
+
+      <!--
+        citizenship-listbox is intentionally NOT nested inside
+        .typeahead-field above — it's appended straight to <body> below
+        (a portal), the same way a real Ashby-shaped combobox renders its
+        option list outside the input's own container.
+      -->
+
+      <!--
+        Selection outcomes are echoed here in plain text (rather than left to
+        infer from element state) so tests/playwright-live.test.mjs can
+        verify a real selectOption() call actually landed, using only the
+        same snapshot().pageText surface the real apply-driver reads — no
+        second, out-of-band Playwright handle needed just for assertions.
+      -->
+      <div id="status" aria-live="polite"></div>
+    </main>
+    <div role="listbox" id="citizenship-listbox" hidden></div>
+    <script>
+      (() => {
+        function appendStatus(text) {
+          var status = document.getElementById("status");
+          status.textContent = status.textContent ? `${status.textContent} | ${text}` : text;
+        }
+
+        document.getElementById("work-authorization").addEventListener("change", (event) => {
+          appendStatus(`Work authorization selected: ${event.target.value}`);
+        });
+
+        // Deliberately ordered so a naive "first substring match wins" search
+        // would land on the wrong option: "United States Minor Outlying
+        // Islands" contains "united states" and sorts before the exact
+        // match, so selecting "United States" is a real regression check for
+        // "exact match beats substring", not just a happy-path pick.
+        var OPTIONS = [
+          "United States Minor Outlying Islands",
+          "United States",
+          "Canada",
+          "United Kingdom",
+        ];
+
+        var input = document.getElementById("country-input");
+        var listbox = document.getElementById("country-listbox");
+        var hiddenValue = document.getElementById("country-value");
+
+        function renderOptions(filterText) {
+          var query = String(filterText || "").trim().toLowerCase();
+          var matches = OPTIONS.filter((option) => option.toLowerCase().indexOf(query) !== -1);
+          listbox.innerHTML = "";
+          matches.forEach((option) => {
+            var choice = document.createElement("div");
+            choice.setAttribute("role", "option");
+            choice.textContent = option;
+            choice.addEventListener("click", () => {
+              hiddenValue.value = option;
+              input.value = option;
+              closeListbox();
+              appendStatus(`Country selected: ${option}`);
+            });
+            listbox.appendChild(choice);
+          });
+        }
+
+        function openListbox() {
+          renderOptions(input.value);
+          listbox.hidden = false;
+          input.setAttribute("aria-expanded", "true");
+        }
+
+        function closeListbox() {
+          listbox.hidden = true;
+          input.setAttribute("aria-expanded", "false");
+        }
+
+        input.addEventListener("click", openListbox);
+        input.addEventListener("focus", openListbox);
+        input.addEventListener("input", () => {
+          renderOptions(input.value);
+          listbox.hidden = false;
+          input.setAttribute("aria-expanded", "true");
+        });
+
+        // Ashby-shaped type-to-populate combobox: unlike Country above,
+        // click/focus render NOTHING, results arrive ASYNCHRONOUSLY
+        // (debounced, not synchronously off the input event) in a PORTAL
+        // (#citizenship-listbox is a direct child of <body>, not nested
+        // inside .typeahead-field — see the comment above the form), and
+        // the list itself renders in TWO WAVES. Ordering/contents are
+        // deliberate: "Canadian Overseas Territory" sorts before the exact
+        // "Canada" match (precedence), "Canada" appears twice (a duplicate
+        // label selectOption() must tolerate without throwing), and
+        // "Tanzania" is present regardless of query the same way a real
+        // Ashby query for "Uni" surfaced "Tanzania" (a non-prefix-matching
+        // entry).
+        var CITIZENSHIP_OPTIONS = [
+          "Canadian Overseas Territory",
+          "Canada",
+          "Canada",
+          "Tanzania",
+        ];
+        // Wave 1: an interim option list renders this long after the last
+        // keystroke (debounce) — present in the DOM, but NOT yet wired to
+        // commit a selection. Wave 2: this much longer after wave 1, the
+        // SAME list becomes interactive. A click that lands in the wave-1
+        // window is exactly the real, measured bug: it resolves with no
+        // error while genuinely selecting nothing.
+        var CITIZENSHIP_WAVE1_DELAY_MS = 150;
+        var CITIZENSHIP_WAVE2_DELAY_MS = 400;
+
+        var citizenshipInput = document.getElementById("citizenship-input");
+        var citizenshipListbox = document.getElementById("citizenship-listbox");
+        var citizenshipValue = document.getElementById("citizenship-value");
+        var citizenshipWave1Timer = null;
+        var citizenshipWave2Timer = null;
+
+        function clearCitizenshipTimers() {
+          clearTimeout(citizenshipWave1Timer);
+          clearTimeout(citizenshipWave2Timer);
+          citizenshipWave1Timer = null;
+          citizenshipWave2Timer = null;
+        }
+
+        function closeCitizenshipList() {
+          citizenshipListbox.hidden = true;
+          citizenshipListbox.innerHTML = "";
+          citizenshipListbox.dataset.interactive = "false";
+          citizenshipInput.setAttribute("aria-expanded", "false");
+        }
+
+        // ONE delegated listener (not one per option) so the
+        // inert-vs-interactive distinction lives on the container's own
+        // readiness state, not on which handler happens to be wired to a
+        // given node — a real "click landed before hydration finished" bug
+        // doesn't care which option was clicked. A click while
+        // dataset.interactive !== "true" is treated as a dismiss: it
+        // reverts the field to genuinely blank, the same symptom a live
+        // Ashby form showed for the false positive this fixture now
+        // reproduces (not just "value unchanged from whatever was typed").
+        citizenshipListbox.addEventListener("click", (event) => {
+          var optionEl = event.target.closest("[role='option']");
+          if (!optionEl) return;
+          if (citizenshipListbox.dataset.interactive !== "true") {
+            citizenshipInput.value = "";
+            citizenshipValue.value = "";
+            closeCitizenshipList();
+            return;
+          }
+          var option = optionEl.textContent;
+          citizenshipValue.value = option;
+          citizenshipInput.value = option;
+          closeCitizenshipList();
+          appendStatus(`Citizenship selected: ${option}`);
+        });
+
+        citizenshipInput.addEventListener("input", () => {
+          clearCitizenshipTimers();
+          closeCitizenshipList();
+
+          var query = citizenshipInput.value.trim();
+          if (!query) return;
+
+          citizenshipWave1Timer = setTimeout(() => {
+            CITIZENSHIP_OPTIONS.forEach((option) => {
+              var choice = document.createElement("div");
+              choice.setAttribute("role", "option");
+              choice.textContent = option;
+              citizenshipListbox.appendChild(choice);
+            });
+            citizenshipListbox.hidden = false;
+            citizenshipListbox.dataset.interactive = "false";
+            citizenshipInput.setAttribute("aria-expanded", "true");
+
+            citizenshipWave2Timer = setTimeout(() => {
+              citizenshipListbox.dataset.interactive = "true";
+            }, CITIZENSHIP_WAVE2_DELAY_MS);
+          }, CITIZENSHIP_WAVE1_DELAY_MS);
+        });
+      })();
+    </script>
+  </body>
+</html>
