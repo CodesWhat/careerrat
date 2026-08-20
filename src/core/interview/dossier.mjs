@@ -55,7 +55,7 @@ function appearsInJob(signal, normalizedBody) {
 // Only phrases actually present in the captured JD are promoted as job
 // signals. Candidate evidence/targeting tells us what phrases are meaningful;
 // it never licenses inventing a requirement the posting did not state.
-export function deriveInterviewJobSignals(context, requestedSignals = []) {
+function deriveInterviewJobSignals(context, requestedSignals = []) {
   const body = normalizedWords(context?.job?.body);
   if (!body) return [];
 

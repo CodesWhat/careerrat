@@ -17,7 +17,7 @@ const KIND_VALUES = new Set([
 ]);
 const ONBOARDING_TRANSCRIPT_CHAR_LIMIT = 16_000;
 
-export const WORKSPACE_INTENT_ENTITY_TYPES = Object.freeze({
+const WORKSPACE_INTENT_ENTITY_TYPES = Object.freeze({
   "interview.prepare": ["application"],
   "interview.prepare-request": ["workspace"],
   "interview.schedule": ["application"],

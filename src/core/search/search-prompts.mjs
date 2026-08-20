@@ -15,7 +15,7 @@
 import { BOUNDED_AI_CODES, makeBoundedAIEnvelope, runBoundedAI } from "../ai/bounded-ai.mjs";
 import { candidateConfigGet, candidateConfigPatch } from "../db/verbs.mjs";
 
-export const SEARCH_PROMPTS_LABELS = Object.freeze({
+const SEARCH_PROMPTS_LABELS = Object.freeze({
   skill: "search-jobs",
   action: "generate-prompts",
   operation: "search:prompts",
@@ -30,7 +30,7 @@ const MANUAL_FALLBACK = Object.freeze({
 const MIN_PROMPTS = 2;
 const MAX_PROMPTS = 5;
 
-export const searchPromptsSchema = Object.freeze({
+const searchPromptsSchema = Object.freeze({
   type: "object",
   required: ["prompts"],
   additionalProperties: false,

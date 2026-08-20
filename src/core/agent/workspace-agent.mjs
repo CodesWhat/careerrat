@@ -230,7 +230,7 @@ function compactCandidateSnapshot({ repoRoot, env }) {
   };
 }
 
-export function buildWorkspaceAgentSystemPrompt({ repoRoot, env = process.env } = {}) {
+function buildWorkspaceAgentSystemPrompt({ repoRoot, env = process.env } = {}) {
   const snapshot = compactCandidateSnapshot({ repoRoot, env });
   return [
     "You are CareerRat, the one durable career-search workspace agent for this candidate.",
@@ -2174,7 +2174,7 @@ export function recordWorkspaceSearchCompletion({ repoRoot, env = process.env, r
   return workspaceThreadRead({ repoRoot, env });
 }
 
-export function recordWorkspaceSearchStart({
+function recordWorkspaceSearchStart({
   repoRoot,
   env = process.env,
   run,

@@ -27,7 +27,7 @@
 // so they unit-test cleanly; the fs touchpoints (load, atomic upsert) are thin and
 // isolated at the bottom — the same shape as learnings.mjs / research-store.mjs.
 
-import { existsSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { lintArtifact } from "../documents/placeholder-lint.mjs";
@@ -67,7 +67,7 @@ export const COMMON_COMPETENCIES = [
 // Paths + slug
 // ---------------------------------------------------------------------------
 
-export function storiesAbsPath(root = DEFAULT_ROOT) {
+function storiesAbsPath(root = DEFAULT_ROOT) {
   return userPath({ repoRoot: root }, STORIES_REL_PATH);
 }
 
@@ -371,14 +371,6 @@ export function computeStoryWrite({ newStory, currentStories = [], evidence = []
 // ---------------------------------------------------------------------------
 // fs touchpoints
 // ---------------------------------------------------------------------------
-
-export function readStoriesText(root = DEFAULT_ROOT) {
-  return readTextIfExists(storiesAbsPath(root));
-}
-
-export function storiesExist(root = DEFAULT_ROOT) {
-  return existsSync(storiesAbsPath(root));
-}
 
 // Atomically write the whole bank back to candidate/stories.yml (creating the
 // candidate/ dir on first write). Callers pass the validated, merged story set.

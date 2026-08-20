@@ -314,7 +314,7 @@ export function evaluateCompensation({ body, frontmatter, profile, bucket, track
  *
  * @returns {{ value: number, rationale: string } | null}
  */
-export function computeCompAnchor({ profile, bucket, comp }) {
+function computeCompAnchor({ profile, bucket, comp }) {
   const c = profile?.compensation ? profile.compensation : {};
   if (bucket && bucket.priority === "oe") {
     if (c.oe_max_base != null)
@@ -345,7 +345,7 @@ export function computeCompAnchor({ profile, bucket, comp }) {
  *
  * @returns {{ ok: boolean, reason: string }}
  */
-export function evaluateLocation({ body, frontmatter, profile }) {
+function evaluateLocation({ body, frontmatter, profile }) {
   const jdText = [
     String(frontmatter?.location ? frontmatter.location : ""),
     String(frontmatter?.mode ? frontmatter.mode : ""),

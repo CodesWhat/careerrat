@@ -126,7 +126,7 @@ function renderCapturedJob({ offer, savedAt }) {
     .join("\n");
 }
 
-export function captureSourcedOfferJob({ repoRoot, env, offer, savedAt = new Date() } = {}) {
+function captureSourcedOfferJob({ repoRoot, env, offer, savedAt = new Date() } = {}) {
   const pathCtx = { repoRoot, env };
   const relPath = jobCaptureRelPath(offer);
   const absPath = userPath(pathCtx, relPath);
@@ -183,7 +183,7 @@ export function sourcedRowsFromScanOffers(offers, nowIso = new Date().toISOStrin
   });
 }
 
-export function persistScanOffersIfDb({ repoRoot, env, offers, nowIso } = {}) {
+function persistScanOffersIfDb({ repoRoot, env, offers, nowIso } = {}) {
   if (!dbExists({ repoRoot, env })) return null;
   const rows = sourcedRowsFromScanOffers(offers, nowIso);
   if (rows.length === 0) return null;

@@ -122,7 +122,7 @@ export function sanitizeArtifactHtml(html) {
  * @param {string} text
  * @returns {string}
  */
-export function normalizeAtsText(text) {
+function normalizeAtsText(text) {
   return text
     .replace(/[—–]/g, "-") // em / en dash -> hyphen
     .replace(/[“”]/g, '"') // curly double quotes -> straight
@@ -434,7 +434,7 @@ function fontFaceCss() {
  *   brand copy keeps Geist.
  * @returns {string} Complete HTML document string
  */
-export function documentHtml(markdown, { title = "Document", ats = false } = {}) {
+function documentHtml(markdown, { title = "Document", ats = false } = {}) {
   const body = markdownToHtml(markdown);
   const fontFaces = ats ? "" : fontFaceCss();
   const hasGeist = fontFaces.includes("'Geist'");
@@ -800,7 +800,7 @@ export function detectDocxCapability() {
  * @param {{ markdown: string, outPath: string, title?: string }} opts
  * @returns {Promise<{ outPath: string, tool: string, label: string }>}
  */
-export async function renderDocx({ markdown, outPath, title = "Document" }) {
+async function renderDocx({ markdown, outPath, title = "Document" }) {
   const cap = detectDocxCapability();
 
   if (cap.tool === "pandoc") {
