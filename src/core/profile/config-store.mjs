@@ -98,7 +98,7 @@ function docFromDbConfig(config, name) {
   return config[name] || null;
 }
 
-export function loadLegacyCandidateDoc(name, { repoRoot, env, fallbackToTemplate }) {
+function loadLegacyCandidateDoc(name, { repoRoot, env, fallbackToTemplate }) {
   const spec = CANDIDATE_DOCS[name];
   if (!spec) {
     const err = new Error(`unknown candidate config "${name}"`);

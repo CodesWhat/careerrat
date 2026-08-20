@@ -14,7 +14,7 @@ export const DEEP_INGEST_TERMINAL_STATUSES = Object.freeze([
   "not_available",
 ]);
 
-export const DEEP_INGEST_NONTERMINAL_STATUSES = Object.freeze([
+const DEEP_INGEST_NONTERMINAL_STATUSES = Object.freeze([
   "not_started",
   "needs_source",
   "scanning",

@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import { userPath } from "../paths/workspace.mjs";
 import { INSTALLED_RUNTIME_DEFINITIONS } from "./installed-runtimes.mjs";
 
-export const INSTALLED_RUNTIME_SELECTION_RELPATH = ".internal/ai-runtime.json";
+const INSTALLED_RUNTIME_SELECTION_RELPATH = ".internal/ai-runtime.json";
 
 const ALLOWED_RUNTIME_IDS = new Set(INSTALLED_RUNTIME_DEFINITIONS.map(({ id }) => id));
 

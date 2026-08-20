@@ -48,10 +48,6 @@ export function parseTrackerHtml(html) {
   };
 }
 
-export function parseTrackerFile(path = "tracker.html") {
-  return parseTrackerHtml(readFileSync(path, "utf8"));
-}
-
 // Load the live tracker data from workspace/tracker.json (the source of truth the
 // dashboard renders from) and normalize it to the {apps, sourced} contract the
 // analysis/validation helpers expect (co/score field names from the legacy HTML
@@ -101,7 +97,7 @@ function loadTrackerDataSafe(jsonPath) {
   }
 }
 
-export function parseConstArray(sourceText, name) {
+function parseConstArray(sourceText, name) {
   const marker = `const ${name} = `;
   const start = sourceText.indexOf(marker);
   if (start === -1) throw new Error(`Could not find ${name} array`);
@@ -229,7 +225,7 @@ export function buildSeenSets(root = ".") {
   return { seenUrls, seenReqIds, seenCompanyRoles, tracker: data };
 }
 
-export function parseJobFrontmatters(jobsDir = "jobs") {
+function parseJobFrontmatters(jobsDir = "jobs") {
   let files = [];
   try {
     files = readdirSync(jobsDir).filter((file) => file.endsWith(".md") && file !== "README.md");
@@ -317,4 +313,4 @@ function extractLikelyReqId(rawUrl) {
   return null;
 }
 
-export { VALID_APP_STATUSES, VALID_CHANNELS, VALID_MODES };
+export { VALID_APP_STATUSES };

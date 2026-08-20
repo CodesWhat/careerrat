@@ -38,7 +38,7 @@ import { validate } from "../profile/schema-validator.mjs";
 const DEFAULT_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 
 // The feed lives at the workspace root — gitignored runtime data, never committed.
-export const ACTIVITY_SUBPATH = "workspace/activity.jsonl";
+const ACTIVITY_SUBPATH = "workspace/activity.jsonl";
 
 // The contract's closed vocabularies, exported so the renderer/tests stay in sync
 // with the schema instead of re-listing the enums.

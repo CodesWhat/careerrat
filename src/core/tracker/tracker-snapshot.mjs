@@ -21,7 +21,7 @@ import {
 import { join } from "node:path";
 import { userPath } from "../paths/workspace.mjs";
 
-export const SNAPSHOT_SUBDIR = "workspace/.snapshots";
+const SNAPSHOT_SUBDIR = "workspace/.snapshots";
 
 // Resolve the absolute path for a relative workspace subpath.
 function absPath(pathCtx, relPath) {

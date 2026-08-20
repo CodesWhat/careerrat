@@ -3,7 +3,7 @@ import { htmlToPlainText } from "../text/html-text.mjs";
 
 export const DEEP_INGEST_JSON_BODY_MAX_BYTES = 1024 * 1024;
 export const DEEP_INGEST_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
-export const DEEP_INGEST_SOURCE_TEXT_MAX_CHARS = 12000;
+const DEEP_INGEST_SOURCE_TEXT_MAX_CHARS = 12000;
 export const DEEP_INGEST_REPO_FILE_LIMIT = 12;
 export const DEEP_INGEST_REPO_MAX_BYTES = 128 * 1024;
 export const DEEP_INGEST_FETCH_TIMEOUT_MS = 12000;
@@ -20,7 +20,7 @@ export const DEEP_INGEST_TARGET_SHAPES = Object.freeze([
   "link",
 ]);
 
-export const DEEP_INGEST_SOURCE_KINDS = Object.freeze([
+const DEEP_INGEST_SOURCE_KINDS = Object.freeze([
   "paste",
   "text",
   "url",
@@ -35,7 +35,7 @@ export const DEEP_INGEST_SOURCE_KINDS = Object.freeze([
   "project_link",
 ]);
 
-export const TARGET_SHAPE_TO_LANE = Object.freeze({
+const TARGET_SHAPE_TO_LANE = Object.freeze({
   auto: "open_gaps",
   evidence: "evidence_claims",
   story: "story_bank",

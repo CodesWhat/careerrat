@@ -22,12 +22,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { userPath } from "../paths/workspace.mjs";
-import { formatErrors, validate } from "../profile/schema-validator.mjs";
+import { validate } from "../profile/schema-validator.mjs";
 
 const DEFAULT_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 
-export const AI_CONFIG_REL_PATH = "config/ai.json";
-export const AI_CONFIG_SCHEMA_PATH = "config/ai.schema.json";
+const AI_CONFIG_REL_PATH = "config/ai.json";
+const AI_CONFIG_SCHEMA_PATH = "config/ai.schema.json";
 
 // Shipped defaults — the last fallback tier in resolveModelConfig(), used
 // only when nothing else (explicit arg, env var, config/ai.json) sets a
@@ -39,7 +39,7 @@ export const DEFAULT_SMALL_FAST_MODEL = "claude-haiku-4-5";
 
 const EMPTY_CONFIG = Object.freeze({ model: null, smallFastModel: null });
 
-export function loadAiConfigSchema({ root = DEFAULT_ROOT } = {}) {
+function loadAiConfigSchema({ root = DEFAULT_ROOT } = {}) {
   return JSON.parse(readFileSync(join(root, AI_CONFIG_SCHEMA_PATH), "utf8"));
 }
 
@@ -106,5 +106,3 @@ export function resolveModelConfig({ root = DEFAULT_ROOT, env = process.env } = 
     smallFastModel: envSmallFastModel || fileConfig.smallFastModel || DEFAULT_SMALL_FAST_MODEL,
   };
 }
-
-export { formatErrors };

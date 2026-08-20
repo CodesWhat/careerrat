@@ -376,7 +376,7 @@ export function buildInstalledRuntimeInvocation({
   throw error;
 }
 
-export function sanitizeInstalledOutputSchema(value) {
+function sanitizeInstalledOutputSchema(value) {
   if (Array.isArray(value)) return value.map((entry) => sanitizeInstalledOutputSchema(entry));
   if (!value || typeof value !== "object") return value;
   return Object.fromEntries(
@@ -386,7 +386,7 @@ export function sanitizeInstalledOutputSchema(value) {
   );
 }
 
-export function sanitizeCodexOutputSchema(value) {
+function sanitizeCodexOutputSchema(value) {
   if (Array.isArray(value)) return value.map((entry) => sanitizeCodexOutputSchema(entry));
   if (!value || typeof value !== "object") return value;
   const sanitized = Object.fromEntries(

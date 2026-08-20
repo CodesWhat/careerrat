@@ -19,10 +19,10 @@ const DEFAULT_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 
 export const MODES_REL_PATH = "candidate/modes.yml";
 export const MODES_TEMPLATE_PATH = "templates/modes.example.yml";
-export const MODES_SCHEMA_PATH = "config/modes.schema.json";
+const MODES_SCHEMA_PATH = "config/modes.schema.json";
 
-export const USAGE_MODES = ["lean", "standard", "full"];
-export const APPLICATION_MODES = ["selective", "balanced", "high-volume"];
+const USAGE_MODES = ["lean", "standard", "full"];
+const APPLICATION_MODES = ["selective", "balanced", "high-volume"];
 
 export const DEFAULT_MODES = Object.freeze({
   usage_mode: "standard",
@@ -59,7 +59,7 @@ export const USAGE_OPERATIONS = {
   "agent:fanout": { lean: "downshift", standard: "run", full: "run" },
 };
 
-export const APPLICATION_MODE_POLICY = {
+const APPLICATION_MODE_POLICY = {
   selective: {
     scannerLikelyKeepMin: 88,
     reviewMediumBodyReadFits: true,
@@ -158,7 +158,7 @@ export function computeAllows(operation, modes = {}) {
   };
 }
 
-export function applicationPolicy(modes = {}) {
+function applicationPolicy(modes = {}) {
   const normalized = normalizeModes(modes);
   return (
     APPLICATION_MODE_POLICY[normalized.data.application_mode] || APPLICATION_MODE_POLICY.balanced

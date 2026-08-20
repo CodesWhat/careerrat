@@ -10,7 +10,7 @@
  */
 
 /** Default maximum number of app-nudge follow-ups per application row. */
-export const APP_NUDGE_MAX_COUNT_DEFAULT = 2;
+const APP_NUDGE_MAX_COUNT_DEFAULT = 2;
 
 /**
  * Domain-neutral default rules, one block per follow-up kind:
@@ -348,44 +348,4 @@ export function computeFollowUps(trackerData, { now, rules } = {}) {
   results.sort((a, b) => b.overdueDays - a.overdueDays);
 
   return results;
-}
-
-/**
- * Compute the ISO date string for when the next follow-up nudge is due for an
- * item. Respects the same per-kind rules (and their thresholds) as
- * {@link computeFollowUps}; returns null when no enabled rule applies.
- *
- * @param {object} item  - application or communication object
- * @param {{ now: Date|string, rules?: object }} opts
- * @returns {string|null}  ISO string, or null if indeterminate
- */
-export function nextFollowUpDate(item, { now, rules } = {}) {
-  const nowDate = toDate(now);
-  if (!nowDate) return null;
-
-  const r = normalizeRules(rules);
-
-  // Communication with an explicit nextActionDue.
-  if (r.commDue.enabled && item.nextActionDue) {
-    const d = toDate(item.nextActionDue);
-    if (d) return d.toISOString();
-  }
-
-  // Communication: waiting stale.
-  if (r.waitingStale.enabled && item.status === "waiting" && item.lastOutboundAt) {
-    const out = toDate(item.lastOutboundAt);
-    if (out) {
-      return new Date(out.getTime() + r.waitingStale.afterDays * 86400000).toISOString();
-    }
-  }
-
-  // Application nudge.
-  if (r.appNudge.enabled && item.appliedAt) {
-    const applied = toDate(item.appliedAt);
-    if (applied) {
-      return new Date(applied.getTime() + r.appNudge.afterDays * 86400000).toISOString();
-    }
-  }
-
-  return null;
 }

@@ -4,7 +4,7 @@ import { validate } from "../../profile/schema-validator.mjs";
 import { validateDeepIngestGrounding } from "../validators/grounding.mjs";
 import { validateDeepIngestPrivacy } from "../validators/privacy.mjs";
 
-export const DEEP_INGEST_PROPOSAL_LANES = Object.freeze([
+const DEEP_INGEST_PROPOSAL_LANES = Object.freeze([
   "evidence",
   "story",
   "honesty",
@@ -13,7 +13,7 @@ export const DEEP_INGEST_PROPOSAL_LANES = Object.freeze([
   "gap",
 ]);
 
-export const DEEP_INGEST_PROPOSAL_STATUSES = Object.freeze([
+const DEEP_INGEST_PROPOSAL_STATUSES = Object.freeze([
   "review_needed",
   "manual_fallback",
   "gap",
@@ -24,7 +24,7 @@ export const DEEP_INGEST_PROPOSAL_STATUSES = Object.freeze([
   "not_available",
 ]);
 
-export const deepIngestProposalRowSchema = Object.freeze({
+const deepIngestProposalRowSchema = Object.freeze({
   type: "object",
   required: ["lane", "sourceId", "status", "confidence", "payload", "validation"],
   additionalProperties: false,
@@ -145,7 +145,7 @@ const deepIngestNativeProposalRowSchema = Object.freeze({
   }),
 });
 
-export const deepIngestProposalOutputSchema = Object.freeze({
+const deepIngestProposalOutputSchema = Object.freeze({
   type: "object",
   required: ["proposals", "gaps"],
   additionalProperties: false,

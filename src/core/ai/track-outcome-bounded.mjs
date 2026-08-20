@@ -38,7 +38,7 @@ export const TRACK_OUTCOME_STATUSES = Object.freeze([
   "withdrawn",
 ]);
 
-export const trackOutcomeOutputSchema = Object.freeze({
+const trackOutcomeOutputSchema = Object.freeze({
   type: "object",
   required: ["status", "nextAction", "nextActionDue", "note"],
   additionalProperties: false,
@@ -104,7 +104,7 @@ function systemPrompt() {
   ].join(" ");
 }
 
-export function buildTrackOutcomeMessages({ pastedText, app }) {
+function buildTrackOutcomeMessages({ pastedText, app }) {
   return [
     {
       role: "user",
