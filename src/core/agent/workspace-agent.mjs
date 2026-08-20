@@ -3148,6 +3148,13 @@ export async function executeWorkspaceIntent({
     }
 
     if (normalized.type === "research.company") {
+      // Entity shape has drifted across callers over time: the deleted api.js
+      // researchCompany() wrapper always sent a workspace entity
+      // ({type: "workspace"}), while the live free-text classifier (below,
+      // around line 7068) sends {type: "company", id: slugifyCompany(...)}.
+      // This handler ignores entity.type, so nothing breaks today, but
+      // company.proposal-decide (a sibling intent) does branch on entity
+      // type via BAD_INTENT_ENTITY, so don't assume that stays true here.
       const company = String(input.company || "").trim();
       if (!company) {
         throw actionError("Name the company CareerRat should research.", "COMPANY_NOT_FOUND");
