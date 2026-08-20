@@ -15,6 +15,7 @@ import {
   findAdvanceButtonRef,
   hostnameToPortal,
   isEasyApply,
+  isSsoOrAccountLabel,
   submitGuard,
 } from "./form-fill.mjs";
 
@@ -221,6 +222,23 @@ function browserInterventionBlockers(snapshot) {
   ) {
     blockers.push("account creation or password entry");
   }
+  // findAdvanceButtonRef already refuses to click a social-login/sign-in
+  // control as an "advance" (isSsoOrAccountLabel), which stops the loop from
+  // wandering onto a third-party auth page. That alone leaves a page whose
+  // only actionable control IS one of these reporting a generic "nothing to
+  // advance" result, which hides the real reason from the human. Surfacing
+  // it here instead gives the honest halt AGENTS.md's browser-automation
+  // contract already promises for login/2FA/provider-ambiguity prompts, the
+  // same way the password/account-creation field check above does for a
+  // native (non-SSO) account gate.
+  const refs = snapshot?.refs && typeof snapshot.refs === "object" ? snapshot.refs : {};
+  const hasSsoControl = Object.values(refs).some(
+    (entry) =>
+      String(entry?.role || "").toLowerCase() === "button" && isSsoOrAccountLabel(entry?.name)
+  );
+  if (hasSsoControl) {
+    blockers.push("third-party or account sign-in");
+  }
   return [...new Set(blockers)];
 }
 
@@ -394,7 +412,7 @@ async function fillStep({
   return { blocked: false, guard, filledCount, uploadedCount, unresolved, finalSnapshot };
 }
 
-// ref count + sorted label set — cheap fingerprint to detect a modal that
+// ref count + sorted label set: cheap fingerprint to detect a modal that
 // didn't actually advance after an "advance" click was sent.
 function snapshotFingerprint(snapshot) {
   const refs = snapshot?.refs || {};
@@ -405,8 +423,40 @@ function snapshotFingerprint(snapshot) {
   return `${Object.keys(refs).length}:${labels.join("|")}`;
 }
 
+// Parses just the hostname out of a snapshot's origin, defensively: origin
+// can be undefined, empty, or not a URL at all (a stub ops implementation in
+// tests, a browser surfacing something unexpected), and new URL() throws on
+// any of those. Returns null rather than throwing so the cross-origin check
+// below can fall through to the existing fingerprint-based behavior instead
+// of blocking, or letting a throw escape the loop, on a parse failure it
+// cannot interpret. Hostname, not the full origin string: path and query
+// change constantly within one legitimate flow, so comparing anything wider
+// than the host would block every normal advance, not just a wrong one.
+function safeHostname(origin) {
+  try {
+    return new URL(String(origin || "")).hostname || null;
+  } catch {
+    return null;
+  }
+}
+
 function easyApplyStepKey(stepIndex) {
   return EASY_APPLY_STEPS[stepIndex - 1]?.key ?? null;
+}
+
+// Cosmetic session fields the multi-step loop attaches once it has actually
+// advanced past the first page (stepIndex > 1). A single-page ATS form (no
+// advance button ever found) never sets these, matching the pre-generalization
+// shape that callers (AskBar/JobDrawer) already treat as "not a stepped flow".
+// stepKey is LinkedIn Easy Apply's own named-section vocabulary (contact →
+// resume → work_auth → ...); it's only meaningful when the flow IS Easy Apply.
+// A generic paginated ATS (Workday, SmartRecruiters' stepped wizard, or any
+// other multi-page form) still gets a numeric stepIndex (genuinely portal-
+// agnostic) but always reports stepKey: null rather than borrowing LinkedIn's
+// section names for a page they don't actually describe.
+function stepSessionFields(stepIndex, easyApply) {
+  if (stepIndex <= 1) return {};
+  return { stepIndex, stepKey: easyApply ? easyApplyStepKey(stepIndex) : null };
 }
 
 // Shared by the entry-point confirmation check and the Easy Apply loop's
@@ -458,7 +508,7 @@ export function createApplyDriver({
   loadAnswerMapImpl = loadAnswerMap,
   mayRunImpl = mayRun,
   saveScreenshotImpl = screenshotPath,
-  maxEasyApplySteps = 10,
+  maxFormSteps = 10,
 } = {}) {
   const sessions = new Map();
 
@@ -554,94 +604,33 @@ export function createApplyDriver({
       };
     }
 
-    if (!easyApply) {
-      const fields = renderedFieldsFromSnapshot(snapshot);
-      if (questionCapture?.state !== "captured" && fields.length) {
-        const captured = await captureQuestionsImpl({
-          repoRoot,
-          env,
-          applicationId,
-          source: "rendered",
-          url: snapshot.origin || url,
-          questions: fields,
-        });
-        return {
-          available: true,
-          verified: false,
-          state: "questions-captured",
-          questionCaptureUpdated: true,
-          session: {
-            provider: providerLabel,
-            answerableCount: captured.questions?.length || 0,
-            excludedCount: captured.excluded?.length || 0,
-            demographicSectionPresent: captured.demographicSectionPresent === true,
-          },
-        };
-      }
-
-      const result = await fillStep({
-        ops,
-        pageId,
-        snapshot,
-        application,
-        url,
-        repoRoot,
-        env,
-        candidateConfigGetImpl,
-        loadAnswerMapImpl,
-      });
-      if (result.blocked) {
-        return {
-          available: true,
-          verified: false,
-          state: "blocked",
-          reason: `Stopped on ${result.blockers.join(", ")}.`,
-          currentUrl: snapshot.origin || url,
-          session: {
-            provider: providerLabel,
-            filledCount: 0,
-            uploadedCount: 0,
-            unresolved: [],
-            blockers: result.blockers,
-            submitMode: result.mode,
-          },
-        };
-      }
-      const { guard, filledCount, uploadedCount, unresolved, finalSnapshot } = result;
-      return {
-        available: true,
-        verified: false,
-        state: guard.blockers.length ? "blocked" : "awaiting-submit",
-        reason: guard.blockers.length
-          ? `Stopped on ${guard.blockers.join(", ")}.`
-          : "Review the live form and submit it in the supervised browser, then ask CareerRat to verify it.",
-        currentUrl: finalSnapshot.origin || snapshot.origin || url,
-        session: {
-          provider: providerLabel,
-          filledCount,
-          uploadedCount,
-          unresolved,
-          blockers: guard.blockers,
-          submitMode: guard.mode,
-        },
-      };
-    }
-
-    // ----- LinkedIn Easy Apply: multi-step modal advancement -----
+    // ----- Multi-step form advancement -----
+    // Not LinkedIn-specific: LinkedIn Easy Apply's paginated modal was the
+    // first shape this handled, but Workday-style multi-page wizards and
+    // stepped ATS forms (SmartRecruiters' recipe note calls out its own
+    // "resume upload is a distinct step") hit the exact same problem: fill
+    // one page, confirm the page actually moved, repeat. Rather than a
+    // parallel LinkedIn-only loop plus a single-shot path for everyone else,
+    // one loop runs for every provider. A single-page ATS form falls out of
+    // it naturally: findAdvanceButtonRef finds no advance button on its only
+    // page, so the loop exits after one iteration exactly like the old
+    // single-page path did. `easyApply` (URL-gated, checked above for the
+    // one_click_apply consent gate) only still matters for cosmetic step
+    // naming. See stepSessionFields.
     let stepIndex = 0;
-    // Sums fillStep's per-call counts across every modal step in this run —
+    // Sums fillStep's per-call counts across every page in this run:
     // AskBar/JobDrawer/workspace-agent render these as run totals, not the
     // final step's count alone.
     let totalFilledCount = 0;
     let totalUploadedCount = 0;
     for (;;) {
       stepIndex += 1;
-      if (stepIndex > maxEasyApplySteps) {
+      if (stepIndex > maxFormSteps) {
         return {
           available: true,
           verified: false,
           state: "blocked",
-          reason: `The application has more steps than CareerRat will advance automatically (limit ${maxEasyApplySteps}).`,
+          reason: `The application has more steps than CareerRat will advance automatically (limit ${maxFormSteps}).`,
           currentUrl: snapshot.origin || url,
           session: {
             provider: providerLabel,
@@ -671,8 +660,7 @@ export function createApplyDriver({
             unresolved: [],
             blockers: stepBlockers,
             submitMode: "manual",
-            stepIndex,
-            stepKey: easyApplyStepKey(stepIndex),
+            ...stepSessionFields(stepIndex, easyApply),
           },
         };
       }
@@ -697,8 +685,7 @@ export function createApplyDriver({
             answerableCount: captured.questions?.length || 0,
             excludedCount: captured.excluded?.length || 0,
             demographicSectionPresent: captured.demographicSectionPresent === true,
-            stepIndex,
-            stepKey: easyApplyStepKey(stepIndex),
+            ...stepSessionFields(stepIndex, easyApply),
           },
         };
       }
@@ -730,8 +717,7 @@ export function createApplyDriver({
             unresolved: [],
             blockers: result.blockers,
             submitMode: result.mode,
-            stepIndex,
-            stepKey: easyApplyStepKey(stepIndex),
+            ...stepSessionFields(stepIndex, easyApply),
           },
         };
       }
@@ -753,12 +739,15 @@ export function createApplyDriver({
             unresolved,
             blockers: guard.blockers,
             submitMode: guard.mode,
-            stepIndex,
-            stepKey: easyApplyStepKey(stepIndex),
+            ...stepSessionFields(stepIndex, easyApply),
           },
         };
       }
 
+      // A step that adds required fields with no resolvable answer (a
+      // page-specific question the profile/honesty/form-defaults context
+      // can't answer) is a NEEDS YOU handoff, never a guess: block here,
+      // naming the fields, rather than clicking advance past them.
       if (requiredUnresolved.length) {
         return {
           available: true,
@@ -775,8 +764,7 @@ export function createApplyDriver({
             unresolved,
             blockers: [],
             submitMode: guard.mode,
-            stepIndex,
-            stepKey: easyApplyStepKey(stepIndex),
+            ...stepSessionFields(stepIndex, easyApply),
           },
         };
       }
@@ -785,7 +773,11 @@ export function createApplyDriver({
       // acting, same as every field/upload action in fillStep — finalSnapshot
       // can be stale by the time a step's fill pass finishes, and clicking a
       // ref resolved against a stale snapshot is the exact hazard the
-      // submit/advance disqualification guard exists to avoid.
+      // submit/advance disqualification guard exists to avoid. Absence of an
+      // advance button is itself meaningful, not just "not this shape yet":
+      // a flow that ends on a review page with no further Next/Continue
+      // control (only a disqualified Submit-flavored one, or none at all)
+      // stops here awaiting-submit, same as a genuinely single-page form.
       const preAdvanceSnapshot = await ops.snapshot({ pageId });
       const advanceRef = findAdvanceButtonRef(preAdvanceSnapshot);
       if (!advanceRef) {
@@ -803,8 +795,7 @@ export function createApplyDriver({
             unresolved,
             blockers: guard.blockers,
             submitMode: guard.mode,
-            stepIndex,
-            stepKey: easyApplyStepKey(stepIndex),
+            ...stepSessionFields(stepIndex, easyApply),
           },
         };
       }
@@ -814,9 +805,9 @@ export function createApplyDriver({
       await ops.clickButton({ pageId, ref: advanceRef });
       const nextSnapshot = await ops.snapshot({ pageId });
 
-      // A click meant to advance the modal can land on a confirmation page
+      // A click meant to advance the page can land on a confirmation page
       // directly (the driver's click-safety fixes make this unexpected, not
-      // impossible) — report reality instead of treating it as a stalled step.
+      // impossible): report reality instead of treating it as a stalled step.
       const postAdvanceConfirmation = confirmationCheck({
         pageText: nextSnapshot.pageText,
         currentUrl: nextSnapshot.origin,
@@ -835,6 +826,59 @@ export function createApplyDriver({
         });
       }
 
+      // Label matching cannot see where a click actually lands. "Continue" is
+      // legitimate wizard vocabulary, but it is also what "Continue browsing
+      // jobs", a consent wall, an interstitial, or an ATS-hosted redirect
+      // says, and none of those advance the application: they leave it. The
+      // fingerprint check below only proves the page changed, and a
+      // navigation off the application changes the fingerprint too, so it
+      // cannot tell a real advance from a wrong destination. This check
+      // can: if the click moved the browser to a different hostname, stop
+      // before ever filling anything there, naming both hosts so the human
+      // can see where it went and decide. Ordered after the confirmation
+      // check on purpose: a legitimate submit-and-confirm can land on a
+      // different host too (an embedded Greenhouse form completing on
+      // boards.greenhouse.io, for one), and confirmationCheck already handles
+      // that path with a screenshot and a verified response, so it gets first
+      // look. This check is the fallback for every other cross-origin
+      // landing, and it deliberately over-blocks: a legitimate same-
+      // application handoff to a new host reads the same as a wrong one from
+      // here, so it stops either way and leaves the rest to the human, same
+      // bias as browserInterventionBlockers' own SSO handling. A false
+      // positive costs one manual step; a false negative is automated
+      // form-filling on a page nobody vetted, which is the worse outcome.
+      const beforeHost = safeHostname(preAdvanceSnapshot.origin);
+      const afterHost = safeHostname(nextSnapshot.origin);
+      if (beforeHost && afterHost && beforeHost !== afterHost) {
+        return {
+          available: true,
+          verified: false,
+          state: "blocked",
+          reason: `Clicking "${advanceLabel}" left the application: it moved from ${beforeHost} to ${afterHost}.`,
+          currentUrl: nextSnapshot.origin || preAdvanceSnapshot.origin || url,
+          session: {
+            provider: providerLabel,
+            filledCount: totalFilledCount,
+            uploadedCount: totalUploadedCount,
+            unresolved,
+            blockers: [],
+            submitMode: guard.mode,
+            ...stepSessionFields(stepIndex, easyApply),
+          },
+        };
+      }
+
+      // The advance-confirmation problem this guards against: a click that
+      // resolves without error is not evidence of anything by itself: a
+      // validation-rejected step or a page that merely re-renders its own
+      // state looks identical from the outside unless something the PAGE did
+      // changed underneath it. Same discipline as playwright-ops.mjs's
+      // requireDisplayChange (a control's own display value, not the value
+      // this code just typed into it): here the fingerprint is built from the
+      // refs/labels the page rendered, never from anything the fill pass
+      // itself wrote: an unchanged fingerprint means the page didn't move,
+      // whether that's a validation failure or a no-op click, so this blocks
+      // instead of looping forever or reporting a false advance.
       const fingerprintAfter = snapshotFingerprint(nextSnapshot);
       if (fingerprintBefore === fingerprintAfter) {
         return {
@@ -850,8 +894,7 @@ export function createApplyDriver({
             unresolved,
             blockers: [],
             submitMode: guard.mode,
-            stepIndex,
-            stepKey: easyApplyStepKey(stepIndex),
+            ...stepSessionFields(stepIndex, easyApply),
           },
         };
       }

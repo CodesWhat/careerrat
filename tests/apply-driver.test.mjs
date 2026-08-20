@@ -6,6 +6,7 @@ import { EASY_APPLY_STEPS, findAdvanceButtonRef } from "../src/core/apply/form-f
 
 const GREENHOUSE_URL = "https://job-boards.greenhouse.io/example/jobs/123";
 const EASY_APPLY_URL = "https://www.linkedin.com/jobs/view/4123456789/?easyApplyModal=true";
+const WORKDAY_URL = "https://acme.wd5.myworkdayjobs.com/en-US/External/job/req-123";
 
 const CONFIG = {
   profile: { candidate: { full_name: "Sam Rivera", phone: "555-0100" } },
@@ -62,7 +63,7 @@ function createFakeOps(steps) {
   };
 }
 
-function makeDriver({ ops, maxEasyApplySteps, captureQuestionsImpl, saveScreenshotImpl } = {}) {
+function makeDriver({ ops, maxFormSteps, captureQuestionsImpl, saveScreenshotImpl } = {}) {
   return createApplyDriver({
     ops,
     providerLabel: "orca",
@@ -79,7 +80,7 @@ function makeDriver({ ops, maxEasyApplySteps, captureQuestionsImpl, saveScreensh
         demographicSectionPresent: false,
       })),
     saveScreenshotImpl: saveScreenshotImpl ?? (() => "workspace/captures/fake-confirmation.png"),
-    maxEasyApplySteps,
+    maxFormSteps,
   });
 }
 
@@ -241,6 +242,59 @@ test("adversarial submit-label variant: 'Review and submit' is disqualified even
     log.some((entry) => entry.op === "clickButton"),
     false,
     "the only advance-vocabulary button on the page is submit-flavored, so nothing was clicked"
+  );
+});
+
+test("SSO/social-login and bare sign-in controls are never returned as an advance button, even though 'continue'/'sign in' read as advance-ish vocabulary", () => {
+  // Direction 1 of the coordinator's SSO-click-risk fix: the loop now calls
+  // findAdvanceButtonRef unconditionally for every provider (previously
+  // LinkedIn Easy Apply only), which means a single-page Greenhouse/Ashby/
+  // Lever form's own "Continue with LinkedIn" / "Sign in with Google" control
+  // is now visible to it too. None of these may ever be treated as a page
+  // advance: that would drive the browser onto a real third-party auth page.
+  const ssoOrAccountLabels = [
+    "Continue with LinkedIn",
+    "Sign in with Google",
+    "Sign up with Facebook",
+    "Log in with Apple",
+    "Register with Okta",
+    "Sign In",
+    "Sign Up",
+    "Log In",
+    "Register",
+  ];
+  for (const label of ssoOrAccountLabels) {
+    assert.equal(
+      findAdvanceButtonRef({ refs: refsOf([["e1", "button", label, false]]) }),
+      null,
+      `"${label}" must never be treated as an advance button`
+    );
+  }
+});
+
+test("'Continue with your application' is not caught by the SSO guard: the provider-name match is specific, not the bare preposition", () => {
+  // Direction 2: the fix the coordinator flagged as wrong (disqualifying on
+  // "continue with" alone) would have broken this real advance label just
+  // because it shares a preposition with a real SSO button. The guard must
+  // match on a KNOWN PROVIDER NAME after the preposition, not the preposition
+  // itself.
+  assert.equal(
+    findAdvanceButtonRef({
+      refs: refsOf([["e1", "button", "Continue with your application", false]]),
+    }),
+    "e1"
+  );
+});
+
+test("a page mixing a legit advance button with an SSO control picks the legit one, never the SSO one", () => {
+  assert.equal(
+    findAdvanceButtonRef({
+      refs: refsOf([
+        ["e1", "button", "Continue with LinkedIn", false],
+        ["e2", "button", "Next", false],
+      ]),
+    }),
+    "e2"
   );
 });
 
@@ -416,7 +470,7 @@ test("stall guard: unchanged snapshot fingerprint after the advance click blocks
   assert.equal(log.filter((entry) => entry.op === "clickButton").length, 1, "no retry loop");
 });
 
-test("step cap: more steps than maxEasyApplySteps blocks and the cap is respected", async () => {
+test("step cap: more steps than maxFormSteps blocks and the cap is respected", async () => {
   const stepP = {
     origin: EASY_APPLY_URL,
     pageText: "P",
@@ -428,7 +482,7 @@ test("step cap: more steps than maxEasyApplySteps blocks and the cap is respecte
     refs: refsOf([["eQ", "button", "Continue", false]]),
   };
   const { ops } = createFakeOps([stepP, stepQ]);
-  const execute = makeDriver({ ops, maxEasyApplySteps: 3 });
+  const execute = makeDriver({ ops, maxFormSteps: 3 });
 
   const result = await execute({
     applicationId: "app-cap",
@@ -535,7 +589,7 @@ test("step cap after real fills reports cumulative counts, not zero", async () =
     ]),
   };
   const { ops } = createFakeOps([stepOne, stepTwo]);
-  const execute = makeDriver({ ops, maxEasyApplySteps: 2 });
+  const execute = makeDriver({ ops, maxFormSteps: 2 });
 
   const result = await execute({
     applicationId: "app-cap-counts",
@@ -604,5 +658,417 @@ test("a dead cached tab is dropped and reopened instead of poisoning every later
   assert.ok(
     log.some((entry) => entry.op === "snapshot" && entry.pageId === "page-2"),
     "the retry ran against the fresh tab"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Generalized multi-step advancement: the loop above is no longer gated to
+// LinkedIn Easy Apply by URL. These fixtures drive it over a plain
+// job-boards.greenhouse.io host and a myworkdayjobs.com host to prove the
+// mechanism (advance-button detection, real-advance verification via
+// snapshotFingerprint, and the NEEDS-YOU required-field gate) is genuinely
+// portal-agnostic, not a second LinkedIn-only code path wearing a different
+// hostname.
+// ---------------------------------------------------------------------------
+
+test("generic (non-LinkedIn) multi-step ATS: advances across pages exactly like Easy Apply, ending awaiting-submit with a numeric stepIndex but no LinkedIn stepKey", async () => {
+  const pageOne = {
+    origin: GREENHOUSE_URL,
+    pageText: "Basic info",
+    refs: refsOf([
+      ["e1", "textbox", "First Name", true],
+      ["e2", "button", "Next", false],
+    ]),
+  };
+  const pageTwo = {
+    origin: `${GREENHOUSE_URL}?step=2`,
+    pageText: "Review your application",
+    refs: refsOf([
+      ["e3", "textbox", "Phone Number", false],
+      ["e4", "button", "Submit application", false],
+    ]),
+  };
+  const { ops, log } = createFakeOps([pageOne, pageTwo]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-generic-multistep",
+    application: { id: "app-generic-multistep" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  });
+
+  assert.equal(result.state, "awaiting-submit");
+  assert.equal(
+    result.session.filledCount,
+    2,
+    "sums page one's First Name and page two's Phone Number, not just the final page"
+  );
+  assert.equal(result.session.stepIndex, 2, "stepIndex is portal-agnostic: it advanced once");
+  assert.equal(
+    result.session.stepKey,
+    null,
+    "stepKey is LinkedIn Easy Apply's own section vocabulary; a generic ATS never borrows it"
+  );
+  assert.deepEqual(
+    log.filter((entry) => entry.op === "clickButton"),
+    [{ op: "clickButton", pageId: "page-1", ref: "e2" }],
+    "only the legit Next ref is clicked: Submit application is disqualified same as on LinkedIn"
+  );
+});
+
+test("generic multi-step ATS: a page that fails validation and doesn't advance blocks via the fingerprint stall guard, same as Easy Apply", async () => {
+  const stepA = {
+    origin: GREENHOUSE_URL,
+    pageText: "Basic info",
+    refs: refsOf([
+      ["e1", "textbox", "Notes", false],
+      ["e2", "button", "Continue", false],
+    ]),
+  };
+  // A re-render of the SAME page after a rejected click (validation failure,
+  // or a plain no-op), different refs but the same fingerprint-relevant
+  // shape (one textbox, one button) would still be a genuine stall; here the
+  // fixture reuses the exact ref set to make the "nothing actually changed"
+  // case unambiguous.
+  const stepAAgain = {
+    origin: GREENHOUSE_URL,
+    pageText: "Basic info (unchanged)",
+    refs: refsOf([
+      ["e1", "textbox", "Notes", false],
+      ["e2", "button", "Continue", false],
+    ]),
+  };
+  const { ops, log } = createFakeOps([stepA, stepAAgain]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-generic-stall",
+    application: { id: "app-generic-stall" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.match(result.reason, /did not advance after clicking "Continue"/);
+  assert.equal(
+    log.filter((entry) => entry.op === "clickButton").length,
+    1,
+    "no retry loop: the stall guard isn't LinkedIn-specific, it fires on the fingerprint alone"
+  );
+});
+
+test("generic multi-step ATS: a page-specific required field with no resolvable answer is a NEEDS YOU handoff, not a guessed advance", async () => {
+  const pageOne = {
+    origin: GREENHOUSE_URL,
+    pageText: "Custom screening",
+    refs: refsOf([
+      ["e1", "textbox", "Describe a time you debugged a distributed system at 3am", true],
+      ["e2", "button", "Next", false],
+    ]),
+  };
+  const { ops, log } = createFakeOps([pageOne]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-generic-unresolved",
+    application: { id: "app-generic-unresolved" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.match(result.reason, /Describe a time you debugged a distributed system at 3am/);
+  assert.deepEqual(result.session.unresolved, [
+    {
+      label: "Describe a time you debugged a distributed system at 3am",
+      required: true,
+    },
+  ]);
+  assert.equal(
+    log.some((entry) => entry.op === "clickButton"),
+    false,
+    "Next is never clicked past a blank required field, even off LinkedIn"
+  );
+});
+
+test("generic multi-step ATS: a review-page ending with only a disqualified Submit control reaches awaiting-submit instead of looping or guessing a click", async () => {
+  const pageOne = {
+    origin: WORKDAY_URL,
+    pageText: "Contact information",
+    refs: refsOf([
+      ["e1", "textbox", "First Name", true],
+      ["e2", "button", "Next", false],
+    ]),
+  };
+  const reviewPage = {
+    origin: `${WORKDAY_URL}?step=review`,
+    pageText: "Review your application before submitting",
+    refs: refsOf([["e3", "button", "Submit", false]]),
+  };
+  const { ops, log } = createFakeOps([pageOne, reviewPage]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-workday-review",
+    application: { id: "app-workday-review" },
+    postingUrl: WORKDAY_URL,
+    questionCapture: { state: "captured" },
+  });
+
+  assert.equal(result.state, "awaiting-submit");
+  assert.equal(result.session.stepIndex, 2);
+  assert.deepEqual(
+    log.filter((entry) => entry.op === "clickButton"),
+    [{ op: "clickButton", pageId: "page-1", ref: "e2" }],
+    "the review page's own Submit is disqualified vocabulary, never clicked"
+  );
+});
+
+test("Workday-shaped multi-step flow: the account-creation blocker fires on whichever page introduces it, not just the entry page", async () => {
+  const landingPage = {
+    origin: WORKDAY_URL,
+    pageText: "Get started",
+    refs: refsOf([["e1", "button", "Next", false]]),
+  };
+  const accountPage = {
+    origin: `${WORKDAY_URL}?step=account`,
+    pageText: "Create your candidate account",
+    refs: refsOf([
+      ["e2", "textbox", "Email", true],
+      ["e3", "textbox", "Password", true],
+      ["e4", "button", "Create Account", false],
+    ]),
+  };
+  const { ops, log } = createFakeOps([landingPage, accountPage]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-workday-account",
+    application: { id: "app-workday-account" },
+    postingUrl: WORKDAY_URL,
+    questionCapture: { state: "captured" },
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.match(result.reason, /account creation or password entry/);
+  assert.equal(
+    log.filter((entry) => entry.op === "fillField").length,
+    0,
+    "the account page's fields are never filled: the blocker fires before fillStep runs for that page"
+  );
+  assert.equal(
+    log.filter((entry) => entry.op === "clickButton").length,
+    1,
+    "only the first page's Next was ever clicked; nothing on the account page was"
+  );
+});
+
+test("a single-page ATS form with a social-login control blocks with an honest sign-in reason instead of clicking through to a third-party auth page", async () => {
+  // The exact risk the generalized loop introduced: this GREENHOUSE_URL page
+  // has both a fillable field and a "Continue with LinkedIn" control. Before
+  // the SSO guard, findAdvanceButtonRef would have matched "continue" and the
+  // loop would have clicked through to thirdPartyAuthPage and started trying
+  // to fill a real identity provider's page. Two independent fixture pages
+  // (rather than one reused snapshot) are used specifically so a regression
+  // that DID click through would show up as a genuine page-2 fill attempt,
+  // not just a fingerprint-stall false pass.
+  const formPage = {
+    origin: GREENHOUSE_URL,
+    pageText: "Apply to this role",
+    refs: refsOf([
+      ["e1", "textbox", "First Name", true],
+      ["e2", "button", "Continue with LinkedIn", false],
+    ]),
+  };
+  const thirdPartyAuthPage = {
+    origin: "https://www.linkedin.com/oauth/authorize?client_id=example",
+    pageText: "Sign in to LinkedIn",
+    refs: refsOf([]),
+  };
+  const { ops, log } = createFakeOps([formPage, thirdPartyAuthPage]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-sso-risk",
+    application: { id: "app-sso-risk" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.match(result.reason, /third-party or account sign-in/);
+  assert.equal(result.currentUrl, GREENHOUSE_URL, "never navigated to the third-party auth page");
+  assert.equal(
+    log.some((entry) => entry.op === "clickButton"),
+    false,
+    "the SSO control is never clicked"
+  );
+  assert.equal(
+    log.some((entry) => entry.op === "fillField"),
+    false,
+    "the flow halts before even attempting to fill First Name: same over-blocking bias as the password/account-creation field gate"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Cross-origin advance detection: label matching cannot see where a click
+// actually lands. "Continue" is legitimate wizard vocabulary, but it is also
+// what "Continue browsing jobs", a consent wall, or an unrelated redirect
+// says, and the fingerprint check alone cannot tell that apart from a real
+// advance, since a navigation off the application changes the fingerprint
+// too. These tests exercise apply-driver.mjs's hostname comparison between
+// preAdvanceSnapshot.origin and nextSnapshot.origin, ordered after the
+// existing post-advance confirmation check.
+// ---------------------------------------------------------------------------
+
+test("an advance click that lands on a different hostname blocks, names the destination, and never fills the wrong page", async () => {
+  const pageOne = {
+    origin: GREENHOUSE_URL,
+    pageText: "Basic info",
+    refs: refsOf([
+      ["e1", "textbox", "Phone Number", false],
+      ["e2", "button", "Continue", false],
+    ]),
+  };
+  // A different host entirely, standing in for the risk the coordinator
+  // flagged: an innocuous "Continue" label whose destination is wrong
+  // ("Continue browsing jobs", an interstitial, an unrelated redirect). Its
+  // own Phone Number field is a plant: if the loop wrongly proceeded to a
+  // second iteration, this is the field it would fill.
+  const crossHostPage = {
+    origin: "https://careers.partner-portal.example/redirect",
+    pageText: "Explore more open roles",
+    refs: refsOf([["e3", "textbox", "Phone Number", false]]),
+  };
+  const { ops, log } = createFakeOps([pageOne, crossHostPage]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-cross-origin",
+    application: { id: "app-cross-origin" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.match(result.reason, /left the application/);
+  assert.match(result.reason, /job-boards\.greenhouse\.io/);
+  assert.match(result.reason, /careers\.partner-portal\.example/);
+  assert.deepEqual(
+    log.filter((entry) => entry.op === "fillField"),
+    [{ op: "fillField", pageId: "page-1", ref: "e1", value: "555-0100" }],
+    "only page one's own Phone Number is ever filled: the cross-host page's field is never touched"
+  );
+});
+
+test("a same-host advance with a changed path still advances normally", async () => {
+  // The regression guard: proves the hostname check isn't blocking every
+  // advance, only ones that leave the host. Path and query differ (a real
+  // wizard's normal behavior); the host does not.
+  const pageOne = {
+    origin: GREENHOUSE_URL,
+    pageText: "Basic info",
+    refs: refsOf([
+      ["e1", "textbox", "Phone Number", false],
+      ["e2", "button", "Continue", false],
+    ]),
+  };
+  const pageTwo = {
+    origin: "https://job-boards.greenhouse.io/example/jobs/123/step-2",
+    pageText: "Review your application",
+    refs: refsOf([["e3", "button", "Submit application", false]]),
+  };
+  const { ops, log } = createFakeOps([pageOne, pageTwo]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-same-host",
+    application: { id: "app-same-host" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  });
+
+  assert.equal(result.state, "awaiting-submit");
+  assert.equal(result.session.stepIndex, 2);
+  assert.deepEqual(
+    log.filter((entry) => entry.op === "clickButton"),
+    [{ op: "clickButton", pageId: "page-1", ref: "e2" }],
+    "the advance click still happens: same host, different path, is a normal wizard step"
+  );
+});
+
+test("a post-advance confirmation on a different host still reports confirmed, not blocked as a wrong destination", async () => {
+  // The ordering guard from the coordinator's point 1: a legitimate
+  // submit-and-confirm can land on a different host (an embedded form
+  // completing on the ATS's own board host, for one), and confirmationCheck
+  // must get first look so that case is never mistaken for a wrong
+  // destination. Uses a real "Continue" click, not a disqualified Submit
+  // button, so the cross-host page is actually reached and this exercises
+  // the ordering, not just the click-disqualification guard.
+  const pageOne = {
+    origin: GREENHOUSE_URL,
+    pageText: "Additional questions",
+    refs: refsOf([["e1", "button", "Continue", false]]),
+  };
+  const confirmationOnOtherHost = {
+    origin: "https://boards.greenhouse.io/confirmation",
+    pageText: "Thank you for applying",
+    refs: refsOf([]),
+  };
+  const { ops, log } = createFakeOps([pageOne, confirmationOnOtherHost]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-confirm-cross-host-real",
+    application: { id: "app-confirm-cross-host-real" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  });
+
+  assert.equal(result.available, true);
+  assert.equal(result.verified, true);
+  assert.equal(result.state, "submitted");
+  // confirmationCheck matches the URL path segment before it ever reads
+  // pageText, and this fixture's origin ends in "/confirmation" (one of
+  // CONFIRMATION_URL_SEGMENTS), so that is the signal it reports.
+  assert.equal(result.confirmation, "/confirmation");
+  assert.equal(
+    log.some((entry) => entry.op === "screenshot"),
+    true,
+    "the confirmation path still captures evidence even though the host changed"
+  );
+});
+
+test("a snapshot with a malformed or missing origin does not throw and does not spuriously block", async () => {
+  const pageOne = {
+    origin: undefined,
+    pageText: "Basic info",
+    refs: refsOf([["e1", "button", "Continue", false]]),
+  };
+  const pageTwo = {
+    origin: "not a valid url at all",
+    pageText: "More info",
+    refs: refsOf([["e2", "textbox", "Notes", false]]),
+  };
+  const { ops, log } = createFakeOps([pageOne, pageTwo]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-malformed-origin",
+    application: { id: "app-malformed-origin" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  });
+
+  assert.equal(
+    result.state,
+    "awaiting-submit",
+    "unparseable origins fall through to the fingerprint check, not a spurious block"
+  );
+  assert.deepEqual(
+    log.filter((entry) => entry.op === "clickButton"),
+    [{ op: "clickButton", pageId: "page-1", ref: "e1" }],
+    "the advance click still happens: an unparseable origin is not evidence of anything, so it never blocks on its own"
   );
 });

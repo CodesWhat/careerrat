@@ -1194,7 +1194,17 @@ test("createApplyDriver uploads the resume through playwright-ops when a target 
       repoRoot,
       env: {},
       mayRunImpl: () => ({ allowed: true }),
-      candidateConfigGetImpl: () => ({ profile: {}, honesty: {}, "form-defaults": {} }),
+      // First Name is required in UPLOAD_CONTROLS; the multi-step loop now
+      // blocks on any unresolved required field (same NEEDS YOU discipline
+      // Easy Apply already applied) rather than reaching awaiting-submit with
+      // a silently blank required field, so a resolvable full_name is needed
+      // here to isolate this test's actual subject (the upload path) from
+      // that unrelated required-field gate.
+      candidateConfigGetImpl: () => ({
+        profile: { candidate: { full_name: "Alex Doe" } },
+        honesty: {},
+        "form-defaults": {},
+      }),
       loadAnswerMapImpl: async () => new Map(),
       captureQuestionsImpl: async ({ questions }) => ({
         questions,
@@ -1309,7 +1319,14 @@ test("createPlaywrightApplyExecutor mirrors createOrcaApplyExecutor's compositio
     env: {},
     launchImpl,
     mayRunImpl: () => ({ allowed: true }),
-    candidateConfigGetImpl: () => ({ profile: {}, honesty: {}, "form-defaults": {} }),
+    // FORM_CONTROLS' First Name is required; a resolvable full_name keeps
+    // this composition-shape test isolated from the multi-step loop's
+    // unresolved-required-field gate (see the upload test's fuller comment).
+    candidateConfigGetImpl: () => ({
+      profile: { candidate: { full_name: "Alex Doe" } },
+      honesty: {},
+      "form-defaults": {},
+    }),
     loadAnswerMapImpl: async () => new Map(),
     captureQuestionsImpl: async ({ questions }) => ({
       questions,

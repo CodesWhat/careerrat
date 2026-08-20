@@ -397,7 +397,15 @@ export function isEasyApply(url) {
 // EASY_APPLY_ADVANCE_LABELS
 // ---------------------------------------------------------------------------
 
-/** Button-text substrings (lowercase) that advance the Easy Apply modal to the next step. */
+// Named for the LinkedIn Easy Apply modal this vocabulary was first written
+// against, but findAdvanceButtonRef (and the multi-step loop in
+// apply-driver.mjs that calls it) is no longer LinkedIn-gated. The same
+// needle list now also drives page-to-page advancement on any paginated ATS
+// form (Workday-style wizards, SmartRecruiters' stepped resume-upload flow,
+// etc). Kept under its original name rather than renamed, since every one of
+// these needles is itself generic wizard vocabulary, not LinkedIn-specific
+// copy.
+/** Button-text substrings (lowercase) that advance a multi-step apply form to the next page. */
 export const EASY_APPLY_ADVANCE_LABELS = [
   "next",
   "continue",
@@ -428,9 +436,83 @@ export const EASY_APPLY_SUBMIT_LABELS = ["submit application"];
 const ADVANCE_DISQUALIFY_TOKENS = ["submit", "send"];
 
 // ---------------------------------------------------------------------------
+// isSsoOrAccountLabel
+// ---------------------------------------------------------------------------
+
+// Identity providers that show up after a "continue/sign in/sign up/log in/
+// register" + "with/via/using" preposition on a social-login control. Not
+// exhaustive by design: over-blocking on an unlisted provider just ends in
+// the human handoff (same bias as ADVANCE_DISQUALIFY_TOKENS), whereas an
+// under-broad preposition match risks clicking through to a real identity
+// provider's page.
+const SSO_PROVIDER_NAMES = [
+  "linkedin",
+  "google",
+  "apple",
+  "facebook",
+  "github",
+  "microsoft",
+  "okta",
+  "twitter",
+  "x",
+  "sso",
+  "single sign on",
+];
+
+// A social-login control names its provider AFTER one of these action verbs
+// plus a preposition: "Continue with Google", "Sign in with LinkedIn",
+// "Register via Okta". Matching on the preposition alone ("with") would also
+// disqualify a legitimate advance label like "Continue with your
+// application", which shares that word but names no identity provider. See
+// isSsoOrAccountLabel below for why the provider-name check is what actually
+// carries the disqualification.
+const SSO_PREPOSITION_MATCH =
+  /\b(?:continue|sign in|sign up|log in|register)\s+(?:with|via|using)\s+(.+)$/;
+
+// A bare auth verb with no object at all ("Sign in", "Register") is always
+// the ATS's own account gate, not a page-advance control, whether or not a
+// third-party provider is named. Distinct from account-creation FIELDS
+// (password/email inputs), which browserInterventionBlockers already catches
+// separately; this is the equivalent guard for the BUTTON that opens that gate.
+const STANDALONE_AUTH_LABELS = new Set(["sign in", "sign up", "log in", "login", "register"]);
+
+/**
+ * True when a control's label is a social-login (SSO) or account sign-in
+ * control rather than a genuine page-advance control. Matches the SSO SHAPE
+ * specifically (a known identity-provider name after a with/via/using
+ * preposition, or a standalone auth verb), not the preposition alone: a
+ * label like "Continue with your application" contains "continue with" too
+ * and must NOT be caught just because it shares that phrase with a real SSO
+ * button. Used both to keep findAdvanceButtonRef from ever clicking an SSO
+ * control as an "advance," and by apply-driver.mjs's browserInterventionBlockers
+ * to give an honest halt reason when a page's only actionable control is one
+ * of these, instead of a generic "nothing to advance" result that hides why.
+ *
+ * @param {string} rawLabel
+ * @returns {boolean}
+ */
+export function isSsoOrAccountLabel(rawLabel) {
+  const normalized = normalizeLabel(rawLabel);
+  if (!normalized) return false;
+  if (STANDALONE_AUTH_LABELS.has(normalized)) return true;
+  const match = normalized.match(SSO_PREPOSITION_MATCH);
+  if (!match) return false;
+  const namedProvider = match[1].trim();
+  return SSO_PROVIDER_NAMES.some(
+    (name) => namedProvider === name || namedProvider.startsWith(`${name} `)
+  );
+}
+
+// ---------------------------------------------------------------------------
 // EASY_APPLY_STEPS
 // ---------------------------------------------------------------------------
 
+// LinkedIn Easy Apply's own named-section vocabulary, used only to label
+// session.stepKey when the flow actually IS Easy Apply (apply-driver.mjs's
+// stepSessionFields). A generic multi-step ATS (Workday, etc.) advances
+// through the SAME loop but reports stepKey: null instead of borrowing these
+// labels, since a Workday page 2 isn't necessarily "Resume" just because
+// Easy Apply's page 2 usually is.
 /** Ordered modal sections in the LinkedIn Easy Apply flow. */
 export const EASY_APPLY_STEPS = [
   {
@@ -470,12 +552,25 @@ export const EASY_APPLY_STEPS = [
 // ---------------------------------------------------------------------------
 
 /**
- * Find the ref of a button that advances a multi-step Easy Apply modal to its
- * next section. Safety invariant: a label containing any ADVANCE_DISQUALIFY_TOKENS
- * token is NEVER returned, even when it also matches an advance label — the
- * token check always disqualifies the ref, regardless of where in the label
- * the token appears ("Submit and continue", "Review and submit"). Returns
- * null when no safe advance button is present on the snapshot.
+ * Find the ref of a button that advances a multi-step apply form (LinkedIn
+ * Easy Apply's modal, a Workday-style wizard, or any other ATS that renders
+ * its form across multiple pages) to its next page. Portal-agnostic by
+ * design: it reads only the button vocabulary on the snapshot, never the
+ * host, so apply-driver.mjs's step loop can call it unconditionally for
+ * every provider: a genuinely single-page form just never has a button that
+ * matches, and the loop exits after one page exactly as it always did.
+ * Safety invariant: a label containing any ADVANCE_DISQUALIFY_TOKENS token is
+ * NEVER returned, even when it also matches an advance label: the token
+ * check always disqualifies the ref, regardless of where in the label the
+ * token appears ("Submit and continue", "Review and submit"). Same for a
+ * social-login or account sign-in control (see isSsoOrAccountLabel). The
+ * generalized loop now calls this on every provider's page, so a "Continue
+ * with LinkedIn" / "Sign in with Google" control that only ever showed up on
+ * pages this function never saw before must never be mistaken for a
+ * "Continue" advance button and clicked into a third-party auth page. Returns
+ * null when no safe advance button is present on the snapshot (including a
+ * flow that ends on a review page whose only control is submit-flavored, or
+ * one whose only control is a sign-in prompt).
  *
  * @param {{ refs?: Record<string, { role?: string, name?: string }> }} snapshot
  * @returns {string|null}
@@ -487,6 +582,7 @@ export function findAdvanceButtonRef(snapshot) {
     const label = normalizeLabel(entry?.name);
     if (!label) continue;
     if (ADVANCE_DISQUALIFY_TOKENS.some((token) => label.includes(token))) continue;
+    if (isSsoOrAccountLabel(entry?.name)) continue;
     if (EASY_APPLY_ADVANCE_LABELS.some((needle) => label.includes(needle))) return ref;
   }
   return null;
