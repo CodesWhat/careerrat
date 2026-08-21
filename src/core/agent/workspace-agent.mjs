@@ -113,7 +113,7 @@ import {
   workspaceThreadRead,
 } from "./workspace-thread.mjs";
 
-const EXECUTABLE_INTENTS = new Set([
+export const EXECUTABLE_INTENTS = new Set([
   "interview.prepare",
   "interview.prepare-request",
   "interview.schedule",

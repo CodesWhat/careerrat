@@ -645,12 +645,15 @@ required contexts, which is the exact failure that same comment warns about two 
 has no drift guard. Fixed in #135, which now tells the next reader to re-read the live ruleset
 instead of trusting the paragraph.
 
-**One thing the queue surfaced that is still open.** `profile.enrich` is declared as a workspace
-intent (`WORKSPACE_INTENT_ENTITY_TYPES` in `src/core/agent/workspace-thread.mjs`) with the
-user-facing label "Enrich my profile", but it has no entry in `EXECUTABLE_INTENTS` in
-`workspace-agent.mjs`, so choosing it throws "workspace intent is not implemented yet". Either
-wire the executor or stop offering the label; a menu item that can only throw is worse than no
-menu item. Surfaced by the August 20 inventory sweep, not yet picked up.
+**The one open item the queue surfaced is now closed.** `profile.enrich` was declared as a
+workspace intent (`WORKSPACE_INTENT_ENTITY_TYPES` in `src/core/agent/workspace-thread.mjs`) with
+the user-facing label "Enrich my profile", but it had no entry in `EXECUTABLE_INTENTS` in
+`workspace-agent.mjs`, so choosing it threw "workspace intent is not implemented yet". History
+showed it was dead on arrival (declared in the runtime's first commit, never implemented in any
+commit since) and no enrichment backend exists to wire it to, so #153 removed the offer rather
+than fabricating an executor. The durable part of the fix is a drift-guard test asserting every
+offered intent is implemented, so an offered-but-unimplemented intent is now a named test
+failure instead of a runtime throw in front of a user.
 
 ### Skill-to-screen product coherence gate (active August 14, 2026)
 
