@@ -38,7 +38,7 @@ the plan doc, the scorer, the AI lane, or any skill.
 
 Re-run either phase:
 
-```
+```sh
 node scripts/eval/phase1-deterministic.mjs --out /tmp/phase1.json
 node scripts/eval/phase2-ai-lane.mjs --out /tmp/phase2.json          # costs real $ — see below
 node scripts/eval/phase2-ai-lane.mjs --limit 5 --out /tmp/phase2.json  # cheap smoke test
@@ -72,7 +72,7 @@ Claude's own read, not a human's — see corpus `_meta.labeling_disclosure`).
 ## Phase 1 — deterministic scanner vs. my labels
 
 | | count |
-|---|---|
+| --- | --- |
 | Total postings | 62 |
 | Agree | 38 |
 | Disagree | 24 |
@@ -82,7 +82,7 @@ Claude's own read, not a human's — see corpus `_meta.labeling_disclosure`).
 By my label:
 
 | my label | n | scorer agreed | agreement |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | high | 13 | 0 | 0.0% |
 | med | 11 | 0 | 0.0% |
 | stretch | 38 | 38 | 100.0% |
@@ -113,7 +113,7 @@ All 62 postings scored successfully (0 failures, 0 retries needed).
 **AI vs. my labels:**
 
 | | count |
-|---|---|
+| --- | --- |
 | Total postings | 62 |
 | Agree | 37 |
 | Disagree | 25 |
@@ -123,7 +123,7 @@ All 62 postings scored successfully (0 failures, 0 retries needed).
 By my label:
 
 | my label | n | AI agreed | agreement |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | high | 13 | 0 | 0.0% |
 | med | 11 | 0 | 0.0% |
 | stretch | 38 | 37 | 97.4% |
@@ -133,7 +133,7 @@ AI `fitBucket` output distribution: stretch 53 (85.5%), med 8 (12.9%), high 1 (1
 **AI vs. deterministic (Phase 1) — the decision-rule metric:**
 
 | | count |
-|---|---|
+| --- | --- |
 | Total postings both lanes scored | 62 |
 | Agree | 53 |
 | Disagree | 9 |
@@ -143,7 +143,7 @@ AI `fitBucket` output distribution: stretch 53 (85.5%), med 8 (12.9%), high 1 (1
 Confusion (deterministic → AI):
 
 | deterministic | AI | count |
-|---|---|---|
+| --- | --- | --- |
 | stretch | stretch | 53 |
 | stretch | med | 8 |
 | stretch | high | 1 |
@@ -151,7 +151,7 @@ Confusion (deterministic → AI):
 All 9 disagreements, in full:
 
 | id | title | mine | deterministic | AI |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | gh-03 | Staff SWE (Cloudflare) | med | stretch | high |
 | ashby-01 | Head of Applied AI | high | stretch | med |
 | arb-01 | Staff AI Engineer | high | stretch | med |
@@ -210,7 +210,7 @@ independent of whatever this eval recommends about the fit-scoring lane split.
 ## Cost and wall-clock
 
 | | Phase 1 (deterministic) | Phase 2 (AI lane) |
-|---|---|---|
+| --- | --- | --- |
 | Total cost | $0 (pure function calls) | $6.4359 |
 | Avg cost / posting | $0 | $0.1038 |
 | Total wall-clock | <50ms for all 62 | 599,297ms (~9m 59s) |
