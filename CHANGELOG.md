@@ -8,6 +8,7 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Added
 
+- Every published release now includes a software bill of materials, a standard SPDX file listing exactly which packages and versions CareerRat is built from, attached as `careerrat-<version>-sbom.spdx.json`. Security tools can read it to check a release against known vulnerabilities without installing anything (#154).
 - Publishing a desktop release is now a single tag push. CI builds, signs, notarizes, and staples the app, uploads the installer to the GitHub release, and publishes the release once the installer is confirmed present. The Homebrew tap then picks up the published release on its own, so no manual step remains between tagging a version and users being able to download or `brew install` it (#150, #151, #152).
 
 ### Changed
