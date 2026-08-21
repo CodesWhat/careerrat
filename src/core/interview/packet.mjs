@@ -332,7 +332,7 @@ function normalizeQuestion(s) {
  * @param {object[]} stories
  * @returns {object|null}
  */
-export function findStoryForQuestion(question, stories) {
+function findStoryForQuestion(question, stories) {
   const bank = Array.isArray(stories) ? stories : [];
   const q = normalizeQuestion(question);
   if (!q) return null;
@@ -362,7 +362,7 @@ export function findStoryForQuestion(question, stories) {
  * @param {{ questions: string[], stories: object[] }} params
  * @returns {{ markdown: string, gaps: string[] }}
  */
-export function buildLikelyQuestionsSection({ questions, stories }) {
+function buildLikelyQuestionsSection({ questions, stories }) {
   const qs = Array.isArray(questions) ? questions : [];
   const gaps = [];
   const blocks = qs.map((question, i) => {
