@@ -636,6 +636,13 @@ required contexts, which is the exact failure that same comment warns about two 
 has no drift guard. Fixed in #135, which now tells the next reader to re-read the live ruleset
 instead of trusting the paragraph.
 
+**One thing the queue surfaced that is still open.** `profile.enrich` is declared as a workspace
+intent (`WORKSPACE_INTENT_ENTITY_TYPES` in `src/core/agent/workspace-thread.mjs`) with the
+user-facing label "Enrich my profile", but it has no entry in `EXECUTABLE_INTENTS` in
+`workspace-agent.mjs`, so choosing it throws "workspace intent is not implemented yet". Either
+wire the executor or stop offering the label; a menu item that can only throw is worse than no
+menu item. Surfaced by the August 20 inventory sweep, not yet picked up.
+
 ### Skill-to-screen product coherence gate (active August 14, 2026)
 
 The completed acceptance sweep proved the released surfaces and distribution artifacts. A

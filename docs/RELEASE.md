@@ -25,19 +25,23 @@ Before tagging a release:
    published package was 0.10.0.
 2. Convert `CHANGELOG.md`'s `## [Unreleased]` section into a
    `## [x.y.z] - YYYY-MM-DD` heading carrying the new version and today's date.
-3. All tests pass: `npm test`. Run this after steps 1 and 2, not before:
+3. `docs/ROADMAP.md` (public) updated — shipped items reflect reality, planned
+   list current. The private working roadmap lives under `.internal/roadmap/`.
+   This comes before the validation steps on purpose: the placeholder linter
+   and the privacy grep below scan the roadmap too, so an edit made after they
+   ran ships unvalidated.
+4. All tests pass: `npm test`. Run this after the version bump and changelog
+   conversion (steps 1 and 2), not before:
    `tests/release-consistency.test.mjs` hard-fails unless the newest
    `CHANGELOG.md` heading matches `package.json`'s version and carries a real
    date, so a green run here proves the release state, not the pre-release one.
-4. Doctor reports clean: `careerrat doctor`
-5. Placeholder linter is clean: `npm run lint:placeholders`
-6. **Privacy/public-split check** — grep all tracked files (`git ls-files`) for
+5. Doctor reports clean: `careerrat doctor`
+6. Placeholder linter is clean: `npm run lint:placeholders`
+7. **Privacy/public-split check** — grep all tracked files (`git ls-files`) for
    the private origin codename and any personal identity strings — must return
    nothing. Confirm that gitignored private paths (the private working roadmap,
    internal JSON artifacts, `candidate/`, `workspace/`) remain untracked:
    `git status --ignored` must not show any of them as staged or tracked.
-7. `docs/ROADMAP.md` (public) updated — shipped items reflect reality, planned
-   list current. The private working roadmap lives under `.internal/roadmap/`.
 8. `README.md` version badge is still the dynamic npm badge
    (`img.shields.io/npm/v/careerrat`, not a hardcoded version) and the install
    snippet still resolves correctly.

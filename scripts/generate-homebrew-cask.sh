@@ -2,7 +2,8 @@
 # Generate the body of CodesWhat/homebrew-tap's Casks/careerrat.rb.
 #
 # Prints the cask to stdout by default; pass --write <path> to write it to a
-# file instead (this repo's own tree only, never the tap checkout). Version
+# file instead (typically the tap checkout's Casks/careerrat.rb, see
+# docs/RELEASE.md's "Updating the Homebrew Cask" section). Version
 # comes from package.json unless --version overrides it. sha256 is computed
 # from a real DMG: pass --dmg <path> to hash a local build (needed before a
 # release is public), or the script downloads the published release DMG for
@@ -65,8 +66,10 @@ if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
 fi
 
 TMP_DIR=""
+WRITE_TMP=""
 cleanup() {
 	[ -z "$TMP_DIR" ] || rm -rf "$TMP_DIR"
+	[ -z "$WRITE_TMP" ] || rm -f "$WRITE_TMP"
 }
 trap cleanup EXIT
 
@@ -79,10 +82,20 @@ if [ -z "$DMG_PATH" ]; then
 	curl -fsSL -o "$DMG_PATH" "$DMG_URL"
 fi
 
-[ -f "$DMG_PATH" ] || {
-	echo "error: DMG not found at $DMG_PATH" >&2
-	exit 1
-}
+if [ ! -f "$DMG_PATH" ] || [ ! -r "$DMG_PATH" ]; then
+	echo "error: DMG not found or not readable at $DMG_PATH" >&2
+	exit 66
+fi
+
+# --write and --dmg pointing at the same file would clobber the input DMG.
+# cd -P compares physical paths, so a symlinked directory can't sneak the
+# same file in under two names.
+if [ -n "$WRITE_PATH" ] && [ -e "$WRITE_PATH" ] &&
+	[ "$(cd -P "$(dirname "$WRITE_PATH")" && pwd)/$(basename "$WRITE_PATH")" = \
+		"$(cd -P "$(dirname "$DMG_PATH")" && pwd)/$(basename "$DMG_PATH")" ]; then
+	echo "error: --write and --dmg resolve to the same file" >&2
+	exit 67
+fi
 
 SHA256="$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')"
 
@@ -130,7 +143,11 @@ EOF
 }
 
 if [ -n "$WRITE_PATH" ]; then
-	emit_cask >"$WRITE_PATH"
+	# Write via a temp file in the destination dir so a mid-write failure
+	# can't leave a truncated cask behind.
+	WRITE_TMP="$(mktemp "$(dirname "$WRITE_PATH")/.careerrat.rb.XXXXXX")"
+	emit_cask >"$WRITE_TMP"
+	mv "$WRITE_TMP" "$WRITE_PATH"
 	echo "Wrote cask to $WRITE_PATH" >&2
 else
 	emit_cask
