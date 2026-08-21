@@ -179,10 +179,10 @@ jobs:
   # (.agents/skills/apply-job/SKILL.md) with no JS importer for knip to find;
   # resolveCompFloor/scoreFit (src/core/evaluate/gate.mjs) and CLAIM_FIELDS
   # (src/core/profile/evidence-writer.mjs), held for the coaching-loop
-  # feature whose evidence path runs through that module; and
-  # findStoryForQuestion/buildLikelyQuestionsSection
-  # (src/core/interview/packet.mjs), held for an interview-prep product
-  # decision.
+  # feature whose evidence path runs through that module. (The interview
+  # packet helpers once held here turned out to be same-file-called shipped
+  # code with a stray export keyword; de-exported like their fifteen
+  # siblings.)
   #
   # Getting to 0 therefore means teaching knip about those references, not
   # deleting them: tag the intentional ones and configure knip to exclude the
@@ -205,4 +205,4 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Knip check
-        run: npx knip --no-progress --max-issues=12
+        run: npx knip --no-progress --max-issues=10
