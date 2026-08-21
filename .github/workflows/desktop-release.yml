@@ -1,0 +1,200 @@
+name: desktop-release
+
+# Fully automated desktop release pipeline. Pushing a tag `vX.Y.Z` builds the
+# macOS app, signs and notarizes the DMG, uploads it to that tag's GitHub
+# release, and flips the release from draft to published. Zero human action
+# once the tag is pushed and the one-time signing secrets are configured
+# (docs/RELEASE.md's "One-time CI signing setup").
+#
+# The Homebrew cask is NOT updated from here. CodesWhat/homebrew-tap carries
+# its own update-careerrat-cask.yml (cron + dispatch) that watches the latest
+# published release and commits the cask bump to its own main with its own
+# GITHUB_TOKEN (the same way the goreleaser-managed casks land there), so no
+# cross-repo credential ever lives in this repo's secrets.
+#
+# workflow_dispatch backfills the LATEST vX.Y.Z tag (e.g. re-running after a
+# secrets fix) without requiring a new tag push. It takes no inputs, matching
+# release-assets.yml's dispatch and the checkov CKV_GHA_7 rule the qlty gate
+# enforces; a dispatch always targets the newest tag by semver order.
+#
+# Every tag value is resolved once in `resolve-tag` and threaded through the
+# other jobs as a job output / env var, never spliced directly into a `run:`
+# script body — that's the template-injection pattern zizmor flags.
+#
+# publish.yml already fires on `release: published`, so flipping the release
+# in `publish-release` below also triggers the npm publish. release-assets.yml
+# also fires on that event and re-confirms the .dmg is attached; by the time
+# it runs here the asset upload already happened, so it's a no-op detector.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  resolve-tag:
+    name: resolve tag
+    runs-on: ubuntu-latest
+    # contents: read, not {}: the dispatch path reads the repo's tag list,
+    # same class of read release-assets.yml grants for its dispatch fallback.
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - name: Harden the runner (audit all outbound calls)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+      - name: Resolve the release tag
+        id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$(gh api "repos/$REPO/tags" --paginate --jq '.[].name' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)"
+          else
+            tag="$REF_NAME"
+          fi
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Resolved tag '$tag' does not match vX.Y.Z"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  build-notarize-upload:
+    name: build, notarize, upload dmg
+    needs: resolve-tag
+    runs-on: macos-14
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.resolve-tag.outputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+    steps:
+      - name: Harden the runner (audit all outbound calls)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve-tag.outputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          # This job signs, notarizes, and uploads a release artifact; a
+          # poisoned shared dependency cache must never be able to reach it.
+          # Same fix as publish.yml's setup-node step.
+          package-manager-cache: false
+      - name: Verify required signing and notarization secrets are set
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "${CSC_LINK:-}" ] || missing+=("CSC_LINK")
+          [ -n "${CSC_KEY_PASSWORD:-}" ] || missing+=("CSC_KEY_PASSWORD")
+          [ -n "${APPLE_API_KEY:-}" ] || missing+=("APPLE_API_KEY")
+          [ -n "${APPLE_API_KEY_ID:-}" ] || missing+=("APPLE_API_KEY_ID")
+          [ -n "${APPLE_API_ISSUER:-}" ] || missing+=("APPLE_API_ISSUER")
+          if [ "${#missing[@]}" -gt 0 ]; then
+            printf '::error::Missing required secrets for the desktop release pipeline: %s\n' "${missing[*]}"
+            echo "::error::See docs/RELEASE.md's 'One-time CI signing setup' section to add them."
+            exit 1
+          fi
+          echo "Required signing and notarization secrets are present."
+      - name: Ensure a GitHub release exists for the tag
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists."
+          else
+            echo "No release found for $TAG; creating a draft."
+            gh release create "$TAG" --draft --title "$TAG" --generate-notes
+          fi
+      - name: Write the App Store Connect API key to a runner-temp file
+        run: |
+          set -euo pipefail
+          key_path="$RUNNER_TEMP/apple-api-key.p8"
+          printf '%s' "$APPLE_API_KEY" | base64 --decode > "$key_path"
+          chmod 600 "$key_path"
+          echo "APPLE_API_KEY=$key_path" >> "$GITHUB_ENV"
+      - name: Assert the tag matches the desktop package version
+        # release-upload.mjs derives its upload target from package.json, not
+        # from the pushed tag. If the two diverge, the upload would clobber a
+        # different release's assets; refuse before the expensive build runs.
+        run: |
+          set -euo pipefail
+          pkg_tag="v$(node -p "require('./apps/desktop/package.json').version")"
+          if [ "$pkg_tag" != "$TAG" ]; then
+            echo "::error::Tag $TAG does not match apps/desktop/package.json ($pkg_tag); refusing to build."
+            exit 1
+          fi
+      - name: Import the signing identity into a persistent keychain
+        # electron-builder imports CSC_LINK into a temporary keychain and
+        # deletes it when its process exits (removeKeychain is registered
+        # unconditionally in app-builder-lib; no env var prevents it).
+        # release-dmg.mjs then codesigns the DMG container from a separate
+        # process, so the identity must also live in a keychain that
+        # survives. This one does, and sits in the user search list so
+        # codesign resolves the identity by name.
+        run: |
+          set -euo pipefail
+          umask 077
+          keychain="$RUNNER_TEMP/desktop-release.keychain-db"
+          kc_pass="$(openssl rand -base64 24)"
+          printf '%s' "$CSC_LINK" | base64 --decode > "$RUNNER_TEMP/signing-cert.p12"
+          security create-keychain -p "$kc_pass" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$kc_pass" "$keychain"
+          security import "$RUNNER_TEMP/signing-cert.p12" -k "$keychain" -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S "apple-tool:,apple:,codesign:" -s -k "$kc_pass" "$keychain" >/dev/null
+          existing="$(security list-keychains -d user | sed 's/[" ]//g' | xargs)"
+          # shellcheck disable=SC2086
+          security list-keychains -d user -s "$keychain" $existing
+          rm -f "$RUNNER_TEMP/signing-cert.p12"
+      - name: Install dependencies
+        run: npm ci
+      - name: Build, sign, notarize, staple, verify, and upload the desktop release
+        run: npm run desktop:release
+
+  publish-release:
+    name: publish release
+    needs: [resolve-tag, build-notarize-upload]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.resolve-tag.outputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Harden the runner (audit all outbound calls)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+      - name: Publish the release once the dmg asset is confirmed
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            assets="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+            if ! grep -q '\.dmg$' <<<"$assets"; then
+              echo "::error::Release $TAG has no .dmg asset attached; refusing to publish."
+              exit 1
+            fi
+            gh release edit "$TAG" --draft=false
+            echo "Published $TAG."
+          else
+            echo "::error::No release found for $TAG after build-notarize-upload; refusing to publish blind."
+            exit 1
+          fi
