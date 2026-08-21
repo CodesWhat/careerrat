@@ -2,8 +2,8 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { Agent } from "undici";
 
-export const DEFAULT_PUBLIC_FETCH_TIMEOUT_MS = 15_000;
-export const DEFAULT_PUBLIC_FETCH_MAX_BYTES = 1024 * 1024;
+const DEFAULT_PUBLIC_FETCH_TIMEOUT_MS = 15_000;
+const DEFAULT_PUBLIC_FETCH_MAX_BYTES = 1024 * 1024;
 const DEFAULT_MAX_REDIRECTS = 4;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
@@ -30,7 +30,7 @@ export function validatePublicHttpUrl(rawUrl) {
   return { ok: true, url: parsed.toString() };
 }
 
-export async function resolvePublicHttpTarget(rawUrl, { resolveHost = resolvePublicHost } = {}) {
+async function resolvePublicHttpTarget(rawUrl, { resolveHost = resolvePublicHost } = {}) {
   const checked = validatePublicHttpUrl(rawUrl);
   if (!checked.ok) return checked;
 

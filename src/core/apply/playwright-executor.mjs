@@ -2,16 +2,8 @@ import { loadAutomation, mayRun } from "../automation/consent.mjs";
 import { profilePath } from "../automation/session.mjs";
 import { candidateConfigGet } from "../db/verbs/candidate.mjs";
 import { capturePacketQuestions } from "../packet/questions.mjs";
-import {
-  createApplyDriver,
-  loadAnswerMap,
-  renderedFieldsFromSnapshot,
-  screenshotPath,
-  uploadTargetsFromSnapshot,
-} from "./apply-driver.mjs";
+import { createApplyDriver, loadAnswerMap, screenshotPath } from "./apply-driver.mjs";
 import { createPlaywrightOps } from "./playwright-ops.mjs";
-
-export { renderedFieldsFromSnapshot, uploadTargetsFromSnapshot };
 
 // The bundled-Playwright persistent profile isn't platform-specific the way
 // scripts/capture-board-snapshot.mjs's per-board profiles are — one apply run

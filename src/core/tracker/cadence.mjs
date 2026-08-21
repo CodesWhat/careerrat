@@ -18,7 +18,7 @@ const APP_NUDGE_MAX_COUNT_DEFAULT = 2;
  * These are the code defaults assumed when the candidate sets no `follow_up:`
  * config. They encode no personal preference — every kind is on.
  */
-export const FOLLOWUP_RULES = Object.freeze({
+const FOLLOWUP_RULES = Object.freeze({
   /** Nudge when an application gets no response (pre-interview stage). */
   appNudge: Object.freeze({ enabled: true, afterDays: 7, maxCount: APP_NUDGE_MAX_COUNT_DEFAULT }),
   /** Nudge when an interviewed application goes quiet. */

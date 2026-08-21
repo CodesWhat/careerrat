@@ -4,7 +4,7 @@ import { validate } from "../profile/schema-validator.mjs";
 import { COMPANY_DISCOVERY_BATCH_MAX, normalizeCompanyKey } from "./company-board-resolver.mjs";
 import { buildCompanySeedContext } from "./company-context.mjs";
 
-export const COMPANY_SEED_LABELS = Object.freeze({
+const COMPANY_SEED_LABELS = Object.freeze({
   skill: "discover-companies",
   action: "seed-generate",
   operation: "company-seeds",

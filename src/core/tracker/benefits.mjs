@@ -119,11 +119,6 @@ const BENEFIT_CATALOG = [
   },
 ];
 
-// Browser-renderable map (key → {emoji, label}), mirrored in dashboard-data.js.
-export const BENEFIT_DISPLAY = Object.fromEntries(
-  BENEFIT_CATALOG.map(({ key, emoji, label }) => [key, { emoji, label }])
-);
-
 // Scan free text and return matched canonical benefit keys in catalog order
 // (deduped). Returns [] for empty/no-match input.
 export function extractBenefitKeys(...texts) {
