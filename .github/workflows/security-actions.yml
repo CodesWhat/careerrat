@@ -26,10 +26,23 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Harden the runner (audit all outbound calls)
+      - name: Harden the runner (block all outbound calls except the allowlist)
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
-          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+          egress-policy: block
+          # raven-actions/actionlint installs actionlint via a Python/pip helper
+          # (files.pythonhosted.org, pypi.org) and fetches the shellcheck binary
+          # from a GitHub release (github.com, release-assets.githubusercontent.com,
+          # raw.githubusercontent.com); registry.npmjs.org covers its npm-based
+          # setup path. Observed on runs 32512881107 and 32512731942 (Stable
+          # baseline, 236 runs since the endpoint set last changed).
+          allowed-endpoints: >
+            files.pythonhosted.org:443
+            github.com:443
+            pypi.org:443
+            raw.githubusercontent.com:443
+            registry.npmjs.org:443
+            release-assets.githubusercontent.com:443
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -42,10 +55,22 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Harden the runner (audit all outbound calls)
+      - name: Harden the runner (block all outbound calls except the allowlist)
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
-          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+          egress-policy: block
+          # astral-sh/setup-uv fetches uv from its GitHub release
+          # (releases.astral.sh) and `uvx zizmor` resolves the package from
+          # PyPI (files.pythonhosted.org, pypi.org, raw.githubusercontent.com
+          # for uv's own index metadata). Observed on runs 32512881107 and
+          # 32512731942 (Stable baseline, 236 runs since the endpoint set last
+          # changed).
+          allowed-endpoints: >
+            files.pythonhosted.org:443
+            github.com:443
+            pypi.org:443
+            raw.githubusercontent.com:443
+            releases.astral.sh:443
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -67,10 +92,16 @@ jobs:
       GITLEAKS_VERSION: "8.30.1"
       GITLEAKS_LINUX_X64_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
     steps:
-      - name: Harden the runner (audit all outbound calls)
+      - name: Harden the runner (block all outbound calls except the allowlist)
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
-          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+          egress-policy: block
+          # checkout plus the pinned-and-hash-verified gitleaks tarball download
+          # from a GitHub release. Observed on runs 32512881107 and 32512731942
+          # (Stable baseline, 236 runs since the endpoint set last changed).
+          allowed-endpoints: >
+            github.com:443
+            release-assets.githubusercontent.com:443
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # gitleaks scans full history, not just the checked-out ref
@@ -93,10 +124,19 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Harden the runner (audit all outbound calls)
+      - name: Harden the runner (block all outbound calls except the allowlist)
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
-          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+          egress-policy: block
+          # actions/dependency-review-action calls the GitHub dependency-graph
+          # diff API (api.github.com) and cross-checks advisories against
+          # deps.dev and OpenSSF Scorecard's API. Observed on run 32512731942
+          # (Stable baseline, 157 runs since the endpoint set last changed).
+          allowed-endpoints: >
+            api.deps.dev:443
+            api.github.com:443
+            api.securityscorecards.dev:443
+            github.com:443
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
