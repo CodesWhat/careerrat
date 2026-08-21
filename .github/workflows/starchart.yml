@@ -1,0 +1,37 @@
+name: Star Chart Refresh
+
+# Thin caller for the org-shared star-history refresh (standards/readme-shape.md,
+# Star History section). The chart is a first-party committed SVG regenerated at
+# the release cut, never on a cron or from `release: [published]` (GitHub
+# suppresses runs for events caused by GITHUB_TOKEN, so that trigger never
+# fires). The release cut dispatches this workflow explicitly:
+#
+#   gh workflow run starchart.yml --ref "$BRANCH"
+#
+# careerrat is at 1 star (2026-08-21): the shared workflow's generator declines
+# to plot below 2 stars and leaves any existing chart untouched rather than
+# committing an empty one, so no chart ships yet. This caller exists so the
+# next release cut catches the star-count crossing automatically (#148).
+#
+# `branch` names the active integration line and rotates with it at each
+# version cut (dev/v0.12 -> dev/v0.13 -> ...); the reusable workflow refuses
+# main by design, since a committed artifact must never mutate under a tag.
+#
+# All generation, hardening, and commit-back logic lives in the pinned
+# reusable workflow; this file only declares the trigger and the inputs.
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  starchart:
+    name: Star Chart Refresh
+    permissions:
+      contents: write
+    uses: CodesWhat/.github/.github/workflows/starchart-refresh.yml@11004e42d7d19e86eb3b7777c467ec9522b784e1 # promoted to main 2026-08-21
+    with:
+      branch: dev/v0.12
+      accent: "#1290de"
+      output-path: apps/website/public/star-history.svg
