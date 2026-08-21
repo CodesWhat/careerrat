@@ -315,11 +315,14 @@ codeswhat/tap/careerrat`. PR #4 on `CodesWhat/homebrew-tap` merged August 19,
 2026. `scripts/generate-homebrew-cask.sh` now generates the cask body
 (version from `package.json`, `sha256` from the published or a local DMG),
 closing the generator gap. Opening the tap PR is no longer a manual step
-either: `.github/workflows/desktop-release.yml` runs the generator against
-the published release DMG and opens the tap PR itself as its last job,
-triggered by a tag push. The one piece left for Scott is the one-time CI
+either: `CodesWhat/homebrew-tap` carries its own `update-careerrat-cask.yml`
+workflow (cron plus manual dispatch) that watches the latest published
+release, runs the generator, and commits the bump to its own `main` with
+its own `GITHUB_TOKEN`, so no cross-repo credential exists anywhere. On this repo's
+side, `.github/workflows/desktop-release.yml` builds, signs, notarizes,
+uploads, and publishes on a tag push. The one piece left is the one-time CI
 signing secrets setup documented in `docs/RELEASE.md`'s "One-time CI signing
-setup" section; until those six secrets are set on the repo, the pipeline
+setup" section; until those five secrets are set on the repo, the pipeline
 fails fast with a clear list of what's missing instead of running.
 
 Stale branch cleanup is done. `origin` is now just `main`. The branches

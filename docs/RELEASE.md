@@ -53,9 +53,8 @@ Before tagging a release:
 
 Pushing a tag `vX.Y.Z` does the whole desktop release with no further human
 action: `.github/workflows/desktop-release.yml` builds the app, signs and
-notarizes the DMG, uploads it to that tag's GitHub release, flips the release
-from draft to published, and opens a PR on `CodesWhat/homebrew-tap` bumping
-the cask. Three jobs, in order:
+notarizes the DMG, uploads it to that tag's GitHub release, and flips the
+release from draft to published. Two jobs, in order:
 
 1. **`build-notarize-upload`** (`macos-14`), checks out the tag, runs
    `npm run desktop:release` (build, sign, notarize, staple,
@@ -66,15 +65,18 @@ the cask. Three jobs, in order:
    `gh release edit "$tag" --draft=false`. This is the step that fires
    `publish.yml` (npm publish) and `release-assets.yml` (the .dmg detector
    below, which by now is a no-op since the asset is already there).
-3. **`tap-pr`** (`macos-14`, needs `shasum`), runs
-   `scripts/generate-homebrew-cask.sh` against the now-public release DMG,
-   pushes the result to a `release/careerrat-vX.Y.Z` branch on the tap repo,
-   and opens a PR against its `main` (matching how idlescreen and careerrat's
-   prior manual cask PRs landed there; the tap's `main` is protected, so
-   this is a PR, never a direct push).
 
-`workflow_dispatch` with a required `tag` input backfills an existing tag
-(re-running after a secrets fix, for example) without needing a new tag push.
+The Homebrew cask is not updated from this repo. `CodesWhat/homebrew-tap`
+carries its own `update-careerrat-cask.yml` (cron plus manual dispatch) that
+watches the latest published careerrat release, regenerates
+`Casks/careerrat.rb` with this repo's `scripts/generate-homebrew-cask.sh`,
+and commits the bump directly to the tap's `main` with its own
+`GITHUB_TOKEN`, the same way the goreleaser-managed casks already land
+there. No cross-repo credential lives in either repo's secrets.
+
+`workflow_dispatch` (no inputs, matching `release-assets.yml`) backfills the
+latest `vX.Y.Z` tag, re-running after a secrets fix for example, without
+needing a new tag push.
 
 The rest of this section, the release checklist, the manual publish order,
 and the manual cask steps, is the fallback path: what to run by hand if the
@@ -83,7 +85,7 @@ verify a step in isolation.
 
 #### One-time CI signing setup
 
-The pipeline needs six repository secrets, set once
+The pipeline needs five repository secrets, set once
 (`gh secret set <name> --repo CodesWhat/careerrat --body ...` or the
 Settings → Secrets and variables → Actions UI):
 
@@ -94,12 +96,10 @@ Settings → Secrets and variables → Actions UI):
 | `APPLE_API_KEY` | Base64 of the App Store Connect API key `.p8` | `base64 -i AuthKey_XXXXXXXXXX.p8 \| pbcopy` |
 | `APPLE_API_KEY_ID` | The API key's Key ID | App Store Connect → Users and Access → Integrations → Team Keys |
 | `APPLE_API_ISSUER` | The API key's Issuer ID | Same Integrations page, above the key list |
-| `HOMEBREW_TAP_PAT` | Fine-grained PAT scoped to `CodesWhat/homebrew-tap` only, with Contents (read/write) and Pull requests (read/write) | github.com → Settings → Developer settings → Fine-grained tokens → Generate new token |
 
-`build-notarize-upload`'s first real step checks all five signing/upload
-secrets are set and fails with a clear list of what's missing rather than
-failing deep inside an electron-builder or notarytool error. `tap-pr` does
-the same for `HOMEBREW_TAP_PAT`.
+`build-notarize-upload`'s first real step checks all five secrets are set and
+fails with a clear list of what's missing rather than failing deep inside an
+electron-builder or notarytool error.
 
 #### Manual fallback: building and verifying locally
 
@@ -160,9 +160,9 @@ verify the repaired one directly with
 
 The cask lives at `Casks/careerrat.rb` in the separate repo
 `CodesWhat/homebrew-tap`, cloned locally at `~/code/codeswhat/homebrew-tap`.
-`scripts/generate-homebrew-cask.sh` generates its body; `tap-pr` above opens
-the PR automatically on a tag push, so this is only needed to debug or redo
-that step by hand.
+`scripts/generate-homebrew-cask.sh` generates its body; the tap repo's own
+`update-careerrat-cask.yml` workflow applies the bump automatically after a
+release publishes, so this is only needed to debug or redo that step by hand.
 
 1. After the GitHub release is published with its `.dmg` attached, run
    `scripts/generate-homebrew-cask.sh --write ~/code/codeswhat/homebrew-tap/Casks/careerrat.rb`.

@@ -2,16 +2,20 @@ name: desktop-release
 
 # Fully automated desktop release pipeline. Pushing a tag `vX.Y.Z` builds the
 # macOS app, signs and notarizes the DMG, uploads it to that tag's GitHub
-# release, flips the release from draft to published, and opens a PR on
-# CodesWhat/homebrew-tap bumping the cask. Zero human action once the tag is
-# pushed and the one-time signing secrets are configured (docs/RELEASE.md's
-# "One-time CI signing setup").
+# release, and flips the release from draft to published. Zero human action
+# once the tag is pushed and the one-time signing secrets are configured
+# (docs/RELEASE.md's "One-time CI signing setup").
 #
-# workflow_dispatch backfills an existing tag (e.g. re-running after a
-# secrets fix) without requiring a new tag push. The `tag` input is required
-# because checkov CKV_GHA_7-style rules aside, a manual run with no target is
-# ambiguous here in a way `release-assets.yml`'s dispatch isn't: this
-# workflow builds and uploads, it doesn't just check.
+# The Homebrew cask is NOT updated from here. CodesWhat/homebrew-tap carries
+# its own update-careerrat-cask.yml (cron + dispatch) that watches the latest
+# published release and commits the cask bump to its own main with its own
+# GITHUB_TOKEN (the same way the goreleaser-managed casks land there), so no
+# cross-repo credential ever lives in this repo's secrets.
+#
+# workflow_dispatch backfills the LATEST vX.Y.Z tag (e.g. re-running after a
+# secrets fix) without requiring a new tag push. It takes no inputs, matching
+# release-assets.yml's dispatch and the checkov CKV_GHA_7 rule the qlty gate
+# enforces; a dispatch always targets the newest tag by semver order.
 #
 # Every tag value is resolved once in `resolve-tag` and threaded through the
 # other jobs as a job output / env var, never spliced directly into a `run:`
@@ -26,12 +30,7 @@ on:
   push:
     tags:
       - "v*.*.*"
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Tag to build and release (e.g. v0.11.0). Used to backfill an existing tag."
-        required: true
-        type: string
+  workflow_dispatch: {}
 
 permissions: {}
 
@@ -50,12 +49,15 @@ jobs:
       - name: Resolve the release tag
         id: resolve
         env:
-          DISPATCH_TAG: ${{ inputs.tag }}
+          EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          tag="$DISPATCH_TAG"
-          if [ -z "$tag" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$(gh api "repos/$REPO/tags" --paginate --jq '.[].name' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)"
+          else
             tag="$REF_NAME"
           fi
           if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
@@ -164,88 +166,3 @@ jobs:
             echo "No release found for $TAG; creating one published with generated notes."
             gh release create "$TAG" --generate-notes
           fi
-
-  tap-pr:
-    name: open the homebrew tap pr
-    needs: [resolve-tag, publish-release]
-    # generate-homebrew-cask.sh hashes the DMG with `shasum`, a macOS default.
-    runs-on: macos-14
-    permissions:
-      contents: read
-    env:
-      TAG: ${{ needs.resolve-tag.outputs.tag }}
-      GH_TOKEN: ${{ secrets.HOMEBREW_TAP_PAT }}
-      HOMEBREW_TAP_PAT: ${{ secrets.HOMEBREW_TAP_PAT }}
-    steps:
-      - name: Harden the runner (audit all outbound calls)
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
-        with:
-          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
-      - name: Verify the tap PAT secret is set
-        run: |
-          set -euo pipefail
-          if [ -z "${HOMEBREW_TAP_PAT:-}" ]; then
-            echo "::error::Missing required secret HOMEBREW_TAP_PAT. See docs/RELEASE.md's 'One-time CI signing setup' section."
-            exit 1
-          fi
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.resolve-tag.outputs.tag }}
-          persist-credentials: false
-      - name: Resolve the bare version and the tap branch name
-        run: |
-          set -euo pipefail
-          version="${TAG#v}"
-          # Matches the branch shape CodesWhat/homebrew-tap's other casks
-          # already use (see PR #3/#4 on that repo: release/<tool>-v<version>).
-          {
-            echo "VERSION=$version"
-            echo "TAP_BRANCH=release/careerrat-$TAG"
-            echo "TAP_DIR=$RUNNER_TEMP/homebrew-tap"
-          } >> "$GITHUB_ENV"
-      - name: Clone the tap repository
-        run: |
-          set -euo pipefail
-          git clone "https://x-access-token:${HOMEBREW_TAP_PAT}@github.com/CodesWhat/homebrew-tap.git" "$TAP_DIR"
-          cd "$TAP_DIR"
-          git config user.name "careerrat-release-bot"
-          git config user.email "careerrat-release-bot@users.noreply.github.com"
-          git checkout -b "$TAP_BRANCH"
-      - name: Check for an already-open pr on this branch
-        run: |
-          set -euo pipefail
-          existing="$(gh pr list --repo CodesWhat/homebrew-tap --head "$TAP_BRANCH" --state open --json number --jq '.[0].number // empty')"
-          echo "EXISTING_PR=$existing" >> "$GITHUB_ENV"
-      - name: Generate the updated cask
-        run: |
-          set -euo pipefail
-          scripts/generate-homebrew-cask.sh --version "$VERSION" --write "$TAP_DIR/Casks/careerrat.rb"
-      - name: Commit and push the cask update
-        run: |
-          set -euo pipefail
-          cd "$TAP_DIR"
-          if git diff --quiet -- Casks/careerrat.rb; then
-            echo "Casks/careerrat.rb is already up to date for $TAG; nothing to commit."
-            echo "SKIP_PR=true" >> "$GITHUB_ENV"
-            exit 0
-          fi
-          git add Casks/careerrat.rb
-          git commit -m "build(cask): update careerrat to $VERSION"
-          git push origin "$TAP_BRANCH"
-      - name: Open the tap pr
-        run: |
-          set -euo pipefail
-          if [ "${SKIP_PR:-}" = "true" ]; then
-            echo "Nothing to push; skipping pr creation."
-            exit 0
-          fi
-          if [ -n "${EXISTING_PR:-}" ]; then
-            echo "A pr for $TAP_BRANCH is already open (#$EXISTING_PR); skipping creation."
-            exit 0
-          fi
-          gh pr create \
-            --repo CodesWhat/homebrew-tap \
-            --base main \
-            --head "$TAP_BRANCH" \
-            --title "build(cask): update careerrat to $VERSION" \
-            --body "Automated cask update for careerrat $TAG, generated by desktop-release.yml from the published GitHub release DMG."
