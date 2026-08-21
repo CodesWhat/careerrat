@@ -95,6 +95,7 @@ intake, and source watermarks; any sourced-row tracker mutation still follows th
 Contract.
 
 It also writes:
+
 - `workspace/scan-results/sourced-<date>.json` — raw scan snapshot
 - `workspace/intake/sourced-<date>.md` — intake markdown
 
@@ -135,6 +136,7 @@ The `allowed` field encodes the three-part AND from `mayRun()` in `src/core/auto
 **If either gate is not met — skip and explain how to opt in. Do not open a browser.**
 
 To enable a source:
+
 1. Read that platform's terms of service yourself.
 2. Record ToS consent: `careerrat automation consent <platform> --write`
 3. Enable the capability global switch: `careerrat automation enable authenticated_search --write`
@@ -257,6 +259,7 @@ SQLite and exported files are generated artifacts; do not hand-edit YAML. In leg
 update `config/search-sources.yml` directly if the scanner did not already write the watermark.
 
 For each legacy source that needs a manual watermark:
+
 1. Read and print the current (before) `lastRunAt` value: `searches[id=<source>].lastRunAt` (print it so the write can be confirmed).
 2. Edit `config/search-sources.yml` directly — set `lastRunAt` to the ISO timestamp of this run.
 3. Print the new (after) `lastRunAt` value as confirmation: `Written lastRunAt for <source>: <before> → <after>`.

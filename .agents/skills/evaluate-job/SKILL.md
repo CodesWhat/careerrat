@@ -253,6 +253,7 @@ Read FIT bands from `targeting.fit_bands` (default: `high_min: 85`, `med_min: 65
 Score the role using the programmatic proxy as a starting point (`careerrat evaluate <path-to-job.md>` exits 0=KEEP, 2=REVIEW, 1=CUT), then **override with the body-read assessment** — the agent's judgment is authoritative.
 
 Factor in:
+
 - Matched `keep_signals` (raises score)
 - Matched `cut_signals` (lowers score; a hard match is a CUT, not a deduction)
 - Title-bucket alignment from `role_buckets`
@@ -263,6 +264,7 @@ Factor in:
 **Company-health cross-cut (config-driven, never a hard kill).** If the tracker row carries a non-stale `companyHealth` object (written by `company-health`), apply its `fitDelta` to the score. `fitDelta` is already `0` when the rating didn't cross-cut any stated candidate need, and a small negative (e.g. `-2`..`-5`) when it did — e.g. a layoff in the candidate's own function when they need `stability`. Name the crossing in caveats: `caveats: company-health watch — eng RIF cross-cuts your stability need (-5)`. `companyHealth` alone NEVER triggers a CUT; it only nudges the score, and can drag fit below `fit_floor` *only via the need it intersects* (the floor does the dropping, not the health rating). A `stale` rating (older than `recheck_days`) is informational — surface it but don't apply `fitDelta`; suggest a `company-health` refresh. When no `companyHealth` exists, nothing changes.
 
 Band mapping:
+
 - score ≥ `high_min` (85) → `high`
 - score ≥ `med_min` (65) → `med`
 - score < `med_min` → `stretch`
@@ -335,9 +337,11 @@ If this sourced role came from `search-jobs` triage (has a row in `workspace/tra
    - Also set `fitScore`, `fitBucket`, and `fitBasis: "evaluated"` on the sourced row.
    - Also write company-history cautions from STEP 3.25 into `warn`/`note`, and set `action: "manual"` when same-company active/recent history forced manual review.
    - **DB workspace:** the role stays in `sourced[]` here — this is a field patch, not a promotion (`sourced promote` is for the later apply-time move into `applications[]`). There is no single-field patch verb for `sourced[]`, so read the current row from `workspace/tracker.json#sourced[]`, apply every field above (carrying the rest of the row over unchanged), and persist the whole row in one call:
+
      ```
      careerrat data sourced upsert-batch --data '[<patched full sourced row JSON>]'
      ```
+
      This is outcome-changing per the Data Write Contract — it bumps the stamp, logs its own activity event, and refreshes analytics in the same transaction.
    - **Legacy workspace (no DB):** edit `workspace/tracker.json` directly and set the fields above on the matching `sourced[]` row.
 3. **For roles evaluated directly (not from a sourced[] row):** scan `applications[]` for an entry where `id` matches the reqId (if known), else where `company` and `role` match. If no matching row exists, do **not** create one here — `applications[]` rows are created at submission; skip to STEP 10.
@@ -346,16 +350,20 @@ If this sourced role came from `search-jobs` triage (has a row in `workspace/tra
    - **Legacy workspace (no DB):** edit `workspace/tracker.json` directly and set the fields above on the matching `applications[]` row.
 4. Validate and snapshot:
    - **DB workspace:** sub-step 2's `sourced upsert-batch` call (or sub-step 3's `app set-fields` call) already persisted and auto-exported `workspace/tracker.json` + `workspace/activity.jsonl` (Data Write Contract, AGENTS.md). Run:
+
      ```
      careerrat data verify
      careerrat tracker --verify
      ```
+
      `careerrat data verify` re-exports then runs the same domain-integrity check as `npm run verify:tracker`; `careerrat tracker --verify` covers the ajv schema-level check `data verify` doesn't run. Both should pass clean.
    - **Legacy workspace (no DB):** run in sequence:
+
      ```
      careerrat tracker --verify
      careerrat tracker
      ```
+
      These are two complementary checks and both should be run: `careerrat tracker --verify` validates JSON shape/structure against config/tracker.schema.json (required keys, field presence), while `npm run verify:tracker` validates domain integrity (status recognizability, score range 0–100, modes, channels, duplicate company-role pairs). Neither replaces the other.
 
 This promotes the row from a coarse scanner estimate to an authoritative body-read fit.
@@ -367,10 +375,13 @@ Then log the verdict to the Activity Pulse feed (the dashboard's live timeline �
   (`sourced` sweep-style or `status_change`-style) in the same transaction. For
   the richer, evaluation-specific type, log an additional event (this verb only
   logs, it never bumps the stamp):
+
   ```
   careerrat data activity append --data '{"type":"evaluated","actor":"agent","title":"Evaluated — <Company>","summary":"<GATE verdict>: <short reason>","refs":{"applicationId":"<application id>","company":"<Company>","role":"<Role>","url":"<posting URL>"}}'
   ```
+
 - **Legacy workspace (no DB):**
+
   ```
   careerrat activity append --type evaluated --actor agent \
     --title "Evaluated — <Company>" --summary "<GATE verdict>: <short reason>" \
