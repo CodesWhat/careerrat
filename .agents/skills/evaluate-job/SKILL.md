@@ -115,7 +115,7 @@ in legacy mode read `candidate/application-limits.yml` if present.
 
 - **`status: blocked` and today < `reapply_after`** → emit `ACTION: hold - <bypass note from config>` and stop. Do not proceed to gate.
 - **`status: caution` and within `cooldown_days` window** → note in output, continue evaluation, and set `ACTION: manual` unless overridden by a later step.
-- **No entry or `status: open`** → continue.
+- **No entry or `status: ok`** → continue. (`ok` is the schema's actual no-restriction value; there is no `open` status.)
 
 ---
 
