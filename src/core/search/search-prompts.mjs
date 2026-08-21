@@ -207,6 +207,16 @@ export function buildSearchPromptContext({
   if (domain) context.domain = domain;
   if (roleBuckets.length) context.role_buckets = roleBuckets;
 
+  // Top-level keep/cut signals — sibling of role_buckets[].fit_signals /
+  // .down_signals, not a replacement. sourced-scanner.mjs reads these same
+  // targeting.keep_signals/cut_signals fields; the AI search lane needs the
+  // same signals visible or it's blind to any workspace that defines them
+  // only at the top level (e.g. examples/demo-workspace/candidate/targeting.yml).
+  const keepSignals = compact(targeting.keep_signals);
+  if (keepSignals.length) context.keep_signals = keepSignals;
+  const cutSignals = compact(targeting.cut_signals);
+  if (cutSignals.length) context.cut_signals = cutSignals;
+
   const excludedCompanies = compact(targeting.excluded_companies);
   if (excludedCompanies.length) context.excluded_companies = excludedCompanies;
 
