@@ -27,7 +27,7 @@ const TERMINAL_STAGE_IDS = new Set(["rejected", "withdrawn"]);
 // Ordering is load-bearing: terminal/negative phrasings are checked BEFORE the
 // positive stages so "no longer under consideration" → rejected (not "consideration"
 // → awaiting) and "we are unable to offer you the role" → rejected (not "offer").
-export const ATS_STATUS_RULES = [
+const ATS_STATUS_RULES = [
   ["withdrawn", ["you withdrew", "withdrawn", "application withdrawn", "you have withdrawn"]],
   [
     "rejected",
@@ -140,7 +140,7 @@ export const ATS_STATUS_RULES = [
 // same raw label — sync-status / track-outcomes write THIS as the `conversations[]`
 // kind so the portal label "Welcome to your virtual onsite" lands as `onsite`, not a
 // generic interview. Ordered deepest-first; first match wins. null = not a round.
-export const ATS_ROUND_RULES = [
+const ATS_ROUND_RULES = [
   [
     "offer",
     ["offer extended", "extended an offer", "offer letter", "you have an offer", "offer accepted"],

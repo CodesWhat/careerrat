@@ -47,6 +47,6 @@ pre-push:
       # debt is cleaned up; never raise it. Keep it identical to the number in
       # .github/workflows/ci-verify.yml, since a pre-push hook looser than CI
       # just moves the failure to a slower place.
-      run: npx knip --no-progress --max-issues=30
+      run: npx knip --no-progress --max-issues=12
     - name: tests
       run: npm test

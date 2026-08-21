@@ -46,7 +46,7 @@ export const RESEARCH_SUBDIR = "workspace/research";
 // Known artifact types. The first two are "sourced" — they must cite at least one
 // source. board-discovery-log is a lightweight audit note (the real artifact of
 // board discovery is the updated config/search-sources.yml).
-export const RESEARCH_TYPES = ["company-research", "comp-benchmark", "board-discovery-log"];
+const RESEARCH_TYPES = ["company-research", "comp-benchmark", "board-discovery-log"];
 const SOURCED_TYPES = new Set(["company-research", "comp-benchmark"]);
 
 // Fallback staleness window when an artifact omits staleness_days. Type-specific

@@ -13,7 +13,8 @@
 
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-export const DEMO_LOGOS = {
+
+const DEMO_LOGOS = {
   // accepted / offers / finals
   "e corp": { src: "../assets/logos/e-corp.png" },
   "aperture science": { src: "../assets/logos/aperture-science.png" },
