@@ -29,10 +29,11 @@ Test homes:
 - [x] `G-06` Keyboard navigation, focus visibility, labels, landmarks, and dialogs are usable.
 - [x] `G-07` Light/dark themes and 1440px, 1024px, and mobile layouts have no clipped controls.
 - [x] `G-08` Reload and server restart preserve route, state, and completed actions without duplicates.
-- [ ] `G-09` Ask rehydrates its last completed turn (result card and follow-up actions) from the durable
+- [x] `G-09` Ask rehydrates its last completed turn (result card and follow-up actions) from the durable
   thread after reload. Observed 2026-08-16 during report-issue acceptance: the thread persists
-  server-side but the Ask bar mounts empty; decide whether replay-on-mount is intended before
-  checking this off.
+  server-side but the Ask bar mounts empty. Decided 2026-08-21 (Scott): replay-on-mount is intended.
+  Implemented in #159: mount-time fetch of the existing thread read, completed turns only, failed and
+  in-progress turns stay unreplayed, live turns always beat a late rehydration response.
 
 ## Onboarding
 

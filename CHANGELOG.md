@@ -17,6 +17,7 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Fixed
 
+- Reloading the page no longer clears your last Ask answer from the screen. The answer and its follow-up buttons come back exactly as they were, because the conversation was always saved; only the screen forgot it. An answer that was still being worked on, or that failed, is not replayed (#159).
 - The workspace chat no longer offers "Enrich my profile". That action never had an implementation behind it, so choosing it could only fail with an error. A new automated check now guarantees every action the chat offers actually works, so a dead menu item like this cannot ship again (#153).
 
 ## [0.11.0] - 2026-08-20
