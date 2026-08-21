@@ -4,6 +4,20 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Publishing a desktop release is now a single tag push. CI builds, signs, notarizes, and staples the app, uploads the installer to the GitHub release, and publishes the release once the installer is confirmed present. The Homebrew tap then picks up the published release on its own, so no manual step remains between tagging a version and users being able to download or `brew install` it (#150, #151, #152).
+
+### Changed
+
+- The two release-pipeline steps that only talk to GitHub now run with all other outbound network access blocked, so a compromised dependency in those steps could not send anything anywhere else. The build step keeps monitoring-only mode for now because Apple's notarization service uses rotating delivery hosts that a fixed blocklist would break (#155).
+
+### Fixed
+
+- The workspace chat no longer offers "Enrich my profile". That action never had an implementation behind it, so choosing it could only fail with an error. A new automated check now guarantees every action the chat offers actually works, so a dead menu item like this cannot ship again (#153).
+
 ## [0.11.0] - 2026-08-20
 
 ### Added

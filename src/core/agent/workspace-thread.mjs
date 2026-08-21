@@ -17,7 +17,7 @@ const KIND_VALUES = new Set([
 ]);
 const ONBOARDING_TRANSCRIPT_CHAR_LIMIT = 16_000;
 
-const WORKSPACE_INTENT_ENTITY_TYPES = Object.freeze({
+export const WORKSPACE_INTENT_ENTITY_TYPES = Object.freeze({
   "interview.prepare": ["application"],
   "interview.prepare-request": ["workspace"],
   "interview.schedule": ["application"],
@@ -79,7 +79,6 @@ const WORKSPACE_INTENT_ENTITY_TYPES = Object.freeze({
   "status.record-portal-request": ["workspace"],
   "status.record-portal": ["application"],
   "status.apply-transition": ["application"],
-  "profile.enrich": ["candidate"],
   "issue.report": ["workspace"],
   "issue.record-filed": ["workspace"],
 });
@@ -415,7 +414,6 @@ function intentText(intent) {
     "status.record-portal": "Record this portal status",
     "status.apply-transition": "Apply this proposed status update",
     "calendar.record-write": "Record a calendar event you added",
-    "profile.enrich": "Enrich my profile",
     "issue.report": "Prepare a redacted bug report",
     "issue.record-filed": "Record that I filed the issue",
   };
