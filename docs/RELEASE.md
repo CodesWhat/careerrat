@@ -49,9 +49,59 @@ Before tagging a release:
    `git tag -s v0.4.0 -m "release: v0.4.0"`, then pushed.
 10. GitHub release created from the tag with changelog notes.
 
-### Desktop Pilot Release
+### Desktop Release Pipeline
 
-For a desktop pilot release, add these checks before tagging:
+Pushing a tag `vX.Y.Z` does the whole desktop release with no further human
+action: `.github/workflows/desktop-release.yml` builds the app, signs and
+notarizes the DMG, uploads it to that tag's GitHub release, flips the release
+from draft to published, and opens a PR on `CodesWhat/homebrew-tap` bumping
+the cask. Three jobs, in order:
+
+1. **`build-notarize-upload`** (`macos-14`), checks out the tag, runs
+   `npm run desktop:release` (build, sign, notarize, staple,
+   Gatekeeper-verify, then `gh release upload`), creating the release as a
+   draft first if one doesn't already exist for the tag. Fails fast, before
+   any of that runs, if a required signing secret is missing.
+2. **`publish-release`**, confirms the `.dmg` landed on the release, then
+   `gh release edit "$tag" --draft=false`. This is the step that fires
+   `publish.yml` (npm publish) and `release-assets.yml` (the .dmg detector
+   below, which by now is a no-op since the asset is already there).
+3. **`tap-pr`** (`macos-14`, needs `shasum`), runs
+   `scripts/generate-homebrew-cask.sh` against the now-public release DMG,
+   pushes the result to a `release/careerrat-vX.Y.Z` branch on the tap repo,
+   and opens a PR against its `main` (matching how idlescreen and careerrat's
+   prior manual cask PRs landed there; the tap's `main` is protected, so
+   this is a PR, never a direct push).
+
+`workflow_dispatch` with a required `tag` input backfills an existing tag
+(re-running after a secrets fix, for example) without needing a new tag push.
+
+The rest of this section, the release checklist, the manual publish order,
+and the manual cask steps, is the fallback path: what to run by hand if the
+pipeline needs debugging, a secret is temporarily unavailable, or you want to
+verify a step in isolation.
+
+#### One-time CI signing setup
+
+The pipeline needs six repository secrets, set once
+(`gh secret set <name> --repo CodesWhat/careerrat --body ...` or the
+Settings → Secrets and variables → Actions UI):
+
+| Secret | What it is | How to produce it |
+| --- | --- | --- |
+| `CSC_LINK` | Base64 of the Developer ID Application `.p12` certificate | `base64 -i DeveloperIDApplication.p12 \| pbcopy` |
+| `CSC_KEY_PASSWORD` | The `.p12`'s export password | Set when exporting the cert from Keychain Access |
+| `APPLE_API_KEY` | Base64 of the App Store Connect API key `.p8` | `base64 -i AuthKey_XXXXXXXXXX.p8 \| pbcopy` |
+| `APPLE_API_KEY_ID` | The API key's Key ID | App Store Connect → Users and Access → Integrations → Team Keys |
+| `APPLE_API_ISSUER` | The API key's Issuer ID | Same Integrations page, above the key list |
+| `HOMEBREW_TAP_PAT` | Fine-grained PAT scoped to `CodesWhat/homebrew-tap` only, with Contents (read/write) and Pull requests (read/write) | github.com → Settings → Developer settings → Fine-grained tokens → Generate new token |
+
+`build-notarize-upload`'s first real step checks all five signing/upload
+secrets are set and fails with a clear list of what's missing rather than
+failing deep inside an electron-builder or notarytool error. `tap-pr` does
+the same for `HOMEBREW_TAP_PAT`.
+
+#### Manual fallback: building and verifying locally
 
 1. Build the desktop artifact with `npm run desktop:dist`. The command signs and notarizes the app
    and DMG container, staples the DMG ticket, and fails unless Gatekeeper verification passes.
@@ -71,7 +121,7 @@ For a desktop pilot release, add these checks before tagging:
    Gatekeeper assessment, fresh/existing workspace smoke, and checkout
    independence.
 
-### Publishing a Desktop Release
+#### Manual fallback: publishing a desktop release
 
 A GitHub release with no `.dmg` attached is a defect, not a formality:
 nobody can download the app from it. Publishing the release is what fires
@@ -106,12 +156,13 @@ flagged release is still the latest one. If a newer release has landed since,
 verify the repaired one directly with
 `gh release view "$tag" --json assets` instead.
 
-### Updating the Homebrew Cask
+#### Manual fallback: updating the Homebrew cask
 
 The cask lives at `Casks/careerrat.rb` in the separate repo
 `CodesWhat/homebrew-tap`, cloned locally at `~/code/codeswhat/homebrew-tap`.
-`scripts/generate-homebrew-cask.sh` generates its body; the tap PR itself is
-still opened by hand.
+`scripts/generate-homebrew-cask.sh` generates its body; `tap-pr` above opens
+the PR automatically on a tag push, so this is only needed to debug or redo
+that step by hand.
 
 1. After the GitHub release is published with its `.dmg` attached, run
    `scripts/generate-homebrew-cask.sh --write ~/code/codeswhat/homebrew-tap/Casks/careerrat.rb`.

@@ -314,7 +314,13 @@ A Homebrew cask now exists and is available: `brew install --cask
 codeswhat/tap/careerrat`. PR #4 on `CodesWhat/homebrew-tap` merged August 19,
 2026. `scripts/generate-homebrew-cask.sh` now generates the cask body
 (version from `package.json`, `sha256` from the published or a local DMG),
-closing the generator gap. Opening the tap PR is still a manual step.
+closing the generator gap. Opening the tap PR is no longer a manual step
+either: `.github/workflows/desktop-release.yml` runs the generator against
+the published release DMG and opens the tap PR itself as its last job,
+triggered by a tag push. The one piece left for Scott is the one-time CI
+signing secrets setup documented in `docs/RELEASE.md`'s "One-time CI signing
+setup" section; until those six secrets are set on the repo, the pipeline
+fails fast with a clear list of what's missing instead of running.
 
 Stale branch cleanup is done. `origin` is now just `main`. The branches
 `fix/v0.7-publish`, `dev/v0.7`, `archive/dev-2026-07`, and
