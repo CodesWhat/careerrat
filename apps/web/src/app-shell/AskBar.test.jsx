@@ -1265,6 +1265,13 @@ describe("AskBar — acting", () => {
     tree = render();
 
     expect(textOf(tree)).toContain("Recurring Co");
+    // This test's own harness quirk: render() is called twice before the
+    // first runPendingEffects(), and renderAskBar's hooks.reset() drops
+    // whatever a prior render() queued — including the G-09 mount-hydration
+    // effect from the very first render() above — so it never actually runs
+    // in this exact interleaving. What this assertion still guards is the
+    // thing it always guarded: no *extra* poll call gets fired once the
+    // company-review result already came back terminal.
     expect(api.getWorkspaceThread).not.toHaveBeenCalled();
   });
 
@@ -4815,5 +4822,232 @@ describe("AskBar — deep-ingest dock", () => {
     tree = render();
 
     expect(byClass(tree, "ask-bar__nudge")).toBeFalsy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 9. Mount-time rehydration (G-09) — the decision logic itself (which turn
+// counts as "completed") lives in ask-rehydrate.test.js; this section covers
+// the wiring — that AskBar actually fetches the thread on mount, renders the
+// rehydrated card, and that a rehydrated follow-up action still runs through
+// the exact same onRunAction -> commitAction path a live turn uses.
+// ---------------------------------------------------------------------------
+
+describe("AskBar — mount-time rehydration (G-09)", () => {
+  it("rehydrates a completed evaluation card and runs its follow-up action", async () => {
+    api.getWorkspaceThread.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            id: "intent-1",
+            sequence: 1,
+            role: "user",
+            kind: "intent",
+            text: "Evaluate this job (application:app-acme).",
+            intent: {
+              type: "job.evaluate",
+              entity: { type: "application", id: "app-acme" },
+            },
+          },
+          {
+            id: "result-1",
+            sequence: 2,
+            role: "assistant",
+            kind: "action_result",
+            text: "Evaluated Acme — Staff AI Engineer: Keep (92/100 fit).",
+            artifacts: [
+              {
+                kind: "job_evaluation",
+                title: "Acme — Staff AI Engineer — Keep",
+                applicationId: "app-acme",
+                evaluation: {
+                  gate: "keep",
+                  fitScore: 92,
+                  fitReasons: ["Strong production AI evidence"],
+                  fitRisks: ["Travel frequency is unclear"],
+                  compensation: { summary: "Posted range clears the floor." },
+                },
+              },
+            ],
+            metadata: {
+              intentMessageId: "intent-1",
+              state: "keep",
+              nextActions: [
+                {
+                  label: "Prepare application",
+                  intent: {
+                    type: "job.generate-documents",
+                    entity: { type: "application", id: "app-acme" },
+                    input: { applyIntent: true, formats: ["pdf"] },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    runPendingEffects();
+    await flushMicrotasks();
+    tree = render();
+
+    expect(api.getWorkspaceThread).toHaveBeenCalledTimes(1);
+    const evaluation = byClass(tree, "ask-bar__evaluation");
+    expect(textOf(evaluation)).toContain("KEEP");
+    expect(textOf(evaluation)).toContain("92/100 fit");
+
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Generated the application packet.",
+            artifacts: [
+              {
+                kind: "packet_generation",
+                status: "reviewable",
+                uploadReady: false,
+                blockingGapCount: 0,
+                gaps: [],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    buttonByText(tree, "Prepare application").props.onClick();
+    await flushMicrotasks();
+    tree = render();
+
+    expect(api.runWorkspaceIntent).toHaveBeenCalledWith(
+      "job.generate-documents",
+      { type: "application", id: "app-acme" },
+      { applyIntent: true, formats: ["pdf"] }
+    );
+    expect(byClass(tree, "ask-bar__packet-status")).toBeTruthy();
+  });
+
+  it("mounts empty when the last turn is still running server-side", async () => {
+    api.getWorkspaceThread.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            id: "intent-1",
+            sequence: 1,
+            role: "user",
+            kind: "intent",
+            text: "Search for qualified jobs (workspace:workspace-main).",
+            intent: { type: "search.run", entity: { type: "workspace", id: "workspace-main" } },
+          },
+          {
+            id: "result-1",
+            sequence: 2,
+            role: "assistant",
+            kind: "action_result",
+            text: "Job search started.",
+            artifacts: [{ kind: "search_run", runId: "run-1", status: "running" }],
+            metadata: { intentMessageId: "intent-1", searchRunId: "run-1", searchTerminal: false },
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    runPendingEffects();
+    await flushMicrotasks();
+    tree = render();
+
+    expect(api.getWorkspaceThread).toHaveBeenCalledTimes(1);
+    expect(byClass(tree, "ask-bar__turn")).toBeFalsy();
+  });
+
+  it("mounts empty when the last turn ended in an error", async () => {
+    api.getWorkspaceThread.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            id: "q-1",
+            sequence: 1,
+            role: "user",
+            kind: "text",
+            text: "what's blocking my top role?",
+          },
+          {
+            id: "a-1",
+            sequence: 2,
+            role: "assistant",
+            kind: "agent_error",
+            text: "No AI engine is configured yet.",
+            error: { code: "NO_AI_ROUTE" },
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    runPendingEffects();
+    await flushMicrotasks();
+    tree = render();
+
+    expect(api.getWorkspaceThread).toHaveBeenCalledTimes(1);
+    expect(byClass(tree, "ask-bar__turn")).toBeFalsy();
+  });
+
+  it("never lets a late rehydration response clobber a turn the user already started", async () => {
+    const thread = deferred();
+    api.getWorkspaceThread.mockReturnValue(thread.promise);
+    api.previewWorkspaceQuery.mockResolvedValue(answerOnlyPreview());
+    api.sendWorkspaceMessage.mockResolvedValue({
+      data: {
+        messages: [{ role: "assistant", kind: "text", text: "Live answer.", metadata: {} }],
+      },
+    });
+
+    let tree = render();
+    runPendingEffects(); // queues the mount hydration fetch, still pending
+
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "what should I do next?" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    expect(textOf(byClass(tree, "ask-bar__answer"))).toBe("Live answer.");
+
+    // The hydration fetch resolves late, after the live turn already landed —
+    // it must not overwrite the live result.
+    thread.resolve({
+      data: {
+        messages: [
+          {
+            id: "q-1",
+            sequence: 1,
+            role: "user",
+            kind: "text",
+            text: "an old question",
+          },
+          {
+            id: "a-1",
+            sequence: 2,
+            role: "assistant",
+            kind: "text",
+            text: "A stale rehydrated answer.",
+          },
+        ],
+      },
+    });
+    await flushMicrotasks();
+    tree = render();
+
+    expect(textOf(byClass(tree, "ask-bar__answer"))).toBe("Live answer.");
   });
 });

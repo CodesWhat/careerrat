@@ -26,6 +26,8 @@ import { useGlobalShortcut } from "../lib/useGlobalShortcut.js";
 import { ChatPanel } from "../onboarding/ChatPanel.jsx";
 import { DeepIngestDock, useDeepIngestNudge } from "../pages/SetupReadinessCard.jsx";
 import { ASK_BAR_REQUEST_EVENT } from "./ask-events.js";
+import { deriveLastCompletedTurn } from "./ask-rehydrate.js";
+import { isTerminalActionMessage } from "./ask-terminal.js";
 import { useDashboardSnapshot } from "./DashboardContext.jsx";
 import { UpdateAvailableDock } from "./UpdateAvailableDock.jsx";
 import { useNeedsYouCount } from "./useNeedsYouCount.js";
@@ -214,25 +216,6 @@ function readFileAsText(file) {
   });
 }
 
-function isTerminalActionMessage(message) {
-  if (!message) return false;
-  if (message.kind === "action_error") return true;
-  if (message.kind !== "action_result") return false;
-  if (
-    message.metadata?.companyReview === true &&
-    message.artifacts?.some(
-      (artifact) => artifact.kind === "company_proposals" && artifact.proposals?.length
-    )
-  ) {
-    return true;
-  }
-  // search.run starts in the background — recordWorkspaceSearchCompletion
-  // (workspace-agent.mjs) appends a later terminal message once it finishes;
-  // every other intent type is awaited fully server-side, so its first
-  // action_result is already terminal (searchTerminal is simply absent).
-  return message.metadata?.searchTerminal !== false;
-}
-
 // Polls GET /api/workspace/thread until the in-flight action's terminal
 // message shows up (or the safety timeout elapses, in which case the caller
 // just renders the latest non-terminal state rather than hanging forever).
@@ -389,6 +372,27 @@ export function AskBar() {
     const interval = setInterval(() => setTick((n) => n + 1), 1000);
     return () => clearInterval(interval);
   }, [turn?.status]);
+
+  // G-09: the durable thread survives a reload server-side, but this bar's
+  // own `turn` state doesn't — mount empty and re-fetch the thread once to
+  // rehydrate the last completed turn (see ask-rehydrate.js for exactly what
+  // counts as "completed"). Guarded by the same turnIdRef a live commit
+  // bumps, so a turn the user starts before this fetch resolves always wins
+  // over a late rehydration response.
+  useEffect(() => {
+    const localTurnId = turnIdRef.current;
+    (async () => {
+      try {
+        const res = await getWorkspaceThread();
+        if (turnIdRef.current !== localTurnId) return;
+        const messages = (res?.data || res)?.messages;
+        const rehydrated = deriveLastCompletedTurn(messages);
+        if (rehydrated) setTurn(rehydrated);
+      } catch {
+        // best-effort — an empty bar is still a safe fallback
+      }
+    })();
+  }, []);
 
   function availableRows() {
     if (captureMode) return ["capture", "answer"];
