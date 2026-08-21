@@ -57,6 +57,17 @@ higher dead-link rate in the AI lane, port the upstream discipline in rather tha
 abandoning the lane: the AI lane calls the deterministic scorer for fit, and its
 survivors get a mandatory liveness re-check before persistence.
 
+**Decision, 2026-08-21: HOLD the port.** Phases 1-2 ran (#165; numbers and caveats in
+`SEARCH-SHAPE-EVAL-RESULTS.md`). Measured AI-vs-deterministic disagreement was 14.5%,
+inside the band at its top edge, but the run cannot trigger the rule: Phase 3's
+dead-link half never ran (fixtures-only scope), the deterministic baseline was
+degenerate on the corpus (stretch on 62/62, so agreement measured the label
+distribution rather than discrimination), and the run surfaced a confounder that
+invalidates the comparison as run: `buildSearchPromptContext()` never passed
+`targeting.yml`'s top-level keep/cut signals to the AI lane at all. That fix landed
+(#166). The port question reopens only if Phase 3 runs after that fix and the
+remeasured pair still trips both halves of the rule.
+
 ## Companion fixes (independent of the eval outcome)
 
 - **Installed-CLI model tiering is dropped.** `callAI({tier: "smallFast"})` correctly
