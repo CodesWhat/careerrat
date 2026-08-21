@@ -4,7 +4,7 @@
 
 <h1 align="center">CareerRat</h1>
 
-<p align="center"><strong>Find, vet, and advance the right roles.</strong></p>
+<p align="center"><strong>Reads the posting, writes only what's true, keeps score of your search.</strong></p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/careerrat"><img src="https://img.shields.io/npm/v/careerrat" alt="npm version"></a>
@@ -50,29 +50,30 @@ macOS users can also download the signed, notarized desktop app from the
 [latest release](https://github.com/CodesWhat/careerrat/releases/latest).
 
 That sets up your workspace, opens the local app at `http://localhost:7777`, and
-hands you off to the agent. From there you just talk to it.
+hands you off to the agent. From there you just talk to it. No dashboard to
+learn first, no settings to get right before it's useful.
 
 ### Your first hour
 
-1. **Let it onboard you.** It asks a handful of questions and builds your profile
-   from the answers: what roles you want, what you'll accept, what you won't,
-   and the real work you've done. If you'd rather kick the tires first, say
+1. **Let it onboard you.** A conversation, not a form: it asks what roles you
+   want, what you'll accept, what you won't, and the real work you've done, then
+   builds your profile from the answers. Want to kick the tires first? Say
    *"set me up with a quick sample profile."*
-2. **Paste a job posting**, a description copied from anywhere, a link, or the
-   sample in `examples/sample-jobs/`, and say *"evaluate this."* You'll get a
-   verdict: keep it or cut it, how well it fits, whether the money works, and
-   what to do next. All from an actual read of the posting.
+2. **Paste a job posting**, a link, or the sample in `examples/sample-jobs/`, and
+   say *"evaluate this."* You'll get a verdict: keep it or cut it, how well it
+   actually fits, whether the money works, and what to do next. All from a real
+   read of the posting, not a keyword match.
 3. **Say "write a résumé and cover letter for this."** It builds them from your
-   own evidence and refuses to invent anything.
+   own evidence and refuses to invent anything you didn't tell it.
 4. **Paste a recruiter email** and say *"draft a reply."* It writes the reply and
-   remembers the thread.
-5. **Open `http://localhost:7777`** and watch the job appear, move through your
-   funnel, and pick up history. Quick local actions work in the app; longer work
-   opens a visible conversation with the owning skill.
+   remembers the thread, so the next one has context.
+5. **Open `http://localhost:7777`** and watch the job land, move through your
+   funnel, and pick up history as you go. Quick actions happen right there;
+   anything longer opens a visible conversation with the skill doing the work.
 
 **One first-run thing that looks broken but isn't:** before you've onboarded,
-`careerrat doctor` will report that your setup is incomplete and list
-`candidate/*.yml` files to create. That's expected. Onboarding fills them in.
+`careerrat doctor` will report your setup is incomplete and list `candidate/*.yml`
+files to create. That's expected. Onboarding fills them in.
 
 ### Everyday commands
 
@@ -84,7 +85,7 @@ careerrat update     # pull the latest code; your data is untouched
 
 If the local app is already running, the update relaunches that recorded
 CareerRat process on the updated code. Unrelated processes are never stopped;
-CareerRat selects another loopback port instead.
+CareerRat picks another loopback port instead.
 
 The local app comes up with `careerrat start`. To run it on its own:
 
@@ -112,11 +113,11 @@ careerrat start claude
 
 ## Why CareerRat
 
-CareerRat is a job-search workspace that runs on your own machine. You tell it
-what you're actually looking for. It reads real job postings and tells you which
+CareerRat is a job-search workspace that runs on your own machine. Tell it what
+you're actually looking for, once. It reads real job postings and tells you which
 ones are worth your time, writes applications from things you've genuinely done,
 drafts your recruiter replies, preps you for interviews, and keeps track of where
-everything stands.
+everything stands, so you're not rebuilding that picture from memory.
 
 No account, no CareerRat server, no telemetry. CareerRat never phones home, and
 your files stay on your machine. What does go out: your AI CLI talks to its own
@@ -124,57 +125,106 @@ provider to do the work, same as any other task you'd give it, and the app
 fetches public resources like job postings and company logos from the services
 that host them. The packaged desktop app also checks GitHub once a day for a
 newer release and shows an in-app notice, nothing more; it never downloads or
-installs anything on its own, and it can be turned off in Settings. See
+installs anything on its own, and you can turn that off in Settings. See
 [privacy](https://careerrat.com/docs/advanced/privacy) for the details.
 
-Most job tools match keywords, then spray. CareerRat won't write a single line of
-a cover letter until it has read the whole posting and checked it against what
-you said you want: your comp floor, your location, your dealbreakers. Jobs that
-don't clear that bar, it tells you to skip.
+Most job tools match keywords, then spray a hundred applications and hope one
+sticks. CareerRat won't write a single line of a cover letter until it has read
+the whole posting and checked it against what you said you want: your comp
+floor, your location, your dealbreakers. Jobs that don't clear that bar, it
+tells you to skip, and says why.
 
 And it won't lie for you. Every claim in a tailored résumé traces back to
 something you told it about your own work. If you didn't do it, it doesn't get
-written.
+written, full stop.
 
-CareerRat is an *agent runtime*. The CLI sets up the workspace and serves the
-local app, but the job-search work happens inside your agent, reading a set of
-skills that tell it how each step is done. That's why you talk to it in plain
-language instead of memorizing subcommands. The first run detects supported AI
-CLIs and explains the available choices.
+CareerRat is an *agent runtime*, not a form-filling script. The CLI sets up the
+workspace and serves the local app, but the job-search work happens inside your
+own agent, reading a set of skills that spell out how each step gets done.
+That's why you talk to it in plain language instead of memorizing subcommands,
+and why the first run just detects which AI CLI you have and gets out of the way.
 
 The rule underneath all of it: **no tailoring, no applying, until the job has
 passed a real read of the posting.** Titles and keywords are triage, not truth.
 
 Same skills for anyone. A nurse, an engineer, and a driver each answer onboarding
-their own way and get the same loop.
+their own way and get the same loop back. (The mascot's a rat named Paul. He
+doesn't do the reading, but he's why the app looks the way it does.)
 
 <hr>
 
 ## Features
 
-- **Onboarding**: a conversation, not a form. Produces your targets, comp floor,
-  evidence bank, honesty boundaries, and writing style.
-- **Finding jobs**: builds searches from your targets, finds boards and company
-  career pages worth watching, dedupes, drops dead links, and triages what's new.
-- **Vetting jobs**: reads the full posting and judges it against your actual
-  constraints before anything gets written.
-- **Honest applications**: résumés, cover letters, and short answers built only
-  from your evidence bank, with a check that blocks anything half-finished.
-- **Applying**: fills portal forms for you, defaults to letting you hit submit,
-  pauses at CAPTCHAs.
+CareerRat covers the whole search, not just the writing. Twenty-eight skills,
+grouped by what you're actually trying to do:
+
+### Find roles
+
+- **Search setup**: turns your targeting into real sources, boards, and company
+  career pages worth watching, and lets you tune or import them by hand.
+- **Sourced sweep**: scans everything configured, dedupes, drops dead links, and
+  coarse-triages every new posting so you see what's worth a closer look.
+- **Company discovery**: finds companies likely to be hiring your kind of role
+  from your own company thesis, checks each one is real, and proposes adding it.
+- **Board research**: looks for new job boards worth watching in your field and
+  proposes adding them.
+
+### Vet them
+
+- **Full-posting evaluation**: reads the whole posting and checks it against
+  your comp floor, location, and dealbreakers before anything gets written.
+  This is the gate every tailor or apply run has to clear first.
+- **Company health**: checks layoff risk, hiring momentum, financials,
+  sentiment, and leadership stability, and scores the company healthy, watch,
+  or risky.
+- **Company research**: pulls together a cited brief on a company across six
+  angles, for vetting and for interview prep.
+- **Comp research**: benchmarks the market rate for a role and location, so the
+  comp check has something real to compare your offer against.
+- **Gap coaching**: when a job lands at "worth a look, but" with named fit gaps,
+  works out an honest plan to close them, or tells you straight there isn't one.
+
+### Apply
+
+- **Honest tailoring**: résumés, cover letters, and short answers built only
+  from things you've actually done, with a check that blocks anything
+  half-finished.
+- **Screening answers**: drafts one-off application-question answers grounded
+  in your profile and evidence, and remembers your standard disclosures so
+  you're never asked twice.
+- **Filling and submitting**: fills the portal form for you, including
+  LinkedIn's one-click Easy Apply, and defaults to letting you hit submit.
+- **LinkedIn tune-up**: diffs your profile against what you're targeting and
+  proposes honest rewrites, headline through Featured, with a preview before
+  anything gets written back.
+
+### Manage the pipeline
+
 - **Recruiter comms**: drafts replies, follow-ups, scheduling, and negotiation,
-  and keeps the whole thread.
-- **Interview prep**: packets tailored to who you're talking to, a story bank
-  grounded in your real work, and live coaching for comp conversations.
-- **Outcome tracking**: records what happened, notices when your results say
-  your strategy needs a rethink, and tells you.
-- **Research**: company intel and comp benchmarks, kept firmly separate from
-  your résumé claims so web findings can never launder into fake credentials.
-- **Dashboard**: stat cards, funnel, active pipeline from sourced through offer,
-  per-job detail, follow-up reminders, and table / board / calendar views. Tokyo
-  Night and Gruvbox themes, light or dark.
-- **Memory**: lessons from each application compound, so it gets sharper the
-  longer you use it.
+  and keeps the whole thread on record.
+- **Scheduling**: reads proposed times, checks your timezone and calendar, and
+  drafts a clear availability reply.
+- **Calendar holds**: writes interviews, assessments, and deadlines to Apple
+  Calendar, Google Calendar, or Outlook.
+- **Reading your inbox and DMs**: pulls recruiter replies and status changes out
+  of Mail, Gmail, Outlook, and LinkedIn or Wellfound messages, so the tracker
+  reflects what's actually happening.
+- **Status sync**: reads your ATS dashboards and normalizes whatever label they
+  use into one vocabulary.
+- **Outcome tracking**: records what happened, learns the pattern for your role
+  family, and tells you when your results say the strategy needs a rethink.
+- **Warm contacts**: finds likely recruiters and hiring-team contacts at
+  companies you're tracking, for you to review before reaching out.
+
+### Interviews and offers
+
+- **Interview prep**: packets tailored to who you're talking to, built from your
+  real work and the job itself.
+- **Live comp coaching**: scripts and rehearses the actual negotiation with you
+  while you're in the room, then debriefs after and folds the lesson back in.
+
+**Dashboard**: stat cards, funnel, active pipeline from sourced through offer,
+table / board / calendar views, Tokyo Night and Gruvbox themes, light or dark.
 
 <hr>
 
