@@ -1,0 +1,140 @@
+name: sbom
+
+# Generates a Software Bill of Materials (SBOM) for a published release and
+# attaches it as a release asset. Closes the gap left when #73 shipped without
+# one: the release pipeline (desktop-release.yml, publish.yml) never produced
+# a dependency manifest for the npm package.
+#
+# Tool choice: `npm sbom --sbom-format spdx` was the first choice (no extra
+# action, no third-party trust). It was tested locally against this repo's
+# real lockfile and fails with ESBOMPROBLEMS: apps/web pins vite@6.4.3 while
+# apps/docs's fumadocs-mdx@15.2.3 requires vite 7.x||8.x. `npm ci` installs
+# that tree fine (it's a benign cross-workspace peer mismatch, not a broken
+# install), but `npm sbom` runs a stricter validate pass that refuses to
+# describe a tree it considers invalid, and neither `--omit` nor
+# `--package-lock-only` route around it. Fixing the underlying version
+# mismatch is a separate change, so this workflow falls back to the pinned
+# anchore/sbom-action (syft under the hood), which scans the installed tree
+# without npm's strict validation and produces the same SPDX format.
+#
+# workflow_dispatch takes no inputs on purpose: checkov CKV_GHA_7 requires
+# them to be empty, matching release-assets.yml and desktop-release.yml's
+# dispatch triggers. A manual run always targets the latest published
+# release, resolved the same way desktop-release.yml's publish-release job
+# resolves releases: by listing `repos/{repo}/releases` and filtering, never
+# `gh release view <tag>` (drafts aren't addressable by tag, and gh's
+# fallback behavior for that case varies by version).
+#
+# Release lists are fetched with `--paginate --slurp` and filtered by the
+# real jq binary, not gh's built-in `--jq`: gh applies `--jq` once per page,
+# so an aggregate filter (sort_by/last/length) silently operates on one page
+# at a time once the repo passes 100 releases. `--slurp` can't be combined
+# with gh's `--jq` at all, hence the pipe. jq's `--arg` also keeps the tag
+# name out of the filter text entirely (tag names may legally contain
+# quotes).
+#
+# Every release value is resolved once in `resolve-release` and threaded
+# through the generate job as job outputs / env vars, never spliced directly
+# into a `run:` script body.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  resolve-release:
+    name: resolve release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Harden the runner (audit all outbound calls)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+      - name: Resolve the target release
+        id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            release="$(gh api "repos/$REPO/releases" --paginate --slurp | jq -c \
+              'add | [.[] | select(.draft==false)] | sort_by(.published_at) | last // empty')"
+            if [ -z "$release" ]; then
+              echo "::error::No published release found; workflow_dispatch has nothing to target."
+              exit 1
+            fi
+          else
+            if [ -z "$EVENT_TAG" ]; then
+              echo "::error::Release event fired with no tag_name in the payload."
+              exit 1
+            fi
+            matches="$(gh api "repos/$REPO/releases" --paginate --slurp | jq -c --arg tag "$EVENT_TAG" \
+              'add | [.[] | select(.tag_name==$tag)]')"
+            count="$(jq 'length' <<<"$matches")"
+            if [ "$count" -ne 1 ]; then
+              echo "::error::Expected exactly one release for tag $EVENT_TAG, found $count."
+              exit 1
+            fi
+            release="$(jq '.[0]' <<<"$matches")"
+          fi
+          tag="$(jq -r '.tag_name' <<<"$release")"
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Resolved tag '$tag' does not look like vX.Y.Z"
+            exit 1
+          fi
+          version="${tag#v}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  generate-and-upload-sbom:
+    name: generate and upload sbom
+    needs: resolve-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # GH_TOKEN is scoped to the one step that talks to GitHub, not the job:
+    # the same house lesson desktop-release.yml records for its build job.
+    env:
+      TAG: ${{ needs.resolve-release.outputs.tag }}
+      VERSION: ${{ needs.resolve-release.outputs.version }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Harden the runner (audit all outbound calls)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve-release.outputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Install dependencies
+        run: npm ci
+      - name: Generate the SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Name the SBOM for the release asset
+        run: mv sbom.spdx.json "careerrat-${VERSION}-sbom.spdx.json"
+      - name: Upload the SBOM to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$TAG" "careerrat-${VERSION}-sbom.spdx.json" --repo "$REPO" --clobber
