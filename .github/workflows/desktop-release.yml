@@ -75,9 +75,13 @@ jobs:
     runs-on: macos-14
     permissions:
       contents: write
+    # GH_TOKEN is deliberately NOT job-level env here: electron-builder
+    # auto-activates its own GitHub publishing whenever it sees GH_TOKEN or
+    # GITHUB_TOKEN (app-builder-lib PublishManager), then fails trying to
+    # detect the repository. Only the steps that actually talk to GitHub get
+    # it, and the electron-builder build never does.
     env:
       TAG: ${{ needs.resolve-tag.outputs.tag }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       CSC_LINK: ${{ secrets.CSC_LINK }}
       CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
       APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
@@ -115,6 +119,8 @@ jobs:
           fi
           echo "Required signing and notarization secrets are present."
       - name: Ensure a GitHub release exists for the tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           if gh release view "$TAG" >/dev/null 2>&1; then
@@ -166,8 +172,12 @@ jobs:
           rm -f "$RUNNER_TEMP/signing-cert.p12"
       - name: Install dependencies
         run: npm ci
-      - name: Build, sign, notarize, staple, verify, and upload the desktop release
-        run: npm run desktop:release
+      - name: Build, sign, notarize, staple, and verify the desktop release
+        run: npm run desktop:dist
+      - name: Upload the dmg to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm --workspace apps/desktop run release:upload
 
   publish-release:
     name: publish release
