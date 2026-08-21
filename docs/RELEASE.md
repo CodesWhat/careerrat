@@ -54,14 +54,21 @@ Before tagging a release:
 Pushing a tag `vX.Y.Z` does the whole desktop release with no further human
 action: `.github/workflows/desktop-release.yml` builds the app, signs and
 notarizes the DMG, uploads it to that tag's GitHub release, and flips the
-release from draft to published. Two jobs, in order:
+release from draft to published. Three jobs, in order:
 
-1. **`build-notarize-upload`** (`macos-14`), checks out the tag, runs
+1. **`resolve-tag`**, resolves and validates the `vX.Y.Z` tag once (from the
+   push ref, or the newest tag by semver order on a dispatch) and threads it
+   to the other jobs, so no job ever splices an unvalidated ref into a
+   script.
+2. **`build-notarize-upload`** (`macos-14`), checks out the tag, refuses to
+   build if the tag doesn't match `apps/desktop/package.json`'s version,
+   imports the signing identity into a keychain that outlives
+   electron-builder's own temporary one, then runs
    `npm run desktop:release` (build, sign, notarize, staple,
    Gatekeeper-verify, then `gh release upload`), creating the release as a
    draft first if one doesn't already exist for the tag. Fails fast, before
    any of that runs, if a required signing secret is missing.
-2. **`publish-release`**, confirms the `.dmg` landed on the release, then
+3. **`publish-release`**, confirms the `.dmg` landed on the release, then
    `gh release edit "$tag" --draft=false`. This is the step that fires
    `publish.yml` (npm publish) and `release-assets.yml` (the .dmg detector
    below, which by now is a no-op since the asset is already there).
