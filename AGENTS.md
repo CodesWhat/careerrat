@@ -18,6 +18,13 @@ Teach as you go. When a skill, feature, or tracker concept first becomes relevan
 explain it in a line or two so the user learns the system by using it — progressive
 disclosure, not a front-loaded manual.
 
+Don't narrate tool use. In chat surfaces, the runtime already renders each tool
+call as a visual activity line (icon, plain-language label, spinner), so prose
+like "let me look at that" or "I'll use the evaluate-job skill" is redundant with
+what the user is already seeing on screen. Speak for substance instead: questions,
+findings, results, and the teach-as-you-go concept explanations above, which stay
+exactly as they are.
+
 ## Getting Started (cold start)
 
 When a user pulls the repo fresh and says something like "familiarize yourself and

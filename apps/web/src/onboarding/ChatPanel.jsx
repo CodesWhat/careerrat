@@ -13,6 +13,7 @@ import {
 } from "../lib/api.js";
 import { errorState, withRetryAction } from "../lib/errorCopy.js";
 import { useEventSource } from "../lib/sse.js";
+import { describeToolActivity } from "./chatActivity.jsx";
 import { renderChatMarkdown } from "./chatMarkdown.jsx";
 import { parseDiscoveryBlocks } from "./discoveryBlocks.js";
 
@@ -91,12 +92,42 @@ export function ChatPanel({
         }
       }
     } else if (type === "tool_use") {
-      setMessages((m) => [...m, { role: "activity", text: `tool: ${data?.name || "unknown"}` }]);
-    } else if (type === "tool_result") {
       setMessages((m) => [
         ...m,
-        { role: "activity", text: `result: ${data?.isError ? "error" : "ok"}` },
+        {
+          role: "activity",
+          id: data?.id ?? null,
+          name: data?.name || "",
+          input: data?.input || null,
+          status: "pending",
+        },
       ]);
+    } else if (type === "tool_result") {
+      // Settle the matching pending activity line in place — never append a
+      // second line for the same tool call. Matched by tool_use id when the
+      // payload carries one (it always does, per mapSdkMessage); falls back
+      // to the most recently started still-pending activity line, since
+      // tool_use/tool_result frames arrive in call order over one SSE
+      // stream.
+      const toolUseId = data?.toolUseId ?? null;
+      const isError = Boolean(data?.isError);
+      setMessages((current) => {
+        let index = -1;
+        if (toolUseId != null) {
+          index = current.findIndex((msg) => msg.role === "activity" && msg.id === toolUseId);
+        } else {
+          for (let i = current.length - 1; i >= 0; i--) {
+            if (current[i].role === "activity" && current[i].status === "pending") {
+              index = i;
+              break;
+            }
+          }
+        }
+        if (index === -1) return current;
+        const next = current.slice();
+        next[index] = { ...next[index], status: isError ? "error" : "done" };
+        return next;
+      });
     } else if (type === "chat_state") {
       if (data?.state) setChatState(data.state);
     } else if (type === "error") {
@@ -312,9 +343,7 @@ export function ChatPanel({
         {messages.map((m, i) =>
           m.role === "activity" ? (
             // biome-ignore lint/suspicious/noArrayIndexKey: append-only transcript log
-            <div key={i} className="chat-activity-line">
-              {m.text}
-            </div>
+            <ChatActivityLine key={i} name={m.name} input={m.input} status={m.status} />
           ) : (
             // biome-ignore lint/suspicious/noArrayIndexKey: append-only transcript log
             <div key={i} className={`chat-bubble chat-bubble--${m.role}`}>
@@ -412,6 +441,30 @@ export function ChatPanel({
           End session
         </Button>
       </div>
+    </div>
+  );
+}
+
+// ChatActivityLine — the settled/spinning tool-activity row that replaced
+// the old raw "tool: X" / "result: ok|error" text lines. Reads as quiet
+// secondary UI (small, muted, icon-led), never assistant prose — the
+// no-narration rule in AGENTS.md exists precisely because this row is doing
+// the job in-band. The raw SDK tool name only ever surfaces in `title`, for
+// a hover; the primary reading path is the plain-language label from
+// describeToolActivity.
+function ChatActivityLine({ name, input, status }) {
+  const { Icon, label, detail } = describeToolActivity(name, input);
+  const text = detail ? `${label}: ${detail}` : label;
+  return (
+    <div className={`chat-activity-line chat-activity-line--${status}`} title={name || "Working"}>
+      <Icon className="chat-activity-line__icon" />
+      {status === "pending" ? (
+        <span className="chat-activity-line__spinner" aria-hidden="true" />
+      ) : null}
+      <span className="chat-activity-line__label">{text}</span>
+      {status === "error" ? (
+        <span className="chat-activity-line__note">That step hit an error</span>
+      ) : null}
     </div>
   );
 }
