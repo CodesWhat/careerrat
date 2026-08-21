@@ -8,6 +8,7 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Added
 
+- When a job's evaluation lands at "review" with named fit risks, you can now click "Coach me on this fit" to get a plan for closing the gaps. Each gap gets either a suggested addition to your evidence, drawn only from things you have actually told CareerRat, or a plain "no honest way to close this one yet". Confirming a suggestion saves it through the same checks as any other evidence, and you can then re-evaluate the job to see if it changed your fit. Nothing runs unless you click, and CareerRat never invents experience for you (#160).
 - Every published release now includes a software bill of materials, a standard SPDX file listing exactly which packages and versions CareerRat is built from, attached as `careerrat-<version>-sbom.spdx.json`. Security tools can read it to check a release against known vulnerabilities without installing anything (#154).
 - Publishing a desktop release is now a single tag push. CI builds, signs, notarizes, and staples the app, uploads the installer to the GitHub release, and publishes the release once the installer is confirmed present. The Homebrew tap then picks up the published release on its own, so no manual step remains between tagging a version and users being able to download or `brew install` it (#150, #151, #152).
 

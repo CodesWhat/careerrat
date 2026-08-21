@@ -98,6 +98,54 @@
               "evaluatedAt": { "type": ["string", "null"] }
             }
           },
+          "coachingPlan": {
+            "type": ["object", "null"],
+            "additionalProperties": true,
+            "description": "DRAWER ONLY — explicit-click coaching plan for a review-gate evaluation with named fitRisks (coach-gaps skill / coaching.plan intent). Never auto-generated; fires only on the user's own 'Coach me on this fit' click. Names each gap with either an evidence-claim draft grounded in evidence already on record, or an explicit no-close-path (a valid, honest outcome, not a failure).",
+            "properties": {
+              "generatedAt": { "type": ["string", "null"] },
+              "basedOn": {
+                "type": ["object", "null"],
+                "additionalProperties": true,
+                "description": "Snapshot of the evaluation this plan was built against, so a stale plan can be told apart from the application's current verdict.",
+                "properties": {
+                  "gate": { "type": ["string", "null"], "enum": ["keep", "review", "cut", null] },
+                  "fitScore": { "type": ["number", "null"] },
+                  "fitBucket": { "type": ["string", "null"], "enum": ["high", "med", "stretch", null] },
+                  "evaluatedAt": { "type": ["string", "null"] }
+                }
+              },
+              "gaps": {
+                "type": ["array", "null"],
+                "maxItems": 3,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "id": { "type": "string" },
+                    "gapText": { "type": "string", "maxLength": 80, "description": "VERBATIM from the evaluation's fitRisks — never restated by the model." },
+                    "suggestion": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "properties": {
+                        "kind": { "type": "string", "enum": ["evidence-claim", "no-close-path"] },
+                        "draftClaim": {
+                          "type": ["object", "null"],
+                          "additionalProperties": true,
+                          "properties": {
+                            "claim": { "type": ["string", "null"], "maxLength": 200 },
+                            "evidence": { "type": ["string", "null"], "maxLength": 300 }
+                          }
+                        },
+                        "rationale": { "type": ["string", "null"], "maxLength": 160 }
+                      }
+                    },
+                    "status": { "type": "string", "enum": ["open", "closed", "dismissed"] }
+                  }
+                }
+              }
+            }
+          },
           "link":   { "type": ["string", "null"] },
           "domain": { "type": ["string", "null"] },
           "channel": { "type": ["string", "null"], "enum": ["board", "linkedin", "portal", "referral", "recruiter", null] },

@@ -30,7 +30,11 @@ import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { ALL_MIGRATIONS } from "../src/core/db/migrations.mjs";
 import { appRegisterPacketQuestionCapture, appUpsert } from "../src/core/db/verbs/app.mjs";
 import { calendarBusyUpsert } from "../src/core/db/verbs/calendar.mjs";
-import { candidateConfigGet, candidateConfigPatch } from "../src/core/db/verbs/candidate.mjs";
+import {
+  candidateConfigGet,
+  candidateConfigPatch,
+  candidateEvidenceMerge,
+} from "../src/core/db/verbs/candidate.mjs";
 import { commUpsert } from "../src/core/db/verbs/comm.mjs";
 import { companyProposalBatchPut } from "../src/core/db/verbs/company-discovery.mjs";
 import { intakeCapture, intakeUpdate } from "../src/core/db/verbs/intake.mjs";
@@ -1103,6 +1107,422 @@ test("company.health throws COMPANY_NOT_FOUND instead of starting a chat for a b
       },
     }),
     (error) => error.code === "COMPANY_NOT_FOUND"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// coaching.plan / coaching.evidence-save — Phase 1 coaching loop. buildCoachingPlan
+// itself is unit-tested directly in tests/coaching-plan.test.mjs (mirroring
+// evaluatePacketGate's own direct-call coverage); these exercise the
+// executor branches: persistence through appSetFields, and the evidence
+// firewall coaching.evidence-save routes a confirmed draft through.
+// ---------------------------------------------------------------------------
+
+function coachingPlanPayload(overrides = {}) {
+  return {
+    generatedAt: "2026-08-20T12:00:00.000Z",
+    basedOn: {
+      gate: "review",
+      fitScore: 68,
+      fitBucket: "med",
+      evaluatedAt: "2026-08-19T00:00:00.000Z",
+    },
+    gaps: [
+      {
+        id: "no-direct-kubernetes-production-experience",
+        gapText: "No direct Kubernetes production experience on record",
+        suggestion: {
+          kind: "evidence-claim",
+          draftClaim: {
+            claim: "Ran production platform tooling used daily by 3 engineering teams.",
+            evidence: "Source: resume (Experience — Northwind Digital).",
+          },
+          rationale: "Grounds platform-delivery scope without claiming Kubernetes itself.",
+        },
+        status: "open",
+      },
+    ],
+    ...overrides,
+  };
+}
+
+// The evaluation that matches coachingPlanPayload()'s default basedOn exactly
+// (evaluatedAt is the staleness discriminator; gate/fitScore are the sanity
+// check on top) — seeded onto the application alongside the plan so
+// coaching.evidence-save tests that are not about staleness don't trip it.
+function currentEvaluationForPlan(overrides = {}) {
+  return {
+    gate: "review",
+    fitScore: 68,
+    fitBucket: "med",
+    evaluatedAt: "2026-08-19T00:00:00.000Z",
+    fitRisks: ["No direct Kubernetes production experience on record"],
+    ...overrides,
+  };
+}
+
+test("coaching.plan persists a plan onto the application row and returns a coaching_plan artifact", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-coach",
+    company: "Acme Platform",
+    role: "Platform Engineer",
+    evaluation: {
+      gate: "review",
+      fitRisks: ["No direct Kubernetes production experience on record"],
+    },
+  });
+  const plan = coachingPlanPayload();
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "coaching.plan",
+      entity: { type: "application", id: "app-coach" },
+    },
+    buildCoachingPlanImpl: async ({ applicationId }) => {
+      assert.equal(applicationId, "app-coach");
+      return { status: 200, body: { ok: true, data: plan } };
+    },
+  });
+
+  const last = result.messages.at(-1);
+  assert.equal(last.artifacts[0].kind, "coaching_plan");
+  assert.equal(last.artifacts[0].applicationId, "app-coach");
+  assert.deepEqual(last.artifacts[0].coachingPlan, plan);
+  assert.match(last.text, /1 gap named/);
+
+  const persisted = readApplication(repoRoot, "app-coach");
+  assert.deepEqual(persisted.coachingPlan, plan);
+});
+
+test("coaching.plan surfaces a failed plan build as a real error, not a silent artifact", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-coach",
+    company: "Acme Platform",
+    role: "Platform Engineer",
+    evaluation: { gate: "keep", fitRisks: [] },
+  });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "coaching.plan",
+        entity: { type: "application", id: "app-coach" },
+      },
+      buildCoachingPlanImpl: async () => ({
+        status: 409,
+        body: {
+          ok: false,
+          code: "COACHING_NOT_APPLICABLE",
+          error: { message: "Coaching only runs on a review verdict with named fit gaps." },
+        },
+      }),
+    }),
+    (error) => {
+      assert.equal(error.code, "COACHING_NOT_APPLICABLE");
+      return true;
+    }
+  );
+  assert.equal(readApplication(repoRoot, "app-coach").coachingPlan, undefined);
+});
+
+test("coaching.evidence-save routes a confirmed draft through the evidence firewall and flips the gap to closed", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-coach",
+    company: "Acme Platform",
+    role: "Platform Engineer",
+    evaluation: currentEvaluationForPlan(),
+    coachingPlan: coachingPlanPayload(),
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "coaching.evidence-save",
+      entity: { type: "application", id: "app-coach" },
+      input: { gapId: "no-direct-kubernetes-production-experience" },
+    },
+  });
+
+  const last = result.messages.at(-1);
+  assert.equal(last.artifacts[0].kind, "evidence_claim_saved");
+  assert.match(last.artifacts[0].claim.claim, /production platform tooling/i);
+
+  const persistedClaims = candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || [];
+  assert.ok(
+    persistedClaims.some((claim) => /production platform tooling/i.test(claim.claim)),
+    "the confirmed draft must land in the evidence bank"
+  );
+
+  const persisted = readApplication(repoRoot, "app-coach");
+  assert.equal(
+    persisted.coachingPlan.gaps.find((g) => g.id === "no-direct-kubernetes-production-experience")
+      .status,
+    "closed"
+  );
+});
+
+test("coaching.evidence-save surfaces an evidence-firewall rejection instead of swallowing it, and leaves the gap open", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-coach",
+    company: "Acme Platform",
+    role: "Platform Engineer",
+    evaluation: currentEvaluationForPlan(),
+    coachingPlan: coachingPlanPayload({
+      gaps: [
+        {
+          id: "no-direct-kubernetes-production-experience",
+          gapText: "No direct Kubernetes production experience on record",
+          suggestion: {
+            kind: "evidence-claim",
+            // Both fields are present (so the executor's own basic
+            // presence guard passes) but the claim carries unresolved
+            // placeholder residue — computeEvidenceWrite's validateClaims
+            // firewall (lintArtifact) must refuse this, not silently
+            // accept a half-finished claim.
+            draftClaim: {
+              claim: "Ran production platform tooling for [Metric TODO] engineering teams.",
+              evidence: "Source: resume.",
+            },
+            rationale: "Thin claim.",
+          },
+          status: "open",
+        },
+      ],
+    }),
+  });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "coaching.evidence-save",
+        entity: { type: "application", id: "app-coach" },
+        input: { gapId: "no-direct-kubernetes-production-experience" },
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "EVIDENCE_WRITE_REJECTED");
+      assert.match(error.message, /evidence/i);
+      return true;
+    }
+  );
+
+  const persistedClaims = candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || [];
+  assert.equal(persistedClaims.length, 0, "a firewall-rejected claim must never reach the bank");
+
+  const persisted = readApplication(repoRoot, "app-coach");
+  assert.equal(
+    persisted.coachingPlan.gaps.find((g) => g.id === "no-direct-kubernetes-production-experience")
+      .status,
+    "open",
+    "a rejected save must never flip the gap to closed"
+  );
+});
+
+test("coaching.evidence-save throws COACHING_GAP_NOT_FOUND for an unknown gap id", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-coach",
+    company: "Acme Platform",
+    role: "Platform Engineer",
+    evaluation: currentEvaluationForPlan(),
+    coachingPlan: coachingPlanPayload(),
+  });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "coaching.evidence-save",
+        entity: { type: "application", id: "app-coach" },
+        input: { gapId: "does-not-exist" },
+      },
+    }),
+    (error) => error.code === "COACHING_GAP_NOT_FOUND"
+  );
+});
+
+test("coaching.evidence-save throws COACHING_PLAN_STALE once a new evaluation has landed, before touching the gap", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-coach",
+    company: "Acme Platform",
+    role: "Platform Engineer",
+    // A NEW evaluation ran after this plan was built — evaluatedAt no
+    // longer matches coachingPlanPayload()'s basedOn.evaluatedAt.
+    evaluation: currentEvaluationForPlan({ evaluatedAt: "2026-08-21T00:00:00.000Z" }),
+    coachingPlan: coachingPlanPayload(),
+  });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "coaching.evidence-save",
+        entity: { type: "application", id: "app-coach" },
+        input: { gapId: "no-direct-kubernetes-production-experience" },
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "COACHING_PLAN_STALE");
+      assert.match(error.message, /earlier evaluation/i);
+      return true;
+    }
+  );
+
+  const persistedClaims = candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || [];
+  assert.equal(persistedClaims.length, 0, "a stale plan must never reach the evidence firewall");
+
+  const persisted = readApplication(repoRoot, "app-coach");
+  assert.equal(
+    persisted.coachingPlan.gaps.find((g) => g.id === "no-direct-kubernetes-production-experience")
+      .status,
+    "open",
+    "a refused stale save must never flip the gap"
+  );
+});
+
+test("coaching.evidence-save ignores an input.draftClaim override and persists only the plan's stored, reviewed draft", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-coach",
+    company: "Acme Platform",
+    role: "Platform Engineer",
+    evaluation: currentEvaluationForPlan(),
+    coachingPlan: coachingPlanPayload(),
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "coaching.evidence-save",
+      entity: { type: "application", id: "app-coach" },
+      input: {
+        gapId: "no-direct-kubernetes-production-experience",
+        // An attacker- or bug-supplied override the executor must never
+        // trust: nothing in the product has ever populated this, and the
+        // stored draft is the exact text the candidate confirmed on the card.
+        draftClaim: { claim: "Led a Kubernetes migration end to end.", evidence: "Trust me." },
+      },
+    },
+  });
+
+  const last = result.messages.at(-1);
+  assert.match(last.artifacts[0].claim.claim, /production platform tooling/i);
+  assert.doesNotMatch(last.artifacts[0].claim.claim, /Kubernetes migration/i);
+
+  const persistedClaims = candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || [];
+  assert.ok(
+    persistedClaims.some((claim) => /production platform tooling/i.test(claim.claim)),
+    "only the plan's own draftClaim may reach the evidence bank"
+  );
+  assert.ok(
+    !persistedClaims.some((claim) => /Kubernetes migration/i.test(claim.claim)),
+    "the input override must never reach the evidence bank"
+  );
+});
+
+test("coaching.evidence-save throws COACHING_GAP_NOT_OPEN instead of silently re-writing a closed gap", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-coach",
+    company: "Acme Platform",
+    role: "Platform Engineer",
+    evaluation: currentEvaluationForPlan(),
+    coachingPlan: coachingPlanPayload({
+      gaps: [
+        {
+          id: "no-direct-kubernetes-production-experience",
+          gapText: "No direct Kubernetes production experience on record",
+          suggestion: {
+            kind: "evidence-claim",
+            draftClaim: {
+              claim: "Ran production platform tooling used daily by 3 engineering teams.",
+              evidence: "Source: resume (Experience — Northwind Digital).",
+            },
+            rationale: "Grounds platform-delivery scope without claiming Kubernetes itself.",
+          },
+          status: "closed",
+        },
+      ],
+    }),
+  });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "coaching.evidence-save",
+        entity: { type: "application", id: "app-coach" },
+        input: { gapId: "no-direct-kubernetes-production-experience" },
+      },
+    }),
+    (error) => error.code === "COACHING_GAP_NOT_OPEN"
+  );
+
+  const persistedClaims = candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || [];
+  assert.equal(persistedClaims.length, 0, "a closed gap must never re-write the evidence bank");
+});
+
+test("coaching.evidence-save reports a duplicate claim as already saved and still closes the gap, instead of claiming a fresh save", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-coach",
+    company: "Acme Platform",
+    role: "Platform Engineer",
+    evaluation: currentEvaluationForPlan(),
+    coachingPlan: coachingPlanPayload(),
+  });
+  // The exact claim text the gap's draft would produce is already in the
+  // evidence bank under a DIFFERENT id — candidateEvidenceMerge's own
+  // text-based dedup skips it rather than adding a second copy.
+  candidateEvidenceMerge({
+    repoRoot,
+    env: {},
+    claims: [
+      {
+        id: "ev-preexisting",
+        claim: "Ran production platform tooling used daily by 3 engineering teams.",
+        evidence: "Source: resume (Experience — Northwind Digital).",
+      },
+    ],
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "coaching.evidence-save",
+      entity: { type: "application", id: "app-coach" },
+      input: { gapId: "no-direct-kubernetes-production-experience" },
+    },
+  });
+
+  const last = result.messages.at(-1);
+  assert.match(last.text, /already in your evidence bank/i);
+  assert.doesNotMatch(last.text, /^Saved/);
+  assert.equal(last.artifacts[0].duplicate, true);
+
+  const persisted = readApplication(repoRoot, "app-coach");
+  assert.equal(
+    persisted.coachingPlan.gaps.find((g) => g.id === "no-direct-kubernetes-production-experience")
+      .status,
+    "closed",
+    "a duplicate is still a resolved gap"
   );
 });
 
