@@ -6215,9 +6215,48 @@ button.chip {
 }
 
 .chat-activity-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 90%;
   font-size: 11px;
   color: var(--ink-soft);
   align-self: flex-start;
+}
+
+.chat-activity-line__icon {
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  color: var(--ink-faint);
+}
+
+.chat-activity-line__spinner {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  border: 1.5px solid var(--accent);
+  border-top-color: transparent;
+  animation: onboarding-spin 0.8s linear infinite;
+}
+
+.chat-activity-line__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-activity-line--error {
+  color: var(--danger);
+}
+
+.chat-activity-line--error .chat-activity-line__icon {
+  color: var(--danger);
+}
+
+.chat-activity-line__note {
+  color: var(--danger);
 }
 
 .chat-input-row {

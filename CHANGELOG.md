@@ -19,6 +19,8 @@ All notable changes to CareerRat are documented here. This project follows
 - AI web search now knows which companies you have blocked, put on cooldown, or recently been rejected by, so it stops proposing roles you cannot act on. Skill-driven search runs also hand each job evaluation a shared digest of your targeting and profile instead of re-reading the same files for every job (#163).
 - Every check that builds, tests, scans, or publishes CareerRat now runs with outbound network access blocked except for that step's own known destinations, extending #155's protection from two release steps to the whole pipeline. A compromised dependency inside any of those steps could no longer send anything anywhere unexpected. The one exception is the website security scan, which by design crawls the live site and keeps monitoring-only mode (#170).
 
+- While CareerRat works on something you asked for in chat, each step now shows as a small activity line with an icon, a plain-language label like "Reading files: resume.pdf" or "Searching the web", and a spinner that settles when the step finishes. The assistant also stops announcing those steps in prose, since you can already see them happen; it speaks up for questions, findings, and results instead (#171).
+
 ### Fixed
 
 - The AI-powered job search now sees the keep and cut signals from your targeting file. It was only reading signals written inside individual role buckets, a place the standard setup never puts them, so searches ran without the "more like this, never that" guidance you had actually written down (#166).

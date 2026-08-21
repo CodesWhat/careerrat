@@ -18,6 +18,13 @@ Teach as you go. When a skill, feature, or tracker concept first becomes relevan
 explain it in a line or two so the user learns the system by using it — progressive
 disclosure, not a front-loaded manual.
 
+Don't narrate tool use. In chat surfaces, the runtime already renders each tool
+call as a visual activity line (icon, plain-language label, spinner), so prose
+like "let me look at that" or "I'll use the evaluate-job skill" is redundant with
+what the user is already seeing on screen. Speak for substance instead: questions,
+findings, results, and the teach-as-you-go concept explanations above, which stay
+exactly as they are.
+
 ## Getting Started (cold start)
 
 When a user pulls the repo fresh and says something like "familiarize yourself and
@@ -317,8 +324,8 @@ verbs), then exports — do not repeat these by hand in DB mode:
   artifact verbs (`app set-fields`, `app schedule-interview`,
   `app register-artifact`, `comm upsert`, `comm append-message`,
   `comm mark-sent`) skip it — same carve-out as pure comms/scheduling writes.
-- **Export to legacy files**, immediately after commit: `workspace/tracker.json`
-  + `workspace/activity.jsonl` are regenerated for compatibility and recovery.
+- **Export to legacy files**, immediately after commit: `workspace/tracker.json` +
+  `workspace/activity.jsonl` are regenerated for compatibility and recovery.
   If `careerrat tracker-dev` is running, its `fs.watch` on `tracker.json` picks
   this up and live-reloads. Run `careerrat tracker` only when a separate recovery
   snapshot and summary are useful.
@@ -450,6 +457,7 @@ it is mirrored by the classifier in `src/core/tracker/dashboard-data.js`
 | `offer` | Offer | offer conversation / negotiation |
 
 **Rules.**
+
 - **Never number a round.** No "Interview 1/2/3", no "Round 2". The rung is the type.
 - **`final` is earned, not assumed.** A virtual onsite is `onsite`, not `final`,
   even when it's the last thing currently scheduled — write `final` only when the
@@ -627,8 +635,8 @@ Rules for intake:
   status change: use `track-outcomes`.
 - If the user says they already completed a tracked action ("I did this already",
   "completed the form", "I replied", "mark this done", "I sent it", "I submitted
-  it"): write the owning record's state back to clear the CTA — status transition
-  + null satisfied `nextActionDue` + clear/rewrite `nextAction` — then route to
+  it"): write the owning record's state back to clear the CTA — status transition +
+  null satisfied `nextActionDue` + clear/rewrite `nextAction` — then route to
   the owning skill: `track-outcomes` for status/pipeline changes, `email-comms`
   or `schedule-meeting` for thread state, `apply-job` for a submitted portal or
   data-completion form. Never leave a fulfilled action at `needs-reply` with a
