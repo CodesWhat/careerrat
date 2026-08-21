@@ -205,3 +205,70 @@ test("buildSearchPromptContext (includeSearchLimits): omits company_history enti
 
   assert.equal(Object.hasOwn(context, "company_history"), false);
 });
+
+test("buildSearchPromptContext: carries top-level keep_signals/cut_signals from targeting", () => {
+  const repoRoot = repo();
+
+  const context = buildSearchPromptContext({
+    repoRoot,
+    config: {
+      targeting: {
+        keep_signals: ["customer-facing deploy-and-adopt", "RAG, agents, tool use"],
+        cut_signals: ["core platform SWE with no AI surface"],
+      },
+      profile: {},
+    },
+  });
+
+  assert.deepEqual(context.keep_signals, [
+    "customer-facing deploy-and-adopt",
+    "RAG, agents, tool use",
+  ]);
+  assert.deepEqual(context.cut_signals, ["core platform SWE with no AI surface"]);
+});
+
+test("buildSearchPromptContext: omits keep_signals/cut_signals when absent or empty", () => {
+  const repoRoot = repo();
+
+  const context = buildSearchPromptContext({
+    repoRoot,
+    config: { targeting: { keep_signals: [], cut_signals: [] }, profile: {} },
+  });
+
+  assert.equal(Object.hasOwn(context, "keep_signals"), false);
+  assert.equal(Object.hasOwn(context, "cut_signals"), false);
+});
+
+test("buildSearchPromptContext: top-level keep/cut signals don't affect per-bucket fit_signals/down_signals", () => {
+  const repoRoot = repo();
+
+  const context = buildSearchPromptContext({
+    repoRoot,
+    config: {
+      targeting: {
+        keep_signals: ["customer-facing deploy-and-adopt"],
+        cut_signals: ["core platform SWE with no AI surface"],
+        role_buckets: [
+          {
+            name: "Primary",
+            titles: ["AI Platform Engineer"],
+            fit_signals: ["LLM integration"],
+            down_signals: ["pure research"],
+          },
+        ],
+      },
+      profile: {},
+    },
+  });
+
+  assert.deepEqual(context.role_buckets, [
+    {
+      titles: ["AI Platform Engineer"],
+      name: "Primary",
+      fit_signals: ["LLM integration"],
+      down_signals: ["pure research"],
+    },
+  ]);
+  assert.deepEqual(context.keep_signals, ["customer-facing deploy-and-adopt"]);
+  assert.deepEqual(context.cut_signals, ["core platform SWE with no AI surface"]);
+});
