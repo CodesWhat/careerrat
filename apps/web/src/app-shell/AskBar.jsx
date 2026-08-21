@@ -27,6 +27,7 @@ import { ChatPanel } from "../onboarding/ChatPanel.jsx";
 import { DeepIngestDock, useDeepIngestNudge } from "../pages/SetupReadinessCard.jsx";
 import { ASK_BAR_REQUEST_EVENT } from "./ask-events.js";
 import { deriveLastCompletedTurn } from "./ask-rehydrate.js";
+import { isTerminalActionMessage } from "./ask-terminal.js";
 import { useDashboardSnapshot } from "./DashboardContext.jsx";
 import { UpdateAvailableDock } from "./UpdateAvailableDock.jsx";
 import { useNeedsYouCount } from "./useNeedsYouCount.js";
@@ -213,25 +214,6 @@ function readFileAsText(file) {
     reader.onerror = () => reject(reader.error || new Error("could not read file"));
     reader.readAsText(file);
   });
-}
-
-function isTerminalActionMessage(message) {
-  if (!message) return false;
-  if (message.kind === "action_error") return true;
-  if (message.kind !== "action_result") return false;
-  if (
-    message.metadata?.companyReview === true &&
-    message.artifacts?.some(
-      (artifact) => artifact.kind === "company_proposals" && artifact.proposals?.length
-    )
-  ) {
-    return true;
-  }
-  // search.run starts in the background — recordWorkspaceSearchCompletion
-  // (workspace-agent.mjs) appends a later terminal message once it finishes;
-  // every other intent type is awaited fully server-side, so its first
-  // action_result is already terminal (searchTerminal is simply absent).
-  return message.metadata?.searchTerminal !== false;
 }
 
 // Polls GET /api/workspace/thread until the in-flight action's terminal

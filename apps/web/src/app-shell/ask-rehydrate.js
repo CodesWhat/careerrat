@@ -1,3 +1,5 @@
+import { isTerminalActionMessage } from "./ask-terminal.js";
+
 // apps/web/src/app-shell/ask-rehydrate.js
 //
 // G-09: the workspace thread already survives a reload server-side (see
@@ -20,22 +22,14 @@
 // left alone — the bar keeps mounting empty for those, same as it did
 // before this fix, rather than faking a result the server never produced
 // or silently discarding a failure.
-
-function isTerminalActionResult(message) {
-  // Mirrors AskBar.jsx's own isTerminalActionMessage company-review carve-out:
-  // a search that's still running can still hand back company proposals that
-  // need a decision right now, so that's terminal (done) even though the
-  // underlying search_run artifact says "running".
-  if (
-    message.metadata?.companyReview === true &&
-    message.artifacts?.some(
-      (artifact) => artifact.kind === "company_proposals" && artifact.proposals?.length
-    )
-  ) {
-    return true;
-  }
-  return message.metadata?.searchTerminal !== false;
-}
+//
+// The server writes the user-side half of a turn (workspaceIntentAppend —
+// workspace-agent.mjs:2312 — or the bare user text append at :7455) BEFORE
+// it produces the result. A reload landing in that exact window leaves the
+// thread's literal last message as a dangling, unanswered user/intent
+// record — that's not a fresh turn to skip past, it's mid-flight work
+// hiding the genuinely completed turn one message earlier. See
+// isDanglingUserRecord below for how that gets stepped over.
 
 function isFromOnboardingImport(message) {
   // workspaceOnboardingHandoff (workspace-thread.mjs) imports the onboarding
@@ -46,8 +40,19 @@ function isFromOnboardingImport(message) {
   return message?.metadata?.source === "onboarding";
 }
 
+// A user-side record the server always appends before doing any work: a
+// typed intent (workspaceIntentAppend, kind: "intent") or a bare free-text
+// query (kind: "text", role: "user") before its reply lands. If either one
+// is still literally the last message in the thread, the matching
+// result/reply hasn't been appended yet — the server is either still
+// working, or was interrupted before it could.
+function isDanglingUserRecord(message) {
+  if (message?.role !== "user") return false;
+  return message.kind === "intent" || message.kind === "text";
+}
+
 function actionTurnFromResult(last, messages) {
-  if (!isTerminalActionResult(last)) return null; // still running server-side
+  if (!isTerminalActionMessage(last)) return null; // still running server-side
   const intentMessage = last.metadata?.intentMessageId
     ? messages.find((message) => message.id === last.metadata.intentMessageId)
     : null;
@@ -103,9 +108,25 @@ function answerTurnFromReply(last, messages) {
 // action/answer pair).
 export function deriveLastCompletedTurn(messages) {
   if (!Array.isArray(messages) || !messages.length) return null;
-  const last = messages[messages.length - 1];
+  let last = messages[messages.length - 1];
+  let scope = messages;
+
+  if (isDanglingUserRecord(last)) {
+    // Step back exactly one message and evaluate it with the same logic
+    // below, same as any other candidate last message. One step is the
+    // designed limit: two dangling user/intent records back to back means
+    // an earlier turn never got its result either (a crash mid-turn, or a
+    // second request fired before the first resolved) — genuinely unclear
+    // state, and an empty mount is the safe failure, not a guess about which
+    // still-earlier message was really "last completed".
+    const previous = messages[messages.length - 2];
+    if (!previous || isDanglingUserRecord(previous)) return null;
+    last = previous;
+    scope = messages.slice(0, -1);
+  }
+
   if (!last || isFromOnboardingImport(last)) return null;
-  if (last.kind === "action_result") return actionTurnFromResult(last, messages);
-  if (last.kind === "text" && last.role === "assistant") return answerTurnFromReply(last, messages);
+  if (last.kind === "action_result") return actionTurnFromResult(last, scope);
+  if (last.kind === "text" && last.role === "assistant") return answerTurnFromReply(last, scope);
   return null;
 }

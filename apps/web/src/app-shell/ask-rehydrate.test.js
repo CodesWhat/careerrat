@@ -153,6 +153,74 @@ describe("deriveLastCompletedTurn — completed action turn", () => {
   });
 });
 
+describe("deriveLastCompletedTurn — dangling head (reload mid-turn)", () => {
+  it("steps back past a dangling user text message to rehydrate the completed action turn before it", () => {
+    const messages = [
+      intentMessage(),
+      actionResultMessage(),
+      // The user started a fresh free-text query and reloaded before the
+      // server appended its reply — workspaceMessageAppend at
+      // workspace-agent.mjs:7455 writes this half first.
+      { id: "q-2", sequence: 3, role: "user", kind: "text", text: "what about the next role?" },
+    ];
+    const turn = deriveLastCompletedTurn(messages);
+    expect(turn).toMatchObject({
+      kind: "action",
+      status: "done",
+      resultText: "This job clears your comp floor.",
+    });
+  });
+
+  it("steps back past a dangling intent record to rehydrate the completed answer turn before it", () => {
+    const messages = [
+      { id: "q-1", sequence: 1, role: "user", kind: "text", text: "what's blocking my top role?" },
+      {
+        id: "a-1",
+        sequence: 2,
+        role: "assistant",
+        kind: "text",
+        text: "Nothing — it's ready for the next interview slot.",
+        metadata: {},
+      },
+      // The user then ran a typed action and reloaded before its result
+      // landed — workspaceIntentAppend at workspace-agent.mjs:2312 writes
+      // this half first.
+      intentMessage({ id: "intent-2", sequence: 3 }),
+    ];
+    const turn = deriveLastCompletedTurn(messages);
+    expect(turn).toMatchObject({
+      kind: "answer",
+      status: "done",
+      resultText: "Nothing — it's ready for the next interview slot.",
+    });
+  });
+
+  it("stays empty when the message one step back is a failed turn, not a completed one", () => {
+    const messages = [
+      intentMessage(),
+      { id: "error-1", sequence: 2, role: "assistant", kind: "action_error", text: "It broke." },
+      intentMessage({ id: "intent-2", sequence: 3 }),
+    ];
+    expect(deriveLastCompletedTurn(messages)).toBeNull();
+  });
+
+  it("stays empty for two dangling records in a row — one step back is the designed limit", () => {
+    // A second dangling user/intent record immediately behind the first
+    // means an even earlier turn never got its result either (a crash
+    // mid-turn, or a second request fired before the first resolved).
+    // That's genuinely unclear state, not a one-hop lookback — the safe
+    // failure is an empty mount, not a guess about which still-earlier
+    // message was really "last completed".
+    const messages = [
+      intentMessage(),
+      actionResultMessage(),
+      { id: "intent-2", sequence: 3, role: "user", kind: "intent", text: "…", intent: {} },
+      { id: "q-3", sequence: 4, role: "user", kind: "text", text: "…" },
+    ];
+    expect(deriveLastCompletedTurn(messages)).toBeNull();
+  });
+});
+
 describe("deriveLastCompletedTurn — completed answer turn", () => {
   it("rebuilds a done answer turn, pairing it back to the user's question", () => {
     const messages = [
