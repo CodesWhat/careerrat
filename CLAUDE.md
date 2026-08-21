@@ -46,3 +46,13 @@ answers in profile/honesty/evidence, never fabricates (the unanswerable case is 
 literal `NEEDS YOU` marker), and persists durable disclosure-style answers back to
 `form-defaults.yml#screening_answers` so they're never re-asked. During a full
 tailor/apply run, `tailor-application` STEP 6 owns the answers artifact instead.
+
+When the user asks how to close a fit gap, improve their fit for a role, or what to
+do about a job that landed at review, run `coach-gaps`. It only fires on an
+`evaluate-job` verdict already at `gate: review` with named `fitRisks`, never on
+`keep` or `cut`. Explicit-click only, mirroring company-health's cost gate: it never
+auto-fires. Every suggestion is grounded only in evidence already on record or the
+current conversation — an honest "no close path yet" is a valid, expected answer for
+a gap, not a failure. A confirmed evidence-claim draft routes through the same
+evidence firewall (`computeEvidenceWrite`/`candidateEvidenceMerge`) every other
+evidence write uses; `evaluate-job` itself stays the narrow, unchanged gate.

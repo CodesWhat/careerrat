@@ -965,6 +965,25 @@ export function recordCompanyHealth({ targetType, targetId, company, companyHeal
   );
 }
 
+// coach-gaps skill (src/core/coaching/plan.mjs) — the Jobs drawer's Coaching
+// panel. runCoachingPlan is the explicit "Coach me on this fit" click;
+// saveCoachingEvidence confirms one gap's evidence-claim draft, routing it
+// through the evidence firewall server-side (coaching.evidence-save)
+// before flipping that gap's status to "closed". Skipping a gap (status
+// "dismissed") is a plain field patch, not a typed intent — see
+// setAppFields below.
+export function runCoachingPlan({ applicationId } = {}) {
+  return runWorkspaceIntent("coaching.plan", { type: "application", id: applicationId });
+}
+
+export function saveCoachingEvidence({ applicationId, gapId, draftClaim } = {}) {
+  return runWorkspaceIntent(
+    "coaching.evidence-save",
+    { type: "application", id: applicationId },
+    { gapId, ...(draftClaim ? { draftClaim } : {}) }
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Packet engine (src/cli/packet-route.mjs) — the Jobs drawer's Evaluate/
 // Documents sections. Every route here already existed and is already

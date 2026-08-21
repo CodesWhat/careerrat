@@ -1107,6 +1107,231 @@ test("company.health throws COMPANY_NOT_FOUND instead of starting a chat for a b
 });
 
 // ---------------------------------------------------------------------------
+// coaching.plan / coaching.evidence-save — Phase 1 coaching loop. buildCoachingPlan
+// itself is unit-tested directly in tests/coaching-plan.test.mjs (mirroring
+// evaluatePacketGate's own direct-call coverage); these exercise the
+// executor branches: persistence through appSetFields, and the evidence
+// firewall coaching.evidence-save routes a confirmed draft through.
+// ---------------------------------------------------------------------------
+
+function coachingPlanPayload(overrides = {}) {
+  return {
+    generatedAt: "2026-08-20T12:00:00.000Z",
+    basedOn: {
+      gate: "review",
+      fitScore: 68,
+      fitBucket: "med",
+      evaluatedAt: "2026-08-19T00:00:00.000Z",
+    },
+    gaps: [
+      {
+        id: "no-direct-kubernetes-production-experience",
+        gapText: "No direct Kubernetes production experience on record",
+        suggestion: {
+          kind: "evidence-claim",
+          draftClaim: {
+            claim: "Ran production platform tooling used daily by 3 engineering teams.",
+            evidence: "Source: resume (Experience — Northwind Digital).",
+          },
+          rationale: "Grounds platform-delivery scope without claiming Kubernetes itself.",
+        },
+        status: "open",
+      },
+    ],
+    ...overrides,
+  };
+}
+
+test("coaching.plan persists a plan onto the application row and returns a coaching_plan artifact", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-coach",
+    company: "Acme Platform",
+    role: "Platform Engineer",
+    evaluation: {
+      gate: "review",
+      fitRisks: ["No direct Kubernetes production experience on record"],
+    },
+  });
+  const plan = coachingPlanPayload();
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "coaching.plan",
+      entity: { type: "application", id: "app-coach" },
+    },
+    buildCoachingPlanImpl: async ({ applicationId }) => {
+      assert.equal(applicationId, "app-coach");
+      return { status: 200, body: { ok: true, data: plan } };
+    },
+  });
+
+  const last = result.messages.at(-1);
+  assert.equal(last.artifacts[0].kind, "coaching_plan");
+  assert.equal(last.artifacts[0].applicationId, "app-coach");
+  assert.deepEqual(last.artifacts[0].coachingPlan, plan);
+  assert.match(last.text, /1 gap named/);
+
+  const persisted = readApplication(repoRoot, "app-coach");
+  assert.deepEqual(persisted.coachingPlan, plan);
+});
+
+test("coaching.plan surfaces a failed plan build as a real error, not a silent artifact", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-coach",
+    company: "Acme Platform",
+    role: "Platform Engineer",
+    evaluation: { gate: "keep", fitRisks: [] },
+  });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "coaching.plan",
+        entity: { type: "application", id: "app-coach" },
+      },
+      buildCoachingPlanImpl: async () => ({
+        status: 409,
+        body: {
+          ok: false,
+          code: "COACHING_NOT_APPLICABLE",
+          error: { message: "Coaching only runs on a review verdict with named fit gaps." },
+        },
+      }),
+    }),
+    (error) => {
+      assert.equal(error.code, "COACHING_NOT_APPLICABLE");
+      return true;
+    }
+  );
+  assert.equal(readApplication(repoRoot, "app-coach").coachingPlan, undefined);
+});
+
+test("coaching.evidence-save routes a confirmed draft through the evidence firewall and flips the gap to closed", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-coach",
+    company: "Acme Platform",
+    role: "Platform Engineer",
+    coachingPlan: coachingPlanPayload(),
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "coaching.evidence-save",
+      entity: { type: "application", id: "app-coach" },
+      input: { gapId: "no-direct-kubernetes-production-experience" },
+    },
+  });
+
+  const last = result.messages.at(-1);
+  assert.equal(last.artifacts[0].kind, "evidence_claim_saved");
+  assert.match(last.artifacts[0].claim.claim, /production platform tooling/i);
+
+  const persistedClaims = candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || [];
+  assert.ok(
+    persistedClaims.some((claim) => /production platform tooling/i.test(claim.claim)),
+    "the confirmed draft must land in the evidence bank"
+  );
+
+  const persisted = readApplication(repoRoot, "app-coach");
+  assert.equal(
+    persisted.coachingPlan.gaps.find((g) => g.id === "no-direct-kubernetes-production-experience")
+      .status,
+    "closed"
+  );
+});
+
+test("coaching.evidence-save surfaces an evidence-firewall rejection instead of swallowing it, and leaves the gap open", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-coach",
+    company: "Acme Platform",
+    role: "Platform Engineer",
+    coachingPlan: coachingPlanPayload({
+      gaps: [
+        {
+          id: "no-direct-kubernetes-production-experience",
+          gapText: "No direct Kubernetes production experience on record",
+          suggestion: {
+            kind: "evidence-claim",
+            // Both fields are present (so the executor's own basic
+            // presence guard passes) but the claim carries unresolved
+            // placeholder residue — computeEvidenceWrite's validateClaims
+            // firewall (lintArtifact) must refuse this, not silently
+            // accept a half-finished claim.
+            draftClaim: {
+              claim: "Ran production platform tooling for [Metric TODO] engineering teams.",
+              evidence: "Source: resume.",
+            },
+            rationale: "Thin claim.",
+          },
+          status: "open",
+        },
+      ],
+    }),
+  });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "coaching.evidence-save",
+        entity: { type: "application", id: "app-coach" },
+        input: { gapId: "no-direct-kubernetes-production-experience" },
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "EVIDENCE_WRITE_REJECTED");
+      assert.match(error.message, /evidence/i);
+      return true;
+    }
+  );
+
+  const persistedClaims = candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || [];
+  assert.equal(persistedClaims.length, 0, "a firewall-rejected claim must never reach the bank");
+
+  const persisted = readApplication(repoRoot, "app-coach");
+  assert.equal(
+    persisted.coachingPlan.gaps.find((g) => g.id === "no-direct-kubernetes-production-experience")
+      .status,
+    "open",
+    "a rejected save must never flip the gap to closed"
+  );
+});
+
+test("coaching.evidence-save throws COACHING_GAP_NOT_FOUND for an unknown gap id", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-coach",
+    company: "Acme Platform",
+    role: "Platform Engineer",
+    coachingPlan: coachingPlanPayload(),
+  });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "coaching.evidence-save",
+        entity: { type: "application", id: "app-coach" },
+        input: { gapId: "does-not-exist" },
+      },
+    }),
+    (error) => error.code === "COACHING_GAP_NOT_FOUND"
+  );
+});
+
+// ---------------------------------------------------------------------------
 // strategy.review / strategy.apply / strategy.stamp — the native
 // strategy-review Ask workflow's executor branches (src/core/strategy/
 // review.mjs's draftStrategyReview/applyStrategyRecommendation/

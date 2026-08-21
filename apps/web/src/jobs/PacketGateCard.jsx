@@ -36,9 +36,33 @@ function formatEvaluatedAt(iso) {
   return d.toLocaleString();
 }
 
-export function PacketGateCard({ verdict, busy, onEvaluate }) {
+// Phase 1 coaching loop's trigger condition — a review verdict with at least
+// one named fit gap. Never on "keep" (nothing to coach) or "cut" (nothing to
+// coach toward); mirrors coaching.plan's own gate (src/core/coaching/plan.mjs),
+// not re-derived there either — one source of truth in each layer.
+function canCoach(verdict) {
   return (
-    <Card title="Evaluate">
+    String(verdict?.gate || "").toLowerCase() === "review" && (verdict?.fitRisks?.length || 0) > 0
+  );
+}
+
+export function PacketGateCard({ verdict, busy, onEvaluate, onCoach, coachBusy }) {
+  return (
+    <Card
+      title="Evaluate"
+      actions={
+        <>
+          <Button disabled={busy} onClick={onEvaluate}>
+            {busy ? "Evaluating…" : verdict ? "Re-evaluate" : "Evaluate"}
+          </Button>
+          {onCoach && canCoach(verdict) ? (
+            <Button variant="secondary" disabled={coachBusy} onClick={onCoach}>
+              {coachBusy ? "Coaching…" : "Coach me on this fit"}
+            </Button>
+          ) : null}
+        </>
+      }
+    >
       {verdict ? (
         <>
           <div className="chip-row">
@@ -95,9 +119,6 @@ export function PacketGateCard({ verdict, busy, onEvaluate }) {
           Not evaluated yet. Run the packet gate to check fit and comp before generating documents.
         </p>
       )}
-      <Button disabled={busy} onClick={onEvaluate}>
-        {busy ? "Evaluating…" : verdict ? "Re-evaluate" : "Evaluate"}
-      </Button>
     </Card>
   );
 }

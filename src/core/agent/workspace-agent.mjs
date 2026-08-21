@@ -20,6 +20,7 @@ import {
 } from "../automation/mail-access.mjs";
 import { PROVIDERS } from "../automation/session.mjs";
 import { statusTransition, toTrackOutcomeStatus } from "../automation/status-map.mjs";
+import { buildCoachingPlan } from "../coaching/plan.mjs";
 import { buildSendLinks, resolveRecipient } from "../comms/recipient.mjs";
 import { requireDb } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
@@ -34,7 +35,11 @@ import {
   WRITE_PROVIDERS as CALENDAR_WRITE_PROVIDERS,
   calendarWriteAppend,
 } from "../db/verbs/calendar.mjs";
-import { candidateConfigGet, candidateConfigPatch } from "../db/verbs/candidate.mjs";
+import {
+  candidateConfigGet,
+  candidateConfigPatch,
+  candidateEvidenceMerge,
+} from "../db/verbs/candidate.mjs";
 import {
   commAppendMessage,
   commCaptureInbound,
@@ -73,6 +78,7 @@ import {
 import { capturePacketQuestions } from "../packet/questions.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { findCompLeak, findCurrentBaseToken } from "../profile/comp-guard.mjs";
+import { computeEvidenceWrite, loadEvidence } from "../profile/evidence-writer.mjs";
 import { applyGateWrite, GATE_APPLY_SUMMARIES } from "../profile/gate-apply.mjs";
 import { GATE_ROUTES } from "../profile/gate-writer.mjs";
 import { platformForHost } from "../providers/search-sources.mjs";
@@ -146,6 +152,8 @@ export const EXECUTABLE_INTENTS = new Set([
   "company.health",
   "company.health-request",
   "company.health-record",
+  "coaching.plan",
+  "coaching.evidence-save",
   "strategy.review",
   "strategy.apply",
   "strategy.stamp",
@@ -1454,7 +1462,7 @@ async function evaluateApplicationRequest({
   };
 }
 
-function evaluationNextActions(gate, applicationId) {
+function evaluationNextActions(gate, applicationId, fitRisks = []) {
   if (gate === "keep") {
     return [
       {
@@ -1467,12 +1475,25 @@ function evaluationNextActions(gate, applicationId) {
       },
     ];
   }
-  return [
+  const actions = [
     {
       label: gate === "cut" ? "Review why this was cut" : "Review this job",
       href: `/jobs?open=${encodeURIComponent(applicationId)}`,
     },
   ];
+  // Coaching only ever offers on a review verdict with named gaps — never on
+  // cut (nothing to coach toward) — matching coaching.plan's own trigger
+  // contract in src/core/coaching/plan.mjs, not re-derived here.
+  if (gate === "review" && Array.isArray(fitRisks) && fitRisks.length > 0) {
+    actions.push({
+      label: "Coach me on this fit",
+      intent: {
+        type: "coaching.plan",
+        entity: { type: "application", id: applicationId },
+      },
+    });
+  }
+  return actions;
 }
 
 const QUESTION_CAPTURE_DEFERRED = "QUESTION_CAPTURE_DEFERRED";
@@ -2292,6 +2313,7 @@ export async function executeWorkspaceIntent({
   startCompanyResearchImpl,
   startCompResearchImpl,
   startCompanyHealthImpl,
+  buildCoachingPlanImpl = buildCoachingPlan,
   onSearchStarted,
   searchFetchImpl,
   applyJobImpl,
@@ -2625,7 +2647,11 @@ export async function executeWorkspaceIntent({
             ...evaluationMetadata,
             ...(captured.sourceIntakeId ? { sourceIntakeId: captured.sourceIntakeId } : {}),
             state: evaluated.gate,
-            nextActions: evaluationNextActions(evaluated.gate, captured.applicationId),
+            nextActions: evaluationNextActions(
+              evaluated.gate,
+              captured.applicationId,
+              evaluated.evaluation.fitRisks
+            ),
           },
           now,
         });
@@ -2732,7 +2758,11 @@ export async function executeWorkspaceIntent({
           applicationId: normalized.entity.id,
           fitScore: evaluated.evaluation.fitScore ?? null,
           manualRequired: Boolean(evaluated.evaluation.manual?.required),
-          nextActions: evaluationNextActions(evaluated.gate, normalized.entity.id),
+          nextActions: evaluationNextActions(
+            evaluated.gate,
+            normalized.entity.id,
+            evaluated.evaluation.fitRisks
+          ),
         },
         now,
       });
@@ -3545,6 +3575,126 @@ export async function executeWorkspaceIntent({
           state: "recorded",
           nextActions: [
             { label: "Open in Jobs", href: `/jobs?open=${encodeURIComponent(row.id)}` },
+          ],
+        },
+        now,
+      });
+    }
+
+    // coaching.plan — Phase 1 coaching loop: the explicit "Coach me on this
+    // fit" click on a review-gate verdict with named fitRisks. Mirrors
+    // job.evaluate's own shape (buildCoachingPlanImpl owns the bounded-AI
+    // call + NO_AI_ROUTE degradation, src/core/coaching/plan.mjs), persisted
+    // through the generic appSetFields patch verb — coaching earns no new DB
+    // verb, it just writes one more typed field onto the application row.
+    if (normalized.type === "coaching.plan") {
+      const application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
+      const operation = await buildCoachingPlanImpl({
+        repoRoot,
+        env,
+        applicationId: normalized.entity.id,
+      });
+      const plan = operation?.body?.data;
+      if (operation?.status !== 200 || !operation?.body?.ok || !plan) {
+        throw actionError(
+          operation?.body?.error?.message || "The coaching plan could not be built.",
+          operation?.body?.code || "COACHING_PLAN_FAILED"
+        );
+      }
+      appSetFields({
+        repoRoot,
+        env,
+        id: normalized.entity.id,
+        patch: { coachingPlan: plan },
+      });
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: `Built a coaching plan for ${applicationLabel(application)}: ${plan.gaps.length} gap${plan.gaps.length === 1 ? "" : "s"} named.`,
+        artifacts: [
+          {
+            kind: "coaching_plan",
+            applicationId: normalized.entity.id,
+            title: `${applicationLabel(application)}: Coaching plan`,
+            coachingPlan: plan,
+          },
+        ],
+        metadata: { state: "planned" },
+        now,
+      });
+    }
+
+    // coaching.evidence-save — confirming one gap's evidence-claim draft.
+    // Routes through the SAME evidence firewall every other guarded evidence
+    // write uses: computeEvidenceWrite (evidence-writer.mjs) validates the
+    // claim (id/claim/evidence required, placeholder lint, current_base leak
+    // guard) and computes the merged claim set, then candidateEvidenceMerge
+    // (db/verbs/candidate.mjs) is the actual DB-mode persistence — the SAME
+    // branch src/cli/evidence.mjs itself takes when a DB workspace exists.
+    // evidence-writer.mjs's own writeEvidence() only writes the LEGACY
+    // candidate/evidence.yml file and has no DB-mode branch, so it is never
+    // the right call in this DB-only web workspace; NO firewall is bypassed
+    // either way, since candidateEvidenceMerge enforces the identical
+    // lint/leak backstop (assertCleanEvidenceClaims) on top.
+    if (normalized.type === "coaching.evidence-save") {
+      const application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
+      const gapId = String(input.gapId || "").trim();
+      const plan = application.coachingPlan;
+      const gap = Array.isArray(plan?.gaps) ? plan.gaps.find((g) => g.id === gapId) : null;
+      if (!gapId || !gap) {
+        throw actionError("CareerRat could not find that coaching gap.", "COACHING_GAP_NOT_FOUND");
+      }
+      const draftClaim = input.draftClaim || gap.suggestion?.draftClaim;
+      if (!draftClaim?.claim || !draftClaim?.evidence) {
+        throw actionError(
+          "This gap has no evidence-claim draft to save.",
+          "COACHING_NO_DRAFT_CLAIM"
+        );
+      }
+
+      const { claims: currentClaims } = loadEvidence({ root: repoRoot });
+      const writePlan = computeEvidenceWrite({ newClaim: draftClaim, currentClaims });
+      if (!writePlan.ok) {
+        throw actionError(
+          `CareerRat could not save this evidence claim: ${writePlan.error}`,
+          "EVIDENCE_WRITE_REJECTED"
+        );
+      }
+      candidateEvidenceMerge({ repoRoot, env, claims: [writePlan.claim] });
+
+      const nextGaps = plan.gaps.map((g) => (g.id === gapId ? { ...g, status: "closed" } : g));
+      appSetFields({
+        repoRoot,
+        env,
+        id: normalized.entity.id,
+        patch: { coachingPlan: { ...plan, gaps: nextGaps } },
+      });
+
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: `Saved "${writePlan.claim.claim}" to your evidence bank. See if this changed your fit.`,
+        artifacts: [
+          {
+            kind: "evidence_claim_saved",
+            applicationId: normalized.entity.id,
+            claim: writePlan.claim,
+          },
+        ],
+        metadata: {
+          state: "saved",
+          nextActions: [
+            {
+              label: "See if this changed your fit",
+              intent: {
+                type: "job.evaluate",
+                entity: { type: "application", id: normalized.entity.id },
+              },
+            },
           ],
         },
         now,
@@ -5549,7 +5699,11 @@ export async function executeWorkspaceIntent({
             fitScore: evaluated.evaluation.fitScore ?? null,
             manualRequired: Boolean(evaluated.evaluation.manual?.required),
             submissionVerified: false,
-            nextActions: evaluationNextActions(evaluated.gate, normalized.entity.id),
+            nextActions: evaluationNextActions(
+              evaluated.gate,
+              normalized.entity.id,
+              evaluated.evaluation.fitRisks
+            ),
           },
           now,
         });

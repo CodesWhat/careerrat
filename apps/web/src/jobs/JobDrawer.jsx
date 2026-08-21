@@ -29,7 +29,9 @@ import {
   mergeNestedField,
   promoteSourced,
   recordExternalApplication,
+  runCoachingPlan,
   runPacketGate,
+  saveCoachingEvidence,
   scheduleInterview,
   setAppFields,
   setAppStatus,
@@ -40,6 +42,7 @@ import { emitDashboardChanged } from "../lib/dashboard-events.js";
 import { resolveErrorCopy } from "../lib/errorCopy.js";
 import { safeExternalHttpUrl } from "../lib/safeExternalUrl.js";
 import { ArtifactViewerModal } from "./ArtifactViewerModal.jsx";
+import { CoachingPlanCard } from "./CoachingPlanCard.jsx";
 import { InterviewDossierCard } from "./InterviewDossierCard.jsx";
 import { PacketDocumentsCard } from "./PacketDocumentsCard.jsx";
 import { PacketGateCard } from "./PacketGateCard.jsx";
@@ -463,6 +466,54 @@ export function JobDrawer({ row, onClose, initialSection }) {
                       await runPacketGate({ applicationId: row.id });
                     },
                     "Evaluated."
+                  )
+                }
+                onCoach={() =>
+                  runWrite(
+                    "coach",
+                    async () => {
+                      await runCoachingPlan({ applicationId: row.id });
+                    },
+                    "Coaching plan ready."
+                  )
+                }
+                coachBusy={busyKey === "coach"}
+              />
+            </div>
+          ) : null}
+
+          {/* Coaching (Phase 1 coaching loop) — the plan a "Coach me on this
+            fit" click produced. Self-hides in CoachingPlanCard until
+            app.coachingPlan exists. */}
+          {isApplication ? (
+            <div id="drawer-section-coaching">
+              <CoachingPlanCard
+                plan={app?.coachingPlan}
+                busyGapId={
+                  busyKey?.startsWith("coach-gap-") ? busyKey.slice("coach-gap-".length) : null
+                }
+                onAddToEvidence={(gap) =>
+                  runWrite(
+                    `coach-gap-${gap.id}`,
+                    () => saveCoachingEvidence({ applicationId: row.id, gapId: gap.id }),
+                    "Saved to your evidence bank."
+                  )
+                }
+                onSkip={(gap) =>
+                  runWrite(
+                    `coach-gap-${gap.id}`,
+                    () =>
+                      setAppFields({
+                        id: row.id,
+                        patch: {
+                          coachingPlan: mergeNestedField(app, "coachingPlan", {
+                            gaps: app.coachingPlan.gaps.map((g) =>
+                              g.id === gap.id ? { ...g, status: "dismissed" } : g
+                            ),
+                          }),
+                        },
+                      }),
+                    "Skipped."
                   )
                 }
               />
