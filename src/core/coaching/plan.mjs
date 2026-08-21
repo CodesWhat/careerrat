@@ -88,20 +88,41 @@ function normalizeSuggestion(rawSuggestion) {
   };
 }
 
+// Lenient equality for the model's echoed gapText vs. the verbatim risk it
+// was asked to address: trimmed, case-insensitive. This is an alignment
+// check only — the OUTPUT gapText is always the verbatim fitRisks string
+// (see schemas.mjs's header comment), never what the model echoed back.
+function gapTextAligned(riskText, echoedGapText) {
+  const a = String(riskText || "")
+    .trim()
+    .toLowerCase();
+  const b = String(echoedGapText || "")
+    .trim()
+    .toLowerCase();
+  return Boolean(a) && a === b;
+}
+
 // The model is asked for gaps in the same order as the numbered risks in the
 // prompt; matched positionally rather than by re-parsing the model's own
 // gapText, so gapText in the OUTPUT is always the verbatim fitRisks string —
-// never what the model echoed back (see schemas.mjs's header comment).
+// never what the model echoed back (see schemas.mjs's header comment). But a
+// positional match is only trusted when the model's own echo lines up with
+// the risk at that index — a mismatch means the model's array likely
+// reordered, dropped, or merged gaps, and attaching that suggestion to the
+// wrong risk would be worse than an honest no-close-path.
 function normalizeGaps(fitRisks, aiGaps) {
   const used = new Set();
   return fitRisks.slice(0, MAX_GAPS).map((riskText, index) => {
     const aiGap = Array.isArray(aiGaps) ? aiGaps[index] : null;
-    const suggestion = aiGap?.suggestion
+    const aligned = aiGap && gapTextAligned(riskText, aiGap.gapText);
+    const suggestion = aligned
       ? normalizeSuggestion(aiGap.suggestion)
       : {
           kind: "no-close-path",
           draftClaim: null,
-          rationale: "No suggestion was returned for this gap; review it manually.",
+          rationale: aiGap
+            ? "The AI's response did not line up with this gap; review it manually."
+            : "No suggestion was returned for this gap; review it manually.",
         };
     return {
       id: gapId(riskText, used),

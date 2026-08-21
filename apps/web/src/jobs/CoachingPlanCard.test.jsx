@@ -19,6 +19,19 @@ function evidenceGap(overrides = {}) {
   };
 }
 
+function planWith(overrides = {}) {
+  return {
+    basedOn: {
+      gate: "review",
+      fitScore: 68,
+      fitBucket: "med",
+      evaluatedAt: "2026-08-19T00:00:00.000Z",
+    },
+    gaps: [evidenceGap()],
+    ...overrides,
+  };
+}
+
 function renderCard(props = {}) {
   return renderToStaticMarkup(
     <CoachingPlanCard plan={null} onAddToEvidence={() => {}} onSkip={() => {}} {...props} />
@@ -34,9 +47,12 @@ describe("CoachingPlanCard", () => {
     expect(renderCard({ plan: { gaps: [] } })).toBe("");
   });
 
-  it("renders the gap text verbatim and the grounded evidence-claim draft", () => {
+  it("renders the gap text verbatim, the AI-drafted framing line, and the grounded evidence-claim draft", () => {
     const html = renderCard({ plan: { gaps: [evidenceGap()] } });
     expect(html).toContain("No direct Kubernetes production experience on record");
+    expect(html).toContain(
+      "Drafted from what you have told CareerRat. Check it reads true before adding."
+    );
     expect(html).toContain("Ran production platform tooling used daily by 3 engineering teams.");
     expect(html).toContain("Source: resume (Experience — Northwind Digital).");
     expect(html).toContain("Grounds platform-delivery scope without claiming Kubernetes itself.");
@@ -99,5 +115,27 @@ describe("CoachingPlanCard", () => {
 
     const dismissedHtml = renderCard({ plan: { gaps: [evidenceGap({ status: "dismissed" })] } });
     expect(dismissedHtml).toContain("Skipped");
+  });
+
+  it("stays visible but disables Add/Skip and shows a stale notice once a new evaluation has landed", () => {
+    const html = renderCard({
+      plan: planWith(),
+      evaluation: { evaluatedAt: "2026-08-21T00:00:00.000Z" },
+    });
+    expect(html).toContain(
+      "This plan was built for an earlier evaluation. Coach again to refresh it."
+    );
+    expect(html).toContain("Add to evidence");
+    expect(html).toContain("Skip");
+    expect(html).toContain("disabled");
+  });
+
+  it("renders no stale notice and leaves actions enabled when the plan matches the current evaluation", () => {
+    const html = renderCard({
+      plan: planWith(),
+      evaluation: { evaluatedAt: "2026-08-19T00:00:00.000Z" },
+    });
+    expect(html).not.toContain("earlier evaluation");
+    expect(html).not.toContain("disabled");
   });
 });

@@ -8,21 +8,39 @@
 // error surface (JobDrawer's shared InlineAlert owns that). Self-hides when
 // there is no plan yet, the same "own gate" convention InterviewDossierCard
 // uses.
+//
+// Staleness: a plan is built against one evaluation (plan.basedOn). Once a
+// new evaluation has landed, the executor refuses to act on it
+// (COACHING_PLAN_STALE) — this card mirrors that read-only, before the click
+// even happens, so the candidate is never offered a save button that would
+// just fail.
 
 import { Button } from "../components/Button.jsx";
 import { Card } from "../components/Card.jsx";
 
 const STATUS_LABELS = { closed: "Added to evidence", dismissed: "Skipped" };
 
-export function CoachingPlanCard({ plan, busyGapId, onAddToEvidence, onSkip }) {
+function isPlanStale(plan, evaluation) {
+  return (plan?.basedOn?.evaluatedAt ?? null) !== (evaluation?.evaluatedAt ?? null);
+}
+
+export function CoachingPlanCard({ plan, evaluation, busyGapId, onAddToEvidence, onSkip }) {
   if (!plan?.gaps?.length) return null;
+
+  const stale = isPlanStale(plan, evaluation);
 
   return (
     <Card title="Coaching">
+      {stale ? (
+        <p className="field__hint">
+          This plan was built for an earlier evaluation. Coach again to refresh it.
+        </p>
+      ) : null}
       {plan.gaps.map((gap) => {
         const canAddEvidence =
           gap.suggestion?.kind === "evidence-claim" && gap.suggestion.draftClaim;
         const gapBusy = busyGapId === gap.id;
+        const actionsDisabled = stale || gapBusy;
         return (
           <div className="job-drawer__coaching-gap" key={gap.id}>
             <p>
@@ -30,6 +48,9 @@ export function CoachingPlanCard({ plan, busyGapId, onAddToEvidence, onSkip }) {
             </p>
             {canAddEvidence ? (
               <>
+                <p className="field__hint">
+                  Drafted from what you have told CareerRat. Check it reads true before adding.
+                </p>
                 <p>{gap.suggestion.draftClaim.claim}</p>
                 <p className="field__hint">{gap.suggestion.draftClaim.evidence}</p>
               </>
@@ -42,11 +63,11 @@ export function CoachingPlanCard({ plan, busyGapId, onAddToEvidence, onSkip }) {
             {gap.status === "open" ? (
               <div className="chip-row">
                 {canAddEvidence ? (
-                  <Button disabled={gapBusy} onClick={() => onAddToEvidence(gap)}>
+                  <Button disabled={actionsDisabled} onClick={() => onAddToEvidence(gap)}>
                     {gapBusy ? "Saving…" : "Add to evidence"}
                   </Button>
                 ) : null}
-                <Button variant="secondary" disabled={gapBusy} onClick={() => onSkip(gap)}>
+                <Button variant="secondary" disabled={actionsDisabled} onClick={() => onSkip(gap)}>
                   Skip
                 </Button>
               </div>

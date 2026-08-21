@@ -73,6 +73,12 @@ A suggestion that claims `evidence-claim` but arrives with no usable draft is do
 `no-close-path` before it is ever shown or saved — the plan never hands the candidate a claim
 CareerRat cannot ground.
 
+Suggestions are matched to gaps by array position, but a position is only trusted when the
+model's own echoed `gapText` for that slot lines up (trimmed, case-insensitive) with the
+verbatim risk at that index. A model response that reordered, dropped, or merged gaps fails
+that check and is downgraded to `no-close-path` instead of attaching its suggestion to the
+wrong risk — the persisted `gapText` is always the verbatim `fitRisks` string regardless.
+
 ---
 
 ## STEP 2 — Persist the plan
@@ -109,8 +115,20 @@ is confirmed into evidence (STEP 3), `"dismissed"` if the candidate skips it. Th
 
 The candidate reviews each gap in the Coaching card and either confirms the draft ("Add to
 evidence") or skips it. Confirming fires the `coaching.evidence-save` workspace intent, which
-routes the draft through the **same** evidence firewall every other guarded evidence write
-uses — never a bypass:
+persists **only** the plan's own stored, reviewed `gap.suggestion.draftClaim` — there is no
+caller-supplied override, so the text the candidate saw on the card is the exact text that
+gets written. Before touching anything, the executor checks two invariants:
+
+- **Staleness.** `coachingPlan.basedOn` is compared against the application's current
+  `evaluation` (`evaluatedAt` is the discriminator; `gate`/`fitScore` are a sanity check on
+  top). A plan built against a since-superseded evaluation throws `COACHING_PLAN_STALE`
+  instead of acting — re-run STEP 0 first. The Coaching card mirrors this read-only: once
+  stale it stays visible but disables Add/Skip with a plain notice to coach again.
+- **Gap status.** Only an `"open"` gap can be saved; a closed or dismissed gap throws
+  `COACHING_GAP_NOT_OPEN` rather than silently re-writing it.
+
+Then the draft routes through the **same** evidence firewall every other guarded evidence
+write uses — never a bypass:
 
 1. `computeEvidenceWrite` (`src/core/profile/evidence-writer.mjs`) validates the claim
    (id/claim/evidence required, placeholder-lint clean, no `current_base` leak) and computes
@@ -118,8 +136,12 @@ uses — never a bypass:
 2. `candidateEvidenceMerge` (`src/core/db/verbs/candidate.mjs`) is the actual DB-mode
    persistence — the exact branch `src/cli/evidence.mjs`'s own `add --write` path takes when a
    DB workspace exists, enforcing the identical lint/leak backstop a second time
-   (`assertCleanEvidenceClaims`) before the row is written.
-3. On success, the matching gap's `status` flips to `"closed"` via `appSetFields`.
+   (`assertCleanEvidenceClaims`) before the row is written. If the claim's text already exists
+   in the bank under a different id, `candidateEvidenceMerge` reports it as skipped rather than
+   added — the confirmation message reflects that ("already in your evidence bank", not
+   "saved"), never claiming a fresh write that didn't happen.
+3. On success (added or a reported duplicate), the matching gap's `status` flips to `"closed"`
+   via `appSetFields`.
 
 A validation failure surfaces to the candidate as a real error — it is never silently
 swallowed or treated as a save.

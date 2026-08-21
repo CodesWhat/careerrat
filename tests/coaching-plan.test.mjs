@@ -243,6 +243,52 @@ test("buildCoachingPlan downgrades an evidence-claim suggestion missing a usable
   assert.equal(gap.suggestion.draftClaim, null);
 });
 
+test("buildCoachingPlan downgrades a gap to no-close-path when the model's echoed gapText does not line up with the risk at that index", async () => {
+  const repoRoot = tempRepo();
+  seedReviewApp(repoRoot);
+
+  const result = await buildCoachingPlan({
+    repoRoot,
+    applicationId: "app-coach",
+    runAI: async () => ({
+      body: {
+        ok: true,
+        ai: { used: true },
+        data: {
+          gaps: [
+            {
+              // Positionally this is gap 0, but the echoed text names a
+              // different risk entirely — the model's array likely
+              // reordered or merged gaps, so this suggestion must not be
+              // trusted for the risk at index 0.
+              gapText: "No fintech domain experience on record",
+              suggestion: {
+                kind: "evidence-claim",
+                draftClaim: {
+                  claim: "Ran production platform tooling.",
+                  evidence: "Source: resume.",
+                },
+                rationale: "Grounds it.",
+              },
+            },
+          ],
+        },
+      },
+    }),
+  });
+
+  assert.equal(result.status, 200);
+  const gap = result.body.data.gaps[0];
+  assert.equal(
+    gap.gapText,
+    "No direct Kubernetes production experience on record",
+    "gapText in the output must still be the verbatim fitRisks string"
+  );
+  assert.equal(gap.suggestion.kind, "no-close-path");
+  assert.equal(gap.suggestion.draftClaim, null);
+  assert.match(gap.suggestion.rationale, /did not line up/i);
+});
+
 test("buildCoachingPlan degrades to a manual reviewable plan on NO_AI_ROUTE without fabricating a keep", async () => {
   const repoRoot = tempRepo();
   seedReviewApp(repoRoot);

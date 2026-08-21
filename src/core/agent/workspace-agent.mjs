@@ -1775,6 +1775,20 @@ function applicationLabel(app) {
   return `${app.company || "this company"}, ${app.role || "this role"}`;
 }
 
+// A coaching plan's basedOn records the evaluation it was built against
+// (config/tracker.schema.json#applications[].coachingPlan). evaluatedAt is
+// the discriminator — a re-evaluation always changes it — with gate and
+// fitScore as a sanity check on top, so a plan is never acted on once the
+// evaluation it coached toward is gone.
+function coachingPlanIsStale(plan, evaluation) {
+  const basedOn = plan?.basedOn;
+  if (!basedOn) return true;
+  if ((basedOn.evaluatedAt ?? null) !== (evaluation?.evaluatedAt ?? null)) return true;
+  if ((basedOn.gate ?? null) !== (evaluation?.gate ?? null)) return true;
+  if ((basedOn.fitScore ?? null) !== (evaluation?.fitScore ?? null)) return true;
+  return false;
+}
+
 function communicationLabel(comm) {
   return [comm.company, comm.role, comm.subject].filter(Boolean).join(", ") || "this thread";
 }
@@ -3638,6 +3652,13 @@ export async function executeWorkspaceIntent({
     // the right call in this DB-only web workspace; NO firewall is bypassed
     // either way, since candidateEvidenceMerge enforces the identical
     // lint/leak backstop (assertCleanEvidenceClaims) on top.
+    //
+    // Only the stored, reviewed gap.suggestion.draftClaim is ever persisted —
+    // there is no caller-supplied override. The draft the candidate saw and
+    // confirmed on the card is the exact draft that gets written; nothing in
+    // the product has ever populated a different one, and accepting one from
+    // input would let a confirm click silently save text the candidate never
+    // reviewed.
     if (normalized.type === "coaching.evidence-save") {
       const application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
       const gapId = String(input.gapId || "").trim();
@@ -3646,7 +3667,23 @@ export async function executeWorkspaceIntent({
       if (!gapId || !gap) {
         throw actionError("CareerRat could not find that coaching gap.", "COACHING_GAP_NOT_FOUND");
       }
-      const draftClaim = input.draftClaim || gap.suggestion?.draftClaim;
+      // The schema documents basedOn as the plan's provenance but nothing
+      // enforced it: a plan built against a prior evaluation must never be
+      // actable once a new evaluation has landed (evaluatedAt is the
+      // discriminator; gate/fitScore are a sanity check on top).
+      if (coachingPlanIsStale(plan, application.evaluation)) {
+        throw actionError(
+          "This coaching plan was built for an earlier evaluation. Run Coach me on this fit again to refresh it.",
+          "COACHING_PLAN_STALE"
+        );
+      }
+      if (gap.status !== "open") {
+        throw actionError(
+          "This coaching gap was already resolved and cannot be saved again.",
+          "COACHING_GAP_NOT_OPEN"
+        );
+      }
+      const draftClaim = gap.suggestion?.draftClaim;
       if (!draftClaim?.claim || !draftClaim?.evidence) {
         throw actionError(
           "This gap has no evidence-claim draft to save.",
@@ -3662,7 +3699,8 @@ export async function executeWorkspaceIntent({
           "EVIDENCE_WRITE_REJECTED"
         );
       }
-      candidateEvidenceMerge({ repoRoot, env, claims: [writePlan.claim] });
+      const mergeResult = candidateEvidenceMerge({ repoRoot, env, claims: [writePlan.claim] });
+      const wasDuplicate = (mergeResult?.added || 0) === 0 && (mergeResult?.skipped || 0) > 0;
 
       const nextGaps = plan.gaps.map((g) => (g.id === gapId ? { ...g, status: "closed" } : g));
       appSetFields({
@@ -3677,12 +3715,15 @@ export async function executeWorkspaceIntent({
         env,
         normalized,
         intentMessage,
-        text: `Saved "${writePlan.claim.claim}" to your evidence bank. See if this changed your fit.`,
+        text: wasDuplicate
+          ? `"${writePlan.claim.claim}" was already in your evidence bank. See if this changed your fit.`
+          : `Saved "${writePlan.claim.claim}" to your evidence bank. See if this changed your fit.`,
         artifacts: [
           {
             kind: "evidence_claim_saved",
             applicationId: normalized.entity.id,
             claim: writePlan.claim,
+            duplicate: wasDuplicate,
           },
         ],
         metadata: {

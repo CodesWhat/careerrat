@@ -489,6 +489,7 @@ export function JobDrawer({ row, onClose, initialSection }) {
             <div id="drawer-section-coaching">
               <CoachingPlanCard
                 plan={app?.coachingPlan}
+                evaluation={evaluation}
                 busyGapId={
                   busyKey?.startsWith("coach-gap-") ? busyKey.slice("coach-gap-".length) : null
                 }
