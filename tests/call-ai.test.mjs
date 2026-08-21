@@ -13,6 +13,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { DEFAULT_SMALL_FAST_MODEL } from "../src/core/ai/ai-config.mjs";
 import {
   callAI,
   extractSSEEvents,
@@ -329,6 +330,112 @@ test("callAI: routes a structured request through the selected CLI without a pro
     assert.equal(events.length, 1);
     assert.equal(events[0].source, "installed");
     assert.equal(JSON.stringify(events[0]).includes("PROMPT_SECRET_02_07"), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Installed-CLI model tiering — runInstalledAI() must resolve `model`/`tier`
+// the same way the non-installed branch does (config/ai.json#smallFastModel
+// for tier: "smallFast"), threading the result through
+// buildInstalledRuntimeInvocation's existing per-call `--model` flag, rather
+// than pinning every installed call to CAREERRAT_INSTALLED_AI_MODEL.
+// ---------------------------------------------------------------------------
+
+test("callAI (installed): an explicit model always wins", async () => {
+  const root = tempRoot();
+  try {
+    writeInstalledRuntimeSelection({ repoRoot: root, env: {}, runtimeId: "codex" });
+    const calls = [];
+    await callAI({
+      model: "explicit-model",
+      tier: "smallFast",
+      messages: [{ role: "user", content: "hi" }],
+      root,
+      env: { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_INSTALLED_AI_MODEL: "base-default" },
+      runtimeInventory: [{ id: "codex", name: "Codex", path: "/safe/codex", available: true }],
+      runInstalledRuntimeImpl: async (input) => {
+        calls.push(input);
+        return { text: "ok", runtimeId: "codex", usage: null };
+      },
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].model, "explicit-model");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("callAI (installed): tier smallFast resolves config/ai.json#smallFastModel, not the env base default", async () => {
+  const root = tempRoot();
+  mkdirSync(join(root, "config"), { recursive: true });
+  writeFileSync(
+    join(root, "config", "ai.json"),
+    JSON.stringify({ smallFastModel: "configured-small-fast" }),
+    "utf8"
+  );
+  try {
+    writeInstalledRuntimeSelection({ repoRoot: root, env: {}, runtimeId: "codex" });
+    const calls = [];
+    await callAI({
+      tier: "smallFast",
+      messages: [{ role: "user", content: "hi" }],
+      root,
+      env: { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_INSTALLED_AI_MODEL: "base-default" },
+      runtimeInventory: [{ id: "codex", name: "Codex", path: "/safe/codex", available: true }],
+      runInstalledRuntimeImpl: async (input) => {
+        calls.push(input);
+        return { text: "ok", runtimeId: "codex", usage: null };
+      },
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].model, "configured-small-fast");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("callAI (installed): tier smallFast with no config file falls back to the shipped small-fast default", async () => {
+  const root = tempRoot();
+  try {
+    writeInstalledRuntimeSelection({ repoRoot: root, env: {}, runtimeId: "codex" });
+    const calls = [];
+    await callAI({
+      tier: "smallFast",
+      messages: [{ role: "user", content: "hi" }],
+      root,
+      env: { CAREERRAT_DESKTOP_SHELL: "1" },
+      runtimeInventory: [{ id: "codex", name: "Codex", path: "/safe/codex", available: true }],
+      runInstalledRuntimeImpl: async (input) => {
+        calls.push(input);
+        return { text: "ok", runtimeId: "codex", usage: null };
+      },
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].model, DEFAULT_SMALL_FAST_MODEL);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("callAI (installed): no model/tier falls back to CAREERRAT_INSTALLED_AI_MODEL, the installed path's own base default", async () => {
+  const root = tempRoot();
+  try {
+    writeInstalledRuntimeSelection({ repoRoot: root, env: {}, runtimeId: "codex" });
+    const calls = [];
+    await callAI({
+      messages: [{ role: "user", content: "hi" }],
+      root,
+      env: { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_INSTALLED_AI_MODEL: "base-default" },
+      runtimeInventory: [{ id: "codex", name: "Codex", path: "/safe/codex", available: true }],
+      runInstalledRuntimeImpl: async (input) => {
+        calls.push(input);
+        return { text: "ok", runtimeId: "codex", usage: null };
+      },
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].model, "base-default");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -13,6 +13,7 @@
 // hasn't filled in is simply absent from the context rather than defaulted.
 
 import { BOUNDED_AI_CODES, makeBoundedAIEnvelope, runBoundedAI } from "../ai/bounded-ai.mjs";
+import { buildDbSeenSets } from "../db/scan-context.mjs";
 import { candidateConfigGet, candidateConfigPatch } from "../db/verbs.mjs";
 
 const SEARCH_PROMPTS_LABELS = Object.freeze({
@@ -72,13 +73,117 @@ function isoNow(now) {
   return now instanceof Date ? now.toISOString() : new Date(now || Date.now()).toISOString();
 }
 
+// Application-limit statuses that never block/caution a company (see
+// config/application-limits.schema.json) — nothing worth surfacing in a
+// compact summary.
+const APPLICATION_LIMIT_QUIET_STATUS = "ok";
+
+// Mirrors evaluate-job STEP 3.25's "active application" definition: any
+// non-terminal applications[] status. Kept local (not imported from
+// tracker/cadence.mjs, whose own set is private) since this is a compact,
+// read-only summary, not the canonical follow-up/cadence logic.
+const COMPANY_HISTORY_TERMINAL_STATUSES = new Set([
+  "rejected",
+  "closed",
+  "offer",
+  "withdrawn",
+  "declined",
+  "accepted",
+]);
+const RECENT_REJECTION_DAYS = 90;
+
+function daysSince(now, dateStr) {
+  const then = new Date(dateStr);
+  if (!dateStr || Number.isNaN(then.getTime())) return null;
+  return Math.floor((now.getTime() - then.getTime()) / (24 * 60 * 60 * 1000));
+}
+
+// Compact per-company application-limit summary — only companies with a
+// status other than "ok" (i.e. `caution` or `blocked`) are worth telling the
+// AI web-search lane about; an unrestricted company needs no flag.
+function summarizeApplicationLimits(applicationLimits) {
+  const companies = Array.isArray(applicationLimits?.companies) ? applicationLimits.companies : [];
+  const out = [];
+  for (const row of companies) {
+    const company = trimString(row?.company);
+    const status = trimString(row?.status).toLowerCase();
+    if (!company || !status || status === APPLICATION_LIMIT_QUIET_STATUS) continue;
+    const entry = { company, status };
+    const reapplyAfter = trimString(row?.reapply_after);
+    if (reapplyAfter) entry.reapply_after = reapplyAfter;
+    out.push(entry);
+  }
+  return out;
+}
+
+// Compact per-company tracker-history summary — mirrors evaluate-job STEP
+// 3.25's three company-history signals (active application, recent
+// rejection, prior sourced cut) at a coarser grain, so the AI web-search
+// lane can apply the same `company-history-*` triage flags STEP 3 of this
+// skill defines without a tracker read of its own (it has none — see the AI
+// Web Search mode's tool-surface restriction).
+function summarizeCompanyHistory({ repoRoot, env, now = new Date() }) {
+  const { tracker } = buildDbSeenSets({ repoRoot, env });
+  const byCompany = new Map();
+  const entryFor = (company) => {
+    let entry = byCompany.get(company);
+    if (!entry) {
+      entry = { company, active: false, recentRejection: false, priorSourced: false };
+      byCompany.set(company, entry);
+    }
+    return entry;
+  };
+
+  for (const row of tracker.apps || []) {
+    const company = trimString(row.co);
+    const status = trimString(row.status).toLowerCase();
+    if (!company || !status) continue;
+    if (!COMPANY_HISTORY_TERMINAL_STATUSES.has(status)) {
+      entryFor(company).active = true;
+    } else if (status === "rejected") {
+      const days = daysSince(now, row.date);
+      if (days !== null && days <= RECENT_REJECTION_DAYS) entryFor(company).recentRejection = true;
+    }
+  }
+  for (const row of tracker.sourced || []) {
+    const company = trimString(row.co);
+    const status = trimString(row.status).toLowerCase();
+    if (!company || status !== "cut") continue;
+    entryFor(company).priorSourced = true;
+  }
+
+  const out = [];
+  for (const entry of byCompany.values()) {
+    const flags = [];
+    if (entry.active) flags.push("active");
+    if (entry.recentRejection) flags.push("recent-rejection");
+    if (entry.priorSourced) flags.push("prior-sourced");
+    if (flags.length) out.push({ company: entry.company, flags });
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Context builder — the ONLY place candidate targeting/profile fields are
 // read for this feature. Strips anything absent rather than defaulting it,
 // so the model's instructions never see a fabricated field.
+//
+// `includeSearchLimits` (default false) additionally folds in a compact
+// application-limit + company-history summary. Opt-in: the AI web-search
+// lane (ai-web-search.mjs) is the one caller that needs it — its STEP 3
+// coarse-triage flags (`company-history-*`, `app-limit-*`) are otherwise
+// unreachable in that mode (no CLI, no tracker read). Prompt generation
+// (generateSearchPrompts below) and the discovery chat context
+// (discovery-route.mjs) don't ask for it, since neither derives a search
+// prompt or triage flag from a candidate's tracker history.
 // ---------------------------------------------------------------------------
 
-export function buildSearchPromptContext({ repoRoot, env, config } = {}) {
+export function buildSearchPromptContext({
+  repoRoot,
+  env,
+  config,
+  includeSearchLimits = false,
+} = {}) {
   const candidateConfig = config || candidateConfigGet({ repoRoot, env });
   const targeting = candidateConfig.targeting || {};
   const profile = candidateConfig.profile || {};
@@ -137,6 +242,13 @@ export function buildSearchPromptContext({ repoRoot, env, config } = {}) {
     context.authorization = { requires_sponsorship: true };
   } else if (authorization.work_authorized === false) {
     context.authorization = { work_authorized: false };
+  }
+
+  if (includeSearchLimits) {
+    const applicationLimits = summarizeApplicationLimits(candidateConfig["application-limits"]);
+    if (applicationLimits.length) context.application_limits = applicationLimits;
+    const companyHistory = summarizeCompanyHistory({ repoRoot, env });
+    if (companyHistory.length) context.company_history = companyHistory;
   }
 
   return context;

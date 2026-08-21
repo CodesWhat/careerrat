@@ -346,6 +346,26 @@ function buildInstalledRuntimePrompt({ system, messages } = {}) {
   return sections.join("\n\n");
 }
 
+// Resolves the installed-CLI model the same way the non-installed branch
+// resolves it (see callAI's own "no-code model-swap seam" comment): an
+// explicit per-call `model` always wins, `tier: "smallFast"` routes to
+// config/ai.json#smallFastModel (env-overridable via ANTHROPIC_SMALL_FAST_MODEL,
+// same as the API routes), and everything else falls back to the installed
+// path's own base default, CAREERRAT_INSTALLED_AI_MODEL — never
+// config/ai.json#model, since that default is an Anthropic API model id and
+// the installed CLI's own default (an undefined --model flag) is the correct
+// base for a subscription-CLI user who set neither. This mirrors the six
+// existing `tier: "smallFast"` call sites, none of which needed to change.
+function resolveInstalledModel({ model, tier, root, env }) {
+  const explicit = String(model || "").trim();
+  if (explicit) return explicit;
+  if (tier === "smallFast") {
+    const modelConfig = resolveModelConfig({ root, env });
+    return modelConfig.smallFastModel || undefined;
+  }
+  return String(env.CAREERRAT_INSTALLED_AI_MODEL || "").trim() || undefined;
+}
+
 async function runInstalledAI({
   route,
   system,
@@ -358,6 +378,8 @@ async function runInstalledAI({
   skill,
   action,
   operation,
+  model,
+  tier,
   runInstalledRuntimeImpl,
 }) {
   const startedAt = performance.now();
@@ -365,7 +387,7 @@ async function runInstalledAI({
     runtime: route.runtime,
     prompt: buildInstalledRuntimePrompt({ system, messages }),
     outputSchema,
-    model: String(env.CAREERRAT_INSTALLED_AI_MODEL || "").trim() || undefined,
+    model: resolveInstalledModel({ model, tier, root, env }),
     cwd: root,
     env,
     signal,
@@ -500,6 +522,8 @@ export async function callAI({
       skill,
       action,
       operation,
+      model,
+      tier,
       runInstalledRuntimeImpl,
     };
     if (stream) return streamInstalledAI(options);

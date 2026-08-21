@@ -70,16 +70,27 @@ write step below gives the `careerrat data <verb>` command (Data Write Contract,
 AGENTS.md). Nonzero exit → legacy workspace (no DB yet) — every write step below
 gives the existing direct JSON-edit instructions, unchanged.
 
+**Fan-out digest short-circuit.** If this run was dispatched as a `search-jobs`
+STEP 7 subagent and its prompt already carries a STEP 0 digest (the parsed
+`targeting.yml`, `profile.yml`, application-limits company set, and a
+company-history summary for this posting's company), use that digest for the
+rows below marked **from digest** instead of re-reading those files — the
+orchestrator already loaded them once and a subagent re-read is wasted context.
+Still read `honesty.yml`, `modes.yml`, and the `learnings/` file yourself; the
+digest never carries them. Running standalone (no digest in the prompt) — the
+normal case for a directly-invoked `evaluate-job` — read every file below as
+usual.
+
 Read the following files (all under `candidate/`):
 
 | File | Fields used |
 | --- | --- |
-| `targeting.yml` | `keep_signals`, `cut_signals`, `excluded_companies`, `degree_policy`, `fit_bands` (default `{high_min:85, med_min:65}`), `role_buckets[].priority` |
-| `profile.yml` | `compensation.comp_floors` (arrangement floors: `remote`/`hybrid`/`onsite`/`relocation` + `home_metro` + `relocation_by_metro[]` — the HARD comp gate; relocation miss = cut), `compensation.minimum_base` (fallback floor), `compensation.target_base`, `compensation.expected_base`, `compensation.oe_min_base`, `compensation.oe_max_base`, `location.remote`, `location.relocation`, `location.travel_tolerance` — **NEVER read `compensation.current_base` for any outbound purpose** |
-| `honesty.yml` | honesty boundaries (education policy, do_not_claim, do_not_fabricate) |
-| `modes.yml` | optional `application_mode`; absent = `balanced`. Read via `careerrat modes status`. It changes pursuit posture after discovery/evaluation, never the evidence/honesty/comp gates. |
-| `application-limits` config | `companies[].status`, `companies[].reapply_after`, `companies[].cooldown_days`, `companies[].bypass` |
-| `learnings/<role-family>.md` | if present — prior outcomes for this track. Read via `careerrat learnings read "<JD title>"` — the helper classifies the family from `targeting.yml` (role_families → role_buckets → neutral-slug ladder), prints the file, or skips silently when absent. |
+| `targeting.yml` **(from digest, if supplied)** | `keep_signals`, `cut_signals`, `excluded_companies`, `degree_policy`, `fit_bands` (default `{high_min:85, med_min:65}`), `role_buckets[].priority` |
+| `profile.yml` **(from digest, if supplied)** | `compensation.comp_floors` (arrangement floors: `remote`/`hybrid`/`onsite`/`relocation` + `home_metro` + `relocation_by_metro[]` — the HARD comp gate; relocation miss = cut), `compensation.minimum_base` (fallback floor), `compensation.target_base`, `compensation.expected_base`, `compensation.oe_min_base`, `compensation.oe_max_base`, `location.remote`, `location.relocation`, `location.travel_tolerance` — **NEVER read `compensation.current_base` for any outbound purpose** |
+| `honesty.yml` | honesty boundaries (education policy, do_not_claim, do_not_fabricate) — always a fresh read; never part of the STEP 0 digest |
+| `modes.yml` | optional `application_mode`; absent = `balanced`. Read via `careerrat modes status`. It changes pursuit posture after discovery/evaluation, never the evidence/honesty/comp gates. Always a fresh read. |
+| `application-limits` config **(from digest, if supplied)** | `companies[].status`, `companies[].reapply_after`, `companies[].cooldown_days`, `companies[].bypass` |
+| `learnings/<role-family>.md` | if present — prior outcomes for this track. Read via `careerrat learnings read "<JD title>"` — the helper classifies the family from `targeting.yml` (role_families → role_buckets → neutral-slug ladder), prints the file, or skips silently when absent. Always a fresh read; never part of the STEP 0 digest. |
 
 Also read any **company research** artifact for FIT context (it lives under
 `workspace/research/`, not `candidate/`): `careerrat research read "<company>"` —
@@ -97,9 +108,10 @@ but does not relax this skill's honesty, comp, legitimacy, or consent gates.
 
 ## STEP 3 — APPLICATION-LIMITS PRE-CHECK
 
-Look up the posting company in application limits. In DB mode, read
-`careerrat data candidate get --json` and use `application-limits.companies[]`.
-In legacy mode, read `candidate/application-limits.yml` if present.
+Look up the posting company in application limits. If a STEP 0 digest was supplied (see
+STEP 2), use its application-limits company set instead of a fresh lookup. Otherwise, in DB
+mode read `careerrat data candidate get --json` and use `application-limits.companies[]`;
+in legacy mode read `candidate/application-limits.yml` if present.
 
 - **`status: blocked` and today < `reapply_after`** → emit `ACTION: hold - <bypass note from config>` and stop. Do not proceed to gate.
 - **`status: caution` and within `cooldown_days` window** → note in output, continue evaluation, and set `ACTION: manual` unless overridden by a later step.
@@ -110,7 +122,11 @@ In legacy mode, read `candidate/application-limits.yml` if present.
 ## STEP 3.25 — TRACKER COMPANY-HISTORY PRE-CHECK
 
 Open `workspace/tracker.json` and review same-company history before assigning priority.
-This is mandatory even when application limits have no formal cap.
+This is mandatory even when application limits have no formal cap. If a STEP 0 digest was
+supplied (search-jobs fan-out — see STEP 2), its company-history summary already covers
+this posting's company; use it instead of opening `workspace/tracker.json` again, and only
+open the file directly when running standalone or when the digest's summary is silent on
+this company.
 
 Check:
 
