@@ -188,23 +188,29 @@ jobs:
     env:
       TAG: ${{ needs.resolve-tag.outputs.tag }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
     steps:
       - name: Harden the runner (audit all outbound calls)
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit # house target is `block` once observed endpoints are allowlisted
       - name: Publish the release once the dmg asset is confirmed
+        # Resolved by release ID via the list API, not `gh release view TAG`:
+        # a draft release is not addressable by tag through the tag-lookup
+        # endpoint, and whether gh's draft fallback kicks in varies by gh
+        # version (it differed between the macos and ubuntu runners on this
+        # workflow's first live run, run 32487926861).
         run: |
           set -euo pipefail
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            assets="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
-            if ! grep -q '\.dmg$' <<<"$assets"; then
-              echo "::error::Release $TAG has no .dmg asset attached; refusing to publish."
-              exit 1
-            fi
-            gh release edit "$TAG" --draft=false
-            echo "Published $TAG."
-          else
+          release="$(gh api "repos/$REPO/releases" --paginate --jq "[.[] | select(.tag_name==\"$TAG\")][0]")"
+          if [ -z "$release" ] || [ "$release" = "null" ]; then
             echo "::error::No release found for $TAG after build-notarize-upload; refusing to publish blind."
             exit 1
           fi
+          if ! jq -er '[.assets[].name | select(endswith(".dmg"))] | length > 0' <<<"$release" >/dev/null; then
+            echo "::error::Release $TAG has no .dmg asset attached; refusing to publish."
+            exit 1
+          fi
+          release_id="$(jq -r '.id' <<<"$release")"
+          gh api -X PATCH "repos/$REPO/releases/$release_id" -F draft=false >/dev/null
+          echo "Published $TAG (release id $release_id)."
