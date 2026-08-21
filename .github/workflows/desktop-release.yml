@@ -140,9 +140,15 @@ jobs:
         # List-API lookup, not `gh release view`: drafts aren't addressable
         # by tag and gh's fallback varies by version. Refuses to pile a
         # second draft onto a tag that somehow already has two.
+        # `--slurp` piped to the real jq, not gh's `--jq`: gh applies `--jq`
+        # once per page, so an aggregate filter like `length` counts one page
+        # at a time past 100 releases (and `--slurp` can't combine with
+        # gh's `--jq` at all). jq's `--arg` also keeps the tag out of the
+        # filter text.
         run: |
           set -euo pipefail
-          count="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq "[.[] | select(.tag_name==\"$TAG\")] | length")"
+          count="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --slurp | jq --arg tag "$TAG" \
+            'add | [.[] | select(.tag_name==$tag)] | length')"
           if [ "$count" -gt 1 ]; then
             echo "::error::Found $count releases for tag $TAG; refusing to add another."
             exit 1
@@ -231,9 +237,13 @@ jobs:
         # endpoint, and whether gh's draft fallback kicks in varies by gh
         # version (it differed between the macos and ubuntu runners on this
         # workflow's first live run, run 32487926861).
+        # `--slurp` piped to the real jq for the same reasons as the
+        # ensure-release step: gh's `--jq` runs per page, which breaks
+        # aggregate filters past 100 releases.
         run: |
           set -euo pipefail
-          matches="$(gh api "repos/$REPO/releases" --paginate --jq "[.[] | select(.tag_name==\"$TAG\")]")"
+          matches="$(gh api "repos/$REPO/releases" --paginate --slurp | jq -c --arg tag "$TAG" \
+            'add | [.[] | select(.tag_name==$tag)]')"
           count="$(jq 'length' <<<"$matches")"
           if [ "$count" -eq 0 ]; then
             echo "::error::No release found for $TAG after build-notarize-upload; refusing to publish blind."
