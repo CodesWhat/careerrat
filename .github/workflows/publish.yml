@@ -35,10 +35,22 @@ jobs:
   npm-publish:
     runs-on: ubuntu-latest
     steps:
-      - name: Harden the runner (audit all outbound calls)
+      - name: Harden the runner (block all outbound calls except the allowlist)
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
-          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+          egress-policy: block
+          # checkout, dependency install, and the provenance publish (Trusted
+          # Publishing/OIDC): registry.npmjs.org for the publish itself, plus
+          # fulcio.sigstore.dev and rekor.sigstore.dev for the provenance
+          # attestation's sigstore signing and transparency log. Observed on
+          # run 32488752323 (baseline still forming, 2 runs since the endpoint
+          # set last changed, but the set matches npm's documented
+          # provenance/sigstore flow exactly).
+          allowed-endpoints: >
+            fulcio.sigstore.dev:443
+            github.com:443
+            registry.npmjs.org:443
+            rekor.sigstore.dev:443
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

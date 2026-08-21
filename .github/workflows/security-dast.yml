@@ -28,7 +28,15 @@ jobs:
       - name: Harden the runner (audit all outbound calls)
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
-          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+          # Stays on audit: the ZAP baseline scan spiders the live
+          # careerrat.com production site and follows whatever it links to
+          # (fonts, analytics, embeds, CDN-hosted assets), so the endpoint set
+          # moves with the site's content rather than with this workflow.
+          # A missed or rotated third-party asset host would fail the scan
+          # mid-run rather than just skip that check. house target is `block`
+          # once a real audit trace across the site's actual link surface
+          # exists, not a guess from the pinned zap image's own dependencies.
+          egress-policy: audit
       - name: ZAP baseline scan (passive only — careerrat.com is a static-export site)
         uses: zaproxy/action-baseline@de8ad967d3548d44ef623df22cf95c3b0baf8b25 # v0.15.0
         with:

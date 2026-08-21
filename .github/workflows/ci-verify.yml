@@ -41,10 +41,15 @@ jobs:
     name: structure-guards
     runs-on: ubuntu-latest
     steps:
-      - name: Harden the runner (audit all outbound calls)
+      - name: Harden the runner (block all outbound calls except the allowlist)
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
-          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+          egress-policy: block
+          # This job only checks out the repo and runs local node --test files;
+          # observed on run 32512881196 (checkout's git-remote-http call, no
+          # other egress).
+          allowed-endpoints: >
+            github.com:443
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -65,10 +70,22 @@ jobs:
     name: tests
     runs-on: ubuntu-latest
     steps:
-      - name: Harden the runner (audit all outbound calls)
+      - name: Harden the runner (block all outbound calls except the allowlist)
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
-          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+          egress-policy: block
+          # checkout + npm ci, plus the full suite's own live calls: job-link-checker's
+          # DNS/liveness probes against jobs.lever.co and wellfound.com
+          # (job-link-checker.test.mjs, portal-coverage.test.mjs — checkUrlLiveness
+          # resolves the host before the mocked fetch runs), and call-ai's
+          # provider-validation probe against api.anthropic.com. Observed on run
+          # 32512881196 across 83 runs since the endpoint set last changed.
+          allowed-endpoints: >
+            api.anthropic.com:443
+            github.com:443
+            jobs.lever.co:443
+            registry.npmjs.org:443
+            wellfound.com:443
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -88,10 +105,15 @@ jobs:
     name: web-build
     runs-on: ubuntu-latest
     steps:
-      - name: Harden the runner (audit all outbound calls)
+      - name: Harden the runner (block all outbound calls except the allowlist)
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
-          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+          egress-policy: block
+          # checkout + npm ci + npm run build; observed on run 32512881196
+          # (Stable baseline, 152 runs since the endpoint set last changed).
+          allowed-endpoints: >
+            github.com:443
+            registry.npmjs.org:443
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -117,10 +139,17 @@ jobs:
     name: website-build
     runs-on: ubuntu-latest
     steps:
-      - name: Harden the runner (audit all outbound calls)
+      - name: Harden the runner (block all outbound calls except the allowlist)
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
-          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+          egress-policy: block
+          # checkout + npm ci + npm run build (apps/website, apps/docs); observed
+          # on run 32512881196 (baseline still forming — 47 runs since the
+          # endpoint set last changed — but the same two hosts as web-build's
+          # stable baseline).
+          allowed-endpoints: >
+            github.com:443
+            registry.npmjs.org:443
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -145,10 +174,42 @@ jobs:
     name: qlty
     runs-on: ubuntu-latest
     steps:
-      - name: Harden the runner (audit all outbound calls)
+      - name: Harden the runner (block all outbound calls except the allowlist)
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
-          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+          egress-policy: block
+          # Qlty pulls its own binary plus the Python/Go/Node toolchains its
+          # bundled linters need. Observed on run 32512881196 (Stable baseline,
+          # 127 runs since the endpoint set last changed): api.github.com/
+          # cafe.github.com/github.com/tuf-repo.github.com (GitHub + gh CLI),
+          # api.segment.io (qlty telemetry), api0.prismacloud.io (qlty's own
+          # scan callback), dl.google.com/go.dev/proxy.golang.org/sum.golang.org
+          # (Go toolchain), files.pythonhosted.org/pypi.org (Python linters),
+          # github-proxy.qlty.sh/qlty-releases.s3.amazonaws.com/
+          # tmaproduction.blob.core.windows.net (qlty's own release + config
+          # delivery), nodejs.org (Node toolchain), registry.npmjs.org (npm
+          # ci), release-assets.githubusercontent.com (GitHub release asset
+          # downloads), tuf-repo-cdn.sigstore.dev (sigstore verification).
+          allowed-endpoints: >
+            api.github.com:443
+            api.segment.io:443
+            api0.prismacloud.io:443
+            cafe.github.com:443
+            dl.google.com:443
+            files.pythonhosted.org:443
+            github-proxy.qlty.sh:443
+            github.com:443
+            go.dev:443
+            nodejs.org:443
+            proxy.golang.org:443
+            pypi.org:443
+            qlty-releases.s3.amazonaws.com:443
+            registry.npmjs.org:443
+            release-assets.githubusercontent.com:443
+            sum.golang.org:443
+            tmaproduction.blob.core.windows.net:443
+            tuf-repo-cdn.sigstore.dev:443
+            tuf-repo.github.com:443
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # needed so `--upstream origin/main` resolves
@@ -192,10 +253,15 @@ jobs:
     name: knip
     runs-on: ubuntu-latest
     steps:
-      - name: Harden the runner (audit all outbound calls)
+      - name: Harden the runner (block all outbound calls except the allowlist)
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
-          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+          egress-policy: block
+          # checkout + npm ci + npx knip; observed on run 32512881196 (Stable
+          # baseline, 152 runs since the endpoint set last changed).
+          allowed-endpoints: >
+            github.com:443
+            registry.npmjs.org:443
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

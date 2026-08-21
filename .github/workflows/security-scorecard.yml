@@ -25,10 +25,33 @@ jobs:
       contents: read
       actions: read
     steps:
-      - name: Harden the runner (audit all outbound calls)
+      - name: Harden the runner (block all outbound calls except the allowlist)
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
-          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+          egress-policy: block
+          # ossf/scorecard-action's own dependencies: it checks OSS-Fuzz
+          # integration (oss-fuzz-build-logs.storage.googleapis.com), queries
+          # deps.dev and OSV for vulnerability data, pulls its Docker-based
+          # checks (auth.docker.io, index.docker.io), publishes results and
+          # signs them via sigstore (fulcio/rekor/tuf-repo-cdn.sigstore.dev),
+          # checks OpenSSF Best Practices badge status, and the codeql-action
+          # SARIF upload needs api.github.com. This is the standard
+          # ossf/scorecard-action allowlist. Observed on run 32512881134
+          # (baseline still forming — 70 runs since the endpoint set last
+          # changed).
+          allowed-endpoints: >
+            api.deps.dev:443
+            api.github.com:443
+            api.osv.dev:443
+            api.scorecard.dev:443
+            auth.docker.io:443
+            fulcio.sigstore.dev:443
+            github.com:443
+            index.docker.io:443
+            oss-fuzz-build-logs.storage.googleapis.com:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+            www.bestpractices.dev:443
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
