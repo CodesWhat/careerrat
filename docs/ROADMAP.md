@@ -952,8 +952,16 @@ same release contract:
   through the same verbs the UI buttons use; the remaining batch is mail/message ingest,
   calendar sync, interview prep, and relationship sourcing (legacy workspaces keep working
   unchanged).
-- **Coaching loop** — turn a below-floor fit score from a verdict into a plan: name the gaps,
-  suggest how to close them, re-ingest the new evidence, re-score.
+- **Coaching loop** — phase 1 shipped in #160: a review-gated verdict with named fit risks
+  offers "Coach me on this fit", each gap gets an evidence-claim draft grounded only in
+  recorded evidence (or an honest no-close-path), a confirmed draft persists through the
+  standard evidence firewall, and re-score is the existing re-evaluate path. Stale plans
+  are enforced against the current verdict, and drafts are framed as AI-drafted to verify.
+  The design finding that scoped it: the legacy CLI scorer never reads profile or evidence
+  (it scores JD-vs-targeting text match), so coaching is only meaningful against the DB/web
+  AI verdict path. Phase 2+ remains open: the legacy axis (teach the deterministic scorer to
+  read evidence, or a targeting-calibration variant), a comp-focused variant for below-floor
+  comp verdicts, and feeding coaching outcomes into role-family learnings.
 - **Search-shape eval and tiered AI cost** — decompose the upstream Career Ops search
   discipline (a cost-gated deterministic-first cascade where the model discovers leads but
   never certifies them, and every web-sourced lead gets a mandatory liveness re-check)
