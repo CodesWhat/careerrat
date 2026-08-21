@@ -15,6 +15,8 @@ All notable changes to CareerRat are documented here. This project follows
 ### Changed
 
 - The two release-pipeline steps that only talk to GitHub now run with all other outbound network access blocked, so a compromised dependency in those steps could not send anything anywhere else. The build step keeps monitoring-only mode for now because Apple's notarization service uses rotating delivery hosts that a fixed blocklist would break (#155).
+- Routine background steps, like classifying a reply or filling in a company domain, now ask your installed Claude CLI for its smaller, faster model instead of the full-size one, the same cost saving API users already had. Other installed CLIs are left on their own default model, because the model names CareerRat knows are Claude's (#163).
+- AI web search now knows which companies you have blocked, put on cooldown, or recently been rejected by, so it stops proposing roles you cannot act on. Skill-driven search runs also hand each job evaluation a shared digest of your targeting and profile instead of re-reading the same files for every job (#163).
 
 ### Fixed
 

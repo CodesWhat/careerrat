@@ -70,16 +70,27 @@ write step below gives the `careerrat data <verb>` command (Data Write Contract,
 AGENTS.md). Nonzero exit → legacy workspace (no DB yet) — every write step below
 gives the existing direct JSON-edit instructions, unchanged.
 
+**Fan-out digest short-circuit.** If this run was dispatched as a `search-jobs`
+STEP 7 subagent and its prompt already carries a STEP 0 digest (the parsed
+`targeting.yml`, `profile.yml`, application-limits company set, and a
+company-history summary for this posting's company), use that digest for the
+rows below marked **from digest** instead of re-reading those files — the
+orchestrator already loaded them once and a subagent re-read is wasted context.
+Still read `honesty.yml`, `modes.yml`, and the `learnings/` file yourself; the
+digest never carries them. Running standalone (no digest in the prompt) — the
+normal case for a directly-invoked `evaluate-job` — read every file below as
+usual.
+
 Read the following files (all under `candidate/`):
 
 | File | Fields used |
 | --- | --- |
-| `targeting.yml` | `keep_signals`, `cut_signals`, `excluded_companies`, `degree_policy`, `fit_bands` (default `{high_min:85, med_min:65}`), `role_buckets[].priority` |
-| `profile.yml` | `compensation.comp_floors` (arrangement floors: `remote`/`hybrid`/`onsite`/`relocation` + `home_metro` + `relocation_by_metro[]` — the HARD comp gate; relocation miss = cut), `compensation.minimum_base` (fallback floor), `compensation.target_base`, `compensation.expected_base`, `compensation.oe_min_base`, `compensation.oe_max_base`, `location.remote`, `location.relocation`, `location.travel_tolerance` — **NEVER read `compensation.current_base` for any outbound purpose** |
-| `honesty.yml` | honesty boundaries (education policy, do_not_claim, do_not_fabricate) |
-| `modes.yml` | optional `application_mode`; absent = `balanced`. Read via `careerrat modes status`. It changes pursuit posture after discovery/evaluation, never the evidence/honesty/comp gates. |
-| `application-limits` config | `companies[].status`, `companies[].reapply_after`, `companies[].cooldown_days`, `companies[].bypass` |
-| `learnings/<role-family>.md` | if present — prior outcomes for this track. Read via `careerrat learnings read "<JD title>"` — the helper classifies the family from `targeting.yml` (role_families → role_buckets → neutral-slug ladder), prints the file, or skips silently when absent. |
+| `targeting.yml` **(from digest, if supplied)** | `keep_signals`, `cut_signals`, `excluded_companies`, `degree_policy`, `fit_bands` (default `{high_min:85, med_min:65}`), `role_buckets[].priority` |
+| `profile.yml` **(from digest, if supplied)** | `compensation.comp_floors` (arrangement floors: `remote`/`hybrid`/`onsite`/`relocation` + `home_metro` + `relocation_by_metro[]` — the HARD comp gate; relocation miss = cut), `compensation.minimum_base` (fallback floor), `compensation.target_base`, `compensation.expected_base`, `compensation.oe_min_base`, `compensation.oe_max_base`, `location.remote`, `location.relocation`, `location.travel_tolerance` — **NEVER read `compensation.current_base` for any outbound purpose** |
+| `honesty.yml` | honesty boundaries (education policy, do_not_claim, do_not_fabricate) — always a fresh read; never part of the STEP 0 digest |
+| `modes.yml` | optional `application_mode`; absent = `balanced`. Read via `careerrat modes status`. It changes pursuit posture after discovery/evaluation, never the evidence/honesty/comp gates. Always a fresh read. |
+| `application-limits` config **(from digest, if supplied)** | `companies[].status`, `companies[].reapply_after`, `companies[].cooldown_days`, `companies[].bypass` |
+| `learnings/<role-family>.md` | if present — prior outcomes for this track. Read via `careerrat learnings read "<JD title>"` — the helper classifies the family from `targeting.yml` (role_families → role_buckets → neutral-slug ladder), prints the file, or skips silently when absent. Always a fresh read; never part of the STEP 0 digest. |
 
 Also read any **company research** artifact for FIT context (it lives under
 `workspace/research/`, not `candidate/`): `careerrat research read "<company>"` —
@@ -97,20 +108,25 @@ but does not relax this skill's honesty, comp, legitimacy, or consent gates.
 
 ## STEP 3 — APPLICATION-LIMITS PRE-CHECK
 
-Look up the posting company in application limits. In DB mode, read
-`careerrat data candidate get --json` and use `application-limits.companies[]`.
-In legacy mode, read `candidate/application-limits.yml` if present.
+Look up the posting company in application limits. If a STEP 0 digest was supplied (see
+STEP 2), use its application-limits company set instead of a fresh lookup. Otherwise, in DB
+mode read `careerrat data candidate get --json` and use `application-limits.companies[]`;
+in legacy mode read `candidate/application-limits.yml` if present.
 
 - **`status: blocked` and today < `reapply_after`** → emit `ACTION: hold - <bypass note from config>` and stop. Do not proceed to gate.
 - **`status: caution` and within `cooldown_days` window** → note in output, continue evaluation, and set `ACTION: manual` unless overridden by a later step.
-- **No entry or `status: open`** → continue.
+- **No entry or `status: ok`** → continue. (`ok` is the schema's actual no-restriction value; there is no `open` status.)
 
 ---
 
 ## STEP 3.25 — TRACKER COMPANY-HISTORY PRE-CHECK
 
 Open `workspace/tracker.json` and review same-company history before assigning priority.
-This is mandatory even when application limits have no formal cap.
+This is mandatory even when application limits have no formal cap. If a STEP 0 digest was
+supplied (search-jobs fan-out — see STEP 2), its company-history summary already covers
+this posting's company; use it instead of opening `workspace/tracker.json` again, and only
+open the file directly when running standalone or when the digest's summary is silent on
+this company.
 
 Check:
 
@@ -237,6 +253,7 @@ Read FIT bands from `targeting.fit_bands` (default: `high_min: 85`, `med_min: 65
 Score the role using the programmatic proxy as a starting point (`careerrat evaluate <path-to-job.md>` exits 0=KEEP, 2=REVIEW, 1=CUT), then **override with the body-read assessment** — the agent's judgment is authoritative.
 
 Factor in:
+
 - Matched `keep_signals` (raises score)
 - Matched `cut_signals` (lowers score; a hard match is a CUT, not a deduction)
 - Title-bucket alignment from `role_buckets`
@@ -247,6 +264,7 @@ Factor in:
 **Company-health cross-cut (config-driven, never a hard kill).** If the tracker row carries a non-stale `companyHealth` object (written by `company-health`), apply its `fitDelta` to the score. `fitDelta` is already `0` when the rating didn't cross-cut any stated candidate need, and a small negative (e.g. `-2`..`-5`) when it did — e.g. a layoff in the candidate's own function when they need `stability`. Name the crossing in caveats: `caveats: company-health watch — eng RIF cross-cuts your stability need (-5)`. `companyHealth` alone NEVER triggers a CUT; it only nudges the score, and can drag fit below `fit_floor` *only via the need it intersects* (the floor does the dropping, not the health rating). A `stale` rating (older than `recheck_days`) is informational — surface it but don't apply `fitDelta`; suggest a `company-health` refresh. When no `companyHealth` exists, nothing changes.
 
 Band mapping:
+
 - score ≥ `high_min` (85) → `high`
 - score ≥ `med_min` (65) → `med`
 - score < `med_min` → `stretch`
@@ -319,9 +337,11 @@ If this sourced role came from `search-jobs` triage (has a row in `workspace/tra
    - Also set `fitScore`, `fitBucket`, and `fitBasis: "evaluated"` on the sourced row.
    - Also write company-history cautions from STEP 3.25 into `warn`/`note`, and set `action: "manual"` when same-company active/recent history forced manual review.
    - **DB workspace:** the role stays in `sourced[]` here — this is a field patch, not a promotion (`sourced promote` is for the later apply-time move into `applications[]`). There is no single-field patch verb for `sourced[]`, so read the current row from `workspace/tracker.json#sourced[]`, apply every field above (carrying the rest of the row over unchanged), and persist the whole row in one call:
+
      ```
      careerrat data sourced upsert-batch --data '[<patched full sourced row JSON>]'
      ```
+
      This is outcome-changing per the Data Write Contract — it bumps the stamp, logs its own activity event, and refreshes analytics in the same transaction.
    - **Legacy workspace (no DB):** edit `workspace/tracker.json` directly and set the fields above on the matching `sourced[]` row.
 3. **For roles evaluated directly (not from a sourced[] row):** scan `applications[]` for an entry where `id` matches the reqId (if known), else where `company` and `role` match. If no matching row exists, do **not** create one here — `applications[]` rows are created at submission; skip to STEP 10.
@@ -330,16 +350,20 @@ If this sourced role came from `search-jobs` triage (has a row in `workspace/tra
    - **Legacy workspace (no DB):** edit `workspace/tracker.json` directly and set the fields above on the matching `applications[]` row.
 4. Validate and snapshot:
    - **DB workspace:** sub-step 2's `sourced upsert-batch` call (or sub-step 3's `app set-fields` call) already persisted and auto-exported `workspace/tracker.json` + `workspace/activity.jsonl` (Data Write Contract, AGENTS.md). Run:
+
      ```
      careerrat data verify
      careerrat tracker --verify
      ```
+
      `careerrat data verify` re-exports then runs the same domain-integrity check as `npm run verify:tracker`; `careerrat tracker --verify` covers the ajv schema-level check `data verify` doesn't run. Both should pass clean.
    - **Legacy workspace (no DB):** run in sequence:
+
      ```
      careerrat tracker --verify
      careerrat tracker
      ```
+
      These are two complementary checks and both should be run: `careerrat tracker --verify` validates JSON shape/structure against config/tracker.schema.json (required keys, field presence), while `npm run verify:tracker` validates domain integrity (status recognizability, score range 0–100, modes, channels, duplicate company-role pairs). Neither replaces the other.
 
 This promotes the row from a coarse scanner estimate to an authoritative body-read fit.
@@ -351,10 +375,13 @@ Then log the verdict to the Activity Pulse feed (the dashboard's live timeline �
   (`sourced` sweep-style or `status_change`-style) in the same transaction. For
   the richer, evaluation-specific type, log an additional event (this verb only
   logs, it never bumps the stamp):
+
   ```
   careerrat data activity append --data '{"type":"evaluated","actor":"agent","title":"Evaluated — <Company>","summary":"<GATE verdict>: <short reason>","refs":{"applicationId":"<application id>","company":"<Company>","role":"<Role>","url":"<posting URL>"}}'
   ```
+
 - **Legacy workspace (no DB):**
+
   ```
   careerrat activity append --type evaluated --actor agent \
     --title "Evaluated — <Company>" --summary "<GATE verdict>: <short reason>" \

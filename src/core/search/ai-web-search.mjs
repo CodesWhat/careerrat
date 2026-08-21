@@ -294,7 +294,16 @@ export async function runAiWebSearch({
     message: `Running ${selected.length} saved search prompt${selected.length === 1 ? "" : "s"}…`,
   });
 
-  const candidateContext = buildSearchPromptContext({ repoRoot, env, config });
+  // includeSearchLimits: true — this lane's STEP 3 coarse-triage flags
+  // (company-history-*, app-limit-*) are otherwise unreachable here (no CLI,
+  // no tracker read; see this skill's AI Web Search mode section). dbExists()
+  // was already confirmed above, so the summary's tracker read is safe.
+  const candidateContext = buildSearchPromptContext({
+    repoRoot,
+    env,
+    config,
+    includeSearchLimits: true,
+  });
   const kickoffInput = {
     mode: "ai-web-search",
     prompts: selected.map((p) => ({ id: p.id, text: p.text })),

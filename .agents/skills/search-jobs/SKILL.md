@@ -17,7 +17,7 @@ Activated when the kickoff input is JSON containing `"mode": "ai-web-search"` (a
 
 For each entry in `prompts`, run one or more `WebSearch` calls using that prompt's text (or a close paraphrase) as the query. For every promising result — a real job-posting URL, not an aggregator/search-results page — run `WebFetch` on the URL to pull the actual JD text. Prefer postings you can read directly; drop a result rather than guessing at a JD you couldn't fetch.
 
-Score every posting you keep using the **STEP 3 — Coarse triage** rules above, verbatim — the same `fitScore`/`fitBucket`/`fitBasis`/`ruleFlags`/one-line-reason shape, no new rules invented here. Score against the `candidate` context object in the kickoff input (role buckets with their fit/down signals, excluded companies, comp floor, location posture, work authorization) rather than reading `candidate/targeting.yml` directly — the tracker, application-limits, company-history, and learnings inputs STEP 3 also lists are not reachable in this mode (no CLI, no tracker read). Flags that depend on that unreachable data (`company-history-*`, `app-limit-*`, `oe-candidate`) only apply if you can confirm the underlying condition from the posting itself and the given `candidate` context (e.g. `oe-candidate`'s remote+comp-band+priority conditions); otherwise omit the flag rather than guessing.
+Score every posting you keep using the **STEP 3 — Coarse triage** rules above, verbatim — the same `fitScore`/`fitBucket`/`fitBasis`/`ruleFlags`/one-line-reason shape, no new rules invented here. Score against the `candidate` context object in the kickoff input (role buckets with their fit/down signals, excluded companies, comp floor, location posture, work authorization) rather than reading `candidate/targeting.yml` directly — `candidate/targeting.yml`, `candidate/profile.yml`, and the learnings inputs STEP 3 also lists are not reachable in this mode (no CLI, no tracker read). The `candidate` context object additionally carries compact `application_limits[]` (`{company, status, reapply_after}`, only companies with a `caution`/`blocked` status) and `company_history[]` (`{company, flags}`, flags drawn from `active`/`recent-rejection`/`prior-sourced`) summaries when the server had tracker data to build them — use those directly to apply `app-limit-*` and `company-history-*`, the same way STEP 3 does from a live tracker read. `oe-candidate` still requires you to confirm all three of its conditions from the posting itself plus the given `candidate` context. If a flag's underlying data isn't present in the context (an empty or absent `application_limits`/`company_history`, or no learnings), omit that flag rather than guessing.
 
 **Skip:** everything that writes. No `workspace/jobs/*.md`, no `config/search-sources.yml` watermark, no `careerrat activity append`, no tracker write, no `evaluate-job` handoff. The server that invoked this run validates your JSON reply and persists survivors itself — this mode never touches disk or the tracker directly.
 
@@ -95,6 +95,7 @@ intake, and source watermarks; any sourced-row tracker mutation still follows th
 Contract.
 
 It also writes:
+
 - `workspace/scan-results/sourced-<date>.json` — raw scan snapshot
 - `workspace/intake/sourced-<date>.md` — intake markdown
 
@@ -135,6 +136,7 @@ The `allowed` field encodes the three-part AND from `mayRun()` in `src/core/auto
 **If either gate is not met — skip and explain how to opt in. Do not open a browser.**
 
 To enable a source:
+
 1. Read that platform's terms of service yourself.
 2. Record ToS consent: `careerrat automation consent <platform> --write`
 3. Enable the capability global switch: `careerrat automation enable authenticated_search --write`
@@ -187,30 +189,27 @@ npm run delta:sourced -- --source <provider> --repo-new-only --write --baseline-
 
 ## STEP 3 — Coarse triage on every new sourced entry
 
-For each sourced entry in the intake, emit a triage block before writing it to the tracker. Score using:
+The scanner (STEP 1's `npm run scan:sourced`) already scored every sourced entry — `scoreSourcedOfferFromConfig` ran against `candidate/targeting.yml` and `profile.yml#compensation.minimum_base` before the intake file was ever written, and its `fitScore`/`fitBucket`/`ruleFlags`/`ratingReason` are already sitting in the intake row (the Fit, Rule Signals, and Flags columns). **Read the stored triage fields from the intake row — do not recompute `fitScore`/`fitBucket`/`ratingReason` or re-derive the scanner's own flags** (`comp-below-floor`, `excluded-company`, `comp-unposted`, `top-of-band-only`, `family-cold`) from scratch; carry them forward as-is.
 
-- `candidate/targeting.yml` — `role_buckets.priority`, `keep_signals`, `cut_signals`, `excluded_companies`
-- `careerrat learnings read "<role>"` — when the sourced role's family is classifiable; skips silently if no file exists
-- `candidate/profile.yml#compensation.minimum_base` — salary floor (use this field, not `current_base`)
+For each sourced entry, still add the flags below that the scanner has no way to compute — it never reads the tracker, application limits, or learnings at scan time:
+
+- `learnings/<role-family>.md` — via `careerrat learnings read "<role>"` when the sourced role's family is classifiable; skips silently if no file exists. Adjust `ratingReason` (not the stored `fitScore`) with what it says.
 - application limits — blocked/capped companies
 
-Emit per-entry:
+Emit per-entry, starting from the stored fields and adding only the agent-derived flags:
 
 ```
-fitScore: <0-100>
-fitBucket: high | med | stretch        # high ≥ 85, med ≥ 65, stretch < 65 (from targeting.fit_bands; default 85/65)
+fitScore: <read from the intake row's Fit column — recompute only if the row predates a scanner change>
+fitBucket: high | med | stretch        # read from the intake row; high ≥ 85, med ≥ 65, stretch < 65 (targeting.fit_bands; default 85/65)
 fitBasis: "triage"                     # marks as pre-read estimate; evaluate-job overwrites with "evaluated"
-ruleFlags: [<zero or more of the flags below>]
-ratingReason: "<one line>"
+ruleFlags: [<the stored flags from the intake row, plus any agent-derived flags below>]
+ratingReason: "<the stored one-line reason, extended with any agent-derived signal>"
 ```
 
-Rule flags to apply where conditions are met:
+Rule flags already written by the scanner (read, don't recompute): `likely-cut` (matches a `cut_signals` entry), `comp-below-floor`, `excluded-company`, `comp-unposted`, `top-of-band-only`.
 
-- `likely-cut` — matches one or more `cut_signals`
-- `comp-below-floor` — posted comp is explicitly below `minimum_base`
-- `excluded-company` — company appears in `targeting.yml#excluded_companies`
-- `comp-unposted` — no comp posted; cannot verify floor
-- `top-of-band-only` — posting says "up to $X" near the floor
+Rule flags the agent adds at triage time — the scanner cannot see this data:
+
 - `possible-duplicate` — title+company match an existing tracker row
 - `company-history-active` — the same company has an active application (`awaiting`, `screen`, `interview`, `blocked`, or equivalent non-terminal status)
 - `company-history-recent-rejection` — the same company has a rejection or pass in `applications[]` within the last 90 days, unless application limits define a different cooldown window
@@ -260,6 +259,7 @@ SQLite and exported files are generated artifacts; do not hand-edit YAML. In leg
 update `config/search-sources.yml` directly if the scanner did not already write the watermark.
 
 For each legacy source that needs a manual watermark:
+
 1. Read and print the current (before) `lastRunAt` value: `searches[id=<source>].lastRunAt` (print it so the write can be confirmed).
 2. Edit `config/search-sources.yml` directly — set `lastRunAt` to the ISO timestamp of this run.
 3. Print the new (after) `lastRunAt` value as confirmation: `Written lastRunAt for <source>: <before> → <after>`.
@@ -290,6 +290,16 @@ the legacy tracker writer otherwise), so there is one writer of canonical tracke
 parallelize; JS-portal JDs that need the session browser serialize (one-browser rule).
 Degrade to inline sequential gating with no subagent primitive. See the **Delegation
 Contract** in AGENTS.md.
+
+**Hand each subagent the STEP 0 digest instead of a re-read.** This orchestrator already
+loaded the full parsed contents of `candidate/targeting.yml` and `candidate/profile.yml`,
+the application-limits blocked/capped company set, and the tracker company-history sets
+(active applications, recent rejections, prior cuts/closed rows) at STEP 0. Include that
+digest directly in each subagent's dispatch prompt — trimmed to the posting's own company
+for the company-history slice — so evaluate-job's STEP 2 reads it from the prompt rather
+than opening those same files again in a fresh context. `candidate/honesty.yml` and any
+role-family `learnings/` file are not part of the STEP 0 digest (this skill never loads
+them); each subagent still reads those itself, along with the live JD fetch.
 
 For each sourced entry with `fitBucket: high` and no `excluded-company` / `app-limit-blocked` / `likely-cut` flag, offer to run `evaluate-job` for a full body-read gate:
 
