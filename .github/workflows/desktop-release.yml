@@ -121,9 +121,16 @@ jobs:
       - name: Ensure a GitHub release exists for the tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # List-API lookup, not `gh release view`: drafts aren't addressable
+        # by tag and gh's fallback varies by version. Refuses to pile a
+        # second draft onto a tag that somehow already has two.
         run: |
           set -euo pipefail
-          if gh release view "$TAG" >/dev/null 2>&1; then
+          count="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq "[.[] | select(.tag_name==\"$TAG\")] | length")"
+          if [ "$count" -gt 1 ]; then
+            echo "::error::Found $count releases for tag $TAG; refusing to add another."
+            exit 1
+          elif [ "$count" -eq 1 ]; then
             echo "Release $TAG already exists."
           else
             echo "No release found for $TAG; creating a draft."
@@ -202,11 +209,16 @@ jobs:
         # workflow's first live run, run 32487926861).
         run: |
           set -euo pipefail
-          release="$(gh api "repos/$REPO/releases" --paginate --jq "[.[] | select(.tag_name==\"$TAG\")][0]")"
-          if [ -z "$release" ] || [ "$release" = "null" ]; then
+          matches="$(gh api "repos/$REPO/releases" --paginate --jq "[.[] | select(.tag_name==\"$TAG\")]")"
+          count="$(jq 'length' <<<"$matches")"
+          if [ "$count" -eq 0 ]; then
             echo "::error::No release found for $TAG after build-notarize-upload; refusing to publish blind."
             exit 1
+          elif [ "$count" -gt 1 ]; then
+            echo "::error::Found $count releases for tag $TAG; refusing to guess which to publish."
+            exit 1
           fi
+          release="$(jq '.[0]' <<<"$matches")"
           if ! jq -er '[.assets[].name | select(endswith(".dmg"))] | length > 0' <<<"$release" >/dev/null; then
             echo "::error::Release $TAG has no .dmg asset attached; refusing to publish."
             exit 1
