@@ -9,6 +9,7 @@ import { mountWorkspaceAgentRoutes } from "../src/cli/workspace-agent-route.mjs"
 import {
   captureWorkspaceIntake,
   createWorkspaceAgentRuntime,
+  EXECUTABLE_INTENTS,
   executeWorkspaceIntent,
   mailSyncSources,
   messagesSyncSources,
@@ -16,6 +17,7 @@ import {
   runWorkspaceAgentTurn,
 } from "../src/core/agent/workspace-agent.mjs";
 import {
+  WORKSPACE_INTENT_ENTITY_TYPES,
   WORKSPACE_THREAD_ID,
   workspaceIntentAppend,
   workspaceMessageAppend,
@@ -8138,5 +8140,15 @@ test("linkedin.proposal-decide: input.batchId that does not match the selected e
       assert.equal(error.code, "BAD_INTENT_ENTITY");
       return true;
     }
+  );
+});
+
+test("every workspace intent offered via WORKSPACE_INTENT_ENTITY_TYPES is implemented in EXECUTABLE_INTENTS", () => {
+  const offered = Object.keys(WORKSPACE_INTENT_ENTITY_TYPES);
+  const unimplemented = offered.filter((type) => !EXECUTABLE_INTENTS.has(type));
+  assert.deepEqual(
+    unimplemented,
+    [],
+    `these intents are offered to the user but throw "not implemented yet" when selected: ${unimplemented.join(", ")}`
   );
 });
