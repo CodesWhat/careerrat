@@ -184,7 +184,7 @@ Status meanings:
 | `ingest-profile` | Chat-first onboarding, company thesis, editable file pane, and durable graduation into Ask | native | Run clean-home and packaged acceptance for transcript continuity, retry idempotency, restart, and a first search already in flight. |
 | `setup-searches` | Onboarding baseline plus Ask URL/query imports and source toggles, with Settings maintenance | native | Packaged-install acceptance passed 2026-08-17 (add/dedup/toggle/receipt/restart). A router-phrasing gap between the promised copy and the shipped add/toggle matchers is filed as a follow-up, not a blocker. Add headed authenticated-off and ambiguous-name recovery coverage. |
 | `research-boards` | Ask starts or reopens an embedded guided board search with Add source/Skip review | native | Session/skill-load path re-verified working 2026-08-17 (PR #84). Chat-text approval claimed writes it never made; the rendered Add source/Skip controls are the real write path (issue #90, skill-text fix in PR #93). Duplicate-source, skip-all, and restart-mid-session coverage still needs a re-run via the rendered controls. |
-| `discover-companies` | Company-thesis onboarding plus native Ask proposals and Track/Skip decisions | native | Explicit-ask, targeting-change, and pending-review-reopen legs passed 2026-08-17 (the reopen leg found and fixed a duplicate-batch defect, PR #91). Weekly-cadence refresh leg not yet re-exercised. |
+| `discover-companies` | Company-thesis onboarding plus native Ask proposals and Track/Skip decisions | native | Explicit-ask, targeting-change, and pending-review-reopen legs passed 2026-08-17 (the reopen leg found and fixed a duplicate-batch defect, PR #91). Weekly-cadence refresh leg passed 2026-08-21: an 8-day-old fully-decided batch went due on `weekly-cadence`, `search.run` created a genuinely new batch, an immediate second run correctly reopened it instead of duplicating, and the state survived a server restart. All four legs confirmed. |
 | `search-jobs` | Jobs search controls and typed `search.run` Ask preview | native | Preserve as the reference interaction contract while source coverage expands. |
 | `evaluate-job` | Application drawer plus Ask for URLs, pasted/attached JDs, open jobs, and named saved jobs | native | Preserve full-JD capture, typed verdict rendering, deterministic resolution, and ambiguity recovery in clean packed-install acceptance. |
 | `tailor-application` | Ask handles URL, pasted, attached, open-job, and named-job tailoring as a documents-only workflow | native | Preserve the separate tailoring/apply boundary, typed artifacts, and packed URL/paste/file-picker acceptance. |
@@ -276,9 +276,11 @@ unconditionally instead of reusing `search.run`'s existing reopen guard. Fix:
 `company.discover` now routes through the same shared reopen guard, returning the
 pending batch as-is (`state: needs-review`) instead of minting a sibling row, while
 preserving the existing "changed targeting creates a fresh batch" and "explicit ask
-on a current cadence creates a batch" semantics. (PR #91) Three of the four acceptance
-legs (explicit ask, targeting-change refresh, and now the reopen-not-duplicate path)
-are confirmed; the weekly-cadence refresh leg was not re-exercised in this pass.
+on a current cadence creates a batch" semantics. (PR #91) All four acceptance legs are
+now confirmed: explicit ask, targeting-change refresh, and reopen-not-duplicate on
+2026-08-17, and the weekly-cadence refresh leg on 2026-08-21 (real server against a
+seeded demo workspace with a backdated batch; new batch on `weekly-cadence`, reopen
+guard still holding on the immediate re-run, state durable across a restart).
 
 ## Recurring job-board discovery
 
