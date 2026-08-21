@@ -356,10 +356,16 @@ function buildInstalledRuntimePrompt({ system, messages } = {}) {
 // the installed CLI's own default (an undefined --model flag) is the correct
 // base for a subscription-CLI user who set neither. This mirrors the six
 // existing `tier: "smallFast"` call sites, none of which needed to change.
-function resolveInstalledModel({ model, tier, root, env }) {
+//
+// The smallFast branch is gated to the `claude` runtime: smallFastModel and
+// its shipped default are Anthropic model ids, which are only valid values
+// for the claude CLI's --model flag. Every other installed runtime (codex,
+// gemini, ...) keeps the base-default behavior regardless of tier until
+// there's a per-runtime small-fast config to resolve from.
+function resolveInstalledModel({ model, tier, root, env, runtimeId }) {
   const explicit = String(model || "").trim();
   if (explicit) return explicit;
-  if (tier === "smallFast") {
+  if (tier === "smallFast" && runtimeId === "claude") {
     const modelConfig = resolveModelConfig({ root, env });
     return modelConfig.smallFastModel || undefined;
   }
@@ -387,7 +393,7 @@ async function runInstalledAI({
     runtime: route.runtime,
     prompt: buildInstalledRuntimePrompt({ system, messages }),
     outputSchema,
-    model: resolveInstalledModel({ model, tier, root, env }),
+    model: resolveInstalledModel({ model, tier, root, env, runtimeId: route.runtime.id }),
     cwd: root,
     env,
     signal,

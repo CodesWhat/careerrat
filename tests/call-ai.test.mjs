@@ -367,7 +367,59 @@ test("callAI (installed): an explicit model always wins", async () => {
   }
 });
 
-test("callAI (installed): tier smallFast resolves config/ai.json#smallFastModel, not the env base default", async () => {
+test("callAI (installed): tier smallFast on the claude runtime resolves config/ai.json#smallFastModel, not the env base default", async () => {
+  const root = tempRoot();
+  mkdirSync(join(root, "config"), { recursive: true });
+  writeFileSync(
+    join(root, "config", "ai.json"),
+    JSON.stringify({ smallFastModel: "configured-small-fast" }),
+    "utf8"
+  );
+  try {
+    writeInstalledRuntimeSelection({ repoRoot: root, env: {}, runtimeId: "claude" });
+    const calls = [];
+    await callAI({
+      tier: "smallFast",
+      messages: [{ role: "user", content: "hi" }],
+      root,
+      env: { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_INSTALLED_AI_MODEL: "base-default" },
+      runtimeInventory: [{ id: "claude", name: "Claude", path: "/safe/claude", available: true }],
+      runInstalledRuntimeImpl: async (input) => {
+        calls.push(input);
+        return { text: "ok", runtimeId: "claude", usage: null };
+      },
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].model, "configured-small-fast");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("callAI (installed): tier smallFast on the claude runtime with no config file falls back to the shipped small-fast default", async () => {
+  const root = tempRoot();
+  try {
+    writeInstalledRuntimeSelection({ repoRoot: root, env: {}, runtimeId: "claude" });
+    const calls = [];
+    await callAI({
+      tier: "smallFast",
+      messages: [{ role: "user", content: "hi" }],
+      root,
+      env: { CAREERRAT_DESKTOP_SHELL: "1" },
+      runtimeInventory: [{ id: "claude", name: "Claude", path: "/safe/claude", available: true }],
+      runInstalledRuntimeImpl: async (input) => {
+        calls.push(input);
+        return { text: "ok", runtimeId: "claude", usage: null };
+      },
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].model, DEFAULT_SMALL_FAST_MODEL);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("callAI (installed): tier smallFast on a non-claude runtime ignores the Anthropic-shaped smallFastModel config", async () => {
   const root = tempRoot();
   mkdirSync(join(root, "config"), { recursive: true });
   writeFileSync(
@@ -390,13 +442,13 @@ test("callAI (installed): tier smallFast resolves config/ai.json#smallFastModel,
       },
     });
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].model, "configured-small-fast");
+    assert.equal(calls[0].model, "base-default");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("callAI (installed): tier smallFast with no config file falls back to the shipped small-fast default", async () => {
+test("callAI (installed): tier smallFast on a non-claude runtime with no base default omits --model entirely", async () => {
   const root = tempRoot();
   try {
     writeInstalledRuntimeSelection({ repoRoot: root, env: {}, runtimeId: "codex" });
@@ -413,7 +465,7 @@ test("callAI (installed): tier smallFast with no config file falls back to the s
       },
     });
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].model, DEFAULT_SMALL_FAST_MODEL);
+    assert.equal(calls[0].model, undefined);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
