@@ -45,10 +45,15 @@ jobs:
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
     steps:
-      - name: Harden the runner (audit all outbound calls)
+      - name: Harden the runner (block all outbound calls except the allowlist)
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
-          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+          egress-policy: block
+          # This job only calls `gh api repos/.../tags` (dispatch path) and
+          # queries GitHub's tag-check API; observed on runs 32487926861 and
+          # 32487059880 (endpoint-called: api.github.com, process: gh).
+          allowed-endpoints: >
+            api.github.com:443
       - name: Resolve the release tag
         id: resolve
         env:
@@ -91,7 +96,18 @@ jobs:
       - name: Harden the runner (audit all outbound calls)
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
-          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+          # Stays on audit: this job's notarytool/stapler calls hit
+          # Apple/Akamai/S3 hosts (appstoreconnect.apple.com,
+          # notary-submissions-prod.s3-accelerate.amazonaws.com,
+          # notary-artifacts-prod.s3.amazonaws.com, ocsp2.apple.com, and a
+          # rotating *.akamaiedge.net edge like e2490.dscb.akamaiedge.net
+          # observed on run 32487926861) that vary by Akamai edge assignment
+          # run to run. A missed or rotated notarization endpoint fails a
+          # release mid-flight, so `block` here needs a wider, verified
+          # allowlist (or the *.apple.com / *.akamaiedge.net / *.aaplimg.com
+          # wildcard form) before flipping, not a guess from one run's edge
+          # node. house target is `block` once that's verified.
+          egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.resolve-tag.outputs.tag }}
@@ -197,10 +213,18 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       REPO: ${{ github.repository }}
     steps:
-      - name: Harden the runner (audit all outbound calls)
+      - name: Harden the runner (block all outbound calls except the allowlist)
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
-          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+          egress-policy: block
+          # This job only calls `gh api repos/.../releases` (list + PATCH);
+          # observed on run 32487926861 (same gh-to-api.github.com pattern
+          # captured on the resolve-tag job across runs 32487926861 and
+          # 32487059880). This job's own audit trace didn't capture a
+          # discrete endpoint-called event, but it runs the identical `gh
+          # api` tooling against the same host.
+          allowed-endpoints: >
+            api.github.com:443
       - name: Publish the release once the dmg asset is confirmed
         # Resolved by release ID via the list API, not `gh release view TAG`:
         # a draft release is not addressable by tag through the tag-lookup
