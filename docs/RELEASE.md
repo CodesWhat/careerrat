@@ -30,7 +30,8 @@ Before tagging a release:
    This comes before the validation steps on purpose: the placeholder linter
    and the privacy grep below scan the roadmap too, so an edit made after they
    ran ships unvalidated.
-4. All tests pass: `npm test`. Run this after steps 1 and 2, not before:
+4. All tests pass: `npm test`. Run this after the version bump and changelog
+   conversion (steps 1 and 2), not before:
    `tests/release-consistency.test.mjs` hard-fails unless the newest
    `CHANGELOG.md` heading matches `package.json`'s version and carries a real
    date, so a green run here proves the release state, not the pre-release one.
