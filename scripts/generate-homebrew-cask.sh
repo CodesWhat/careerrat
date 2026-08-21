@@ -66,8 +66,10 @@ if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
 fi
 
 TMP_DIR=""
+WRITE_TMP=""
 cleanup() {
 	[ -z "$TMP_DIR" ] || rm -rf "$TMP_DIR"
+	[ -z "$WRITE_TMP" ] || rm -f "$WRITE_TMP"
 }
 trap cleanup EXIT
 
@@ -86,11 +88,13 @@ if [ ! -f "$DMG_PATH" ] || [ ! -r "$DMG_PATH" ]; then
 fi
 
 # --write and --dmg pointing at the same file would clobber the input DMG.
+# cd -P compares physical paths, so a symlinked directory can't sneak the
+# same file in under two names.
 if [ -n "$WRITE_PATH" ] && [ -e "$WRITE_PATH" ] &&
-	[ "$(cd "$(dirname "$WRITE_PATH")" && pwd)/$(basename "$WRITE_PATH")" = \
-		"$(cd "$(dirname "$DMG_PATH")" && pwd)/$(basename "$DMG_PATH")" ]; then
+	[ "$(cd -P "$(dirname "$WRITE_PATH")" && pwd)/$(basename "$WRITE_PATH")" = \
+		"$(cd -P "$(dirname "$DMG_PATH")" && pwd)/$(basename "$DMG_PATH")" ]; then
 	echo "error: --write and --dmg resolve to the same file" >&2
-	exit 65
+	exit 67
 fi
 
 SHA256="$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')"
