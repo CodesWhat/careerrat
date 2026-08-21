@@ -310,7 +310,7 @@ export function hostnameToPortal(url) {
  * Pattern → quirks. Kept separate from PORTAL_RECIPES so non-recipe hosts can
  * still carry known-issue guidance.
  */
-export const DOMAIN_QUIRKS = [
+const DOMAIN_QUIRKS = [
   {
     match: /\.myworkdayjobs\.com$|\.myworkday\.com$|workday/i,
     portal: "workday",
@@ -406,7 +406,7 @@ export function isEasyApply(url) {
 // these needles is itself generic wizard vocabulary, not LinkedIn-specific
 // copy.
 /** Button-text substrings (lowercase) that advance a multi-step apply form to the next page. */
-export const EASY_APPLY_ADVANCE_LABELS = [
+const EASY_APPLY_ADVANCE_LABELS = [
   "next",
   "continue",
   "review",
@@ -415,19 +415,12 @@ export const EASY_APPLY_ADVANCE_LABELS = [
   "save and continue",
 ];
 
-// ---------------------------------------------------------------------------
-// EASY_APPLY_SUBMIT_LABELS
-// ---------------------------------------------------------------------------
-
-/** Button-text substrings (lowercase) for the FINAL submit action in Easy Apply. */
-export const EASY_APPLY_SUBMIT_LABELS = ["submit application"];
-
 /**
  * Fail-safe disqualifier tokens for findAdvanceButtonRef: a normalized label
  * containing ANY of these tokens anywhere is never treated as an advance
  * button, even when it also matches an EASY_APPLY_ADVANCE_LABELS needle (e.g.
- * "Submit and continue", "Review and submit"). A needle-list scan against
- * EASY_APPLY_SUBMIT_LABELS is not enough — that only catches the exact final
+ * "Submit and continue", "Review and submit"). A needle-list scan against an
+ * exact final-submit label is not enough — that only catches the exact final
  * label, not every submit-flavored variant. Over-blocking is deliberate: a
  * wrongly skipped advance ends in the awaiting-submit human handoff, a
  * wrongly clicked submit is irreversible. Do not add "apply" here — it would

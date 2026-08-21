@@ -332,7 +332,7 @@ function messageContentText(content) {
     .join("\n");
 }
 
-export function buildInstalledRuntimePrompt({ system, messages } = {}) {
+function buildInstalledRuntimePrompt({ system, messages } = {}) {
   const sections = [];
   if (system) sections.push(`System instructions:\n${String(system).trim()}`);
   const turns = (Array.isArray(messages) ? messages : []).map(

@@ -88,7 +88,7 @@ export function closeAll() {
 export const NO_DATABASE_MESSAGE =
   "no database yet. Run 'careerrat data import' to migrate this workspace, or 'careerrat data init' to start fresh";
 
-export class NoDatabaseError extends Error {
+class NoDatabaseError extends Error {
   constructor(message = NO_DATABASE_MESSAGE) {
     super(message);
     this.name = "NoDatabaseError";
