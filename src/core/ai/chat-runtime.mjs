@@ -54,6 +54,8 @@ import {
   CHAT_SESSION_RUNTIME_TIMEOUT_MS,
   RUNTIME_TOOL_PROFILE_UNSUPPORTED,
   runInstalledRuntime,
+  runInstalledRuntimeStream,
+  supportsInstalledRuntimeStreaming,
 } from "./installed-runtimes.mjs";
 import { createRuntimeToolPolicy } from "./runtime-tool-policy.mjs";
 import { resolveChatRuntimeTools } from "./runtime-tools.mjs";
@@ -376,6 +378,13 @@ export function createChatRuntime({
   env = process.env,
   loadSdk = loadClaudeAgentSdk,
   runInstalledRuntimeImpl = runInstalledRuntime,
+  // Overridable for the same reason as runInstalledRuntimeImpl above — tests
+  // drive this against a hand-rolled fake streaming CLI (fixture NDJSON) that
+  // never spawns a real process. Only ever called when
+  // supportsInstalledRuntimeStreaming(route.runtime.id) is true (today, just
+  // "claude") — every other installed runtime keeps going through
+  // runInstalledRuntimeImpl above, unchanged.
+  runInstalledRuntimeStreamImpl = runInstalledRuntimeStream,
   resolveCandidateContextImpl = resolveCandidateChatContext,
   now = () => Date.now(),
   idleTtlMs = envNumber(env, "CAREERRAT_CHAT_IDLE_TTL_MS", 30 * 60 * 1000),
@@ -613,7 +622,7 @@ export function createChatRuntime({
         transcript: session.transcript,
         candidateContext: currentCandidateContext(session.skill),
       });
-      const result = await runInstalledRuntimeImpl({
+      const sharedRuntimeCallArgs = {
         runtime: route.runtime,
         prompt,
         cwd: repoRoot,
@@ -640,7 +649,33 @@ export function createChatRuntime({
         // Last-Event-ID replay if the connection drops mid-turn. So this is
         // the one place a bound actually needs raising.
         timeoutMs: CHAT_SESSION_RUNTIME_TIMEOUT_MS,
-      });
+      };
+
+      // The bug this fix closes: an installed "claude" runtime never called
+      // loadSdk (see startSession's own comment), so this turn only ever had
+      // ONE json envelope to work with, at process exit — no activity ever
+      // rendered while a turn was running. When the selected runtime supports
+      // it (supportsInstalledRuntimeStreaming — today, only "claude"), spawn
+      // stream-json instead and dispatch each tool_use/tool_result frame the
+      // moment it's parsed off stdout, via the exact same mapSdkMessage the
+      // SDK path (pump(), above) already uses — so ChatActivityLine renders
+      // identically on both routes. The final assistant message, usage, and
+      // chat_state transitions below are unchanged either way: both calls
+      // resolve to the same {text, usage, model} shape, sourced from the
+      // terminal result envelope (single json object vs. the stream's
+      // terminal "result" NDJSON line — same fields either way).
+      const result = supportsInstalledRuntimeStreaming(route.runtime.id)
+        ? await runInstalledRuntimeStreamImpl({
+            ...sharedRuntimeCallArgs,
+            onMessage: (message) => {
+              for (const evt of mapSdkMessage(message, { env })) {
+                if (evt.type === "tool_use" || evt.type === "tool_result") {
+                  dispatchEvents(session, [evt]);
+                }
+              }
+            },
+          })
+        : await runInstalledRuntimeImpl(sharedRuntimeCallArgs);
 
       session.transcript.push({ role: "assistant", content: result.text });
       session.lastActivityAt = now();

@@ -69,6 +69,22 @@ function selectInstalledRuntime({ repoRoot, env }) {
   });
 }
 
+// Same deterministic-route trick as selectFakeCodexRuntime, but for "claude" —
+// the one registry entry supportsInstalledRuntimeStreaming() actually returns
+// true for. Needed for the streaming-turn coverage below, which asserts
+// runInstalledTurn dispatches over runInstalledRuntimeStreamImpl (never the
+// one-shot runInstalledRuntimeImpl) once route.runtime.id === "claude".
+function selectFakeClaudeRuntime({ repoRoot, env }) {
+  const binDir = mkdtempSync(join(tmpdir(), "careerrat-fake-claude-bin-"));
+  const claudePath = join(binDir, "claude");
+  writeFileSync(claudePath, "#!/bin/sh\nexit 0\n", "utf8");
+  chmodSync(claudePath, 0o755);
+  env.PATH = "";
+  env.CAREERRAT_RUNTIME_EXTRA_PATHS = binDir;
+  writeInstalledRuntimeSelection({ repoRoot, env, runtimeId: "claude" });
+  return binDir;
+}
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -1089,6 +1105,145 @@ test("createChatRuntime.startSession (installed route): threads skill + repoRoot
       assert.equal(calls[1].skill, "research-company");
       assert.equal(calls[1].repoRoot, repoRoot);
       assert.equal(calls[1].timeoutMs, CHAT_SESSION_RUNTIME_TIMEOUT_MS);
+    } finally {
+      chatRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The bug this fix closes: startInstalledSession never called loadSdk, so an
+// installed "claude" chat turn only ever had ONE json envelope to work with,
+// at process exit — no tool_use/tool_result activity ever rendered while a
+// turn was running (PR #171's ChatActivityLine had nothing to draw on this
+// route). runInstalledTurn now calls runInstalledRuntimeStreamImpl instead of
+// runInstalledRuntimeImpl whenever supportsInstalledRuntimeStreaming(runtime.id)
+// is true (today, only "claude"), dispatching each tool_use/tool_result frame
+// (mapped via skill-runtime.mjs's own mapSdkMessage — the same mapper the SDK
+// route's pump() uses) the moment it arrives, while the final assistant
+// message/usage/chat_state transition stay sourced from the resolved
+// {text, usage, model}, exactly like the one-shot path.
+// ---------------------------------------------------------------------------
+
+test("createChatRuntime (installed route, claude): streams tool_use/tool_result frames as they arrive, then the same final assistant/result/usage shape as the one-shot path", async () => {
+  const repoRoot = tempRepoWithSkill("research-company");
+  try {
+    const env = {};
+    selectFakeClaudeRuntime({ repoRoot, env });
+    const calls = [];
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      runInstalledRuntimeImpl: async () => {
+        throw new Error(
+          "the one-shot runtime must never be called for a streaming-capable runtime"
+        );
+      },
+      runInstalledRuntimeStreamImpl: async (args) => {
+        calls.push(args);
+        // Simulate the real CLI's NDJSON arriving one message at a time,
+        // synchronously — same as installed-runtimes.mjs's real pump calling
+        // onMessage off each parsed stdout line.
+        args.onMessage({
+          type: "assistant",
+          session_id: "sess-1",
+          message: {
+            content: [{ type: "tool_use", id: "tu1", name: "WebSearch", input: { q: "acme" } }],
+          },
+        });
+        args.onMessage({
+          type: "user",
+          session_id: "sess-1",
+          message: {
+            content: [
+              { type: "tool_result", tool_use_id: "tu1", content: "acme is fine", is_error: false },
+            ],
+          },
+        });
+        return {
+          text: "Acme looks healthy.",
+          usage: { input_tokens: 12, output_tokens: 6 },
+          model: "claude-sonnet",
+        };
+      },
+    });
+    try {
+      const { chatId } = await chatRuntime.startSession({ skill: "research-company" });
+      const events = subscribeCollect(chatRuntime, chatId);
+      await waitForPredicate(() =>
+        events.some((e) => e.type === "chat_state" && e.data.state === "idle")
+      );
+
+      assert.equal(calls.length, 1, "the streaming impl must be called, not the one-shot impl");
+      assert.equal(calls[0].skill, "research-company");
+      assert.equal(calls[0].timeoutMs, CHAT_SESSION_RUNTIME_TIMEOUT_MS);
+      assert.equal(typeof calls[0].onMessage, "function");
+
+      const toolUse = events.find((e) => e.type === "tool_use");
+      assert.ok(toolUse, "expected a tool_use frame streamed before the turn finished");
+      assert.equal(toolUse.data.id, "tu1");
+      assert.equal(toolUse.data.name, "WebSearch");
+
+      const toolResult = events.find((e) => e.type === "tool_result");
+      assert.ok(toolResult, "expected a tool_result frame streamed before the turn finished");
+      assert.equal(toolResult.data.toolUseId, "tu1");
+      assert.equal(toolResult.data.isError, false);
+
+      // tool_use must land before tool_result, and both before the final
+      // assistant/result pair — same call order the SDK route's pump()
+      // guarantees via mapSdkMessage + dispatchEvents.
+      const order = events.map((e) => e.type);
+      assert.ok(order.indexOf("tool_use") < order.indexOf("tool_result"));
+      assert.ok(order.indexOf("tool_result") < order.indexOf("assistant"));
+      assert.ok(order.indexOf("assistant") < order.indexOf("result"));
+
+      const assistantEvent = events.find((e) => e.type === "assistant");
+      assert.equal(assistantEvent.data.message.content[0].text, "Acme looks healthy.");
+
+      const resultEvent = events.find((e) => e.type === "result");
+      assert.deepEqual(resultEvent.data, { ok: true });
+    } finally {
+      chatRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime (installed route, claude): a stream with an isError tool_result still surfaces it as isError:true before the turn completes", async () => {
+  const repoRoot = tempRepoWithSkill("research-company");
+  try {
+    const env = {};
+    selectFakeClaudeRuntime({ repoRoot, env });
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      runInstalledRuntimeStreamImpl: async (args) => {
+        args.onMessage({
+          type: "assistant",
+          session_id: "sess-1",
+          message: { content: [{ type: "tool_use", id: "tu1", name: "WebFetch", input: {} }] },
+        });
+        args.onMessage({
+          type: "user",
+          session_id: "sess-1",
+          message: {
+            content: [{ type: "tool_result", tool_use_id: "tu1", content: "boom", is_error: true }],
+          },
+        });
+        return { text: "Could not fetch that.", usage: null, model: null };
+      },
+    });
+    try {
+      const { chatId } = await chatRuntime.startSession({ skill: "research-company" });
+      const events = subscribeCollect(chatRuntime, chatId);
+      await waitForPredicate(() =>
+        events.some((e) => e.type === "chat_state" && e.data.state === "idle")
+      );
+      const toolResult = events.find((e) => e.type === "tool_result");
+      assert.equal(toolResult.data.isError, true);
     } finally {
       chatRuntime.shutdown();
     }
