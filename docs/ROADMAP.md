@@ -295,14 +295,33 @@ nurse, a driver, and an engineer each bring their own config.
 - **Setup readiness on the home view** — while sourcing runs, the home view shows what's
   still needed to unlock gating and applying (with per-item hints), and gets out of the way
   once setup is complete.
+- **Live chat activity lines** — while CareerRat works on a chat request, each step shows
+  as a small activity line (an icon, a plain-language label like "Reading files: resume.pdf"
+  or "Searching the web", and a spinner that settles when the step finishes) instead of the
+  assistant narrating its own tool use in prose. Works on every AI connection, including the
+  most common one: chat turns through an installed Claude CLI now stream each step live.
+- **Fit-gap coaching** (`coach-gaps`) — when an evaluation lands at "review" with named fit
+  risks, an explicit click gets a plan for closing the gaps, grounded only in evidence
+  already on record or the current conversation. An honest "no close path yet" is a valid
+  answer; confirmed suggestions route through the same evidence firewall as every other
+  evidence write.
+- **AI shape QA harness** — a script-run quality check that exercises every AI-produced
+  verdict shape end to end (evaluate-job, coach-gaps, search triage, company-health) against
+  a fictional demo candidate through the installed AI CLI, so malformed AI output is caught
+  before it reaches a real job seeker mid-search.
 
-## Release status (v0.10.0, updated August 20, 2026)
+## Release status (v0.12.0, updated August 22, 2026)
 
-**v0.10.0 is released and published.** npm `dist-tags.latest` is `0.10.0`. The
-GitHub release `v0.10.0` carries a signed, notarized, stapled
-`CareerRat-0.10.0-arm64.dmg`. `publish.yml` fires on a published GitHub Release,
-not on a tag push, so tagging alone is always safe. `CHANGELOG.md` at the repo
-root is the per-release record from here on.
+**v0.12.0 is the current release.** Since v0.11.0 the repo runs the strict flow:
+feature PRs land on the active dev branch (`dev/v0.12` for this cycle), `main`
+advances only through a promotion merge immediately before each cut, and the tag
+fires the whole pipeline — `desktop-release.yml` builds, signs, notarizes, and
+uploads the DMG, publishing the release then fires `publish.yml` (npm) and the
+tap's own cask updater. `publish.yml` fires on a published GitHub Release, not
+on a tag push, so tagging alone is always safe. `CHANGELOG.md` at the repo root
+is the per-release record. The v0.12 cycle closed with a whole-app review pass:
+26 confirmed findings, the top 15 fixed across four lanes (#181 through #184),
+and the below-cut remainder tracked in #180.
 
 Version drift now has a guard. `tests/release-consistency.test.mjs` checks that
 `package.json`, `apps/desktop/package.json`, and the newest `CHANGELOG.md`
@@ -320,10 +339,10 @@ workflow (cron plus manual dispatch) that watches the latest published
 release, runs the generator, and commits the bump to its own `main` with
 its own `GITHUB_TOKEN`, so no cross-repo credential exists anywhere. On this repo's
 side, `.github/workflows/desktop-release.yml` builds, signs, notarizes,
-uploads, and publishes on a tag push. The one piece left is the one-time CI
-signing secrets setup documented in `docs/RELEASE.md`'s "One-time CI signing
-setup" section; until those five secrets are set on the repo, the pipeline
-fails fast with a clear list of what's missing instead of running.
+uploads, and publishes on a tag push. The one-time CI signing secrets setup
+documented in `docs/RELEASE.md`'s "One-time CI signing setup" section is done;
+the pipeline still fails fast with a clear list if a secret is ever removed or
+rotated away.
 
 Stale branch cleanup is done. `origin` is now just `main`. The branches
 `fix/v0.7-publish`, `dev/v0.7`, `archive/dev-2026-07`, and
