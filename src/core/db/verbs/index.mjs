@@ -95,7 +95,7 @@ export {
   publicSyncPreferenceSet,
 } from "./public-intel.mjs";
 export { relationshipLeadSetStatus, relationshipLeadUpsertBatch } from "./relationship.mjs";
-export { kvGet, kvUpsert, NotFoundError } from "./shared.mjs";
+export { ExportFailedError, kvGet, kvUpsert, NotFoundError } from "./shared.mjs";
 export { sourceWatermarkUpsert } from "./source.mjs";
 export {
   companyAtsRemove,

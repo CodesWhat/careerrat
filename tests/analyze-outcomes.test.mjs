@@ -62,6 +62,18 @@ test("returns uncategorized for empty/blank role when no targeting config is sup
   assert.equal(classifyRoleFamily(), "uncategorized");
 });
 
+// The `role = ""` default parameter only covers an omitted/undefined arg. A
+// row that stores role as an explicit null (not just missing) reaches
+// classifyRoleFamily with that exact value — and every outcome-changing verb
+// (appUpsert/appSetStatus/...) classifies every applications row inside one
+// shared transaction, so this must not throw: one bad row would otherwise
+// wedge all future outcome-changing writes until hand-fixed.
+test("is null-safe: an explicit role:null does not throw, with or without a targeting config", () => {
+  assert.equal(classifyRoleFamily(null), "uncategorized");
+  assert.equal(classifyRoleFamily(undefined), "uncategorized");
+  assert.equal(classifyRoleFamily(null, techTargeting), "other");
+});
+
 test("neutral slug collapses runs of non-alphanumeric chars to single hyphen", () => {
   // Multiple separators → single "-"
   assert.equal(classifyRoleFamily("Sr. / Lead Engineer"), "sr-lead-engineer");

@@ -103,42 +103,50 @@ export function sourceConfigPut({ repoRoot, env, name, data } = {}) {
   });
 }
 
-export function companyAtsUpsert({ repoRoot, env, entry } = {}) {
+// Pure-on-the-passed-db half of companyAtsUpsert (no transaction of its own)
+// — the same "InDb" split refreshAnalyticsInDb uses, so a caller that already
+// holds an open transaction (public-intel.mjs's publicIntelReviewDecision)
+// can compose this in without a nested BEGIN IMMEDIATE, which node:sqlite
+// rejects. companyAtsUpsert below is the standalone verb for callers that
+// don't already have a transaction open.
+export function companyAtsUpsertInDb(db, entry) {
   const normalized = normalizeCompanyEntry(entry);
-  const db = requireDb({ repoRoot, env });
-  return withTransaction(db, () => {
-    const current = readSourceConfig(db, "sourced-scan").data;
-    const companies = Array.isArray(current.tracked_companies)
-      ? current.tracked_companies.slice()
-      : [];
-    const index = companies.findIndex((company) => sameCompanyOrUrl(company, normalized));
+  const current = readSourceConfig(db, "sourced-scan").data;
+  const companies = Array.isArray(current.tracked_companies)
+    ? current.tracked_companies.slice()
+    : [];
+  const index = companies.findIndex((company) => sameCompanyOrUrl(company, normalized));
 
-    let status = "added";
-    if (index === -1) {
-      companies.push(normalized);
+  let status = "added";
+  if (index === -1) {
+    companies.push(normalized);
+  } else {
+    const existing = companies[index];
+    const sameName =
+      String(existing.name || "").toLowerCase() === String(normalized.name || "").toLowerCase();
+    const sameUrl = String(existing.careers_url || "") === String(normalized.careers_url || "");
+    if (sameName && sameUrl) {
+      status = "already-tracked";
     } else {
-      const existing = companies[index];
-      const sameName =
-        String(existing.name || "").toLowerCase() === String(normalized.name || "").toLowerCase();
-      const sameUrl = String(existing.careers_url || "") === String(normalized.careers_url || "");
-      if (sameName && sameUrl) {
-        status = "already-tracked";
-      } else {
-        companies[index] = normalized;
-        status = "updated";
-      }
+      companies[index] = normalized;
+      status = "updated";
     }
+  }
 
-    const next = { ...current, tracked_companies: companies };
-    putSourceConfig(db, "sourced-scan", next);
-    return {
-      ok: true,
-      status,
-      entry: index === -1 ? normalized : companies[index],
-      total: companies.length,
-      data: readSourceConfig(db, "sourced-scan").data,
-    };
-  });
+  const next = { ...current, tracked_companies: companies };
+  putSourceConfig(db, "sourced-scan", next);
+  return {
+    ok: true,
+    status,
+    entry: index === -1 ? normalized : companies[index],
+    total: companies.length,
+    data: readSourceConfig(db, "sourced-scan").data,
+  };
+}
+
+export function companyAtsUpsert({ repoRoot, env, entry } = {}) {
+  const db = requireDb({ repoRoot, env });
+  return withTransaction(db, () => companyAtsUpsertInDb(db, entry));
 }
 
 export function companyAtsRemove({ repoRoot, env, name } = {}) {
