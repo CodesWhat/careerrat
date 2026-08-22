@@ -3,11 +3,16 @@
 // Work-authorization, sponsorship, salary-expectation, and notice-period
 // questions are structured facts the candidate already gave during
 // onboarding (Quick facts persists profile.authorization.work_authorized /
-// requires_sponsorship and profile.compensation.minimum_base). Those facts
+// requires_sponsorship and profile.compensation.expected_base). Those facts
 // have no evidence-claim id, so routing them through the AI-answer path
 // (which requires a citable claim id) can only ever produce NEEDS YOU — this
 // module resolves them locally instead, for free, before the AI ever sees
 // them.
+//
+// PRIVACY (AGENTS.md): compensation.minimum_base and compensation.current_base
+// are private gate inputs and must never be read in this file — an outbound
+// disclosure answer states expected_base only, or degrades to the NEEDS YOU
+// path (via the null return below) when expected_base isn't set.
 
 const CATEGORY_PATTERNS = [
   ["workAuthorization", /\b(legally\s+)?authoriz|work\s+authorization|eligible\s+to\s+work/i],
@@ -89,10 +94,15 @@ function profileAnswer(category, profile) {
   }
 
   if (category === "salary") {
-    const minimum = Number(compensation.minimum_base);
-    if (Number.isFinite(minimum) && minimum > 0) {
+    // Outbound only ever states expected_base (the ask), never minimum_base
+    // (the private walk-away floor) or current_base. No expected_base on
+    // file means there is nothing safe to state — fall through to null so
+    // the caller routes this question to the AI-answer path, which degrades
+    // to the NEEDS YOU marker (see module doc comment above).
+    const expected = Number(compensation.expected_base);
+    if (Number.isFinite(expected) && expected > 0) {
       const currency = compensation.currency || "USD";
-      return `My minimum base salary requirement is $${formatThousands(minimum)} ${currency} per year; I'm flexible within the posted range depending on level and total compensation.`;
+      return `My target base salary is $${formatThousands(expected)} ${currency} per year; I'm flexible within the posted range depending on level and total compensation.`;
     }
     return null;
   }
