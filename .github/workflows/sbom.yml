@@ -120,18 +120,19 @@ jobs:
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: block
-          # No insights run exists yet (this workflow has never executed), so
-          # this is derived, not observed: checkout + npm ci
-          # (github.com/registry.npmjs.org), anchore/sbom-action's bundled
-          # octokit calls plus its syft-binary download via a github.com
-          # releases redirect (api.github.com/release-assets.githubusercontent.com,
-          # confirmed by reading the pinned action's dist/index.cjs), and the
-          # final `gh release upload` step (api.github.com for the release
-          # lookup, uploads.github.com for the asset bytes — the same pair
-          # codeql.yml's SARIF upload needs).
+          # Observed from the v0.12.0 run (StepSecurity insights, run
+          # 32589608972): checkout + npm ci (github.com/registry.npmjs.org),
+          # anchore/sbom-action's octokit calls and syft-binary download
+          # (api.github.com/release-assets.githubusercontent.com), plus
+          # raw.githubusercontent.com — the action's first call, missing from
+          # the original derived list, which block-mode refused and failed the
+          # v0.12.0 SBOM until this line landed. The final `gh release upload`
+          # needs api.github.com for the release lookup and uploads.github.com
+          # for the asset bytes, the same pair codeql.yml's SARIF upload needs.
           allowed-endpoints: >
             api.github.com:443
             github.com:443
+            raw.githubusercontent.com:443
             registry.npmjs.org:443
             release-assets.githubusercontent.com:443
             uploads.github.com:443

@@ -1,9 +1,40 @@
 ---
 title: Install & First Run
-description: Install and launch CareerRat in two commands.
+description: Install the signed Mac app, or run CareerRat anywhere with npm.
 ---
 
-## Prerequisites
+## Mac app (Apple Silicon)
+
+The signed, notarized macOS app is the simplest way to run CareerRat on an
+Apple Silicon Mac running macOS 12 or newer.
+
+Download the `CareerRat-<version>-arm64.dmg` from the
+[latest release](https://github.com/CodesWhat/careerrat/releases/latest), or
+install it with Homebrew:
+
+```bash
+brew install --cask codeswhat/tap/careerrat
+```
+
+The app is not self-contained. It still needs an AI coding CLI on your PATH,
+either one:
+
+- Claude Code: `npm install -g @anthropic-ai/claude-code`
+  ([claude.com/claude-code](https://claude.com/claude-code))
+- Codex: `npm install -g @openai/codex`
+  ([github.com/openai/codex](https://github.com/openai/codex))
+
+Open the app and it scaffolds your workspace, boots the local app at
+`http://localhost:7777`, and launches your agent with a starter message, the
+same first run described below for the npm path.
+
+The app checks GitHub once a day for a newer release and shows an in-app
+notice. It never downloads or installs anything on its own; see
+[Privacy & Data Boundaries](/advanced/privacy) for the details.
+
+## npm (any platform)
+
+Prerequisites:
 
 - **Node.js >= 24** — check with `node -v`
 - **A coding-agent CLI on your PATH** — Claude Code or Codex:
@@ -14,8 +45,6 @@ description: Install and launch CareerRat in two commands.
 
 You need one of those on your PATH before running `careerrat start`.
 
-## Public install
-
 ```bash
 npm install -g careerrat
 careerrat start claude        # or: careerrat start codex
@@ -23,7 +52,7 @@ careerrat start claude        # or: careerrat start codex
 
 The `start` command does the whole arc in one shot:
 
-1. Scaffolds `candidate/` and `workspace/` directories (idempotent — safe to re-run).
+1. Scaffolds `candidate/` and `workspace/` directories (idempotent, safe to re-run).
 2. Installs the skills so your agent sees `/apply-job`, `/evaluate-job`, etc.
 3. Seeds `workspace/tracker.json` from the demo template if not yet present.
 4. Boots the live local app at `http://localhost:7777` with hot reload.

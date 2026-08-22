@@ -46,20 +46,27 @@ export default function Home() {
         <div className="wrap hero-inner">
           <div className="hero-copy">
             <div className="hero-eyebrow receipt reveal" aria-hidden="true">
-              Free · Local · Runs on your own AI CLI
+              Free · Local · Private
             </div>
             <h1 className="hero-h1 reveal reveal-delay-1" id="hero-h1">
               Your job hunt, run by a rat.
             </h1>
             <p className="hero-sub reveal reveal-delay-2">
-              CareerRat rates the postings actually worth chasing, applies
-              with honest artifacts drawn from your own evidence, and tracks
-              every outcome. It runs on a supported AI CLI you already have,
-              including Claude Code, Codex, Gemini CLI, and OpenCode.
+              CareerRat is a free Mac app that rates the postings actually
+              worth chasing, applies with honest artifacts drawn from your own
+              evidence, and tracks every outcome. It works with an AI CLI you
+              already have, like Claude Code or Codex, and also runs anywhere
+              via npm.
             </p>
             <div className="hero-actions reveal reveal-delay-3">
-              <TrackedCtaLink href="#get" className="btn-primary" placement="hero">
-                Get started, free &amp; open source
+              <TrackedCtaLink
+                href="https://github.com/CodesWhat/careerrat/releases/latest"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-primary"
+                placement="hero"
+              >
+                Download for Mac
                 <svg
                   width="16"
                   height="16"
@@ -81,9 +88,12 @@ export default function Home() {
                 See how it works
               </a>
             </div>
+            <div className="hero-cli-note receipt reveal reveal-delay-4">
+              Apple Silicon Macs, signed and notarized.
+            </div>
             <div className="hero-actions reveal reveal-delay-4">
               <span className="hero-command receipt">
-                npm i -g careerrat
+                or anywhere: npm i -g careerrat
               </span>
             </div>
             <div className="hero-cli-note receipt reveal reveal-delay-4">
@@ -118,11 +128,12 @@ export default function Home() {
           <div className="steps-grid">
             <div className="step-card reveal reveal-delay-1">
               <div className="step-index receipt">01</div>
-              <h3 className="step-h3">Point it at your CLI</h3>
+              <h3 className="step-h3">Download and open it</h3>
               <p className="step-p">
-                On first launch it finds supported AI CLIs already installed.
-                Pick one and CareerRat uses that runtime under its provider's
-                own privacy and retention terms.
+                Grab the Mac app, or install with npm. On first launch it
+                finds supported AI CLIs already on your machine, so you just
+                pick one; CareerRat uses that runtime under its provider's own
+                privacy and retention terms.
               </p>
               <span className="step-chip step-chip-success">
                 CLAUDE CODE · DETECTED
@@ -356,12 +367,12 @@ export default function Home() {
                 </h2>
                 <p className="section-sub">
                   CareerRat supports multiple agent runtimes instead of locking
-                  the workflow to one provider. Bring a supported AI CLI you
-                  already use, including Claude Code, Codex, Gemini CLI, and
-                  OpenCode.
+                  the workflow to one provider. The app runs on a supported AI
+                  CLI you already have, including Claude Code, Codex, Gemini
+                  CLI, and OpenCode.
                 </p>
                 <div className="ai-chip-group">
-                  <div className="ai-chip-group-title">CLI launch options</div>
+                  <div className="ai-chip-group-title">Supported engines</div>
                   <div className="ai-chips" role="list">
                     <span className="ai-chip" role="listitem">
                       <svg
@@ -438,21 +449,21 @@ export default function Home() {
                 <div
                   className="terminal-sticker"
                   role="region"
-                  aria-label="Example start command"
+                  aria-label="Example engine detection"
                 >
                   <div className="terminal-dots" aria-hidden="true">
                     <div className="terminal-dot terminal-dot-red" />
                     <div className="terminal-dot terminal-dot-yellow" />
                     <div className="terminal-dot terminal-dot-green" />
                   </div>
-                  <div className="terminal-prompt">~ careerrat $</div>
+                  <div className="terminal-prompt">CareerRat</div>
                   <div className="terminal-command">
-                    careerrat start claude
+                    Engine: Claude Code
                     <span className="terminal-cursor" aria-hidden="true" />
                   </div>
                   <div className="terminal-comment">
-                    # scaffold → skills → dashboard → agent handoff
-                    <br /># one command, then the agent takes it from here
+                    # detected automatically on first launch
+                    <br /># swap engines anytime from Settings
                   </div>
                 </div>
                 <p
@@ -463,10 +474,9 @@ export default function Home() {
                     lineHeight: 1.5,
                   }}
                 >
-                  CareerRat scaffolds the workspace, installs skills, starts
-                  the dashboard, and hands off to a supported agent CLI.
-                  Model choice, cost, and local data stay under local
-                  control.
+                  Open the app and CareerRat scaffolds the workspace, installs
+                  skills, and hands off to the AI CLI running underneath.
+                  Model choice, cost, and local data stay under your control.
                 </p>
               </div>
             </div>
@@ -483,8 +493,8 @@ export default function Home() {
               Free is the product.
             </h2>
             <p className="section-sub">
-              With your own CLI you get all of it: the AI features
-              included. No account, no sign-in, no trial clock.
+              With your own AI CLI running underneath, you get all of it: the
+              AI features included. No account, no sign-in, no trial clock.
             </p>
           </div>
           <div className="pricing-grid pricing-grid-single">
@@ -492,7 +502,7 @@ export default function Home() {
               <div className="pricing-card-head">
                 <h3 className="pricing-card-name">Free</h3>
                 <span className="pricing-card-tag receipt">
-                  $0 · bring your CLI
+                  $0 · bring your AI CLI
                 </span>
               </div>
               <p className="pricing-card-p">
@@ -572,14 +582,35 @@ export default function Home() {
                 </h2>
                 <p className="section-sub">
                   Free to self-host, open source (MIT). No account or signup:
-                  one command starts guided setup.
+                  one download or one command starts guided setup.
                 </p>
+                <div style={{ marginTop: "28px" }}>
+                  <div className="prereq-label">On a Mac</div>
+                  <TrackedCtaLink
+                    href="https://github.com/CodesWhat/careerrat/releases/latest"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn-primary"
+                    placement="get"
+                  >
+                    Download for Mac
+                  </TrackedCtaLink>
+                  <p className="get-note">
+                    Or with Homebrew:{" "}
+                    <code className="inline-code">
+                      brew install --cask codeswhat/tap/careerrat
+                    </code>
+                  </p>
+                  <p className="get-note">
+                    Signed and notarized, for Apple Silicon Macs on macOS 12
+                    or newer. It opens the same guided setup as the npm path.
+                  </p>
+                </div>
                 <div style={{ marginTop: "28px" }}>
                   <div className="prereq-label">Prerequisites</div>
                   <ul className="prereq-list">
-                    <li>Node.js 24 or newer</li>
-                    <li style={{ marginTop: "8px" }}>
-                      An AI coding CLI on your PATH:
+                    <li>
+                      An AI coding CLI on your PATH, needed either way:
                       <ul className="prereq-sublist">
                         <li>
                           <strong style={{ color: "var(--ink)" }}>
@@ -611,11 +642,15 @@ export default function Home() {
                         </li>
                       </ul>
                     </li>
+                    <li style={{ marginTop: "8px" }}>
+                      Node.js 24 or newer, for the npm path only. The Mac app
+                      bundles its own runtime.
+                    </li>
                   </ul>
                 </div>
               </div>
               <div>
-                <div className="prereq-label">Get it running</div>
+                <div className="prereq-label">Anywhere with npm</div>
                 <div
                   className="terminal-sticker"
                   role="region"
@@ -670,6 +705,10 @@ export default function Home() {
                       untouched
                     </div>
                   </div>
+                  <p className="get-note">
+                    The Mac app checks GitHub for a newer release and shows a
+                    notice. It never installs anything on its own.
+                  </p>
                 </div>
               </div>
             </div>
@@ -688,8 +727,8 @@ export default function Home() {
               Ready when you are.
             </h2>
             <p className="final-sub">
-              Free. Local. Honest. One command to get going. Run it yourself
-              and your data stays put.
+              Free. Local. Honest. One download to get going, or one command.
+              Run it yourself and your data stays put.
             </p>
             <div className="final-actions">
               <TrackedCtaLink href="#get" className="btn-primary" placement="final">

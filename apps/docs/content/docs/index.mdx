@@ -16,15 +16,29 @@ config helpers — it is not a job board or separate cloud service.
 
 ## Quick start
 
+**On an Apple Silicon Mac**, download the signed, notarized app from the
+[latest release](https://github.com/CodesWhat/careerrat/releases/latest), or
+install it with Homebrew:
+
+```bash
+brew install --cask codeswhat/tap/careerrat
+```
+
+You still need an AI coding CLI on your PATH (Claude Code or Codex); see
+[Install & First Run](/getting-started/install) for both commands.
+
+**On any other platform**, use npm (requires Node.js 24 or newer):
+
 ```bash
 npm install -g careerrat
 careerrat start claude   # or: careerrat start codex
 ```
 
-That scaffolds your workspace, boots the local app at `http://localhost:7777`,
-and launches your agent with a starter message. Paste a job posting and say
-**"evaluate this"** — within seconds you get a verdict on whether to keep or cut
-it, how well it fits, whether the pay clears your floor, and what to do next.
+Either path scaffolds your workspace, boots the local app at
+`http://localhost:7777`, and launches your agent with a starter message.
+Paste a job posting and say **"evaluate this"**, and within seconds you get a
+verdict on whether to keep or cut it, how well it fits, whether the pay clears
+your floor, and what to do next.
 
 ## Two reading tracks
 

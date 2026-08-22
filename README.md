@@ -32,25 +32,26 @@
 
 ## Quick Start
 
-You'll need:
+Both paths need an AI coding CLI. Either one works:
 
-- **Node.js 24 or newer**: check with `node -v`
-- **An AI coding CLI**, either one:
-  - Claude Code: `npm install -g @anthropic-ai/claude-code` ([claude.com/claude-code](https://claude.com/claude-code))
-  - Codex: `npm install -g @openai/codex` ([github.com/openai/codex](https://github.com/openai/codex))
+- Claude Code: `npm install -g @anthropic-ai/claude-code` ([claude.com/claude-code](https://claude.com/claude-code))
+- Codex: `npm install -g @openai/codex` ([github.com/openai/codex](https://github.com/openai/codex))
 
-Then:
+**On an Apple Silicon Mac**: download the signed, notarized app from the
+[latest release](https://github.com/CodesWhat/careerrat/releases/latest), or
+`brew install --cask codeswhat/tap/careerrat`. You still need one AI CLI
+installed.
+
+**On any other platform**, or if you'd rather use the terminal: install with
+npm (requires **Node.js 24 or newer**, check with `node -v`), then run it:
 
 ```bash
 npm install -g careerrat
 careerrat start claude    # or: careerrat start codex
 ```
 
-macOS users can also download the signed, notarized desktop app from the
-[latest release](https://github.com/CodesWhat/careerrat/releases/latest).
-
-That sets up your workspace, opens the local app at `http://localhost:7777`, and
-hands you off to the agent. From there you just talk to it, and watch it work:
+Either path sets up your workspace, opens the local app at
+`http://localhost:7777`, and hands you off to the agent. From there you just talk to it, and watch it work:
 each step shows up as a small activity line, reading your resume, searching the
 web, writing, instead of narrated text. No dashboard to learn first, no settings
 to get right before it's useful.
@@ -262,6 +263,13 @@ Bugs and feature requests: [GitHub Issues](https://github.com/CodesWhat/careerra
 Questions, ideas, and show-and-tell: [GitHub Discussions](https://github.com/CodesWhat/careerrat/discussions).
 
 Chat: [CodesWhat Discord](https://discord.gg/mWHCPJRzSx).
+
+## Star History
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="apps/website/public/star-history-dark.svg">
+  <img src="apps/website/public/star-history.svg" alt="Star history for CodesWhat/careerrat">
+</picture>
 
 ---
 
