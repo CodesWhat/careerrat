@@ -67,6 +67,16 @@ function validateNode(data, schema, path, errors) {
     }
   }
 
+  // --- string length ---
+  if (typeof data === "string") {
+    if (typeof schema.minLength === "number" && data.length < schema.minLength) {
+      errors.push({ path, message: `must have at least ${schema.minLength} characters` });
+    }
+    if (typeof schema.maxLength === "number" && data.length > schema.maxLength) {
+      errors.push({ path, message: `must have at most ${schema.maxLength} characters` });
+    }
+  }
+
   // --- properties + required + additionalProperties ---
   if (
     schema.properties !== undefined ||

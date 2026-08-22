@@ -128,6 +128,21 @@ test("evaluate-job verdict: fitScore over its 0-100 cap fails", () => {
   );
 });
 
+test("evaluate-job verdict: fitSummary over its maxLength:160 cap fails", () => {
+  // schema-validator.mjs now enforces minLength/maxLength (#173), so this
+  // exercises the real over-length string directly.
+  const data = makePacketVerdict({ fitSummary: "x".repeat(161) });
+  const result = validate(data, packetGateAiVerdictSchema);
+  assert.equal(result.valid, false);
+  assert.ok(
+    result.errors.some(
+      (error) =>
+        error.path === "fitSummary" && /must have at most 160 characters/.test(error.message)
+    ),
+    `expected a fitSummary maxLength error, got: ${JSON.stringify(result.errors)}`
+  );
+});
+
 test("evaluate-job verdict: fitReasons over its maxItems:3 cap fails", () => {
   // schema-validator.mjs now enforces minItems/maxItems (#173), so this
   // exercises the real over-cap list directly instead of substituting
