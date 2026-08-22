@@ -25,6 +25,8 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Fixed
 
+- The guard that keeps CareerRat's web fetches away from private and internal addresses now catches every textual disguise of an internal IPv4 address inside an IPv6 one (mapped, NAT64, and 6to4 forms). The old check looked for a spelling Node's URL parser never actually produces, so it could not fire at all (#181).
+- The updater's safety check that keeps a release archive from ever writing into your private candidate or workspace folders now matches those folder names case-insensitively and sees through path tricks, closing a bypass on the case-insensitive filesystems Macs and Windows machines actually use (#181).
 - The checks that verify AI answers now enforce the size limits they always claimed to: an evaluation that comes back with too many fit reasons, or an over-long summary, gets rejected and retried instead of slipping through. Limits on your own saved tracker notes were dropped entirely rather than enforced, since your notes are yours and were never restricted when you wrote them (#174).
 - The AI-powered job search now sees the keep and cut signals from your targeting file. It was only reading signals written inside individual role buckets, a place the standard setup never puts them, so searches ran without the "more like this, never that" guidance you had actually written down (#166).
 - Reloading the page no longer clears your last Ask answer from the screen. The answer and its follow-up buttons come back exactly as they were, because the conversation was always saved; only the screen forgot it. An answer that was still being worked on, or that failed, is not replayed (#159).
