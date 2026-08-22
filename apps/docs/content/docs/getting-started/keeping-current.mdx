@@ -3,9 +3,9 @@ title: Keeping Current
 description: How to pull the latest code without touching your data.
 ---
 
-CareerRat is published to npm as `careerrat@latest`. The update command pulls the
-latest code and overwrites only the code files. Your `workspace/` and `candidate/`
-data are never touched.
+CareerRat is published to npm as `careerrat@latest`. This page covers the npm
+CLI's update command. If you're on the Mac app instead, see
+[Mac app updates](#mac-app-updates) below; the two paths work differently.
 
 ## Update command
 
@@ -60,3 +60,11 @@ careerrat install-skills
 
 That re-shims `.claude/skills` → `.agents/skills` for Claude Code (or creates a
 copied tree where symlinks are not available).
+
+## Mac app updates
+
+The signed Mac app does not run `careerrat update`. It checks GitHub once a day
+for a newer release and shows an in-app notice; you download and install the
+update yourself, from a new DMG or `brew upgrade --cask
+codeswhat/tap/careerrat`. The app never downloads or installs anything on its
+own. See [Privacy & Data Boundaries](/advanced/privacy) for the details.

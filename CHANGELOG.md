@@ -4,6 +4,12 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- The README and the docs now lead with the signed Mac app: download it from the latest release or install with Homebrew, with npm kept as the path for every other platform. The install guide spells out what each path needs (an AI CLI either way; Node.js only for npm) and how the Mac app stays current (#190).
+
 ## [0.12.0] - 2026-08-22
 
 ### Added
