@@ -266,17 +266,37 @@ nav.scrolled {
   align-items: center;
 }
 
+/* ─── Flat window frame for app captures ───
+   Shared by the hero screenshot and the steps-demo gif so the app UI never
+   melts into the page background. The wrapper clips the image; the image
+   itself carries no radius of its own. */
+.app-window {
+  border: 1px solid var(--ink);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--ink);
+}
+.app-window-chrome {
+  display: flex;
+  gap: 6px;
+  padding: 14px 16px;
+  background: var(--ink);
+}
+
 /* ─── Hero product screenshot ─── */
 .hero-shot {
   width: 100%;
   height: auto;
   display: block;
-  border-radius: var(--radius-lg);
 }
 
 /* ─── How-it-works activity-line demo ─── */
 .steps-demo {
   margin-top: 32px;
+}
+.steps-demo .app-window {
+  max-width: 720px;
+  margin: 0 auto;
 }
 .steps-demo-gif {
   width: 100%;
@@ -284,7 +304,6 @@ nav.scrolled {
   height: auto;
   display: block;
   margin: 0 auto;
-  border-radius: var(--radius-lg);
 }
 .steps-demo-caption {
   margin-top: 12px;
@@ -634,6 +653,29 @@ section {
   vertical-align: middle;
   margin-left: 2px;
   animation: cursorblink 1.1s step-end infinite;
+}
+/* ─── Settings-style AI engine card (flat, no terminal chrome) ─── */
+.engine-card {
+  background: var(--card);
+  border: 1px solid var(--ink);
+  border-radius: var(--radius-lg);
+  padding: 26px 28px;
+  margin-top: 22px;
+}
+.engine-card-label {
+  color: var(--ink-faint);
+}
+.engine-card-value {
+  font-family: var(--font-display), sans-serif;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--ink);
+  margin-top: 8px;
+}
+.engine-card-note {
+  color: var(--ink-soft);
+  margin-top: 14px;
+  font-size: 0.85rem;
 }
 @keyframes cursorblink {
   0%,
