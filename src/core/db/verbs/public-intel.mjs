@@ -3,7 +3,7 @@
 import { scrubPublicIntelPayload } from "../../discovery/public-intel-scrub.mjs";
 import { requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
-import { companyAtsUpsert } from "./source-config.mjs";
+import { companyAtsUpsertInDb } from "./source-config.mjs";
 
 const PREF_ID = "public-sync-home";
 
@@ -270,8 +270,10 @@ export function publicIntelReviewDecision({
       const board = current.proposedBoardId
         ? readRow(db, "public_board_intel", current.proposedBoardId)
         : null;
-      const writeCompanyAts =
-        companyAtsUpsertImpl || ((entry) => companyAtsUpsert({ repoRoot, env, entry }));
+      // Default writes THROUGH this transaction's own db handle (companyAtsUpsertInDb),
+      // not the standalone companyAtsUpsert verb — that opens its own BEGIN
+      // IMMEDIATE, which node:sqlite rejects when nested inside this one.
+      const writeCompanyAts = companyAtsUpsertImpl || ((entry) => companyAtsUpsertInDb(db, entry));
       sourceConfigResult = writeCompanyAts(normalizeCompanyAtsEntry({ item: current, board }));
     }
 

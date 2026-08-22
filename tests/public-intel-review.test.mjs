@@ -177,6 +177,65 @@ test("review decisions enforce expected version and supported ATS separation", a
   assert.equal(publicIntelReviewList({ repoRoot, status: "pending" }).items.length, 0);
 });
 
+test("use-supported-ats commits through the real companyAtsUpsert path without a nested transaction", async () => {
+  const repoRoot = tempRepo();
+  const { publicBoardIntelUpsert, publicIntelReviewDecision, publicIntelReviewItemUpsert } =
+    await publicIntelVerbs();
+  const { sourceConfigGet } = await import("../src/core/db/verbs/source-config.mjs");
+
+  publicBoardIntelUpsert({
+    repoRoot,
+    record: {
+      id: "board-real-write",
+      companyKey: "real-write-co",
+      boardUrl: "https://jobs.lever.co/real-write",
+      atsProvider: "lever",
+      sourceKind: "supported_ats",
+      confidence: "high",
+      provenance: [{ source: "resolver", url: "https://jobs.lever.co/real-write" }],
+    },
+    now: NOW,
+  });
+  publicIntelReviewItemUpsert({
+    repoRoot,
+    item: {
+      id: "review-real-write",
+      status: "pending",
+      reason: "provider_conflict",
+      companyKey: "real-write-co",
+      companyName: "Real Write Co",
+      proposedBoardId: "board-real-write",
+      proposedProvider: "lever",
+      version: 1,
+    },
+    now: NOW,
+  });
+
+  // No companyAtsUpsertImpl override here — this exercises the DEFAULT path.
+  // Before the fix, that default called companyAtsUpsert(), which opens its
+  // OWN BEGIN IMMEDIATE, nested inside this verb's already-open transaction —
+  // node:sqlite rejects that, so this call always threw.
+  const decided = publicIntelReviewDecision({
+    repoRoot,
+    itemId: "review-real-write",
+    expectedVersion: 1,
+    action: "use-supported-ats",
+    now: NOW,
+  });
+
+  assert.equal(decided.ok, true);
+  assert.equal(decided.item.status, "resolved");
+  assert.equal(decided.sourceConfig.status, "added");
+
+  const stored = sourceConfigGet({ repoRoot, name: "sourced-scan" });
+  assert.ok(
+    stored.data.tracked_companies.some(
+      (company) => company.careers_url === "https://jobs.lever.co/real-write"
+    ),
+    "the approved company must actually land in sourced-scan's tracked_companies"
+  );
+});
+
 test("review UI action labels stay stable for the scanner review panel", async () => {
   const { PUBLIC_INTEL_REVIEW_ACTIONS } = await publicIntelVerbs();
   assert.deepEqual(

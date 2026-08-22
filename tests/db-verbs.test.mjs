@@ -36,6 +36,7 @@ import {
   commMarkSent,
   commSetDraft,
   commUpsert,
+  kvUpsert,
   relationshipLeadSetStatus,
   relationshipLeadUpsertBatch,
   sourcedPromote,
@@ -240,6 +241,44 @@ test("appSetStatus: a transition that was never in the interview stage clears no
   assert.equal(app.status, "cut");
   assert.equal(app.interviewAt, undefined);
   assert.equal(app.nextInterviewAt, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// A pre-existing application row with role: null (e.g. imported from a
+// legacy tracker.json, or patched by a non-outcome-changing verb) must not
+// wedge every LATER outcome-changing write. Every such verb (appUpsert,
+// appSetStatus, ...) refreshes analytics inside its own transaction, scanning
+// EVERY applications row and classifying its role — before the
+// classifyRoleFamily null-safety fix, one row with role: null threw there and
+// rolled back an otherwise-unrelated write to a different, perfectly valid
+// row.
+// ---------------------------------------------------------------------------
+
+test("a pre-existing application row with role: null does not wedge later outcome-changing writes", () => {
+  const repoRoot = tempRepo();
+  const sourceDir = join(repoRoot, "fixture-null-role-source");
+  mkdirSync(sourceDir, { recursive: true });
+  writeFileSync(
+    join(sourceDir, "tracker.json"),
+    JSON.stringify(
+      {
+        meta: {},
+        applications: [
+          { id: "app-null-role", company: "Acme", role: null, status: "applied" },
+          { id: "app-valid-role", company: "Globex", role: "Engineer", status: "applied" },
+        ],
+        sourced: [],
+        sources: [],
+        communications: [],
+      },
+      null,
+      2
+    )
+  );
+  importFromTracker({ repoRoot, sourceDir });
+
+  const result = appSetStatus({ repoRoot, id: "app-valid-role", to: "interview" });
+  assert.equal(result.ok, true);
 });
 
 // ---------------------------------------------------------------------------
@@ -1746,6 +1785,92 @@ test("candidate setup initialize is idempotent and never resets saved DB config"
   assert.equal(config.profile.candidate.full_name, "Katherine Johnson");
   assert.equal(config.profile.candidate.email, "kj@example.com");
   assert.equal(existsSync(userPath({ repoRoot }, "candidate/profile.yml")), false);
+});
+
+// ---------------------------------------------------------------------------
+// candidateConfigPatch/candidateApplicationLimitUpsert/candidateEvidenceMerge/
+// candidateEvidenceRemoveOne bump tracker meta (see completeCandidateConfigWrite),
+// so a candidate write must not leave an EXISTING workspace/tracker.json
+// silently behind the db while tracker-dev (which watches the file, not the
+// db) never sees the change. But candidate profile/targeting/evidence data
+// isn't part of assembleTrackerObject()'s shape at all — a candidate-only or
+// packet-only workspace that has never touched the applications pipeline must
+// stay tracker.json-free (deep-ingest-db.test.mjs / packet-generate-route.test.mjs
+// pin this). So these four route through runVerb's `requireExistingTracker`
+// option: skip the export when tracker.json doesn't exist yet, keep it in
+// sync when it does.
+// ---------------------------------------------------------------------------
+
+test("candidateConfigPatch stays tracker.json-free in a candidate-only workspace", () => {
+  const repoRoot = tempRepo();
+  candidateSetupInitialize({ repoRoot });
+
+  const patched = candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: { candidate: { full_name: "Grace Hopper", email: "grace@example.com" } },
+  });
+
+  assert.equal(patched.exported, false);
+  assert.equal(
+    existsSync(userPath({ repoRoot }, "workspace/tracker.json")),
+    false,
+    "a candidate-only workspace must not be forced into tracker.json existence"
+  );
+});
+
+test("candidateConfigPatch keeps an EXISTING workspace/tracker.json in sync instead of leaving its meta stamp stale", () => {
+  const repoRoot = tempRepo();
+  candidateSetupInitialize({ repoRoot });
+  const db = openDb({ repoRoot });
+
+  // A real tracker-pipeline write materializes tracker.json first — this is
+  // the "tracker-dev is already watching this file" case the fix targets.
+  kvUpsert({ repoRoot, key: "strategyReview", value: { snapshot: { rejected: 0 } } });
+  assert.ok(existsSync(userPath({ repoRoot }, "workspace/tracker.json")));
+
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: { candidate: { full_name: "Grace Hopper", email: "grace@example.com" } },
+  });
+
+  const exportedTracker = JSON.parse(
+    readFileSync(userPath({ repoRoot }, "workspace/tracker.json"), "utf8")
+  );
+  const dbMeta = readMeta(db);
+  assert.equal(exportedTracker.meta.version, dbMeta.version);
+  assert.equal(exportedTracker.meta.lastUpdatedAt, dbMeta.lastUpdatedAt);
+});
+
+test("candidateApplicationLimitUpsert, candidateEvidenceMerge, and candidateEvidenceRemoveOne all keep an existing tracker.json in sync", () => {
+  const repoRoot = tempRepo();
+  candidateSetupInitialize({ repoRoot });
+  kvUpsert({ repoRoot, key: "strategyReview", value: { snapshot: { rejected: 0 } } });
+
+  const limitResult = candidateApplicationLimitUpsert({
+    repoRoot,
+    row: { company: "OpenAI", cap: { max: 3, window_days: 90 } },
+  });
+  assert.ok(
+    limitResult.exported,
+    "candidateApplicationLimitUpsert must export once tracker.json exists"
+  );
+
+  const mergeResult = candidateEvidenceMerge({
+    repoRoot,
+    claims: [{ claim: "Shipped a scheduler", evidence: "Resume" }],
+  });
+  assert.ok(mergeResult.exported, "candidateEvidenceMerge must export once tracker.json exists");
+
+  const removeResult = candidateEvidenceRemoveOne({
+    repoRoot,
+    id: mergeResult.data.claims[0].id,
+  });
+  assert.ok(
+    removeResult.exported,
+    "candidateEvidenceRemoveOne must export once tracker.json exists"
+  );
 });
 
 test("candidate and evidence writes stamp Activity with user-facing outcomes", () => {
