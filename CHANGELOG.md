@@ -8,6 +8,7 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Changed
 
+- careerrat.com now presents CareerRat as a Mac app first: the hero's main action is downloading the signed app, the walkthrough starts at "Download and open it", and the install section leads with the app and Homebrew. The npm path stays on the page as the way in for every other platform (#191).
 - The README and the docs now lead with the signed Mac app: download it from the latest release or install with Homebrew, with npm kept as the path for every other platform. The install guide spells out what each path needs (an AI CLI either way; Node.js only for npm) and how the Mac app stays current (#190).
 
 ## [0.12.0] - 2026-08-22

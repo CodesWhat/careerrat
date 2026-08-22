@@ -32,6 +32,30 @@ test("website hero leads with the CareerRat pitch", async () => {
   );
 });
 
+test("website leads with the signed Mac app, keeping npm as the cross-platform path", async () => {
+  const page = await readFile("apps/website/src/app/page.tsx", "utf8");
+
+  // Hero: the Mac app is the primary framing and the primary CTA.
+  assert.match(page, /free Mac app/);
+  assert.match(page, /Download for Mac/);
+  assert.match(page, /https:\/\/github\.com\/CodesWhat\/careerrat\/releases\/latest/);
+  assert.match(page, /Apple Silicon Macs, signed and notarized\./);
+  assert.doesNotMatch(page, /Runs on your own AI CLI/);
+  assert.doesNotMatch(page, /Get started, free &amp; open source/);
+
+  // Get section: the Mac app leads, npm is the explicit second, cross-platform path.
+  assert.match(page, /On a Mac/);
+  assert.match(page, /Anywhere with npm/);
+  assert.match(page, /brew install --cask codeswhat\/tap\/careerrat/);
+  assert.match(page, /signed and notarized/i);
+  assert.match(page, /macOS 12/);
+
+  // npm stays on the page as the cross-platform option; a regression back to
+  // an npm-first hero or Get section fails this test by name.
+  assert.match(page, /npm i -g careerrat/);
+  assert.match(page, /npm install -g careerrat/);
+});
+
 test("root layout suppresses the intentional early html class hydration delta", async () => {
   const layout = await readFile("apps/website/src/app/layout.tsx", "utf8");
 

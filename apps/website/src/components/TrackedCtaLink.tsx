@@ -4,7 +4,7 @@ import posthog from "posthog-js";
 import type { AnchorHTMLAttributes } from "react";
 
 type TrackedCtaLinkProps = AnchorHTMLAttributes<HTMLAnchorElement> & {
-  placement: "header" | "hero" | "pricing" | "final";
+  placement: "header" | "hero" | "get" | "pricing" | "final";
 };
 
 export function TrackedCtaLink({ placement, onClick, ...props }: TrackedCtaLinkProps) {
