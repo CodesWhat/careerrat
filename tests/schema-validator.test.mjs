@@ -359,3 +359,46 @@ test("validate: array items type-checked", () => {
   assert.equal(errors[0].path, "keep_signals[1]");
   assert.ok(errors[0].message.includes("expected type string"));
 });
+
+// ---------------------------------------------------------------------------
+// minItems / maxItems
+// ---------------------------------------------------------------------------
+
+test("validate: array shorter than minItems is rejected", () => {
+  const schema = { type: "array", items: { type: "string" }, minItems: 2 };
+  const result = validate(["only-one"], schema);
+  assert.equal(result.valid, false);
+  const error = result.errors.find((e) => e.path === "");
+  assert.ok(error, `expected a root-level error, got: ${JSON.stringify(result.errors)}`);
+  assert.equal(error.message, "must have at least 2 items");
+});
+
+test("validate: array longer than maxItems is rejected", () => {
+  const schema = { type: "array", items: { type: "string" }, maxItems: 3 };
+  const result = validate(["a", "b", "c", "d"], schema);
+  assert.equal(result.valid, false);
+  const error = result.errors.find((e) => e.path === "");
+  assert.ok(error, `expected a root-level error, got: ${JSON.stringify(result.errors)}`);
+  assert.equal(error.message, "must have at most 3 items");
+});
+
+test("validate: array within minItems/maxItems range is valid", () => {
+  const schema = { type: "array", items: { type: "string" }, minItems: 1, maxItems: 3 };
+  const result = validate(["a", "b"], schema);
+  assert.equal(result.valid, true);
+  assert.deepEqual(result.errors, []);
+});
+
+test("validate: maxItems violation on a nested property reports the property's path", () => {
+  const schema = {
+    type: "object",
+    properties: {
+      fitReasons: { type: "array", maxItems: 3, items: { type: "string" } },
+    },
+  };
+  const result = validate({ fitReasons: ["a", "b", "c", "d"] }, schema);
+  assert.equal(result.valid, false);
+  const error = result.errors.find((e) => e.path === "fitReasons");
+  assert.ok(error, `expected an error at fitReasons, got: ${JSON.stringify(result.errors)}`);
+  assert.equal(error.message, "must have at most 3 items");
+});
