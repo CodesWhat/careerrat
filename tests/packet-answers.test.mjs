@@ -647,6 +647,62 @@ test("a disclosure answer conflicting with a confirmed boundary degrades to the 
   assert.equal(result.answers[0].uploadReady, false);
 });
 
+test("a salary disclosure answer states expected_base, never the private minimum_base floor", async () => {
+  const { draftPacketAnswers } = await loadAnswersModule();
+  const result = await draftPacketAnswers({
+    context: {
+      ...PACKET_CONTEXT,
+      profile: {
+        candidate: { full_name: "Alex Rivera" },
+        compensation: {
+          current_base: "PRIVATE_CURRENT_BASE_SENTINEL",
+          minimum_base: 150000,
+          expected_base: 180000,
+        },
+      },
+    },
+    questions: {
+      answerable: [{ id: "q-salary", label: "What are your salary expectations?", required: true }],
+      excluded: [],
+    },
+    runAI: async () => {
+      throw new Error("deterministic disclosure must not call AI");
+    },
+  });
+
+  const answer = result.answers[0];
+  assert.match(answer.answer, /180,000/);
+  assert.doesNotMatch(answer.answer, /150,000/);
+  assert.equal(answer.disclosure, true);
+  assert.equal(answer.source, "profile");
+});
+
+test("a salary disclosure question with no expected_base on file degrades to NEEDS YOU rather than stating minimum_base", async () => {
+  const { draftPacketAnswers } = await loadAnswersModule();
+  const result = await draftPacketAnswers({
+    context: {
+      ...PACKET_CONTEXT,
+      profile: {
+        candidate: { full_name: "Alex Rivera" },
+        // minimum_base on file, expected_base is not — the private floor
+        // must never be substituted in as the outbound figure.
+        compensation: { current_base: "PRIVATE_CURRENT_BASE_SENTINEL", minimum_base: 150000 },
+      },
+    },
+    questions: {
+      answerable: [{ id: "q-salary", label: "What are your salary expectations?", required: true }],
+      excluded: [],
+    },
+    runAI: async () => ({
+      body: { ok: true, ai: { used: true }, data: { answers: [] } },
+    }),
+  });
+
+  const answer = result.answers[0];
+  assert.match(answer.answer, /^NEEDS YOU:/);
+  assert.doesNotMatch(answer.answer, /150,000/);
+});
+
 test("POST /api/packet/questions persists capture before local answer drafting", async () => {
   const repoRoot = tempRepo();
   seedApp(repoRoot);

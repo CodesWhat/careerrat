@@ -5233,6 +5233,31 @@ test("communication.handoff refuses to build compose links from a draft that lea
   );
 });
 
+test("communication.handoff's backstop also catches a phrase-based leak, not just the literal current_base token", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  seedCommunication(repoRoot, {
+    status: "drafted",
+    draft: {
+      subject: "Re: Compensation",
+      body: "To be transparent, my current salary is $180,000, so I'm targeting a step up.",
+    },
+    participants: [{ name: "Avery Recruiter", email: "avery@temporal.test" }],
+  });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "communication.handoff",
+        entity: { type: "communication", id: "comm-temporal-recruiter" },
+      },
+    }),
+    (error) => error.code === "COMMUNICATION_COMP_LEAK"
+  );
+});
+
 test("communication.handoff refuses a draft with unresolved placeholder text", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot);
@@ -5830,6 +5855,95 @@ test("Apply on site keeps an active supervised browser session without treating 
   assert.match(last.text, /not marked Applied/i);
 });
 
+test("job.apply refuses a resumeSession request when the application has no passing gate verdict on record", async () => {
+  const repoRoot = tempRepo();
+  // No evaluation persisted at all — resumeSession must not be trusted to
+  // skip straight to the executor just because a client set the flag.
+  seedApplication(repoRoot);
+  let applyCalls = 0;
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.apply",
+      entity: { type: "application", id: "app-temporal" },
+      input: { resumeSession: true },
+    },
+    applyJobImpl: async () => {
+      applyCalls += 1;
+      return { verified: true };
+    },
+  });
+
+  assert.equal(applyCalls, 0, "the executor must never run without a corroborated gate verdict");
+  assert.equal(result.messages.at(-1).metadata.state, "blocked");
+  assert.match(result.messages.at(-1).text, /passing gate verdict/i);
+  assert.match(result.messages.at(-1).text, /did not open the application form/i);
+  assert.equal(readApplication(repoRoot, "app-temporal").status, "reviewed-hold");
+});
+
+test("job.apply refuses a resumeSession request when the persisted packet still has open items", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    evaluation: { gate: "keep", fitScore: 92 },
+    // No packetManifest at all — the packet was never generated.
+  });
+  let applyCalls = 0;
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.apply",
+      entity: { type: "application", id: "app-temporal" },
+      input: { resumeSession: true },
+    },
+    applyJobImpl: async () => {
+      applyCalls += 1;
+      return { verified: true };
+    },
+  });
+
+  assert.equal(applyCalls, 0);
+  assert.equal(result.messages.at(-1).metadata.state, "blocked");
+  assert.match(result.messages.at(-1).text, /packet/i);
+});
+
+test("job.apply's resumeSession proceeds straight to the executor once the persisted gate and packet both corroborate", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    evaluation: { gate: "keep", fitScore: 92 },
+    packetManifest: {
+      applicationId: "app-temporal",
+      generatedAt: "2026-08-09T00:00:00.000Z",
+      uploadReady: true,
+      gaps: [],
+      artifacts: {},
+    },
+  });
+  let applyCalls = 0;
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.apply",
+      entity: { type: "application", id: "app-temporal" },
+      input: { resumeSession: true },
+    },
+    applyJobImpl: async () => {
+      applyCalls += 1;
+      return { verified: true, submittedAt: "2026-08-09T15:45:00.000Z" };
+    },
+    now: () => new Date("2026-08-09T15:45:00.000Z"),
+  });
+
+  assert.equal(applyCalls, 1, "a corroborated resumeSession must still reach the executor");
+  assert.equal(readApplication(repoRoot, "app-temporal").status, "applied");
+  assert.notEqual(result.messages.at(-1).metadata.state, "blocked");
+});
+
 test("Draft reply uses the same agent context and persists a reviewable communication draft", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot);
@@ -5870,6 +5984,63 @@ test("Draft reply uses the same agent context and persists a reviewable communic
   assert.equal(result.messages.at(-1).artifacts[0].kind, "communication_draft");
   assert.equal(result.messages.at(-1).metadata.sent, false);
   assert.equal(result.messages.at(-1).metadata.requiresReview, true);
+});
+
+test("communication.draft refuses and does not persist an AI draft that leaks a comp phrase", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  seedCommunication(repoRoot);
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "communication.draft",
+        entity: { type: "communication", id: "comm-temporal-recruiter" },
+      },
+      callAIImpl: async () => ({
+        content: [
+          {
+            type: "text",
+            text: "Thanks for asking — my current salary is $180,000, so I'm targeting a step up.",
+          },
+        ],
+        model: "installed:claude",
+      }),
+    }),
+    (error) => error.code === "COMMUNICATION_COMP_LEAK"
+  );
+
+  // The comp-leaking draft must never have been persisted onto the thread.
+  const comm = readCommunication(repoRoot, "comm-temporal-recruiter");
+  assert.ok(!comm.draft);
+  assert.notEqual(comm.status, "drafted");
+});
+
+test("communication.draft refuses an AI draft with unresolved placeholder text, same as handoff", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  seedCommunication(repoRoot);
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "communication.draft",
+        entity: { type: "communication", id: "comm-temporal-recruiter" },
+      },
+      callAIImpl: async () => ({
+        content: [{ type: "text", text: "Thanks [Recruiter Name], Tuesday works for me." }],
+        model: "installed:claude",
+      }),
+    }),
+    (error) => error.code === "COMMUNICATION_DRAFT_PLACEHOLDER"
+  );
+
+  const comm = readCommunication(repoRoot, "comm-temporal-recruiter");
+  assert.ok(!comm.draft);
 });
 
 test("Send reply cannot clear a draft until its delivery executor verifies the send", async () => {
