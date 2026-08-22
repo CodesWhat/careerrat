@@ -310,10 +310,12 @@ nurse, a driver, and an engineer each bring their own config.
   a fictional demo candidate through the installed AI CLI, so malformed AI output is caught
   before it reaches a real job seeker mid-search.
 
-## Release status (v0.12.0, updated August 22, 2026)
+## Release status (v0.12.1, updated August 22, 2026)
 
-**v0.12.0 is the current release.** Since v0.11.0 the repo runs the strict flow:
-feature PRs land on the active dev branch (`dev/v0.12` for this cycle), `main`
+**v0.12.1 is the current release**, a same-day patch on v0.12.0 that reframes
+careerrat.com, the README, and the docs around the signed Mac app, with npm as
+the any-platform path (#190, #191). Since v0.11.0 the repo runs the strict flow:
+feature PRs land on the active dev branch (`dev/v0.13` for this cycle), `main`
 advances only through a promotion merge immediately before each cut, and the tag
 fires the whole pipeline — `desktop-release.yml` builds, signs, notarizes, and
 uploads the DMG, publishing the release then fires `publish.yml` (npm) and the
