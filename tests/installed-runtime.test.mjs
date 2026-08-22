@@ -24,9 +24,12 @@ import {
   parseCustomCommandString,
   probeCustomRuntimeCommand,
   probeInstalledRuntime,
+  RUNTIME_STREAMING_UNSUPPORTED,
   RUNTIME_TOOL_PROFILE_UNSUPPORTED,
   runInstalledRuntime,
+  runInstalledRuntimeStream,
   runtimeSearchDirectories,
+  supportsInstalledRuntimeStreaming,
 } from "../src/core/ai/installed-runtimes.mjs";
 import {
   loadInstalledRuntimeSelection,
@@ -51,6 +54,35 @@ function fakeInstalledChild({ stdout = "", status = 0 } = {}) {
   };
   child.kill = () => {};
   return child;
+}
+
+// A fake child for runInstalledRuntimeStream's spawnImpl injection point:
+// like fakeInstalledChild above, but emits `chunks` one at a time (each on
+// its own microtask tick, via setImmediate) rather than a single stdout
+// write, so tests can exercise NDJSON line-buffering across chunk
+// boundaries — including a chunk that splits a JSON object mid-line.
+function fakeStreamingChild({ chunks = [], status = 0, stderr = "" } = {}) {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdin = new EventEmitter();
+  child.stdin.end = () => {
+    (async () => {
+      for (const chunk of chunks) {
+        await new Promise((resolve) => setImmediate(resolve));
+        child.stdout.emit("data", Buffer.from(chunk, "utf8"));
+      }
+      if (stderr) child.stderr.emit("data", Buffer.from(stderr, "utf8"));
+      await new Promise((resolve) => setImmediate(resolve));
+      child.emit("close", status, null);
+    })();
+  };
+  child.kill = () => {};
+  return child;
+}
+
+function ndjson(lines) {
+  return lines.map((line) => `${JSON.stringify(line)}\n`).join("");
 }
 
 function tempRoot() {
@@ -944,4 +976,239 @@ test("runInstalledRuntime: codex + the app-safe one-shot profile still proceeds 
   assert.equal(spawnCalls.length, 1, "codex must still spawn for the app-safe one-shot profile");
   assert.equal(spawnCalls[0].command, "/safe/codex");
   assert.equal(result.text, "evaluated");
+});
+
+// ---------------------------------------------------------------------------
+// runInstalledRuntimeStream — the streaming sibling used by chat-runtime.mjs's
+// runInstalledTurn so an installed "claude" chat turn surfaces real-time
+// tool_use/tool_result activity instead of going dark until process exit (the
+// bug: startInstalledSession never called loadSdk, so this route's chat had
+// no streaming envelope at all). Fixture NDJSON in, one onMessage call per
+// parsed line, hermetic — no real CLI spawned.
+// ---------------------------------------------------------------------------
+
+test("supportsInstalledRuntimeStreaming is true only for claude, the sole registry entry with streamingSupported", () => {
+  assert.equal(supportsInstalledRuntimeStreaming("claude"), true);
+  for (const { id } of INSTALLED_RUNTIME_DEFINITIONS) {
+    if (id === "claude") continue;
+    assert.equal(supportsInstalledRuntimeStreaming(id), false, `${id} must not support streaming`);
+  }
+  assert.equal(supportsInstalledRuntimeStreaming("not-a-real-runtime"), false);
+});
+
+test("buildInstalledRuntimeInvocation: streaming:true swaps --output-format json for stream-json --verbose on claude only", () => {
+  const streaming = buildInstalledRuntimeInvocation({
+    runtimeId: "claude",
+    executablePath: "/safe/claude",
+    streaming: true,
+  });
+  const formatIdx = streaming.args.indexOf("--output-format");
+  assert.ok(formatIdx >= 0);
+  assert.equal(streaming.args[formatIdx + 1], "stream-json");
+  assert.ok(streaming.args.includes("--verbose"), "stream-json requires --verbose in print mode");
+
+  const nonStreaming = buildInstalledRuntimeInvocation({
+    runtimeId: "claude",
+    executablePath: "/safe/claude",
+  });
+  const nonStreamingFormatIdx = nonStreaming.args.indexOf("--output-format");
+  assert.equal(nonStreaming.args[nonStreamingFormatIdx + 1], "json");
+  assert.equal(nonStreaming.args.includes("--verbose"), false);
+});
+
+test("runInstalledRuntimeStream rejects with RUNTIME_STREAMING_UNSUPPORTED before spawning for a runtime with no streaming mode", async () => {
+  let spawnCalls = 0;
+  await assert.rejects(
+    runInstalledRuntimeStream({
+      runtime: { id: "codex", path: "/safe/codex", name: "Codex" },
+      prompt: "hello",
+      spawnImpl: () => {
+        spawnCalls++;
+        throw new Error("spawn must never be reached for an unsupported streaming runtime");
+      },
+    }),
+    (error) => error.code === RUNTIME_STREAMING_UNSUPPORTED && error.runtimeId === "codex"
+  );
+  assert.equal(spawnCalls, 0, "the spawn was invoked despite the capability gate");
+});
+
+test("runInstalledRuntimeStream: a text-only turn calls onMessage once per NDJSON line, in order, and resolves the terminal result's text/usage/model/sessionId", async () => {
+  const lines = [
+    { type: "system", subtype: "init", session_id: "sess-1" },
+    {
+      type: "assistant",
+      session_id: "sess-1",
+      message: { content: [{ type: "text", text: "Hello there" }] },
+    },
+    {
+      type: "result",
+      subtype: "success",
+      result: "Hello there",
+      usage: { input_tokens: 10, output_tokens: 5 },
+      model: "claude-sonnet",
+      session_id: "sess-1",
+    },
+  ];
+  const received = [];
+  const result = await runInstalledRuntimeStream({
+    runtime: { id: "claude", path: "/safe/claude" },
+    prompt: "hi",
+    timeoutMs: 2000,
+    onMessage: (message) => received.push(message),
+    spawnImpl: () => fakeStreamingChild({ chunks: [ndjson(lines)] }),
+  });
+  assert.deepEqual(received, lines);
+  assert.equal(result.text, "Hello there");
+  assert.deepEqual(result.usage, { input_tokens: 10, output_tokens: 5 });
+  assert.equal(result.model, "claude-sonnet");
+  assert.equal(result.sessionId, "sess-1");
+  assert.equal(result.runtimeId, "claude");
+});
+
+test("runInstalledRuntimeStream: a turn with two tool calls (one isError result) streams every message, mappable via mapSdkMessage into the same tool_use/tool_result frames the SDK path produces", async () => {
+  const lines = [
+    { type: "system", subtype: "init", session_id: "sess-2" },
+    {
+      type: "assistant",
+      session_id: "sess-2",
+      message: { content: [{ type: "tool_use", id: "tu1", name: "WebSearch", input: { q: "x" } }] },
+    },
+    {
+      type: "user",
+      session_id: "sess-2",
+      message: {
+        content: [{ type: "tool_result", tool_use_id: "tu1", content: "result1", is_error: false }],
+      },
+    },
+    {
+      type: "assistant",
+      session_id: "sess-2",
+      message: {
+        content: [{ type: "tool_use", id: "tu2", name: "WebFetch", input: { url: "y" } }],
+      },
+    },
+    {
+      type: "user",
+      session_id: "sess-2",
+      message: {
+        content: [{ type: "tool_result", tool_use_id: "tu2", content: "boom", is_error: true }],
+      },
+    },
+    {
+      type: "assistant",
+      session_id: "sess-2",
+      message: { content: [{ type: "text", text: "Done" }] },
+    },
+    {
+      type: "result",
+      subtype: "success",
+      result: "Done",
+      usage: { input_tokens: 20, output_tokens: 8 },
+      session_id: "sess-2",
+    },
+  ];
+  const received = [];
+  const result = await runInstalledRuntimeStream({
+    runtime: { id: "claude", path: "/safe/claude" },
+    prompt: "research this",
+    timeoutMs: 2000,
+    onMessage: (message) => received.push(message),
+    spawnImpl: () => fakeStreamingChild({ chunks: [ndjson(lines)] }),
+  });
+  assert.equal(received.length, lines.length);
+
+  const { mapSdkMessage } = await import("../src/core/ai/skill-runtime.mjs");
+  const frames = received.flatMap((message) => mapSdkMessage(message, { env: {} }));
+  const toolFrames = frames.filter((f) => f.type === "tool_use" || f.type === "tool_result");
+  assert.deepEqual(
+    toolFrames.map((f) => f.type),
+    ["tool_use", "tool_result", "tool_use", "tool_result"]
+  );
+  assert.equal(toolFrames[0].data.id, "tu1");
+  assert.equal(toolFrames[0].data.name, "WebSearch");
+  assert.equal(toolFrames[1].data.toolUseId, "tu1");
+  assert.equal(toolFrames[1].data.isError, false);
+  assert.equal(toolFrames[2].data.id, "tu2");
+  assert.equal(toolFrames[3].data.toolUseId, "tu2");
+  assert.equal(toolFrames[3].data.isError, true);
+  assert.equal(result.text, "Done");
+});
+
+test("runInstalledRuntimeStream buffers a JSON object split across two stdout chunks into exactly one onMessage call", async () => {
+  const resultLine = {
+    type: "result",
+    subtype: "success",
+    result: "reassembled",
+    usage: { input_tokens: 1, output_tokens: 1 },
+  };
+  const whole = `${JSON.stringify({ type: "system", subtype: "init" })}\n${JSON.stringify(resultLine)}\n`;
+  // Split mid-object: right after the opening of the result line's JSON.
+  const splitPoint = whole.indexOf('"type":"result"') + 5;
+  const chunks = [whole.slice(0, splitPoint), whole.slice(splitPoint)];
+  const received = [];
+  const result = await runInstalledRuntimeStream({
+    runtime: { id: "claude", path: "/safe/claude" },
+    prompt: "hi",
+    timeoutMs: 2000,
+    onMessage: (message) => received.push(message),
+    spawnImpl: () => fakeStreamingChild({ chunks }),
+  });
+  assert.equal(received.length, 2);
+  assert.deepEqual(received[1], resultLine);
+  assert.equal(result.text, "reassembled");
+});
+
+test("runInstalledRuntimeStream skips a malformed line mid-stream without crashing the turn", async () => {
+  const goodFirst = { type: "system", subtype: "init" };
+  const goodResult = { type: "result", subtype: "success", result: "survived" };
+  const chunks = [
+    `${JSON.stringify(goodFirst)}\n`,
+    "{not valid json at all\n",
+    `${JSON.stringify(goodResult)}\n`,
+  ];
+  const received = [];
+  const result = await runInstalledRuntimeStream({
+    runtime: { id: "claude", path: "/safe/claude" },
+    prompt: "hi",
+    timeoutMs: 2000,
+    onMessage: (message) => received.push(message),
+    spawnImpl: () => fakeStreamingChild({ chunks }),
+  });
+  assert.deepEqual(received, [goodFirst, goodResult]);
+  assert.equal(result.text, "survived");
+});
+
+test("runInstalledRuntimeStream rejects with RUNTIME_EXIT on a nonzero exit, same shape as runInstalledRuntime", async () => {
+  await assert.rejects(
+    runInstalledRuntimeStream({
+      runtime: { id: "claude", path: "/safe/claude" },
+      prompt: "hi",
+      timeoutMs: 2000,
+      spawnImpl: () =>
+        fakeStreamingChild({
+          chunks: [`${JSON.stringify({ type: "system", subtype: "init" })}\n`],
+          status: 7,
+          stderr: "sign in required",
+        }),
+    }),
+    (error) =>
+      error.code === "RUNTIME_EXIT" &&
+      error.exitStatus === 7 &&
+      /sign in required/.test(error.message)
+  );
+});
+
+test("runInstalledRuntimeStream rejects with RUNTIME_RESULT_MISSING when the process exits 0 with no terminal result line", async () => {
+  await assert.rejects(
+    runInstalledRuntimeStream({
+      runtime: { id: "claude", path: "/safe/claude" },
+      prompt: "hi",
+      timeoutMs: 2000,
+      spawnImpl: () =>
+        fakeStreamingChild({
+          chunks: [`${JSON.stringify({ type: "system", subtype: "init" })}\n`],
+        }),
+    }),
+    (error) => error.code === "RUNTIME_RESULT_MISSING"
+  );
 });

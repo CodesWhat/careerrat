@@ -407,6 +407,70 @@ test("POST /api/packet/gate: captures supplied JD body and stamps artifacts.jd b
   }
 });
 
+test("POST /api/packet/gate: an excluded-company posting forces CUT without an AI call", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: { excluded_companies: ["Acme AI"] },
+  });
+  const server = await bootServer(repoRoot, {
+    packetGateInvoke: async () => {
+      throw new Error("excluded-company gate must not call the AI");
+    },
+  });
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-packet",
+      jobBody:
+        "Own agentic workflow prototypes with customers and ship deployed AI workflow tools.",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(body.data?.gate, "cut");
+    assert.equal(body.data?.manual?.required, false);
+    assert.equal(body.data?.ai?.used, false);
+    assert.match(body.data?.fitRisks?.[0] || "", /excluded/i);
+
+    const app = readApp(repoRoot, "app-packet");
+    assert.equal(app.evaluation.gate, "cut");
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/gate: a cut_signal match in the JD forces REVIEW without an AI call", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: { cut_signals: ["unpaid overtime expected"] },
+  });
+  const server = await bootServer(repoRoot, {
+    packetGateInvoke: async () => {
+      throw new Error("cut-signal gate must not call the AI");
+    },
+  });
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-packet",
+      jobBody:
+        "Own agentic workflow prototypes with customers. Unpaid overtime expected during launches.",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(body.data?.gate, "review");
+    assert.equal(body.data?.manual?.required, true);
+    assert.equal(body.data?.manual?.code, "CUT_SIGNAL_MATCH");
+    assert.equal(body.data?.ai?.used, false);
+    assert.match(body.data?.fitRisks?.[0] || "", /unpaid overtime expected/i);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("packet gate reserves output budget for model reasoning plus the typed verdict", async () => {
   const repoRoot = tempRepo();
   seedPacketReadyApp(repoRoot);

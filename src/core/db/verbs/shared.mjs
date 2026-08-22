@@ -6,6 +6,8 @@
 // in app.mjs/sourced.mjs/comm.mjs/activity.mjs/analytics.mjs is built on
 // runVerb() below, so there is exactly one INSERT/UPDATE call site per domain
 // action, and CLI + HTTP always call that same function.
+import { existsSync } from "node:fs";
+import { userPath } from "../../paths/workspace.mjs";
 import { computeAppend } from "../../tracker/activity-log.mjs";
 import { requireDb } from "../connection.mjs";
 import { exportToTracker } from "../export-to-tracker.mjs";
@@ -147,16 +149,64 @@ export function refreshAnalyticsInDb(
   return analytics;
 }
 
+export class ExportFailedError extends Error {
+  constructor(message, { cause, result } = {}) {
+    super(message);
+    this.name = "ExportFailedError";
+    this.code = "EXPORT_FAILED";
+    // The db transaction above already committed by the time this can throw
+    // — this flag is the whole point of the distinct error type: a caller
+    // must not treat this the same as "nothing happened, safe to retry
+    // blind." `result` carries the write's own return value (already
+    // committed) and `cause` preserves the original export failure for
+    // diagnosis.
+    this.committed = true;
+    this.result = result;
+    if (cause !== undefined) this.cause = cause;
+  }
+}
+
 // The one call site every verb funnels through: open the db (fail-closed —
 // requireDb throws NoDatabaseError when no db file exists yet, decision 7),
 // run `fn(db, pathCtx)` inside one BEGIN IMMEDIATE ... COMMIT, then — OUTSIDE
 // and AFTER that transaction — regenerate tracker.json + activity.jsonl
 // (decision 8) so the legacy dashboard render never goes stale.
-export function runVerb({ repoRoot, env }, fn) {
+//
+// The transaction and the export are two different failure domains: a thrown
+// error from `fn`/withTransaction means nothing was written (rolled back),
+// safe to retry as-is. A thrown error from exportToTracker means the OPPOSITE
+// — the db write already committed and only the tracker.json/activity.jsonl
+// regeneration failed — so it's caught separately and re-thrown as
+// ExportFailedError, which callers can distinguish (`err.code ===
+// "EXPORT_FAILED"` / `err.committed`) instead of retrying a write that
+// already happened.
+//
+// `requireExistingTracker: true` (candidate.mjs's setup verbs) skips the
+// export entirely when workspace/tracker.json doesn't exist yet, rather than
+// materializing it. Candidate profile/targeting/evidence/application-limits
+// are app state, not tracker-pipeline data (they're not even part of
+// assembleTrackerObject()'s shape) — a candidate-only or packet-only
+// workspace that has never touched the applications pipeline must stay
+// tracker.json-free (deep-ingest-db.test.mjs / packet-generate-route.test.mjs
+// pin this). But once tracker.json DOES exist — a real workspace tracker-dev
+// is already watching — a candidate write must keep it in sync instead of
+// silently leaving its meta stamp stale, which is what this option is for.
+export function runVerb({ repoRoot, env }, fn, { requireExistingTracker = false } = {}) {
   const pathCtx = { repoRoot, env };
   const db = requireDb(pathCtx);
   const result = withTransaction(db, () => fn(db, pathCtx));
-  const exported = exportToTracker(pathCtx);
+  if (requireExistingTracker && !existsSync(userPath(pathCtx, "workspace/tracker.json"))) {
+    return { ok: true, ...result, exported: false };
+  }
+  let exported;
+  try {
+    exported = exportToTracker(pathCtx);
+  } catch (err) {
+    throw new ExportFailedError(`db write committed, but exportToTracker failed: ${err.message}`, {
+      cause: err,
+      result: { ok: true, ...result },
+    });
+  }
   return { ok: true, ...result, exported };
 }
 

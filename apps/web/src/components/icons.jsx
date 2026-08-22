@@ -272,6 +272,46 @@ export function ArrowUpIcon(props) {
   );
 }
 
+// Chat activity icons — see onboarding/chatActivity.jsx's tool-name -> icon
+// map. Same inline-stroke-SVG convention as every icon above.
+
+export function EyeIcon(props) {
+  return (
+    <Svg {...props}>
+      <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" />
+      <circle cx="12" cy="12" r="2.8" />
+    </Svg>
+  );
+}
+
+export function GlobeIcon(props) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M3.5 12h17M12 3.5c2.5 2.4 3.8 5.4 3.8 8.5s-1.3 6.1-3.8 8.5c-2.5-2.4-3.8-5.4-3.8-8.5S9.5 5.9 12 3.5Z" />
+    </Svg>
+  );
+}
+
+export function PencilIcon(props) {
+  return (
+    <Svg {...props}>
+      <path d="m4 20 .9-4.2L15.8 5 19 8.2 8.1 19.1 4 20Z" />
+      <path d="m13.8 6.9 3.3 3.3" />
+    </Svg>
+  );
+}
+
+export function TerminalIcon(props) {
+  return (
+    <Svg {...props}>
+      <rect x="3" y="4.5" width="18" height="15" rx="1.5" />
+      <path d="m6.5 9.5 3.5 2.5-3.5 2.5" />
+      <path d="M12.5 15.5h5" />
+    </Svg>
+  );
+}
+
 // Keyed lookup for icon strings the server-derived view model carries
 // (dashboard-data.js row.modeIcon/sourceIcon, jobs.funnel[].icon,
 // drawer.timeline[].icon, calendar event kinds). Not every legacy icon key is

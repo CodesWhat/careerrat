@@ -1,8 +1,8 @@
 // scripts/eval/lib/skill-sections.mjs — extracts named "## Heading" sections
-// verbatim out of .agents/skills/search-jobs/SKILL.md, so the Phase 2 harness
-// always replays the CURRENT triage rules text (not a hand-copied, driftable
-// snapshot). Both phase2 scripts read from this file rather than embedding
-// their own copy of the skill prose.
+// verbatim out of a skill's SKILL.md, so a harness always replays the CURRENT
+// rules text (not a hand-copied, driftable snapshot). Both the phase2 scripts
+// and scripts/eval/skill-shape-qa.mjs read from this file rather than
+// embedding their own copy of any skill's prose.
 
 import { readFileSync } from "node:fs";
 
@@ -40,6 +40,14 @@ export function extractSection(markdown, headingText) {
     .trim();
 }
 
+// loadSkillMd(repoRoot, skillName) — generic reader for any
+// `.agents/skills/<skillName>/SKILL.md`. loadSearchJobsSkill below is kept as
+// a thin, unchanged wrapper so phase2-ai-lane.mjs's existing call site never
+// has to change.
+export function loadSkillMd(repoRoot, skillName) {
+  return readFileSync(`${repoRoot}/.agents/skills/${skillName}/SKILL.md`, "utf8");
+}
+
 export function loadSearchJobsSkill(repoRoot) {
-  return readFileSync(`${repoRoot}/.agents/skills/search-jobs/SKILL.md`, "utf8");
+  return loadSkillMd(repoRoot, "search-jobs");
 }

@@ -54,10 +54,16 @@ jobs:
       tag: ${{ steps.resolve.outputs.tag }}
       version: ${{ steps.resolve.outputs.version }}
     steps:
-      - name: Harden the runner (audit all outbound calls)
+      - name: Harden the runner (block all outbound calls except the allowlist)
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
-          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+          egress-policy: block
+          # This job only calls `gh api repos/.../releases`, the same
+          # resolve-release pattern as desktop-release.yml's resolve-tag job.
+          # No insights run exists yet (this workflow has never executed);
+          # derived from the step's only network call.
+          allowed-endpoints: >
+            api.github.com:443
       - name: Resolve the target release
         id: resolve
         env:
@@ -110,10 +116,25 @@ jobs:
       VERSION: ${{ needs.resolve-release.outputs.version }}
       REPO: ${{ github.repository }}
     steps:
-      - name: Harden the runner (audit all outbound calls)
+      - name: Harden the runner (block all outbound calls except the allowlist)
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
-          egress-policy: audit # house target is `block` once observed endpoints are allowlisted
+          egress-policy: block
+          # No insights run exists yet (this workflow has never executed), so
+          # this is derived, not observed: checkout + npm ci
+          # (github.com/registry.npmjs.org), anchore/sbom-action's bundled
+          # octokit calls plus its syft-binary download via a github.com
+          # releases redirect (api.github.com/release-assets.githubusercontent.com,
+          # confirmed by reading the pinned action's dist/index.cjs), and the
+          # final `gh release upload` step (api.github.com for the release
+          # lookup, uploads.github.com for the asset bytes — the same pair
+          # codeql.yml's SARIF upload needs).
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            registry.npmjs.org:443
+            release-assets.githubusercontent.com:443
+            uploads.github.com:443
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.resolve-release.outputs.tag }}

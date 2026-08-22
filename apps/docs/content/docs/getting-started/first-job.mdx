@@ -32,8 +32,16 @@ COMP: clear — posted range covers target_base
 ACTION: apply-now
 ```
 
+Watch for activity lines while it works, reading the posting and maybe
+searching, each settling before the verdict prints.
+
 This is a real read of the posting body against your config — not a keyword
 match. If the posting is a poor fit you will get `GATE: CUT` with a reason.
+
+Here is a finished Ask run once its activity lines settle, this one researching
+market comp:
+
+![A settled Ask conversation, completed activity lines above a cited market-comp answer with a save-or-discard benchmark card](./chat-activity-settled.png)
 
 ### 3. Ask it to tailor
 
@@ -56,7 +64,11 @@ and tracks the thread.
 
 Open `http://localhost:7777` and watch the application appear, move through the
 funnel, and accumulate activity. Quick local actions write through the same
-canonical data layer as the CLI; longer work opens the owning skill in Ask.
+canonical data layer as the CLI; longer work opens the owning skill in Ask. Each
+step shows as a live activity line, an icon and a plain-language label like
+"Reading files: resume.pdf" or "Searching the web", with a spinner that settles
+once the step finishes. The assistant only speaks to ask a question or hand you
+a result.
 
 If all five land, CareerRat is working end to end.
 

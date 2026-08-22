@@ -369,7 +369,7 @@ export function ensureAutomationFile({ root = DEFAULT_ROOT } = {}) {
 
 // ---------------------------------------------------------------------------
 // resolveEditPath — map an edit intent to the dotted YAML path + human label.
-// kind: "consent" | "capability" | "platform".
+// kind: "consent" | "capability" | "platform" | "session" | "mode".
 // ---------------------------------------------------------------------------
 
 export function resolveEditPath({ kind, capability, platform }) {
@@ -380,6 +380,9 @@ export function resolveEditPath({ kind, capability, platform }) {
   }
   if (kind === "session") {
     return { parts: ["session", "provider"], label: "session browser provider" };
+  }
+  if (kind === "mode") {
+    return { parts: ["setup_mode"], label: "automation setup mode" };
   }
   if (!isCapability(capability))
     throw new Error(`unknown capability "${capability}". Known: ${CAPABILITY_KEYS.join(", ")}`);
@@ -474,6 +477,16 @@ function ensureCapabilityBlock(text, capability) {
   return lines.join("\n");
 }
 
+// Scaffold a top-level scalar key (e.g. `setup_mode`) that predates this field
+// on an older automation.yml. No-op if the key already exists.
+function ensureTopLevelScalar(text, key, defaultValue) {
+  const lines = text.split("\n");
+  if (findKeyPath(lines, [key])) return text;
+  const insertAt = topLevelInsertIndex(lines);
+  lines.splice(insertAt, 0, `${key}: ${defaultValue}`);
+  return lines.join("\n");
+}
+
 function ensureMappingBlock(text, parentParts, key) {
   const lines = text.split("\n");
   const targetParts = [...parentParts, key];
@@ -561,6 +574,41 @@ export function planSessionEdit({ provider, currentText, schema = null }) {
     path: parts.join("."),
     label,
     value: provider,
+    previous: patch.previous,
+    changed: patch.changed,
+    valid: validation.valid,
+    errors: validation.errors,
+    nextText: patch.text,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// planModeEdit — pure (no fs): compute the comment-preserving next text for the
+// coarse setup_mode gate (a STRING enum, not a boolean). mayRun() ANDs
+// setup_mode === "advanced" in alongside the granular capability/platform/
+// consent switches: `basic` keeps every external capability hard-off no matter
+// what the granular switches say, so this is the fourth term the documented
+// consent/enable recipe (AGENTS.md → Browser Automation Contract) needs a real
+// CLI verb for. See `automationModePatch` above for the coarser reset shape
+// used elsewhere; this is the line-level edit the CLI's dry-run/--write
+// pattern needs.
+// ---------------------------------------------------------------------------
+
+export function planModeEdit({ mode, currentText, schema = null }) {
+  if (mode !== "basic" && mode !== "advanced") {
+    return { ok: false, error: 'automation mode must be "basic" or "advanced"' };
+  }
+  const { parts, label } = resolveEditPath({ kind: "mode" });
+  const scaffoldedText = ensureTopLevelScalar(currentText, "setup_mode", "basic");
+  const patch = setScalar(scaffoldedText, parts, mode);
+  if (!patch.ok) return { ok: false, error: patch.error };
+
+  const validation = patch.changed ? validateText(patch.text, schema) : { valid: true, errors: [] };
+  return {
+    ok: true,
+    path: parts.join("."),
+    label,
+    value: mode,
     previous: patch.previous,
     changed: patch.changed,
     valid: validation.valid,

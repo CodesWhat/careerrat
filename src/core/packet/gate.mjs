@@ -1,4 +1,5 @@
 import { BOUNDED_AI_CODES, runBoundedAI } from "../ai/bounded-ai.mjs";
+import { matchSignals } from "../evaluate/gate.mjs";
 import {
   buildPacketContext,
   capturePacketJobBody,
@@ -72,6 +73,62 @@ function reviewData({ applicationId, code, reason, ai = { used: false }, source 
       action: "Review the job body and packet gate manually.",
     },
     ai,
+    source,
+    evaluatedAt: new Date().toISOString(),
+  };
+}
+
+// Deterministic hard-cut/review checks, run BEFORE the AI call so a
+// targeting.excluded_companies or targeting.cut_signals hit can never be
+// silently overridden by the LLM's own KEEP/CUT/REVIEW judgment. Mirrors
+// evaluate/gate.mjs's evaluateGate() checks (a)/(b) — the same deterministic
+// hard-cut semantics the app already uses for the primary evaluate-job body
+// gate — reusing its exported matchSignals() for cut_signals. The word-
+// boundary company matcher below is evaluateGate's matchesExcluded, kept
+// local since that helper isn't exported.
+function normalizeForMatch(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function companyMatchesExcluded(company, excludedCompanies) {
+  const companyNorm = normalizeForMatch(company);
+  if (!companyNorm) return null;
+  for (const entry of Array.isArray(excludedCompanies) ? excludedCompanies : []) {
+    const entryNorm = normalizeForMatch(entry);
+    if (!entryNorm) continue;
+    const escaped = entryNorm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`).test(companyNorm)) {
+      return entry;
+    }
+  }
+  return null;
+}
+
+function forcedCutData({ applicationId, reason, source }) {
+  return {
+    appId: applicationId,
+    applicationId,
+    gate: "cut",
+    fitScore: 0,
+    fitBucket: "stretch",
+    fitSummary: boundedDisplayText(reason, 150),
+    compensation: {
+      status: "unknown",
+      currency: null,
+      minBase: null,
+      maxBase: null,
+      source: "unknown",
+      summary: "Compensation not evaluated: excluded company.",
+    },
+    action: "cut",
+    fitReasons: [],
+    fitRisks: [boundedDisplayText(reason, 72)],
+    confidence: "high",
+    manual: { required: false },
+    ai: { used: false },
     source,
     evaluatedAt: new Date().toISOString(),
   };
@@ -175,6 +232,29 @@ export async function evaluatePacketGate({
       captured: Boolean(captured),
     };
 
+    // Hard cut: an excluded-company match is deterministic and decisive —
+    // force the verdict without ever calling the AI, so it can't be
+    // reasoned around. Runs before the job-body check since the company is
+    // already known from the tracked application, independent of whether a
+    // JD body was ever captured.
+    const excludedCompanies = Array.isArray(context.targeting?.excluded_companies)
+      ? context.targeting.excluded_companies
+      : [];
+    const matchedExcludedCompany = companyMatchesExcluded(context.app.company, excludedCompanies);
+    if (matchedExcludedCompany) {
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          data: forcedCutData({
+            applicationId: request.applicationId,
+            reason: `Company matches the excluded list: "${matchedExcludedCompany}".`,
+            source,
+          }),
+        },
+      };
+    }
+
     if (!hasReadableJobBody(context)) {
       return {
         status: 200,
@@ -184,6 +264,35 @@ export async function evaluatePacketGate({
             applicationId: request.applicationId,
             code: "MISSING_JOB_BODY",
             reason: "A readable full job description is required before packet gate evaluation.",
+            source,
+          }),
+        },
+      };
+    }
+
+    // Hard cut_signal match, same matching semantics (case-insensitive
+    // substring, checked against title + body) evaluateGate() already uses
+    // for the primary evaluate-job body gate's hard-cut check (a). Surfaced
+    // here as a forced REVIEW rather than a forced CUT — the deterministic
+    // sourced-scanner treats a cut_signal as a strong down-weight, not the
+    // outright disqualifier an excluded company is — so a human still signs
+    // off, but the AI can never quietly wave the signal through to KEEP.
+    const cutSignals = Array.isArray(context.targeting?.cut_signals)
+      ? context.targeting.cut_signals
+      : [];
+    const cutSignalSearchText = [context.app.role, context.job.body].filter(Boolean).join("\n");
+    const matchedCutSignals = matchSignals(cutSignalSearchText, cutSignals)
+      .filter((r) => r.matched)
+      .map((r) => r.signal);
+    if (matchedCutSignals.length > 0) {
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          data: reviewData({
+            applicationId: request.applicationId,
+            code: "CUT_SIGNAL_MATCH",
+            reason: `Cut signal(s) found in the job description: ${matchedCutSignals.join(", ")}.`,
             source,
           }),
         },

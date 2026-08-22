@@ -36,7 +36,14 @@ function resolveFamilies(targeting) {
  * @returns {string} Family name or neutral slug.
  */
 export function classifyRoleFamily(role = "", targeting) {
-  const lower = role.toLowerCase();
+  // `role = ""` above only covers an omitted/undefined arg — a row that
+  // stores role explicitly as null (or any other non-string) reaches here as
+  // that exact value, and every outcome-changing verb classifies every row
+  // in one shared transaction (buildReevaluationAnalytics), so one bad row
+  // would otherwise throw and wedge all future outcome writes. Coerce here,
+  // at the entry point, rather than trusting every caller to pre-sanitize.
+  const safeRole = String(role ?? "");
+  const lower = safeRole.toLowerCase();
   const families = resolveFamilies(targeting);
 
   if (families !== null) {
@@ -50,7 +57,7 @@ export function classifyRoleFamily(role = "", targeting) {
   }
 
   // Tier 3: neutral slug — domain-agnostic, groups identical role titles.
-  const trimmed = role.trim();
+  const trimmed = safeRole.trim();
   if (!trimmed) return "uncategorized";
   return trimmed
     .toLowerCase()

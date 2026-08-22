@@ -1509,6 +1509,31 @@ function blockingPacketGaps(gaps) {
   return gaps.filter((gap) => !isQuestionCaptureGap(gap));
 }
 
+// Server-side corroboration for job.apply's resumeSession shortcut (see the
+// call site below): the persisted evaluation must have cleared the gate, and
+// the persisted packet manifest must be free of blocking gaps. Both fields
+// come straight off the application row — no AI call, no doc regeneration —
+// so resumeSession still skips the REDUNDANT re-evaluate/re-generate work,
+// just never the safety checks themselves.
+function applicationApplySafetyBlockReason(application) {
+  const gate = String(application?.evaluation?.gate || "").toLowerCase();
+  if (gate !== "keep") {
+    return "This application does not have a passing gate verdict on record.";
+  }
+  const manifest = application?.packetManifest;
+  if (!manifest) {
+    return "This application's packet has not been generated yet.";
+  }
+  const gaps = Array.isArray(manifest.gaps) ? manifest.gaps : null;
+  const packetComplete = gaps
+    ? blockingPacketGaps(gaps).length === 0
+    : manifest.uploadReady === true;
+  if (!packetComplete) {
+    return "This application's packet still has open items to resolve.";
+  }
+  return null;
+}
+
 function questionCaptureFromApplication(application) {
   const summary = application?.packetManifest?.questions;
   if (!summary || typeof summary !== "object") return null;
@@ -5171,6 +5196,25 @@ export async function executeWorkspaceIntent({
       if (!body)
         throw actionError("The selected AI runtime returned an empty draft.", "EMPTY_AI_RESPONSE");
       const subject = replySubject(communication, input);
+      // Same outbound-content backstops communication.handoff runs before a
+      // draft goes into a compose link: an AI-drafted reply is free text and
+      // gets no other check before this point, so it must clear the same
+      // comp-leak and placeholder guards before it is persisted or returned.
+      const draftLeak =
+        findCurrentBaseToken(`${subject}\n${body}`) || findCompLeak(`${subject}\n${body}`);
+      if (draftLeak) {
+        throw actionError(
+          "This draft still contains your private current pay figure. Edit the draft, then try again.",
+          "COMMUNICATION_COMP_LEAK"
+        );
+      }
+      const draftPlaceholderLint = lintArtifact(`${subject}\n${body}`);
+      if (!draftPlaceholderLint.clean) {
+        throw actionError(
+          "This draft still has unfinished placeholder text. Finish the draft, then try again.",
+          "COMMUNICATION_DRAFT_PLACEHOLDER"
+        );
+      }
       const summary = draftSummary(body);
       const draftedAt = resolvedCommunicationDate(undefined, now);
       commSetDraft({
@@ -5392,9 +5436,13 @@ export async function executeWorkspaceIntent({
         `Re: ${communication.role || "this role"} at ${communication.company || "this company"}`;
       const body = String(draft.body || "");
       // Outbound-content backstops before anything goes into a compose link:
-      // the private current_base figure never leaves, and an unfinished draft
-      // with placeholder brackets goes back for editing instead of out.
-      const leak = findCurrentBaseToken(`${subject}\n${body}`);
+      // the private current_base figure never leaves (findCurrentBaseToken
+      // catches the literal field name; findCompLeak catches phrase-based
+      // disclosures like "my current salary is $X" that never mention the
+      // field), and an unfinished draft with placeholder brackets goes back
+      // for editing instead of out.
+      const leak =
+        findCurrentBaseToken(`${subject}\n${body}`) || findCompLeak(`${subject}\n${body}`);
       if (leak) {
         throw actionError(
           "This draft still contains your private current pay figure. Edit the draft, then try again.",
@@ -5854,6 +5902,41 @@ export async function executeWorkspaceIntent({
               },
             },
           ],
+        },
+        now,
+      });
+    }
+    // Server-side corroboration for the resumeSession shortcut above: the
+    // non-resume branch just freshly re-evaluated the gate and regenerated
+    // the packet in THIS request (both branches already returned above if
+    // either check failed), so it needs no further check here. resumeSession
+    // skipped both of those, trusting a client-supplied boolean — so before
+    // the browser is driven to submit, corroborate against the PERSISTED
+    // verdict and packet state instead. A client can set resumeSession on
+    // any request; it must never be trusted to skip the checks themselves,
+    // only the redundant work of re-running them.
+    const applySafetyBlockReason =
+      input.resumeSession === true ? applicationApplySafetyBlockReason(application) : null;
+    if (applySafetyBlockReason) {
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: `${applySafetyBlockReason} CareerRat did not open the application form.`,
+        artifacts: [
+          {
+            kind: "application_apply_blocked",
+            title: `${applicationLabel(application)}: Not ready to apply`,
+            applicationId: normalized.entity.id,
+            code: "APPLY_SAFETY_CHECK_FAILED",
+            reason: applySafetyBlockReason,
+          },
+        ],
+        metadata: {
+          state: "blocked",
+          applicationId: normalized.entity.id,
+          submissionVerified: false,
         },
         now,
       });

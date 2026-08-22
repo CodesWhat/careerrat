@@ -9,6 +9,7 @@ import { existsSync, readFileSync } from "node:fs";
 //
 // Usage:
 //   node src/cli/automation.mjs status [--json]
+//   node src/cli/automation.mjs mode <basic|advanced> [--write]
 //   node src/cli/automation.mjs consent <platform>            (dry run)
 //   node src/cli/automation.mjs consent <platform> --write
 //   node src/cli/automation.mjs revoke  <platform> --write
@@ -40,6 +41,7 @@ import {
   mergeAutomationDefaults,
   PLATFORMS,
   planAutomationEdit,
+  planModeEdit,
   planSessionEdit,
   resolveEditPath,
 } from "../core/automation/consent.mjs";
@@ -111,6 +113,11 @@ if (verb === "session") {
   process.exit(0); // handleSession always exits; this is a belt-and-suspenders guard
 }
 
+if (verb === "mode") {
+  handleMode(rest[0]);
+  process.exit(0); // handleMode always exits; this is a belt-and-suspenders guard
+}
+
 const WRITE_VERBS = {
   consent: { kind: "consent", value: true },
   revoke: { kind: "consent", value: false },
@@ -121,7 +128,7 @@ const WRITE_VERBS = {
 const spec = WRITE_VERBS[verb];
 if (!spec) {
   fail(
-    `unknown command "${verb}". Try: status | enable | disable | consent | revoke (see --help).`
+    `unknown command "${verb}". Try: status | mode | enable | disable | consent | revoke (see --help).`
   );
 }
 
@@ -409,6 +416,177 @@ function handleSession(provider) {
   process.exit(0);
 }
 
+// `mode <basic|advanced>` — flip the coarse setup-mode gate. mayRun() ANDs this
+// in alongside the granular capability/platform/consent switches: basic keeps
+// every external capability hard-off no matter what the granular switches say,
+// advanced lets them govern individually. This is the CLI verb the documented
+// consent/enable recipe (AGENTS.md → Browser Automation Contract) needs to run
+// first — without it, no combination of `consent`/`enable` can ever reach
+// mayRun()'s allowed:true. Same safety pattern as the other verbs: dry-run by
+// default, schema-validated, comment-preserving, atomic; first --write scaffolds.
+function handleMode(mode) {
+  if (mode !== "basic" && mode !== "advanced") {
+    fail(`Usage: mode <basic|advanced>.`);
+  }
+
+  const pathCtx = { repoRoot: opts.root };
+  if (candidateConfigSource(pathCtx) === "db") {
+    handleDbMode(mode);
+  }
+
+  const candidatePath = userPath(pathCtx, AUTOMATION_FILE);
+  const automationDisplay = displayPath(pathCtx, AUTOMATION_FILE);
+  const templatePath = join(opts.root, AUTOMATION_TEMPLATE);
+  const schemaPath = join(opts.root, AUTOMATION_SCHEMA);
+  const schema = existsSync(schemaPath) ? JSON.parse(readFileSync(schemaPath, "utf8")) : null;
+  const fileExists = existsSync(candidatePath);
+  const baseText = readFileSync(fileExists ? candidatePath : templatePath, "utf8");
+
+  let plan;
+  try {
+    plan = planModeEdit({ mode, currentText: baseText, schema });
+  } catch (err) {
+    fail(err.message);
+  }
+  if (!plan.ok) fail(plan.error);
+
+  const result = {
+    command: "mode",
+    file: automationDisplay,
+    path: plan.path,
+    label: plan.label,
+    value: plan.value,
+    previous: plan.previous,
+    changed: plan.changed,
+    valid: plan.valid,
+    willCreate: !fileExists,
+    written: false,
+  };
+
+  if (!plan.changed) {
+    if (opts.json) console.log(JSON.stringify({ ...result, note: "already set" }, null, 2));
+    else console.log(`No change: setup mode is already ${plan.value} in ${automationDisplay}.`);
+    process.exit(0);
+  }
+
+  if (!plan.valid) {
+    if (opts.json)
+      console.log(
+        JSON.stringify(
+          { ...result, error: "would invalidate schema", errors: plan.errors },
+          null,
+          2
+        )
+      );
+    else {
+      console.error(
+        `Refusing: this change would make ${automationDisplay} invalid against its schema:`
+      );
+      for (const e of plan.errors) console.error(`  ${e.path || "(root)"}: ${e.message}`);
+    }
+    process.exit(1);
+  }
+
+  const diff = `  ~ ${plan.path}: ${plan.previous} → ${plan.value}`;
+
+  if (!opts.write) {
+    if (opts.json) {
+      console.log(JSON.stringify({ ...result, dryRun: true }, null, 2));
+    } else {
+      if (!fileExists)
+        console.log(`(first write will create ${automationDisplay} from the template)`);
+      console.log(`Proposed change to ${automationDisplay} (${plan.label}):`);
+      console.log(diff);
+      console.log(
+        `  → ${mode === "basic" ? "all external capabilities hard-off" : "individual opt-ins below now apply"}`
+      );
+      console.log("Dry run - pass --write to commit.");
+    }
+    process.exit(0);
+  }
+
+  const created = ensureAutomationFile({ root: opts.root }).created;
+  const actualText = readFileSync(candidatePath, "utf8");
+  let writePlan = plan;
+  if (actualText !== baseText) {
+    writePlan = planModeEdit({ mode, currentText: actualText, schema });
+    if (!writePlan.ok || !writePlan.valid)
+      fail(writePlan.error || "post-scaffold edit became invalid");
+  }
+  atomicWriteFile(candidatePath, writePlan.nextText);
+  result.written = true;
+  result.created = created;
+
+  if (opts.json) {
+    console.log(JSON.stringify(result, null, 2));
+  } else {
+    if (created) console.log(`Created ${automationDisplay} from the template.`);
+    console.log(`Written to ${automationDisplay}: setup mode = ${mode}`);
+  }
+  process.exit(0);
+}
+
+function handleDbMode(mode) {
+  const loaded = loadAutomation({ root: opts.root });
+  const currentData = mergeAutomationDefaults(loaded.data);
+  const previous = currentData.setup_mode;
+  const changed = previous !== mode;
+  const result = {
+    command: "mode",
+    file: "sqlite:automation",
+    path: "setup_mode",
+    label: "automation setup mode",
+    value: mode,
+    previous,
+    changed,
+    valid: true,
+    willCreate: false,
+    written: false,
+  };
+
+  if (!changed) {
+    if (opts.json) console.log(JSON.stringify({ ...result, note: "already set" }, null, 2));
+    else console.log(`No change - setup mode is already ${mode} in SQLite.`);
+    process.exit(0);
+  }
+
+  const diff = `  ~ setup_mode: ${previous} → ${mode}`;
+  if (!opts.write) {
+    if (opts.json) {
+      console.log(JSON.stringify({ ...result, dryRun: true }, null, 2));
+    } else {
+      console.log(`Proposed change to SQLite automation config (${result.label}):`);
+      console.log(diff);
+      console.log("Dry run - pass --write to commit.");
+    }
+    process.exit(0);
+  }
+
+  try {
+    candidateConfigPatch({ repoRoot: opts.root, name: "automation", patch: { setup_mode: mode } });
+  } catch (err) {
+    if (opts.json) {
+      console.log(
+        JSON.stringify({ ...result, error: err.message, errors: err.errors || [] }, null, 2)
+      );
+    } else {
+      console.error("Refusing: this change would make sqlite:automation invalid:");
+      if (err.errors)
+        for (const e of err.errors) console.error(`  ${e.path || "(root)"}: ${e.message}`);
+      else console.error(err.message);
+    }
+    process.exit(1);
+  }
+
+  result.written = true;
+  if (opts.json) {
+    console.log(JSON.stringify(result, null, 2));
+  } else {
+    console.log(`Written to SQLite automation config: setup_mode = ${mode}`);
+  }
+  process.exit(0);
+}
+
 function handleDbAutomationEdit({ command, kind, capability, platform, value }) {
   const loaded = loadAutomation({ root: opts.root });
   const { parts, label } = resolveEditPath({ kind, capability, platform });
@@ -602,7 +780,7 @@ function printStatus(asJson) {
     console.log("");
   }
   console.log(
-    `Setup mode: ${status.mode} (${status.mode === "basic" ? "all external capabilities hard-off" : "individual opt-ins below"})`
+    `Setup mode: ${status.mode} (${status.mode === "basic" ? "all external capabilities hard-off" : "individual opt-ins below"}). Change: \`careerrat automation mode <basic|advanced> --write\`.`
   );
   console.log(`Live capability×platform pairs: ${status.liveCount}`);
   console.log("");
@@ -651,12 +829,15 @@ Usage:
   node src/cli/automation.mjs enable  <capability> [platform] --write
   node src/cli/automation.mjs disable <capability> [platform] --write
   node src/cli/automation.mjs session <auto|extension|orca|playwright> [--write]  Set the session-browser provider
+  node src/cli/automation.mjs mode <basic|advanced> [--write]  Set the setup-mode gate
   node src/cli/automation.mjs --list [--json]          List capabilities + platforms
   node src/cli/automation.mjs --help
 
-A capability runs on a platform only if ALL of: the capability global switch,
-that platform's switch, and that platform's consent are on. \`enable <capability>\`
-with no platform flips the global switch; with a platform flips just that platform.
+A capability runs on a platform only if ALL of: setup mode is "advanced", the
+capability global switch, that platform's switch, and that platform's consent are
+on. \`mode advanced --write\` must run before consent/enable can make anything
+live; \`enable <capability>\` with no platform flips the global switch; with a
+platform flips just that platform.
 
 Options:
   --write     Commit the change (default: dry run, writes nothing)

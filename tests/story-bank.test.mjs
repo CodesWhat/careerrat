@@ -103,11 +103,25 @@ test("validateStories refuses a dangling evidence id when evidence is loaded", (
   );
 });
 
-test("validateStories skips id-existence when no evidence is loaded (still requires >=1 id)", () => {
-  // Unknown id but no evidence bank to check against → existence skipped, structurally ok.
-  assert.equal(validateStories([goodStory({ evidence_ids: ["whatever"] })], []).ok, true);
-  // But zero ids is always refused.
+test("validateStories hard-fails a fabricated evidence id even when the evidence bank is empty", () => {
+  // An empty evidence.yml can never back ANY cited id — that's the honesty
+  // firewall the docstring promises, not a reason to skip the check. A story
+  // that cites "whatever" against a zero-claim bank must fail, with a message
+  // that names the missing evidence bank rather than silently passing.
+  const v = validateStories([goodStory({ evidence_ids: ["whatever"] })], []);
+  assert.equal(v.ok, false);
+  assert.ok(
+    v.errors.some((e) => e.message.includes("whatever") && e.message.includes("no claims")),
+    JSON.stringify(v.errors)
+  );
+  // Zero ids is still refused too (unrelated rule, unaffected by this fix).
   assert.equal(validateStories([goodStory({ evidence_ids: [] })], []).ok, false);
+});
+
+test("validateStories still refuses a dangling id when the evidence bank is non-empty but doesn't contain it", () => {
+  const v = validateStories([goodStory({ evidence_ids: ["project-999"] })], EVIDENCE);
+  assert.equal(v.ok, false);
+  assert.ok(v.errors.some((e) => e.message.includes("project-999")));
 });
 
 test("validateStories flags duplicate ids", () => {

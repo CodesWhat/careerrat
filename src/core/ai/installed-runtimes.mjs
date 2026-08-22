@@ -39,6 +39,15 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     // a real per-call tool restriction, the way this one was verified against
     // the real installed `claude` CLI (see the file header comment).
     chatToolProfileSupported: true,
+    // The only installed runtime whose CLI has a documented NDJSON streaming
+    // output mode (`--output-format stream-json --verbose`, wired in
+    // buildInstalledRuntimeInvocation's "claude" branch below) that emits the
+    // same system/assistant/user/result message shapes the Agent SDK's own
+    // query() does — see runInstalledRuntimeStream. Absent on every other
+    // definition means "no streaming path," deliberately: do not add this key
+    // for another runtime without first verifying its CLI actually has an
+    // equivalent structured incremental-output mode.
+    streamingSupported: true,
   },
   {
     id: "codex",
@@ -275,6 +284,14 @@ export function buildInstalledRuntimeInvocation({
   // is only safe when the spawn's cwd is guaranteed to contain nothing but
   // that one skill.
   skill,
+  // Only meaningful for runtimeId === "claude" (the only definition with
+  // streamingSupported: true — see the registry above). Swaps
+  // `--output-format json` for `--output-format stream-json --verbose`:
+  // stream-json requires --verbose in print mode, per the CLI's own --help.
+  // Ignored for every other runtime; runInstalledRuntimeStream is the only
+  // caller that ever sets this true, and it already gates on
+  // streamingSupported before getting here.
+  streaming = false,
 } = {}) {
   const common = {
     command: executablePath,
@@ -305,7 +322,8 @@ export function buildInstalledRuntimeInvocation({
       // keeps exactly today's --safe-mode behavior.
       ...(skill ? ["--setting-sources", "project"] : ["--safe-mode"]),
       "--output-format",
-      "json",
+      streaming ? "stream-json" : "json",
+      ...(streaming ? ["--verbose"] : []),
       "--permission-mode",
       "dontAsk",
       "--no-session-persistence",
@@ -970,6 +988,288 @@ export async function runInstalledRuntime({
     return { ...result, runtimeId: runtime.id };
   } finally {
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+    if (skillCwd) rmSync(skillCwd, { recursive: true, force: true });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// runInstalledRuntimeStream — the streaming sibling of runInstalledRuntime,
+// added so a chat turn over the installed "claude" runtime can surface real
+// tool_use/tool_result activity while the turn is still running instead of
+// going dark until process exit (the bug this fix closes: startInstalledSession
+// never called loadSdk, so chat-runtime.mjs's own runInstalledTurn only ever
+// had ONE json envelope to work with, at the very end).
+//
+// Capability-gated: only a runtime with streamingSupported: true in the
+// registry above (today, only "claude") may call this. Every other installed
+// runtime (codex, gemini, opencode, ...) keeps going through the single-shot
+// runInstalledRuntime unchanged — this function throws RUNTIME_STREAMING_UNSUPPORTED
+// before spawning anything if asked to run one of them.
+//
+// Deliberately does NOT import or duplicate skill-runtime.mjs's mapSdkMessage:
+// installed-runtimes.mjs sits below skill-runtime.mjs in the dependency graph
+// (skill-runtime.mjs already imports runInstalledRuntime from here), so
+// importing the other direction would be a cycle. Instead this function is a
+// pure NDJSON-line-to-raw-message pump — one parsed JSON object per `onMessage`
+// call, in arrival order, using the exact same message shapes (`type`:
+// system/assistant/user/result, snake_case fields) the claude CLI's
+// stream-json output shares with the Agent SDK's own query() messages (both
+// are produced by the same underlying engine). Callers (chat-runtime.mjs)
+// already import mapSdkMessage for the SDK path and can feed each raw message
+// through the identical mapper here, so the two routes can never drift on
+// frame shape.
+//
+// Malformed lines are skipped, never thrown — a single corrupted NDJSON line
+// must not crash an otherwise-healthy chat turn. Partial lines (a chunk
+// boundary landing mid-JSON-object) are buffered and only parsed once a
+// trailing newline completes them.
+// ---------------------------------------------------------------------------
+
+export function supportsInstalledRuntimeStreaming(runtimeId) {
+  const definition = INSTALLED_RUNTIME_DEFINITIONS.find(({ id }) => id === runtimeId);
+  return Boolean(definition?.streamingSupported);
+}
+
+export const RUNTIME_STREAMING_UNSUPPORTED = "RUNTIME_STREAMING_UNSUPPORTED";
+
+export async function runInstalledRuntimeStream({
+  runtime,
+  prompt,
+  model,
+  tools = [],
+  cwd,
+  env = process.env,
+  signal,
+  timeoutMs = ONE_SHOT_RUNTIME_TIMEOUT_MS,
+  spawnImpl = spawn,
+  // Skill this call is running — same isolated-cwd semantics as
+  // runInstalledRuntime's own skill/repoRoot params (see
+  // materializeIsolatedSkillCwd and buildInstalledRuntimeInvocation above).
+  skill = null,
+  repoRoot = null,
+  // Called once per raw NDJSON message, in stream order, as soon as it's
+  // fully parsed — including the terminal "result" message. A throwing
+  // callback must never break the pump; caught and dropped.
+  onMessage,
+} = {}) {
+  if (!runtime?.id || !runtime?.path) {
+    throw runtimeError("No installed AI runtime is selected.", "RUNTIME_NOT_SELECTED");
+  }
+  if (!supportsInstalledRuntimeStreaming(runtime.id)) {
+    throw runtimeError(
+      `${runtime.name || runtime.id} has no streaming output mode, so it cannot run a streaming ` +
+        "installed turn.",
+      RUNTIME_STREAMING_UNSUPPORTED,
+      { runtimeId: runtime.id }
+    );
+  }
+  if (signal?.aborted) {
+    throw runtimeError("Installed AI request was cancelled.", "RUNTIME_CANCELLED");
+  }
+  // Same fail-closed guard as runInstalledRuntime — kept here too so a future
+  // streamingSupported runtime with no tool-allowlist mechanism can't slip
+  // the restricted chat tool profile through this path either.
+  if (isRestrictedChatToolProfile(tools)) {
+    const definition = INSTALLED_RUNTIME_DEFINITIONS.find(({ id }) => id === runtime.id);
+    if (!definition?.chatToolProfileSupported) {
+      throw runtimeError(
+        `${definition?.name || runtime.id} has no tool-allowlist mechanism, so it cannot run ` +
+          "CareerRat's restricted research-chat tool profile (network access without local file " +
+          "access).",
+        RUNTIME_TOOL_PROFILE_UNSUPPORTED,
+        { runtimeId: runtime.id }
+      );
+    }
+  }
+
+  let skillCwd = null;
+  try {
+    // Same isolation rule as runInstalledRuntime's own comment: only skip
+    // cwd=repoRoot when the granted tool profile has no Read/Glob/Grep.
+    const requiresRepoCwd = ["Read", "Glob", "Grep"].some((tool) => tools.includes(tool));
+    if (runtime.id === "claude" && skill && !requiresRepoCwd) {
+      skillCwd = materializeIsolatedSkillCwd({ repoRoot, skill });
+    }
+    const invocation = buildInstalledRuntimeInvocation({
+      runtimeId: runtime.id,
+      executablePath: runtime.path,
+      model,
+      tools,
+      skill: skillCwd ? skill : undefined,
+      streaming: true,
+    });
+
+    const result = await new Promise((resolve, reject) => {
+      let child;
+      try {
+        child = spawnImpl(invocation.command, invocation.args, {
+          ...invocation.options,
+          cwd: skillCwd || cwd,
+          env,
+          detached: process.platform !== "win32",
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+      } catch (error) {
+        reject(
+          runtimeError("Could not start the selected AI CLI.", "RUNTIME_SPAWN", { cause: error })
+        );
+        return;
+      }
+
+      let lineBuffer = "";
+      let stderr = "";
+      let outputBytes = 0;
+      let settled = false;
+      let timedOut = false;
+      let cancelled = false;
+      let finalResult = null;
+
+      const finish = (callback) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", abort);
+        callback();
+      };
+      const abort = () => {
+        cancelled = true;
+        killRuntimeProcess(child);
+      };
+      const timer = setTimeout(
+        () => {
+          timedOut = true;
+          killRuntimeProcess(child);
+        },
+        Math.max(1, timeoutMs)
+      );
+      timer.unref?.();
+      signal?.addEventListener("abort", abort, { once: true });
+
+      // One NDJSON line -> one parsed message -> one onMessage call. A line
+      // that fails to parse (a chunk boundary that split mid-object and never
+      // recombines cleanly, or genuinely corrupt output) is skipped rather
+      // than thrown — this pump must survive a single bad line.
+      function handleLine(line) {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        let message;
+        try {
+          message = JSON.parse(trimmed);
+        } catch {
+          return;
+        }
+        if (message?.type === "result") finalResult = message;
+        try {
+          onMessage?.(message);
+        } catch {
+          // a caller's own mapping/dispatch error must never break the pump
+        }
+      }
+
+      child.stdout?.on("data", (chunk) => {
+        outputBytes += chunk.length;
+        if (outputBytes > MAX_RUNTIME_OUTPUT_BYTES) {
+          killRuntimeProcess(child);
+          return;
+        }
+        lineBuffer += chunk.toString("utf8");
+        const lines = lineBuffer.split("\n");
+        // The last element is either "" (the chunk ended exactly on a
+        // newline) or a partial line still waiting for more data — either
+        // way it's not yet a complete line, so it goes back into the buffer
+        // rather than through handleLine.
+        lineBuffer = lines.pop() ?? "";
+        for (const line of lines) handleLine(line);
+      });
+      child.stderr?.on("data", (chunk) => {
+        outputBytes += chunk.length;
+        if (outputBytes > MAX_RUNTIME_OUTPUT_BYTES) {
+          killRuntimeProcess(child);
+          return;
+        }
+        stderr += chunk.toString("utf8");
+      });
+      child.on("error", (error) => {
+        finish(() =>
+          reject(
+            runtimeError("Could not start the selected AI CLI.", "RUNTIME_SPAWN", { cause: error })
+          )
+        );
+      });
+      child.on("close", (status, closeSignal) => {
+        finish(() => {
+          // Flush a final complete-but-unterminated line (a process that
+          // exits without a trailing newline after its last NDJSON object).
+          if (lineBuffer.trim()) handleLine(lineBuffer);
+          if (cancelled) {
+            reject(runtimeError("Installed AI request was cancelled.", "RUNTIME_CANCELLED"));
+            return;
+          }
+          if (timedOut) {
+            reject(runtimeError("Installed AI request timed out.", "RUNTIME_TIMEOUT"));
+            return;
+          }
+          if (outputBytes > MAX_RUNTIME_OUTPUT_BYTES) {
+            reject(
+              runtimeError(
+                "Installed AI output exceeded the 10MB safety limit.",
+                "RUNTIME_OUTPUT_LIMIT"
+              )
+            );
+            return;
+          }
+          if (status !== 0) {
+            const diagnostic = safeRuntimeDiagnostic(stderr);
+            reject(
+              runtimeError(
+                `Installed AI CLI exited with status ${status}${diagnostic ? `: ${diagnostic}` : "."}`,
+                "RUNTIME_EXIT",
+                { exitStatus: status, signal: closeSignal || null }
+              )
+            );
+            return;
+          }
+          if (!finalResult) {
+            reject(
+              runtimeError(
+                "Installed AI CLI exited without a result event.",
+                "RUNTIME_RESULT_MISSING"
+              )
+            );
+            return;
+          }
+          if (finalResult.is_error === true || finalResult.subtype === "error") {
+            reject(
+              runtimeError(
+                safeRuntimeDiagnostic(finalResult.result) ||
+                  "Claude CLI reported an unsuccessful result.",
+                "RUNTIME_RESULT_ERROR"
+              )
+            );
+            return;
+          }
+          const structured = finalResult.structured_output;
+          resolve({
+            text:
+              structured === undefined
+                ? String(finalResult.result || "").trim()
+                : JSON.stringify(structured),
+            usage: finalResult.usage || null,
+            model: finalResult.model || null,
+            sessionId: finalResult.session_id || null,
+          });
+        });
+      });
+
+      child.stdin?.on("error", () => {
+        // A fast process can close stdin before the write completes; close/error
+        // handling above owns the final outcome.
+      });
+      child.stdin?.end(String(prompt || ""));
+    });
+
+    return { ...result, runtimeId: runtime.id };
+  } finally {
     if (skillCwd) rmSync(skillCwd, { recursive: true, force: true });
   }
 }

@@ -19,7 +19,7 @@ import { hasConfiguredCompensationFloor } from "../../profile/compensation.mjs";
 import { validate } from "../../profile/schema-validator.mjs";
 import { openDb, requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
-import { bumpMeta, logActivityEvent } from "./shared.mjs";
+import { bumpMeta, logActivityEvent, runVerb } from "./shared.mjs";
 
 const PRODUCT_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 
@@ -614,58 +614,60 @@ export function candidateConfigPatch({ repoRoot, env, name, patch, recordActivit
     throw err;
   }
 
-  const db = requireDb({ repoRoot, env });
-  const result = withTransaction(db, () => {
-    if (name === "targeting") {
-      const current = readTargeting(db);
-      const merged = deepMerge(current, patch);
-      merged.role_buckets = normalizeSearchTracks(merged.role_buckets);
-      merged.tracked_companies = compactStrings(merged.tracked_companies);
-      merged.excluded_companies = compactStrings(merged.excluded_companies);
-      assertValid("targeting", merged);
-      const { role_buckets, tracked_companies, excluded_companies, ...base } = merged;
-      putSingleton(db, "candidate_targeting", base);
-      putSearchTracks(db, role_buckets);
-      putCompanies(db, "target", tracked_companies);
-      putCompanies(db, "excluded", excluded_companies);
-      return completeCandidateConfigWrite(
-        db,
-        name,
-        { data: readTargeting(db), setup: refreshCandidateSetup(db) },
-        { recordActivity }
-      );
-    }
+  return runVerb(
+    { repoRoot, env },
+    (db) => {
+      if (name === "targeting") {
+        const current = readTargeting(db);
+        const merged = deepMerge(current, patch);
+        merged.role_buckets = normalizeSearchTracks(merged.role_buckets);
+        merged.tracked_companies = compactStrings(merged.tracked_companies);
+        merged.excluded_companies = compactStrings(merged.excluded_companies);
+        assertValid("targeting", merged);
+        const { role_buckets, tracked_companies, excluded_companies, ...base } = merged;
+        putSingleton(db, "candidate_targeting", base);
+        putSearchTracks(db, role_buckets);
+        putCompanies(db, "target", tracked_companies);
+        putCompanies(db, "excluded", excluded_companies);
+        return completeCandidateConfigWrite(
+          db,
+          name,
+          { data: readTargeting(db), setup: refreshCandidateSetup(db) },
+          { recordActivity }
+        );
+      }
 
-    if (name === "application-limits") {
-      const current = readSingleton(
-        db,
-        "candidate_application_limits",
-        DEFAULTS["application-limits"]
-      );
-      const merged = normalizeApplicationLimits(deepMerge(current, patch));
+      if (name === "application-limits") {
+        const current = readSingleton(
+          db,
+          "candidate_application_limits",
+          DEFAULTS["application-limits"]
+        );
+        const merged = normalizeApplicationLimits(deepMerge(current, patch));
+        assertValid(name, merged);
+        putSingleton(db, "candidate_application_limits", merged);
+        return completeCandidateConfigWrite(
+          db,
+          name,
+          { data: merged, setup: refreshCandidateSetup(db) },
+          { recordActivity }
+        );
+      }
+
+      const table = SINGLETON_TABLES[name];
+      const current = readSingleton(db, table, DEFAULTS[name] || {});
+      const merged = deepMerge(current, patch);
       assertValid(name, merged);
-      putSingleton(db, "candidate_application_limits", merged);
+      putSingleton(db, table, merged);
       return completeCandidateConfigWrite(
         db,
         name,
         { data: merged, setup: refreshCandidateSetup(db) },
         { recordActivity }
       );
-    }
-
-    const table = SINGLETON_TABLES[name];
-    const current = readSingleton(db, table, DEFAULTS[name] || {});
-    const merged = deepMerge(current, patch);
-    assertValid(name, merged);
-    putSingleton(db, table, merged);
-    return completeCandidateConfigWrite(
-      db,
-      name,
-      { data: merged, setup: refreshCandidateSetup(db) },
-      { recordActivity }
-    );
-  });
-  return { ok: true, ...result };
+    },
+    { requireExistingTracker: true }
+  );
 }
 
 export function candidateApplicationLimitUpsert({ repoRoot, env, row } = {}) {
@@ -675,31 +677,35 @@ export function candidateApplicationLimitUpsert({ repoRoot, env, row } = {}) {
     err.code = "BAD_REQUEST";
     throw err;
   }
-  const db = requireDb({ repoRoot, env });
-  const result = withTransaction(db, () => {
-    const current = normalizeApplicationLimits(
-      readSingleton(db, "candidate_application_limits", DEFAULTS["application-limits"])
-    );
-    const key = applicationLimitKey(normalized);
-    const existingIndex = current.companies.findIndex((item) => applicationLimitKey(item) === key);
-    if (existingIndex === -1) {
-      current.companies.push(normalized);
-    } else {
-      if (row.status === undefined) normalized.status = current.companies[existingIndex].status;
-      current.companies[existingIndex] = normalizeApplicationLimitRow({
-        ...current.companies[existingIndex],
-        ...normalized,
-        company: current.companies[existingIndex].company,
+  return runVerb(
+    { repoRoot, env },
+    (db) => {
+      const current = normalizeApplicationLimits(
+        readSingleton(db, "candidate_application_limits", DEFAULTS["application-limits"])
+      );
+      const key = applicationLimitKey(normalized);
+      const existingIndex = current.companies.findIndex(
+        (item) => applicationLimitKey(item) === key
+      );
+      if (existingIndex === -1) {
+        current.companies.push(normalized);
+      } else {
+        if (row.status === undefined) normalized.status = current.companies[existingIndex].status;
+        current.companies[existingIndex] = normalizeApplicationLimitRow({
+          ...current.companies[existingIndex],
+          ...normalized,
+          company: current.companies[existingIndex].company,
+        });
+      }
+      assertValid("application-limits", current);
+      putSingleton(db, "candidate_application_limits", current);
+      return completeCandidateConfigWrite(db, "application-limits", {
+        data: current,
+        setup: refreshCandidateSetup(db),
       });
-    }
-    assertValid("application-limits", current);
-    putSingleton(db, "candidate_application_limits", current);
-    return completeCandidateConfigWrite(db, "application-limits", {
-      data: current,
-      setup: refreshCandidateSetup(db),
-    });
-  });
-  return { ok: true, ...result };
+    },
+    { requireExistingTracker: true }
+  );
 }
 
 // The same honesty/privacy backstop src/cli/evidence.mjs's `careerrat evidence
@@ -754,69 +760,71 @@ export function candidateEvidenceMerge({ repoRoot, env, claims, recordActivity =
     throw err;
   }
   assertCleanEvidenceClaims(claims);
-  const db = requireDb({ repoRoot, env });
-  const result = withTransaction(db, () => {
-    const existing = readEvidence(db).claims;
-    const seenClaims = new Map(
-      existing.map((claim) => [String(claim.claim || "").trim(), String(claim.id || "")])
-    );
-    const usedIds = new Set(existing.map((claim) => String(claim.id || "")));
-    const existingById = new Map(existing.map((claim) => [String(claim.id || ""), claim]));
-    const stmt = db.prepare(
-      `INSERT INTO candidate_evidence_claims (id, data, updated_at) VALUES (?, ?, ?)
+  return runVerb(
+    { repoRoot, env },
+    (db) => {
+      const existing = readEvidence(db).claims;
+      const seenClaims = new Map(
+        existing.map((claim) => [String(claim.claim || "").trim(), String(claim.id || "")])
+      );
+      const usedIds = new Set(existing.map((claim) => String(claim.id || "")));
+      const existingById = new Map(existing.map((claim) => [String(claim.id || ""), claim]));
+      const stmt = db.prepare(
+        `INSERT INTO candidate_evidence_claims (id, data, updated_at) VALUES (?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`
-    );
-    let added = 0;
-    let skipped = 0;
-    for (const raw of claims) {
-      const claimText = String(raw?.claim || "").trim();
-      const rawId = raw?.id ? String(raw.id) : "";
-      const existingIdForText = seenClaims.get(claimText);
-      if (!claimText || (existingIdForText && existingIdForText !== rawId)) {
-        skipped += 1;
-        continue;
+      );
+      let added = 0;
+      let skipped = 0;
+      for (const raw of claims) {
+        const claimText = String(raw?.claim || "").trim();
+        const rawId = raw?.id ? String(raw.id) : "";
+        const existingIdForText = seenClaims.get(claimText);
+        if (!claimText || (existingIdForText && existingIdForText !== rawId)) {
+          skipped += 1;
+          continue;
+        }
+        const replacingExistingId = rawId && existingById.has(rawId);
+        const id =
+          rawId && (!usedIds.has(rawId) || existingIdForText === rawId || replacingExistingId)
+            ? rawId
+            : nextClaimId(usedIds);
+        if (replacingExistingId) {
+          const previousClaimText = String(existingById.get(rawId)?.claim || "").trim();
+          if (previousClaimText && previousClaimText !== claimText)
+            seenClaims.delete(previousClaimText);
+        }
+        seenClaims.set(claimText, id);
+        usedIds.add(id);
+        const data = { ...raw, id, claim: claimText, evidence: String(raw?.evidence || "") };
+        stmt.run(id, JSON.stringify(data), new Date().toISOString());
+        added += 1;
       }
-      const replacingExistingId = rawId && existingById.has(rawId);
-      const id =
-        rawId && (!usedIds.has(rawId) || existingIdForText === rawId || replacingExistingId)
-          ? rawId
-          : nextClaimId(usedIds);
-      if (replacingExistingId) {
-        const previousClaimText = String(existingById.get(rawId)?.claim || "").trim();
-        if (previousClaimText && previousClaimText !== claimText)
-          seenClaims.delete(previousClaimText);
-      }
-      seenClaims.set(claimText, id);
-      usedIds.add(id);
-      const data = { ...raw, id, claim: claimText, evidence: String(raw?.evidence || "") };
-      stmt.run(id, JSON.stringify(data), new Date().toISOString());
-      added += 1;
-    }
-    const evidence = readEvidence(db);
-    assertValid("evidence", evidence);
-    const meta = added > 0 && recordActivity ? bumpMeta(db) : null;
-    const event =
-      added > 0 && recordActivity
-        ? logActivityEvent(db, {
-            type: "system",
-            title: "Evidence bank updated",
-            summary: `${added} evidence ${added === 1 ? "claim" : "claims"} saved${
-              skipped ? `; ${skipped} duplicate${skipped === 1 ? "" : "s"} skipped` : ""
-            }.`,
-            tags: ["operation:candidate:evidence-save"],
-          })
-        : null;
-    return {
-      added,
-      skipped,
-      total: evidence.claims.length,
-      data: evidence,
-      setup: refreshCandidateSetup(db),
-      meta,
-      event,
-    };
-  });
-  return { ok: true, ...result };
+      const evidence = readEvidence(db);
+      assertValid("evidence", evidence);
+      const meta = added > 0 && recordActivity ? bumpMeta(db) : null;
+      const event =
+        added > 0 && recordActivity
+          ? logActivityEvent(db, {
+              type: "system",
+              title: "Evidence bank updated",
+              summary: `${added} evidence ${added === 1 ? "claim" : "claims"} saved${
+                skipped ? `; ${skipped} duplicate${skipped === 1 ? "" : "s"} skipped` : ""
+              }.`,
+              tags: ["operation:candidate:evidence-save"],
+            })
+          : null;
+      return {
+        added,
+        skipped,
+        total: evidence.claims.length,
+        data: evidence,
+        setup: refreshCandidateSetup(db),
+        meta,
+        event,
+      };
+    },
+    { requireExistingTracker: true }
+  );
 }
 
 function nextClaimId(usedIds) {
@@ -840,34 +848,36 @@ export function candidateEvidenceRemoveOne({ repoRoot, env, id } = {}) {
     err.code = "BAD_REQUEST";
     throw err;
   }
-  const db = requireDb({ repoRoot, env });
-  const result = withTransaction(db, () => {
-    const existing = db
-      .prepare("SELECT data FROM candidate_evidence_claims WHERE id = ?")
-      .get(claimId);
-    if (!existing) {
-      const err = new Error(`evidence claim not found: "${claimId}"`);
-      err.code = "NOT_FOUND";
-      throw err;
-    }
-    db.prepare("DELETE FROM candidate_evidence_claims WHERE id = ?").run(claimId);
-    const removedClaim = JSON.parse(existing.data);
-    const meta = bumpMeta(db);
-    const event = logActivityEvent(db, {
-      type: "system",
-      title: "Evidence claim removed",
-      summary: String(removedClaim?.claim || "Removed one saved evidence claim.").slice(0, 120),
-      tags: ["operation:candidate:evidence-remove"],
-    });
-    return {
-      removed: claimId,
-      data: readEvidence(db),
-      setup: refreshCandidateSetup(db),
-      meta,
-      event,
-    };
-  });
-  return { ok: true, ...result };
+  return runVerb(
+    { repoRoot, env },
+    (db) => {
+      const existing = db
+        .prepare("SELECT data FROM candidate_evidence_claims WHERE id = ?")
+        .get(claimId);
+      if (!existing) {
+        const err = new Error(`evidence claim not found: "${claimId}"`);
+        err.code = "NOT_FOUND";
+        throw err;
+      }
+      db.prepare("DELETE FROM candidate_evidence_claims WHERE id = ?").run(claimId);
+      const removedClaim = JSON.parse(existing.data);
+      const meta = bumpMeta(db);
+      const event = logActivityEvent(db, {
+        type: "system",
+        title: "Evidence claim removed",
+        summary: String(removedClaim?.claim || "Removed one saved evidence claim.").slice(0, 120),
+        tags: ["operation:candidate:evidence-remove"],
+      });
+      return {
+        removed: claimId,
+        data: readEvidence(db),
+        setup: refreshCandidateSetup(db),
+        meta,
+        event,
+      };
+    },
+    { requireExistingTracker: true }
+  );
 }
 
 export function candidateArtifactPut({ repoRoot, env, id, kind, data } = {}) {
