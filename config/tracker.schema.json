@@ -40,8 +40,8 @@
           "benefits": { "type": ["array", "null"], "items": { "type": "string" }, "description": "Canonical benefit keys (see src/core/tracker/benefits.mjs) extracted from the JD/comp text; rendered as emoji chips in the drawer." },
           "sub":    { "type": ["boolean", "null"] },
           "warn":   { "type": ["string", "null"] },
-          "note":   { "type": ["string", "null"], "maxLength": 60, "description": "INTERNAL ONLY — never rendered on a card or row (search text + submission one-liner). One topic, ≤60 chars, e.g. 'Greenhouse — submitted, confirmation received.' Topic-routed display content goes to the typed fields below (see AGENTS.md Tracker Content Register)." },
-          "interviewNote": { "type": ["string", "null"], "maxLength": 60, "description": "Single-clause interview logistics for the Focus card + drawer Interview section. Format: '<Round> — <Weekday> <Date> <Time> TZ with <First Name>', e.g. 'Onsite loop — Tue 03-10 14:00 PT with Alex Rivera'. Nothing about comp/fit." },
+          "note":   { "type": ["string", "null"], "description": "INTERNAL ONLY — never rendered on a card or row (search text + submission one-liner). One topic, ≤60 chars, e.g. 'Greenhouse — submitted, confirmation received.' Topic-routed display content goes to the typed fields below (see AGENTS.md Tracker Content Register)." },
+          "interviewNote": { "type": ["string", "null"], "description": "Single-clause interview logistics for the Focus card + drawer Interview section. Format: '<Round> — <Weekday> <Date> <Time> TZ with <First Name>', e.g. 'Onsite loop — Tue 03-10 14:00 PT with Alex Rivera'. Nothing about comp/fit." },
           "interviewAt": { "type": ["string", "null"], "description": "ISO datetime of the FIRST scheduled interview round. Owner: schedule-meeting (writes it on booking confirm, in the same atomic write as the conversations[] entry + interviewNote). A real FUTURE value here is the ONLY thing that makes an interview the dashboard Focus (scheduledInterviewAt → buildInterviewFocus) — it is never inferred from notes/role text. Cleared (set null) by track-outcomes when the round completes." },
           "nextInterviewAt": { "type": ["string", "null"], "description": "ISO datetime of the NEXT scheduled interview round; supersedes interviewAt once a follow-on is booked, and is read first by the Focus card. Owner: schedule-meeting. Cleared by track-outcomes after the round." },
           "interviewDate": { "type": ["string", "null"], "description": "LEGACY read-only alias for interviewAt (older data / the deprecated nextInterviewDate). New writes MUST use interviewAt/nextInterviewAt; kept only as a render fallback." },
@@ -53,22 +53,22 @@
               "dueAt":         { "type": ["string", "null"], "description": "ISO date/datetime the follow-up is due; surfaces in Next Steps once dueAt <= now." },
               "kind":          { "type": ["string", "null"], "description": "Follow-up type, e.g. 'post-round-follow-up' or 'nudge'. Do NOT use the word 'interview' — this is a follow-up, not a scheduled round." },
               "title":         { "type": ["string", "null"] },
-              "note":          { "type": ["string", "null"], "maxLength": 160 },
+              "note":          { "type": ["string", "null"] },
               "draft":         { "type": ["string", "null"], "description": "Optional drafted follow-up message body." },
               "generatedAt":   { "type": ["string", "null"], "description": "ISO timestamp the follow-up/draft was generated." },
               "nextActionDue": { "type": ["string", "null"], "description": "ISO date the next action is due (cadence)." },
               "sentCount":     { "type": ["number", "null"], "description": "How many follow-ups already sent on this thread." }
             }
           },
-          "statusNote": { "type": ["string", "null"], "maxLength": 120, "description": "One-sentence present-tense live state for the jobs card. e.g. 'Awaiting HM debrief — recruiter screen cleared 06-12.' No ATS mechanics, no comp intel." },
-          "compNote": { "type": ["string", "null"], "maxLength": 140, "description": "DRAWER ONLY — one sentence of comp/band/negotiation intel. Uses target_base / minimum_base, never current_base. e.g. 'Job code budgeted ~$175K, max $205K; team discourages top-of-band placements.'" },
+          "statusNote": { "type": ["string", "null"], "description": "One-sentence present-tense live state for the jobs card. e.g. 'Awaiting HM debrief — recruiter screen cleared 06-12.' No ATS mechanics, no comp intel." },
+          "compNote": { "type": ["string", "null"], "description": "DRAWER ONLY — one sentence of comp/band/negotiation intel. Uses target_base / minimum_base, never current_base. e.g. 'Job code budgeted ~$175K, max $205K; team discourages top-of-band placements.'" },
           "roleFit": {
             "type": ["object", "null"],
             "additionalProperties": true,
             "description": "DRAWER ONLY — structured fit signals (not prose). Renders as two bullet lists.",
             "properties": {
-              "why":   { "type": ["array", "null"], "items": { "type": "string", "maxLength": 80 }, "description": "Up to 3 reasons it fits, ≤80 chars each." },
-              "risks": { "type": ["array", "null"], "items": { "type": "string", "maxLength": 80 }, "description": "Up to 3 gaps/caveats/flags, ≤80 chars each." }
+              "why":   { "type": ["array", "null"], "items": { "type": "string" }, "description": "Up to 3 reasons it fits, ≤80 chars each." },
+              "risks": { "type": ["array", "null"], "items": { "type": "string" }, "description": "Up to 3 gaps/caveats/flags, ≤80 chars each." }
             }
           },
           "evaluation": {
@@ -79,7 +79,7 @@
               "gate": { "type": "string", "enum": ["keep", "review", "cut"] },
               "fitScore": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
               "fitBucket": { "type": ["string", "null"], "enum": ["high", "med", "stretch", null] },
-              "fitSummary": { "type": ["string", "null"], "maxLength": 160 },
+              "fitSummary": { "type": ["string", "null"] },
               "compensation": {
                 "type": ["object", "null"],
                 "additionalProperties": true,
@@ -89,11 +89,11 @@
                   "minBase": { "type": ["number", "null"], "minimum": 0 },
                   "maxBase": { "type": ["number", "null"], "minimum": 0 },
                   "source": { "type": "string", "enum": ["job-description", "market", "unknown"] },
-                  "summary": { "type": ["string", "null"], "maxLength": 140 }
+                  "summary": { "type": ["string", "null"] }
                 }
               },
-              "fitReasons": { "type": ["array", "null"], "maxItems": 3, "items": { "type": "string", "maxLength": 80 } },
-              "fitRisks": { "type": ["array", "null"], "maxItems": 3, "items": { "type": "string", "maxLength": 80 } },
+              "fitReasons": { "type": ["array", "null"], "maxItems": 3, "items": { "type": "string" } },
+              "fitRisks": { "type": ["array", "null"], "maxItems": 3, "items": { "type": "string" } },
               "confidence": { "type": ["string", "null"], "enum": ["low", "medium", "high", null] },
               "evaluatedAt": { "type": ["string", "null"] }
             }
@@ -123,7 +123,7 @@
                   "additionalProperties": true,
                   "properties": {
                     "id": { "type": "string" },
-                    "gapText": { "type": "string", "maxLength": 80, "description": "VERBATIM from the evaluation's fitRisks — never restated by the model." },
+                    "gapText": { "type": "string", "description": "VERBATIM from the evaluation's fitRisks — never restated by the model." },
                     "suggestion": {
                       "type": "object",
                       "additionalProperties": true,
@@ -133,11 +133,11 @@
                           "type": ["object", "null"],
                           "additionalProperties": true,
                           "properties": {
-                            "claim": { "type": ["string", "null"], "maxLength": 200 },
-                            "evidence": { "type": ["string", "null"], "maxLength": 300 }
+                            "claim": { "type": ["string", "null"] },
+                            "evidence": { "type": ["string", "null"] }
                           }
                         },
-                        "rationale": { "type": ["string", "null"], "maxLength": 160 }
+                        "rationale": { "type": ["string", "null"] }
                       }
                     },
                     "status": { "type": "string", "enum": ["open", "closed", "dismissed"] }
@@ -182,9 +182,9 @@
                 "stage":     { "type": ["string", "null"], "description": "Canonical stage id for this round — the STAGE_ORDER vocabulary (src/core/tracker/dashboard-data.js).", "enum": ["sourced", "reviewed-hold", "manual-apply", "applied", "screen", "interview", "assessment", "technical", "hiring-manager", "onsite", "final", "offer", "accepted", "rejected", "withdrawn", null] },
                 "outcome":   { "type": ["string", "null"], "description": "Result of this round. 'pending' = the round happened and is awaiting a decision.", "enum": ["pending", "advanced", "rejected", "cancelled", null] },
                 "who":       { "type": ["string", "null"] },
-                "notes":     { "type": ["string", "null"], "maxLength": 200, "description": "2 sentences max: what happened + immediate next step. Comp/process/coaching go in the typed sibling fields, not here." },
-                "compNote":  { "type": ["string", "null"], "maxLength": 140, "description": "One-sentence comp signal heard on this call (else omit)." },
-                "processNote": { "type": ["string", "null"], "maxLength": 160, "description": "One sentence: next round + who + approximate timing (else omit)." },
+                "notes":     { "type": ["string", "null"], "description": "2 sentences max: what happened + immediate next step. Comp/process/coaching go in the typed sibling fields, not here." },
+                "compNote":  { "type": ["string", "null"], "description": "One-sentence comp signal heard on this call (else omit)." },
+                "processNote": { "type": ["string", "null"], "description": "One sentence: next round + who + approximate timing (else omit)." },
                 "learnings": {
                   "type": ["array", "null"],
                   "description": "DRAWER ONLY — labeled coaching/signal items from this call. Up to 5, no prose.",
@@ -192,8 +192,8 @@
                     "type": "object",
                     "additionalProperties": true,
                     "properties": {
-                      "label": { "type": ["string", "null"], "maxLength": 50 },
-                      "note":  { "type": ["string", "null"], "maxLength": 100 }
+                      "label": { "type": ["string", "null"] },
+                      "note":  { "type": ["string", "null"] }
                     }
                   }
                 },
