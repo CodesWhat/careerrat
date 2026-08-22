@@ -105,6 +105,37 @@ test("appendToSequence is idempotent when the value already exists", () => {
   assert.equal(out.text, EXCLUDE_FIXTURE);
 });
 
+test("appendToSequence is idempotent against an existing entry with a trailing inline comment", () => {
+  // A commented entry ('- "Palantir" # note') must still be recognized as the
+  // same value on re-add — otherwise it duplicates on every run and the
+  // existing (commented) line must stay untouched.
+  const fixture = `excluded_companies:
+  - "Palantir" # laid off my friend there
+  - "Tesla"
+degree_policy: "flexible"
+`;
+  const out = appendToSequence(fixture, ["excluded_companies"], "Palantir");
+  assert.equal(out.ok, true);
+  assert.equal(out.changed, false);
+  assert.equal(out.text, fixture); // the commented line is left exactly as-is
+});
+
+test("appendToSequence recognizes a single-quoted commented entry too", () => {
+  const fixture = "excluded_companies:\n  - 'Palantir' # note\n";
+  const out = appendToSequence(fixture, ["excluded_companies"], "Palantir");
+  assert.equal(out.changed, false);
+});
+
+test("appendToSequence still appends a genuinely new value alongside a commented sibling", () => {
+  const fixture = `excluded_companies:
+  - "Palantir" # laid off my friend there
+`;
+  const out = appendToSequence(fixture, ["excluded_companies"], "Acme Corp");
+  assert.equal(out.changed, true);
+  assert.match(out.text, /- "Palantir" # laid off my friend there/); // untouched
+  assert.match(out.text, /- "Acme Corp"/);
+});
+
 test("appendToSequence matches unquoted sibling style", () => {
   const fixture = "cut_signals:\n  - pure research\n  - on-call heavy\n";
   const out = appendToSequence(fixture, ["cut_signals"], "ml-research");

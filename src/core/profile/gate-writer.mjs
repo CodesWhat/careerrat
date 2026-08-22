@@ -158,6 +158,24 @@ function unquote(s) {
   return t;
 }
 
+// Strip a trailing inline comment (`# ...`) from a raw sequence-item value
+// before comparing it. A `#` inside a quoted scalar is content, not a comment
+// marker, so this only strips one that sits outside any quotes — matching how
+// the rest of this file's line-oriented editing treats YAML.
+function stripInlineComment(s) {
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "'" && !inDouble) inSingle = !inSingle;
+    else if (ch === '"' && !inSingle) inDouble = !inDouble;
+    else if (ch === "#" && !inSingle && !inDouble && (i === 0 || /\s/.test(s[i - 1]))) {
+      return s.slice(0, i).trim();
+    }
+  }
+  return s;
+}
+
 // A string is safe to emit bare (unquoted) only if it can't be misread as YAML.
 function needsQuote(s) {
   return (
@@ -244,8 +262,13 @@ export function appendToSequence(text, pathParts, value) {
     else break; // mapping content under the key — not a flat sequence
   }
 
-  // Idempotency: bail if the value is already present.
-  const existing = items.map((it) => unquote(it.raw.trimStart().replace(/^-\s*/, "")));
+  // Idempotency: bail if the value is already present. Strip a trailing inline
+  // comment before unquoting — otherwise a commented existing entry (e.g.
+  // `- "Palantir"  # note`) never matches a re-added bare value and the
+  // append duplicates it every time. The existing line is left untouched.
+  const existing = items.map((it) =>
+    unquote(stripInlineComment(it.raw.trimStart().replace(/^-\s*/, "")))
+  );
   if (existing.some((v) => v === String(value))) {
     return { ok: true, changed: false, text };
   }
