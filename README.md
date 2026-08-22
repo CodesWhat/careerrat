@@ -50,8 +50,10 @@ macOS users can also download the signed, notarized desktop app from the
 [latest release](https://github.com/CodesWhat/careerrat/releases/latest).
 
 That sets up your workspace, opens the local app at `http://localhost:7777`, and
-hands you off to the agent. From there you just talk to it. No dashboard to
-learn first, no settings to get right before it's useful.
+hands you off to the agent. From there you just talk to it, and watch it work:
+each step shows up as a small activity line, reading your resume, searching the
+web, writing, instead of narrated text. No dashboard to learn first, no settings
+to get right before it's useful.
 
 ### Your first hour
 
@@ -62,18 +64,27 @@ learn first, no settings to get right before it's useful.
 2. **Paste a job posting**, a link, or the sample in `examples/sample-jobs/`, and
    say *"evaluate this."* You'll get a verdict: keep it or cut it, how well it
    actually fits, whether the money works, and what to do next. All from a real
-   read of the posting, not a keyword match.
+   read of the posting, not a keyword match. You'll see it fetch and read the
+   posting as activity lines before the verdict lands.
 3. **Say "write a résumé and cover letter for this."** It builds them from your
    own evidence and refuses to invent anything you didn't tell it.
 4. **Paste a recruiter email** and say *"draft a reply."* It writes the reply and
    remembers the thread, so the next one has context.
 5. **Open `http://localhost:7777`** and watch the job land, move through your
-   funnel, and pick up history as you go. Quick actions happen right there;
-   anything longer opens a visible conversation with the skill doing the work.
+   funnel, and pick up history as you go. Every step in the chat shows as a
+   plain-language activity line, an icon plus a label like "Searching the web"
+   or "Reading files," with a spinner that settles once it's done. The
+   assistant only speaks up to ask a question or hand you a result.
 
 **One first-run thing that looks broken but isn't:** before you've onboarded,
 `careerrat doctor` will report your setup is incomplete and list `candidate/*.yml`
 files to create. That's expected. Onboarding fills them in.
+
+<p align="center">
+  <img src="assets/screenshots/chat-activity.gif" alt="Activity lines streaming in the CareerRat chat, each showing an icon, a plain-language label, and a spinner that settles when the step finishes" width="720">
+</p>
+
+<p align="center"><em>Activity lines streaming while CareerRat researches market comp.</em></p>
 
 ### Everyday commands
 
@@ -143,6 +154,13 @@ workspace and serves the local app, but the job-search work happens inside your
 own agent, reading a set of skills that spell out how each step gets done.
 That's why you talk to it in plain language instead of memorizing subcommands,
 and why the first run just detects which AI CLI you have and gets out of the way.
+
+<p align="center">
+  <img src="assets/screenshots/chat-activity-pending.png" alt="A CareerRat chat activity line mid-run, a spinner live next to Searching the web while the research-comp skill works" width="560">
+</p>
+
+<p align="center"><em>Activity lines mid-run: "Using the research-comp skill,"
+"Searching the web."</em></p>
 
 The rule underneath all of it: **no tailoring, no applying, until the job has
 passed a real read of the posting.** Titles and keywords are triage, not truth.
