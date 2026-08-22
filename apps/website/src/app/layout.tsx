@@ -35,7 +35,7 @@ const archivo = localFont({
 });
 
 const siteDescription =
-  "CareerRat is a chat-first job-search tracker. Rate the jobs worth chasing, apply with honest evidence-backed artifacts, and track every outcome. Free, local-first, and run by the AI CLI you already have.";
+  "CareerRat is a free Mac app you talk your job hunt through. Rate the jobs worth chasing, apply with honest evidence-backed artifacts, and track every outcome. Local, private, and powered by the AI you already use.";
 
 export const metadata: Metadata = {
   title: "CareerRat: Rate. Apply. Track.",

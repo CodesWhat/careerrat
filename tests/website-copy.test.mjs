@@ -23,7 +23,7 @@ test("website hero leads with the CareerRat pitch", async () => {
   const styles = await readFile("apps/website/src/app/globals.css", "utf8");
 
   assert.match(page, /Your job hunt, run by a rat\./);
-  assert.match(page, /npm i -g careerrat/);
+  assert.match(page, /npm install -g careerrat/);
   assert.doesNotMatch(page, new RegExp(LEGACY_BRAND, "i"));
   assert.doesNotMatch(
     styles,
@@ -37,11 +37,15 @@ test("website leads with the signed Mac app, keeping npm as the cross-platform p
 
   // Hero: the Mac app is the primary framing and the primary CTA.
   assert.match(page, /free Mac app/);
+  assert.match(page, /free Mac app you talk to/);
   assert.match(page, /Download for Mac/);
   assert.match(page, /https:\/\/github\.com\/CodesWhat\/careerrat\/releases\/latest/);
   assert.match(page, /Apple Silicon Macs, signed and notarized\./);
   assert.doesNotMatch(page, /Runs on your own AI CLI/);
   assert.doesNotMatch(page, /Get started, free &amp; open source/);
+  assert.doesNotMatch(page, /bring your AI CLI/);
+  assert.doesNotMatch(page, /Agent runtime/);
+  assert.doesNotMatch(page, /Self-host it/);
 
   // Get section: the Mac app leads, npm is the explicit second, cross-platform path.
   assert.match(page, /On a Mac/);
@@ -52,8 +56,32 @@ test("website leads with the signed Mac app, keeping npm as the cross-platform p
 
   // npm stays on the page as the cross-platform option; a regression back to
   // an npm-first hero or Get section fails this test by name.
-  assert.match(page, /npm i -g careerrat/);
   assert.match(page, /npm install -g careerrat/);
+});
+
+test("website frames app captures in a flat window chrome", async () => {
+  const page = await readFile("apps/website/src/app/page.tsx", "utf8");
+  const styles = await readFile("apps/website/src/app/globals.css", "utf8");
+
+  // Both the hero screenshot and the steps-demo gif render inside the
+  // app-window wrapper, not bare against the page background.
+  assert.match(
+    page,
+    /className="app-window"[\s\S]{0,400}chat-activity-pending\.png/,
+    "hero screenshot should be wrapped in the flat app-window chrome"
+  );
+  assert.match(
+    page,
+    /className="app-window"[\s\S]{0,400}chat-activity\.gif/,
+    "steps-demo gif should be wrapped in the flat app-window chrome"
+  );
+
+  // The wrapper itself stays flat: a hairline border, no shadow.
+  const windowRuleMatch = styles.match(/\.app-window\s*\{([^}]*)\}/);
+  assert.ok(windowRuleMatch, ".app-window rule should exist in globals.css");
+  const windowRule = windowRuleMatch[1];
+  assert.match(windowRule, /border:\s*1px solid var\(--ink\)/);
+  assert.doesNotMatch(windowRule, /box-shadow/);
 });
 
 test("root layout suppresses the intentional early html class hydration delta", async () => {

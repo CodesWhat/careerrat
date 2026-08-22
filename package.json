@@ -1,6 +1,6 @@
 {
   "name": "careerrat",
-  "version": "0.12.1",
+  "version": "0.12.2",
   "private": false,
   "packageManager": "npm@11.19.0",
   "publishConfig": {
