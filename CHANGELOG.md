@@ -25,6 +25,10 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Fixed
 
+- Approving a proposed job source no longer crashes when it also records the company's application system: the two database writes were fighting over the same connection. They now commit together as one change (#183).
+- Edits to your profile, targeting, evidence, and application limits now show up in the tracker file immediately when a workspace has one, instead of waiting for some later unrelated write to refresh it. A workspace that never uses the tracker file stays without one (#183).
+- When a change saves to the database but the tracker file fails to refresh afterwards, the error now says exactly that, instead of looking like the save itself failed. Retrying blindly after that message would have written the change twice (#183).
+- A tracked job saved without a role title no longer breaks outcome analytics for the whole workspace. One such row used to make every later status change crash (#183).
 - One broken job-board provider can no longer take down the whole provider registry. Each of the roughly 80 bundled providers now loads on its own; a bad one is skipped and recorded, and every other source keeps working (#182).
 - The documented setup path for browser automation actually works now. The permission check has always required automation's "advanced" mode, but no CLI command could turn it on, so following the written recipe left every capability stuck off. `careerrat automation mode advanced --write` now exists, and the docs walk through it first (#182).
 - An interview story citing evidence that is not on record is now rejected even when your evidence file is empty. Before, an empty evidence bank switched that check off entirely, which is exactly when an invented citation is most likely (#182).
