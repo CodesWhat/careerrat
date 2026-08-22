@@ -25,6 +25,10 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Fixed
 
+- The packet gate now enforces your excluded-companies list and cut signals itself, before asking the AI anything. A company on your excluded list is cut outright without an AI call, and a job matching one of your cut signals is held for your review instead of trusting the AI not to wave it through (#184).
+- Resuming an interrupted apply session now re-checks the saved verdict and packet on the server before the browser is driven. Previously a resumed session trusted the request's own word that those checks had passed (#184).
+- AI-drafted reply messages now go through the same private-pay and unfinished-placeholder checks as handoff drafts before being saved, and the handoff check itself now also catches phrased-out salary disclosures like "my current salary is", not just the literal field name (#184).
+- Salary-expectation answers on application forms now state your target salary instead of your private walk-away minimum. If you have not set a target, the question comes back marked for you rather than guessing (#184).
 - Approving a proposed job source no longer crashes when it also records the company's application system: the two database writes were fighting over the same connection. They now commit together as one change (#183).
 - Edits to your profile, targeting, evidence, and application limits now show up in the tracker file immediately when a workspace has one, instead of waiting for some later unrelated write to refresh it. A workspace that never uses the tracker file stays without one (#183).
 - When a change saves to the database but the tracker file fails to refresh afterwards, the error now says exactly that, instead of looking like the save itself failed. Retrying blindly after that message would have written the change twice (#183).
