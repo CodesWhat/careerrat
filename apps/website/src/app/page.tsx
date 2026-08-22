@@ -52,11 +52,11 @@ export default function Home() {
               Your job hunt, run by a rat.
             </h1>
             <p className="hero-sub reveal reveal-delay-2">
-              CareerRat is a free Mac app that rates the postings actually
-              worth chasing, applies with honest artifacts drawn from your own
-              evidence, and tracks every outcome. It works with an AI CLI you
-              already have, like Claude Code or Codex, and also runs anywhere
-              via npm.
+              CareerRat is a free Mac app you talk to. Tell it what you want,
+              and it rates the postings actually worth chasing, applies with
+              honest artifacts drawn from your own evidence, and tracks every
+              outcome. It thinks with the AI you already use, like Claude or
+              Codex.
             </p>
             <div className="hero-actions reveal reveal-delay-3">
               <TrackedCtaLink
@@ -91,23 +91,25 @@ export default function Home() {
             <div className="hero-cli-note receipt reveal reveal-delay-4">
               Apple Silicon Macs, signed and notarized.
             </div>
-            <div className="hero-actions reveal reveal-delay-4">
-              <span className="hero-command receipt">
-                or anywhere: npm i -g careerrat
-              </span>
-            </div>
             <div className="hero-cli-note receipt reveal reveal-delay-4">
               Works with Claude Code · Codex · Gemini CLI · OpenCode · more
             </div>
           </div>
           <div className="hero-visual reveal reveal-delay-2">
-            <img
-              className="hero-shot"
-              src="/chat-activity-pending.png"
-              alt="CareerRat chat mid-turn, with a live activity line reading Searching the web and its spinner still spinning"
-              width={1280}
-              height={800}
-            />
+            <div className="app-window">
+              <div className="app-window-chrome" aria-hidden="true">
+                <div className="terminal-dot terminal-dot-red" />
+                <div className="terminal-dot terminal-dot-yellow" />
+                <div className="terminal-dot terminal-dot-green" />
+              </div>
+              <img
+                className="hero-shot"
+                src="/chat-activity-pending.png"
+                alt="CareerRat chat mid-turn, with a live activity line reading Searching the web and its spinner still spinning"
+                width={1280}
+                height={800}
+              />
+            </div>
           </div>
         </div>
       </section>
@@ -130,10 +132,9 @@ export default function Home() {
               <div className="step-index receipt">01</div>
               <h3 className="step-h3">Download and open it</h3>
               <p className="step-p">
-                Grab the Mac app, or install with npm. On first launch it
-                finds supported AI CLIs already on your machine, so you just
-                pick one; CareerRat uses that runtime under its provider's own
-                privacy and retention terms.
+                Grab the app and open it. It spots the AI you already use,
+                asks which one it should think with, and sets everything up.
+                No forms, no account.
               </p>
               <span className="step-chip step-chip-success">
                 CLAUDE CODE · DETECTED
@@ -148,9 +149,7 @@ export default function Home() {
                 fills its own file as you talk: roles, floors, dealbreakers.
                 You can edit any of it by hand.
               </p>
-              <span className="step-chip">
-                ROLES ✓ · GUARDRAILS ✓ · TARGETING.YML UPDATED
-              </span>
+              <span className="step-chip">ROLES ✓ · GUARDRAILS ✓ · SAVED</span>
             </div>
 
             <div className="step-card reveal reveal-delay-3">
@@ -168,14 +167,21 @@ export default function Home() {
             </div>
           </div>
           <div className="steps-demo reveal reveal-delay-3">
-            <img
-              className="steps-demo-gif"
-              src="/chat-activity.gif"
-              alt="CareerRat chat scrolling through activity lines during a comp-research turn, each with an icon, a plain-language label, and a spinner that settles when the step finishes"
-              width={800}
-              height={500}
-              loading="lazy"
-            />
+            <div className="app-window">
+              <div className="app-window-chrome" aria-hidden="true">
+                <div className="terminal-dot terminal-dot-red" />
+                <div className="terminal-dot terminal-dot-yellow" />
+                <div className="terminal-dot terminal-dot-green" />
+              </div>
+              <img
+                className="steps-demo-gif"
+                src="/chat-activity.gif"
+                alt="CareerRat chat scrolling through activity lines during a comp-research turn, each with an icon, a plain-language label, and a spinner that settles when the step finishes"
+                width={800}
+                height={500}
+                loading="lazy"
+              />
+            </div>
             <p className="steps-demo-caption">
               A real comp-research turn: activity lines for reading files,
               searching the web, and writing, no narration needed.
@@ -265,10 +271,9 @@ export default function Home() {
                 </div>
                 <h3>Your stuff stays yours.</h3>
                 <p>
-                  Run CareerRat on your own machine and your résumé, comp
-                  numbers, evidence bank, and full pipeline stay on your
-                  laptop. No account to create, no telemetry, nothing syncing
-                  in the background.
+                  Your résumé, comp numbers, evidence bank, and full pipeline
+                  stay on your laptop. No account to create, no telemetry,
+                  nothing syncing in the background.
                 </p>
                 <div className="privacy-chips" role="list">
                   <span className="privacy-chip" role="listitem">
@@ -337,7 +342,7 @@ export default function Home() {
             <div className="privacy-copy reveal reveal-delay-2">
               <div className="section-label">Privacy as warmth</div>
               <h2 className="section-h2" id="privacy-h2">
-                Self-host it, and your data stays your own.
+                Everything lives on your Mac.
               </h2>
               <p className="section-sub">
                   Job searches are personal. Your comp floor, your reasons for
@@ -345,10 +350,9 @@ export default function Home() {
                   on your machine instead of a hosted CareerRat account.
               </p>
               <p className="section-sub" style={{ marginTop: "16px" }}>
-                No CareerRat signup, telemetry, or background sync. The
-                self-hosted app stores your workspace locally. Requests sent
-                through your chosen AI CLI follow that provider's privacy and
-                retention terms.
+                No CareerRat signup, telemetry, or background sync. The app
+                stores your workspace locally. Requests sent through your
+                chosen AI follow that provider's privacy and retention terms.
               </p>
             </div>
           </div>
@@ -361,15 +365,16 @@ export default function Home() {
           <div className="ai-section reveal">
             <div className="ai-section-inner">
               <div>
-                <div className="section-label">Agent runtime</div>
+                <div className="section-label">Bring your own AI</div>
                 <h2 className="section-h2" id="ai-h2">
                   Works with your favorite AI.
                 </h2>
                 <p className="section-sub">
-                  CareerRat supports multiple agent runtimes instead of locking
-                  the workflow to one provider. The app runs on a supported AI
-                  CLI you already have, including Claude Code, Codex, Gemini
-                  CLI, and OpenCode.
+                  CareerRat doesn&apos;t sell an AI plan and doesn&apos;t lock
+                  you to one provider. It thinks with the AI subscription you
+                  already pay for: Claude Code, OpenAI Codex, Gemini CLI, or
+                  OpenCode. Pick one the first time you open the app, swap
+                  anytime in Settings.
                 </p>
                 <div className="ai-chip-group">
                   <div className="ai-chip-group-title">Supported engines</div>
@@ -447,23 +452,16 @@ export default function Home() {
               </div>
               <div>
                 <div
-                  className="terminal-sticker"
+                  className="engine-card"
                   role="region"
-                  aria-label="Example engine detection"
+                  aria-label="Example AI engine setting"
                 >
-                  <div className="terminal-dots" aria-hidden="true">
-                    <div className="terminal-dot terminal-dot-red" />
-                    <div className="terminal-dot terminal-dot-yellow" />
-                    <div className="terminal-dot terminal-dot-green" />
+                  <div className="engine-card-label receipt">
+                    SETTINGS · AI ENGINE
                   </div>
-                  <div className="terminal-prompt">CareerRat</div>
-                  <div className="terminal-command">
-                    Engine: Claude Code
-                    <span className="terminal-cursor" aria-hidden="true" />
-                  </div>
-                  <div className="terminal-comment">
-                    # detected automatically on first launch
-                    <br /># swap engines anytime from Settings
+                  <div className="engine-card-value">Claude Code</div>
+                  <div className="engine-card-note">
+                    Detected on first launch. Swap engines anytime.
                   </div>
                 </div>
                 <p
@@ -474,9 +472,9 @@ export default function Home() {
                     lineHeight: 1.5,
                   }}
                 >
-                  Open the app and CareerRat scaffolds the workspace, installs
-                  skills, and hands off to the AI CLI running underneath.
-                  Model choice, cost, and local data stay under your control.
+                  Open the app and CareerRat sets up your workspace, then
+                  hands the thinking to the AI underneath. Model choice, cost,
+                  and your data stay under your control.
                 </p>
               </div>
             </div>
@@ -493,8 +491,9 @@ export default function Home() {
               Free is the product.
             </h2>
             <p className="section-sub">
-              With your own AI CLI running underneath, you get all of it: the
-              AI features included. No account, no sign-in, no trial clock.
+              With the AI you already use running underneath, you get all of
+              it: the AI features included. No account, no sign-in, no trial
+              clock.
             </p>
           </div>
           <div className="pricing-grid pricing-grid-single">
@@ -502,12 +501,12 @@ export default function Home() {
               <div className="pricing-card-head">
                 <h3 className="pricing-card-name">Free</h3>
                 <span className="pricing-card-tag receipt">
-                  $0 · bring your AI CLI
+                  $0 · bring your own AI
                 </span>
               </div>
               <p className="pricing-card-p">
-                The whole app. AI features run on your installed CLI: your
-                subscription, your machine.
+                The whole app. AI features run on the AI subscription you
+                already have: your plan, your machine.
               </p>
               <ul className="pricing-list">
                 <li>Board pulls, dedupe, tracking</li>
@@ -578,11 +577,11 @@ export default function Home() {
               <div>
                 <div className="section-label">Get CareerRat</div>
                 <h2 className="section-h2" id="get-h2">
-                  Install it. Run it. Own it.
+                  One download, and you&apos;re talking.
                 </h2>
                 <p className="section-sub">
-                  Free to self-host, open source (MIT). No account or signup:
-                  one download or one command starts guided setup.
+                  Free and open source (MIT). No account, no signup. Download
+                  it, open it, say hi.
                 </p>
                 <div style={{ marginTop: "28px" }}>
                   <div className="prereq-label">On a Mac</div>
@@ -603,14 +602,15 @@ export default function Home() {
                   </p>
                   <p className="get-note">
                     Signed and notarized, for Apple Silicon Macs on macOS 12
-                    or newer. It opens the same guided setup as the npm path.
+                    or newer. Setup is a conversation, not a form.
                   </p>
                 </div>
                 <div style={{ marginTop: "28px" }}>
-                  <div className="prereq-label">Prerequisites</div>
+                  <div className="prereq-label">You&apos;ll need one AI</div>
                   <ul className="prereq-list">
                     <li>
-                      An AI coding CLI on your PATH, needed either way:
+                      CareerRat thinks with an AI helper you install once.
+                      Either one works:
                       <ul className="prereq-sublist">
                         <li>
                           <strong style={{ color: "var(--ink)" }}>
@@ -727,8 +727,8 @@ export default function Home() {
               Ready when you are.
             </h2>
             <p className="final-sub">
-              Free. Local. Honest. One download to get going, or one command.
-              Run it yourself and your data stays put.
+              Free. Local. Honest. Download it and start talking. Your data
+              stays put.
             </p>
             <div className="final-actions">
               <TrackedCtaLink href="#get" className="btn-primary" placement="final">
@@ -752,7 +752,7 @@ export default function Home() {
                 CareerRat<span className="footer-logo-dot">.</span>
               </div>
               <p className="footer-blurb">
-                A chat-first, local-first job-search tracker. Rate the jobs
+                A free Mac app you talk your job hunt through. Rate the jobs
                 worth chasing, apply with honest evidence, and track every
                 outcome: from your own data, on your own machine.
               </p>

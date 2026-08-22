@@ -4,6 +4,12 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- careerrat.com now leads with the chat: the whole page describes CareerRat as a free Mac app you talk to, with the AI underneath framed as "bring your own AI" instead of CLI plumbing. The engine section shows a Settings-style card instead of a fake terminal, the privacy section says "Everything lives on your Mac" instead of "self-host it", and the npm command left the hero for the install section. The app screenshots now sit in a flat framed window with the site's chrome dots so they no longer blend into the page background (#194).
+
 ## [0.12.1] - 2026-08-22
 
 ### Changed
