@@ -359,3 +359,89 @@ test("validate: array items type-checked", () => {
   assert.equal(errors[0].path, "keep_signals[1]");
   assert.ok(errors[0].message.includes("expected type string"));
 });
+
+// ---------------------------------------------------------------------------
+// minItems / maxItems
+// ---------------------------------------------------------------------------
+
+test("validate: array shorter than minItems is rejected", () => {
+  const schema = { type: "array", items: { type: "string" }, minItems: 2 };
+  const result = validate(["only-one"], schema);
+  assert.equal(result.valid, false);
+  const error = result.errors.find((e) => e.path === "");
+  assert.ok(error, `expected a root-level error, got: ${JSON.stringify(result.errors)}`);
+  assert.equal(error.message, "must have at least 2 items");
+});
+
+test("validate: array longer than maxItems is rejected", () => {
+  const schema = { type: "array", items: { type: "string" }, maxItems: 3 };
+  const result = validate(["a", "b", "c", "d"], schema);
+  assert.equal(result.valid, false);
+  const error = result.errors.find((e) => e.path === "");
+  assert.ok(error, `expected a root-level error, got: ${JSON.stringify(result.errors)}`);
+  assert.equal(error.message, "must have at most 3 items");
+});
+
+test("validate: array within minItems/maxItems range is valid", () => {
+  const schema = { type: "array", items: { type: "string" }, minItems: 1, maxItems: 3 };
+  const result = validate(["a", "b"], schema);
+  assert.equal(result.valid, true);
+  assert.deepEqual(result.errors, []);
+});
+
+test("validate: maxItems violation on a nested property reports the property's path", () => {
+  const schema = {
+    type: "object",
+    properties: {
+      fitReasons: { type: "array", maxItems: 3, items: { type: "string" } },
+    },
+  };
+  const result = validate({ fitReasons: ["a", "b", "c", "d"] }, schema);
+  assert.equal(result.valid, false);
+  const error = result.errors.find((e) => e.path === "fitReasons");
+  assert.ok(error, `expected an error at fitReasons, got: ${JSON.stringify(result.errors)}`);
+  assert.equal(error.message, "must have at most 3 items");
+});
+
+// ---------------------------------------------------------------------------
+// minLength / maxLength
+// ---------------------------------------------------------------------------
+
+test("validate: string shorter than minLength is rejected", () => {
+  const schema = { type: "string", minLength: 5 };
+  const result = validate("hi", schema);
+  assert.equal(result.valid, false);
+  const error = result.errors.find((e) => e.path === "");
+  assert.ok(error, `expected a root-level error, got: ${JSON.stringify(result.errors)}`);
+  assert.equal(error.message, "must have at least 5 characters");
+});
+
+test("validate: string longer than maxLength is rejected", () => {
+  const schema = { type: "string", maxLength: 3 };
+  const result = validate("too long", schema);
+  assert.equal(result.valid, false);
+  const error = result.errors.find((e) => e.path === "");
+  assert.ok(error, `expected a root-level error, got: ${JSON.stringify(result.errors)}`);
+  assert.equal(error.message, "must have at most 3 characters");
+});
+
+test("validate: string within minLength/maxLength range is valid", () => {
+  const schema = { type: "string", minLength: 1, maxLength: 10 };
+  const result = validate("just right", schema);
+  assert.equal(result.valid, true);
+  assert.deepEqual(result.errors, []);
+});
+
+test("validate: maxLength violation on a nested property reports the property's path", () => {
+  const schema = {
+    type: "object",
+    properties: {
+      fitSummary: { type: "string", maxLength: 10 },
+    },
+  };
+  const result = validate({ fitSummary: "way too long for this field" }, schema);
+  assert.equal(result.valid, false);
+  const error = result.errors.find((e) => e.path === "fitSummary");
+  assert.ok(error, `expected an error at fitSummary, got: ${JSON.stringify(result.errors)}`);
+  assert.equal(error.message, "must have at most 10 characters");
+});

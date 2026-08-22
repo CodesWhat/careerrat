@@ -55,6 +55,17 @@ function makeCoachingPlan(overrides = {}) {
   };
 }
 
+function makeGap(n) {
+  return {
+    gapText: `Gap number ${n}`,
+    suggestion: {
+      kind: "no-close-path",
+      draftClaim: null,
+      rationale: "Nothing on record honestly closes this gap.",
+    },
+  };
+}
+
 function makeSingleRoleTriage(overrides = {}) {
   return {
     fit_score: 78,
@@ -106,12 +117,6 @@ test("evaluate-job verdict: wrong gate enum value fails", () => {
 });
 
 test("evaluate-job verdict: fitScore over its 0-100 cap fails", () => {
-  // schema-validator.mjs's supported keyword subset enforces numeric
-  // minimum/maximum but not array minItems/maxItems (verified directly: an
-  // over-length array against a maxItems schema comes back valid:true) — so
-  // this schema's "over-cap" case is exercised through fitScore's numeric
-  // maximum:100, the one cap keyword the validator actually checks, rather
-  // than fitReasons/fitRisks' unenforced maxItems:3.
   const data = makePacketVerdict({ fitScore: 150 });
   const result = validate(data, packetGateAiVerdictSchema);
   assert.equal(result.valid, false);
@@ -120,6 +125,38 @@ test("evaluate-job verdict: fitScore over its 0-100 cap fails", () => {
       (error) => error.path === "fitScore" && /must be at most 100/.test(error.message)
     ),
     `expected a fitScore maximum error, got: ${JSON.stringify(result.errors)}`
+  );
+});
+
+test("evaluate-job verdict: fitSummary over its maxLength:160 cap fails", () => {
+  // schema-validator.mjs now enforces minLength/maxLength (#173), so this
+  // exercises the real over-length string directly.
+  const data = makePacketVerdict({ fitSummary: "x".repeat(161) });
+  const result = validate(data, packetGateAiVerdictSchema);
+  assert.equal(result.valid, false);
+  assert.ok(
+    result.errors.some(
+      (error) =>
+        error.path === "fitSummary" && /must have at most 160 characters/.test(error.message)
+    ),
+    `expected a fitSummary maxLength error, got: ${JSON.stringify(result.errors)}`
+  );
+});
+
+test("evaluate-job verdict: fitReasons over its maxItems:3 cap fails", () => {
+  // schema-validator.mjs now enforces minItems/maxItems (#173), so this
+  // exercises the real over-cap list directly instead of substituting
+  // fitScore's numeric maximum:100.
+  const data = makePacketVerdict({
+    fitReasons: ["Reason one", "Reason two", "Reason three", "Reason four"],
+  });
+  const result = validate(data, packetGateAiVerdictSchema);
+  assert.equal(result.valid, false);
+  assert.ok(
+    result.errors.some(
+      (error) => error.path === "fitReasons" && /must have at most 3 items/.test(error.message)
+    ),
+    `expected a fitReasons maxItems error, got: ${JSON.stringify(result.errors)}`
   );
 });
 
@@ -172,6 +209,21 @@ test("coach-gaps plan: missing required gapText fails", () => {
         error.path === "gaps[0]" && /missing required property "gapText"/.test(error.message)
     ),
     `expected a missing-gapText error, got: ${JSON.stringify(result.errors)}`
+  );
+});
+
+test("coach-gaps plan: gaps over its maxItems:3 cap fails", () => {
+  // schema-validator.mjs now enforces minItems/maxItems (#173), so this
+  // exercises the real over-cap list directly instead of only substitute
+  // violations.
+  const data = makeCoachingPlan({ gaps: [makeGap(1), makeGap(2), makeGap(3), makeGap(4)] });
+  const result = validate(data, coachingPlanSchema);
+  assert.equal(result.valid, false);
+  assert.ok(
+    result.errors.some(
+      (error) => error.path === "gaps" && /must have at most 3 items/.test(error.message)
+    ),
+    `expected a gaps maxItems error, got: ${JSON.stringify(result.errors)}`
   );
 });
 

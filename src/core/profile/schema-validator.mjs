@@ -67,6 +67,16 @@ function validateNode(data, schema, path, errors) {
     }
   }
 
+  // --- string length ---
+  if (typeof data === "string") {
+    if (typeof schema.minLength === "number" && data.length < schema.minLength) {
+      errors.push({ path, message: `must have at least ${schema.minLength} characters` });
+    }
+    if (typeof schema.maxLength === "number" && data.length > schema.maxLength) {
+      errors.push({ path, message: `must have at most ${schema.maxLength} characters` });
+    }
+  }
+
   // --- properties + required + additionalProperties ---
   if (
     schema.properties !== undefined ||
@@ -112,6 +122,16 @@ function validateNode(data, schema, path, errors) {
           }
         }
       }
+    }
+  }
+
+  // --- array length ---
+  if (Array.isArray(data)) {
+    if (typeof schema.minItems === "number" && data.length < schema.minItems) {
+      errors.push({ path, message: `must have at least ${schema.minItems} items` });
+    }
+    if (typeof schema.maxItems === "number" && data.length > schema.maxItems) {
+      errors.push({ path, message: `must have at most ${schema.maxItems} items` });
     }
   }
 
