@@ -131,9 +131,9 @@ export function loadStories({ root = DEFAULT_ROOT } = {}) {
 
 // Validate a set of stories against the evidence bank. Returns { ok, errors[] }.
 // Each error is { id, message }. evidenceClaims is the array from evidence.yml's
-// `claims:`; when it is empty (evidence not loaded) the evidence-id EXISTENCE check
-// is skipped, but the structural rules (>=1 evidence_id, STAR+R fields, no
-// placeholder/comp leak, unique ids) still apply.
+// `claims:`. The evidence-id EXISTENCE check always runs, even when the bank is
+// empty — an empty bank plus a non-empty evidence_ids is itself a hard fail (a
+// cited id can never resolve to a claim that doesn't exist), never a silent skip.
 export function validateStories(stories, evidenceClaims = []) {
   if (!Array.isArray(stories)) {
     return { ok: false, errors: [{ id: null, message: "stories must be an array" }] };
@@ -145,7 +145,6 @@ export function validateStories(stories, evidenceClaims = []) {
       .filter(Boolean)
       .map(String)
   );
-  const haveEvidence = claimIds.size > 0;
   const seen = new Set();
 
   stories.forEach((s, i) => {
@@ -180,12 +179,14 @@ export function validateStories(stories, evidenceClaims = []) {
         id: s.id ?? null,
         message: `${where} cites no evidence_ids: every story must trace to candidate/evidence.yml (no invented narratives)`,
       });
-    } else if (haveEvidence) {
+    } else {
       for (const ref of ids) {
         if (!claimIds.has(ref)) {
           errors.push({
             id: s.id ?? null,
-            message: `${where} cites evidence id "${ref}" that is not in evidence.yml`,
+            message: claimIds.size
+              ? `${where} cites evidence id "${ref}" that is not in evidence.yml`
+              : `${where} cites evidence id "${ref}" but evidence.yml has no claims to trace to`,
           });
         }
       }

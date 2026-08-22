@@ -12,21 +12,59 @@ const implementedIds = CAREER_OPS_PROVIDER_PARITY.filter(
   (entry) => entry.status === "implemented"
 ).map((entry) => entry.id);
 
-const loadedProviders = await Promise.all(
-  implementedIds.map(async (id) => {
-    const module = await import(`./career-ops/vendor/${id}.mjs`);
-    const provider = module.default;
-    if (!provider || provider.id !== id || typeof provider.fetch !== "function") {
-      throw new Error(`Career Ops provider "${id}" does not satisfy { id, fetch }`);
+// Load every vendored provider in isolation: one broken/misauthored vendor file
+// must not take down the whole registry (and therefore every module that
+// imports it) for every OTHER provider. `importProvider` is injectable so tests
+// can exercise the isolation behavior with a mocked failing loader without
+// touching the real vendor/ tree. A failed provider is logged and recorded,
+// never thrown — the registry loads with the survivors.
+export async function loadCareerOpsProviders(
+  ids,
+  importProvider = (id) => import(`./career-ops/vendor/${id}.mjs`)
+) {
+  const results = await Promise.allSettled(
+    ids.map(async (id) => {
+      const module = await importProvider(id);
+      const provider = module.default;
+      if (!provider || provider.id !== id || typeof provider.fetch !== "function") {
+        throw new Error(`Career Ops provider "${id}" does not satisfy { id, fetch }`);
+      }
+      if (provider.detect != null && typeof provider.detect !== "function") {
+        throw new Error(`Career Ops provider "${id}" has an invalid detect export`);
+      }
+      return provider;
+    })
+  );
+
+  const providers = [];
+  const failures = [];
+  results.forEach((result, index) => {
+    const id = ids[index];
+    if (result.status === "fulfilled") {
+      providers.push(result.value);
+    } else {
+      const error =
+        result.reason instanceof Error ? result.reason : new Error(String(result.reason));
+      failures.push({ id, error });
+      console.warn(
+        `[career-ops-registry] provider "${id}" failed to load, skipping: ${error.message}`
+      );
     }
-    if (provider.detect != null && typeof provider.detect !== "function") {
-      throw new Error(`Career Ops provider "${id}" has an invalid detect export`);
-    }
-    return provider;
-  })
-);
+  });
+  return { providers, failures };
+}
+
+const { providers: loadedProviders, failures: loadFailures } =
+  await loadCareerOpsProviders(implementedIds);
 
 const PROVIDERS = new Map(loadedProviders.map((provider) => [provider.id, provider]));
+
+// Providers that failed to load at startup — a diagnostics surface (e.g. a
+// future `doctor` check) can report these instead of only the console warning
+// emitted at import time.
+export function careerOpsLoadFailures() {
+  return loadFailures.map((f) => ({ id: f.id, message: f.error.message }));
+}
 
 function normalizeProviderId(value) {
   return String(value || "")
