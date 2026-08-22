@@ -25,6 +25,10 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Fixed
 
+- One broken job-board provider can no longer take down the whole provider registry. Each of the roughly 80 bundled providers now loads on its own; a bad one is skipped and recorded, and every other source keeps working (#182).
+- The documented setup path for browser automation actually works now. The permission check has always required automation's "advanced" mode, but no CLI command could turn it on, so following the written recipe left every capability stuck off. `careerrat automation mode advanced --write` now exists, and the docs walk through it first (#182).
+- An interview story citing evidence that is not on record is now rejected even when your evidence file is empty. Before, an empty evidence bank switched that check off entirely, which is exactly when an invented citation is most likely (#182).
+- Re-adding a company to your exclusion list no longer duplicates it when the existing entry carries an inline comment (#182).
 - The guard that keeps CareerRat's web fetches away from private and internal addresses now catches every textual disguise of an internal IPv4 address inside an IPv6 one (mapped, NAT64, and 6to4 forms). The old check looked for a spelling Node's URL parser never actually produces, so it could not fire at all (#181).
 - The updater's safety check that keeps a release archive from ever writing into your private candidate or workspace folders now matches those folder names case-insensitively and sees through path tricks, closing a bypass on the case-insensitive filesystems Macs and Windows machines actually use (#181).
 - The checks that verify AI answers now enforce the size limits they always claimed to: an evaluation that comes back with too many fit reasons, or an over-long summary, gets rejected and retried instead of slipping through. Limits on your own saved tracker notes were dropped entirely rather than enforced, since your notes are yours and were never restricted when you wrote them (#174).
