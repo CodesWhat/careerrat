@@ -151,3 +151,32 @@ test("validatePublicHttpUrl still rejects unmapped IPv6 private/local/loopback r
     assert.equal(result.ok, false, `${host} should be rejected`);
   }
 });
+
+test("validatePublicHttpUrl rejects a NAT64-embedded loopback and metadata address", () => {
+  // NAT64's well-known prefix 64:ff9b::/96 embeds an IPv4 in its low 32 bits,
+  // the same way IPv4-mapped addresses do, and reaches Node's URL parser in
+  // both the textual dotted-decimal and canonical hex-group spellings.
+  for (const host of ["[64:ff9b::127.0.0.1]", "[64:ff9b::7f00:1]"]) {
+    const result = validatePublicHttpUrl(`http://${host}/`);
+    assert.equal(result.ok, false, `${host} should be rejected`);
+  }
+  for (const host of ["[64:ff9b::169.254.169.254]", "[64:ff9b::a9fe:a9fe]"]) {
+    const result = validatePublicHttpUrl(`http://${host}/`);
+    assert.equal(result.ok, false, `${host} should be rejected`);
+  }
+});
+
+test("validatePublicHttpUrl rejects a 6to4-embedded private address", () => {
+  // 6to4's 2002::/16 prefix embeds the IPv4 higher up, in bits 16-47
+  // (groups 1-2), with an SLA ID/interface ID in the remaining groups.
+  const result = validatePublicHttpUrl("http://[2002:0a00:0001::]/");
+  assert.equal(result.ok, false);
+});
+
+test("validatePublicHttpUrl still allows a genuinely public address embedded via NAT64 or 6to4", () => {
+  const nat64 = validatePublicHttpUrl("http://[64:ff9b::8.8.8.8]/");
+  assert.equal(nat64.ok, true);
+
+  const sixToFour = validatePublicHttpUrl("http://[2002:0808:0808::]/");
+  assert.equal(sixToFour.ok, true);
+});

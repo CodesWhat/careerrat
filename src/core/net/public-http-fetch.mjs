@@ -306,22 +306,48 @@ function isNonPublicIp(value) {
 }
 
 // Returns the embedded IPv4 (dotted-decimal string) for an IPv6 address that
-// carries one in its low 32 bits — IPv4-mapped (::ffff:0:0/96) or the
-// deprecated IPv4-compatible form (::/96) — or null otherwise. Handles both
-// the canonical hex-group form Node's URL parser produces (::ffff:7f00:1)
-// and the textual dotted-decimal form (::ffff:127.0.0.1), since the groups
-// come from a shared IPv6 parser rather than a single regex shape.
+// carries one, or null otherwise. Covers every transition/translation form
+// that reaches a non-public IPv4 through an IPv6 spelling:
+//   - IPv4-mapped (::ffff:0:0/96) and the deprecated IPv4-compatible (::/96)
+//     forms, embedded in the low 32 bits (groups[6..7])
+//   - the NAT64 well-known prefix (64:ff9b::/96), same low-32-bit embedding
+//   - 6to4 (2002::/16), which embeds the IPv4 higher up, in bits 16-47
+//     (groups[1..2]) — the remaining groups carry an SLA ID/interface ID and
+//     are not part of the address
+// Handles both the canonical hex-group form Node's URL parser produces
+// (::ffff:7f00:1) and the textual dotted-decimal form (::ffff:127.0.0.1),
+// since the groups come from a shared IPv6 parser rather than a single
+// regex shape.
 function embeddedIpv4(host) {
   const groups = ipv6ToGroups(host);
   if (!groups) return null;
+
   const highZero = groups.slice(0, 5).every((g) => g === 0);
   const isMapped = highZero && groups[5] === 0xffff;
   const isCompatible = highZero && groups[5] === 0;
-  if (!isMapped && !isCompatible) return null;
-  const a = groups[6] >> 8;
-  const b = groups[6] & 0xff;
-  const c = groups[7] >> 8;
-  const d = groups[7] & 0xff;
+  if (isMapped || isCompatible) return ipv4FromGroups(groups[6], groups[7]);
+
+  const isNat64 =
+    groups[0] === 0x64 &&
+    groups[1] === 0xff9b &&
+    groups[2] === 0 &&
+    groups[3] === 0 &&
+    groups[4] === 0 &&
+    groups[5] === 0;
+  if (isNat64) return ipv4FromGroups(groups[6], groups[7]);
+
+  const isSixToFour = groups[0] === 0x2002;
+  if (isSixToFour) return ipv4FromGroups(groups[1], groups[2]);
+
+  return null;
+}
+
+// Reassembles two 16-bit IPv6 groups into their dotted-decimal IPv4 string.
+function ipv4FromGroups(hi, lo) {
+  const a = hi >> 8;
+  const b = hi & 0xff;
+  const c = lo >> 8;
+  const d = lo & 0xff;
   return `${a}.${b}.${c}.${d}`;
 }
 
