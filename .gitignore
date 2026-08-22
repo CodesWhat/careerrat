@@ -6,6 +6,11 @@ node_modules/
 # (CAREERRAT_HOME=./.demo-home) — never real data, never checked in.
 .demo-home/
 
+# Scratch video/screenshot working dir for scripts/capture-chat-demo.mjs —
+# removed by the script itself on both success and failure; ignored here as a
+# backstop in case a run is interrupted before cleanup.
+.demo-capture/
+
 # Turborepo build artifacts. Each app owns its local Next/Vite output rules.
 .turbo/
 
