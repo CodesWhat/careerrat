@@ -1,4 +1,3 @@
-import DashboardPreview from "@/components/DashboardPreview";
 import SiteInteractions from "@/components/SiteInteractions";
 import { TrackedCtaLink } from "@/components/TrackedCtaLink";
 
@@ -92,7 +91,13 @@ export default function Home() {
             </div>
           </div>
           <div className="hero-visual reveal reveal-delay-2">
-            <DashboardPreview />
+            <img
+              className="hero-shot"
+              src="/chat-activity-pending.png"
+              alt="CareerRat chat mid-turn, with a live activity line reading Searching the web and its spinner still spinning"
+              width={1280}
+              height={800}
+            />
           </div>
         </div>
       </section>
@@ -141,14 +146,29 @@ export default function Home() {
               <div className="step-index receipt">03</div>
               <h3 className="step-h3">It hunts, you decide</h3>
               <p className="step-p">
-                Say the word and it sweeps: pull, dedupe, cut, rank, prep.
-                Everything it does leaves a receipt, and nothing is sent
-                without you.
+                Say the word and it sweeps: pull, dedupe, cut, rank, prep. You
+                watch it work the whole time: each step shows live as an
+                activity line, reading files, searching the web, writing.
+                Nothing is sent without you.
               </p>
               <span className="step-chip">
                 SWEEP · 9 CUT · 12 RANKED · AI · CLAUDE CODE
               </span>
             </div>
+          </div>
+          <div className="steps-demo reveal reveal-delay-3">
+            <img
+              className="steps-demo-gif"
+              src="/chat-activity.gif"
+              alt="CareerRat chat scrolling through activity lines during a comp-research turn, each with an icon, a plain-language label, and a spinner that settles when the step finishes"
+              width={800}
+              height={500}
+              loading="lazy"
+            />
+            <p className="steps-demo-caption">
+              A real comp-research turn: activity lines for reading files,
+              searching the web, and writing, no narration needed.
+            </p>
           </div>
         </div>
       </section>
@@ -532,7 +552,7 @@ export default function Home() {
                 </li>
                 <li>Coaches you through the comp conversation, out loud</li>
                 <li>Remembers every outcome and gets sharper as you go</li>
-                <li>A live dashboard: the agent works, you watch it happen</li>
+                <li>A live chat where you watch it read, search, and write as it happens</li>
                 <li>Works the same for any role, in any field</li>
               </ul>
             </div>

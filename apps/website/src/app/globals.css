@@ -266,104 +266,32 @@ nav.scrolled {
   align-items: center;
 }
 
-/* ─── Dashboard preview card (hero mockup) ─── */
-.dash-card {
+/* ─── Hero product screenshot ─── */
+.hero-shot {
   width: 100%;
-  max-width: 440px;
-  background: var(--card);
+  height: auto;
+  display: block;
   border-radius: var(--radius-lg);
-  overflow: hidden;
 }
-.dash-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--hairline);
+
+/* ─── How-it-works activity-line demo ─── */
+.steps-demo {
+  margin-top: 32px;
 }
-.dash-card-wordmark {
-  font-family: var(--font-display), sans-serif;
-  font-size: 0.95rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  color: var(--ink);
-}
-.dash-card-dot {
-  color: var(--accent);
-}
-.dash-card-receipt {
-  font-family: var(--font-mono), monospace;
-  font-size: 0.6rem;
-  letter-spacing: 0.05em;
-  color: var(--ink-faint);
-}
-.dash-card-body {
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.dash-card-title {
-  font-family: var(--font-display), sans-serif;
-  font-size: 1.15rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  color: var(--ink);
-  margin-bottom: 4px;
-}
-.dash-card-row {
-  background: var(--surface);
-  border-radius: var(--radius-sm);
-  padding: 12px 14px;
-}
-.dash-card-row-label {
+.steps-demo-gif {
+  width: 100%;
+  max-width: 720px;
+  height: auto;
   display: block;
-  font-family: var(--font-mono), monospace;
-  font-size: 0.62rem;
-  letter-spacing: 0.04em;
-  color: var(--ink-soft);
+  margin: 0 auto;
+  border-radius: var(--radius-lg);
 }
-.dash-card-row-label-danger {
-  color: var(--danger-dark);
-}
-.dash-card-row-text {
-  display: block;
+.steps-demo-caption {
+  margin-top: 12px;
   font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--ink);
-  margin-top: 4px;
-}
-.dash-card-ask {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: var(--surface);
-  border-radius: var(--radius-sm);
-  padding: 10px 14px;
-  margin-top: 2px;
-}
-.dash-card-ask span:first-child {
-  flex: 1;
-  font-size: 0.78rem;
-  color: var(--ink-faint-2);
-}
-.dash-card-ask-send {
-  flex: 0 0 auto;
-  width: 22px;
-  height: 22px;
-  border-radius: var(--radius-pill);
-  background: var(--accent);
-  color: #fff;
-  display: grid;
-  place-items: center;
-}
-.dash-card-footer {
-  font-family: var(--font-mono), monospace;
-  font-size: 0.6rem;
-  letter-spacing: 0.04em;
-  color: var(--ink-faint-2);
+  font-style: italic;
+  color: var(--ink-faint);
   text-align: center;
-  margin-top: 2px;
 }
 
 /* ─── Reveal animation ─── */
