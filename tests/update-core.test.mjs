@@ -3,7 +3,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { refreshUpdateCacheInBackground } from "../src/core/update/update-core.mjs";
+import {
+  findUserDataLeaks,
+  refreshUpdateCacheInBackground,
+} from "../src/core/update/update-core.mjs";
 
 async function waitForFile(path, timeoutMs = 2_000) {
   const deadline = Date.now() + timeoutMs;
@@ -11,6 +14,54 @@ async function waitForFile(path, timeoutMs = 2_000) {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 }
+
+test("findUserDataLeaks catches candidate/workspace entries regardless of case", () => {
+  // CareerRat ships on case-insensitive filesystems (APFS, NTFS), where
+  // "Candidate/x" and "candidate/x" are the same real path. A case-sensitive
+  // guard would let a differently-cased tarball entry extract straight over
+  // the user's real candidate/ or workspace/ directory.
+  const leaks = findUserDataLeaks([
+    "Candidate/resume.json",
+    "CANDIDATE/profile.yml",
+    "candidate/evidence.json",
+    "Workspace/tracker.json",
+    "src/index.mjs",
+  ]);
+  assert.deepEqual(leaks, [
+    "Candidate/resume.json",
+    "CANDIDATE/profile.yml",
+    "candidate/evidence.json",
+    "Workspace/tracker.json",
+  ]);
+});
+
+test("findUserDataLeaks still exempts workspace/.gitkeep regardless of case", () => {
+  const leaks = findUserDataLeaks([
+    "workspace/.gitkeep",
+    "Workspace/.GITKEEP",
+    "WORKSPACE/.gitkeep",
+  ]);
+  assert.deepEqual(leaks, []);
+});
+
+test("findUserDataLeaks catches a leading ./ and backslash path-separator variants", () => {
+  const leaks = findUserDataLeaks([
+    "./candidate/resume.json",
+    ".\\Candidate\\profile.yml",
+    "candidate\\evidence.json",
+    "./src/index.mjs",
+  ]);
+  assert.deepEqual(leaks, [
+    "./candidate/resume.json",
+    ".\\Candidate\\profile.yml",
+    "candidate\\evidence.json",
+  ]);
+});
+
+test("findUserDataLeaks does not false-positive on a lookalike directory name", () => {
+  const leaks = findUserDataLeaks(["candidate-templates/blank.json", "workspaceship/readme.md"]);
+  assert.deepEqual(leaks, []);
+});
 
 test("refreshUpdateCacheInBackground forces Electron's detached child into Node mode", async () => {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-update-core-"));

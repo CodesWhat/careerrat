@@ -107,10 +107,23 @@ export function fetchTarball(spec) {
 
 // Privacy guard: tarball entries that carry user data (candidate/ or non-scaffold
 // workspace/). A non-empty result means the published package leaked — refuse to install.
+//
+// Matching is case-insensitive and normalizes path separators/leading "./" before
+// testing, because CareerRat ships on case-insensitive filesystems (APFS, NTFS) where
+// "Candidate/x" and "candidate/x" are the same real path, and a case-sensitive or
+// separator-sensitive regex would let a differently-cased or oddly-prefixed entry
+// extract straight over the user's real candidate/ or workspace/ directory.
 export function findUserDataLeaks(entries) {
-  return entries.filter(
-    (p) => /^candidate\//.test(p) || (/^workspace\//.test(p) && !/\.gitkeep$/.test(p))
-  );
+  return entries.filter((p) => {
+    const normalized = String(p || "")
+      .replace(/\\/g, "/")
+      .replace(/^(\.\/)+/, "")
+      .toLowerCase();
+    return (
+      /^candidate\//.test(normalized) ||
+      (/^workspace\//.test(normalized) && !/\.gitkeep$/.test(normalized))
+    );
+  });
 }
 
 // Extract a tarball's code over targetDir. tar only writes archived (code) paths and
