@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { fetchPublicHttpText } from "../src/core/net/public-http-fetch.mjs";
+import { fetchPublicHttpText, validatePublicHttpUrl } from "../src/core/net/public-http-fetch.mjs";
 
 const PUBLIC_ADDRESSES = [{ address: "93.184.216.34", family: 4 }];
 
@@ -110,4 +110,44 @@ test("public fetch stops and cancels a streaming body at the byte cap", async ()
   assert.equal(result.byteLength, 10);
   assert.equal(cancelled, true);
   assert.equal(reads, 2);
+});
+
+test("validatePublicHttpUrl rejects an IPv4-mapped loopback in both its textual and hex-group forms", () => {
+  // Node's URL parser canonicalizes a bracketed IPv6 host to hex groups
+  // (::ffff:127.0.0.1 -> ::ffff:7f00:1), so both spellings must be caught —
+  // a check that only matched the dotted-decimal text would miss the second.
+  const textual = validatePublicHttpUrl("http://[::ffff:127.0.0.1]/");
+  assert.equal(textual.ok, false);
+  assert.equal(textual.reason, "private, local, or non-public network host is not fetchable");
+
+  const hexForm = validatePublicHttpUrl("http://[::ffff:7f00:1]/");
+  assert.equal(hexForm.ok, false);
+  assert.equal(hexForm.reason, "private, local, or non-public network host is not fetchable");
+});
+
+test("validatePublicHttpUrl rejects the cloud metadata address mapped into IPv6, textual and hex", () => {
+  const textual = validatePublicHttpUrl("http://[::ffff:169.254.169.254]/latest/meta-data");
+  assert.equal(textual.ok, false);
+
+  const hexForm = validatePublicHttpUrl("http://[::ffff:a9fe:a9fe]/latest/meta-data");
+  assert.equal(hexForm.ok, false);
+});
+
+test("validatePublicHttpUrl rejects plain private-range IPv4 addresses mapped into IPv6", () => {
+  for (const host of ["[::ffff:10.0.0.1]", "[::ffff:192.168.1.1]", "[::ffff:172.16.0.1]"]) {
+    const result = validatePublicHttpUrl(`http://${host}/`);
+    assert.equal(result.ok, false, `${host} should be rejected`);
+  }
+});
+
+test("validatePublicHttpUrl still allows a genuinely public address mapped into IPv6", () => {
+  const result = validatePublicHttpUrl("http://[::ffff:8.8.8.8]/");
+  assert.equal(result.ok, true);
+});
+
+test("validatePublicHttpUrl still rejects unmapped IPv6 private/local/loopback ranges", () => {
+  for (const host of ["[::1]", "[::]", "[fc00::1]", "[fd00::1]", "[fe80::1]", "[2001:db8::1]"]) {
+    const result = validatePublicHttpUrl(`http://${host}/`);
+    assert.equal(result.ok, false, `${host} should be rejected`);
+  }
 });

@@ -269,8 +269,14 @@ function isNonPublicIp(value) {
   const version = isIP(host);
   if (!version) return false;
   if (version === 6) {
-    const mapped = host.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-    if (mapped) return isNonPublicIp(mapped[1]);
+    // Node's URL parser canonicalizes bracketed IPv6 hosts to the hex-group
+    // form (::ffff:127.0.0.1 -> ::ffff:7f00:1), so a textual dotted-decimal
+    // match alone lets an embedded IPv4 loopback/metadata address through.
+    // Decode any embedded IPv4 (mapped ::ffff:0:0/96, and the deprecated
+    // IPv4-compatible ::/96) from either textual form back to its IPv4 and
+    // reuse the IPv4 logic below on it.
+    const embedded = embeddedIpv4(host);
+    if (embedded) return isNonPublicIp(embedded);
     return (
       host === "::" ||
       host === "::1" ||
@@ -297,6 +303,66 @@ function isNonPublicIp(value) {
     (a === 203 && b === 0 && c === 113) ||
     a >= 224
   );
+}
+
+// Returns the embedded IPv4 (dotted-decimal string) for an IPv6 address that
+// carries one in its low 32 bits — IPv4-mapped (::ffff:0:0/96) or the
+// deprecated IPv4-compatible form (::/96) — or null otherwise. Handles both
+// the canonical hex-group form Node's URL parser produces (::ffff:7f00:1)
+// and the textual dotted-decimal form (::ffff:127.0.0.1), since the groups
+// come from a shared IPv6 parser rather than a single regex shape.
+function embeddedIpv4(host) {
+  const groups = ipv6ToGroups(host);
+  if (!groups) return null;
+  const highZero = groups.slice(0, 5).every((g) => g === 0);
+  const isMapped = highZero && groups[5] === 0xffff;
+  const isCompatible = highZero && groups[5] === 0;
+  if (!isMapped && !isCompatible) return null;
+  const a = groups[6] >> 8;
+  const b = groups[6] & 0xff;
+  const c = groups[7] >> 8;
+  const d = groups[7] & 0xff;
+  return `${a}.${b}.${c}.${d}`;
+}
+
+// Expands a normalized (lowercase, unbracketed) IPv6 address into its 8
+// 16-bit groups, resolving "::" compression and an optional trailing
+// dotted-decimal IPv4 tail. Returns null for anything that doesn't parse.
+function ipv6ToGroups(host) {
+  if (!host.includes(":")) return null;
+  const compressAt = host.indexOf("::");
+  const head = compressAt === -1 ? host : host.slice(0, compressAt);
+  const tail = compressAt === -1 ? "" : host.slice(compressAt + 2);
+
+  const headGroups = expandIpv6Parts(head ? head.split(":") : []);
+  const tailGroups = expandIpv6Parts(tail ? tail.split(":") : []);
+  if (!headGroups || !tailGroups) return null;
+
+  if (compressAt === -1) {
+    return headGroups.length === 8 ? headGroups : null;
+  }
+  const missing = 8 - headGroups.length - tailGroups.length;
+  if (missing < 0) return null;
+  return [...headGroups, ...new Array(missing).fill(0), ...tailGroups];
+}
+
+// Expands a run of colon-separated IPv6 parts into 16-bit groups. A part
+// containing "." is a trailing embedded IPv4 tail and expands to 2 groups.
+function expandIpv6Parts(parts) {
+  const out = [];
+  for (const part of parts) {
+    if (part.includes(".")) {
+      const match = part.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+      if (!match) return null;
+      const bytes = match.slice(1).map(Number);
+      if (bytes.some((b) => b < 0 || b > 255)) return null;
+      out.push((bytes[0] << 8) | bytes[1], (bytes[2] << 8) | bytes[3]);
+    } else {
+      if (!/^[0-9a-f]{1,4}$/.test(part)) return null;
+      out.push(Number.parseInt(part, 16));
+    }
+  }
+  return out;
 }
 
 function failure(code, reason, extra = {}) {
