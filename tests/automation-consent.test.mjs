@@ -12,6 +12,7 @@ import {
   mayRun,
   PLATFORMS,
   planAutomationEdit,
+  planModeEdit,
   resolveEditPath,
 } from "../src/core/automation/consent.mjs";
 import { validate } from "../src/core/profile/schema-validator.mjs";
@@ -418,4 +419,144 @@ test("automation writer: can add calendar_sync paths to legacy automation files"
   assert.equal(consentPlan.ok, true);
   assert.equal(consentPlan.valid, true, JSON.stringify(consentPlan.errors));
   assert.ok(consentPlan.nextText.includes("google_calendar: true"));
+});
+
+// ── planModeEdit / the setup_mode CLI gap ───────────────────────────────────
+//
+// mayRun() is a hard AND of setup_mode==="advanced" plus the three granular
+// switches (global, platform, consent). Before this fix, the CLI
+// (src/cli/automation.mjs) had `consent`/`enable`/`disable`/`revoke` verbs but
+// no verb that could ever move setup_mode off its "basic" default, so the
+// AGENTS.md-documented recipe (consent, enable, enable) could never reach
+// allowed:true. planModeEdit is the pure edit-computation behind the new
+// `mode <basic|advanced>` CLI verb.
+
+test("resolveEditPath supports kind:mode", () => {
+  assert.deepEqual(resolveEditPath({ kind: "mode" }), {
+    parts: ["setup_mode"],
+    label: "automation setup mode",
+  });
+});
+
+test("planModeEdit rejects a value that isn't basic or advanced", () => {
+  const plan = planModeEdit({ mode: "yolo", currentText: legacyAutomationText });
+  assert.equal(plan.ok, false);
+  assert.match(plan.error, /basic.*advanced|advanced.*basic/);
+});
+
+test("planModeEdit scaffolds setup_mode on a legacy file that predates the field", () => {
+  // legacyAutomationText has no `setup_mode:` key at all — an install from
+  // before this field existed. The edit must still succeed.
+  assert.doesNotMatch(legacyAutomationText, /setup_mode/);
+  const schema = loadJson("config/automation.schema.json");
+  const plan = planModeEdit({ mode: "advanced", currentText: legacyAutomationText, schema });
+  assert.equal(plan.ok, true);
+  assert.equal(plan.valid, true, JSON.stringify(plan.errors));
+  assert.equal(plan.changed, true);
+  assert.match(plan.nextText, /^setup_mode: advanced$/m);
+
+  const parsed = parseYaml(plan.nextText);
+  assert.equal(parsed.setup_mode, "advanced");
+  // Nothing else in the file moved.
+  assert.equal(parsed.consent.linkedin, true);
+});
+
+test("planModeEdit is idempotent once already at the target mode", () => {
+  const schema = loadJson("config/automation.schema.json");
+  const first = planModeEdit({ mode: "advanced", currentText: legacyAutomationText, schema });
+  const second = planModeEdit({ mode: "advanced", currentText: first.nextText, schema });
+  assert.equal(second.changed, false);
+  assert.equal(second.nextText, first.nextText);
+});
+
+test("planModeEdit can move an advanced file back to basic", () => {
+  const schema = loadJson("config/automation.schema.json");
+  const advanced = planModeEdit({ mode: "advanced", currentText: legacyAutomationText, schema });
+  const backToBasic = planModeEdit({ mode: "basic", currentText: advanced.nextText, schema });
+  assert.equal(backToBasic.ok, true);
+  assert.equal(backToBasic.changed, true);
+  assert.equal(parseYaml(backToBasic.nextText).setup_mode, "basic");
+});
+
+test("the AGENTS.md-documented CLI recipe (mode, consent, enable, enable) ends in mayRun() allowed:true", () => {
+  const schema = loadJson("config/automation.schema.json");
+  const template = readFileSync(join(root, "templates/automation.example.yml"), "utf8");
+
+  // Before this fix, running consent + enable + enable alone (skipping a
+  // setup_mode step no CLI verb could perform) left the capability
+  // permanently unreachable. Confirm that failure mode still holds without
+  // the new `mode` step, so the fix is demonstrably necessary...
+  let text = template;
+  let step = planAutomationEdit({
+    kind: "consent",
+    platform: "linkedin",
+    value: true,
+    currentText: text,
+    schema,
+  });
+  assert.equal(step.ok, true);
+  text = step.nextText;
+  step = planAutomationEdit({
+    kind: "capability",
+    capability: "messaging",
+    value: true,
+    currentText: text,
+    schema,
+  });
+  text = step.nextText;
+  step = planAutomationEdit({
+    kind: "platform",
+    capability: "messaging",
+    platform: "linkedin",
+    value: true,
+    currentText: text,
+    schema,
+  });
+  text = step.nextText;
+  const withoutMode = mayRun({
+    capability: "messaging",
+    platform: "linkedin",
+    data: parseYaml(text),
+  });
+  assert.equal(withoutMode.allowed, false);
+  assert.match(withoutMode.reasons.join(" "), /Basic mode/);
+
+  // ...then confirm prepending the new `mode advanced --write` step (now
+  // possible thanks to planModeEdit) is sufficient to reach allowed:true,
+  // with no other change to the recipe.
+  const modePlan = planModeEdit({ mode: "advanced", currentText: template, schema });
+  assert.equal(modePlan.ok, true);
+  let fullText = modePlan.nextText;
+  step = planAutomationEdit({
+    kind: "consent",
+    platform: "linkedin",
+    value: true,
+    currentText: fullText,
+    schema,
+  });
+  fullText = step.nextText;
+  step = planAutomationEdit({
+    kind: "capability",
+    capability: "messaging",
+    value: true,
+    currentText: fullText,
+    schema,
+  });
+  fullText = step.nextText;
+  step = planAutomationEdit({
+    kind: "platform",
+    capability: "messaging",
+    platform: "linkedin",
+    value: true,
+    currentText: fullText,
+    schema,
+  });
+  fullText = step.nextText;
+
+  const parsed = parseYaml(fullText);
+  const validation = validate(parsed, schema);
+  assert.equal(validation.valid, true, JSON.stringify(validation.errors));
+
+  const verdict = mayRun({ capability: "messaging", platform: "linkedin", data: parsed });
+  assert.equal(verdict.allowed, true, JSON.stringify(verdict.reasons));
 });
