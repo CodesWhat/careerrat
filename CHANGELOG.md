@@ -24,6 +24,7 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Fixed
 
+- The checks that verify AI answers now enforce the size limits they always claimed to: an evaluation that comes back with too many fit reasons, or an over-long summary, gets rejected and retried instead of slipping through. Limits on your own saved tracker notes were dropped entirely rather than enforced, since your notes are yours and were never restricted when you wrote them (#174).
 - The AI-powered job search now sees the keep and cut signals from your targeting file. It was only reading signals written inside individual role buckets, a place the standard setup never puts them, so searches ran without the "more like this, never that" guidance you had actually written down (#166).
 - Reloading the page no longer clears your last Ask answer from the screen. The answer and its follow-up buttons come back exactly as they were, because the conversation was always saved; only the screen forgot it. An answer that was still being worked on, or that failed, is not replayed (#159).
 - The workspace chat no longer offers "Enrich my profile". That action never had an implementation behind it, so choosing it could only fail with an error. A new automated check now guarantees every action the chat offers actually works, so a dead menu item like this cannot ship again (#153).
