@@ -8,11 +8,14 @@ name: Star Chart Refresh
 #
 #   gh workflow run starchart.yml --ref "$BRANCH"
 #
-# careerrat is at 1 star (2026-08-22, rechecked at the v0.12.0 cut): the shared
-# workflow's generator declines to plot below 2 stars and leaves any existing
-# chart untouched rather than committing an empty one, so no chart ships yet.
-# This caller exists so the next release cut catches the star-count crossing
-# automatically (#148).
+# careerrat crossed the 2-star threshold at the v0.12.0 cut (3 stars,
+# 2026-08-22) and both charts are now committed and referenced from the README.
+# Known limitation, hit that same day: this caller's commit-back step pushes
+# directly to `branch`, which the dev ruleset rejects (dev branches require
+# PRs), so a dispatch that generates a changed chart FAILS at the push step.
+# Until the shared workflow grows a PR mode, refresh the chart at each cut by
+# running ops' scripts/starchart/build-chart.mjs locally and landing the SVGs
+# through a normal PR (#148 has the history).
 #
 # `branch` names the active integration line and rotates with it at each
 # version cut (dev/v0.13 -> dev/v0.14 -> ...); the reusable workflow refuses

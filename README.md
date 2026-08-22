@@ -263,6 +263,13 @@ Questions, ideas, and show-and-tell: [GitHub Discussions](https://github.com/Cod
 
 Chat: [CodesWhat Discord](https://discord.gg/mWHCPJRzSx).
 
+## Star History
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="apps/website/public/star-history-dark.svg">
+  <img src="apps/website/public/star-history.svg" alt="Star history for CodesWhat/careerrat">
+</picture>
+
 ---
 
 **[MIT License](LICENSE)**
