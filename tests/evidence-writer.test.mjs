@@ -80,6 +80,49 @@ test("validateClaims refuses the private current_base field token", () => {
   assert.ok(v.errors.some((e) => e.message.includes("current_base")));
 });
 
+test("validateClaims rejects links/role_signals/forbidden_wording that aren't arrays", () => {
+  for (const field of ["links", "role_signals", "forbidden_wording"]) {
+    const v = validateClaims([goodClaim({ [field]: "not-an-array" })]);
+    assert.equal(v.ok, false, `expected failure for ${field} as a bare string`);
+    assert.ok(
+      v.errors.some((e) => e.message.includes(`"${field}"`) && e.message.includes("array"))
+    );
+  }
+});
+
+test("validateClaims rejects non-string entries inside links/role_signals/forbidden_wording", () => {
+  for (const field of ["links", "role_signals", "forbidden_wording"]) {
+    const v = validateClaims([goodClaim({ [field]: [123] })]);
+    assert.equal(v.ok, false, `expected failure for ${field}[0] as a number`);
+    assert.ok(v.errors.some((e) => e.message.includes(`${field}[0]`)));
+  }
+});
+
+test("validateClaims rejects empty-string entries inside links/role_signals/forbidden_wording", () => {
+  const v = validateClaims([goodClaim({ links: ["   "] })]);
+  assert.equal(v.ok, false);
+  assert.ok(v.errors.some((e) => e.message.includes("links[0]")));
+});
+
+test("validateClaims flags placeholder residue inside links/role_signals/forbidden_wording", () => {
+  for (const field of ["links", "role_signals", "forbidden_wording"]) {
+    const v = validateClaims([goodClaim({ [field]: ["Built [Product] integration"] })]);
+    assert.equal(v.ok, false, `expected placeholder failure for ${field}`);
+    assert.ok(v.errors.some((e) => e.message.includes("placeholder")));
+  }
+});
+
+test("validateClaims accepts well-formed links/role_signals/forbidden_wording", () => {
+  const v = validateClaims([
+    goodClaim({
+      links: ["https://example.com/portal"],
+      role_signals: ["self-serve tooling"],
+      forbidden_wording: ["invented a new architecture"],
+    }),
+  ]);
+  assert.equal(v.ok, true, JSON.stringify(v.errors));
+});
+
 test("validateClaims does NOT false-positive on legit 'currently' accomplishment prose", () => {
   // The tight guard (current_base token) must not trip on production phrasing the
   // broad findCompLeak would have flagged.

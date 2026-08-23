@@ -93,6 +93,13 @@ vi.mock("../lib/intake-events.js", () => ({
   subscribeIntakeChanged: vi.fn(() => vi.fn()),
 }));
 
+const sse = vi.hoisted(() => ({ calls: [] }));
+vi.mock("../lib/sse.js", () => ({
+  useEventSource: (url, opts) => {
+    sse.calls.push({ url, opts });
+  },
+}));
+
 async function loadDashboardContext({ staticPreview = false } = {}) {
   vi.resetModules();
   vi.stubEnv("VITE_STATIC_PREVIEW", staticPreview ? "true" : "false");
@@ -115,6 +122,7 @@ beforeEach(() => {
   hookHarness.clear();
   vi.clearAllMocks();
   vi.unstubAllEnvs();
+  sse.calls = [];
   vi.stubGlobal(
     "setInterval",
     vi.fn(() => 1)
@@ -208,5 +216,70 @@ describe("DashboardContext", () => {
 
     expect(snapshot.error).toBeNull();
     expect(snapshot.data).toEqual({ stats: { active: 5 } });
+  });
+
+  it("subscribes to the dev server's livereload SSE and refetches on tracker/activity events", async () => {
+    const first = { data: { stats: { active: 1 } }, setup: null };
+    const second = { data: { stats: { active: 9 } }, setup: null };
+    apiMocks.getDashboard.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    const dashboardContext = await loadDashboardContext();
+
+    renderProvider(dashboardContext);
+    await flushEffects();
+
+    expect(sse.calls).toHaveLength(1);
+    expect(sse.calls[0].url).toBe("/__livereload");
+    expect(sse.calls[0].opts.types).toEqual(["tracker-update", "activity-update"]);
+
+    // Simulate the server broadcasting a tracker-update (a CLI/agent write to
+    // workspace/tracker.json, not one made through this tab) by invoking the
+    // captured onEvent handler directly.
+    await sse.calls[0].opts.onEvent("tracker-update", "1");
+
+    const provider = renderProvider(dashboardContext);
+    hookHarness.contextValue = provider.props.value;
+    const snapshot = dashboardContext.useDashboardSnapshot();
+
+    expect(snapshot.data).toEqual(second.data);
+    expect(apiMocks.getDashboard).toHaveBeenCalledTimes(2);
+  });
+
+  it("latches a pending refresh instead of dropping an SSE event that arrives mid-fetch", async () => {
+    let resolveFirst;
+    const firstPromise = new Promise((resolve) => {
+      resolveFirst = resolve;
+    });
+    const first = { data: { stats: { active: 1 } }, setup: null };
+    const second = { data: { stats: { active: 9 } }, setup: null };
+    apiMocks.getDashboard.mockReturnValueOnce(firstPromise).mockResolvedValueOnce(second);
+    const dashboardContext = await loadDashboardContext();
+
+    renderProvider(dashboardContext);
+    // Run the mount effect by hand (rather than flushEffects, which awaits
+    // several microtask turns) so the first fetch is left deliberately
+    // in-flight when the SSE event below fires.
+    const mountEffects = hookHarness.pendingEffects.splice(0);
+    for (const effect of mountEffects) effect();
+    await Promise.resolve();
+
+    expect(apiMocks.getDashboard).toHaveBeenCalledTimes(1);
+    expect(sse.calls).toHaveLength(1);
+
+    // The dev server's livereload SSE fires while the mount fetch above is
+    // still unresolved. Fixed load() latches a pending reload here instead
+    // of silently dropping it.
+    await sse.calls[0].opts.onEvent("tracker-update", "1");
+    expect(apiMocks.getDashboard).toHaveBeenCalledTimes(1);
+
+    resolveFirst(first);
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+
+    expect(apiMocks.getDashboard).toHaveBeenCalledTimes(2);
+
+    const provider = renderProvider(dashboardContext);
+    hookHarness.contextValue = provider.props.value;
+    const snapshot = dashboardContext.useDashboardSnapshot();
+
+    expect(snapshot.data).toEqual(second.data);
   });
 });

@@ -12,10 +12,9 @@ import {
   DEFAULT_DEEP_INGEST_REQUIRED_LANES,
   evaluateDeepIngestReadiness,
 } from "../../deep-ingest/readiness.mjs";
-import { lintArtifact } from "../../documents/placeholder-lint.mjs";
 import { CANDIDATE_DEFAULTS } from "../../profile/candidate-defaults.mjs";
-import { findCurrentBaseToken } from "../../profile/comp-guard.mjs";
 import { hasConfiguredCompensationFloor } from "../../profile/compensation.mjs";
+import { validateClaimFields } from "../../profile/evidence-validation.mjs";
 import { validate } from "../../profile/schema-validator.mjs";
 import { openDb, requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
@@ -41,6 +40,7 @@ const SCHEMA_PATHS = {
   modes: "config/modes.schema.json",
   automation: "config/automation.schema.json",
   "application-limits": "config/application-limits.schema.json",
+  evidence: "config/evidence.schema.json",
 };
 
 // The candidate-defaults module is the single canonical "genuinely empty"
@@ -709,42 +709,27 @@ export function candidateApplicationLimitUpsert({ repoRoot, env, row } = {}) {
 }
 
 // The same honesty/privacy backstop src/cli/evidence.mjs's `careerrat evidence
-// add` path already enforces via evidence-writer.mjs's validateClaims()
-// (shared lintArtifact for residual placeholder text — [Company], {{x}},
-// <insert...> — and findCurrentBaseToken for the private current_base field
-// token) — reused here rather than re-derived so the CLI's dry-run/--write
-// path and every HTTP caller of candidateEvidenceMerge (the evidence merge
-// route, the evidence-seed route, and Library's future edit-in-place save)
-// share one firewall. A claim that fails this can never enter the bank
+// add` path already enforces via evidence-writer.mjs's validateClaims() —
+// shared via evidence-validation.mjs's validateClaimFields() (not
+// evidence-writer.mjs directly: that file pulls in config-store.mjs, which
+// pulls in db/verbs.mjs, which barrels this file back in — importing
+// evidence-writer.mjs here would close that cycle; see
+// evidence-validation.mjs's header comment) so the CLI's dry-run/--write path
+// and every HTTP caller of candidateEvidenceMerge (the evidence merge route,
+// the evidence-seed route, and Library's future edit-in-place save) share one
+// firewall. This runs against the RAW incoming claims, before ids are
+// assigned below, so it only checks field shape (links/role_signals/
+// forbidden_wording must be arrays of non-empty strings) and placeholder/
+// current_base residue — not id/claim/evidence presence, which the
+// post-write assertValid("evidence", ...) schema check below covers once ids
+// are in place. A claim that fails either guard can never enter the bank
 // through any surface, not just the CLI's own guarded add.
 function assertCleanEvidenceClaims(claims) {
   const errors = [];
-  for (const raw of Array.isArray(claims) ? claims : []) {
-    const probe = [
-      raw?.claim,
-      raw?.evidence,
-      ...(Array.isArray(raw?.metrics) ? raw.metrics : []),
-      ...(Array.isArray(raw?.allowed_wording) ? raw.allowed_wording : []),
-    ]
-      .filter(Boolean)
-      .join("\n");
-    if (!probe) continue;
-    const lint = lintArtifact(probe);
-    if (!lint.clean) {
-      const finding = lint.findings[0];
-      errors.push({
-        id: raw?.id ?? null,
-        message: `unresolved placeholder (${finding.pattern}): "${finding.text}"`,
-      });
-    }
-    const leak = findCurrentBaseToken(probe);
-    if (leak) {
-      errors.push({
-        id: raw?.id ?? null,
-        message: "contains the private current_base field: evidence must never carry it",
-      });
-    }
-  }
+  (Array.isArray(claims) ? claims : []).forEach((raw, i) => {
+    const where = raw?.id ? `claim "${raw.id}"` : `claims[${i}]`;
+    errors.push(...validateClaimFields(raw, where));
+  });
   if (errors.length) {
     const err = new Error("evidence claim(s) refused by the honesty/privacy guard");
     err.code = "EVIDENCE_GUARD_REJECTED";
