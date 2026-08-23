@@ -1,7 +1,7 @@
 export const CAREER_OPS_UPSTREAM = Object.freeze({
   repository: "https://github.com/santifer/career-ops",
   commit: "10a569b1e9178aa90ef8028ea287e411a831e1b6",
-  providerCount: 74,
+  providerCount: 78,
 });
 
 export const CAREER_OPS_PROVIDER_IDS = Object.freeze([
@@ -38,6 +38,7 @@ export const CAREER_OPS_PROVIDER_IDS = Object.freeze([
   "ibm",
   "icims",
   "jibeapply",
+  "jobbankca",
   "jobicy",
   "jobspresso",
   "jobstreet",
@@ -51,6 +52,7 @@ export const CAREER_OPS_PROVIDER_IDS = Object.freeze([
   "local-parser",
   "manfred",
   "meituan",
+  "mycareersfuture",
   "nodesk",
   "nofluffjobs",
   "oraclecloud",
@@ -64,6 +66,7 @@ export const CAREER_OPS_PROVIDER_IDS = Object.freeze([
   "remotli",
   "rheinmetall",
   "rippling",
+  "senjob",
   "smartrecruiters",
   "softgarden",
   "solidjobs",
@@ -79,6 +82,7 @@ export const CAREER_OPS_PROVIDER_IDS = Object.freeze([
   "workday",
   "workingnomads",
   "wttj",
+  "yourator",
 ]);
 
 export const CAREER_OPS_PROVIDER_PARITY = Object.freeze(
@@ -189,12 +193,11 @@ export const CAREER_OPS_UPSTREAM_PROVIDER_IDS = Object.freeze([
 
 // Upstream providers not yet adopted, pending Scott's decision. Not a
 // permanent exclusion; each can move into CAREER_OPS_PROVIDER_IDS later.
-export const CAREER_OPS_DEFERRED_PROVIDER_IDS = Object.freeze({
-  jobbankca: "Deferred pending review; not yet adopted from the pinned upstream.",
-  mycareersfuture: "Deferred pending review; not yet adopted from the pinned upstream.",
-  senjob: "Deferred pending review; not yet adopted from the pinned upstream.",
-  yourator: "Deferred pending review; not yet adopted from the pinned upstream.",
-});
+// Currently empty — jobbankca, mycareersfuture, senjob, and yourator were the
+// last deferred batch and were adopted into CAREER_OPS_PROVIDER_IDS on
+// 2026-08-23. The constant stays in place (rather than being removed) as the
+// landing slot for whatever the next upstream roll defers.
+export const CAREER_OPS_DEFERRED_PROVIDER_IDS = Object.freeze({});
 
 // Upstream providers deliberately never adopted, with no plan to. Distinct
 // from "deferred": local-parser is already vendored (it is in

@@ -143,6 +143,24 @@ function prepareProviderEntry(providerId, entry = {}) {
       keywords: normalized.vdab?.keywords || keywords,
     };
   }
+  // Same convention as arbeitsagentur/vdab above: jobbankca and
+  // mycareersfuture are also keyword-required national job-bank providers,
+  // and their vendored fallback (resolveProfileKeywords(), from the
+  // _profile-keywords.mjs shim) always returns [] locally — CareerRat keeps
+  // candidate state in its workspace database, not a filesystem
+  // config/profile.yml, so the real fallback path is here instead.
+  if (providerId === "jobbankca" && keywords.length > 0) {
+    normalized.jobbankca = {
+      ...normalized.jobbankca,
+      keywords: normalized.jobbankca?.keywords || keywords,
+    };
+  }
+  if (providerId === "mycareersfuture" && keywords.length > 0) {
+    normalized.mycareersfuture = {
+      ...normalized.mycareersfuture,
+      keywords: normalized.mycareersfuture?.keywords || keywords,
+    };
+  }
   return normalized;
 }
 
@@ -158,7 +176,7 @@ function timeoutFor(value) {
   return Math.min(Math.trunc(requested), MAX_TIMEOUT_MS);
 }
 
-// Every provider request — 73 vendored adapters, each driven by a
+// Every provider request — 77 vendored adapters, each driven by a
 // user-configured source URL — goes through this one function, so this is
 // where the shared SSRF guard from public-http-fetch.mjs (protocol
 // screening, resolved-IP screening, DNS-pinned dispatcher, and re-validated

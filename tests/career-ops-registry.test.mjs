@@ -10,7 +10,7 @@ import {
 } from "../src/core/providers/career-ops-registry.mjs";
 
 // loadCareerOpsProviders is the per-provider isolation loader behind the
-// module's top-level registry build: 74+ vendored provider files used to load
+// module's top-level registry build: 78+ vendored provider files used to load
 // through a single Promise.all, so one broken vendor file threw and took down
 // the WHOLE registry (and therefore every module that imports it) for every
 // other provider too. `importProvider` is injectable specifically so this can

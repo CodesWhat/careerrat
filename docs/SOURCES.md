@@ -162,7 +162,7 @@ never written here.
 ## Deterministic provider parity
 
 The curated table above is a starter menu, not the complete runtime inventory.
-CareerRat accounts for all 74 providers in the pinned Career Ops snapshot: 73
+CareerRat accounts for all 78 providers in the pinned Career Ops snapshot: 77
 public-network adapters are implemented, and `local-parser` is intentionally
 unsupported because it executes user-configured local commands rather than making
 a public network call. The npm package includes the adapter sources, MIT license,

@@ -29,6 +29,7 @@ import { candidateConfigSource, loadCandidateConfig } from "../core/profile/conf
 import { loadEvidence } from "../core/profile/evidence-writer.mjs";
 import { listLearnings } from "../core/profile/learnings.mjs";
 import { loadModes } from "../core/profile/modes.mjs";
+import { CAREER_OPS_UPSTREAM } from "../core/providers/provider-parity.mjs";
 import { parseConfig } from "../core/providers/search-sources.mjs";
 import { inferProvider, loadScannerConfig } from "../core/scoring/sourced-scanner.mjs";
 
@@ -37,6 +38,9 @@ const pathCtx = { repoRoot: root };
 const userPaths = resolveUserPaths(pathCtx);
 const args = process.argv.slice(2);
 const json = args.includes("--json");
+// Matches companies.mjs's PUBLIC_PROVIDER_COUNT: excludes local-parser, the
+// one adopted id that is not a public network source adapter.
+const PUBLIC_PROVIDER_COUNT = CAREER_OPS_UPSTREAM.providerCount - 1;
 
 const userPrereqs = [
   {
@@ -527,7 +531,7 @@ function printCompanyAtsReadiness(readiness) {
       "- Company ATS scans: not configured - ask your agent to run discover-companies, or add boards with `careerrat companies --add`."
     );
     console.log(
-      "  This wires employer boards through CareerRat's 73 public deterministic provider adapters."
+      `  This wires employer boards through CareerRat's ${PUBLIC_PROVIDER_COUNT} public deterministic provider adapters.`
     );
     return;
   }

@@ -51,7 +51,7 @@ overrides and asks for a partial sweep. If source config is missing or has no en
 entries, stop and run `setup-searches` first:
 
 > **Available portals:** the baseline auto-seeds domain-appropriate sources, and
-> `careerrat searches --providers` lists all 73 public deterministic adapters.
+> `careerrat searches --providers` lists all 77 public deterministic adapters.
 > `setup-searches` auto-detects recognized pasted board URLs and supports explicit
 > adapter selection for branded hosts.
 

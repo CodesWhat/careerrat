@@ -17,15 +17,22 @@ imports `providers/<id>.conformance.mjs` for a real provider id, so a
 `_html-entities` fixture would never execute. The remaining 53 provider
 fixtures are untouched from the prior pin.
 
-The 73 public-network provider suites are copied with their filenames and import
+`jobbankca`, `mycareersfuture`, `senjob`, and `yourator` were added
+2026-08-23 when those four providers moved from
+`CAREER_OPS_DEFERRED_PROVIDER_IDS` into the adopted set — their fixtures are
+new, not rolled forward, and use invented, domain-neutral sample data rather
+than upstream's live-captured payloads.
+
+The 77 public-network provider suites are copied with their filenames and import
 roots adapted so Node's test runner executes them against
-`src/core/providers/career-ops/vendor`. The VDAB-only ambient
-`config/profile.yml` fallback assertions are omitted because CareerRat injects
-DB-backed candidate keywords through its registry instead; that replacement has
-first-party coverage. One Remotli mock salary is changed to `219500` because the
-upstream value is an intentional CareerRat private-data release sentinel; the
-assertion remains equivalent. `local-parser` is excluded because it executes
-user-configured local commands and is not a network source.
+`src/core/providers/career-ops/vendor`. The VDAB/jobbankca/mycareersfuture
+ambient `config/profile.yml` fallback assertions are omitted because CareerRat
+injects DB-backed candidate keywords through its registry instead; that
+replacement has first-party coverage. One Remotli mock salary is changed to
+`219500` because the upstream value is an intentional CareerRat private-data
+release sentinel; the assertion remains equivalent. `local-parser` is excluded
+because it executes user-configured local commands and is not a network
+source.
 
 CareerRat owns the small assertion helper in this directory. Shared CareerRat
 tests separately cover the wrapper transport, normalized offer contract,
