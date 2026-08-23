@@ -376,6 +376,117 @@ describe("CalendarPage", () => {
     expect(event).toBeGreaterThan(nextWeekHeading);
     expect(event).toBeLessThan(laterHeading);
   });
+
+  // 2026-08-23 UX audit: the hero "This Week" tile (data-calendar-stat="thisWeek")
+  // and the agenda's own "This week" bucket count (.calendar__bucket-count) must
+  // always agree — a reader sees both numbers on the same screen. Before the fix,
+  // the agenda's event pool (collectCalendarEvents) only drew from today.events,
+  // upcoming.events (capped to 6 server-side), and weeks[].days/events (Mon-Fri
+  // only), so it silently dropped events the hero's uncapped, weekday-agnostic
+  // metrics.thisWeek counted: a 7th this-week event past the cap, and any
+  // Saturday/Sunday event. This fixture reproduces both failure modes in one
+  // shot — 7 qualifying events (cap-overflow), two of them on a weekend
+  // (2026-07-11 Sat, 2026-07-12 Sun) — via calendar.thisWeek.events, the
+  // canonical uncapped collection buildCalendar() now also exposes for the
+  // agenda to read.
+  it("keeps the This Week hero stat and the agenda's This week row count in agreement, including a cap-overflow and a weekend event", () => {
+    const thisWeekEvents = [
+      {
+        id: "tw-1",
+        iso: "2026-07-10",
+        title: "Friday screen",
+        kind: "interview",
+        label: "Interview",
+        detailId: "tw-1",
+        done: false,
+      },
+      {
+        id: "tw-2",
+        iso: "2026-07-11",
+        title: "Saturday assessment due",
+        kind: "assessment",
+        label: "Assessment",
+        detailId: "tw-2",
+        done: false,
+      },
+      {
+        id: "tw-3",
+        iso: "2026-07-12",
+        title: "Sunday reply due",
+        kind: "reply",
+        label: "Reply",
+        detailId: "tw-3",
+        done: false,
+      },
+      {
+        id: "tw-4",
+        iso: "2026-07-13",
+        title: "Monday onsite",
+        kind: "interview",
+        label: "Interview",
+        detailId: "tw-4",
+        done: false,
+      },
+      {
+        id: "tw-5",
+        iso: "2026-07-13",
+        title: "Monday follow-up",
+        kind: "follow-up",
+        label: "Follow-Up",
+        detailId: "tw-5",
+        done: false,
+      },
+      {
+        id: "tw-6",
+        iso: "2026-07-14",
+        title: "Tuesday hiring-manager screen",
+        kind: "interview",
+        label: "Interview",
+        detailId: "tw-6",
+        done: false,
+      },
+      {
+        id: "tw-7",
+        iso: "2026-07-14",
+        title: "Tuesday deadline",
+        kind: "deadline",
+        label: "Deadline",
+        detailId: "tw-7",
+        done: false,
+      },
+    ];
+
+    const html = renderCalendarPage({
+      data: {
+        calendar: {
+          todayIso: "2026-07-08",
+          metrics: { dueToday: 0, interviews: 0, thisWeek: thisWeekEvents.length },
+          today: { events: [] },
+          // Simulates the real server-side cap: only 6 of the 7 qualifying
+          // events survive `upcomingEvents.slice(0, 6)` in dashboard-data.js.
+          // The 7th (and the weekend two) are ONLY reachable via
+          // calendar.thisWeek.events.
+          upcoming: { events: thisWeekEvents.slice(0, 6) },
+          // Mon-Fri only — both weekend events are structurally absent here,
+          // same as the real buildCalendarWeek().
+          weeks: [],
+          thisWeek: { events: thisWeekEvents },
+        },
+      },
+    });
+
+    expect(html).toMatch(/data-calendar-stat="thisWeek">7</);
+
+    const bucketHeading = html.indexOf("<h2>This week</h2>");
+    const bucketCountMatch = html
+      .slice(bucketHeading)
+      .match(/<span class="calendar__bucket-count">(\d+)<\/span>/);
+    expect(bucketCountMatch?.[1]).toBe("7");
+
+    for (const event of thisWeekEvents) {
+      expect(html).toContain(event.title);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

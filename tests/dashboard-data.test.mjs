@@ -417,7 +417,12 @@ test("Dashboard adapter builds Calendar from tracker dates and actions", () => {
     now: new Date("2026-06-18T12:00:00.000Z"),
   });
 
-  assert.equal(vm.calendar.metrics.thisWeek, 3);
+  // metrics.thisWeek is forward-looking (today+2..today+6, see buildCalendar in
+  // dashboard-data.js), not the Mon-Fri `currentWeek` grid below: 06-17 is
+  // yesterday (past) and both 06-18 items are today, so only the 06-22 followUp
+  // falls in the forward window. currentWeek.events (Jun 15-19) still holds all 3.
+  assert.equal(vm.calendar.metrics.thisWeek, 1);
+  assert.equal(vm.calendar.weeks[0].events.length, 3);
   assert.equal(vm.calendar.metrics.interviews, 1);
   assert.equal(vm.calendar.metrics.dueToday, 2);
   assert.equal(vm.calendar.currentWeekIndex, 0);
@@ -480,6 +485,65 @@ test("Dashboard adapter builds Calendar from tracker dates and actions", () => {
   assert.equal(vm.calendar.sync.history[0].providerLabel, "Google Calendar");
   assert.equal(vm.calendar.sync.history[0].title, "Aperture interview");
   assert.equal(vm.calendar.sync.history[0].statusLabel, "Written");
+});
+
+// 2026-08-23 UX audit: on a Sunday, the Mon-Fri `currentWeek` grid is entirely
+// in the past, so a hero stat built from it undercounts (or reads zero) next
+// to the agenda's forward-looking "This week" section, which is a
+// self-contradiction a user reads on the same screen. metrics.thisWeek must
+// stay forward-looking (today+2..today+6) regardless of which weekday "today"
+// falls on.
+test("Calendar's This Week hero stat stays forward-looking on a Sunday, not the past Mon-Fri week", () => {
+  const tracker = {
+    applications: [
+      {
+        id: "initech",
+        company: "Initech",
+        role: "Staff Engineer",
+        status: "interview",
+        channel: "portal",
+        fitScore: 80,
+        appliedAt: "2026-06-01",
+        nextInterviewAt: "2026-06-24T15:00:00.000Z",
+      },
+      {
+        id: "globodyne",
+        company: "Globodyne",
+        role: "Platform Engineer",
+        status: "awaiting",
+        channel: "portal",
+        fitScore: 78,
+        appliedAt: "2026-06-03",
+        followUp: { kind: "app-nudge", dueAt: "2026-06-26" },
+      },
+    ],
+    sourced: [],
+    sources: [],
+    communications: [],
+  };
+
+  const vm = buildDashboardViewModel(tracker, {
+    now: new Date("2026-06-21T12:00:00.000Z"),
+  });
+
+  assert.equal(vm.calendar.todayIso, "2026-06-21");
+  // The ISO Mon-Fri week (Jun 15-19) is entirely in the past on this Sunday.
+  assert.equal(vm.calendar.weeks[0].label, "Jun 15-19");
+  assert.equal(vm.calendar.weeks[0].events.length, 0);
+  // The two forward-looking items (Jun 24 interview, Jun 26 follow-up) land in
+  // today+2..today+6, so the hero stat reads 2, matching what the agenda's
+  // forward "This week" bucket would show instead of the stale, contradicting 0.
+  assert.equal(vm.calendar.metrics.thisWeek, 2);
+  // calendar.thisWeek.events is the canonical, uncapped collection
+  // CalendarPage's agenda pool also reads (collectCalendarEvents) so its
+  // rendered "This week" row count can never drift from this hero number —
+  // see CalendarPage.test.jsx for the full cap-overflow/weekend-event
+  // regression case.
+  assert.equal(vm.calendar.thisWeek.events.length, vm.calendar.metrics.thisWeek);
+  assert.deepEqual(vm.calendar.thisWeek.events.map((event) => event.detailId).sort(), [
+    "globodyne",
+    "initech",
+  ]);
 });
 
 test("Calendar counts and names a scheduled round inside the rolling 14-day horizon", () => {
