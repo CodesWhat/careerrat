@@ -17,10 +17,62 @@
 //                   platform (the scripts/capture-board-snapshot.mjs model).
 
 import { existsSync, readdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+const requireFromSession = createRequire(import.meta.url);
+
+const DEFAULT_PLAYWRIGHT_TOOLING_DEPENDENCIES = {
+  resolvePackage: () => requireFromSession.resolve("playwright"),
+  loadPackage: () => requireFromSession("playwright"),
+  pathExists: existsSync,
+};
+
 export const PROVIDER_PREFERENCE = ["auto", "extension", "orca", "playwright"];
+
+export function detectPlaywrightTooling(dependencies = {}) {
+  const {
+    resolvePackage = DEFAULT_PLAYWRIGHT_TOOLING_DEPENDENCIES.resolvePackage,
+    loadPackage = DEFAULT_PLAYWRIGHT_TOOLING_DEPENDENCIES.loadPackage,
+    pathExists = DEFAULT_PLAYWRIGHT_TOOLING_DEPENDENCIES.pathExists,
+  } = dependencies;
+
+  try {
+    resolvePackage();
+  } catch {
+    return {
+      packageInstalled: false,
+      browserInstalled: false,
+      ready: false,
+      detail: "Playwright is not installed.",
+    };
+  }
+
+  try {
+    const playwright = loadPackage();
+    const executablePath = playwright?.chromium?.executablePath?.();
+    if (typeof executablePath !== "string" || executablePath.length === 0) {
+      throw new Error("Chromium executable path is unavailable");
+    }
+    const browserInstalled = pathExists(executablePath) === true;
+    return {
+      packageInstalled: true,
+      browserInstalled,
+      ready: browserInstalled,
+      detail: browserInstalled
+        ? "Playwright and Chromium are installed."
+        : "Playwright is installed, but its Chromium executable is missing.",
+    };
+  } catch {
+    return {
+      packageInstalled: true,
+      browserInstalled: false,
+      ready: false,
+      detail: "Playwright is installed, but Chromium readiness could not be verified.",
+    };
+  }
+}
 
 // `automatedApply` marks whether `apply-job`'s scripted/headless apply path
 // (createConfiguredApplyExecutor, src/core/apply/apply-executor-factory.mjs) can
@@ -115,7 +167,7 @@ export function describeProviders({ env = process.env } = {}) {
 // the actual provider options rather than one baked-in suggestion.
 export function automaticApplyGap(provider) {
   const descriptor = PROVIDERS[provider];
-  if (!descriptor || descriptor.automatedApply !== false) return null;
+  if (descriptor?.automatedApply !== false) return null;
   return {
     provider,
     label: descriptor.label,

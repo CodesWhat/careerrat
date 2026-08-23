@@ -1462,6 +1462,11 @@ test("Dashboard adapter's artifact list surfaces friendly notes, never raw paths
           resumeNote: "Tailored for the platform team",
           coverLetter: "workspace/tailored/dated-co-cover.md",
           coverLetterGeneratedAt: "2026-06-02T10:00:00.000Z",
+          interviewDossier: {
+            path: "workspace/interview-prep/dated-co.md",
+            generatedAt: "2026-06-03T10:00:00.000Z",
+            markdown: "# Dated Co interview dossier",
+          },
         },
       },
       {
@@ -1490,6 +1495,7 @@ test("Dashboard adapter's artifact list surfaces friendly notes, never raw paths
   const jd = dated.drawer.artifacts.find((a) => a.kind === "Job description");
   const resume = dated.drawer.artifacts.find((a) => a.kind === "Resume");
   const coverLetter = dated.drawer.artifacts.find((a) => a.kind === "Cover letter");
+  const dossier = dated.drawer.artifacts.find((a) => a.kind === "Interview dossier");
   assert.equal(jd.path, "workspace/jobs/dated-co.md");
   assert.notEqual(jd.note, jd.path);
   assert.match(jd.note, /Captured/);
@@ -1498,6 +1504,8 @@ test("Dashboard adapter's artifact list surfaces friendly notes, never raw paths
   assert.equal(coverLetter.path, "workspace/tailored/dated-co-cover.md");
   assert.notEqual(coverLetter.note, coverLetter.path);
   assert.match(coverLetter.note, /Generated/);
+  assert.equal(dossier.path, "workspace/interview-prep/dated-co.md");
+  assert.match(dossier.note, /Prepared/);
 
   const plain = byId.get("no-dates");
   const plainJd = plain.drawer.artifacts.find((a) => a.kind === "Job description");

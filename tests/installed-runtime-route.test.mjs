@@ -158,6 +158,42 @@ test("inventory leaves selectedId null when two or more CLIs are ready — the p
   });
 });
 
+test("runtime probe returns the requested runtime's current readiness", async () => {
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {
+      claude: { status: "authentication_required", ready: false, action: "open_terminal" },
+      codex: { status: "ready", ready: true, action: null },
+    },
+  });
+
+  const response = await request(server, "POST", "/api/settings/ai-runtime/probe", {
+    runtimeId: "codex",
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.ok, true);
+  assert.deepEqual(
+    {
+      id: response.body.runtime.id,
+      status: response.body.runtime.status,
+      ready: response.body.runtime.ready,
+    },
+    { id: "codex", status: "ready", ready: true }
+  );
+});
+
+test("runtime probe rejects an unknown runtime id", async () => {
+  const server = boot({ inventory: INVENTORY, probes: {} });
+
+  const response = await request(server, "POST", "/api/settings/ai-runtime/probe", {
+    runtimeId: "not-a-runtime",
+  });
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(response.body, { ok: false, code: "RUNTIME_UNKNOWN" });
+});
+
 test("Open Terminal is an explicit user action with a fixed sign-in command", async () => {
   const opened = [];
   const server = boot({
@@ -175,6 +211,23 @@ test("Open Terminal is an explicit user action with a fixed sign-in command", as
   assert.equal(response.body.signInCommand, "claude auth login");
   assert.equal(opened.length, 1);
   assert.equal(opened[0].id, "claude");
+});
+
+test("Open Terminal rejects an unknown runtime id without invoking the terminal", async () => {
+  const opened = [];
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {},
+    openTerminalImpl: (runtime) => opened.push(runtime),
+  });
+
+  const response = await request(server, "POST", "/api/settings/ai-runtime/open-terminal", {
+    runtimeId: "not-a-runtime",
+  });
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(response.body, { ok: false, code: "RUNTIME_NOT_AVAILABLE" });
+  assert.deepEqual(opened, []);
 });
 
 test("selection rejects an unavailable or unauthenticated runtime with an actionable code", async () => {

@@ -9,11 +9,11 @@ describe("desktop smoke HTTP surface verification", () => {
     const requested = [];
     const report = await verifySmokeHttpSurface({
       baseUrl: "http://127.0.0.1:61234",
-      route: "/app/onboarding",
+      route: "/app",
       getOk: async (url) => {
         requested.push(url);
         if (url.endsWith("/api/health")) return '{"ok":true}';
-        if (url.endsWith("/app/onboarding")) {
+        if (url.endsWith("/app")) {
           return '<!doctype html><div id="root"></div><script type="module" src="/app/assets/index-abc.js"></script>';
         }
         if (url.endsWith("/app/assets/index-abc.js")) return "console.log('ok');";
@@ -23,11 +23,11 @@ describe("desktop smoke HTTP surface verification", () => {
 
     assert.deepEqual(requested, [
       "http://127.0.0.1:61234/api/health",
-      "http://127.0.0.1:61234/app/onboarding",
+      "http://127.0.0.1:61234/app",
       "http://127.0.0.1:61234/app/assets/index-abc.js",
     ]);
     assert.deepEqual(report, {
-      route: "/app/onboarding",
+      route: "/app",
       assetPaths: ["/app/assets/index-abc.js"],
     });
   });

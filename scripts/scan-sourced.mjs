@@ -353,6 +353,7 @@ export async function runSourcedScan({
   const outputOffers = [];
   const savedAt = new Date();
   const companyPresentationCounts = new Map();
+  const seenRunCompanyRoles = new Set();
   const configuredCompanyCap = Number(
     candidateConfig?.targeting?.search_preferences?.presentation_cap_per_company
   );
@@ -392,6 +393,7 @@ export async function runSourcedScan({
       config: candidateConfig,
       now: savedAt.getTime(),
       companyPresentationCounts,
+      seenRunCompanyRoles,
       perCompanyCap,
     });
 

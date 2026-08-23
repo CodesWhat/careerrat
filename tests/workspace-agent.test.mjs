@@ -6205,12 +6205,16 @@ test("settings.explain never leaks current_base and surfaces the other comp fiel
 test("settings.explain scopes to the requested domain and reads absent automation capabilities as false", async () => {
   const repoRoot = tempRepo();
   // A minimal stored automation doc that predates several capabilities —
-  // only one_click_apply is present.
+  // only authenticated_apply_preparation is present.
   candidateConfigPatch({
     repoRoot,
     env: {},
     name: "automation",
-    patch: { capabilities: { one_click_apply: { enabled: true, platforms: { linkedin: true } } } },
+    patch: {
+      capabilities: {
+        authenticated_apply_preparation: { enabled: true, platforms: { linkedin: true } },
+      },
+    },
   });
 
   const modesOnly = await executeWorkspaceIntent({
@@ -6248,10 +6252,10 @@ test("settings.explain scopes to the requested domain and reads absent automatio
     assert.equal(platform.enabled, false);
   }
 
-  const oneClickApply = allArtifact.automation.capabilities.find(
-    (cap) => cap.key === "one_click_apply"
+  const applyPreparation = allArtifact.automation.capabilities.find(
+    (cap) => cap.key === "authenticated_apply_preparation"
   );
-  assert.equal(oneClickApply.enabled, true);
+  assert.equal(applyPreparation.enabled, true);
 });
 
 test("settings.apply rejects a comp-reference change without echoing any value or writing config", async () => {
@@ -6511,7 +6515,7 @@ test("settings.apply automation: capability disable is allowed even for a high-t
         change: {
           kind: "automation",
           op: "capability",
-          capability: "one_click_apply",
+          capability: "authenticated_apply_preparation",
           enabled: false,
         },
       },
@@ -6519,7 +6523,8 @@ test("settings.apply automation: capability disable is allowed even for a high-t
   });
   assert.equal(settingsArtifact(result).to, false);
   assert.equal(
-    candidateConfigGet({ repoRoot, env: {} }).automation.capabilities.one_click_apply.enabled,
+    candidateConfigGet({ repoRoot, env: {} }).automation.capabilities
+      .authenticated_apply_preparation.enabled,
     false
   );
 });
@@ -6557,7 +6562,7 @@ test("settings.apply automation: enabling a high-tier capability is unsupported 
           change: {
             kind: "automation",
             op: "capability",
-            capability: "one_click_apply",
+            capability: "authenticated_apply_preparation",
             enabled: true,
           },
         },
@@ -6566,7 +6571,7 @@ test("settings.apply automation: enabling a high-tier capability is unsupported 
     (error) => {
       assert.equal(error.code, "SETTINGS_CHANGE_UNSUPPORTED");
       assert.equal(error.details.reason, "capability-tier");
-      assert.equal(error.details.capability, "one_click_apply");
+      assert.equal(error.details.capability, "authenticated_apply_preparation");
       return true;
     }
   );
@@ -6604,7 +6609,7 @@ test("settings.apply automation: the value/enabled flag aliases agree — value:
           change: {
             kind: "automation",
             op: "capability",
-            capability: "one_click_apply",
+            capability: "authenticated_apply_preparation",
             value: true,
           },
         },

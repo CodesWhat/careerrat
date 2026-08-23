@@ -17,7 +17,7 @@ private config, not hardcoded preferences.
 | `search-jobs` | Run the top-of-funnel sourced sweep — scan configured sources, dedupe, check liveness, coarse-triage every new entry with fitScore/fitBucket/fitBasis, save JD bodies, write watermarks, and optionally hand top sourced roles to evaluate-job. Does not tailor, fill, or submit. |
 | `evaluate-job` | Body-read gate for a single job posting — fetch, save, check limits/comp/fit, emit GATE/FIT/COMP/ACTION, and write calibrated fit back to the tracker. Run before any tailoring or submission. |
 | `tailor-application` | Generate finished, honest role-specific resumes, cover letters, short answers, and non-message outreach artifacts from a saved JD, source resume facts, candidate evidence bank, writing style, and form defaults after the job passes the CareerRat gate. Reject unresolved placeholders. |
-| `apply-job` | End-to-end job application workflow — gates on app limits and evaluate-job verdict, tailors artifacts, builds the render, fills the ATS form (including LinkedIn Easy Apply one-click path), verifies submission, and updates the tracker. |
+| `apply-job` | End-to-end job application workflow — gates on app limits and evaluate-job verdict, tailors artifacts, builds the render, prepares supported ATS forms (including LinkedIn Easy Apply), stops for user submission, verifies the reported outcome, and updates the tracker. |
 
 ## Research loop
 

@@ -52,7 +52,7 @@ nurse, a driver, and an engineer each bring their own config.
   hiring manager / panel) grounded in your evidence, with do-not-overclaim
   guardrails. Comp/logistics scripts use only your target/minimum figures.
 - **Apply workflow engine** (`apply-job`) — portal form-fill recipes with a
-  manual-submit default; auto-submit is strictly opt-in, and the flow halts on
+  mandatory user-submit gate, and the flow halts on
   CAPTCHAs and unsupported auth prompts. With explicit `mail_access` consent, it
   can read one recent emailed verification code from any webmail provider and continue.
   The agent-led workflow and safety gates are shipped. Native Ask and Apply on site
@@ -130,8 +130,8 @@ nurse, a driver, and an engineer each bring their own config.
 - **Opt-in browser & mail automation** — session-based automation you switch on per
   capability, using your own browser login with no stored credentials: application-status
   sync (`sync-status`), authenticated search, in-platform message ingest
-  (`ingest-messages`), and authenticated one-click apply (LinkedIn Easy Apply, behind the
-  existing submit-safety gate), LinkedIn profile optimization, plus opt-in mail sync and
+  (`ingest-messages`), and authenticated supervised apply preparation (LinkedIn Easy Apply,
+  stopping at the existing user-submit gate), LinkedIn profile optimization, plus opt-in mail sync and
   `mail_access` for generic webmail / Gmail / Outlook. A per-capability, per-platform consent
   switchboard (`careerrat automation`) defaults fully off and stores nothing — nothing runs
   until you read a platform's terms, record consent, and enable it; every session is
@@ -199,7 +199,7 @@ nurse, a driver, and an engineer each bring their own config.
 - **Sourced-role triage & status lanes** — newly sourced roles, gate verdicts, and apply
   outcomes drive clear board states: roles that pass the gate stay as ready-to-pursue, gated
   roles archive off the active board (kept and recoverable), and an application the assistant
-  can't auto-submit (CAPTCHA, account wall, a required exercise) is surfaced as "manual apply
+  can't prepare a submission (CAPTCHA, account wall, a required exercise) is surfaced as "manual apply
   needed" rather than disappearing. A board-top triage banner counts what's waiting and prompts
   you to go through it with your agent.
 - **Dashboard strategy insights** — a local, read-only "what's working" card on the dashboard:

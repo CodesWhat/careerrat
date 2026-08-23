@@ -8,8 +8,9 @@ const REPO_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 const PRODUCT_FILES = [
   "apps/web/src/App.jsx",
-  "apps/web/src/app-shell/NavList.jsx",
-  "apps/web/src/app-shell/DashboardContext.jsx",
+  "apps/web/src/chat-first/dashboard-context.jsx",
+  "apps/web/src/chat-first/ChatFirstApp.jsx",
+  "apps/web/src/chat-first/ProfileSettingsController.jsx",
   "apps/web/src/lib/api.js",
   "src/cli/dashboard-route.mjs",
   "src/cli/data-route.mjs",
@@ -20,8 +21,9 @@ const PRODUCT_FILES = [
 ];
 
 const REACT_PRODUCT_PAGE_FILES = [
-  "apps/web/src/onboarding/OnboardingPage.jsx",
-  "apps/web/src/onboarding/InterviewSurface.jsx",
+  "apps/web/src/chat-first/ChatFirstApp.jsx",
+  "apps/web/src/chat-first/FirstRunExperience.jsx",
+  "apps/web/src/chat-first/ProfileSettings.jsx",
 ];
 
 const LEGACY_STATIC_ROUTES = ["/onboard", "/search", "/packet", "/evaluate", "/answer", "/tracker"];
@@ -144,11 +146,12 @@ function assertNoMatch(source, pattern, message) {
   assert.equal(match, null, `${message}${match ? `: ${match[0]}` : ""}`);
 }
 
-test("DB app shell guard scans the complete product boundary", () => {
+test("DB chat-first workspace guard scans the complete product boundary", () => {
   assert.deepEqual(PRODUCT_FILES, [
     "apps/web/src/App.jsx",
-    "apps/web/src/app-shell/NavList.jsx",
-    "apps/web/src/app-shell/DashboardContext.jsx",
+    "apps/web/src/chat-first/dashboard-context.jsx",
+    "apps/web/src/chat-first/ChatFirstApp.jsx",
+    "apps/web/src/chat-first/ProfileSettingsController.jsx",
     "apps/web/src/lib/api.js",
     "src/cli/dashboard-route.mjs",
     "src/cli/data-route.mjs",
@@ -161,8 +164,9 @@ test("DB app shell guard scans the complete product boundary", () => {
 
 test("static affordance guard scans normal React product pages", () => {
   assert.deepEqual(REACT_PRODUCT_PAGE_FILES, [
-    "apps/web/src/onboarding/OnboardingPage.jsx",
-    "apps/web/src/onboarding/InterviewSurface.jsx",
+    "apps/web/src/chat-first/ChatFirstApp.jsx",
+    "apps/web/src/chat-first/FirstRunExperience.jsx",
+    "apps/web/src/chat-first/ProfileSettings.jsx",
   ]);
 });
 

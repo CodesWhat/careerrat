@@ -159,6 +159,7 @@ export const EXECUTABLE_INTENTS = new Set([
   "strategy.stamp",
   "settings.explain",
   "settings.apply",
+  "job.prepare-submit",
   "job.apply",
   "communication.draft",
   "communication.draft-request",
@@ -5738,6 +5739,8 @@ export async function executeWorkspaceIntent({
       });
     }
 
+    const prepareSubmit = normalized.type === "job.prepare-submit";
+    const resumeApplicationSession = prepareSubmit || input.resumeSession === true;
     const postingUrl = safeExternalHttpUrl(
       application.link || application.url || application.sourceUrl
     );
@@ -5757,7 +5760,7 @@ export async function executeWorkspaceIntent({
           },
         ],
         metadata: {
-          state: "needs-input",
+          state: prepareSubmit ? "blocked" : "needs-input",
           applicationId: normalized.entity.id,
           submissionVerified: false,
         },
@@ -5767,7 +5770,7 @@ export async function executeWorkspaceIntent({
 
     let questionCapture = null;
 
-    if (input.resumeSession !== true) {
+    if (!resumeApplicationSession) {
       const evaluated = await evaluateApplicationRequest({
         repoRoot,
         env,
@@ -5872,7 +5875,10 @@ export async function executeWorkspaceIntent({
       });
     }
 
-    if (typeof applyJobImpl !== "function") {
+    const applySafetyBlockReason = resumeApplicationSession
+      ? applicationApplySafetyBlockReason(application)
+      : null;
+    if (typeof applyJobImpl !== "function" && (!prepareSubmit || !applySafetyBlockReason)) {
       return appendActionResult({
         repoRoot,
         env,
@@ -5906,17 +5912,10 @@ export async function executeWorkspaceIntent({
         now,
       });
     }
-    // Server-side corroboration for the resumeSession shortcut above: the
-    // non-resume branch just freshly re-evaluated the gate and regenerated
-    // the packet in THIS request (both branches already returned above if
-    // either check failed), so it needs no further check here. resumeSession
-    // skipped both of those, trusting a client-supplied boolean — so before
-    // the browser is driven to submit, corroborate against the PERSISTED
-    // verdict and packet state instead. A client can set resumeSession on
-    // any request; it must never be trusted to skip the checks themselves,
-    // only the redundant work of re-running them.
-    const applySafetyBlockReason =
-      input.resumeSession === true ? applicationApplySafetyBlockReason(application) : null;
+    // A prepare-submit request always skips re-evaluation and regeneration.
+    // Corroborate the saved gate and packet before opening the browser, even
+    // when no executor is connected. job.apply keeps its existing no-executor
+    // handoff behavior because its non-resume path can build those records.
     if (applySafetyBlockReason) {
       return appendActionResult({
         repoRoot,
@@ -5941,6 +5940,9 @@ export async function executeWorkspaceIntent({
         now,
       });
     }
+    const executorInput = prepareSubmit
+      ? { ...input, resumeSession: true, prepareOnly: true }
+      : input;
     let execution = await applyJobImpl({
       repoRoot,
       env,
@@ -5948,7 +5950,8 @@ export async function executeWorkspaceIntent({
       application,
       postingUrl,
       questionCapture,
-      input,
+      input: executorInput,
+      ...(prepareSubmit ? { prepareOnly: true } : {}),
     });
     if (execution?.state === "questions-captured" && execution?.questionCaptureUpdated === true) {
       application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
@@ -5998,7 +6001,7 @@ export async function executeWorkspaceIntent({
             },
           ],
           metadata: {
-            state: "needs-input",
+            state: prepareSubmit ? "blocked" : "needs-input",
             applicationId: normalized.entity.id,
             submissionVerified: false,
             uploadReady: Boolean(packet.uploadReady),
@@ -6010,9 +6013,9 @@ export async function executeWorkspaceIntent({
                 href: `/jobs?open=${encodeURIComponent(normalized.entity.id)}`,
               },
               {
-                label: "Resume supervised apply",
+                label: prepareSubmit ? "Resume supervised preparation" : "Resume supervised apply",
                 intent: {
-                  type: "job.apply",
+                  type: prepareSubmit ? "job.prepare-submit" : "job.apply",
                   entity: { type: "application", id: normalized.entity.id },
                   input: { resumeSession: true },
                 },
@@ -6031,7 +6034,13 @@ export async function executeWorkspaceIntent({
         application,
         postingUrl,
         questionCapture,
-        input: { ...input, resumeSession: true, renderedQuestionsReady: true },
+        input: {
+          ...executorInput,
+          resumeSession: true,
+          renderedQuestionsReady: true,
+          ...(prepareSubmit ? { prepareOnly: true } : {}),
+        },
+        ...(prepareSubmit ? { prepareOnly: true } : {}),
       });
     }
     if (execution?.available === false || execution?.state === "unavailable") {
@@ -6078,6 +6087,8 @@ export async function executeWorkspaceIntent({
       const sessionUrl = safeExternalHttpUrl(
         execution.currentUrl || application.link || application.url || application.sourceUrl
       );
+      const sessionState =
+        prepareSubmit && execution.state === "questions-captured" ? "blocked" : execution.state;
       return appendActionResult({
         repoRoot,
         env,
@@ -6097,14 +6108,14 @@ export async function executeWorkspaceIntent({
           },
         ],
         metadata: {
-          state: execution.state,
+          state: sessionState,
           applicationId: normalized.entity.id,
           submissionVerified: false,
           nextActions: [
             {
-              label: "Rescan and verify",
+              label: prepareSubmit ? "Resume supervised preparation" : "Rescan and verify",
               intent: {
-                type: "job.apply",
+                type: prepareSubmit ? "job.prepare-submit" : "job.apply",
                 entity: { type: "application", id: normalized.entity.id },
                 input: { resumeSession: true },
               },
@@ -6117,6 +6128,58 @@ export async function executeWorkspaceIntent({
               },
             },
           ],
+        },
+        operationResult: execution,
+        now,
+      });
+    }
+    if (prepareSubmit && (execution?.verified === true || execution?.state === "submitted")) {
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: `The supervised browser already shows a submission confirmation for ${applicationLabel(application)}. This application was not marked Applied; record it only after you confirm the submission.`,
+        artifacts: [
+          {
+            kind: "application_handoff",
+            title: `${applicationLabel(application)}: Submission confirmation needs review`,
+            applicationId: normalized.entity.id,
+            submissionVerified: false,
+            executorAvailable: true,
+            session: execution.session || { provider: "session-browser" },
+          },
+        ],
+        metadata: {
+          state: "manual-handoff",
+          applicationId: normalized.entity.id,
+          submissionVerified: false,
+          nextActions: [
+            {
+              label: "I applied",
+              intent: {
+                type: "application.record-external",
+                entity: { type: "application", id: normalized.entity.id },
+              },
+            },
+          ],
+        },
+        operationResult: execution,
+        now,
+      });
+    }
+    if (prepareSubmit && execution?.verified !== true) {
+      const detail = String(execution?.reason || "The supervised preparation could not continue.");
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: `${detail} CareerRat stopped before submission and did not mark this application Applied.`,
+        metadata: {
+          state: "blocked",
+          applicationId: normalized.entity.id,
+          submissionVerified: false,
         },
         operationResult: execution,
         now,
@@ -6685,7 +6748,7 @@ function strategyReviewRequestFromText(text) {
 // settings.explain / settings.apply phrasings — the free-text half of the
 // Ask "configure" row. Anchored on words the terminal search.run catch-all
 // below doesn't own (settings, mode, automation, consent, capability,
-// polling, one-click apply, setup mode) — never the bare word "search",
+// polling, authenticated apply preparation, setup mode) — never the bare word "search",
 // which is owned by the source/search intents above.
 // ---------------------------------------------------------------------------
 
@@ -6773,8 +6836,8 @@ const AUTOMATION_CAPABILITY_PHRASES = {
   "authenticated search scanning": "authenticated_search",
   messaging: "messaging",
   "in-platform messaging": "messaging",
-  "one-click apply": "one_click_apply",
-  "one click apply": "one_click_apply",
+  "authenticated apply preparation": "authenticated_apply_preparation",
+  "apply preparation": "authenticated_apply_preparation",
   "profile optimize": "profile_optimize",
   "profile apply": "profile_apply",
   "mail access": "mail_access",

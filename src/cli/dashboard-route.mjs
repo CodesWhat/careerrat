@@ -44,7 +44,7 @@
 import { automationStatus } from "../core/automation/consent.mjs";
 import { requireDb } from "../core/db/connection.mjs";
 import { assembleActivityEvents, assembleTrackerObject } from "../core/db/export-to-tracker.mjs";
-import { candidateConfigGet } from "../core/db/verbs.mjs";
+import { candidateConfigGet, chatFirstStateFromDb } from "../core/db/verbs.mjs";
 import { loadModes } from "../core/profile/modes.mjs";
 import { loadAgentGuidanceSnapshot } from "../core/tracker/agent-guidance-snapshot.mjs";
 import { buildDashboardViewModel } from "../core/tracker/dashboard-data.js";
@@ -134,8 +134,9 @@ export function mountDashboardRoutes({
         automationStatusForRoute,
       });
 
+      const requestedAt = now();
       const viewModel = buildDashboardViewModel(trackerData, {
-        now: now(),
+        now: requestedAt,
         activityEvents,
         modes,
         settings,
@@ -143,6 +144,7 @@ export function mountDashboardRoutes({
         agentGuidance,
         calendarProviderStatus,
       });
+      viewModel.chatFirst = chatFirstStateFromDb(db, { now: requestedAt });
 
       const setup = readSetup({ repoRoot, env, candidateConfigGetForRoute });
 

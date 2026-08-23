@@ -37,7 +37,7 @@ if (isMain) {
   }
   // --allow-posthog-proxy is opt-in per call site: only apps/website and
   // apps/docs pass it (the public marketing/docs surface). apps/web's demo
-  // build (scripts/build-demo.mjs) and the local dev server
+  // static builds and the local dev server
   // (src/cli/tracker-dev.mjs, which calls buildContentSecurityPolicy directly
   // and never sets extraConnectSrc) both stay on connect-src 'self' — the
   // local-first dashboard never gets an analytics egress point.

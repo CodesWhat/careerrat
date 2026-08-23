@@ -29,8 +29,7 @@ const MARGIN = (CANVAS - BODY) / 2; // 100
 const RADIUS = 185; // ~22.5% of body
 const LOGO_BOX = 800; // mascot bounding box, centred (boldest — fills the body edge to edge)
 
-// Cream brand ramp, from apps/web/src/styles/tokens.css (--paper-*): a whisper
-// of top-to-bottom gradient for depth without looking like a button.
+// Cream brand ramp for the existing desktop icon artwork.
 const CREAM_TOP = "#fffaf2"; // --paper-surface
 const CREAM_BOTTOM = "#f4eee1"; // a touch deeper than --paper-bg (#faf6ef)
 const EDGE = "#e7dcca"; // --paper-edge-ish hairline for definition on white

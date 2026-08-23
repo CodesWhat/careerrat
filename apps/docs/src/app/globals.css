@@ -27,10 +27,9 @@
 }
 
 /*
- * CareerRat token mapping onto fumadocs' neutral.css HSL variables — see
- * apps/web/src/styles/tokens.css for the canonical hex palette (read-only,
- * not imported here since that stylesheet also carries ~11k lines of
- * unrelated app.css aliases). This is a token-level restyle only: fumadocs'
+ * CareerRat token mapping onto fumadocs' neutral.css HSL variables. This is
+ * a docs-only restyle; the product owns its fixed palette in
+ * apps/web/src/chat-first/chat-first.css. Fumadocs'
  * layout/components are unchanged, and no box-shadows, gradients, or
  * backdrop-filters are added.
  */

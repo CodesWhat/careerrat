@@ -158,6 +158,40 @@ test("dedupe filters existing tracker roles by URL and req id, but only flags co
   assert.equal(result.kept[0].possibleDuplicate, true);
 });
 
+test("dedupe presents one canonical role when a single source batch repeats it under different URLs", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Twilio",
+        title: "Senior Engineering Manager, Conversational Agents",
+        url: "https://remote.example.test/twilio-agents",
+        location: "Remote - US",
+      },
+      {
+        company: "Twilio",
+        title: "Senior Engineering Manager Conversational Agents",
+        url: "https://job-boards.example.test/twilio/jobs/7926887",
+        location: "Remote - US",
+      },
+    ],
+    {
+      seenUrls: new Set(),
+      seenReqIds: new Set(),
+      seenCompanyRoles: new Set(),
+      titleFilter: () => true,
+      locationFilter: () => true,
+    }
+  );
+
+  assert.deepEqual(
+    result.kept.map((offer) => offer.url),
+    ["https://remote.example.test/twilio-agents"]
+  );
+  assert.equal(result.duplicates.length, 1);
+  assert.equal(result.duplicates[0].duplicateReason, "company_role_batch");
+  assert.equal(result.possibleDuplicates.length, 0);
+});
+
 test("infers ATS provider from common careers URLs", () => {
   assert.equal(inferProvider({ careers_url: "https://jobs.ashbyhq.com/openai" }), "ashby");
   assert.equal(
@@ -639,6 +673,15 @@ test("remote/US location adds a bonus without config (neutral structural signal)
     remote.score > onsite.score,
     `expected remote (${remote.score}) > onsite (${onsite.score})`
   );
+});
+
+test("foreign remote locations do not receive the US location bonus", () => {
+  const result = scoreSourcedOffer({
+    title: "Analyst",
+    location: "Remote DE; Aachen; Munich",
+  });
+
+  assert.equal(result.ratingReason.includes("remote/US location"), false);
 });
 
 test("office-burden flag fires without config (neutral structural signal)", () => {

@@ -1,9 +1,6 @@
-// onboardingSetup.js — pure view-model helpers for the W4 chat-first
-// onboarding surface (OnboardingPage.jsx, EngineScreen.jsx,
-// InterviewSurface.jsx, FilePane.jsx). Kept dependency-free (no React, no
-// fetch) so every branch here is trivially unit-testable and reusable across
-// the engine gate, the file pane, and the mini-progress row without either
-// component re-deriving the same shape.
+// Pure setup view-model helpers for the chat-first first-run conversation.
+// This stays dependency-free so the engine gate and knowledge panel share
+// one interpretation of the server's setup state.
 //
 // The 8 setup items (engine, resume, roles, companies, evidence, guardrails,
 // quickFacts, authorization — the last added for Lane A / R5) mirror
@@ -100,7 +97,7 @@ export function setupProgressFromState(state) {
 // candidate answer. New writes carry mode_preferences_confirmed so the UI can
 // distinguish the two. The setup-progress fallback keeps older completed
 // profiles readable without letting an unrelated profile write expose Remote.
-export function locationModePreferencesConfirmed(state) {
+function locationModePreferencesConfirmed(state) {
   const explicit = state?.data?.profile?.location?.mode_preferences_confirmed;
   if (typeof explicit === "boolean") return explicit;
   const quickFacts = state?.setupProgress?.items?.find((item) => item?.key === "quickFacts");
@@ -157,15 +154,17 @@ export function setupDisclosureRows({ state, runtime } = {}) {
   const roleTitles = (targeting.role_buckets ?? []).flatMap((bucket) => bucket.titles ?? []);
   const companyPreferences = targeting.company_preferences ?? {};
   const companySignals = [
-    ...(companyPreferences.industries ?? []),
-    ...(companyPreferences.organization_types ?? []),
-    ...(companyPreferences.sizes ?? []),
-    ...(companyPreferences.stages ?? []),
-    ...(companyPreferences.business_models ?? []),
-    ...(companyPreferences.values ?? []),
-    ...(companyPreferences.geographies ?? []),
+    ...new Set([
+      ...(companyPreferences.industries ?? []),
+      ...(companyPreferences.organization_types ?? []),
+      ...(companyPreferences.sizes ?? []),
+      ...(companyPreferences.stages ?? []),
+      ...(companyPreferences.business_models ?? []),
+      ...(companyPreferences.values ?? []),
+      ...(companyPreferences.geographies ?? []),
+    ]),
   ];
-  const companyExamples = companyPreferences.examples ?? [];
+  const companyExamples = [...new Set(companyPreferences.examples ?? [])];
   const trackedCompanies = targeting.tracked_companies ?? [];
   const guardrails = targeting.cut_signals ?? [];
   const location = candidate.location || profile.location?.home;
@@ -228,12 +227,11 @@ export function setupDisclosureRows({ state, runtime } = {}) {
           ? [
               ...(companySignals.length ? companySignals : ["No narrow focus"]),
               companyExamples.length ? `Examples: ${companyExamples.join(", ")}` : null,
-              "Broad discovery on",
             ]
               .filter(Boolean)
               .join(" · ")
           : trackedCompanies.length
-            ? `Tracked sources: ${trackedCompanies.join(", ")} · Broad discovery on`
+            ? `Tracked sources: ${trackedCompanies.join(", ")}`
             : "Not provided",
     },
     { key: "evidence", label: SETUP_ITEM_LABELS.evidence, value: evidenceValue },

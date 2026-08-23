@@ -9,7 +9,8 @@ import { describe, expect, it } from "vitest";
 const sourceRoot = process.env.CAREERRAT_STYLE_SOURCE_ROOT
   ? resolve(process.env.CAREERRAT_STYLE_SOURCE_ROOT)
   : fileURLToPath(new URL("../src", import.meta.url));
-const tokensPath = resolve(sourceRoot, "styles/tokens.css");
+const palettePath = resolve(sourceRoot, "chat-first/chat-first.css");
+const foundationPath = resolve(sourceRoot, "chat-first/app-foundation.css");
 
 function walkFiles(directory) {
   return readdirSync(directory, { withFileTypes: true })
@@ -56,7 +57,7 @@ function cssDeclarations(path) {
 const declarations = cssFiles.flatMap(cssDeclarations);
 
 function ruleTokens(selector) {
-  const css = stripCssComments(readFileSync(tokensPath, "utf8"));
+  const css = stripCssComments(readFileSync(palettePath, "utf8"));
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const body = css.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
   return new Map(
@@ -67,12 +68,13 @@ function ruleTokens(selector) {
   );
 }
 
-const lightTokens = ruleTokens(":root");
-const darkTokens = ruleTokens('[data-theme="dark"]');
+const chatFirstTokens = ruleTokens(".chat-first-workspace");
 
-function tokenMismatches(tokens, expected, theme) {
+function tokenMismatches(tokens, expected) {
   return Object.entries(expected).flatMap(([name, value]) =>
-    tokens.get(name) === value ? [] : [`tokens.css (${theme}) ${name}: ${tokens.get(name) ?? "missing"}`]
+    tokens.get(name) === value
+      ? []
+      : [`chat-first.css ${name}: ${tokens.get(name) ?? "missing"}`]
   );
 }
 
@@ -86,7 +88,7 @@ function textOccurrences(files, pattern) {
 }
 
 function resolvesToAccent(name, tokens, seen = new Set()) {
-  if (name === "--accent" || name.startsWith("--accent-")) return true;
+  if (name === "--cf-lime" || name.startsWith("--cf-lime-")) return true;
   if (seen.has(name)) return false;
 
   const value = tokens.get(name);
@@ -99,14 +101,10 @@ function resolvesToAccent(name, tokens, seen = new Set()) {
 }
 
 const accentVariables = new Set(
-  [lightTokens, darkTokens].flatMap((tokens) =>
-    [...tokens.keys()].filter((name) => resolvesToAccent(name, tokens))
-  )
+  [...chatFirstTokens.keys()].filter((name) => resolvesToAccent(name, chatFirstTokens))
 );
 const rawAccentColors = new Set(
-  [lightTokens.get("--accent"), darkTokens.get("--accent")]
-    .filter(Boolean)
-    .map((value) => value.toLowerCase())
+  [chatFirstTokens.get("--cf-lime")].filter(Boolean).map((value) => value.toLowerCase())
 );
 
 function hasAccentColor(value) {
@@ -130,22 +128,18 @@ function hasTwoPixelOrWiderBorder(value) {
   });
 }
 
-describe("CareerRat flat design", () => {
-  it("keeps every shadow token disabled in light and dark themes", () => {
-    const expected = { "--card-shadow": "none", "--header-pill-shadow": "none" };
-    const mismatches = [
-      ...tokenMismatches(lightTokens, expected, "light"),
-      ...tokenMismatches(darkTokens, expected, "dark"),
-    ];
+describe("CareerRat chat-first surfaces", () => {
+  it("does not carry retired shadow or theme aliases", () => {
+    const offenders = textOccurrences(cssFiles, /--(?:card-shadow|header-pill-shadow)|data-theme/i);
 
-    expect(mismatches, mismatches.join("\n")).toEqual([]);
+    expect(offenders, offenders.join("\n")).toEqual([]);
   });
 
-  it("allows only none or disabled shadow-token references in box-shadow declarations", () => {
+  it("allows only the handoff dropdown and modal elevations", () => {
     const allowedValues = new Set([
       "none",
-      "var(--card-shadow)",
-      "var(--header-pill-shadow)",
+      "0 14px 40px rgba(20, 20, 10, 0.18)",
+      "0 24px 60px rgba(20, 20, 10, 0.3)",
     ]);
     const offenders = declarations
       .filter(({ property, value }) => property.endsWith("box-shadow") && !allowedValues.has(value))
@@ -171,72 +165,20 @@ describe("CareerRat flat design", () => {
   });
 });
 
-describe("CareerRat palette tokens", () => {
-  it("pins the canonical light palette", () => {
+describe("CareerRat chat-first palette", () => {
+  it("pins the fixed handoff palette", () => {
     const mismatches = tokenMismatches(
-      lightTokens,
+      chatFirstTokens,
       {
-        "--canvas": "#ececea",
-        "--surface": "#fbfbf9",
-        "--card": "#ffffff",
-        "--ink": "#17171a",
-        "--accent": "#2545d3",
-      },
-      "light"
-    );
-
-    expect(mismatches, mismatches.join("\n")).toEqual([]);
-  });
-
-  it("keeps the complete light legacy palette as value-only aliases", () => {
-    const mismatches = tokenMismatches(
-      lightTokens,
-      {
-        "--paper-bg": "var(--canvas)",
-        "--paper-band": "var(--surface)",
-        "--paper-surface": "var(--card)",
-        "--paper-edge": "var(--border-soft)",
-        "--paper-edge-strong": "var(--border)",
-        "--zebra-odd": "var(--paper-band)",
-        "--zebra-even": "var(--paper-surface)",
-        "--cool-ink": "var(--ink)",
-        "--cool-ink-mid": "var(--ink-soft)",
-        "--cool-ink-soft": "var(--ink-faint)",
-        "--coral": "var(--accent)",
-        "--coral-dark": "var(--accent-dark)",
-        "--teal": "var(--success)",
-        "--teal-light": "var(--success-bg)",
-        "--mustard": "var(--warning)",
-        "--mustard-light": "var(--warning-bg)",
-        "--sky": "var(--accent)",
-      },
-      "light"
-    );
-
-    expect(mismatches, mismatches.join("\n")).toEqual([]);
-  });
-
-  it("keeps dark-theme legacy aliases routed through canonical tokens", () => {
-    const mismatches = tokenMismatches(
-      darkTokens,
-      {
-        "--paper-bg": "var(--canvas)",
-        "--paper-band": "var(--surface)",
-        "--paper-surface": "var(--card)",
-        "--paper-edge": "var(--border-soft)",
-        "--paper-edge-strong": "var(--border)",
-        "--cool-ink": "var(--ink)",
-        "--cool-ink-mid": "var(--ink-soft)",
-        "--cool-ink-soft": "var(--ink-faint)",
-        "--coral": "var(--accent)",
-        "--coral-dark": "var(--accent-dark)",
-        "--teal": "var(--success)",
-        "--teal-light": "var(--success-bg)",
-        "--mustard": "var(--warning)",
-        "--mustard-light": "var(--warning-bg)",
-        "--sky": "var(--accent)",
-      },
-      "dark"
+        "--cf-bg": "#edf5fb",
+        "--cf-panel": "#ffffff",
+        "--cf-cream": "#faf7ef",
+        "--cf-ink": "#17171a",
+        "--cf-lime": "#e6fa8d",
+        "--cf-lavender": "#d9a6f4",
+        "--cf-sky": "#8fd0f8",
+        "--cf-red": "#f04c38",
+      }
     );
 
     expect(mismatches, mismatches.join("\n")).toEqual([]);
@@ -244,25 +186,28 @@ describe("CareerRat palette tokens", () => {
 });
 
 describe("CareerRat typography", () => {
-  it("loads the Archivo display weights used by the app", () => {
-    const tokensCss = stripCssComments(readFileSync(tokensPath, "utf8"));
-    const importedWeights = [...tokensCss.matchAll(
-      /@import\s+["']@fontsource\/archivo\/(\d+)\.css["']\s*;/g
+  it("loads every Figtree weight used by the chat-first app", () => {
+    const foundationCss = stripCssComments(readFileSync(foundationPath, "utf8"));
+    const importedWeights = [...foundationCss.matchAll(
+      /@import\s+["']@fontsource\/figtree\/(\d+)\.css["']\s*;/g
     )]
       .map((match) => match[1])
       .sort();
-    const hasArchivoDisplayFamily = declarations.some(
-      ({ property, value }) => property === "font-family" && /^"Archivo"\s*,/.test(value)
+    const hasFigtreeFamily = declarations.some(
+      ({ property, value }) => property === "font-family" && /^"Figtree"\s*,/.test(value)
     );
 
-    expect({ importedWeights, hasArchivoDisplayFamily }).toEqual({
-      importedWeights: ["700", "800"],
-      hasArchivoDisplayFamily: true,
+    expect({ importedWeights, hasFigtreeFamily }).toEqual({
+      importedWeights: ["400", "500", "600", "700", "800"],
+      hasFigtreeFamily: true,
     });
   });
 
-  it("keeps Geist Mono as the label font token", () => {
-    expect(lightTokens.get("--label-font")).toBe('"Geist Mono", ui-monospace, monospace');
+  it("self-hosts both Geist families from the shared asset tree", () => {
+    const foundationCss = stripCssComments(readFileSync(foundationPath, "utf8"));
+
+    expect(foundationCss).toContain('../../../../assets/fonts/GeistVF.woff2');
+    expect(foundationCss).toContain('../../../../assets/fonts/GeistMonoVF.woff2');
   });
 
   it("does not reference the retired Fraunces font anywhere in web source", () => {
@@ -283,8 +228,6 @@ describe("CareerRat card edges", () => {
       )
       .map(({ file, line, property, value }) => `${file}:${line}: ${property}: ${value}`);
 
-    // The sanctioned .automation-mode__choice--selected rule is a 1.5px
-    // full border, so it is intentionally outside this edge-rail check.
     expect(offenders, offenders.join("\n")).toEqual([]);
   });
 });

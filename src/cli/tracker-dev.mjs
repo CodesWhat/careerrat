@@ -70,6 +70,7 @@ import {
   mountBoardsRoutes,
   setSearchSourceEnabled,
 } from "./boards-route.mjs";
+import { mountChatFirstRoutes } from "./chat-first-route.mjs";
 import { mountChatRoute } from "./chat-route.mjs";
 import { mountDashboardRoutes } from "./dashboard-route.mjs";
 import { mountDataRoutes } from "./data-route.mjs";
@@ -88,6 +89,7 @@ import { mountSkillRunRoute } from "./skill-run-route.mjs";
 import { mountSourcingRoutes } from "./sourcing-route.mjs";
 import { mountTrackOutcomeRoutes } from "./track-outcome-route.mjs";
 import { mountWorkspaceAgentRoutes } from "./workspace-agent-route.mjs";
+import { mountWorkspaceExportRoutes } from "./workspace-export-route.mjs";
 
 const DEFAULT_ROOT = join(fileURLToPath(new URL("../..", import.meta.url)));
 const LOCAL_BROWSER_SECURITY_HEADERS = securityHeaders({
@@ -340,6 +342,8 @@ export function createDevServer({
     executeIntentImpl: workspaceAgentRuntime.executeIntent,
     captureIntakeImpl: workspaceAgentRuntime.captureIntake,
   });
+  mountChatFirstRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
+  mountWorkspaceExportRoutes({ addRoute, repoRoot, env });
   // App-facing supervised discovery pipeline. Shares the same chatRuntime as
   // /api/chat/* so Quick Start / Continue Discovery can start or reconnect to
   // exactly one visible research-boards/discover-companies/search-jobs session.
@@ -857,6 +861,10 @@ Local app APIs:
   GET  /api/data/communications         Communication thread rows
   GET  /api/data/activity               Activity events, newest-first (?limit=)
   GET  /api/data/dashboard              Server-derived dashboard view model (M10, 409 if no db yet)
+  GET  /api/data/export-everything      Consistent private workspace ZIP export
+  POST /api/chat-first/job-thread/*     Pin, archive, or append to durable job conversations
+  POST /api/chat-first/missions/*       Create, run, pause, or advance durable missions
+  POST /api/chat-first/mock/*           Start, record, coach, or end mock interview sessions
   POST /api/data/app/status             appSetStatus verb
   POST /api/data/app/fields             appSetFields verb
   POST /api/data/app/interview          appScheduleInterview verb

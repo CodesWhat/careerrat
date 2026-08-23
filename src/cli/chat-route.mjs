@@ -81,6 +81,14 @@ function queryParam(req, name) {
   return url.searchParams.get(name);
 }
 
+function requestedEventCursor(req) {
+  const candidates = [req.headers["last-event-id"], queryParam(req, "after")]
+    .filter((value) => value !== undefined && value !== null && value !== "")
+    .map((value) => Number(value))
+    .filter((value) => Number.isSafeInteger(value) && value >= 0);
+  return candidates.length ? Math.max(...candidates) : undefined;
+}
+
 // `repoRoot`/`env` are accepted (not just `chatRuntime`) to keep this
 // mount function's signature symmetric with mountSkillRunRoute()/
 // mountOnboardRoutes() at the tracker-dev.mjs call site — every route needed
@@ -110,7 +118,7 @@ export function mountChatRoute({ addRoute, repoRoot, chatRuntime, env = process.
 
   addRoute("GET", "/api/chat/events", (req, res) => {
     const chatId = queryParam(req, "id");
-    const lastEventId = req.headers["last-event-id"];
+    const lastEventId = requestedEventCursor(req);
     try {
       chatRuntime.subscribe(chatId, res, { lastEventId });
     } catch (err) {

@@ -315,7 +315,7 @@ test("Orca executor uploads generated PDFs through explicit live controls", asyn
   }
 });
 
-test("Orca executor refuses LinkedIn Easy Apply until one-click consent is live", async () => {
+test("Orca executor refuses LinkedIn Easy Apply until supervised preparation consent is live", async () => {
   const commands = [];
   const execute = createOrcaApplyExecutor({
     repoRoot: "/repo",
@@ -326,7 +326,7 @@ test("Orca executor refuses LinkedIn Easy Apply until one-click consent is live"
     },
     mayRunImpl: () => ({
       allowed: false,
-      reasons: ["one_click_apply on LinkedIn is off"],
+      reasons: ["authenticated_apply_preparation on LinkedIn is off"],
     }),
   });
 
@@ -339,7 +339,7 @@ test("Orca executor refuses LinkedIn Easy Apply until one-click consent is live"
   assert.equal(result.available, true);
   assert.equal(result.verified, false);
   assert.equal(result.state, "blocked");
-  assert.match(result.reason, /one_click_apply on LinkedIn is off/);
+  assert.match(result.reason, /authenticated_apply_preparation on LinkedIn is off/);
   assert.deepEqual(commands, []);
 });
 

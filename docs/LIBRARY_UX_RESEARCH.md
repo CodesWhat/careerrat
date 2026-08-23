@@ -104,6 +104,7 @@ thing shown might not be the story bank at all.
 One page. Top to bottom:
 
 ### 1. Hero
+
 Title `Library`, subtitle unchanged from `V1` ("The full reusable evidence, story, and writing-voice bank"),
 plus the metric tiles `V1`'s `library.index`/`metrics` already carry (Claims, Stories, Gaps — Voice/Honesty/
 Role signal too, in deep-ingest mode). Fix the one thing `V1` gets wrong here: `.library-summary-tile strong`
@@ -111,12 +112,14 @@ carries no `font-family` today (`LibraryPage.css:27-32`), so the counts render i
 `.library-v2__metric strong` already does this correctly (`app.css:9220-9227`) — port that rule.
 
 ### 2. Toolbar
+
 Search box, type segments (`All / Evidence / Story / Voice`, extended with `Honesty`/`Role signal` when
 `library.metrics.voice`/`.honesty` are present), tag/family filter chips with counts, story-lane chips. This
 is `V1`/`V2`'s existing toolbar — keep it structurally as-is, it already matches the real `data.library`
 shape field for field.
 
 ### 3. Card grid — the primary content, restore what `V1` never shipped
+
 Cards must be openable and copyable — parity item 8 in `PORT_PARITY_AUDIT.md`, still unfixed on the canonical
 route. Port `V2`'s pattern: `role="button" tabIndex="0"`, click or Enter opens a drawer, drawer has a "Copy
 reusable text" button with a clipboard fallback, Escape closes. `V2`'s URL-persisted filter/open state
@@ -124,6 +127,7 @@ reusable text" button with a clipboard fallback, Escape closes. `V2`'s URL-persi
 reload or a shared link.
 
 ### 4. Readiness + guardrails
+
 Keep one summary of this, not two. `V1` has three separate cards (bank status / readiness / claim
 guardrails); `V2` has a "Featured asset" panel plus a separate readiness panel that mostly restates the same
 numbers. Collapse to `V1`'s three-card row — it already covers readiness and gaps without a redundant
@@ -131,6 +135,7 @@ numbers. Collapse to `V1`'s three-card row — it already covers readiness and g
 resolve deterministically.
 
 ### 5. Documents — new section, separate from the card grid
+
 A flat, searchable list of every résumé/cover-letter/JD artifact across all applications, each row: artifact
 kind, the company/role it belongs to, and a link back into that job's drawer (not a new place to view the
 file — the job drawer already renders it). Own search box, not merged into the story-bank search or the
@@ -138,9 +143,10 @@ file — the job drawer already renders it). Own search box, not merged into the
 the one part of this doc that isn't render-only.
 
 ### 6. Empty states, honestly
+
 `V1`'s "No reusable material yet" pointing at `ingest-profile` is correct and should stay the pattern.
 Don't repeat `V2`'s current behavior of silently substituting `PREVIEW_LIBRARY` mock data any time
-`library.cards.length === 0` — that's fine gated behind the same explicit `VITE_STATIC_PREVIEW` flag
+`library.cards.length === 0` — this was previously gated behind the retired static preview path
 `DashboardContext.jsx` already uses for preview mode, but as an unconditional client fallback it means a
 genuinely empty bank never tells the user their bank is empty.
 

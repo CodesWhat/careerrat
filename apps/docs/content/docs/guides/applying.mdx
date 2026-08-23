@@ -65,8 +65,7 @@ The `apply-job` skill:
 4. Shows the generated résumé, cover letter, answers, unresolved facts, and safe site link.
 5. Uses an authenticated session browser to fill the form when that executor is available.
    Otherwise, it gives you a concrete supervised handoff instead of claiming automation ran.
-6. **Halts before final submission** and waits for your explicit confirmation
-   (the default; `auto_submit` is an opt-in in `form-defaults.yml`).
+6. **Halts before final submission** so you can review the form and press submit.
 7. Halts on CAPTCHAs and unsupported auth prompts.
 8. Records the application through the canonical data layer only after submission is
    verified or you explicitly report that you applied. The app and Activity Pulse update
@@ -74,9 +73,10 @@ The `apply-job` skill:
 
 ### LinkedIn Easy Apply
 
-For LinkedIn postings, `apply-job` supports an opt-in one-click path via the
-session browser. This requires the `one_click_apply` capability to be enabled in
-`careerrat automation status`. It follows the same submit-safety gate.
+For LinkedIn postings, `apply-job` supports opt-in supervised form preparation via
+the session browser. This requires the `authenticated_apply_preparation`
+capability to be enabled in `careerrat automation status`. It fills and advances
+the modal but never presses the final submit control.
 
 ## Application limits
 

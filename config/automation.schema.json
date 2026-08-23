@@ -19,7 +19,7 @@
     },
     "capabilities": {
       "type": "object",
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "status_polling": {
           "type": "object",
@@ -45,7 +45,7 @@
             "platforms": { "type": "object", "additionalProperties": { "type": "boolean" } }
           }
         },
-        "one_click_apply": {
+        "authenticated_apply_preparation": {
           "type": "object",
           "additionalProperties": true,
           "properties": {

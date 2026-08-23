@@ -74,6 +74,7 @@ import {
   candidateSetupInitialize,
   publicSyncPreferenceGet,
   publicSyncPreferenceSet,
+  skillChatThreadRead,
   sourceConfigGet,
   sourceConfigPut,
 } from "../core/db/verbs.mjs";
@@ -411,11 +412,13 @@ export function normalizeOnboardingDraft(raw = {}) {
     ? Math.max(0, Math.min(ONBOARDING_DRAFT_MAX_STEP, Math.trunc(numericStep)))
     : 0;
   const draftSeeds = isPlainObject(raw?.draftSeeds) ? raw.draftSeeds : {};
+  const chatCursor = normalizeOnboardingChatCursor(raw?.chatCursor);
   return {
     stepIndex,
     completedIndexes: normalizeOnboardingCompletedIndexes(raw?.completedIndexes),
     draftSeeds,
     transcript: normalizeOnboardingTranscript(raw?.transcript),
+    ...(chatCursor ? { chatCursor } : {}),
     updatedAt: typeof raw?.updatedAt === "string" && raw.updatedAt.trim() ? raw.updatedAt : null,
     finishedAt:
       typeof raw?.finishedAt === "string" && raw.finishedAt.trim() ? raw.finishedAt : null,
@@ -442,6 +445,14 @@ function cloneJsonValue(value, fallback = null) {
   }
 }
 
+function normalizeOnboardingChatCursor(value) {
+  if (!isPlainObject(value)) return null;
+  const chatId = typeof value.chatId === "string" ? value.chatId.trim().slice(0, 500) : "";
+  const eventId = Number(value.eventId);
+  if (!chatId || !Number.isSafeInteger(eventId) || eventId < 0) return null;
+  return { chatId, eventId };
+}
+
 function normalizeOnboardingTranscript(value) {
   if (!Array.isArray(value)) return [];
   return value.slice(-200).flatMap((message) => {
@@ -450,6 +461,16 @@ function normalizeOnboardingTranscript(value) {
       role: message.role,
       text: typeof message.text === "string" ? message.text.slice(0, 20000) : "",
     };
+    if (typeof message.id === "string" && message.id.trim()) {
+      normalized.id = message.id.trim().slice(0, 1000);
+    }
+    if (message.role === "assistant") {
+      const cursor = normalizeOnboardingChatCursor(message);
+      if (cursor) {
+        normalized.chatId = cursor.chatId;
+        normalized.eventId = cursor.eventId;
+      }
+    }
     if (message.role === "assistant" && Array.isArray(message.blocks)) {
       normalized.blocks = message.blocks.slice(0, 20).flatMap((block) => {
         if (!isPlainObject(block) || !ONBOARDING_BLOCK_KINDS.has(block.kind)) return [];
@@ -487,14 +508,46 @@ function normalizeOnboardingCompletedIndexes(values = []) {
   ).sort((a, b) => a - b);
 }
 
+function sameOnboardingTranscriptTurn(draftMessage, canonicalMessage) {
+  if (draftMessage?.role !== canonicalMessage?.role) return false;
+  if (draftMessage?.text === canonicalMessage?.text) return true;
+  return (
+    canonicalMessage?.role === "assistant" &&
+    typeof canonicalMessage.text === "string" &&
+    typeof draftMessage?.text === "string" &&
+    canonicalMessage.text.includes(draftMessage.text)
+  );
+}
+
+function reconcileOnboardingTranscript(draftMessages, canonicalMessages) {
+  const draft = normalizeOnboardingTranscript(draftMessages);
+  const canonical = normalizeOnboardingTranscript(canonicalMessages);
+  if (!canonical.length) return draft;
+  const reconciled = canonical.map((message, index) =>
+    sameOnboardingTranscriptTurn(draft[index], message) ? draft[index] : message
+  );
+  if (draft.length > canonical.length) reconciled.push(...draft.slice(canonical.length));
+  return reconciled;
+}
+
 export function readOnboardingDraft(pathCtx) {
   const draftPath = userPath(pathCtx, ONBOARDING_DRAFT_PATH);
-  if (!existsSync(draftPath)) return normalizeOnboardingDraft();
-  try {
-    return normalizeOnboardingDraft(JSON.parse(readFileSync(draftPath, "utf8")));
-  } catch {
-    return normalizeOnboardingDraft();
+  let draft = normalizeOnboardingDraft();
+  if (existsSync(draftPath)) {
+    try {
+      draft = normalizeOnboardingDraft(JSON.parse(readFileSync(draftPath, "utf8")));
+    } catch {
+      draft = normalizeOnboardingDraft();
+    }
   }
+  if (!dbExists(pathCtx)) return draft;
+  const canonical = skillChatThreadRead({ ...pathCtx, skill: "ingest-profile" }).messages.filter(
+    (message) => message.visibility !== "internal"
+  );
+  return normalizeOnboardingDraft({
+    ...draft,
+    transcript: reconcileOnboardingTranscript(draft.transcript, canonical),
+  });
 }
 
 function writeOnboardingDraft(pathCtx, draft) {

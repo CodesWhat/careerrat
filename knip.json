@@ -11,9 +11,7 @@
         "tests/fixtures/db-concurrency-worker.mjs"
       ]
     },
-    "apps/web": {
-      "ignore": ["public/theme-init.js"]
-    },
+    "apps/web": {},
     "apps/desktop": {
       "entry": ["scripts/*.mjs", "preload/*.cjs"]
     }

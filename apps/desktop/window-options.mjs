@@ -1,16 +1,19 @@
 const BASE_WINDOW_OPTIONS = {
   width: 1280,
   height: 860,
-  minWidth: 960,
-  minHeight: 700,
+  minWidth: 1280,
+  maxWidth: 1280,
+  minHeight: 860,
+  maxHeight: 860,
+  resizable: false,
+  maximizable: false,
+  fullscreenable: false,
   title: "CareerRat",
-  backgroundColor: "#fffaf2",
+  backgroundColor: "#edf5fb",
 };
 
-export function buildBrowserWindowOptions({ platform = process.platform, dark = false } = {}) {
-  const base = dark
-    ? { ...BASE_WINDOW_OPTIONS, backgroundColor: "#000000" }
-    : { ...BASE_WINDOW_OPTIONS };
+export function buildBrowserWindowOptions({ platform = process.platform } = {}) {
+  const base = { ...BASE_WINDOW_OPTIONS };
   if (platform !== "darwin") return base;
 
   return {

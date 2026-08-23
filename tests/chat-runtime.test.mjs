@@ -27,6 +27,7 @@ import {
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 import { APP_SAFE_RUNTIME_TOOLS, CHAT_RUNTIME_TOOLS } from "../src/core/ai/runtime-tools.mjs";
 import { readUsageEvents } from "../src/core/ai/usage-log.mjs";
+import { openDb } from "../src/core/db/connection.mjs";
 import {
   candidateArtifactPut,
   candidateConfigPatch,
@@ -209,6 +210,15 @@ function turnMessages(n) {
       },
     },
   ];
+}
+
+function turnMessagesWithReply(text, n = 1) {
+  const messages = turnMessages(n);
+  messages[0] = {
+    ...messages[0],
+    message: { content: [{ type: "text", text }] },
+  };
+  return messages;
 }
 
 // Subscribes a fake `res` (matching http.ServerResponse's writeHead/write/on/
@@ -612,6 +622,252 @@ test("createChatRuntime: 3 turns drive 3 idle transitions and write 3 byok usage
       }
     } finally {
       chatRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime: a replacement process waits on the durable unanswered assistant question and resumes with full history", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
+  candidateSetupInitialize({ repoRoot, env });
+  try {
+    const firstRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () =>
+        fakeStreamingSdk([
+          turnMessagesWithReply("Which locations work for you?", 1),
+          turnMessagesWithReply("What is your minimum base salary?", 2),
+        ]),
+    });
+    const first = await firstRuntime.startSession({ skill: "ingest-profile" });
+    await waitForPredicate(() => firstRuntime.getSession(first.chatId)?.state === "idle");
+    firstRuntime.postMessage(first.chatId, "Remote in the US works for me.");
+    await waitForPredicate(() => firstRuntime.getSession(first.chatId)?.state === "idle");
+    firstRuntime.shutdown();
+
+    const resumedInputs = [];
+    const replacementRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () =>
+        fakeStreamingSdk([turnMessagesWithReply("Thanks, I have the full context.", 3)], {
+          onTurnInput: (input) => resumedInputs.push(input.message.content),
+        }),
+    });
+    try {
+      const resumed = await replacementRuntime.startSession({ skill: "ingest-profile" });
+      assert.equal(resumed.state, "idle");
+      assert.equal(resumedInputs.length, 0, "reopening must not duplicate an unanswered question");
+
+      replacementRuntime.postMessage(resumed.chatId, "$200,000 base.");
+      await waitForPredicate(() => replacementRuntime.getSession(resumed.chatId)?.state === "idle");
+      assert.equal(resumedInputs.length, 1);
+      assert.match(resumedInputs[0], /Which locations work for you\?/);
+      assert.match(resumedInputs[0], /Remote in the US works for me\./);
+      assert.match(resumedInputs[0], /What is your minimum base salary\?/);
+      assert.match(resumedInputs[0], /\$200,000 base\./);
+      assert.match(resumedInputs[0], /durable conversation/i);
+    } finally {
+      replacementRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime: a user answer committed before process death is answered after restart", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
+  candidateSetupInitialize({ repoRoot, env });
+  try {
+    let secondTurnReceived = false;
+    const firstRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () =>
+        fakeStreamingSdk([turnMessagesWithReply("Which locations work for you?", 1), []], {
+          onTurnInput: () => {
+            if (firstRuntime.listSessions()[0]?.state === "running") {
+              secondTurnReceived = true;
+            }
+          },
+        }),
+    });
+    const first = await firstRuntime.startSession({ skill: "ingest-profile" });
+    await waitForPredicate(() => firstRuntime.getSession(first.chatId)?.state === "idle");
+    secondTurnReceived = false;
+    firstRuntime.postMessage(first.chatId, "Remote in the US works for me.");
+    await waitForPredicate(() => secondTurnReceived);
+    firstRuntime.shutdown();
+
+    const resumedInputs = [];
+    const replacementRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () =>
+        fakeStreamingSdk([turnMessagesWithReply("What is your minimum base salary?", 2)], {
+          onTurnInput: (input) => resumedInputs.push(input.message.content),
+        }),
+    });
+    try {
+      const resumed = await replacementRuntime.startSession({ skill: "ingest-profile" });
+      assert.equal(resumed.state, "running");
+      await waitForPredicate(() => replacementRuntime.getSession(resumed.chatId)?.state === "idle");
+      assert.equal(resumedInputs.length, 1);
+      assert.match(resumedInputs[0], /Which locations work for you\?/);
+      assert.match(resumedInputs[0], /Remote in the US works for me\./);
+    } finally {
+      replacementRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime: installed runtime replacement also waits and replays the durable onboarding thread", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  const env = {};
+  candidateSetupInitialize({ repoRoot, env });
+  selectInstalledRuntime({ repoRoot, env });
+  const prompts = [];
+  try {
+    const firstRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      runInstalledRuntimeImpl: async ({ prompt }) => {
+        prompts.push(prompt);
+        return {
+          text:
+            prompts.length === 1
+              ? "Which locations work for you?"
+              : "What is your minimum base salary?",
+          usage: null,
+          model: null,
+        };
+      },
+    });
+    const first = await firstRuntime.startSession({ skill: "ingest-profile" });
+    await waitForPredicate(() => firstRuntime.getSession(first.chatId)?.state === "idle");
+    firstRuntime.postMessage(first.chatId, "Remote in the US works for me.");
+    await waitForPredicate(() => firstRuntime.getSession(first.chatId)?.state === "idle");
+    firstRuntime.shutdown();
+
+    const replacementRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      runInstalledRuntimeImpl: async ({ prompt }) => {
+        prompts.push(prompt);
+        return { text: "Thanks, I have the full context.", usage: null, model: null };
+      },
+    });
+    try {
+      const resumed = await replacementRuntime.startSession({ skill: "ingest-profile" });
+      assert.equal(resumed.state, "idle");
+      assert.equal(prompts.length, 2, "reopening must not invoke the installed runtime");
+
+      replacementRuntime.postMessage(resumed.chatId, "$200,000 base.");
+      await waitForPredicate(() => replacementRuntime.getSession(resumed.chatId)?.state === "idle");
+      assert.equal(prompts.length, 3);
+      assert.match(prompts[2], /Which locations work for you\?/);
+      assert.match(prompts[2], /Remote in the US works for me\./);
+      assert.match(prompts[2], /What is your minimum base salary\?/);
+      assert.match(prompts[2], /\$200,000 base\./);
+      assert.match(prompts[2], /durable history/i);
+    } finally {
+      replacementRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime: first restart adopts an existing onboarding draft into the canonical thread", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
+  candidateSetupInitialize({ repoRoot, env });
+  const internalDir = join(repoRoot, ".careerrat", "internal");
+  mkdirSync(internalDir, { recursive: true });
+  writeFileSync(
+    join(internalDir, "onboarding-draft.json"),
+    JSON.stringify({
+      transcript: [
+        { role: "assistant", text: "Which locations work for you?" },
+        { role: "user", text: "Remote in the US works for me." },
+        { role: "assistant", text: "What is your minimum base salary?" },
+      ],
+    }),
+    "utf8"
+  );
+  const resumedInputs = [];
+  const chatRuntime = createChatRuntime({
+    repoRoot,
+    env,
+    loadSdk: async () =>
+      fakeStreamingSdk([turnMessagesWithReply("Thanks, I have the full context.", 3)], {
+        onTurnInput: (input) => resumedInputs.push(input.message.content),
+      }),
+  });
+  try {
+    const resumed = await chatRuntime.startSession({ skill: "ingest-profile" });
+    assert.equal(resumed.state, "idle");
+    assert.equal(resumedInputs.length, 0);
+
+    chatRuntime.postMessage(resumed.chatId, "$200,000 base.");
+    await waitForPredicate(() => chatRuntime.getSession(resumed.chatId)?.state === "idle");
+    assert.equal(resumedInputs.length, 1);
+    assert.match(resumedInputs[0], /Which locations work for you\?/);
+    assert.match(resumedInputs[0], /Remote in the US works for me\./);
+    assert.match(resumedInputs[0], /What is your minimum base salary\?/);
+  } finally {
+    chatRuntime.shutdown();
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime: assistant text without a terminal result resumes the interrupted turn", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
+  candidateSetupInitialize({ repoRoot, env });
+  try {
+    let assistantWasEmitted = false;
+    const firstRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () =>
+        fakeStreamingSdk([[turnMessagesWithReply("I found your resume. Checking it now.", 1)[0]]], {
+          onTurnInput: () => {
+            assistantWasEmitted = true;
+          },
+        }),
+    });
+    await firstRuntime.startSession({ skill: "ingest-profile" });
+    await waitForPredicate(() => assistantWasEmitted);
+    await waitForPredicate(() => {
+      const db = openDb({ repoRoot, env });
+      return db.prepare("SELECT count(*) AS count FROM skill_chat_messages").get().count === 1;
+    });
+    firstRuntime.shutdown();
+
+    const resumedInputs = [];
+    const replacementRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () =>
+        fakeStreamingSdk([turnMessagesWithReply("What role are you targeting?", 2)], {
+          onTurnInput: (input) => resumedInputs.push(input.message.content),
+        }),
+    });
+    try {
+      const resumed = await replacementRuntime.startSession({ skill: "ingest-profile" });
+      assert.equal(resumed.state, "running");
+      await waitForPredicate(() => replacementRuntime.getSession(resumed.chatId)?.state === "idle");
+      assert.equal(resumedInputs.length, 1);
+      assert.match(resumedInputs[0], /I found your resume\. Checking it now\./);
+    } finally {
+      replacementRuntime.shutdown();
     }
   } finally {
     cleanup(repoRoot);

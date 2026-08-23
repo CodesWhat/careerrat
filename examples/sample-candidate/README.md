@@ -32,7 +32,7 @@ valid, then `careerrat searches --from-targeting` to build your search sources.
 | `targeting.yml` | Role buckets (primary/secondary/stretch/oe), keep/cut signals that filter job postings, and excluded companies. |
 | `evidence.yml` | Claim bank — each entry is a verifiable accomplishment with evidence, metrics, and wording guidance. Tailored resumes and cover letters draw from this. |
 | `honesty.yml` | Hard boundaries: which tools you can honestly claim, what must never be fabricated, and style guardrails. |
-| `form-defaults.yml` | Pre-filled answers for common application form fields. `auto_submit` is always `false` — you confirm before anything is submitted. |
+| `form-defaults.yml` | Pre-filled answers for common application form fields. Final submission always stays with you. |
 
 ## Keeping your data private
 

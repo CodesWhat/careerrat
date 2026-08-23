@@ -19,7 +19,12 @@ import { candidateConfigSource, loadCandidateDoc } from "../profile/config-store
 import { atomicWriteFile, findKeyPath, setScalar, validateText } from "../profile/gate-writer.mjs";
 import { validate } from "../profile/schema-validator.mjs";
 import { parseYaml } from "../profile/yaml.mjs";
-import { describeProviders, detectSession, PROVIDERS } from "./session.mjs";
+import {
+  describeProviders,
+  detectPlaywrightTooling,
+  detectSession,
+  PROVIDERS,
+} from "./session.mjs";
 
 const DEFAULT_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 
@@ -52,10 +57,10 @@ export const CAPABILITIES = {
     summary: "read in-platform DMs into communications[]",
     platforms: ["linkedin", "wellfound"],
   },
-  one_click_apply: {
+  authenticated_apply_preparation: {
     phase: 4,
-    label: "Authenticated one-click apply",
-    summary: "modal-driven apply under the apply-job submit gate",
+    label: "Authenticated apply preparation",
+    summary: "fill the modal and stop at the user-submit gate",
     platforms: ["linkedin"],
   },
   profile_optimize: {
@@ -296,7 +301,11 @@ export function mayRun({
 // status — the full matrix for `automation status`, doctor, and skills.
 // ---------------------------------------------------------------------------
 
-export function automationStatus({ root = DEFAULT_ROOT, env = process.env } = {}) {
+export function automationStatus({
+  root = DEFAULT_ROOT,
+  env = process.env,
+  playwrightToolingDependencies,
+} = {}) {
   const loaded = loadAutomation({ root, env });
   const cfg = loaded.data;
 
@@ -331,6 +340,9 @@ export function automationStatus({ root = DEFAULT_ROOT, env = process.env } = {}
     effectiveProvider: detectedSession.provider,
     profileRoot: detectedSession.profileRoot,
     presence: detectedSession.presence,
+    tooling: {
+      playwright: detectPlaywrightTooling(playwrightToolingDependencies),
+    },
     options: describeProviders({ env }).map(({ id, label, needs, automatedApply }) => ({
       id,
       label,

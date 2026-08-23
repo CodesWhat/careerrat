@@ -1,9 +1,8 @@
 # CareerRat Electron desktop
 
 The Electron desktop app is the pilot product shell. It boots the local
-CareerRat server and opens the React app at `/app`; a first-run workspace opens
-`/app/onboarding`. Generated tracker/static pages remain compatibility,
-debug, or export support only, not the desktop pilot UX.
+CareerRat server and opens the chat-first React app at `/app`. First-run setup
+and returning workspaces use that same shell.
 
 ## Run in development
 
@@ -24,9 +23,8 @@ npm --workspace apps/desktop run smoke
 ```
 
 The smoke path boots the server, hits `GET /api/health` over loopback, verifies
-the selected `/app` or `/app/onboarding` route returns the built SPA shell and
-assets, prints `SMOKE OK` with the loopback URL, and exits 0. A window may
-briefly open during boot.
+that `/app` returns the built SPA shell and assets, prints `SMOKE OK` with the
+loopback URL, and exits 0. A window may briefly open during boot.
 
 ## Build the pilot package
 

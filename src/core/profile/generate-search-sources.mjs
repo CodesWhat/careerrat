@@ -97,6 +97,23 @@ const REGION_DEFINITIONS = [
   { name: "EMEA", aliases: [] },
 ];
 
+// Common locality abbreviations that do not carry a state/country marker.
+// Recognizing one only establishes its country/region for the broad source
+// filter. The scanner's commute-area check still decides whether a specific
+// non-remote offer is local enough.
+const LOCALITY_COUNTRY_ALIASES = [
+  {
+    country: "United States",
+    aliases: [
+      "NYC",
+      "New York City",
+      "New York Metropolitan Area",
+      "New York Metro Area",
+      "NY Metro",
+    ],
+  },
+];
+
 const US_STATES = [
   ["Alabama", "AL"],
   ["Alaska", "AK"],
@@ -197,6 +214,7 @@ function deriveLocationFilter(profile = {}) {
   const places = compactGeoValues([loc.home, ...(loc.relocation ?? [])]);
   const allowedCountries = new Set();
   const allowedRegions = new Set();
+  const allowedLocalityAliases = new Set();
 
   for (const place of places) {
     for (const country of COUNTRY_DEFINITIONS) {
@@ -205,6 +223,12 @@ function deriveLocationFilter(profile = {}) {
       }
     }
     if (hasUsState(place)) allowedCountries.add("United States");
+    for (const locality of LOCALITY_COUNTRY_ALIASES) {
+      if (locality.aliases.some((term) => containsGeoTerm(place, term))) {
+        allowedCountries.add(locality.country);
+        for (const alias of locality.aliases) allowedLocalityAliases.add(alias);
+      }
+    }
     for (const region of REGION_DEFINITIONS) {
       if ([region.name, ...region.aliases].some((term) => containsGeoTerm(place, term))) {
         allowedRegions.add(region.name);
@@ -223,7 +247,7 @@ function deriveLocationFilter(profile = {}) {
     }
   }
 
-  const allow = [...places];
+  const allow = [...places, ...allowedLocalityAliases];
   if (loc.remote) allow.push("Remote", "Worldwide", "Anywhere", "Global");
   for (const country of COUNTRY_DEFINITIONS) {
     if (allowedCountries.has(country.name)) allow.push(...countryTerms(country));

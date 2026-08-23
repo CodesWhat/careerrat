@@ -63,13 +63,19 @@ function createFakeOps(steps) {
   };
 }
 
-function makeDriver({ ops, maxFormSteps, captureQuestionsImpl, saveScreenshotImpl } = {}) {
+function makeDriver({
+  ops,
+  maxFormSteps,
+  captureQuestionsImpl,
+  saveScreenshotImpl,
+  mayRunImpl,
+} = {}) {
   return createApplyDriver({
     ops,
     providerLabel: "orca",
     repoRoot: "/repo",
     env: {},
-    mayRunImpl: () => ({ allowed: true }),
+    mayRunImpl: mayRunImpl ?? (() => ({ allowed: true })),
     candidateConfigGetImpl: () => CONFIG,
     loadAnswerMapImpl: async () => new Map(),
     captureQuestionsImpl:
@@ -83,6 +89,29 @@ function makeDriver({ ops, maxFormSteps, captureQuestionsImpl, saveScreenshotImp
     maxFormSteps,
   });
 }
+
+test("LinkedIn form preparation uses the supervised-preparation consent capability", async () => {
+  const seen = [];
+  const { ops } = createFakeOps([]);
+  const execute = makeDriver({
+    ops,
+    mayRunImpl: (request) => {
+      seen.push(request);
+      return { allowed: false, reasons: ["permission off"] };
+    },
+  });
+
+  const result = await execute({
+    applicationId: "app-consent",
+    application: { id: "app-consent" },
+    postingUrl: EASY_APPLY_URL,
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].capability, "authenticated_apply_preparation");
+  assert.equal(seen[0].platform, "linkedin");
+});
 
 test("single-page flow fills resolvable fields and stops awaiting-submit, same as today", async () => {
   const snapshot = {
@@ -1037,6 +1066,70 @@ test("a post-advance confirmation on a different host still reports confirmed, n
     log.some((entry) => entry.op === "screenshot"),
     true,
     "the confirmation path still captures evidence even though the host changed"
+  );
+});
+
+test("prepare-only stops before a misleading Continue to Review control that submits", async () => {
+  const reviewPage = {
+    origin: GREENHOUSE_URL,
+    pageText: "Review your application",
+    refs: refsOf([["e1", "button", "Continue to Review", false]]),
+  };
+  const confirmationPage = {
+    origin: `${GREENHOUSE_URL}/confirmation`,
+    pageText: "Thank you for applying",
+    refs: refsOf([]),
+  };
+  const { ops, log } = createFakeOps([reviewPage, confirmationPage]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-prepare-only-submit-risk",
+    application: { id: "app-prepare-only-submit-risk" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.equal(result.state, "awaiting-submit");
+  assert.equal(result.verified, false);
+  assert.equal(result.currentUrl, GREENHOUSE_URL);
+  assert.equal(result.session.prepareOnly, true);
+  assert.equal(
+    log.some((entry) => entry.op === "clickButton"),
+    false,
+    "prepare-only never clicks an ambiguous advance control that could submit"
+  );
+});
+
+test("prepare-only advances through an explicit Next step and stops at the submit handoff", async () => {
+  const detailsPage = {
+    origin: GREENHOUSE_URL,
+    pageText: "Application details",
+    refs: refsOf([["e1", "button", "Next", false]]),
+  };
+  const reviewPage = {
+    origin: `${GREENHOUSE_URL}?step=review`,
+    pageText: "Review your application",
+    refs: refsOf([["e2", "button", "Submit application", false]]),
+  };
+  const { ops, log } = createFakeOps([detailsPage, reviewPage]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-prepare-only-next",
+    application: { id: "app-prepare-only-next" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.equal(result.state, "awaiting-submit");
+  assert.equal(result.verified, false);
+  assert.equal(result.session.prepareOnly, true);
+  assert.deepEqual(
+    log.filter((entry) => entry.op === "clickButton"),
+    [{ op: "clickButton", pageId: "page-1", ref: "e1" }]
   );
 });
 

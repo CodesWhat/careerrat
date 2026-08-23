@@ -3,6 +3,19 @@ import { describe, expect, it, vi } from "vitest";
 import { ArtifactViewerModal, handleArtifactViewerKeyDown } from "./ArtifactViewerModal.jsx";
 
 describe("ArtifactViewerModal", () => {
+  it("previews plain-text evidence without injecting it as HTML", () => {
+    const html = renderToStaticMarkup(
+      <ArtifactViewerModal
+        title="Nexus story"
+        artifact={{ text: "Reduced <script> launch time by 30%." }}
+        onClose={() => {}}
+      />
+    );
+
+    expect(html).toContain("Reduced &lt;script&gt; launch time by 30%.");
+    expect(html).not.toContain("<script>");
+  });
+
   it("renders server-provided HTML through the markdown branch", () => {
     const html = renderToStaticMarkup(
       <ArtifactViewerModal

@@ -1169,15 +1169,15 @@ test("previewWorkspaceIntent: a comp-floor-to-current-salary phrasing flags comp
   });
 });
 
-test("previewWorkspaceIntent: turning off one-click apply on a named platform classifies as a settings.apply automation change", () => {
+test("previewWorkspaceIntent: turning off apply preparation on a named platform classifies as a settings.apply automation change", () => {
   const repoRoot = tempRepo();
   const result = previewWorkspaceIntent({
-    text: "turn off one-click apply on linkedin",
+    text: "turn off authenticated apply preparation on linkedin",
     repoRoot,
     env: {},
   });
   assert.deepEqual(result.action, {
-    label: "Turn off Authenticated one-click apply on linkedin",
+    label: "Turn off Authenticated apply preparation on linkedin",
     intent: {
       type: "settings.apply",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
@@ -1185,7 +1185,7 @@ test("previewWorkspaceIntent: turning off one-click apply on a named platform cl
         change: {
           kind: "automation",
           op: "platform",
-          capability: "one_click_apply",
+          capability: "authenticated_apply_preparation",
           platform: "linkedin",
           enabled: false,
         },
@@ -1194,7 +1194,7 @@ test("previewWorkspaceIntent: turning off one-click apply on a named platform cl
   });
 });
 
-test("previewWorkspaceIntent: turning on one-click apply is not offered as an Ask action (falls to chat)", () => {
+test("previewWorkspaceIntent: obsolete one-click language is not offered as an Ask action", () => {
   const repoRoot = tempRepo();
   const result = previewWorkspaceIntent({ text: "turn on one-click apply", repoRoot, env: {} });
   assert.equal(result.action, null);

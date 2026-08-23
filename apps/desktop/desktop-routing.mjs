@@ -1,21 +1,13 @@
 // desktop-routing.mjs — pure route decisions for the Electron shell.
 //
 // Kept out of main.mjs so route policy is testable without importing
-// Electron. The desktop shell is app-first: existing workspaces open the SPA
-// Home route, while first-run workspaces open the SPA onboarding wizard. Source
-// dev launches can force onboarding while the first-run experience is being
-// designed against real Electron chrome. A dev route override is intentionally
-// explicit so design review can jump to a product page without changing the
-// first-run default.
-export function chooseDesktopRoute({
-  hasCandidateSetup,
-  forceOnboarding = false,
-  routeOverride = "",
-} = {}) {
+// Electron. The React app owns first-run state inside the same chat-first
+// workspace, so the desktop shell always opens one product route. A dev route
+// override remains available for focused review of a real chat-first route.
+export function chooseDesktopRoute({ routeOverride = "" } = {}) {
   const override = normalizeDesktopRoute(routeOverride);
   if (override) return override;
-  if (forceOnboarding) return "/app/onboarding";
-  return hasCandidateSetup ? "/app" : "/app/onboarding";
+  return "/app";
 }
 
 export function normalizeDesktopRoute(value) {

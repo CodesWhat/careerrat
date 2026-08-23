@@ -44,7 +44,7 @@ test("desktop README teaches the app-first signed and notarized pilot path", asy
   assertIncludes(readme, "apps/desktop/README.md", [
     /Electron desktop/i,
     /\/app\b/,
-    /\/app\/onboarding\b/,
+    /same shell/i,
     /signed and notarized macOS DMG/i,
     /CAREERRAT_HOME/i,
     /internal\/ai\.env/i,

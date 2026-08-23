@@ -15,7 +15,6 @@ import {
   PORTAL_RECIPES,
   resolveFieldValue,
   resolveScreeningAnswer,
-  shouldAutoSubmit,
   submitGuard,
 } from "../src/core/apply/form-fill.mjs";
 
@@ -65,12 +64,6 @@ const FORM_DEFAULTS_BASIC = {
   requires_sponsorship: "No",
   expected_base: 210000,
   eeo_default: "Prefer not to answer",
-  auto_submit: false,
-};
-
-const FORM_DEFAULTS_AUTO = {
-  ...FORM_DEFAULTS_BASIC,
-  auto_submit: true,
 };
 
 // ---------------------------------------------------------------------------
@@ -338,37 +331,6 @@ describe("resolveFieldValue", () => {
 });
 
 // ---------------------------------------------------------------------------
-// shouldAutoSubmit
-// ---------------------------------------------------------------------------
-
-describe("shouldAutoSubmit", () => {
-  it("returns false by default (null)", () => {
-    assert.equal(shouldAutoSubmit(null), false);
-  });
-
-  it("returns false by default (undefined)", () => {
-    assert.equal(shouldAutoSubmit(undefined), false);
-  });
-
-  it("returns false when auto_submit is false", () => {
-    assert.equal(shouldAutoSubmit({ auto_submit: false }), false);
-  });
-
-  it("returns false when auto_submit is missing", () => {
-    assert.equal(shouldAutoSubmit({}), false);
-  });
-
-  it("returns true only when auto_submit === true", () => {
-    assert.equal(shouldAutoSubmit({ auto_submit: true }), true);
-  });
-
-  it("returns false for truthy non-boolean", () => {
-    assert.equal(shouldAutoSubmit({ auto_submit: 1 }), false);
-    assert.equal(shouldAutoSubmit({ auto_submit: "true" }), false);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // BLOCKER_SIGNALS
 // ---------------------------------------------------------------------------
 
@@ -396,7 +358,6 @@ describe("submitGuard", () => {
   it("blocks on pageText containing 'verify you are human'", () => {
     const result = submitGuard({
       pageText: "Please verify you are human to continue.",
-      formDefaults: FORM_DEFAULTS_AUTO,
     });
     assert.equal(result.canSubmit, false);
     assert.equal(result.mode, "manual");
@@ -409,30 +370,19 @@ describe("submitGuard", () => {
     assert.equal(result.mode, "manual");
   });
 
-  it("returns mode=auto and canSubmit=true with auto_submit true and clean page", () => {
+  it("returns mode=manual and canSubmit=true with a clean page", () => {
     const result = submitGuard({
       pageText: "Please fill in your details.",
-      formDefaults: FORM_DEFAULTS_AUTO,
-    });
-    assert.equal(result.canSubmit, true);
-    assert.equal(result.mode, "auto");
-    assert.deepEqual(result.blockers, []);
-  });
-
-  it("returns mode=manual with auto_submit false and clean page", () => {
-    const result = submitGuard({
-      pageText: "Please fill in your details.",
-      formDefaults: FORM_DEFAULTS_BASIC,
     });
     assert.equal(result.canSubmit, true);
     assert.equal(result.mode, "manual");
+    assert.deepEqual(result.blockers, []);
   });
 
   it("blocks when pageSignals.captcha === true", () => {
     const result = submitGuard({
       pageText: "Fill out the form below.",
       pageSignals: { captcha: true },
-      formDefaults: FORM_DEFAULTS_AUTO,
     });
     assert.equal(result.canSubmit, false);
     assert.equal(result.mode, "manual");
@@ -443,7 +393,6 @@ describe("submitGuard", () => {
     const result = submitGuard({
       pageText: "",
       pageSignals: { appLimit: true },
-      formDefaults: FORM_DEFAULTS_AUTO,
     });
     assert.equal(result.canSubmit, false);
     assert.equal(result.mode, "manual");
@@ -454,7 +403,6 @@ describe("submitGuard", () => {
     const result = submitGuard({
       pageText: "",
       pageSignals: { requiredExercise: true },
-      formDefaults: FORM_DEFAULTS_AUTO,
     });
     assert.equal(result.canSubmit, false);
     assert.equal(result.mode, "manual");
@@ -467,10 +415,9 @@ describe("submitGuard", () => {
     assert.deepEqual(result.blockers, []);
   });
 
-  it("returns canSubmit false and mode manual when blocker exists even with auto_submit", () => {
+  it("returns canSubmit false and mode manual when a blocker exists", () => {
     const result = submitGuard({
       pageText: "You have reached the application limit for this role.",
-      formDefaults: FORM_DEFAULTS_AUTO,
     });
     assert.equal(result.canSubmit, false);
     assert.equal(result.mode, "manual");
@@ -991,7 +938,6 @@ describe("BLOCKER_SIGNALS verification-code phrases [#6][#7]", () => {
   it("submitGuard blocks on 'verification code' in pageText", () => {
     const result = submitGuard({
       pageText: "Please enter your verification code to continue.",
-      formDefaults: FORM_DEFAULTS_AUTO,
     });
     assert.equal(result.canSubmit, false);
     assert.equal(result.mode, "manual");
@@ -1001,7 +947,6 @@ describe("BLOCKER_SIGNALS verification-code phrases [#6][#7]", () => {
   it("submitGuard blocks on 'check your email' in pageText", () => {
     const result = submitGuard({
       pageText: "Check your email for a one-time link.",
-      formDefaults: FORM_DEFAULTS_AUTO,
     });
     assert.equal(result.canSubmit, false);
     assert.ok(result.blockers.includes("check your email"));
@@ -1010,7 +955,6 @@ describe("BLOCKER_SIGNALS verification-code phrases [#6][#7]", () => {
   it("submitGuard blocks on 'enter the 6-digit code'", () => {
     const result = submitGuard({
       pageText: "Enter the 6-digit code we sent to your phone.",
-      formDefaults: FORM_DEFAULTS_AUTO,
     });
     assert.equal(result.canSubmit, false);
     assert.ok(result.blockers.includes("enter the 6-digit code"));
@@ -1082,11 +1026,10 @@ describe("E2E: current_base privacy", () => {
   it("submitGuard is unaffected by compensation data", () => {
     const result = submitGuard({
       pageText: "Fill out the form.",
-      formDefaults: FORM_DEFAULTS_AUTO,
       profile: PROFILE_WITH_CURRENT,
     });
     assert.equal(result.canSubmit, true);
-    assert.equal(result.mode, "auto");
+    assert.equal(result.mode, "manual");
     const serialized = JSON.stringify(result);
     assert.ok(!serialized.includes("999999"));
   });

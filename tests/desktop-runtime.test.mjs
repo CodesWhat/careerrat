@@ -188,18 +188,18 @@ describe("desktop external URL decisions", () => {
     assert.deepEqual(
       decideExternalOpen({
         baseUrl: "http://127.0.0.1:61234",
-        target: "http://127.0.0.1:61234/app/onboarding",
+        target: "http://127.0.0.1:61234/app/settings",
       }),
       {
         action: "ignore",
         reason: "same-origin",
-        url: "http://127.0.0.1:61234/app/onboarding",
+        url: "http://127.0.0.1:61234/app/settings",
       }
     );
   });
 
   it("keeps every same-origin path in-window, including neighboring /app routes", () => {
-    for (const path of ["/app", "/app/onboarding"]) {
+    for (const path of ["/app", "/app/settings"]) {
       assert.deepEqual(
         decideExternalOpen({
           baseUrl: "http://127.0.0.1:61234",

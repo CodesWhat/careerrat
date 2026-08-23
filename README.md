@@ -211,8 +211,8 @@ grouped by what you're actually trying to do:
 - **Screening answers**: drafts one-off application-question answers grounded
   in your profile and evidence, and remembers your standard disclosures so
   you're never asked twice.
-- **Filling and submitting**: fills the portal form for you, including
-  LinkedIn's one-click Easy Apply, and defaults to letting you hit submit.
+- **Supervised form preparation**: fills supported portal fields, including
+  LinkedIn Easy Apply, then stops for you to review and submit.
 - **LinkedIn tune-up**: diffs your profile against what you're targeting and
   proposes honest rewrites, headline through Featured, with a preview before
   anything gets written back.

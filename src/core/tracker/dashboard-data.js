@@ -3653,16 +3653,6 @@ function stageGroupLabel(stage) {
   return configured?.label || titleCase(stage);
 }
 
-function stageColor(stage) {
-  return JOB_FUNNEL_STAGES.find((item) => item.id === stage)?.color || "#8d7f73";
-}
-
-function stageIcon(row) {
-  if (row?.terminal) return "x";
-  const stage = typeof row === "string" ? row : row?.stage;
-  return JOB_FUNNEL_STAGES.find((item) => item.id === stage)?.icon || "list";
-}
-
 function firstMessageSummary(comm = {}) {
   return (
     comm.summary ||
@@ -4265,9 +4255,13 @@ function jobDetailFromRow(
   const jdPath = artifactPathString(artifacts.jd || artifacts.jobDescription);
   const resumePath = artifactPathString(artifacts.resume);
   const coverLetterPath = artifactPathString(artifacts.coverLetter);
+  const dossierPath = artifactPathString(artifacts.interviewDossier);
   const jdCapturedLabel = formatArtifactDate(artifacts.jdGeneratedAt);
   const resumeGeneratedLabel = formatArtifactDate(artifacts.resumeGeneratedAt);
   const coverLetterGeneratedLabel = formatArtifactDate(artifacts.coverLetterGeneratedAt);
+  const dossierGeneratedLabel = formatArtifactDate(
+    artifacts.interviewDossier?.generatedAt || artifacts.interviewDossierGeneratedAt
+  );
   const artifactList = [
     jdPath
       ? artifactRow(
@@ -4295,6 +4289,15 @@ function jobDetailFromRow(
               ? `Generated ${coverLetterGeneratedLabel}`
               : "Generated document"),
           coverLetterPath
+        )
+      : null,
+    dossierPath
+      ? artifactRow(
+          "Interview dossier",
+          dossierGeneratedLabel
+            ? `Prepared ${dossierGeneratedLabel}`
+            : "Prepared interview dossier",
+          dossierPath
         )
       : null,
   ].filter(Boolean);

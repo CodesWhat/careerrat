@@ -466,6 +466,47 @@ test("GET /api/chat/events: frames carry id: lines, and Last-Event-ID replays on
   }
 });
 
+test("GET /api/chat/events: an EventSource-compatible after cursor replays only newer events", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  const chatRuntime = createChatRuntime({
+    repoRoot,
+    env: { ANTHROPIC_API_KEY: "sk-ant-test" },
+    loadSdk: async () => fakeStreamingSdk([turnMessages(1)]),
+  });
+  const server = await bootServer(chatRuntime, repoRoot);
+  try {
+    const startRes = await fetch(`${baseUrl(server)}/api/chat/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ skill: "ingest-profile" }),
+    });
+    const { chatId } = await startRes.json();
+    await waitForPredicate(() => chatRuntime.getSession(chatId)?.state === "idle");
+
+    const { res: fullRes, abort: abortFull } = await openSse(
+      `${baseUrl(server)}/api/chat/events?id=${chatId}`
+    );
+    const fullText = await readSseBody(fullRes, {
+      stopWhen: (text) => /event: result/.test(text),
+      leaveOpen: true,
+    });
+    const cursor = Math.max(...parseSseIds(fullText));
+
+    const { res: tailRes, abort: abortTail } = await openSse(
+      `${baseUrl(server)}/api/chat/events?id=${chatId}&after=${cursor}`
+    );
+    const tailText = await readSseBody(tailRes, { timeoutMs: 200, leaveOpen: true });
+    assert.deepEqual(parseSseIds(tailText), []);
+
+    abortFull();
+    abortTail();
+  } finally {
+    chatRuntime.shutdown();
+    await closeServer(server);
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 // KEY REGRESSION: destroying an events response mid-running must not abort
 // the session — a second connection afterward gets the full backlog plus
 // whatever happened live in between.

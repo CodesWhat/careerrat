@@ -101,13 +101,27 @@ test("profile: negative compensation values are rejected", () => {
 });
 
 test("form defaults: negative expected base is rejected", () => {
-  const result = validate({ auto_submit: false, expected_base: -1 }, formDefaultsSchema);
+  const result = validate({ expected_base: -1 }, formDefaultsSchema);
 
   assert.equal(result.valid, false);
   assert.ok(
     result.errors.some(
       (error) => error.path === "expected_base" && /at least 0/.test(error.message)
     )
+  );
+});
+
+test("form defaults: final submission has no configurable setting", () => {
+  const defaults = validate({}, formDefaultsSchema);
+  assert.equal(defaults.valid, true, JSON.stringify(defaults.errors));
+
+  const removedSetting = validate({ auto_submit: false }, formDefaultsSchema);
+  assert.equal(removedSetting.valid, false);
+  assert.ok(
+    removedSetting.errors.some(
+      (error) => error.path === "auto_submit" && /unexpected property/.test(error.message)
+    ),
+    JSON.stringify(removedSetting.errors)
   );
 });
 

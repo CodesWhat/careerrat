@@ -32,6 +32,28 @@ export {
   candidateSetupInitialize,
 } from "./candidate.mjs";
 export {
+  chatFirstStateFromDb,
+  chatFirstStateGet,
+  ensureJobThreadInDb,
+  jobThreadMessageAppend,
+  jobThreadSetArchived,
+  jobThreadSetPinned,
+  jobThreadTurn,
+  missionCreate,
+  missionCreateForJobs,
+  missionRun,
+  missionSetStatus,
+  missionStepSetStatus,
+  mockInterviewEnd,
+  mockInterviewFeedbackAppend,
+  mockInterviewMessageAppend,
+  mockInterviewStart,
+  mockInterviewStartWithAI,
+  mockInterviewTurn,
+  sourcedDecisionSet,
+  touchDueDismiss,
+} from "./chat-first.mjs";
+export {
   commAppendMessage,
   commCaptureInbound,
   commMarkSent,
@@ -96,6 +118,12 @@ export {
 } from "./public-intel.mjs";
 export { relationshipLeadSetStatus, relationshipLeadUpsertBatch } from "./relationship.mjs";
 export { ExportFailedError, kvGet, kvUpsert, NotFoundError } from "./shared.mjs";
+export {
+  skillChatMessageAppend,
+  skillChatThreadRead,
+  skillChatThreadSetTurnState,
+  skillChatTranscriptAdopt,
+} from "./skill-chat.mjs";
 export { sourceWatermarkUpsert } from "./source.mjs";
 export {
   companyAtsRemove,

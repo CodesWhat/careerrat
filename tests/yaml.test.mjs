@@ -160,7 +160,7 @@ test("parses form-defaults.example.yml — string, null, boolean fields", () => 
   assert.equal(fd.eeo_default, "Prefer not to answer");
   assert.deepEqual(fd.screening_answers, {});
   assert.equal(fd.confirm_current_role, false);
-  assert.equal(fd.auto_submit, false);
+  assert.equal("auto_submit" in fd, false);
 });
 
 // ---------------------------------------------------------------------------

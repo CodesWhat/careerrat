@@ -38,8 +38,8 @@ Root `AGENTS.md` and `CLAUDE.md` instruct agents how to map user intent to the
 
 - "Apply", "submit", or a JD URL with apply intent → `apply-job`
   (`apply-job` must run or verify `evaluate-job` as step zero; LinkedIn Easy Apply
-  postings can use the opt-in authenticated one-click path gated by the
-  `one_click_apply` capability — no new skill, stays within `apply-job`)
+  postings can use opt-in authenticated form preparation gated by the
+  `authenticated_apply_preparation` capability; final submission stays manual)
 - "Gate", "should I apply", or a JD URL without apply intent → `evaluate-job`
 - "Find jobs", "source", "search", "refresh queue" → `search-jobs`
 - "Set up searches", "build search config" → `setup-searches`
@@ -214,6 +214,9 @@ user-selected sessions, not hidden fallbacks from local API errors.
 Compatibility/static tracker pages are compatibility/debug/export aids. They
 are not normal product UX; the Electron and React product path is `/app`, with
 `/app/onboarding` for first-run workspaces.
+
+The chat-first shell persists threads and missions independently of any one AI
+vendor. See [CHAT_FIRST_RUNTIME.md](CHAT_FIRST_RUNTIME.md).
 
 ### Skill Contract Layer
 

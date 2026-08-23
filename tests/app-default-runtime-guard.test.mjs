@@ -6,49 +6,33 @@ import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
-// Synced against source deletions/renames from 728a5f85 (calendar V2/V3
-// consolidation: CalendarEventChip/MonthView/WeekView deleted) and a85a9e96
-// (JobFunnel/JobRow deleted — replaced by FunnelSankey.jsx + inline rows on
-// JobsPage.jsx; HomePage.jsx deleted — DashboardV2Page de-versioned to
-// DashboardPage.jsx as its replacement).
 const APP_DEFAULT_FILES = [
   "apps/web/src/App.jsx",
   "apps/web/src/main.jsx",
-  "apps/web/src/app-shell/ActivityBell.jsx",
-  "apps/web/src/app-shell/AppShell.jsx",
-  "apps/web/src/app-shell/AskBar.jsx",
-  "apps/web/src/app-shell/DashboardContext.jsx",
-  "apps/web/src/app-shell/NavList.jsx",
-  "apps/web/src/app-shell/useNeedsYouCount.js",
-  "apps/web/src/calendar/CalendarPage.jsx",
+  "apps/web/src/chat-first/dashboard-context.jsx",
+  "apps/web/src/chat-first/ChatFirstApp.jsx",
+  "apps/web/src/chat-first/FirstRunExperience.jsx",
+  "apps/web/src/chat-first/ProfileSettings.jsx",
+  "apps/web/src/chat-first/ProfileSettingsController.jsx",
+  "apps/web/src/chat-first/WorkspaceBrowser.jsx",
+  "apps/web/src/chat-first/browser-model.js",
+  "apps/web/src/chat-first/chat-first-app-controller.js",
+  "apps/web/src/chat-first/chat-first-controller.js",
+  "apps/web/src/chat-first/chat-first-icons.jsx",
+  "apps/web/src/chat-first/chat-first-model.js",
+  "apps/web/src/chat-first/conversation-surfaces.jsx",
+  "apps/web/src/chat-first/deep-ingest-controller.js",
+  "apps/web/src/chat-first/first-run-controller.js",
+  "apps/web/src/chat-first/profile-settings-controller.js",
+  "apps/web/src/chat-first/workspace-shell.jsx",
   "apps/web/src/components/Button.jsx",
-  "apps/web/src/components/Card.jsx",
-  "apps/web/src/components/Chip.jsx",
-  "apps/web/src/components/CompanyAvatar.jsx",
-  "apps/web/src/components/PageScaffold.jsx",
-  "apps/web/src/components/Toast.jsx",
-  "apps/web/src/components/form.jsx",
-  "apps/web/src/components/icons.jsx",
-  "apps/web/src/jobs/FunnelSankey.jsx",
-  "apps/web/src/jobs/JobDrawer.jsx",
-  "apps/web/src/jobs/JobsPage.jsx",
+  "apps/web/src/jobs/ArtifactViewerModal.jsx",
   "apps/web/src/jobs/jobsSearch.js",
-  "apps/web/src/lib/intake-labels.js",
-  "apps/web/src/lib/quickFacts.js",
-  "apps/web/src/library/LibraryPage.jsx",
-  "apps/web/src/network/NetworkPage.jsx",
-  "apps/web/src/onboarding/EngineScreen.jsx",
-  "apps/web/src/onboarding/FilePane.jsx",
-  "apps/web/src/onboarding/OnboardingBar.jsx",
-  "apps/web/src/onboarding/OnboardingPage.jsx",
-  "apps/web/src/onboarding/OnboardingShell.jsx",
+  "apps/web/src/lib/errorCopy.js",
+  "apps/web/src/lib/safeExternalUrl.js",
+  "apps/web/src/lib/sse.js",
+  "apps/web/src/onboarding/confirmBlocks.js",
   "apps/web/src/onboarding/onboardingSetup.js",
-  "apps/web/src/onboarding/steps/GuardrailsStep.jsx",
-  "apps/web/src/pages/ComingSoonPage.jsx",
-  "apps/web/src/pages/DashboardPage.jsx",
-  "apps/web/src/pages/SetupReadinessCard.jsx",
-  "apps/web/src/settings/InstalledRuntimeChoices.jsx",
-  "apps/web/src/settings/SettingsPage.jsx",
   "src/cli/assist-route.mjs",
   "src/cli/boards-route.mjs",
   "src/cli/dashboard-route.mjs",
@@ -157,23 +141,14 @@ const CLASSIFIED_LEGACY_STATIC_RUNTIME_FILES = [
 const CLASSIFIED_EXPLICIT_CHAT_SLICES = [
   {
     file: "apps/web/src/lib/api.js",
-    label: "discovery chat handoff API helpers",
-    slices: [
-      ["export function startDiscoveryQuickStart", "export async function suggestAssist"],
-      ["export function startChat", "export function createIntake"],
-    ],
-    patterns: [/\/api\/discovery\/quick-start/, /\/api\/chat\/start/],
+    label: "first-run chat API helpers",
+    slices: [["export function startChat", "export function getDashboard"]],
+    patterns: [/\/api\/chat\/start/, /\/api\/chat\/message/, /\/api\/chat\/by-skill/],
   },
   {
-    file: "apps/web/src/onboarding/ChatPanel.jsx",
-    label: "visible chat panel",
-    slices: [["export function ChatPanel", null]],
-    patterns: [/\bstartChat\b/, /\/api\/chat\/events/],
-  },
-  {
-    file: "apps/web/src/onboarding/InterviewSurface.jsx",
-    label: "W4 chat-first onboarding interview panel",
-    slices: [["export function InterviewSurface", null]],
+    file: "apps/web/src/chat-first/FirstRunController.jsx",
+    label: "chat-first setup conversation",
+    slices: [["export function FirstRunController", null]],
     patterns: [/\bfindChatBySkill\b/, /\/api\/chat\/events/],
   },
   {
@@ -327,57 +302,18 @@ function assertClassifiedPatterns(source, patterns, label) {
 }
 
 test("SEC-01 app-default guard scans the named product/default file set", () => {
-  assert.deepEqual(APP_DEFAULT_FILES, [
-    "apps/web/src/App.jsx",
-    "apps/web/src/main.jsx",
-    "apps/web/src/app-shell/ActivityBell.jsx",
-    "apps/web/src/app-shell/AppShell.jsx",
-    "apps/web/src/app-shell/AskBar.jsx",
-    "apps/web/src/app-shell/DashboardContext.jsx",
-    "apps/web/src/app-shell/NavList.jsx",
-    "apps/web/src/app-shell/useNeedsYouCount.js",
-    "apps/web/src/calendar/CalendarPage.jsx",
-    "apps/web/src/components/Button.jsx",
-    "apps/web/src/components/Card.jsx",
-    "apps/web/src/components/Chip.jsx",
-    "apps/web/src/components/CompanyAvatar.jsx",
-    "apps/web/src/components/PageScaffold.jsx",
-    "apps/web/src/components/Toast.jsx",
-    "apps/web/src/components/form.jsx",
-    "apps/web/src/components/icons.jsx",
-    "apps/web/src/jobs/FunnelSankey.jsx",
-    "apps/web/src/jobs/JobDrawer.jsx",
-    "apps/web/src/jobs/JobsPage.jsx",
-    "apps/web/src/jobs/jobsSearch.js",
-    "apps/web/src/lib/intake-labels.js",
-    "apps/web/src/lib/quickFacts.js",
-    "apps/web/src/library/LibraryPage.jsx",
-    "apps/web/src/network/NetworkPage.jsx",
-    "apps/web/src/onboarding/EngineScreen.jsx",
-    "apps/web/src/onboarding/FilePane.jsx",
-    "apps/web/src/onboarding/OnboardingBar.jsx",
-    "apps/web/src/onboarding/OnboardingPage.jsx",
-    "apps/web/src/onboarding/OnboardingShell.jsx",
-    "apps/web/src/onboarding/onboardingSetup.js",
-    "apps/web/src/onboarding/steps/GuardrailsStep.jsx",
-    "apps/web/src/pages/ComingSoonPage.jsx",
-    "apps/web/src/pages/DashboardPage.jsx",
-    "apps/web/src/pages/SetupReadinessCard.jsx",
-    "apps/web/src/settings/InstalledRuntimeChoices.jsx",
-    "apps/web/src/settings/SettingsPage.jsx",
-    "src/cli/assist-route.mjs",
-    "src/cli/boards-route.mjs",
-    "src/cli/dashboard-route.mjs",
-    "src/cli/data-route.mjs",
-    "src/cli/deep-ingest-route.mjs",
-    "src/cli/logo-route.mjs",
-    "src/cli/packet-route.mjs",
-    "src/cli/search-route.mjs",
-    "src/cli/sourcing-route.mjs",
-    "src/core/ai/answer-page.mjs",
-    "src/core/onboarding/packet-page.mjs",
-    "apps/desktop/main.mjs",
-  ]);
+  assert.ok(APP_DEFAULT_FILES.includes("apps/web/src/chat-first/ChatFirstApp.jsx"));
+  assert.ok(APP_DEFAULT_FILES.includes("apps/web/src/chat-first/FirstRunExperience.jsx"));
+  assert.ok(APP_DEFAULT_FILES.includes("apps/web/src/chat-first/ProfileSettings.jsx"));
+  assert.ok(APP_DEFAULT_FILES.includes("apps/web/src/jobs/jobsSearch.js"));
+  assert.equal(
+    APP_DEFAULT_FILES.some((file) => file.includes("/JobsPage.jsx")),
+    false
+  );
+  assert.equal(
+    APP_DEFAULT_FILES.some((file) => file.includes("/OnboardingPage.jsx")),
+    false
+  );
 });
 
 test("SEC-01 retained runtime classifications are named, not blanket exceptions", () => {

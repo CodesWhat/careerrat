@@ -67,12 +67,12 @@ test("shared runtime fonts live under the asset tree", async () => {
 
   const trackerDev = await readText("src/cli/tracker-dev.mjs");
   const documentExport = await readText("src/core/documents/export.mjs");
-  const webTokens = await readText("apps/web/src/styles/tokens.css");
+  const webFoundation = await readText("apps/web/src/chat-first/app-foundation.css");
   const pkg = JSON.parse(await readText("package.json"));
   assert.match(trackerDev, /join\(repoRoot, "assets", "fonts"\)/);
   assert.match(documentExport, /join\(repoRoot, "assets", "fonts", file\)/);
-  assert.match(webTokens, /\.\.\/\.\.\/\.\.\/\.\.\/assets\/fonts\/GeistVF\.woff2/);
-  assert.doesNotMatch(webTokens, /url\("\/fonts\//);
+  assert.match(webFoundation, /\.\.\/\.\.\/\.\.\/\.\.\/assets\/fonts\/GeistVF\.woff2/);
+  assert.doesNotMatch(webFoundation, /url\("\/fonts\//);
   assert.ok(!pkg.files.includes("fonts"));
 });
 
@@ -345,10 +345,14 @@ test("web discovery emits typed proposals that the app can actually persist", as
   assert.match(companies, /"kind":"discovery_complete","step":"discover-companies"/);
 });
 
-test("the app theme bootstrap is rebased exactly once", async () => {
+test("the app ships one fixed light visual mode", async () => {
   const index = await readText("apps/web/index.html");
-  assert.match(index, /<script src="\/theme-init\.js"><\/script>/);
-  assert.doesNotMatch(index, /%BASE_URL%theme-init\.js/);
+  const foundation = await readText("apps/web/src/chat-first/app-foundation.css");
+  const workspace = await readText("apps/web/src/chat-first/chat-first.css");
+  assert.doesNotMatch(index, /theme-init\.js/);
+  assert.equal(existsSync(join(root, "apps/web/public/theme-init.js")), false);
+  assert.doesNotMatch(`${foundation}\n${workspace}`, /\[data-theme=["']?dark/);
+  assert.match(foundation, /background:\s*#edf5fb/);
 });
 
 test("local user data roots are excluded from git, docker, and Vercel surfaces", async () => {
@@ -604,12 +608,10 @@ test("scripts reachable from a skill or published npm-run alias are shipped", as
     if (m) aliasToScript[alias] = m[0];
   }
 
-  // Scripts that exist only to build/deploy the demo + marketing site. They are
-  // never invoked from a skill or a user install, so they are intentionally not
-  // shipped. Everything else an agent can reach at runtime MUST ship — npm pack
-  // ships exactly the "files" allowlist, so an unshipped-but-referenced script
-  // breaks in every installed/live copy (the missing-verify-tracker.mjs class of bug).
-  const DEV_ONLY = new Set(["scripts/build-demo.mjs", "scripts/deploy-demo.mjs"]);
+  // Everything an agent can reach at runtime MUST ship. npm pack ships exactly
+  // the "files" allowlist, so an unshipped-but-referenced script breaks every
+  // installed/live copy (the missing-verify-tracker.mjs class of bug).
+  const DEV_ONLY = new Set();
 
   const referenced = new Set();
   // Every script a published npm-run alias points at.

@@ -25,6 +25,7 @@ const FIELD_ROLES = new Map([
   ["checkbox", "checkbox"],
   ["radio", "radio"],
 ]);
+const PREPARE_ONLY_ADVANCE_LABELS = new Set(["next", "next step"]);
 
 function normalizeLabel(value) {
   return String(value || "")
@@ -330,7 +331,6 @@ async function fillStep({
 
   const initialGuard = submitGuard({
     pageText: snapshot.pageText,
-    formDefaults: config?.["form-defaults"] || {},
   });
   if (initialGuard.blockers.length) {
     return {
@@ -407,7 +407,6 @@ async function fillStep({
   const finalSnapshot = await ops.snapshot({ pageId });
   const guard = submitGuard({
     pageText: finalSnapshot.pageText,
-    formDefaults: config?.["form-defaults"] || {},
   });
   return { blocked: false, guard, filledCount, uploadedCount, unresolved, finalSnapshot };
 }
@@ -457,6 +456,12 @@ function easyApplyStepKey(stepIndex) {
 function stepSessionFields(stepIndex, easyApply) {
   if (stepIndex <= 1) return {};
   return { stepIndex, stepKey: easyApply ? easyApplyStepKey(stepIndex) : null };
+}
+
+function isPrepareOnlyAdvance(snapshot, ref) {
+  const label = normalizeLabel(snapshot?.refs?.[ref]?.name);
+  if (!PREPARE_ONLY_ADVANCE_LABELS.has(label)) return false;
+  return !/\b(review|confirm|submit|send)\b/.test(normalizeLabel(snapshot?.pageText));
 }
 
 // Shared by the entry-point confirmation check and the Easy Apply loop's
@@ -512,7 +517,13 @@ export function createApplyDriver({
 } = {}) {
   const sessions = new Map();
 
-  return async function execute({ applicationId, application, postingUrl, questionCapture } = {}) {
+  return async function execute({
+    applicationId,
+    application,
+    postingUrl,
+    questionCapture,
+    prepareOnly = false,
+  } = {}) {
     const url = safePostingUrl(postingUrl);
     if (!url) {
       return {
@@ -526,7 +537,7 @@ export function createApplyDriver({
     const easyApply = isEasyApply(url);
     if (easyApply) {
       const permission = mayRunImpl({
-        capability: "one_click_apply",
+        capability: "authenticated_apply_preparation",
         platform: "linkedin",
         root: repoRoot,
       });
@@ -615,7 +626,7 @@ export function createApplyDriver({
     // it naturally: findAdvanceButtonRef finds no advance button on its only
     // page, so the loop exits after one iteration exactly like the old
     // single-page path did. `easyApply` (URL-gated, checked above for the
-    // one_click_apply consent gate) only still matters for cosmetic step
+    // authenticated preparation consent gate) only still matters for cosmetic step
     // naming. See stepSessionFields.
     let stepIndex = 0;
     // Sums fillStep's per-call counts across every page in this run:
@@ -795,12 +806,32 @@ export function createApplyDriver({
             unresolved,
             blockers: guard.blockers,
             submitMode: guard.mode,
+            ...(prepareOnly === true ? { prepareOnly: true } : {}),
             ...stepSessionFields(stepIndex, easyApply),
           },
         };
       }
 
       const advanceLabel = String(preAdvanceSnapshot.refs?.[advanceRef]?.name || "").trim();
+      if (prepareOnly === true && !isPrepareOnlyAdvance(preAdvanceSnapshot, advanceRef)) {
+        return {
+          available: true,
+          verified: false,
+          state: "awaiting-submit",
+          reason: `Preparation stopped before "${advanceLabel}" because that control could submit the application.`,
+          currentUrl: preAdvanceSnapshot.origin || finalSnapshot.origin || url,
+          session: {
+            provider: providerLabel,
+            filledCount: totalFilledCount,
+            uploadedCount: totalUploadedCount,
+            unresolved,
+            blockers: guard.blockers,
+            submitMode: "manual",
+            prepareOnly: true,
+            ...stepSessionFields(stepIndex, easyApply),
+          },
+        };
+      }
       const fingerprintBefore = snapshotFingerprint(preAdvanceSnapshot);
       await ops.clickButton({ pageId, ref: advanceRef });
       const nextSnapshot = await ops.snapshot({ pageId });

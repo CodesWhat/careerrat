@@ -7,8 +7,7 @@
 //
 // Two run modes:
 //   dev  (`npm run desktop` from repo root) — unpackaged window over the live
-//        checkout; shares data with `npm run tracker:dev` (legacy in-checkout
-//        layout, no CAREERRAT_HOME). The primary POC deliverable.
+//        checkout; shares data with `npm run tracker:dev`.
 //   dist (`npm run desktop:dist`) — signed .dmg via electron-builder, running
 //        against a staged copy of the engine (see scripts/stage.mjs) with its
 //        own per-user data root.
@@ -26,7 +25,6 @@ import {
   ipcMain,
   Menu,
   nativeImage,
-  nativeTheme,
   shell,
 } from "electron";
 import { existsSync, readFileSync, rmSync } from "node:fs";
@@ -95,8 +93,7 @@ app.userAgentFallback = app.userAgentFallback.replace(/\s(CareerRat|Electron)\/[
 // BEFORE importing any careerrat module: resolveUserPaths() reads
 // process.env.CAREERRAT_HOME the moment it's called (src/core/paths/
 // workspace.mjs), so this must land before boot()'s dynamic imports below.
-// Dev keeps the legacy in-checkout layout (no CAREERRAT_HOME) so it shares
-// data with `npm run tracker:dev` on the same checkout.
+// Dev keeps the in-checkout layout so it shares data with `npm run tracker:dev`.
 const runtimePaths = resolveDesktopRuntimePaths({
   isPackaged: app.isPackaged,
   appDir: __dirname,
@@ -206,11 +203,6 @@ async function boot() {
   process.env.CAREERRAT_DESKTOP_PDF_RENDER_TOKEN = pdfRenderer.token;
 
   const { createDevServer } = await loadEngineModule("src/cli/tracker-dev.mjs");
-  const { resolveUserPaths, userPath } = await loadEngineModule("src/core/paths/workspace.mjs");
-  const { dbExists } = await loadEngineModule("src/core/db/connection.mjs");
-  const { candidateConfigGet } = await loadEngineModule("src/core/db/verbs.mjs");
-  const { readOnboardingDraft } = await loadEngineModule("src/cli/onboard-route.mjs");
-
   dev = createDevServer({ repoRoot });
 
   // Tolerate a fresh data root (no tracker.json yet) — an empty workspace
@@ -245,45 +237,13 @@ async function boot() {
   const url = `http://127.0.0.1:${port}`;
   log(`serving ${url}`);
 
-  // First-run routing: a candidate with none of legacy candidate/profile.yml,
-  // a deliberately finished onboarding wizard, or an apply-ready DB-backed
-  // setup goes to onboarding instead of an empty dashboard. Use the engine's
-  // own path resolver — the same one createDevServer() itself used above —
-  // rather than hand-rolling a join, so this always agrees with where the
-  // server actually looked for user data. First-run goes to the M8 SPA wizard
-  // (/app/onboarding — PDF/image resume drop, AI extraction), NOT the legacy
-  // /onboard page (txt/md only). The Electron window has no address bar, so
-  // landing on the wrong wizard strands the user there.
-  const pathCtx = { repoRoot };
-  resolveUserPaths(pathCtx);
+  // First-run and returning candidates share the same chat-first route. The
+  // React app reads canonical setup state and renders first-run in that shell.
   const route = chooseDesktopRoute({
     routeOverride: process.env.CAREERRAT_DESKTOP_ROUTE,
-    forceOnboarding: !app.isPackaged,
-    hasCandidateSetup:
-      existsSync(userPath(pathCtx, "candidate/profile.yml")) ||
-      hasOnboardingFinished({ pathCtx, readOnboardingDraft }) ||
-      hasDbCandidateSetup({ pathCtx, dbExists, candidateConfigGet }),
   });
 
   return { url, route };
-}
-
-function hasOnboardingFinished({ pathCtx, readOnboardingDraft }) {
-  try {
-    return typeof readOnboardingDraft(pathCtx).finishedAt === "string";
-  } catch {
-    return false;
-  }
-}
-
-function hasDbCandidateSetup({ pathCtx, dbExists, candidateConfigGet }) {
-  if (!dbExists(pathCtx)) return false;
-  try {
-    const config = candidateConfigGet(pathCtx);
-    return config.setup?.readiness?.apply_ready === true;
-  } catch {
-    return false;
-  }
 }
 
 async function shutdown() {
@@ -494,7 +454,7 @@ function scheduleUpdateChecks() {
 }
 
 function createWindow(url, route, { load = true } = {}) {
-  const windowOptions = buildBrowserWindowOptions({ dark: nativeTheme.shouldUseDarkColors });
+  const windowOptions = buildBrowserWindowOptions();
   win = new BrowserWindow({
     ...windowOptions,
     webPreferences: {

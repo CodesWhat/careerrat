@@ -536,7 +536,7 @@ export const EASY_APPLY_STEPS = [
   {
     key: "submit",
     label: "Submit application",
-    note: "Final submit action; gated by auto_submit.",
+    note: "Final submission stays with the candidate; CareerRat stops here.",
   },
 ];
 
@@ -1045,21 +1045,6 @@ export function resolveFieldValue(fieldLabel, { formDefaults, profile, portal } 
 }
 
 // ---------------------------------------------------------------------------
-// shouldAutoSubmit
-// ---------------------------------------------------------------------------
-
-/**
- * Returns true only when formDefaults explicitly sets auto_submit === true.
- * Default is false (manual submit).
- *
- * @param {object|null|undefined} formDefaults
- * @returns {boolean}
- */
-export function shouldAutoSubmit(formDefaults) {
-  return !!(formDefaults && formDefaults.auto_submit === true);
-}
-
-// ---------------------------------------------------------------------------
 // BLOCKER_SIGNALS
 // ---------------------------------------------------------------------------
 
@@ -1092,10 +1077,10 @@ export const BLOCKER_SIGNALS = [
 /**
  * Safety gate before submit.
  *
- * @param {{ pageText?: string, pageSignals?: object, formDefaults?: object }} opts
- * @returns {{ canSubmit: boolean, mode: "auto"|"manual", blockers: string[] }}
+ * @param {{ pageText?: string, pageSignals?: object }} opts
+ * @returns {{ canSubmit: boolean, mode: "manual", blockers: string[] }}
  */
-export function submitGuard({ pageText = "", pageSignals = {}, formDefaults } = {}) {
+export function submitGuard({ pageText = "", pageSignals = {} } = {}) {
   const lower = String(pageText).toLowerCase();
   const blockers = [];
 
@@ -1119,10 +1104,7 @@ export function submitGuard({ pageText = "", pageSignals = {}, formDefaults } = 
 
   const canSubmit = blockers.length === 0;
 
-  // mode: "auto" only when auto_submit true AND no blockers
-  const mode = canSubmit && shouldAutoSubmit(formDefaults) ? "auto" : "manual";
-
-  return { canSubmit, mode, blockers };
+  return { canSubmit, mode: "manual", blockers };
 }
 
 // ---------------------------------------------------------------------------
