@@ -178,7 +178,7 @@ describe("runJobsPageSearch", () => {
     expect(result).toEqual({ ok: false, timedOut: true });
     expect(state.setSearchRun).toHaveBeenLastCalledWith(null);
     expect(state.setSearchError).toHaveBeenLastCalledWith(
-      "Search is still running in the background — reload the page later to see results."
+      "Search is still running in the background. Reload the page later to see results."
     );
     expect(state.refetch).not.toHaveBeenCalled();
   });
