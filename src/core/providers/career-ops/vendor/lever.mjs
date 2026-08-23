@@ -17,7 +17,7 @@ function assertLeverUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`lever: URL must use HTTPS: ${url}`);
   if (!ALLOWED_LEVER_HOSTS.has(parsed.hostname))
-    throw new Error(`lever: untrusted hostname "${parsed.hostname}". Must be one of: ${[...ALLOWED_LEVER_HOSTS].join(', ')}`);
+    throw new Error(`lever: untrusted hostname "${parsed.hostname}" — must be one of: ${[...ALLOWED_LEVER_HOSTS].join(', ')}`);
   return url;
 }
 
@@ -43,6 +43,25 @@ function resolveApiUrl(entry) {
   return `https://api.${host[1]}/v0/postings/${slug}`;
 }
 
+/** Fold `categories.location` together with any extra `categories.allLocations`
+ *  into one string. Lever puts a SINGLE primary city in `location`, and exposes
+ *  the full set on multi-location postings in `allLocations` — reading only the
+ *  former silently hides every other eligible location from scan.mjs's
+ *  location_filter (e.g. a req open in Barcelona AND Montevideo looks
+ *  Barcelona-only). Mirrors resolveLocation() in providers/remotli.mjs.
+ *  @param {any} categories */
+function resolveLocation(categories) {
+  const primary = typeof categories?.location === 'string' ? categories.location.trim() : '';
+  const all = Array.isArray(categories?.allLocations)
+    ? categories.allLocations.filter(l => typeof l === 'string' && l.trim()).map(l => l.trim())
+    : [];
+  const merged = [];
+  for (const l of [primary, ...all]) {
+    if (l && !merged.some(m => m.toLowerCase() === l.toLowerCase())) merged.push(l);
+  }
+  return merged.join('; ');
+}
+
 /** @type {Provider} */
 export default {
   id: 'lever',
@@ -66,7 +85,7 @@ export default {
       title: j.text || '',
       url: j.hostedUrl || '',
       company: entry.name,
-      location: j.categories?.location || '',
+      location: resolveLocation(j.categories),
       // Lever's v0 postings list ships the full description for free (same
       // payload, no per-job request) — enables scan.mjs content_filter.
       description: typeof j.descriptionPlain === 'string' ? j.descriptionPlain : '',

@@ -439,6 +439,70 @@ try {
       `phenom ctx.maxPages stop should not warn about raising max_pages: ${JSON.stringify(ctxCapWarnings)}`
     );
   }
+
+  // Title/location entity decoding (#2921) — an undecoded "R&amp;D Engineer"
+  // fails a user's positive title_filter keyword "r&d" and the posting is
+  // silently dropped, and a negative filter's veto never fires.
+  const { rows: entityRows } = parseRefineSearch(
+    {
+      refineSearch: {
+        status: 200,
+        totalHits: 1,
+        data: {
+          jobs: [
+            {
+              jobId: "98098",
+              title: "R&amp;D Engineer",
+              location: "M&#252;nchen",
+              postedDate: "2026-05-07T18:25:30.000+0000",
+            },
+          ],
+        },
+      },
+    },
+    { origin: "https://careers.exampleco.com", urlPrefix: "global/en" }
+  );
+  if (entityRows[0]?.title === "R&D Engineer")
+    pass("phenom parseRefineSearch() decodes &amp; in the title (#2921)");
+  else fail(`phenom title decode = ${JSON.stringify(entityRows[0]?.title)}`);
+
+  const decodedLoc = jobLocation({ location: "M&#252;nchen" });
+  if (decodedLoc === "München")
+    pass("phenom.jobLocation() decodes a numeric entity in the location (#2921)");
+  else fail(`phenom location decode = ${JSON.stringify(decodedLoc)}`);
+
+  // Named Latin-1 letter entities, not just &amp; and numeric refs. The
+  // expanded shared decoder handles these too, and case-sensitively
+  // (&Eacute; is É, not é).
+  const { rows: namedEntityRows } = parseRefineSearch(
+    {
+      refineSearch: {
+        status: 200,
+        totalHits: 1,
+        data: {
+          jobs: [
+            {
+              jobId: "98099",
+              title: "Caf&eacute; Team Lead vs CAF&Eacute; TEAM LEAD",
+              location: "Gen&egrave;ve",
+              postedDate: "2026-05-07T18:25:30.000+0000",
+            },
+          ],
+        },
+      },
+    },
+    { origin: "https://careers.exampleco.com", urlPrefix: "global/en" }
+  );
+  if (namedEntityRows[0]?.title === "Café Team Lead vs CAFÉ TEAM LEAD")
+    pass(
+      "phenom parseRefineSearch() decodes named Latin-1 entities case-sensitively (eacute/Eacute)"
+    );
+  else fail(`phenom named entity title decode = ${JSON.stringify(namedEntityRows[0]?.title)}`);
+
+  const decodedNamedLoc = jobLocation({ location: "Gen&egrave;ve" });
+  if (decodedNamedLoc === "Genève")
+    pass("phenom.jobLocation() decodes a named Latin-1 entity (egrave) in the location");
+  else fail(`phenom named entity location decode = ${JSON.stringify(decodedNamedLoc)}`);
 } catch (e) {
   fail(`phenom provider tests crashed: ${e.message}`);
 }
