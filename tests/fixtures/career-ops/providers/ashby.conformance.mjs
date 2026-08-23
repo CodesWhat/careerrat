@@ -248,6 +248,66 @@ try {
     );
   else fail(`ashby.fetch() row 0 location = ${JSON.stringify(fetched[0]?.location)}`);
 
+  // Remote work model — `workplaceType` / `isRemote` live outside `location`,
+  // which keeps naming the office city on a fully remote posting. Without
+  // folding them in, a location_filter blocking that city silently drops a
+  // remote role. `workplaceType` is authoritative when present; `isRemote` is
+  // the fallback. See formatLocation() in vendor/ashby.mjs.
+  const workModel = await ashby.fetch(
+    { name: "Acme", careers_url: "https://jobs.ashbyhq.com/acme" },
+    {
+      fetchJson: async () => ({
+        jobs: [
+          {
+            title: "Remote via workplaceType",
+            location: "San Francisco",
+            isRemote: true,
+            workplaceType: "Remote",
+          },
+          {
+            title: "Hybrid despite isRemote",
+            location: "New York",
+            isRemote: true,
+            workplaceType: "Hybrid",
+          },
+          { title: "Onsite", location: "Austin", isRemote: false, workplaceType: "Onsite" },
+          { title: "isRemote fallback, no workplaceType", location: "Seattle", isRemote: true },
+          {
+            title: "Already says remote",
+            location: "Remote - US",
+            isRemote: true,
+            workplaceType: "Remote",
+          },
+          {
+            title: "Blank workplaceType falls back",
+            location: "Denver",
+            isRemote: true,
+            workplaceType: "   ",
+          },
+        ],
+      }),
+    }
+  );
+
+  const workModelExpected = [
+    "San Francisco · Remote",
+    "New York",
+    "Austin",
+    "Seattle · Remote",
+    "Remote - US",
+    "Denver · Remote",
+  ];
+  const workModelActual = workModel.map((r) => r.location);
+  if (JSON.stringify(workModelActual) === JSON.stringify(workModelExpected)) {
+    pass(
+      'ashby.fetch() appends "Remote" from workplaceType/isRemote; workplaceType wins over isRemote; no duplicate "Remote"'
+    );
+  } else {
+    fail(
+      `ashby.fetch() work-model locations = ${JSON.stringify(workModelActual)} (expected ${JSON.stringify(workModelExpected)})`
+    );
+  }
+
   if (
     fetched[1]?.title === "" &&
     fetched[1]?.url === "" &&
@@ -333,6 +393,61 @@ try {
     }
   }
 
+  // ── Permanent vs transient failures (#3072) ──────────────────────────────
+  // The old local retry loop caught EVERY error unconditionally, so a board
+  // that is gone was asked three times: 404, 401 and 410 each bought a second
+  // and third request that could only fail again. #2840 measured 684 of 3,161
+  // Ashby boards as permanently 404, and re-probing known-dead boards is the
+  // traffic that provokes the single-host throttle in #2839 — so tripling it
+  // is the same problem, worse. Counting REQUESTS rather than asserting an
+  // exit code is the point: the call fails either way, so only the request
+  // count distinguishes the fix from the bug.
+  const httpErr = (status) => Object.assign(new Error(`HTTP ${status}`), { status });
+  async function requestsFor(err) {
+    let calls = 0;
+    const ctx = {
+      fetchJson: async () => {
+        calls++;
+        throw err;
+      },
+      sleep: async () => {},
+    };
+    await ashby
+      .fetch({ name: "DeadCo", careers_url: "https://jobs.ashbyhq.com/deadco" }, ctx)
+      .catch(() => {});
+    return calls;
+  }
+
+  let permanentOk = true;
+  for (const status of [404, 401, 410, 403, 400]) {
+    const calls = await requestsFor(httpErr(status));
+    if (calls !== 1) {
+      permanentOk = false;
+      fail(
+        `ashby.fetch() HTTP ${status} made ${calls} requests, want 1 — it cannot succeed on a retry`
+      );
+    }
+  }
+  if (permanentOk)
+    pass("ashby.fetch() spends exactly one request on a permanent failure (404/401/410/403/400)");
+
+  let transientOk = true;
+  for (const status of [429, 500, 502, 503]) {
+    const calls = await requestsFor(httpErr(status));
+    if (calls !== 3) {
+      transientOk = false;
+      fail(`ashby.fetch() HTTP ${status} made ${calls} requests, want 3`);
+    }
+  }
+  if (transientOk)
+    pass(
+      "ashby.fetch() still spends the full attempt budget on a transient failure (429/500/502/503)"
+    );
+
+  const networkErrCalls = await requestsFor(new Error("socket hang up"));
+  if (networkErrCalls === 3) pass("ashby.fetch() still retries a network error with no status");
+  else fail(`ashby.fetch() network error made ${networkErrCalls} requests, want 3`);
+
   // fetch() — a pinned api: is used verbatim, bypassing careers_url parsing entirely.
   let pinnedUrl = null;
   await ashby.fetch(
@@ -400,6 +515,39 @@ try {
         `ashby.fetch() underivable entry: fetchCalled=${underiveFetchCalled}, error=${e.message}`
       );
     }
+  }
+
+  // ── Description (#3175 phase 2) ──
+  // Ashby's posting-api list ships descriptionPlain for free (same payload,
+  // no per-job request) — mapped verbatim, mirroring lever. A non-string
+  // value degrades to '' rather than leaking a wrong type into the pipeline.
+  const withDesc = await ashby.fetch(
+    { name: "Acme", careers_url: "https://jobs.ashbyhq.com/acme" },
+    {
+      fetchJson: async () => ({
+        jobs: [
+          {
+            title: "Writer",
+            jobUrl: "https://jobs.ashbyhq.com/acme/w1",
+            descriptionPlain: "Own the blog.\nShip weekly.",
+          },
+          { title: "No body" },
+          { title: "Bad body", descriptionPlain: 42 },
+        ],
+      }),
+    }
+  );
+  if (withDesc[0]?.description === "Own the blog.\nShip weekly.") {
+    pass("ashby.fetch() carries descriptionPlain through untouched when it is a string");
+  } else {
+    fail(`ashby.fetch() row 0 description = ${JSON.stringify(withDesc[0]?.description)}`);
+  }
+  if (withDesc[1]?.description === "" && withDesc[2]?.description === "") {
+    pass('ashby.fetch() emits "" for a missing / non-string descriptionPlain');
+  } else {
+    fail(
+      `ashby.fetch() descriptions = ${JSON.stringify([withDesc[1]?.description, withDesc[2]?.description])}`
+    );
   }
 } catch (e) {
   fail(`ashby provider tests crashed: ${e.message}`);

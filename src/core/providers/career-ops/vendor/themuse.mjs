@@ -27,7 +27,7 @@ const RETRY_MAX_DELAY_MS = 8_000;
 
 // Delay between successive pages so a 100-page walk doesn't fire as a burst
 // against the same host (mirrors workday.mjs / oraclecloud.mjs).
-const INTER_PAGE_DELAY_MS = 150;
+const INTER_PAGE_DELAY_MS = 250;
 
 function sleep(ms, ctx) {
   if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
@@ -89,7 +89,7 @@ function assertMuseUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`themuse: URL must use HTTPS: ${url}`);
   if (parsed.hostname !== TRUSTED_HOST) {
-    throw new Error(`themuse: untrusted hostname "${parsed.hostname}". Must be ${TRUSTED_HOST}`);
+    throw new Error(`themuse: untrusted hostname "${parsed.hostname}" — must be ${TRUSTED_HOST}`);
   }
   return url;
 }
@@ -145,7 +145,7 @@ export default {
     const first = await fetchPageWithRetry(ctx, firstUrl, { redirect: 'error' });
     if (!first || !Array.isArray(first.results)) {
       throw new Error(
-        `themuse: unexpected API response on page 0: expected { results: [...] }, got keys: [${first ? Object.keys(first).join(', ') : 'null'}]`,
+        `themuse: unexpected API response on page 0 — expected { results: [...] }, got keys: [${first ? Object.keys(first).join(', ') : 'null'}]`,
       );
     }
     const allResults = [...first.results];
@@ -166,7 +166,7 @@ export default {
         json = await fetchPageWithRetry(ctx, url, { redirect: 'error' });
         if (!json || !Array.isArray(json.results)) {
           throw new Error(
-            `themuse: unexpected API response on page ${page}: expected { results: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
+            `themuse: unexpected API response on page ${page} — expected { results: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
           );
         }
       } catch (err) {

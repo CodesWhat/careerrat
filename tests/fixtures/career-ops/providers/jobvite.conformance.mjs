@@ -251,6 +251,27 @@ try {
     );
   }
 
+  // CareerRat addition: Jobvite now shares _html-entities.mjs with the other
+  // migrated providers instead of a private five-name XML_ENTITIES table, so
+  // named Latin-1 letters must decode here too, and stay case-sensitive
+  // (&Eacute; is É, not é. Looking the name up lowercased would make every
+  // uppercase entry unreachable and silently decode &Eacute; to the lowercase
+  // letter.)
+  {
+    const named = parseJobviteXml(
+      "<result><job><title>D&eacute;veloppeur</title>" +
+        "<detail-url><![CDATA[https://app.jobvite.com/x]]></detail-url>" +
+        "<location>Montr&eacute;al vs MONTR&Eacute;AL</location></job></result>",
+      "X"
+    );
+    eq("parseJobviteXml decodes a named Latin-1 entity (eacute)", named[0].title, "Développeur");
+    eq(
+      "parseJobviteXml keeps named entity decoding case-sensitive (eacute vs Eacute)",
+      named[0].location,
+      "Montréal vs MONTRÉAL"
+    );
+  }
+
   // #2623 review: the same guard one level out. Many `<job>` starts with no
   // closing tag made the old lazy outer matcher rescan to end-of-document from
   // every start — quadratic on input the feed host controls.

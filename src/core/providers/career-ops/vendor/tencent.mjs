@@ -21,7 +21,7 @@ const DEFAULT_KEYWORDS = [''];  // empty keyword = the whole board, no topical b
 const DEFAULT_MAX_PAGES = 20;
 // Every request after the first pays it — across pages and keyword switches
 // (same idiom as avature/workday).
-const INTER_PAGE_DELAY_MS = 150;
+const INTER_PAGE_DELAY_MS = 250;
 
 /** Parse "2026年06月23日" → epoch ms. NaN-safe. */
 function parseCnDate(value) {
@@ -121,7 +121,7 @@ export default {
           // workday/jobstreet/glints). Track successes directly — a keyword
           // can legitimately match 0 jobs, so seen.size is not the signal.
           if (!succeededOnce) throw err;
-          console.error(`  ⚠ tencent: keyword "${keyword}" page ${page} failed (${err.message}), keeping the ${seen.size} jobs collected so far`);
+          console.error(`  ⚠ tencent: keyword "${keyword}" page ${page} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
           return [...seen.values()];
         }
         succeededOnce = true;

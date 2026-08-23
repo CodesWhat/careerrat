@@ -280,6 +280,53 @@ try {
   if (legacyJobs.length === 1)
     pass("csod.fetch() falls back to fetchText when ctx has no fetchResponse");
   else fail(`csod.fetch() legacy path returned ${legacyJobs.length} jobs`);
+
+  // Title entity decoding (#2921) — an undecoded "R&amp;D Engineer" fails a
+  // user's positive title_filter keyword "r&d" and the posting is silently
+  // dropped, and a negative filter's veto never fires.
+  const entityReqs = parseRequisitions(
+    {
+      data: {
+        totalCount: 1,
+        requisitions: [
+          {
+            requisitionId: 8410,
+            postingEffectiveDate: "7/3/2026",
+            displayJobTitle: "R&amp;D Engineer",
+            locations: [{ city: "Bremen", country: "DE" }],
+          },
+        ],
+      },
+    },
+    { origin: "https://career-ohb.csod.com", siteId: 4, corpName: "career-ohb" }
+  );
+  if (entityReqs[0]?.title === "R&D Engineer")
+    pass("csod parseRequisitions() decodes &amp; in the title (#2921)");
+  else fail(`csod title decode = ${JSON.stringify(entityReqs[0]?.title)}`);
+
+  // Named Latin-1 letter entities, not just &amp;. The expanded shared
+  // decoder handles these too, and case-sensitively (&Eacute; is É, not é).
+  const namedEntityReqs = parseRequisitions(
+    {
+      data: {
+        totalCount: 1,
+        requisitions: [
+          {
+            requisitionId: 8411,
+            postingEffectiveDate: "7/3/2026",
+            displayJobTitle: "Caf&eacute; Gen&egrave;ve vs CAF&Eacute; GEN&Egrave;VE",
+            locations: [{ city: "Bremen", country: "DE" }],
+          },
+        ],
+      },
+    },
+    { origin: "https://career-ohb.csod.com", siteId: 4, corpName: "career-ohb" }
+  );
+  if (namedEntityReqs[0]?.title === "Café Genève vs CAFÉ GENÈVE")
+    pass(
+      "csod parseRequisitions() decodes named Latin-1 entities case-sensitively (eacute/Eacute/egrave)"
+    );
+  else fail(`csod named entity title decode = ${JSON.stringify(namedEntityReqs[0]?.title)}`);
 } catch (e) {
   fail(`csod provider tests crashed: ${e.message}`);
 }

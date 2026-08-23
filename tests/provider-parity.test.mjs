@@ -8,9 +8,12 @@ import {
   providerForId,
 } from "../src/core/providers/career-ops-registry.mjs";
 import {
+  CAREER_OPS_DEFERRED_PROVIDER_IDS,
+  CAREER_OPS_EXCLUDED_PROVIDER_IDS,
   CAREER_OPS_PROVIDER_IDS,
   CAREER_OPS_PROVIDER_PARITY,
   CAREER_OPS_UPSTREAM,
+  CAREER_OPS_UPSTREAM_PROVIDER_IDS,
 } from "../src/core/providers/provider-parity.mjs";
 
 const EXPECTED_PROVIDER_IDS = [
@@ -93,12 +96,47 @@ const EXPECTED_PROVIDER_IDS = [
 test("Career Ops provider parity is pinned to the audited upstream snapshot", () => {
   assert.deepEqual(CAREER_OPS_UPSTREAM, {
     repository: "https://github.com/santifer/career-ops",
-    commit: "8be39e0934b83410276d66b541bf3a2edf3411cb",
+    commit: "10a569b1e9178aa90ef8028ea287e411a831e1b6",
     providerCount: 74,
   });
   assert.deepEqual(CAREER_OPS_PROVIDER_IDS, EXPECTED_PROVIDER_IDS);
   assert.equal(new Set(CAREER_OPS_PROVIDER_IDS).size, 74);
   assert.equal(CAREER_OPS_PROVIDER_PARITY.length, 74);
+});
+
+test("every provider in the pinned upstream inventory has an explicit disposition", () => {
+  // Regression guard for a self-referential test: deriving the expected
+  // universe from CAREER_OPS_PROVIDER_IDS itself would pass even if a
+  // provider upstream silently added at the pin was never adopted, deferred,
+  // or excluded here. CAREER_OPS_UPSTREAM_PROVIDER_IDS is instead a
+  // hard-coded copy of the real upstream inventory at the pinned commit
+  // (fetched directly from santifer/career-ops), independent of what this
+  // repo has actually adopted.
+  //
+  // local-parser is deliberately not double-counted: it is already present
+  // in CAREER_OPS_PROVIDER_IDS (with an "unsupported" disposition in
+  // CAREER_OPS_PROVIDER_PARITY), so CAREER_OPS_EXCLUDED_PROVIDER_IDS only
+  // needs to explain its exclusion, not add it to the tally again.
+  const adopted = new Set(CAREER_OPS_PROVIDER_IDS);
+  const deferred = new Set(Object.keys(CAREER_OPS_DEFERRED_PROVIDER_IDS));
+  const excluded = new Set(Object.keys(CAREER_OPS_EXCLUDED_PROVIDER_IDS));
+
+  for (const id of excluded) {
+    assert.ok(adopted.has(id), `excluded provider ${id} must also be an adopted id (local-parser)`);
+  }
+  for (const id of deferred) {
+    assert.ok(!adopted.has(id), `deferred provider ${id} must not already be adopted`);
+  }
+
+  const accountedFor = new Set([...adopted, ...deferred]);
+  const upstream = new Set(CAREER_OPS_UPSTREAM_PROVIDER_IDS);
+
+  assert.deepEqual(
+    [...accountedFor].sort(),
+    [...upstream].sort(),
+    "adopted + deferred must exactly equal the pinned upstream inventory"
+  );
+  assert.equal(CAREER_OPS_UPSTREAM_PROVIDER_IDS.length, 78);
 });
 
 test("every upstream provider has an explicit runtime disposition", () => {
@@ -184,6 +222,11 @@ test("Career Ops fetch normalizes provider output for CareerRat and marks missin
           { status: 200, headers: { "content-type": "application/json" } }
         );
       },
+      // The SSRF guard resolves the host before ever calling fetchImpl; mock
+      // it to a real public address so this stays a pure unit test with no
+      // network access, same pattern as public-http-fetch.test.mjs.
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      dispatcherFactory: () => ({ close: async () => {} }),
       sleep: async () => {},
     }
   );
@@ -224,6 +267,8 @@ test("Career Ops fetch preserves free list-payload descriptions and normalizes e
           ]),
           { status: 200 }
         ),
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      dispatcherFactory: () => ({ close: async () => {} }),
     }
   );
 
@@ -244,6 +289,8 @@ test("CareerRat injects candidate query keywords into keyword-required providers
         requestBody = JSON.parse(init.body);
         return new Response(JSON.stringify({ resultaten: [] }), { status: 200 });
       },
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      dispatcherFactory: () => ({ close: async () => {} }),
     }
   );
 

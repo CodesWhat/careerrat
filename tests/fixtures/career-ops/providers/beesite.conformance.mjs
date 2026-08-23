@@ -127,6 +127,63 @@ try {
   if (beeJobs.length === 102 && beeCalls === 2 && beeSeen[1].includes('"FirstItem":101'))
     pass("beesite.fetch() paginates via FirstItem and dedups across pages");
   else fail(`beesite.fetch() returned ${beeJobs.length} jobs after ${beeCalls} calls`);
+
+  // Title entity decoding (#2921) — an undecoded "R&amp;D Engineer" fails a
+  // user's positive title_filter keyword "r&d" and the posting is silently
+  // dropped, and a negative filter's veto never fires. Numeric entities matter
+  // as much as &amp; here: beesite points at DACH postings where accented
+  // characters via numeric refs are routine.
+  const beeEntityJson = {
+    SearchResult: {
+      SearchResultCount: 1,
+      SearchResultCountAll: 1,
+      SearchResultItems: [
+        {
+          MatchedObjectId: "1",
+          MatchedObjectDescriptor: {
+            PositionID: "x1",
+            PositionTitle: "R&amp;D Engineer",
+            PositionURI: "https://jobs.example.com/a-1",
+            PositionLocation: [{ CityName: "Bremen" }],
+            PublicationStartDate: "2026-07-04",
+          },
+        },
+      ],
+    },
+  };
+  const { rows: beeEntityRows } = parseSearchResult(beeEntityJson);
+  if (beeEntityRows[0]?.title === "R&D Engineer")
+    pass("beesite parseSearchResult() decodes &amp; in the title (#2921)");
+  else fail(`beesite title decode = ${JSON.stringify(beeEntityRows[0]?.title)}`);
+
+  // Named Latin-1 letter entities, not just &amp; and numeric refs. The
+  // expanded shared decoder handles these too, and case-sensitively
+  // (&Eacute; is É, not é). PositionTitle is the field decodeEntities()
+  // actually runs on (PositionLocation.CityName is not decoded).
+  const beeNamedEntityJson = {
+    SearchResult: {
+      SearchResultCount: 1,
+      SearchResultCountAll: 1,
+      SearchResultItems: [
+        {
+          MatchedObjectId: "2",
+          MatchedObjectDescriptor: {
+            PositionID: "x2",
+            PositionTitle: "Caf&eacute; Gen&egrave;ve vs CAF&Eacute; GEN&Egrave;VE",
+            PositionURI: "https://jobs.example.com/a-2",
+            PositionLocation: [{ CityName: "Geneva" }],
+            PublicationStartDate: "2026-07-04",
+          },
+        },
+      ],
+    },
+  };
+  const { rows: beeNamedEntityRows } = parseSearchResult(beeNamedEntityJson);
+  if (beeNamedEntityRows[0]?.title === "Café Genève vs CAFÉ GENÈVE")
+    pass(
+      "beesite parseSearchResult() decodes named Latin-1 entities case-sensitively (eacute/Eacute/egrave)"
+    );
+  else fail(`beesite named entity title decode = ${JSON.stringify(beeNamedEntityRows[0]?.title)}`);
 } catch (e) {
   fail(`beesite provider tests crashed: ${e.message}`);
 }
