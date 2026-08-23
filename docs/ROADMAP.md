@@ -121,7 +121,7 @@ nurse, a driver, and an engineer each bring their own config.
   BATNA framing, and multi-round sequencing across the written (`email-comms`) and
   live (`interview-prep`) channels, anchored to market benchmarks and never
   fabricating an offer, number, or deadline.
-- **Deterministic source foundation** — all 73 public-network adapters from the pinned
+- **Deterministic source foundation** — all 77 public-network adapters from the pinned
   Career Ops provider snapshot run through CareerRat's shared scanner boundary, including
   company ATS APIs, broad public APIs/RSS, regional boards, and niche sources. The parity
   manifest records the one intentional exclusion: `local-parser`, which executes arbitrary
@@ -858,7 +858,7 @@ The current build order is:
    an open issue, not a blocker for this row. The remaining original-skill rows stay tracked in the
    linked audit.
 5. **Free/public source parity before AI (implemented and accepted)** — the pinned manifest
-   accounts for all 74 Career Ops provider modules: 73 public-network adapters run through the
+   accounts for all 78 Career Ops provider modules: 77 public-network adapters run through the
    deterministic registry, and `local-parser` is intentionally excluded with a safety reason.
    URL inference, explicit branded-host selection, normalized output, upstream conformance fixtures,
    scanner dedupe, full-JD hydration, and source provenance are wired. AI remains the fallback for

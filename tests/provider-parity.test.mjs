@@ -50,6 +50,7 @@ const EXPECTED_PROVIDER_IDS = [
   "ibm",
   "icims",
   "jibeapply",
+  "jobbankca",
   "jobicy",
   "jobspresso",
   "jobstreet",
@@ -63,6 +64,7 @@ const EXPECTED_PROVIDER_IDS = [
   "local-parser",
   "manfred",
   "meituan",
+  "mycareersfuture",
   "nodesk",
   "nofluffjobs",
   "oraclecloud",
@@ -76,6 +78,7 @@ const EXPECTED_PROVIDER_IDS = [
   "remotli",
   "rheinmetall",
   "rippling",
+  "senjob",
   "smartrecruiters",
   "softgarden",
   "solidjobs",
@@ -91,17 +94,18 @@ const EXPECTED_PROVIDER_IDS = [
   "workday",
   "workingnomads",
   "wttj",
+  "yourator",
 ];
 
 test("Career Ops provider parity is pinned to the audited upstream snapshot", () => {
   assert.deepEqual(CAREER_OPS_UPSTREAM, {
     repository: "https://github.com/santifer/career-ops",
     commit: "10a569b1e9178aa90ef8028ea287e411a831e1b6",
-    providerCount: 74,
+    providerCount: 78,
   });
   assert.deepEqual(CAREER_OPS_PROVIDER_IDS, EXPECTED_PROVIDER_IDS);
-  assert.equal(new Set(CAREER_OPS_PROVIDER_IDS).size, 74);
-  assert.equal(CAREER_OPS_PROVIDER_PARITY.length, 74);
+  assert.equal(new Set(CAREER_OPS_PROVIDER_IDS).size, 78);
+  assert.equal(CAREER_OPS_PROVIDER_PARITY.length, 78);
 });
 
 test("every provider in the pinned upstream inventory has an explicit disposition", () => {
@@ -296,4 +300,43 @@ test("CareerRat injects candidate query keywords into keyword-required providers
 
   assert.deepEqual(offers, []);
   assert.equal(requestBody.criteria.trefwoord, "Data Engineer");
+});
+
+test("CareerRat injects candidate query keywords into jobbankca", async () => {
+  let requestedUrl = null;
+  const offers = await fetchCareerOpsProvider(
+    "jobbankca",
+    { name: "Job Bank", query: "Data Engineer" },
+    {
+      sleep: async () => {},
+      fetchImpl: async (url) => {
+        requestedUrl = url;
+        return new Response('<?xml version="1.0"?><feed></feed>', { status: 200 });
+      },
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      dispatcherFactory: () => ({ close: async () => {} }),
+    }
+  );
+
+  assert.deepEqual(offers, []);
+  assert.equal(new URL(requestedUrl).searchParams.get("searchstring"), "Data Engineer");
+});
+
+test("CareerRat injects candidate query keywords into mycareersfuture", async () => {
+  let requestBody = null;
+  const offers = await fetchCareerOpsProvider(
+    "mycareersfuture",
+    { name: "MyCareersFuture", query: "Data Engineer" },
+    {
+      fetchImpl: async (_url, init) => {
+        requestBody = JSON.parse(init.body);
+        return new Response(JSON.stringify({ results: [] }), { status: 200 });
+      },
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      dispatcherFactory: () => ({ close: async () => {} }),
+    }
+  );
+
+  assert.deepEqual(offers, []);
+  assert.equal(requestBody.search, "Data Engineer");
 });

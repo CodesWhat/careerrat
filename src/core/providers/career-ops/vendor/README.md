@@ -14,8 +14,7 @@ two commits were re-vendored — `echojobs`, `consider`, `lever`, `csod`,
 shared `_html-to-text.mjs` helper it introduced for description hydration. The
 remaining provider files are untouched from the prior pin. The four providers
 upstream added since the prior pin (`jobbankca`, `mycareersfuture`, `senjob`,
-`yourator`) were deliberately not vendored — that is a separate adoption
-decision.
+`yourator`) were adopted the same day, once past the initial review pass.
 
 CareerRat uses the public network adapters under the upstream MIT license. The
 upstream `local-parser` module is intentionally excluded because it executes
