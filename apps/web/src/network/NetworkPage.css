@@ -237,6 +237,11 @@
   flex: 0 0 auto;
 }
 
+.network__person-meta-label {
+  color: var(--ink-faint, var(--ink-soft));
+  font-weight: 700;
+}
+
 .network__pill {
   display: inline-flex;
   width: fit-content;

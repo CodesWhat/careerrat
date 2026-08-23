@@ -49,8 +49,13 @@ export function InstalledRuntimeChoices({
             >
               <div className="onboarding-runtime__choice-copy">
                 <strong>{runtime.name}</strong>
-                <code>{runtime.commandShape}</code>
                 {runtime.warning ? <span className="field__hint">{runtime.warning}</span> : null}
+                {runtime.commandShape ? (
+                  <details className="onboarding-runtime__choice-detail">
+                    <summary>Advanced · Command this runs</summary>
+                    <code>{runtime.commandShape}</code>
+                  </details>
+                ) : null}
               </div>
               <div className="onboarding-runtime__choice-action">
                 <span className="badge">{runtimeStatusLabel(runtime)}</span>

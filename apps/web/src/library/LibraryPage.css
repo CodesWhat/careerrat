@@ -601,4 +601,21 @@
     grid-template-columns: 1fr;
     justify-items: start;
   }
+
+  /* Scroll horizontally instead of wrapping, matching the primary nav's own
+     mobile pattern (apps/web/src/styles/app.css's .app-shell__primary) — a
+     wrapped tablist stranded "Role signal" alone on its own row. */
+  .library__segments {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .library__segments::-webkit-scrollbar {
+    display: none;
+  }
+
+  .library__segment {
+    flex: 0 0 auto;
+  }
 }

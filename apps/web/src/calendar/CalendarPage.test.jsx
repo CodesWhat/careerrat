@@ -246,7 +246,7 @@ describe("CalendarPage", () => {
     expect(html).toContain("calendar__kind-pill--busy");
 
     // Export controls, visible (not hover-only), siblings of the title link.
-    expect(html).toContain(">.ics<");
+    expect(html).toContain(">Download file<");
     expect(html).toContain(">Google<");
     expect(html).toContain(">Outlook<");
     expect(html).toContain("data:text/calendar;charset=utf-8,");

@@ -303,8 +303,13 @@ function EventExportControls({ exportData }) {
   const icsHref = `data:text/calendar;charset=utf-8,${encodeURIComponent(exportData.ics)}`;
   return (
     <div className="calendar__export">
-      <a className="calendar__export-link" download={exportData.filename} href={icsHref}>
-        .ics
+      <a
+        className="calendar__export-link"
+        download={exportData.filename}
+        href={icsHref}
+        title=".ics file"
+      >
+        Download file
       </a>
       <a
         className="calendar__export-link"

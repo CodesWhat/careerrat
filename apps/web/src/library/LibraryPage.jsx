@@ -52,12 +52,12 @@ const TYPE_OPTIONS = [
   { key: "all", label: "All" },
   { key: "evidence", label: "Evidence" },
   { key: "story", label: "Stories" },
-  { key: "voice", label: "Voice" },
+  { key: "voice", label: "Voice", title: "How you naturally talk about your own work" },
 ];
 
 const DEEP_INGEST_TYPE_OPTIONS = [
-  { key: "honesty", label: "Honesty" },
-  { key: "role_signal", label: "Role signal" },
+  { key: "honesty", label: "Honesty", title: "Limits and disclosures you've set for yourself" },
+  { key: "role_signal", label: "Role signal", title: "Notes on what fits the roles you want" },
 ];
 
 const DOC_KIND_OPTIONS = [
@@ -648,6 +648,7 @@ function LibraryBank({ model, onOpen, onReset, query, setSearchParams, type }) {
               key={option.key}
               onClick={() => updateParam(setSearchParams, "type", option.key, "all")}
               role="tab"
+              title={option.title}
               type="button"
             >
               {option.label}

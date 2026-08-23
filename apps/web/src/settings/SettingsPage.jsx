@@ -96,11 +96,20 @@ const WORK_MODE_OPTIONS = [
   { value: "onsite", label: "On-site" },
 ];
 
+// Plain-language badge text is the primary reading path; the "how" (CLI vs.
+// your own key vs. a managed connection) is dev/insider detail that moves to
+// this badge's title attribute (hover) instead — see aiBadgeDetail below.
 const AI_ROUTE_LABEL = {
-  installed: "Connected (installed CLI)",
-  byok: "Connected (BYOK)",
-  proxy: "Connected (managed proxy)",
+  installed: "Connected",
+  byok: "Connected",
+  proxy: "Connected",
   none: "Not connected",
+};
+const AI_ROUTE_DETAIL = {
+  installed: "Using an AI tool already installed on this computer.",
+  byok: "Using your own API key.",
+  proxy: "Using a managed AI connection.",
+  none: "No AI connection set up yet.",
 };
 const EMPTY_USAGE_SUMMARY = {
   totals: {
@@ -661,6 +670,7 @@ export function SettingsPage() {
     () => AI_ROUTE_LABEL[displayedAiRoute] ?? "Unknown",
     [displayedAiRoute]
   );
+  const aiBadgeDetail = AI_ROUTE_DETAIL[displayedAiRoute] ?? "";
   const aiBadgeTone =
     installedAi?.selectedId || aiStatus.keyPresent || aiStatus.route !== "none"
       ? "badge--ok"
@@ -682,7 +692,7 @@ export function SettingsPage() {
   return (
     <PageScaffold
       title="Settings"
-      subtitle="Reads and writes the same SQLite-backed candidate setup used by onboarding."
+      subtitle="Uses the same setup you filled in during onboarding."
       actions={
         toast ? (
           <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} />
@@ -694,7 +704,11 @@ export function SettingsPage() {
       {/* AI connection ------------------------------------------------- */}
       <Card
         title="AI connection"
-        actions={<span className={`badge ${aiBadgeTone}`}>{aiBadgeLabel}</span>}
+        actions={
+          <span className={`badge ${aiBadgeTone}`} title={aiBadgeDetail}>
+            {aiBadgeLabel}
+          </span>
+        }
       >
         {sectionBanner.aiRuntime ? (
           <InlineAlert
