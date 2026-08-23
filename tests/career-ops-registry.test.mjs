@@ -144,7 +144,7 @@ test("createContext().fetchJson blocks a DNS-resolved private-IP target before e
   assert.equal(fetchCalled, false);
 });
 
-test("createContext().fetchJson blocks a non-http(s) protocol", async () => {
+test("createContext().fetchText blocks a non-http(s) protocol", async () => {
   let fetchCalled = false;
   const ctx = createContext(async () => {
     fetchCalled = true;

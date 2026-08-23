@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { mock } from "node:test";
 
 import {
   buildLocationFilter,
@@ -310,6 +310,58 @@ test("fetchProvider rejects an rss source whose host resolves to a private addre
     }
   );
   assert.equal(fetchCalls, 0);
+});
+
+// #3 review: fetchRss cleared its abort timer in a `finally` immediately after
+// guardedFetch resolved, so once headers arrived the deadline stopped covering
+// the body read: a host that returns headers and then stalls the body hung
+// `guarded.response.text()` forever. The fix keeps the timer live across the
+// body read too, clearing it only once text() settles. This fetchImpl mirrors
+// a real fetch by wiring the response body's stream to the same abort signal
+// guardedFetch passed it, so aborting on deadline actually errors the pending
+// read instead of leaving it stuck with nothing listening.
+test("fetchProvider('rss', …) aborts a body that stalls after headers, within the RSS deadline", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const fetchImpl = async (_url, init) => {
+      const { signal } = init;
+      const stream = new ReadableStream({
+        start(streamController) {
+          if (signal.aborted) {
+            streamController.error(signal.reason);
+            return;
+          }
+          signal.addEventListener("abort", () => streamController.error(signal.reason), {
+            once: true,
+          });
+        },
+      });
+      return new Response(stream, { status: 200 });
+    };
+
+    const promise = fetchProvider(
+      "rss",
+      { rssUrl: "https://feeds.example.test/jobs.xml" },
+      {
+        fetchImpl,
+        resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+        dispatcherFactory: () => ({ close: async () => {} }),
+      }
+    );
+
+    // Flush the guardedFetch chain's own microtasks (DNS resolve, response
+    // construction) so the stalled `.text()` read is actually pending before
+    // the mocked clock advances past the RSS deadline.
+    await new Promise((resolve) => setImmediate(resolve));
+    mock.timers.tick(15_000);
+
+    await assert.rejects(promise, (error) => {
+      assert.match(String(error?.message || error), /abort/i);
+      return true;
+    });
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test("extracts canonical req ids from common ATS URLs", () => {

@@ -255,6 +255,112 @@ test("guardedFetch returns the real Response and a close() for an allowed public
   assert.equal(closed, true);
 });
 
+// guardedFetch's redirect chain replays WHATWG fetch's own per-hop request
+// mutation (https://fetch.spec.whatwg.org/#http-redirect-fetch) rather than
+// the original init verbatim: a 303 (or a non-GET/HEAD 301/302) downgrades to
+// a bodyless GET and drops the body-describing headers, a 307/308 preserves
+// method and body untouched, and a hop that crosses origin loses any
+// caller-supplied credential headers.
+
+test("guardedFetch turns a 303 hop from POST into a bodyless GET and drops body headers", async () => {
+  const hops = [];
+  const result = await guardedFetch(
+    "https://public.example.test/start",
+    {
+      method: "POST",
+      body: "payload",
+      headers: { "Content-Type": "application/json", "X-Custom": "keep-me" },
+    },
+    {
+      resolveHost: async () => PUBLIC_ADDRESSES,
+      dispatcherFactory: () => ({ close: async () => {} }),
+      fetchImpl: async (url, init) => {
+        hops.push({ url, ...init });
+        if (hops.length === 1) {
+          return new Response(null, {
+            status: 303,
+            headers: { location: "https://public.example.test/next" },
+          });
+        }
+        return new Response("done", { status: 200 });
+      },
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(hops.length, 2);
+  assert.equal(hops[0].method, "POST");
+  assert.equal(hops[0].body, "payload");
+  assert.equal(hops[1].method, "GET");
+  assert.equal(hops[1].body, undefined);
+  assert.equal(hops[1].headers["Content-Type"], undefined);
+  assert.equal(hops[1].headers["X-Custom"], "keep-me");
+});
+
+test("guardedFetch preserves method and body across a 307 hop", async () => {
+  const hops = [];
+  const result = await guardedFetch(
+    "https://public.example.test/start",
+    { method: "POST", body: "payload", headers: { "Content-Type": "application/json" } },
+    {
+      resolveHost: async () => PUBLIC_ADDRESSES,
+      dispatcherFactory: () => ({ close: async () => {} }),
+      fetchImpl: async (url, init) => {
+        hops.push({ url, ...init });
+        if (hops.length === 1) {
+          return new Response(null, {
+            status: 307,
+            headers: { location: "https://public.example.test/next" },
+          });
+        }
+        return new Response("done", { status: 200 });
+      },
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(hops.length, 2);
+  assert.equal(hops[1].method, "POST");
+  assert.equal(hops[1].body, "payload");
+  assert.equal(hops[1].headers["Content-Type"], "application/json");
+});
+
+test("guardedFetch drops authorization/cookie on a cross-origin hop but keeps them same-origin", async () => {
+  const hops = [];
+  const result = await guardedFetch(
+    "https://public.example.test/start",
+    { headers: { Authorization: "Bearer secret", Cookie: "session=abc", "X-Custom": "keep-me" } },
+    {
+      resolveHost: async () => PUBLIC_ADDRESSES,
+      dispatcherFactory: () => ({ close: async () => {} }),
+      fetchImpl: async (url, init) => {
+        hops.push({ url, ...init });
+        if (hops.length === 1) {
+          return new Response(null, {
+            status: 302,
+            headers: { location: "https://public.example.test/same-origin" },
+          });
+        }
+        if (hops.length === 2) {
+          return new Response(null, {
+            status: 302,
+            headers: { location: "https://other.example.test/cross-origin" },
+          });
+        }
+        return new Response("done", { status: 200 });
+      },
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(hops.length, 3);
+  assert.equal(hops[1].headers.Authorization, "Bearer secret");
+  assert.equal(hops[1].headers.Cookie, "session=abc");
+  assert.equal(hops[2].headers.Authorization, undefined);
+  assert.equal(hops[2].headers.Cookie, undefined);
+  assert.equal(hops[2].headers["X-Custom"], "keep-me");
+});
+
 // resolveHost is awaited to resolve every hop's target before that hop's
 // deadline (timeoutMs for fetchPublicHttpText, init.signal for guardedFetch)
 // starts covering anything else. A resolver that never settles (a hung DNS

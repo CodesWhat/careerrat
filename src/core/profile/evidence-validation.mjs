@@ -71,5 +71,19 @@ export function validateClaimFields(c, where) {
     });
   }
 
+  // Belt-and-suspenders against the value scan above: a claim can carry a private
+  // current_base field WITHOUT the token ever appearing in probed text (e.g. a
+  // numeric comp figure under an own `current_base` key, since evidence.schema.json's
+  // claim items allow additionalProperties). The CLI/file path is unaffected, it
+  // drops unknown keys via evidence-writer.mjs's normalizeClaim() before validating,
+  // but the DB merge path (candidate.mjs's candidateEvidenceMerge) persists `raw`
+  // verbatim, so this key-name check is this firewall's only backstop there.
+  if (Object.hasOwn(Object(c), "current_base")) {
+    errors.push({
+      id: c?.id ?? null,
+      message: `${where} has a current_base key: evidence must never carry the private current_base field`,
+    });
+  }
+
   return errors;
 }
