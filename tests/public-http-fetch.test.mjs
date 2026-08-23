@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { fetchPublicHttpText, validatePublicHttpUrl } from "../src/core/net/public-http-fetch.mjs";
+import {
+  fetchPublicHttpText,
+  guardedFetch,
+  validatePublicHttpUrl,
+} from "../src/core/net/public-http-fetch.mjs";
 
 const PUBLIC_ADDRESSES = [{ address: "93.184.216.34", family: 4 }];
 
@@ -179,4 +183,190 @@ test("validatePublicHttpUrl still allows a genuinely public address embedded via
 
   const sixToFour = validatePublicHttpUrl("http://[2002:0808:0808::]/");
   assert.equal(sixToFour.ok, true);
+});
+
+// guardedFetch is the Response-returning sibling of fetchPublicHttpText,
+// added for callers (the Career Ops provider registry) that need arbitrary
+// methods/bodies/headers and consume the body themselves rather than getting
+// back capped text. It reuses the exact same validate/resolve/pin machinery.
+
+test("guardedFetch rejects an unsafe target before ever calling fetchImpl", async () => {
+  let fetchCalls = 0;
+  const result = await guardedFetch(
+    "http://169.254.169.254/latest/meta-data",
+    {},
+    {
+      fetchImpl: async () => (fetchCalls += 1),
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+    }
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "unsafe_url");
+  assert.equal(fetchCalls, 0);
+});
+
+test("guardedFetch with redirect: follow re-validates each hop and blocks a private second hop", async () => {
+  let fetchCalls = 0;
+  const result = await guardedFetch(
+    "https://public.example.test/start",
+    {},
+    {
+      resolveHost: async (host) =>
+        host === "public.example.test"
+          ? [{ address: "93.184.216.34", family: 4 }]
+          : [{ address: "10.0.0.8", family: 4 }],
+      dispatcherFactory: () => ({ close: async () => {} }),
+      fetchImpl: async (_url, init) => {
+        fetchCalls += 1;
+        assert.equal(init.redirect, "manual");
+        return new Response(null, {
+          status: 302,
+          headers: { location: "http://internal.example.test/admin" },
+        });
+      },
+    }
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "unsafe_redirect");
+  assert.equal(fetchCalls, 1);
+});
+
+test("guardedFetch returns the real Response and a close() for an allowed public target", async () => {
+  let closed = false;
+  const result = await guardedFetch(
+    "https://public.example.test/jobs",
+    {},
+    {
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      dispatcherFactory: () => ({
+        close: async () => {
+          closed = true;
+        },
+      }),
+      fetchImpl: async () => new Response("available jobs", { status: 200 }),
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(await result.response.text(), "available jobs");
+  assert.equal(closed, false);
+  await result.close();
+  assert.equal(closed, true);
+});
+
+// resolveHost is awaited to resolve every hop's target before that hop's
+// deadline (timeoutMs for fetchPublicHttpText, init.signal for guardedFetch)
+// starts covering anything else. A resolver that never settles (a hung DNS
+// client, a black-holed network) must not be able to hold the call open past
+// that deadline — these tests use a resolveHost that deliberately never
+// resolves or rejects, on both the initial hop and a redirect hop.
+const NEVER_SETTLES = () => new Promise(() => {});
+
+test("fetchPublicHttpText aborts a stalled initial DNS lookup within the deadline", async () => {
+  const start = Date.now();
+  const result = await fetchPublicHttpText("https://public.example.test/jobs", {
+    timeoutMs: 50,
+    resolveHost: NEVER_SETTLES,
+    fetchImpl: async () => {
+      throw new Error("fetchImpl must not be reached — DNS never resolved");
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.ok(Date.now() - start < 2000, "resolveHost must not outlive timeoutMs");
+});
+
+test("fetchPublicHttpText aborts a stalled redirect-hop DNS lookup within the deadline", async () => {
+  const start = Date.now();
+  let hop = 0;
+  const result = await fetchPublicHttpText("https://public.example.test/start", {
+    timeoutMs: 50,
+    dispatcherFactory: () => ({ close: async () => {} }),
+    resolveHost: async (host) => {
+      hop += 1;
+      if (hop === 1) return [{ address: "93.184.216.34", family: 4 }];
+      return NEVER_SETTLES();
+    },
+    fetchImpl: async (_url, init) => {
+      assert.equal(init.redirect, "manual");
+      return new Response(null, {
+        status: 302,
+        headers: { location: "https://public.example.test/next" },
+      });
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(hop, 2);
+  assert.ok(Date.now() - start < 2000, "the redirect hop's resolveHost must not outlive timeoutMs");
+});
+
+test("guardedFetch aborts a stalled initial DNS lookup within the caller's own abort signal", async () => {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(new Error("caller deadline")), 50);
+  const start = Date.now();
+  const result = await guardedFetch(
+    "https://public.example.test/jobs",
+    { signal: controller.signal },
+    {
+      resolveHost: NEVER_SETTLES,
+      fetchImpl: async () => {
+        throw new Error("fetchImpl must not be reached — DNS never resolved");
+      },
+    }
+  );
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /caller deadline/);
+  assert.ok(Date.now() - start < 2000, "resolveHost must not outlive the caller's abort signal");
+});
+
+test("guardedFetch aborts a stalled redirect-hop DNS lookup within the caller's own abort signal", async () => {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(new Error("caller deadline")), 50);
+  let hop = 0;
+  const start = Date.now();
+  const result = await guardedFetch(
+    "https://public.example.test/start",
+    { signal: controller.signal },
+    {
+      dispatcherFactory: () => ({ close: async () => {} }),
+      resolveHost: async () => {
+        hop += 1;
+        if (hop === 1) return [{ address: "93.184.216.34", family: 4 }];
+        return NEVER_SETTLES();
+      },
+      fetchImpl: async (_url, init) => {
+        assert.equal(init.redirect, "manual");
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://public.example.test/next" },
+        });
+      },
+    }
+  );
+  assert.equal(result.ok, false);
+  assert.equal(hop, 2);
+  assert.match(result.reason, /caller deadline/);
+  assert.ok(
+    Date.now() - start < 2000,
+    "the redirect hop's resolveHost must not outlive the caller's abort signal"
+  );
+});
+
+test("guardedFetch passes redirect: 'error'/'manual' straight through to fetchImpl, pinning only the initial hop", async () => {
+  let receivedInit;
+  const result = await guardedFetch(
+    "https://public.example.test/api",
+    { redirect: "error" },
+    {
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      dispatcherFactory: () => ({ close: async () => {} }),
+      fetchImpl: async (_url, init) => {
+        receivedInit = init;
+        return new Response("{}", { status: 200 });
+      },
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(receivedInit.redirect, "error");
 });

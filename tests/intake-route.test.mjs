@@ -581,20 +581,24 @@ test("POST /api/intake: a bare URL auto-detects inputKind:'url' and skips AI whe
   openDb({ repoRoot });
   const url = "https://job-boards.greenhouse.io/acme/jobs/123456";
   const server = await bootServer(repoRoot, {
-    fetchImpl: async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        jobs: [
-          {
-            title: "Staff Engineer",
-            absolute_url: url,
-            location: { name: "Remote" },
-            content: "<p>JD</p>",
-          },
-        ],
-      }),
-    }),
+    // resolveJobUrl now routes a known-ATS URL through fetchProvider ->
+    // fetchCareerOpsProvider's shared request(), which requires a real
+    // Response (it calls response.text() itself) rather than the old
+    // CareerRat-local fetchGreenhouse's plain {ok,status,json} shape.
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({
+          jobs: [
+            {
+              title: "Staff Engineer",
+              absolute_url: url,
+              location: { name: "Remote" },
+              content: "<p>JD</p>",
+            },
+          ],
+        }),
+        { status: 200 }
+      ),
     loadSdk: async () => {
       throw new Error("must never be called — this posting resolves deterministically");
     },

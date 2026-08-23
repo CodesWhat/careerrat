@@ -96,7 +96,11 @@ function writeSearchSourcesConfig(repoRoot, config = searchSourcesFixture()) {
 }
 
 // A single-job Lever fixture, matching tests/sourced-scanner.test.mjs's own
-// Lever fixture shape.
+// Lever fixture shape. descriptionPlain, not descriptionBodyPlain: the vendor
+// provider (src/core/providers/career-ops/vendor/lever.mjs) maps bodyText from
+// descriptionPlain only, not the richer legacy descriptionBodyPlain +
+// additionalPlain + salaryDescriptionPlain + lists composition the old
+// CareerRat-local fetchLever() used to build.
 function leverFetchStub(title = "Director of IT") {
   return async (url) => {
     if (String(url).includes("api.lever.co")) {
@@ -106,7 +110,7 @@ function leverFetchStub(title = "Director of IT") {
             text: title,
             hostedUrl: "https://jobs.lever.co/acme/abc",
             categories: { location: "Remote" },
-            descriptionBodyPlain: "Own corporate IT, identity, endpoint, and automation.",
+            descriptionPlain: "Own corporate IT, identity, endpoint, and automation.",
           },
         ]),
         { status: 200 }
@@ -646,6 +650,10 @@ test("DB mode write:true stamps search-source watermarks in SQLite without writi
     await runSourcedScan({
       repoRoot,
       fetchImpl: rssFetchStub(),
+      // The SSRF guard resolves the host before ever calling fetchImpl; mock
+      // it to a real public address so this stays a pure unit test with no
+      // network access, same pattern as public-http-fetch.test.mjs.
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
       write: true,
       intake: false,
     });
@@ -848,6 +856,10 @@ test("search-source watermarks advance only after each source finishes", async (
       repoRoot,
       write: true,
       intake: false,
+      // The SSRF guard resolves the host before ever calling fetchImpl; mock
+      // it to a real public address so this stays a pure unit test with no
+      // network access, same pattern as public-http-fetch.test.mjs.
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
       fetchImpl: async (url) => {
         if (String(url).endsWith("/first.xml")) {
           return rssResponse({

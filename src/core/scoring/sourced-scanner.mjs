@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
-import { setTimeout as delay } from "node:timers/promises";
 
 import { effectiveTargetingForRole } from "../deep-ingest/role-signal-overlay.mjs";
+import { guardedFetch } from "../net/public-http-fetch.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { scannerLikelyKeepThreshold } from "../profile/modes.mjs";
 import {
@@ -17,6 +17,11 @@ import { classifyRoleFamily } from "../tracker/outcome-analysis.mjs";
 import { normalizeCompanyRoleKey } from "../tracker/tracker-data.mjs";
 
 export { normalizeCompanyRoleKey };
+
+// Matches career-ops-registry.mjs's own DEFAULT_TIMEOUT_MS. fetchRss is the
+// same threat model (a user-configured source URL, fetched over the guarded
+// transport) so it gets the same deadline.
+const RSS_TIMEOUT_MS = 15_000;
 
 // --- Board-wide aggregator feed registry ------------------------------------
 // Board sources (config/search-sources.yml entries with source_type:"board") are
@@ -90,8 +95,6 @@ export function computeFamilyOutcomes(apps = [], targeting) {
   }
   return stats;
 }
-
-const DEFAULT_TIMEOUT_MS = 15000;
 
 function normalizeKeywordList(value) {
   if (value == null) return [];
@@ -919,7 +922,10 @@ export function extractReqId(rawUrl = "") {
   return { provider: null, value: null, id: null };
 }
 
-export async function scanCompanies(config, { fetchImpl = fetch, companyFilter = null } = {}) {
+export async function scanCompanies(
+  config,
+  { fetchImpl = fetch, resolveHost, dispatcherFactory, companyFilter = null } = {}
+) {
   const companies = (config.tracked_companies || [])
     .filter((entry) => entry && entry.enabled !== false)
     .filter(
@@ -936,7 +942,11 @@ export async function scanCompanies(config, { fetchImpl = fetch, companyFilter =
       continue;
     }
     try {
-      const jobs = await fetchProvider(provider, company, fetchImpl);
+      const jobs = await fetchProvider(provider, company, {
+        fetchImpl,
+        resolveHost,
+        dispatcherFactory,
+      });
       results.push(...jobs.map((job) => ({ ...job, source: `${provider}-api` })));
     } catch (error) {
       errors.push({ company: company.name, error: error.message });
@@ -946,32 +956,81 @@ export async function scanCompanies(config, { fetchImpl = fetch, companyFilter =
   return { offers: results, errors };
 }
 
-export async function fetchProvider(provider, entry, fetchImpl = fetch) {
+// Every provider this dispatches to — the seven ATS providers formerly fetched
+// by this module's own unguarded fetchers (ashby, greenhouse, lever, workable,
+// smartrecruiters, recruitee, workday) plus every other Career Ops adapter —
+// is now routed through fetchCareerOpsProvider, which sends every request
+// through the shared SSRF guard in public-http-fetch.mjs (see
+// career-ops-registry.mjs's request()). Before this, those seven had their own
+// legacy fetchers here that called fetchImpl directly against entry.api/
+// careers_url with native redirect-following and no host revalidation — a
+// malicious or poisoned source entry could aim the request at a loopback,
+// link-local, or cloud-metadata target, and the vendored providers' own
+// upgrades (lever's allLocations dedupe, smartrecruiters/greenhouse/recruitee
+// description hydration, ashby's retry policy) never ran because the legacy
+// branches short-circuited before the isCareerOpsProviderSupported check
+// below ever ran. All seven are adopted Career Ops providers (see
+// provider-parity.mjs), so isCareerOpsProviderSupported already covers them —
+// there is nothing left for a dedicated branch to do.
+//
+// `fetchImplOrOptions` accepts either a bare fetchImpl function (the shape
+// every caller in this file already used) or an options object carrying
+// { fetchImpl, resolveHost, dispatcherFactory } for tests that need to inject
+// the guard's DNS/dispatcher seams the same way career-ops-registry.test.mjs
+// does.
+export async function fetchProvider(provider, entry, fetchImplOrOptions = fetch) {
   const providerId = String(provider || "").toLowerCase();
-  if (providerId === "ashby") return fetchAshby(entry, fetchImpl);
-  if (providerId === "greenhouse") return fetchGreenhouse(entry, fetchImpl);
-  if (providerId === "lever") return fetchLever(entry, fetchImpl);
-  if (providerId === "workable") return fetchWorkable(entry, fetchImpl);
-  if (providerId === "smartrecruiters") return fetchSmartRecruiters(entry, fetchImpl);
-  if (providerId === "recruitee") return fetchRecruitee(entry, fetchImpl);
-  if (providerId === "workday") return fetchWorkday(entry, fetchImpl);
-  if (providerId === "rss") return fetchRss(entry, fetchImpl);
+  const options =
+    typeof fetchImplOrOptions === "function"
+      ? { fetchImpl: fetchImplOrOptions }
+      : { ...fetchImplOrOptions };
+  if (!options.fetchImpl) options.fetchImpl = fetch;
+  if (providerId === "rss") return fetchRss(entry, options);
   if (isCareerOpsProviderSupported(providerId)) {
-    return fetchCareerOpsProvider(providerId, entry, { fetchImpl });
+    return fetchCareerOpsProvider(providerId, entry, options);
   }
   throw new Error(`unsupported provider: ${providerId || provider}`);
 }
 
 // Fetch + parse a single RSS source (a config/search-sources.yml entry with an
 // rssUrl, or any { rssUrl | url }) into scanner offers. This is the runtime
-// consumer for the rss.mjs provider.
-async function fetchRss(source = {}, fetchImpl = fetch) {
+// consumer for the rss.mjs provider. The URL is user-config-controlled the
+// same way a tracked-company entry's api/careers_url is, so it goes through
+// the same guardedFetch used by every Career Ops provider request rather than
+// a raw fetchImpl call.
+async function fetchRss(source = {}, { fetchImpl = fetch, resolveHost, dispatcherFactory } = {}) {
   const url = source.rssUrl || source.url;
   if (!url) return [];
-  const res = await fetchImpl(url);
-  const xml = typeof res === "string" ? res : await res.text();
-  const { items } = parseFeed(xml);
-  return feedItemsToOffers(items, { source });
+  // guardedFetch has no timeoutMs of its own (see its own comment). The
+  // caller supplies the deadline via init.signal, same as career-ops-registry's
+  // request(). Without one, a stalled DNS lookup or a server that never
+  // responds hangs this call forever instead of failing the source.
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), RSS_TIMEOUT_MS);
+  let guarded;
+  try {
+    guarded = await guardedFetch(
+      url,
+      { signal: controller.signal },
+      { fetchImpl, resolveHost, dispatcherFactory }
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+  if (!guarded.ok) {
+    const blockedUrl = guarded.finalUrl && guarded.finalUrl !== url ? guarded.finalUrl : url;
+    throw new Error(`RSS request blocked for ${blockedUrl}: ${guarded.reason}`);
+  }
+  try {
+    if (!guarded.response.ok) {
+      throw new Error(`${url} returned HTTP ${guarded.response.status}`);
+    }
+    const xml = await guarded.response.text();
+    const { items } = parseFeed(xml);
+    return feedItemsToOffers(items, { source });
+  } finally {
+    await guarded.close();
+  }
 }
 
 // Scan the enabled RSS-bearing sources from a parsed config/search-sources.yml.
@@ -980,7 +1039,10 @@ async function fetchRss(source = {}, fetchImpl = fetch) {
 // Non-fetchable source types (browser/auth aggregators like HiringCafe, Wellfound,
 // authenticated LinkedIn/Indeed) are driven by the agent's session browser per the
 // Browser Automation Contract and are intentionally skipped here.
-export async function scanSearchSources(searchSources, { fetchImpl = fetch } = {}) {
+export async function scanSearchSources(
+  searchSources,
+  { fetchImpl = fetch, resolveHost, dispatcherFactory } = {}
+) {
   const sources = (searchSources?.sources || searchSources?.searches || [])
     .filter((s) => s && s.enabled !== false)
     .filter((s) => s.source_type === "rss" || s.rssUrl);
@@ -989,7 +1051,7 @@ export async function scanSearchSources(searchSources, { fetchImpl = fetch } = {
   const errors = [];
   for (const source of sources) {
     try {
-      const offers = await fetchRss(source, fetchImpl);
+      const offers = await fetchRss(source, { fetchImpl, resolveHost, dispatcherFactory });
       results.push(
         ...offers.map((offer) => ({ ...offer, source: source.label || offer.source || "rss" }))
       );
@@ -1005,7 +1067,10 @@ export async function scanSearchSources(searchSources, { fetchImpl = fetch } = {
 // scanSearchSources — same run path, same enabled-filter/error-isolation shape —
 // but dispatches to BOARD_PROVIDERS instead of the RSS parser. Offers are tagged
 // `source: "<provider>-board"`, mirroring scanCompanies' `"<provider>-api"` tag.
-export async function scanBoards(searchSources, { fetchImpl = fetch } = {}) {
+export async function scanBoards(
+  searchSources,
+  { fetchImpl = fetch, resolveHost, dispatcherFactory } = {}
+) {
   const sources = (searchSources?.sources || searchSources?.searches || [])
     .filter((s) => s && s.enabled !== false)
     .filter(
@@ -1020,7 +1085,7 @@ export async function scanBoards(searchSources, { fetchImpl = fetch } = {}) {
     try {
       const offers = provider
         ? await provider(source, fetchImpl)
-        : await fetchProvider(providerId, source, fetchImpl);
+        : await fetchProvider(providerId, source, { fetchImpl, resolveHost, dispatcherFactory });
       const sourceKind = source.source_type === "ats" ? "api" : "board";
       results.push(...offers.map((offer) => ({ ...offer, source: `${providerId}-${sourceKind}` })));
     } catch (error) {
@@ -1028,352 +1093,6 @@ export async function scanBoards(searchSources, { fetchImpl = fetch } = {}) {
     }
   }
   return { offers: results, errors };
-}
-
-async function fetchJson(url, fetchImpl, options = {}) {
-  const response = await fetchWithTimeout(url, fetchImpl, options);
-  if (!response.ok) throw new Error(`${url} returned HTTP ${response.status}`);
-  return response.json();
-}
-
-async function fetchText(url, fetchImpl, options = {}) {
-  const response = await fetchWithTimeout(url, fetchImpl, options);
-  if (!response.ok) throw new Error(`${url} returned HTTP ${response.status}`);
-  return response.text();
-}
-
-async function fetchWithTimeout(
-  url,
-  fetchImpl,
-  { timeoutMs = DEFAULT_TIMEOUT_MS, retries = 0, method, body, headers } = {}
-) {
-  let lastError;
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const init = { signal: controller.signal, redirect: "follow" };
-      if (method) init.method = method;
-      if (body !== undefined) init.body = body;
-      if (headers) init.headers = headers;
-      return await fetchImpl(url, init);
-    } catch (error) {
-      lastError = error;
-      if (attempt < retries) await delay(500 * (attempt + 1));
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-  throw lastError;
-}
-
-async function fetchAshby(entry, fetchImpl) {
-  const slug = new URL(entry.careers_url).pathname.split("/").filter(Boolean)[0];
-  const url = `https://api.ashbyhq.com/posting-api/job-board/${slug}?includeCompensation=true`;
-  const json = await fetchJson(url, fetchImpl, { timeoutMs: 30000, retries: 2 });
-  const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
-  return jobs.map((job) => ({
-    title: job.title || "",
-    url: job.jobUrl || "",
-    company: entry.name,
-    location: job.location || "",
-    comp: formatAshbyComp(job.compensation),
-    bodyText: job.descriptionPlain || htmlToText(job.descriptionHtml || ""),
-  }));
-}
-
-async function fetchGreenhouse(entry, fetchImpl) {
-  const apiUrl = entry.api || greenhouseApiFromCareersUrl(entry.careers_url);
-  if (!apiUrl) throw new Error("cannot derive Greenhouse API URL");
-  const json = await fetchJson(withQueryParam(apiUrl, "content", "true"), fetchImpl);
-  const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
-  return jobs.map((job) => ({
-    title: job.title || "",
-    url: job.absolute_url || "",
-    company: entry.name,
-    location: job.location?.name || "",
-    comp: "",
-    bodyText: htmlToText(job.content || ""),
-  }));
-}
-
-function withQueryParam(rawUrl, key, value) {
-  const url = new URL(rawUrl);
-  url.searchParams.set(key, value);
-  return url.toString();
-}
-
-function greenhouseApiFromCareersUrl(rawUrl = "") {
-  const match = rawUrl.match(
-    /(?:job-boards(?:\.eu)?\.greenhouse\.io|boards\.greenhouse\.io)\/([^/?#]+)/
-  );
-  return match ? `https://boards-api.greenhouse.io/v1/boards/${match[1]}/jobs` : null;
-}
-
-async function fetchLever(entry, fetchImpl) {
-  const slug = new URL(entry.careers_url).pathname.split("/").filter(Boolean)[0];
-  const jobs = await fetchJson(`https://api.lever.co/v0/postings/${slug}`, fetchImpl);
-  return Array.isArray(jobs)
-    ? jobs.map((job) => ({
-        title: job.text || "",
-        url: job.hostedUrl || "",
-        company: entry.name,
-        location: job.categories?.location || "",
-        comp: formatLeverComp(job),
-        bodyText: [
-          job.descriptionBodyPlain || job.descriptionPlain,
-          job.additionalPlain,
-          job.salaryDescriptionPlain,
-          ...(Array.isArray(job.lists)
-            ? job.lists.map((list) => `${list.text || ""}\n${list.content || ""}`)
-            : []),
-        ]
-          .filter(Boolean)
-          .join("\n\n"),
-      }))
-    : [];
-}
-
-async function fetchWorkable(entry, fetchImpl) {
-  const slug = new URL(entry.careers_url).pathname.split("/").filter(Boolean)[0];
-  const text = await fetchText(`https://apply.workable.com/${slug}/jobs.md`, fetchImpl);
-  return parseWorkableMarkdown(text, entry.name);
-}
-
-function parseWorkableMarkdown(text, companyName) {
-  const jobs = [];
-  for (const line of String(text).split("\n")) {
-    if (!line.startsWith("|") || !line.includes("[View]")) continue;
-    const cols = line.split("|").map((col) => col.trim());
-    const title = cols[1];
-    const location = cols[3] || "";
-    const urlMatch = line.match(/\[View\]\(([^)]+)\)/);
-    let url = urlMatch ? urlMatch[1] : "";
-    if (url.endsWith(".md")) url = url.slice(0, -3);
-    if (!title || title === "Title" || !url) continue;
-    jobs.push({ title, url, company: companyName, location, comp: "" });
-  }
-  return jobs;
-}
-
-const SR_PAGE_LIMIT = 100;
-const SR_MAX_PAGES = 20;
-
-async function fetchSmartRecruiters(entry, fetchImpl) {
-  const slug = new URL(entry.careers_url).pathname.split("/").filter(Boolean)[0];
-  const allJobs = [];
-  let offset = 0;
-  let totalElements = null;
-
-  for (let page = 0; page < SR_MAX_PAGES; page++) {
-    const url = `https://api.smartrecruiters.com/v1/companies/${slug}/postings?limit=${SR_PAGE_LIMIT}&offset=${offset}&status=PUBLIC`;
-    const json = await fetchJson(url, fetchImpl);
-    const jobs = Array.isArray(json?.content) ? json.content : [];
-    allJobs.push(...jobs);
-
-    if (totalElements === null && json?.totalElements != null) {
-      totalElements = Number(json.totalElements);
-    }
-
-    const fetched = allJobs.length;
-    const done =
-      jobs.length < SR_PAGE_LIMIT || (totalElements !== null && fetched >= totalElements);
-    if (done) break;
-
-    offset += SR_PAGE_LIMIT;
-    if (page === SR_MAX_PAGES - 1) {
-      console.warn(
-        `[sourced-scanner] SmartRecruiters ${slug}: stopped after ${SR_MAX_PAGES} pages` +
-          (totalElements !== null ? ` (${totalElements - fetched} postings may be missing)` : "")
-      );
-    }
-  }
-
-  return allJobs.map((job) => {
-    const loc = job.location || {};
-    const location =
-      loc.fullLocation ||
-      [loc.city, loc.region, loc.country, loc.remote ? "Remote" : ""].filter(Boolean).join(", ");
-    const titleSlug = (job.name || "")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "");
-    return {
-      title: job.name || "",
-      url: job.ref
-        ? String(job.ref).replace(
-            "https://api.smartrecruiters.com/v1/companies/",
-            "https://jobs.smartrecruiters.com/"
-          )
-        : `https://jobs.smartrecruiters.com/${slug}/${job.id}-${titleSlug}`,
-      company: entry.name,
-      location,
-      comp: "",
-      bodyText: htmlToText(
-        [
-          job.jobAd?.sections?.jobDescription?.text,
-          job.jobAd?.sections?.qualifications?.text,
-          job.jobAd?.sections?.benefits?.text,
-        ]
-          .filter(Boolean)
-          .join("\n\n")
-      ),
-    };
-  });
-}
-
-// Ported from santifer/career-ops (MIT License, Copyright (c) 2026 Santiago
-// Fernández de Valderrama — github.com/santifer/career-ops) providers/recruitee.mjs.
-// Per-tenant subdomains are the variable part — SSRF defence uses a regex match
-// on `<safe-slug>.recruitee.com` rather than a static allowlist.
-const RECRUITEE_HOST_RE = /^[a-z0-9][a-z0-9-]*\.recruitee\.com$/;
-
-async function fetchRecruitee(entry, fetchImpl) {
-  const parsed = new URL(entry.careers_url);
-  if (parsed.protocol !== "https:" || !RECRUITEE_HOST_RE.test(parsed.hostname)) {
-    throw new Error(
-      `recruitee: untrusted hostname "${parsed.hostname}". Must match <slug>.recruitee.com`
-    );
-  }
-  const apiUrl = `https://${parsed.hostname}/api/offers/`;
-  const json = await fetchJson(apiUrl, fetchImpl);
-  const offers = Array.isArray(json?.offers) ? json.offers : [];
-  return offers.map((j) => {
-    const city = j.city || "";
-    const country = j.country || "";
-    const remote = j.remote ? "Remote" : "";
-    const location = j.location || [city, country, remote].filter(Boolean).join(", ");
-
-    // Validate offer URL: must parse as https://<safe-slug>.recruitee.com/...
-    let url = "";
-    const rawUrl = j.careers_url || j.url || "";
-    if (typeof rawUrl === "string" && rawUrl) {
-      try {
-        const offerUrl = new URL(rawUrl);
-        if (offerUrl.protocol === "https:" && RECRUITEE_HOST_RE.test(offerUrl.hostname)) {
-          url = offerUrl.href;
-        }
-      } catch {
-        // malformed URL → leave url = ""
-      }
-    }
-
-    return {
-      title: j.title || "",
-      url,
-      company: entry.name,
-      location,
-      comp: "",
-      bodyText: htmlToText(j.description || ""),
-    };
-  });
-}
-
-// Ported from santifer/career-ops (MIT License, Copyright (c) 2026 Santiago
-// Fernández de Valderrama — github.com/santifer/career-ops) providers/workday.mjs.
-// Auto-detects from careers_url pattern
-// `https://<tenant>.<instance>.myworkdayjobs.com[/<locale>]/<site>`, e.g.
-// https://23andme.wd5.myworkdayjobs.com/23 →
-//      POST https://23andme.wd5.myworkdayjobs.com/wday/cxs/23andme/23/jobs
-//
-// Workday only exposes a relative "postedOn" label ("Posted Today",
-// "Posted 5 Days Ago", "Posted 30+ Days Ago"); postedAt is derived from it
-// and omitted (null) for the unbounded "30+ Days Ago" form.
-const WD_PAGE_LIMIT = 20;
-const WD_MAX_PAGES = 50; // safety cap — at most 1000 postings per site
-const WORKDAY_URL_RE =
-  /^https:\/\/([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?([^/?#]+)/;
-
-function resolveWorkdayEndpoint(entry) {
-  const url = entry.careers_url || "";
-  const m = url.match(WORKDAY_URL_RE);
-  if (!m) return null;
-  const [, tenant, instance, site] = m;
-  const origin = `https://${tenant}.${instance}.myworkdayjobs.com`;
-  return {
-    api: `${origin}/wday/cxs/${tenant}/${site}/jobs`,
-    // externalPath is relative to the site, not the host root — without the
-    // site segment the URL 404s.
-    jobBase: `${origin}/${site}`,
-  };
-}
-
-function parseWorkdayPostedOn(label) {
-  if (!label) return undefined;
-  if (/posted\s+today/i.test(label)) return Date.now();
-  if (/posted\s+yesterday/i.test(label)) return Date.now() - 86_400_000;
-  const m = label.match(/posted\s+(\d+)(\+?)\s*day/i);
-  if (!m || m[2] === "+") return undefined; // "30+ Days Ago" — unbounded, no usable date
-  return Date.now() - Number(m[1]) * 86_400_000;
-}
-
-async function fetchWorkday(entry, fetchImpl) {
-  const ep = resolveWorkdayEndpoint(entry);
-  if (!ep) throw new Error(`workday: cannot derive CXS endpoint for ${entry.name}`);
-
-  const jobs = [];
-  for (let page = 0; page < WD_MAX_PAGES; page++) {
-    const body = JSON.stringify({
-      limit: WD_PAGE_LIMIT,
-      offset: page * WD_PAGE_LIMIT,
-      searchText: "",
-      appliedFacets: {},
-    });
-    const json = await fetchJson(ep.api, fetchImpl, {
-      method: "POST",
-      body,
-      headers: { "content-type": "application/json", accept: "application/json" },
-    });
-    const postings = Array.isArray(json?.jobPostings) ? json.jobPostings : [];
-    for (const j of postings) {
-      if (!j.externalPath) continue;
-      const postedAtMs = parseWorkdayPostedOn(j.postedOn);
-      jobs.push({
-        title: j.title || "",
-        url: ep.jobBase + j.externalPath,
-        company: entry.name,
-        location: j.locationsText || "",
-        comp: "",
-        postedAt: postedAtMs != null ? new Date(postedAtMs).toISOString() : null,
-      });
-    }
-    if (postings.length < WD_PAGE_LIMIT) break;
-  }
-  return jobs;
-}
-
-function formatAshbyComp(compensation) {
-  if (!compensation) return "";
-  if (typeof compensation === "string") return compensation;
-  if (compensation.scrapeableCompensationSalarySummary)
-    return compensation.scrapeableCompensationSalarySummary;
-  if (compensation.compensationTierSummary) return compensation.compensationTierSummary;
-  const parts = [];
-  const items = [
-    ...(Array.isArray(compensation) ? compensation : [compensation]),
-    ...(Array.isArray(compensation.summaryComponents) ? compensation.summaryComponents : []),
-    ...(Array.isArray(compensation.compensationTiers)
-      ? compensation.compensationTiers.flatMap((tier) => tier.components || [])
-      : []),
-  ];
-  for (const item of items) {
-    const min = item?.minValue ?? item?.min;
-    const max = item?.maxValue ?? item?.max;
-    const currency = item?.currencyCode || item?.currency || "";
-    if (min || max) parts.push(`${currency} ${min || "?"}-${max || "?"}`.trim());
-  }
-  return parts.join("; ");
-}
-
-function formatLeverComp(job = {}) {
-  const parts = [];
-  if (job.salaryDescriptionPlain) parts.push(job.salaryDescriptionPlain);
-  const min = job.salaryRange?.min;
-  const max = job.salaryRange?.max;
-  const currency = job.salaryRange?.currency || "";
-  const interval = job.salaryRange?.interval || "";
-  if (min || max) parts.push(`${currency} ${min || "?"}-${max || "?"} ${interval}`.trim());
-  return parts.join("\n\n");
 }
 
 // Load the company-watchlist scanner config. When no config exists the scanner

@@ -105,6 +105,15 @@ test("fetchProvider maps Recruitee offers and validates returned offer URLs", as
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, "https://acme.recruitee.com/api/offers/");
   assert.equal(Object.hasOwn(calls[0].init, "method"), false);
+  // fetchProvider now routes recruitee through fetchCareerOpsProvider, whose
+  // normalizeOffer() adds bodyPartial/provider to every offer (#2921 vendor
+  // roll). The Security Engineer URL is also a real, documented behavior
+  // change, not a regression: the vendor's parseRecruiteeResponse (see its
+  // own docstring) only requires a well-formed https: URL for the per-offer
+  // link, not a trusted-host match. That field is display-only and never
+  // server-fetched, so the SSRF rationale the API-endpoint check enforces
+  // does not apply to it. The old CareerRat-local fetchRecruitee dropped
+  // untrusted-host offer URLs; the pinned upstream adapter keeps them.
   assert.deepEqual(offers, [
     {
       title: "Platform Engineer",
@@ -113,6 +122,8 @@ test("fetchProvider maps Recruitee offers and validates returned offer URLs", as
       location: "Anywhere in the US",
       comp: "",
       bodyText: "Build & operate systems.",
+      bodyPartial: false,
+      provider: "recruitee",
     },
     {
       title: "Solutions Engineer",
@@ -121,14 +132,18 @@ test("fetchProvider maps Recruitee offers and validates returned offer URLs", as
       location: "Boston, US, Remote",
       comp: "",
       bodyText: "",
+      bodyPartial: true,
+      provider: "recruitee",
     },
     {
       title: "Security Engineer",
-      url: "",
+      url: "https://jobs.example.test/security-engineer",
       company: "Acme Systems",
       location: "Canada",
       comp: "",
       bodyText: "",
+      bodyPartial: true,
+      provider: "recruitee",
     },
     {
       title: "Data Engineer",
@@ -137,6 +152,8 @@ test("fetchProvider maps Recruitee offers and validates returned offer URLs", as
       location: "Remote",
       comp: "",
       bodyText: "",
+      bodyPartial: true,
+      provider: "recruitee",
     },
   ]);
 });
@@ -158,12 +175,18 @@ test("fetchProvider rejects untrusted Recruitee careers URLs before fetching", a
     "http://acme.recruitee.com/careers",
   ]) {
     let fetched = false;
+    // fetchProvider now routes recruitee through the vendored adapter
+    // (src/core/providers/career-ops/vendor/recruitee.mjs). Its resolveApiUrl()
+    // returns null for a non-recruitee host or a non-https URL, so fetch()
+    // throws "cannot derive API URL" rather than the old CareerRat-local
+    // fetchRecruitee's "untrusted hostname" message. Same guarantee (never
+    // calls fetchImpl for a bad host), different wording.
     await assert.rejects(
       fetchProvider("recruitee", { name: "Acme Systems", careers_url }, async () => {
         fetched = true;
         return jsonResponse({ offers: [] });
       }),
-      /untrusted hostname/
+      /cannot derive API URL/
     );
     assert.equal(fetched, false);
   }
@@ -215,6 +238,12 @@ test("fetchProvider paginates Workday with POST requests and maps posting dates"
   );
 
   assert.equal(calls.length, 2);
+  // fetchProvider now routes workday through the vendored adapter
+  // (src/core/providers/career-ops/vendor/workday.mjs), which sends the
+  // fuller browser-like header set Workday's CXS endpoint expects
+  // (accept-language/origin/referer/user-agent). The old CareerRat-local
+  // fetchWorkday sent only content-type/accept. URL, method, and body are
+  // unchanged.
   assert.deepEqual(
     calls.map(({ url, init }) => ({
       url,
@@ -225,7 +254,15 @@ test("fetchProvider paginates Workday with POST requests and maps posting dates"
     [0, 20].map((offset) => ({
       url: "https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/careers/jobs",
       method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json" },
+      headers: {
+        accept: "application/json",
+        "accept-language": "en-US,en;q=0.9",
+        "content-type": "application/json",
+        origin: "https://acme.wd5.myworkdayjobs.com",
+        referer: "https://acme.wd5.myworkdayjobs.com/careers/",
+        "user-agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 CareerRat/0.7",
+      },
       body: { limit: 20, offset, searchText: "", appliedFacets: {} },
     }))
   );
@@ -240,11 +277,18 @@ test("fetchProvider paginates Workday with POST requests and maps posting dates"
     company: "Acme Systems",
     location: "Remote",
     comp: "",
+    bodyText: "",
+    bodyPartial: true,
     postedAt: new Date(now).toISOString(),
+    provider: "workday",
   });
   assert.equal(offers.at(-2).postedAt, new Date(now - 5 * 86_400_000).toISOString());
-  assert.equal(offers.at(-1).postedAt, null);
-  assert.equal(offers[0].postedAt, null);
+  // normalizeOffer() omits postedAt entirely rather than setting it to null
+  // when there is no usable date (same contract as every other Career Ops
+  // provider; see career-ops-registry.test.mjs's own "omits postedAt"
+  // coverage), so an unparseable/missing postedOn means the key is absent.
+  assert.equal(Object.hasOwn(offers.at(-1), "postedAt"), false);
+  assert.equal(Object.hasOwn(offers[0], "postedAt"), false);
 });
 
 test("fetchProvider rejects Workday URLs that cannot derive a CXS endpoint", async () => {
@@ -258,7 +302,7 @@ test("fetchProvider rejects Workday URLs that cannot derive a CXS endpoint", asy
   );
 });
 
-test("plain GET providers do not receive method, body, or headers fetch options", async () => {
+test("plain GET providers do not receive method or body fetch options", async () => {
   let receivedInit;
   await fetchProvider(
     "lever",
@@ -271,5 +315,11 @@ test("plain GET providers do not receive method, body, or headers fetch options"
 
   assert.equal(Object.hasOwn(receivedInit, "method"), false);
   assert.equal(Object.hasOwn(receivedInit, "body"), false);
-  assert.equal(Object.hasOwn(receivedInit, "headers"), false);
+  // fetchProvider now routes lever through career-ops-registry's shared
+  // request(), which always sets a headers object (at minimum a default
+  // user-agent) regardless of provider. The old CareerRat-local fetchLever
+  // called raw fetch(url) with no custom headers at all. method/body still
+  // stay absent for a plain GET provider.
+  assert.equal(Object.hasOwn(receivedInit, "headers"), true);
+  assert.match(receivedInit.headers["user-agent"], /CareerRat/);
 });

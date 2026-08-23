@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 
+import { guardedFetch } from "../net/public-http-fetch.mjs";
 import { CAREER_OPS_PROVIDER_PARITY } from "./provider-parity.mjs";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -157,9 +158,18 @@ function timeoutFor(value) {
   return Math.min(Math.trunc(requested), MAX_TIMEOUT_MS);
 }
 
-async function request(fetchImpl, url, options = {}, consume) {
+// Every provider request — 73 vendored adapters, each driven by a
+// user-configured source URL — goes through this one function, so this is
+// where the shared SSRF guard from public-http-fetch.mjs (protocol
+// screening, resolved-IP screening, DNS-pinned dispatcher, and re-validated
+// redirect hops) is applied rather than calling fetchImpl directly. A
+// request the guard blocks throws a specific error naming the URL and the
+// reason — never a silent empty result — so a provider (or its caller) sees
+// exactly why a scan came back short instead of just quietly missing rows.
+async function request(fetchImpl, url, options = {}, consume, resolveHost, dispatcherFactory) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutFor(options.timeoutMs));
+  let close = null;
   try {
     const init = {
       signal: controller.signal,
@@ -169,7 +179,24 @@ async function request(fetchImpl, url, options = {}, consume) {
     if (options.method) init.method = options.method;
     if (options.body != null) init.body = options.body;
 
-    const response = await fetchImpl(url, init);
+    const guarded = await guardedFetch(url, init, { fetchImpl, resolveHost, dispatcherFactory });
+    if (!guarded.ok) {
+      // guarded.finalUrl is set (and differs from url) when the guard blocked
+      // a redirect hop rather than the initial request — name the actual
+      // blocked target, not just the URL the provider originally asked for,
+      // so the error is specific enough to act on.
+      const blockedUrl = guarded.finalUrl && guarded.finalUrl !== url ? guarded.finalUrl : url;
+      const error = new Error(
+        `Career Ops request blocked for ${blockedUrl}: ${guarded.reason}` +
+          (blockedUrl !== url ? ` (requested ${url})` : "")
+      );
+      error.code = guarded.code;
+      error.url = url;
+      error.blockedUrl = blockedUrl;
+      throw error;
+    }
+    close = guarded.close;
+    const response = guarded.response;
     if (!response || typeof response.text !== "function") {
       throw new Error(`Career Ops provider request returned an invalid response for ${url}`);
     }
@@ -187,10 +214,16 @@ async function request(fetchImpl, url, options = {}, consume) {
     return await consume(response);
   } finally {
     clearTimeout(timeout);
+    if (close) await close();
   }
 }
 
-function createContext(fetchImpl, options = {}) {
+// Exported so tests can drive the shared SSRF guard integration directly
+// (fetchJson/fetchText/fetchResponse against an injected fetchImpl/resolveHost)
+// without depending on any one vendored provider's URL-derivation logic.
+export function createContext(fetchImpl, options = {}) {
+  const resolveHost = options.resolveHost;
+  const dispatcherFactory = options.dispatcherFactory;
   return {
     transport: "http",
     maxPages: options.maxPages,
@@ -199,23 +232,44 @@ function createContext(fetchImpl, options = {}) {
     syntheticEntries: options.syntheticEntries,
     sleep: options.sleep || ((ms) => delay(ms)),
     fetchJson(url, requestOptions = {}) {
-      return request(fetchImpl, url, requestOptions, async (response) => {
-        const text = await response.text();
-        return JSON.parse(text);
-      });
+      return request(
+        fetchImpl,
+        url,
+        requestOptions,
+        async (response) => {
+          const text = await response.text();
+          return JSON.parse(text);
+        },
+        resolveHost,
+        dispatcherFactory
+      );
     },
     fetchText(url, requestOptions = {}) {
-      return request(fetchImpl, url, requestOptions, (response) => response.text());
+      return request(
+        fetchImpl,
+        url,
+        requestOptions,
+        (response) => response.text(),
+        resolveHost,
+        dispatcherFactory
+      );
     },
     fetchResponse(url, requestOptions = {}) {
-      return request(fetchImpl, url, requestOptions, async (response) => {
-        const body = NULL_BODY_STATUSES.has(response.status) ? null : await response.text();
-        return new Response(body, {
-          status: response.status,
-          statusText: response.statusText,
-          headers: response.headers,
-        });
-      });
+      return request(
+        fetchImpl,
+        url,
+        requestOptions,
+        async (response) => {
+          const body = NULL_BODY_STATUSES.has(response.status) ? null : await response.text();
+          return new Response(body, {
+            status: response.status,
+            statusText: response.statusText,
+            headers: response.headers,
+          });
+        },
+        resolveHost,
+        dispatcherFactory
+      );
     },
   };
 }
@@ -226,6 +280,25 @@ function normalizedDate(value) {
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
 }
 
+// A handful of vendored providers (ashby, manfred, wttj, …) surface a
+// structured { min, max, currency } salary object on the Job they return,
+// rather than a formatted string — the vendored Job type (vendor/_types.js)
+// documents no `comp` field at all, so without this the figure never reaches
+// scoring's extractCompBand or a generated document. Formatted only when at
+// least one bound is a usable positive number; malformed/partial data
+// degrades to no comp rather than a broken string like "USD ?-?".
+function formatSalaryRange(salary) {
+  if (!salary || typeof salary !== "object") return "";
+  const min = Number(salary.min);
+  const max = Number(salary.max);
+  const hasMin = Number.isFinite(min) && min > 0;
+  const hasMax = Number.isFinite(max) && max > 0;
+  if (!hasMin && !hasMax) return "";
+  const currency = String(salary.currency || "").trim();
+  const range = hasMin && hasMax ? `${min}-${max}` : String(hasMin ? min : max);
+  return currency ? `${currency} ${range}` : range;
+}
+
 function normalizeOffer(job = {}, providerId) {
   const bodyText = String(job.bodyText || job.description || "").trim();
   const postedAt = normalizedDate(job.postedAt);
@@ -234,7 +307,7 @@ function normalizeOffer(job = {}, providerId) {
     url: String(job.url || "").trim(),
     company: String(job.company || "").trim(),
     location: String(job.location || "").trim(),
-    comp: String(job.comp || "").trim(),
+    comp: String(job.comp || formatSalaryRange(job.salary) || "").trim(),
     bodyText,
     bodyPartial: bodyText.length === 0,
     ...(postedAt ? { postedAt } : {}),
