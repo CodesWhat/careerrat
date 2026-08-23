@@ -28,10 +28,9 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { lintArtifact } from "../documents/placeholder-lint.mjs";
 import { displayPath, userPath } from "../paths/workspace.mjs";
-import { findCurrentBaseToken } from "./comp-guard.mjs";
 import { loadCandidateDoc } from "./config-store.mjs";
+import { validateClaimFields } from "./evidence-validation.mjs";
 import { atomicWriteFile } from "./gate-writer.mjs";
 import { validate } from "./schema-validator.mjs";
 import { parseYaml, stringifyYaml } from "./yaml.mjs";
@@ -117,29 +116,16 @@ export function validateClaims(claims) {
       errors.push({ id: c.id ?? null, message: `${where} is missing evidence` });
     }
 
-    const probe = [
-      c.claim,
-      c.evidence,
-      ...(Array.isArray(c.metrics) ? c.metrics : []),
-      ...(Array.isArray(c.allowed_wording) ? c.allowed_wording : []),
-    ]
-      .filter(Boolean)
-      .join("\n");
-    const lint = lintArtifact(probe);
-    if (!lint.clean) {
-      const f = lint.findings[0];
-      errors.push({
-        id: c.id ?? null,
-        message: `${where} has unresolved placeholder (${f.pattern}): "${f.text}"`,
-      });
-    }
-    const leak = findCurrentBaseToken(probe);
-    if (leak) {
-      errors.push({
-        id: c.id ?? null,
-        message: `${where} contains the private current_base field: evidence must never carry it`,
-      });
-    }
+    // links/role_signals/forbidden_wording are optional but, when present, must be
+    // arrays of non-empty strings — downstream consumers (tailor.mjs's
+    // selectEvidenceForSignals/forbiddenWordingFor, story-bank.mjs, dossier.mjs)
+    // call string methods on every entry with no further type guard, so a malformed
+    // shape here (a bare string instead of an array, a number entry) would crash a
+    // later résumé/packet build instead of being refused at the honesty firewall.
+    // The shape + placeholder/leak checks live in evidence-validation.mjs so
+    // db/verbs/candidate.mjs's merge path can share them without importing
+    // this file (see that module's header comment for the cycle it avoids).
+    errors.push(...validateClaimFields(c, where));
   });
 
   return { ok: errors.length === 0, errors };

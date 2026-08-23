@@ -370,41 +370,47 @@ export function buildSearchSources(targeting, profile) {
   // Tech-only aggregator: RemoteVibeCodingJobs.
   // Omit when domain is explicitly non-tech rather than emitting a nonsensical RSS entry.
   if (techDomain) {
-    // Determine query: first primary-bucket title, or first title overall, or tech fallback.
-    let aggregatorQuery = "AI engineer";
+    // Determine query: first primary-bucket title, or first title overall. No
+    // tech-flavored literal fallback — a candidate with an explicit tech domain
+    // but no titles configured yet gets no aggregator entries at all rather than
+    // a hardcoded "AI engineer" query that would misrepresent every other tech
+    // role family (domain-neutral rule: no personal/tech defaults hardcoded).
+    let aggregatorQuery = "";
     for (const bucket of targeting.role_buckets ?? []) {
       if (bucket.priority === "primary" && bucket.titles?.length) {
         aggregatorQuery = bucket.titles[0];
         break;
       }
     }
-    if (aggregatorQuery === "AI engineer" && positiveTitles.length > 0) {
+    if (!aggregatorQuery && positiveTitles.length > 0) {
       aggregatorQuery = positiveTitles[0];
     }
 
-    searches.push({
-      provider: "RemoteVibeCodingJobs",
-      source_type: "url-query",
-      label: "Remote Vibe Coding Jobs",
-      query: aggregatorQuery,
-      rssUrl: "https://remotevibecodingjobs.com/feed.xml",
-      enabled: true,
-    });
+    if (aggregatorQuery) {
+      searches.push({
+        provider: "RemoteVibeCodingJobs",
+        source_type: "url-query",
+        label: "Remote Vibe Coding Jobs",
+        query: aggregatorQuery,
+        rssUrl: "https://remotevibecodingjobs.com/feed.xml",
+        enabled: true,
+      });
 
-    // Tech-only aggregator: Wellfound (startup/tech-leaning marketplace).
-    // Respects the candidate's location preference: remote=true → /role/r/{slug},
-    // onsite with home city → /role/l/{slug}/{loc}, otherwise /role/{slug}.
-    searches.push({
-      provider: "Wellfound",
-      source_type: "browser",
-      label: "Wellfound",
-      url: buildWellfoundUrl({
-        role: aggregatorQuery,
-        remote: !!loc.remote,
-        location: !loc.remote && loc.home ? loc.home : undefined,
-      }),
-      enabled: true,
-    });
+      // Tech-only aggregator: Wellfound (startup/tech-leaning marketplace).
+      // Respects the candidate's location preference: remote=true → /role/r/{slug},
+      // onsite with home city → /role/l/{slug}/{loc}, otherwise /role/{slug}.
+      searches.push({
+        provider: "Wellfound",
+        source_type: "browser",
+        label: "Wellfound",
+        url: buildWellfoundUrl({
+          role: aggregatorQuery,
+          remote: !!loc.remote,
+          location: !loc.remote && loc.home ? loc.home : undefined,
+        }),
+        enabled: true,
+      });
+    }
   }
 
   // Board-wide remote aggregator feeds (RemoteOK / Remotive / Working Nomads): unlike

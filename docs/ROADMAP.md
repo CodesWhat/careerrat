@@ -370,8 +370,11 @@ through #145) came out of the August 20 queue and are recorded lane by lane unde
 [The queue](#the-queue-opened-august-20-2026), since what each one turned out to be
 matters more than that it merged.
 
-**No issues are open.** The only number on the list is Renovate's Dependency Dashboard
-(#11), which is permanent by design and is not a task.
+Three issues are open, all accounted for: #180 holds the below-cut remainder of the
+v0.12 whole-app review (being worked through on this dev line), #148 tracks the star
+chart's one leftover limitation (the shared refresh workflow can't push to a
+PR-required dev branch; the adoption itself landed in #169/#187/#188), and #11 is
+Renovate's Dependency Dashboard, which is permanent by design and is not a task.
 
 - **#106, #112**: Playwright live harness, then custom combobox dropdowns in
   `playwright-ops`. The dropdown fix closes two real traps: an empty target value used
