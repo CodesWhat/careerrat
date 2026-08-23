@@ -16,7 +16,7 @@ import { findCurrentBaseToken } from "./comp-guard.mjs";
 // metrics/allowed_wording are deliberately excluded — evidence-writer.mjs
 // has never shape-checked them, only linted their text, and this helper
 // keeps parity with that existing behavior rather than tightening it here.
-export const EVIDENCE_ARRAY_FIELDS = ["links", "role_signals", "forbidden_wording"];
+const EVIDENCE_ARRAY_FIELDS = ["links", "role_signals", "forbidden_wording"];
 
 // Validate one claim's optional array fields (links/role_signals/forbidden_wording)
 // plus placeholder residue / current_base leaks across every text field the

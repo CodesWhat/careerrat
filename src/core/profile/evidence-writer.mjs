@@ -41,7 +41,7 @@ export const EVIDENCE_REL_PATH = "candidate/evidence.yml";
 
 // The claim fields evidence.schema.json knows about (used to drop unknown keys a
 // caller might pass and to order the serialized output predictably).
-export const CLAIM_FIELDS = [
+const CLAIM_FIELDS = [
   "id",
   "claim",
   "evidence",
