@@ -234,6 +234,50 @@ try {
   } else {
     fail("hackernews.fetch() should throw when no matching thread found");
   }
+
+  // Title/location entity decoding (#2921) — the old local map decoded &#39;
+  // but no other numeric entity, so "Softwareentwickler &#8211; R&amp;D |
+  // M&#252;nchen" left an undecoded en-dash, "&amp;" and city in the parsed
+  // comment. A user's positive title_filter keyword "r&d" would fail against
+  // the undecoded title, silently dropping the posting.
+  const entityComment = parseHnComment(
+    "<p>Acme GmbH | Softwareentwickler &#8211; R&amp;D | M&#252;nchen | https://acme.example/jobs</p>",
+    "https://news.ycombinator.com/item?id=1"
+  );
+  if (entityComment && entityComment.title.includes("–") && entityComment.title.includes("R&D")) {
+    pass(
+      "hackernews.parseHnComment() decodes numeric entities its local 7-form map missed (#2921)"
+    );
+  } else {
+    fail(`hackernews entity title = ${JSON.stringify(entityComment && entityComment.title)}`);
+  }
+  if (entityComment && entityComment.location === "München") {
+    pass("hackernews.parseHnComment() decodes &#252; in the location (#2921)");
+  } else {
+    fail(`hackernews entity location = ${JSON.stringify(entityComment && entityComment.location)}`);
+  }
+
+  // Named Latin-1 letter entities, not just numeric refs. The expanded
+  // shared decoder handles these too, and case-sensitively (&Eacute; is É,
+  // not é).
+  const namedEntityComment = parseHnComment(
+    "<p>Caf&eacute; GmbH | CAF&Eacute; Lead | Gen&egrave;ve | https://cafe.example/jobs</p>",
+    "https://news.ycombinator.com/item?id=1"
+  );
+  if (namedEntityComment && namedEntityComment.title.includes("CAFÉ Lead")) {
+    pass("hackernews.parseHnComment() decodes a named Latin-1 entity case-sensitively (Eacute)");
+  } else {
+    fail(
+      `hackernews named entity title = ${JSON.stringify(namedEntityComment && namedEntityComment.title)}`
+    );
+  }
+  if (namedEntityComment && namedEntityComment.location === "Genève") {
+    pass("hackernews.parseHnComment() decodes a named Latin-1 entity (egrave) in the location");
+  } else {
+    fail(
+      `hackernews named entity location = ${JSON.stringify(namedEntityComment && namedEntityComment.location)}`
+    );
+  }
 } catch (e) {
   fail(`hackernews provider tests crashed: ${e.message}`);
 }

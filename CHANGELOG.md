@@ -4,6 +4,30 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-08-23
+
+### Added
+
+- Four new job sources: Job Bank Canada, MyCareersFuture Singapore, Senjob for Senegal, and Yourator for Taiwan. CareerRat now implements all 77 public providers in its pinned source snapshot, and the doctor command derives its provider count from the manifest so the number can never go stale again (#200).
+- Job descriptions for Greenhouse, Recruitee, and SmartRecruiters listings now load from each posting's detail endpoint during a sweep, so triage sees real posting text instead of an empty body (#199).
+
+### Changed
+
+- The vendored job-source providers rolled forward to the latest upstream snapshot: Lever listings with multiple locations no longer appear once per location, Ashby fetches retry and detect remote roles, accented characters like the é in Montréal now decode correctly in titles and locations across several sources, EchoJobs is retired upstream, and eight providers pace their requests more politely (#199).
+- Lever job text now comes from the provider's own plain-description field, and structured salary ranges from Ashby, Manfred, and Welcome to the Jungle are recovered into the comp field, where they were silently dropped before (#199).
+
+### Fixed
+
+- The chat ask bar is visible again on phone-sized screens instead of rendering below the fold, reserves the right amount of space on tall desktop windows, and fades page content behind it without covering open panels (#198).
+- The calendar's This Week number now always matches the agenda list below it, including weeks with more events than the list can hold and events that land on weekends (#198).
+- Saving evidence claims now actually validates them against the schema; a wiring gap had made that check a silent no-op (#197).
+- Machine-generated searches no longer fall back to a default job title when none can be derived from your profile, and any stored searches created by that old fallback are reconciled away (#197).
+- Duplicate-company detection now ignores legal suffixes like Inc and GmbH, education only appears in tailored resumes when you opt in, the dashboard picks up tracker changes live without a manual refresh, and the Mac app follows normal macOS behavior when its last window closes (#197).
+
+### Security
+
+- Every outbound request a job sweep makes now goes through the private-network guard: redirects re-check DNS on every hop, lookups are bound to the request deadline, seven major ATS providers that still used older unguarded fetch paths now route through the guarded adapters, RSS feeds gained the same guard plus a deadline, and Consider's session handshake is guarded too (#199).
+
 ## [0.12.2] - 2026-08-22
 
 ### Changed

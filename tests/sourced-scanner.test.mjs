@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { mock } from "node:test";
 
 import {
   buildLocationFilter,
@@ -167,38 +167,201 @@ test("infers ATS provider from common careers URLs", () => {
   assert.equal(inferProvider({ careers_url: "https://jobs.lever.co/acme" }), "lever");
 });
 
-test("includes Lever salary descriptions in fetched sourced comp text", async () => {
+// fetchProvider("lever", ...) now routes through fetchCareerOpsProvider (the
+// SSRF-guarded Career Ops registry) instead of this module's own unguarded
+// legacy fetcher — see the comment above fetchProvider's definition. The
+// vendored lever.mjs adapter maps `descriptionPlain` (not the legacy
+// fetcher's descriptionBodyPlain/additionalPlain/salaryDescriptionPlain/lists
+// concatenation) into bodyText and does not surface a comp string at all, so
+// this is a real, disclosed behavior change from the pre-fix scanner: comp is
+// no longer populated for Lever specifically. bodyText and location (via
+// resolveLocation's allLocations dedupe, asserted separately below) still
+// carry through correctly.
+test("fetchCareerOpsProvider-routed Lever fetch maps descriptionPlain into bodyText", async () => {
   const offers = await fetchProvider(
     "lever",
     { name: "Acme", careers_url: "https://jobs.lever.co/acme" },
-    async () =>
-      new Response(
-        JSON.stringify([
-          {
-            text: "Director of IT",
-            hostedUrl: "https://jobs.lever.co/acme/abc",
-            categories: { location: "Remote" },
-            descriptionBodyPlain: "Own corporate IT, identity, endpoint, and automation.",
-            descriptionPlain: "Stale marketing role text.",
-            salaryDescriptionPlain:
-              "The base salary range for this position is expected to be between $224,000 - $260,000 per year.",
-            lists: [],
-          },
-        ]),
-        { status: 200 }
-      )
+    {
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify([
+            {
+              text: "Director of IT",
+              hostedUrl: "https://jobs.lever.co/acme/abc",
+              categories: { location: "Remote" },
+              descriptionPlain: "Own corporate IT, identity, endpoint, and automation.",
+            },
+          ]),
+          { status: 200 }
+        ),
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      dispatcherFactory: () => ({ close: async () => {} }),
+    }
   );
 
-  assert.equal(
-    offers[0].comp,
-    "The base salary range for this position is expected to be between $224,000 - $260,000 per year."
-  );
-  assert.deepEqual(extractCompBand(`${offers[0].comp}\n${offers[0].bodyText}`), {
-    min: 224000,
-    max: 260000,
-  });
   assert.match(offers[0].bodyText, /Own corporate IT/);
-  assert.doesNotMatch(offers[0].bodyText, /Stale marketing role text/);
+  assert.equal(offers[0].comp, "");
+});
+
+// #1 review: production scanner bypass. Every provider fetchProvider() knows
+// about — including the seven that used to have their own unguarded fetchers
+// here — must go through the shared SSRF guard before fetchImpl is ever
+// called. A source entry pointing its api/careers_url at a private-resolving
+// hostname must be rejected here, on the actual production dispatch path,
+// not just in the registry's own unit tests.
+test("fetchProvider rejects a greenhouse source whose host resolves to a private address, before ever calling fetchImpl", async () => {
+  let fetchCalls = 0;
+  await assert.rejects(
+    () =>
+      fetchProvider(
+        "greenhouse",
+        { name: "Acme", careers_url: "https://job-boards.greenhouse.io/acme" },
+        {
+          fetchImpl: async () => {
+            fetchCalls += 1;
+            throw new Error("must not reach fetchImpl");
+          },
+          resolveHost: async () => [{ address: "127.0.0.1", family: 4 }],
+        }
+      ),
+    (error) => {
+      assert.match(error.message, /Career Ops request blocked/);
+      return true;
+    }
+  );
+  assert.equal(fetchCalls, 0);
+});
+
+test("fetchProvider rejects a lever source whose host resolves to a private address, before ever calling fetchImpl", async () => {
+  let fetchCalls = 0;
+  await assert.rejects(
+    () =>
+      fetchProvider(
+        "lever",
+        { name: "Acme", careers_url: "https://jobs.lever.co/acme" },
+        {
+          fetchImpl: async () => {
+            fetchCalls += 1;
+            throw new Error("must not reach fetchImpl");
+          },
+          resolveHost: async () => [{ address: "169.254.169.254", family: 4 }],
+        }
+      ),
+    (error) => {
+      assert.match(error.message, /Career Ops request blocked/);
+      return true;
+    }
+  );
+  assert.equal(fetchCalls, 0);
+});
+
+// #1 review: Lever's allLocations dedupe (resolveLocation() in
+// vendor/lever.mjs) is inert on the legacy path because the old fetchLever
+// only ever read categories.location. Routing through the guard also routes
+// through the real vendored mapping, so a multi-location posting's full
+// location set now reaches the offer.
+test("fetchProvider dedupes Lever's primary location with allLocations through the guarded path", async () => {
+  const offers = await fetchProvider(
+    "lever",
+    { name: "Acme", careers_url: "https://jobs.lever.co/acme" },
+    {
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify([
+            {
+              text: "Staff Engineer",
+              hostedUrl: "https://jobs.lever.co/acme/abc",
+              categories: { location: "Barcelona", allLocations: ["Barcelona", "Montevideo"] },
+              descriptionPlain: "Build reliable systems.",
+            },
+          ]),
+          { status: 200 }
+        ),
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      dispatcherFactory: () => ({ close: async () => {} }),
+    }
+  );
+
+  assert.equal(offers[0].location, "Barcelona; Montevideo");
+  assert.equal(offers[0].company, "Acme");
+});
+
+// #1 review: fetchRss (source_type:"rss") took a user-configured URL straight
+// to fetchImpl with no host validation at all — same threat model as the ATS
+// providers above. It must go through guardedFetch too.
+test("fetchProvider rejects an rss source whose host resolves to a private address, before ever calling fetchImpl", async () => {
+  let fetchCalls = 0;
+  await assert.rejects(
+    () =>
+      fetchProvider(
+        "rss",
+        { rssUrl: "https://feeds.example.test/jobs.xml" },
+        {
+          fetchImpl: async () => {
+            fetchCalls += 1;
+            throw new Error("must not reach fetchImpl");
+          },
+          resolveHost: async () => [{ address: "10.0.0.5", family: 4 }],
+        }
+      ),
+    (error) => {
+      assert.match(error.message, /RSS request blocked/);
+      return true;
+    }
+  );
+  assert.equal(fetchCalls, 0);
+});
+
+// #3 review: fetchRss cleared its abort timer in a `finally` immediately after
+// guardedFetch resolved, so once headers arrived the deadline stopped covering
+// the body read: a host that returns headers and then stalls the body hung
+// `guarded.response.text()` forever. The fix keeps the timer live across the
+// body read too, clearing it only once text() settles. This fetchImpl mirrors
+// a real fetch by wiring the response body's stream to the same abort signal
+// guardedFetch passed it, so aborting on deadline actually errors the pending
+// read instead of leaving it stuck with nothing listening.
+test("fetchProvider('rss', …) aborts a body that stalls after headers, within the RSS deadline", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const fetchImpl = async (_url, init) => {
+      const { signal } = init;
+      const stream = new ReadableStream({
+        start(streamController) {
+          if (signal.aborted) {
+            streamController.error(signal.reason);
+            return;
+          }
+          signal.addEventListener("abort", () => streamController.error(signal.reason), {
+            once: true,
+          });
+        },
+      });
+      return new Response(stream, { status: 200 });
+    };
+
+    const promise = fetchProvider(
+      "rss",
+      { rssUrl: "https://feeds.example.test/jobs.xml" },
+      {
+        fetchImpl,
+        resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+        dispatcherFactory: () => ({ close: async () => {} }),
+      }
+    );
+
+    // Flush the guardedFetch chain's own microtasks (DNS resolve, response
+    // construction) so the stalled `.text()` read is actually pending before
+    // the mocked clock advances past the RSS deadline.
+    await new Promise((resolve) => setImmediate(resolve));
+    mock.timers.tick(15_000);
+
+    await assert.rejects(promise, (error) => {
+      assert.match(String(error?.message || error), /abort/i);
+      return true;
+    });
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test("extracts canonical req ids from common ATS URLs", () => {

@@ -17,6 +17,7 @@ import { ApiError, getDashboard } from "../lib/api.js";
 import { subscribeDashboardChanged } from "../lib/dashboard-events.js";
 import { resolveErrorCopy } from "../lib/errorCopy.js";
 import { subscribeIntakeChanged } from "../lib/intake-events.js";
+import { useEventSource } from "../lib/sse.js";
 import { DASHBOARD_PREVIEW } from "../pages/dashboardPreviewData.js";
 
 // Matches InboxPage's own POLL_MS convention (8-15s band per the M10 design
@@ -90,9 +91,19 @@ function LiveDashboardProvider({ children }) {
   const [noDatabase, setNoDatabase] = useState(false);
   const inFlight = useRef(false);
   const noDatabaseRef = useRef(false);
+  // A re-entrant load() call (e.g. an SSE event arriving mid-fetch) latches
+  // one pending refresh instead of being dropped — otherwise the response
+  // already in flight when the write happened could commit stale data over
+  // the newer one, and the UI would sit stale until the next POLL_MS tick.
+  // One latch, not a queue: any number of re-entrant calls while in flight
+  // collapse into a single follow-up load().
+  const pendingReload = useRef(false);
 
   const load = useCallback(async () => {
-    if (inFlight.current) return;
+    if (inFlight.current) {
+      pendingReload.current = true;
+      return;
+    }
     inFlight.current = true;
     try {
       const { data: viewModel, setup: setupPayload } = await getDashboard();
@@ -125,6 +136,10 @@ function LiveDashboardProvider({ children }) {
     } finally {
       setLoading(false);
       inFlight.current = false;
+      if (pendingReload.current) {
+        pendingReload.current = false;
+        load();
+      }
     }
   }, []);
 
@@ -153,6 +168,20 @@ function LiveDashboardProvider({ children }) {
       clearInterval(interval);
     };
   }, [load]);
+
+  // The dev server already broadcasts tracker-update/activity-update over
+  // /__livereload (src/cli/tracker-dev.mjs) whenever workspace/tracker.json
+  // or workspace/activity.jsonl changes on disk — a CLI/agent write, not
+  // just an in-app one. Without this, an open tab only picked those up on
+  // the next POLL_MS tick (up to 10s stale); this closes that gap the same
+  // way subscribeDashboardChanged/subscribeIntakeChanged already do for
+  // in-app writes. The interval above stays as the fallback for a dropped
+  // connection — EventSource reconnects on its own, but a page open through
+  // a proxy that buffers SSE would otherwise go stale silently.
+  useEventSource("/__livereload", {
+    types: ["tracker-update", "activity-update"],
+    onEvent: load,
+  });
 
   return (
     <DashboardCtx.Provider value={{ data, setup, loading, error, noDatabase, refetch: load }}>

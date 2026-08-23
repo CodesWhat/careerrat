@@ -41,7 +41,7 @@ const RETRY_POLICY = { retries: 3 };
 // WAF-level rate limiting on any tenant that paginates several pages deep
 // (large boards like rollsroyce, sec, roche). Only tenants that loop past
 // page 1 pay this; no-date-skip and early-stopped tenants never do.
-const INTER_PAGE_DELAY_MS = 150;
+const INTER_PAGE_DELAY_MS = 250;
 
 // Workday returns postings newest-first, so pagination can stop once a
 // page's oldest *dated* posting is well past --since — no point paying for
@@ -299,7 +299,7 @@ export default {
     if (stopReason === 'cap') {
       const jobsSummary = `${jobs.length}${total !== null ? ` of ${total}` : ''} jobs`;
       if (!syntheticEntries) {
-        console.error(`⚠️  workday: ${entry.name} truncated at max_pages=${maxPages} (${jobsSummary}). Raise max_pages on this entry for more`);
+        console.error(`⚠️  workday: ${entry.name} truncated at max_pages=${maxPages} (${jobsSummary}) — raise max_pages on this entry for more`);
       } else {
         // Workday's CXS backend can report `total` as exactly
         // maxPages*PAGE_SIZE when the real count is far higher (e.g.

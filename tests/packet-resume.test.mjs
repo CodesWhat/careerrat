@@ -226,6 +226,27 @@ test("buildStructuredResumeMarkdown omits proposal education when honesty disabl
   assert.doesNotMatch(markdown, /Example University/);
 });
 
+test("buildStructuredResumeMarkdown omits proposal education by default when honesty.education is absent or undefined", () => {
+  // add_education_section is opt-in everywhere else in the app (candidate-
+  // defaults.mjs, templates/honesty.example.yml, packet/generate.mjs's own
+  // fallback all default it to false). An absent honesty.education, or a
+  // present-but-undefined add_education_section, must NOT silently add an
+  // Education section nobody opted into.
+  const noEducationHonesty = { education: {}, tools: {} };
+  const missingEducationHonesty = { tools: {} };
+
+  for (const honesty of [noEducationHonesty, missingEducationHonesty, undefined]) {
+    const markdown = buildStructuredResumeMarkdown({
+      profile: PROFILE,
+      proposal: BASE_PROPOSAL,
+      evidence: EVIDENCE,
+      honesty,
+    });
+    assert.doesNotMatch(markdown, /## Education/);
+    assert.doesNotMatch(markdown, /Example University/);
+  }
+});
+
 test("buildStructuredResumeMarkdown preserves forbidden-wording, placeholder, and ATS gates", () => {
   const build = (proposal, evidence = EVIDENCE) =>
     buildStructuredResumeMarkdown({

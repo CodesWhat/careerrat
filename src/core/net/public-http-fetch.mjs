@@ -7,6 +7,59 @@ const DEFAULT_PUBLIC_FETCH_MAX_BYTES = 1024 * 1024;
 const DEFAULT_MAX_REDIRECTS = 4;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
+// WHATWG fetch's "request-body-header name" list: headers that describe the
+// body being sent, so they must not survive a redirect hop that drops the
+// body (see https://fetch.spec.whatwg.org/#request-body-header-name).
+const REQUEST_BODY_HEADER_NAMES = [
+  "content-type",
+  "content-length",
+  "content-encoding",
+  "content-language",
+  "transfer-encoding",
+];
+
+// Headers a caller-supplied credential must never survive a cross-origin hop
+// on, so guardedFetch's own redirect chain can't hand a caller's bearer
+// token or session cookie to a host the caller never named.
+const CROSS_ORIGIN_STRIP_HEADER_NAMES = ["authorization", "cookie"];
+
+// Normalizes an init.headers value (plain object, Headers instance, or array
+// of [name, value] pairs, every shape RequestInit.headers accepts) into a
+// case-insensitive Map keyed by lowercase header name, each entry keeping the
+// original casing for re-serialization. Doing this once up front lets the
+// redirect loop below mutate one representation per hop instead of
+// re-detecting the shape on every hop.
+function normalizeHeadersInit(headersInit) {
+  const map = new Map();
+  if (!headersInit) return map;
+  if (Array.isArray(headersInit)) {
+    for (const pair of headersInit) {
+      const [name, value] = pair;
+      if (name === undefined) continue;
+      map.set(String(name).toLowerCase(), { name: String(name), value: String(value) });
+    }
+    return map;
+  }
+  // Headers-like (has both entries() and forEach(), and isn't a plain array).
+  if (typeof headersInit.entries === "function" && typeof headersInit.forEach === "function") {
+    for (const [name, value] of headersInit.entries()) {
+      map.set(String(name).toLowerCase(), { name: String(name), value: String(value) });
+    }
+    return map;
+  }
+  for (const [name, value] of Object.entries(headersInit)) {
+    if (value === undefined) continue;
+    map.set(name.toLowerCase(), { name, value });
+  }
+  return map;
+}
+
+function headersMapToObject(map) {
+  const obj = {};
+  for (const { name, value } of map.values()) obj[name] = value;
+  return obj;
+}
+
 export function validatePublicHttpUrl(rawUrl) {
   let parsed;
   try {
@@ -30,7 +83,33 @@ export function validatePublicHttpUrl(rawUrl) {
   return { ok: true, url: parsed.toString() };
 }
 
-async function resolvePublicHttpTarget(rawUrl, { resolveHost = resolvePublicHost } = {}) {
+// Races a resolveHost() lookup against an (optional) abort signal so a
+// stalled DNS lookup cannot outlive the caller's own deadline. `signal` comes
+// from the caller's timeout/AbortController (fetchPublicHttpText's per-hop
+// controller, or guardedFetch's init.signal). Without this, resolveHost was
+// awaited plainly and a lookup that never settles (a hung resolver, a
+// black-holed network) kept the whole call open forever, timeoutMs or not.
+//
+// Promise.race attaches a handler to BOTH promises the moment it runs, so
+// neither one can produce an unhandled-rejection warning regardless of which
+// one settles first or how much later the loser eventually does.
+function abortSignalRejection(signal) {
+  return new Promise((_, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+}
+
+async function resolveHostWithDeadline(resolveHost, hostname, signal) {
+  const hostLookup = Promise.resolve().then(() => resolveHost(hostname));
+  if (!signal) return hostLookup;
+  return Promise.race([hostLookup, abortSignalRejection(signal)]);
+}
+
+async function resolvePublicHttpTarget(rawUrl, { resolveHost = resolvePublicHost, signal } = {}) {
   const checked = validatePublicHttpUrl(rawUrl);
   if (!checked.ok) return checked;
 
@@ -46,8 +125,18 @@ async function resolvePublicHttpTarget(rawUrl, { resolveHost = resolvePublicHost
 
   let resolved;
   try {
-    resolved = await resolveHost(hostname);
-  } catch {
+    resolved = await resolveHostWithDeadline(resolveHost, hostname, signal);
+  } catch (error) {
+    // Distinguish "the deadline fired while we were waiting" from an
+    // ordinary resolution failure (NXDOMAIN, network error, …) so the abort
+    // reason set by the caller's own timeout is visible in the result rather
+    // than being flattened into the same generic message either way.
+    if (signal && error === signal.reason) {
+      return {
+        ok: false,
+        reason: `host resolution aborted: ${String(signal.reason?.message ?? signal.reason ?? "aborted")}`,
+      };
+    }
     return { ok: false, reason: "host could not be resolved" };
   }
   const addresses = normalizeAddresses(resolved);
@@ -71,7 +160,23 @@ export async function fetchPublicHttpText(
     readErrorBody = true,
   } = {}
 ) {
-  let target = await resolvePublicHttpTarget(rawUrl, { resolveHost });
+  let target;
+  {
+    // The initial resolution has no hop-scoped controller yet (that is
+    // created per-hop below, for the fetch itself), so give it its own,
+    // bounded by the same timeoutMs, so a stalled first lookup can't hang
+    // the call indefinitely.
+    const initialController = new AbortController();
+    const initialTimeout = setTimeout(() => initialController.abort(), timeoutMs);
+    try {
+      target = await resolvePublicHttpTarget(rawUrl, {
+        resolveHost,
+        signal: initialController.signal,
+      });
+    } finally {
+      clearTimeout(initialTimeout);
+    }
+  }
   if (!target.ok) return failure("unsafe_url", target.reason, { url: rawUrl });
 
   for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
@@ -101,7 +206,13 @@ export async function fetchPublicHttpText(
             finalUrl: currentUrl,
           });
         }
-        const next = await resolvePublicHttpTarget(redirectUrl, { resolveHost });
+        // The current hop's controller/timeout is still live here (its
+        // `finally` hasn't run yet), so reusing controller.signal bounds this
+        // redirect's DNS lookup by the same deadline as the hop that produced it.
+        const next = await resolvePublicHttpTarget(redirectUrl, {
+          resolveHost,
+          signal: controller.signal,
+        });
         if (!next.ok) {
           return failure("unsafe_redirect", `unsafe redirect target: ${next.reason}`, {
             url: rawUrl,
@@ -174,6 +285,150 @@ export async function fetchPublicHttpText(
       clearTimeout(timeout);
       await closeDispatcher(dispatcher);
     }
+  }
+
+  return failure("too_many_redirects", "too many redirects", { url: rawUrl });
+}
+
+// Guarded fetch for callers that need the raw Response (status/headers/body
+// stream) rather than fetchPublicHttpText's capped-text contract — e.g. the
+// Career Ops provider registry, which drives arbitrary methods/bodies/headers
+// per provider and consumes the body itself (JSON, text, or a rebuilt
+// Response). Every connection this makes, including the redirect: "follow"
+// case below, goes through the same validate-resolve-pin sequence as
+// fetchPublicHttpText: protocol + literal-IP screening, DNS resolution, and
+// non-public-range screening of the resolved addresses, with those addresses
+// pinned into the dispatcher so the actual connection can't land anywhere the
+// check didn't approve (DNS rebinding / TOCTOU).
+//
+// Redirect handling depends on the caller's own `init.redirect`:
+//   - "follow" (or unset, matching native fetch's default): we drive the
+//     chain ourselves with redirect: "manual" against the underlying
+//     fetchImpl, so every hop is independently re-resolved, re-pinned, and
+//     re-checked before it is ever connected to. Native auto-follow would
+//     otherwise revalidate nothing.
+//   - "error" / "manual": the caller has already opted into a fetch mode
+//     that either throws on a redirect response or hands the raw 3xx back
+//     without following it, so there is no second hop for this guard to
+//     revalidate — we only add DNS pinning to the one connection made.
+export async function guardedFetch(
+  rawUrl,
+  init = {},
+  {
+    fetchImpl = fetch,
+    resolveHost = resolvePublicHost,
+    dispatcherFactory = createPinnedDispatcher,
+    maxRedirects = DEFAULT_MAX_REDIRECTS,
+  } = {}
+) {
+  // guardedFetch has no timeoutMs of its own. The caller's own deadline is
+  // whatever AbortController/signal it puts on init (see career-ops-registry's
+  // request(), which drives one abort per outbound provider call). Racing DNS
+  // resolution against that same signal on every hop is what keeps a stalled
+  // lookup from outliving it; a caller that passes no signal gets the old
+  // plain-await behavior.
+  let target = await resolvePublicHttpTarget(rawUrl, { resolveHost, signal: init.signal });
+  if (!target.ok) return failure("unsafe_url", target.reason, { url: rawUrl });
+
+  const redirectMode = init.redirect || "follow";
+  if (redirectMode !== "follow") {
+    const dispatcher = dispatcherFactory({
+      hostname: target.hostname,
+      addresses: target.addresses,
+    });
+    try {
+      const response = await fetchImpl(target.url, { ...init, dispatcher });
+      return {
+        ok: true,
+        url: rawUrl,
+        finalUrl: response?.url || target.url,
+        response,
+        close: () => closeDispatcher(dispatcher),
+      };
+    } catch (error) {
+      await closeDispatcher(dispatcher);
+      throw error;
+    }
+  }
+
+  // Per-hop request state, mutated across hops per WHATWG fetch's redirect
+  // algorithm (https://fetch.spec.whatwg.org/#http-redirect-fetch) rather
+  // than replayed verbatim: a POST that hits a 303 becomes a bodyless GET on
+  // the next hop, and credentials the caller supplied don't follow the chain
+  // across an origin change.
+  let hopMethod = String(init.method || "GET").toUpperCase();
+  let hopBody = init.body;
+  const hopHeaders = normalizeHeadersInit(init.headers);
+
+  for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
+    const currentUrl = target.url;
+    const dispatcher = dispatcherFactory({
+      hostname: target.hostname,
+      addresses: target.addresses,
+    });
+    let response;
+    try {
+      response = await fetchImpl(currentUrl, {
+        ...init,
+        method: hopMethod,
+        body: hopBody,
+        headers: headersMapToObject(hopHeaders),
+        redirect: "manual",
+        dispatcher,
+      });
+    } catch (error) {
+      await closeDispatcher(dispatcher);
+      throw error;
+    }
+
+    const redirectUrl = redirectTarget(response, currentUrl);
+    if (!redirectUrl) {
+      return {
+        ok: true,
+        url: rawUrl,
+        finalUrl: response?.url || currentUrl,
+        response,
+        close: () => closeDispatcher(dispatcher),
+      };
+    }
+
+    const status = Number(response?.status || 0);
+    await cancelBody(response);
+    await closeDispatcher(dispatcher);
+    if (redirectCount === maxRedirects) {
+      return failure("too_many_redirects", "too many redirects", {
+        url: rawUrl,
+        finalUrl: currentUrl,
+      });
+    }
+    const next = await resolvePublicHttpTarget(redirectUrl, { resolveHost, signal: init.signal });
+    if (!next.ok) {
+      return failure("unsafe_redirect", `unsafe redirect target: ${next.reason}`, {
+        url: rawUrl,
+        finalUrl: redirectUrl,
+      });
+    }
+
+    // 303 always downgrades to a bodyless GET; so does 301/302 when the
+    // method being replayed isn't already GET/HEAD. 307/308 preserve method
+    // and body untouched.
+    const downgradesToGet =
+      status === 303 ||
+      ((status === 301 || status === 302) && !["GET", "HEAD"].includes(hopMethod));
+    if (downgradesToGet) {
+      hopMethod = "GET";
+      hopBody = undefined;
+      for (const name of REQUEST_BODY_HEADER_NAMES) hopHeaders.delete(name);
+    }
+
+    // A hop that crosses origin (scheme, host, or port) loses any
+    // caller-supplied credential headers, so a redirect can't hand them to a
+    // host the caller never named.
+    if (new URL(currentUrl).origin !== new URL(redirectUrl).origin) {
+      for (const name of CROSS_ORIGIN_STRIP_HEADER_NAMES) hopHeaders.delete(name);
+    }
+
+    target = next;
   }
 
   return failure("too_many_redirects", "too many redirects", { url: rawUrl });

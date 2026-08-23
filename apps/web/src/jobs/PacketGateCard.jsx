@@ -116,7 +116,7 @@ export function PacketGateCard({ verdict, busy, onEvaluate, onCoach, coachBusy }
         </>
       ) : (
         <p className="field__hint">
-          Not evaluated yet. Run the packet gate to check fit and comp before generating documents.
+          Not evaluated yet. Evaluate this job to check fit and comp before generating documents.
         </p>
       )}
     </Card>

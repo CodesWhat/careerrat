@@ -121,7 +121,7 @@ nurse, a driver, and an engineer each bring their own config.
   BATNA framing, and multi-round sequencing across the written (`email-comms`) and
   live (`interview-prep`) channels, anchored to market benchmarks and never
   fabricating an offer, number, or deadline.
-- **Deterministic source foundation** — all 73 public-network adapters from the pinned
+- **Deterministic source foundation** — all 77 public-network adapters from the pinned
   Career Ops provider snapshot run through CareerRat's shared scanner boundary, including
   company ATS APIs, broad public APIs/RSS, regional boards, and niche sources. The parity
   manifest records the one intentional exclusion: `local-parser`, which executes arbitrary
@@ -310,13 +310,15 @@ nurse, a driver, and an engineer each bring their own config.
   a fictional demo candidate through the installed AI CLI, so malformed AI output is caught
   before it reaches a real job seeker mid-search.
 
-## Release status (v0.12.2, updated August 22, 2026)
+## Release status (v0.13.0, updated August 23, 2026)
 
-**v0.12.2 is the current release**, the second same-day patch on v0.12.0: it
-rewrites careerrat.com to lead with the Mac chat app everywhere, with the AI
-underneath framed as bring-your-own and the app screenshots in a flat framed
-window (#194), on top of v0.12.1's Mac-first install reframe of the site, the
-README, and the docs (#190, #191). Since v0.11.0 the repo runs the strict flow:
+**v0.13.0 is the current release.** It closes the below-cut remainder from the
+v0.12 whole-app review (#180, fixed by #197), fixes the regressions a fresh full-surface UX
+audit confirmed, led by the ask bar dock being invisible on phone-sized
+viewports (#198), rolls the vendored career-ops providers to the latest
+upstream pin and routes every outbound sweep request through the SSRF guard
+(#199), and adopts the four remaining deferred providers, bringing the
+implemented public inventory to 77 (#200). Since v0.11.0 the repo runs the strict flow:
 feature PRs land on the active dev branch (`dev/v0.13` for this cycle), `main`
 advances only through a promotion merge immediately before each cut, and the tag
 fires the whole pipeline — `desktop-release.yml` builds, signs, notarizes, and
@@ -325,7 +327,7 @@ tap's own cask updater. `publish.yml` fires on a published GitHub Release, not
 on a tag push, so tagging alone is always safe. `CHANGELOG.md` at the repo root
 is the per-release record. The v0.12 cycle closed with a whole-app review pass:
 26 confirmed findings, the top 15 fixed across four lanes (#181 through #184),
-and the below-cut remainder tracked in #180.
+and the below-cut remainder closed by #197 in v0.13.0.
 
 Version drift now has a guard. `tests/release-consistency.test.mjs` checks that
 `package.json`, `apps/desktop/package.json`, and the newest `CHANGELOG.md`
@@ -370,8 +372,12 @@ through #145) came out of the August 20 queue and are recorded lane by lane unde
 [The queue](#the-queue-opened-august-20-2026), since what each one turned out to be
 matters more than that it merged.
 
-**No issues are open.** The only number on the list is Renovate's Dependency Dashboard
-(#11), which is permanent by design and is not a task.
+Three issues are open, all accounted for: #180 holds the below-cut remainder of the
+v0.12 whole-app review (its fixes merged in #197 and it closes with the v0.13.0
+promotion), #148 tracks the star
+chart's one leftover limitation (the shared refresh workflow can't push to a
+PR-required dev branch; the adoption itself landed in #169/#187/#188), and #11 is
+Renovate's Dependency Dashboard, which is permanent by design and is not a task.
 
 - **#106, #112**: Playwright live harness, then custom combobox dropdowns in
   `playwright-ops`. The dropdown fix closes two real traps: an empty target value used
@@ -855,7 +861,7 @@ The current build order is:
    an open issue, not a blocker for this row. The remaining original-skill rows stay tracked in the
    linked audit.
 5. **Free/public source parity before AI (implemented and accepted)** — the pinned manifest
-   accounts for all 74 Career Ops provider modules: 73 public-network adapters run through the
+   accounts for all 78 Career Ops provider modules: 77 public-network adapters run through the
    deterministic registry, and `local-parser` is intentionally excluded with a safety reason.
    URL inference, explicit branded-host selection, normalized output, upstream conformance fixtures,
    scanner dedupe, full-JD hydration, and source provenance are wired. AI remains the fallback for

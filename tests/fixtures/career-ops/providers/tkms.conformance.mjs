@@ -133,6 +133,48 @@ try {
   if (tkJobs.length === 3 && tkCalls === 2 && tkSawSub === "tkms")
     pass("tkms.fetch() paginates via page/nextPage, dedups, sends subclient");
   else fail(`tkms.fetch() returned ${tkJobs.length} jobs after ${tkCalls} calls (sub=${tkSawSub})`);
+
+  // Title entity decoding (#2921) — an undecoded "R&amp;D Engineer" fails a
+  // user's positive title_filter keyword "r&d" and the posting is silently
+  // dropped, and a negative filter's veto never fires.
+  const { rows: entityRows } = parseQuery(
+    {
+      totalHits: 1,
+      nextPage: null,
+      jobs: [
+        { data: { id: "964694", title: "R&amp;D Engineer", city: "Kiel", country: "Germany" } },
+      ],
+    },
+    { origin: "https://jobs.tkmsgroup.com", locale: "en" }
+  );
+  if (entityRows[0]?.title === "R&D Engineer")
+    pass("tkms.parseQuery() decodes &amp; in the title (#2921)");
+  else fail(`tkms title decode = ${JSON.stringify(entityRows[0]?.title)}`);
+
+  // Named Latin-1 letter entities, not just &amp;. The expanded shared
+  // decoder handles these too, and case-sensitively (&Eacute; is É, not é).
+  const { rows: namedEntityRows } = parseQuery(
+    {
+      totalHits: 1,
+      nextPage: null,
+      jobs: [
+        {
+          data: {
+            id: "964695",
+            title: "Caf&eacute; Gen&egrave;ve vs CAF&Eacute; GEN&Egrave;VE",
+            city: "Kiel",
+            country: "Germany",
+          },
+        },
+      ],
+    },
+    { origin: "https://jobs.tkmsgroup.com", locale: "en" }
+  );
+  if (namedEntityRows[0]?.title === "Café Genève vs CAFÉ GENÈVE")
+    pass(
+      "tkms.parseQuery() decodes named Latin-1 entities case-sensitively (eacute/Eacute/egrave)"
+    );
+  else fail(`tkms named entity title decode = ${JSON.stringify(namedEntityRows[0]?.title)}`);
 } catch (e) {
   fail(`tkms provider tests crashed: ${e.message}`);
 }

@@ -66,6 +66,10 @@ const ACTION_POLL_TIMEOUT_MS = 5 * 60 * 1000;
 // a recruiter email, a status update), not a short query — see the M9
 // intake pipeline's own kind classifier for the same rough shape rule.
 const CAPTURE_MIN_LENGTH = 200;
+// Extra breathing room between the last line of page content and the dock's
+// own top edge, on top of the dock's measured footprint — see the
+// --askbar-clearance ResizeObserver effect below.
+const ASKBAR_CLEARANCE_BUFFER_PX = 24;
 
 // Domain-neutral, page-aware placeholders (DESIGN-SPEC.md's examples are
 // company-specific mockup copy — these are the generic equivalents the W3
@@ -392,6 +396,46 @@ export function AskBar() {
         // best-effort — an empty bar is still a safe fallback
       }
     })();
+  }, []);
+
+  // --askbar-clearance (UX audit 2026-08-23): .app-shell__content's own
+  // bottom padding reads this custom property instead of a flat number, so
+  // the dock's footprint (idle vs. a growing nudge card / turn card /
+  // multiline capture textarea) never buries in-flow page content — and,
+  // just as important, never over-reserves space when the dock is small.
+  // Measures via getBoundingClientRect() rather than the observed entry's
+  // own contentRect so the clearance folds in the dock's `bottom: clamp(...)`
+  // offset for free, with no separate formula to keep in sync with the CSS.
+  // No-ops (and app.css's own `var(--askbar-clearance, 120px)` fallback
+  // takes over) when the root node isn't there yet or ResizeObserver isn't
+  // available.
+  useEffect(() => {
+    const node = rootRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return undefined;
+    const root = document.documentElement;
+    function applyClearance() {
+      const rect = node.getBoundingClientRect();
+      // Above the 860px desktop cap (app.css's @media (min-height: 860.02px)
+      // rule), .app-shell itself is height/max-height: 860px and vertically
+      // centered, so window.innerHeight includes the letterbox below the
+      // shell's own bottom edge. Measure to the shell's bounding rect bottom
+      // when it's present so that letterbox never inflates the clearance;
+      // fall back to the viewport when the shell isn't in the tree (tests,
+      // or markup that doesn't nest AskBar under .app-shell).
+      const shell = node.closest(".app-shell");
+      const bottomEdge = shell ? shell.getBoundingClientRect().bottom : window.innerHeight;
+      const clearance = Math.max(0, bottomEdge - rect.top) + ASKBAR_CLEARANCE_BUFFER_PX;
+      root.style.setProperty("--askbar-clearance", `${Math.round(clearance)}px`);
+    }
+    const observer = new ResizeObserver(applyClearance);
+    observer.observe(node);
+    applyClearance();
+    window.addEventListener("resize", applyClearance);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", applyClearance);
+      root.style.removeProperty("--askbar-clearance");
+    };
   }, []);
 
   function availableRows() {

@@ -377,7 +377,7 @@ NEXT: awaiting confirmation
   companies never become an allowlist. Every non-excluded employer remains eligible when it
   matches the role, location, compensation-plausibility, and company-thesis signals.
 - **Scannable-ATS gate.** Only propose-to-add a company whose careers board resolves to one of
-  the 73 implemented public adapters in `careerrat searches --providers`. Recognized hosts infer
+  the 77 implemented public adapters in `careerrat searches --providers`. Recognized hosts infer
   automatically; branded hosts require a validated explicit provider. Unsupported companies are
   intel only because an unscannable board would silently never sweep.
 - **Comp screen stays internal.** Use `minimum_base` to filter implausible employers; never write

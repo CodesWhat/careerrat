@@ -137,8 +137,9 @@ function directProvider(url) {
   return inferProvider({ careers_url: url.toString() });
 }
 
-// Same CXS-endpoint regex as fetchWorkday in sourced-scanner.mjs — Workday
-// resolves off the hostname/site, not a path slug like the other providers.
+// Matches the CXS endpoint shape the workday vendor adapter documents
+// (career-ops/vendor/workday.mjs): Workday resolves off the hostname/site,
+// not a path slug like the other providers.
 const WORKDAY_URL_RE =
   /^https:\/\/([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?([^/?#]+)/;
 

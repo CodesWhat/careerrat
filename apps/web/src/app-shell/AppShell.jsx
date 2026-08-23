@@ -70,6 +70,9 @@ export function AppShell({ children }) {
         <div className="app-shell__main">
           <main className="app-shell__content">{children}</main>
         </div>
+        {/* Bottom scrim (UX audit 2026-08-23) — behind the dock, in front of
+            content; see .app-shell__scrim in app.css for why. */}
+        <div className="app-shell__scrim" aria-hidden="true" />
         <AskBar />
       </div>
     </DashboardProvider>

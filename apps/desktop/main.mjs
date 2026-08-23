@@ -730,15 +730,27 @@ app.whenReady().then(async () => {
   app.exit(1);
 });
 
+// macOS convention: closing the last window backgrounds the app (it stays
+// live in the dock) instead of quitting — the `activate` handler above
+// re-creates the window from the dock icon. Every other platform has no
+// such convention, so window-all-closed there really does mean quit. Either
+// way the actual teardown (stopWatching/closeClients/chatRuntime.shutdown)
+// only ever runs from the before-quit handler below, which fires on a real
+// quit trigger (Cmd+Q, Dock > Quit, app.quit()) independent of this handler
+// — staying alive here changes nothing about that cleanup path.
 app.on("window-all-closed", () => {
-  app.quit();
+  if (process.platform !== "darwin") {
+    app.quit();
+  }
 });
 
-// Shutdown: both window-all-closed (via app.quit() above) and any other quit
-// trigger (Cmd+Q, etc.) funnel through this one before-quit handler so
-// stopWatching()/closeClients()/chatRuntime.shutdown()/server.close() always
-// run exactly once before the process actually exits — no orphaned `claude`
-// CLI children left behind.
+// Shutdown: every real quit trigger (Cmd+Q, Dock > Quit, non-darwin
+// window-all-closed's app.quit() above) funnels through this one before-quit
+// handler so stopWatching()/closeClients()/chatRuntime.shutdown()/
+// server.close() always run exactly once before the process actually exits —
+// no orphaned `claude` CLI children left behind. Closing the last window on
+// darwin does NOT reach here (see window-all-closed above); the app and its
+// server stay alive in the dock until an actual quit.
 app.on("before-quit", (event) => {
   if (shuttingDown) return;
   shuttingDown = true;

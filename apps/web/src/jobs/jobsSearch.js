@@ -88,7 +88,7 @@ async function pollManualSearchRun({
     if (Date.now() >= deadline) {
       setSearchRun?.(null);
       setSearchError?.(
-        "Search is still running in the background — reload the page later to see results."
+        "Search is still running in the background. Reload the page later to see results."
       );
       return { ok: false, timedOut: true };
     }
@@ -182,7 +182,7 @@ function describeAiWebSearchError(error) {
 // no use for "SEARCH_PROMPTS_NO_TARGETING" or a provider status code, only
 // somewhere to go fix it.
 const AI_SEARCH_PREP_ERROR =
-  "Couldn't figure out what to search for — finish your job preferences in Settings.";
+  "Couldn't figure out what to search for. Finish your job preferences in Settings.";
 
 // There is no per-prompt/Regenerate UI anymore (Scott, 2026-07-20: the old
 // "AI prompts (N)" button + modal meant nothing to a non-technical job
@@ -371,7 +371,7 @@ export async function runAiWebSearchLane({
   // run. Report it as a failure and skip refetch rather than quietly
   // clearing results/counts as if the search actually completed.
   if (!sawDone) {
-    const message = "Search ended unexpectedly — try again.";
+    const message = "Search ended unexpectedly. Try again.";
     setStatus?.("error");
     setError?.(message);
     return { ok: false, error: message };

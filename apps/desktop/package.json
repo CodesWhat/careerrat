@@ -1,6 +1,6 @@
 {
   "name": "@careerrat/desktop",
-  "version": "0.12.2",
+  "version": "0.13.0",
   "private": true,
   "type": "module",
   "description": "Thin Electron shell over the CareerRat local server (M5 paid-POC deliverable).",

@@ -2080,3 +2080,167 @@ test("candidateEvidenceMerge rejects residual placeholders and current_base toke
     );
   }
 });
+
+test("candidateEvidenceMerge rejects a claim carrying an own current_base key and persists nothing", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+
+  assert.throws(
+    () =>
+      candidateEvidenceMerge({
+        repoRoot,
+        claims: [
+          {
+            id: "comp-leak-claim",
+            claim: "Negotiated a strong offer.",
+            evidence: "Resume",
+            current_base: 185000,
+          },
+        ],
+      }),
+    (error) => {
+      assert.equal(error.code, "EVIDENCE_GUARD_REJECTED");
+      assert.equal(error.message, "evidence claim(s) refused by the honesty/privacy guard");
+      assert.equal(Array.isArray(error.errors), true);
+      assert.equal(error.errors.length, 1);
+      assert.equal(error.errors[0].id, "comp-leak-claim");
+      assert.match(error.errors[0].message, /current_base key/);
+      return true;
+    }
+  );
+
+  const db = openDb({ repoRoot });
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM candidate_evidence_claims").get().n, 0);
+});
+
+test("candidateEvidenceMerge rejects a malformed links/role_signals/forbidden_wording container (validation parity with evidence-writer)", () => {
+  for (const field of ["links", "role_signals", "forbidden_wording"]) {
+    assert.throws(
+      () =>
+        candidateEvidenceMerge({
+          claims: [
+            {
+              id: "malformed-container",
+              claim: "Shipped the onboarding flow",
+              evidence: "Resume",
+              [field]: "not-an-array",
+            },
+          ],
+        }),
+      (error) => {
+        assert.equal(error.code, "EVIDENCE_GUARD_REJECTED");
+        assert.equal(Array.isArray(error.errors), true);
+        assert.ok(
+          error.errors.some(
+            (e) => e.message.includes(`"${field}"`) && e.message.includes("must be an array")
+          ),
+          `expected a container error for ${field}`
+        );
+        return true;
+      }
+    );
+  }
+});
+
+test("candidateEvidenceMerge rejects non-string and empty/whitespace entries inside links/role_signals/forbidden_wording", () => {
+  for (const field of ["links", "role_signals", "forbidden_wording"]) {
+    assert.throws(
+      () =>
+        candidateEvidenceMerge({
+          claims: [
+            {
+              id: "bad-entries",
+              claim: "Shipped the onboarding flow",
+              evidence: "Resume",
+              [field]: [42],
+            },
+          ],
+        }),
+      (error) => {
+        assert.equal(error.code, "EVIDENCE_GUARD_REJECTED");
+        assert.ok(
+          error.errors.some((e) => e.message.includes(`${field}[0]`)),
+          `expected a non-string entry error for ${field}[0]`
+        );
+        return true;
+      }
+    );
+
+    assert.throws(
+      () =>
+        candidateEvidenceMerge({
+          claims: [
+            {
+              id: "blank-entry",
+              claim: "Shipped the onboarding flow",
+              evidence: "Resume",
+              [field]: ["   "],
+            },
+          ],
+        }),
+      (error) => {
+        assert.equal(error.code, "EVIDENCE_GUARD_REJECTED");
+        assert.ok(
+          error.errors.some((e) => e.message.includes(`${field}[0]`)),
+          `expected an empty/whitespace entry error for ${field}[0]`
+        );
+        return true;
+      }
+    );
+  }
+});
+
+test("candidateEvidenceMerge rejects placeholder residue inside links/role_signals/forbidden_wording", () => {
+  for (const field of ["links", "role_signals", "forbidden_wording"]) {
+    assert.throws(
+      () =>
+        candidateEvidenceMerge({
+          claims: [
+            {
+              id: "placeholder-array-field",
+              claim: "Shipped the onboarding flow",
+              evidence: "Resume",
+              [field]: ["Built [Company] integration"],
+            },
+          ],
+        }),
+      (error) => {
+        assert.equal(error.code, "EVIDENCE_GUARD_REJECTED");
+        assert.ok(
+          error.errors.some((e) => e.message.includes("unresolved placeholder")),
+          `expected a placeholder error for ${field}`
+        );
+        return true;
+      }
+    );
+  }
+});
+
+test("candidateEvidenceMerge accepts a well-formed claim with links/role_signals/forbidden_wording and persists all three arrays", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+
+  const result = candidateEvidenceMerge({
+    repoRoot,
+    claims: [
+      {
+        id: "well-formed-claim",
+        claim: "Shipped the onboarding flow end to end",
+        evidence: "Resume + project notes",
+        links: ["https://example.com/case-study"],
+        role_signals: ["self-serve onboarding"],
+        forbidden_wording: ["invented the architecture solo"],
+      },
+    ],
+  });
+
+  assert.equal(result.added, 1);
+  const config = candidateConfigGet({ repoRoot });
+  const stored = config.evidence.claims.find((c) => c.id === "well-formed-claim");
+  assert.ok(stored, "expected the well-formed claim to persist");
+  assert.deepEqual(stored.links, ["https://example.com/case-study"]);
+  assert.deepEqual(stored.role_signals, ["self-serve onboarding"]);
+  assert.deepEqual(stored.forbidden_wording, ["invented the architecture solo"]);
+});

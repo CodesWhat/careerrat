@@ -94,7 +94,7 @@ const TERMINAL_STAGES = new Set(["rejected", "withdrawn"]);
 
 const JOB_FUNNEL_STAGES = [
   { id: "sourced", label: "Sourced", color: "#B4B2A9", icon: "search" },
-  { id: "reviewed-hold", label: "Reviewed — hold", color: "#b08948", icon: "clock" },
+  { id: "reviewed-hold", label: "Reviewed: hold", color: "#b08948", icon: "clock" },
   { id: "manual-apply", label: "Manual apply needed", color: "#e8553d", icon: "alert" },
   { id: "applied", label: "Applied", color: "#9C998F", icon: "send" },
   { id: "screen", label: "Screen", color: "#E0A93B", icon: "chat" },
@@ -1540,7 +1540,7 @@ function buildStoryEnrichmentSteps(trackerData) {
       const lead = compactUiText(missing[0], 96);
       const more = missing.length - 1;
       const supportingText =
-        more > 0 ? `Story added — ${lead} (+${more} more)` : `Story added — ${lead}`;
+        more > 0 ? `Story added: ${lead} (+${more} more)` : `Story added: ${lead}`;
       return {
         title,
         company: "",
@@ -1622,7 +1622,7 @@ function focusAppContext(app) {
   const rawDossier = app?.artifacts?.interviewDossier || null;
   const hasDossier = Boolean(rawDossier?.markdown);
   const dossier = {
-    title: rawDossier?.title || `${company} — ${role}`,
+    title: rawDossier?.title || `${company} · ${role}`,
     subtitle: app?.interviewNote || `${company} · ${role}`,
     round: rawDossier?.round || "",
     generatedAt: rawDossier?.generatedAt || "",
@@ -1661,8 +1661,8 @@ function buildInterviewFocus(trackerData, now) {
   const meta =
     app.interviewNote ||
     (hasDossier
-      ? "Dossier ready — open to review prep context."
-      : "Interview scheduled — generate your prep dossier.");
+      ? "Dossier ready. Open to review prep context."
+      : "Interview scheduled. Generate your prep dossier.");
   return {
     kind: "interview",
     // The round the app has actually reached (typed conversations preferred) — e.g.
@@ -2605,7 +2605,6 @@ function buildCalendar(trackerData, { now = new Date(), calendarProviderStatus =
   const weeks = [0, 7, 14].map((offset) =>
     buildCalendarWeek(events, addDaysToIso(currentWeekStart, offset), todayIso, busyEvents)
   );
-  const currentWeek = weeks[0];
   const todayEvents = events.filter((event) => event.iso === todayIso);
   const rollingHorizonEnd = addDaysToIso(todayIso, CALENDAR_ROLLING_HORIZON_DAYS - 1);
   const rollingHorizonEvents = eventsBetween(events, todayIso, rollingHorizonEnd);
@@ -2616,11 +2615,22 @@ function buildCalendar(trackerData, { now = new Date(), calendarProviderStatus =
     .filter((event) => compareIsoDate(event.iso, todayIso) >= 0)
     .sort((a, b) => compareIsoDate(a.iso, b.iso))
     .slice(0, 6);
+  // The hero "This Week" stat mirrors the agenda's forward-looking "This week"
+  // bucket (apps/web/src/calendar/CalendarPage.jsx's bucketForIso: the two
+  // days after tomorrow through six days out), not the Monday-Sunday ISO week
+  // `weeks[0]` uses. On a Sunday, that ISO window is almost entirely
+  // the past, which read as contradicting the agenda's forward count in the
+  // 2026-08-23 UX audit.
+  const thisWeekStartIso = addDaysToIso(todayIso, 2);
+  const thisWeekEndIso = addDaysToIso(todayIso, 6);
+  const thisWeekEvents = eventsBetween(events, thisWeekStartIso, thisWeekEndIso).filter(
+    (event) => event.done !== true
+  );
   return {
     todayIso,
     currentWeekIndex: 0,
     metrics: {
-      thisWeek: currentWeek.events.length,
+      thisWeek: thisWeekEvents.length,
       interviews: rollingHorizonEvents.filter(
         (event) => event.kind === "interview" && event.done !== true
       ).length,
@@ -2634,6 +2644,16 @@ function buildCalendar(trackerData, { now = new Date(), calendarProviderStatus =
     },
     upcoming: {
       events: upcomingEvents,
+    },
+    // Canonical, uncapped source for the "This Week" hero metric above — also
+    // fed into CalendarPage's agenda pool (collectCalendarEvents) so the
+    // rendered "This week" row count always equals metrics.thisWeek. Without
+    // this, the agenda only sees today.events + the top-6 capped upcoming
+    // list + Mon-Fri-only week.days/week.events, so a >6-event week or a
+    // weekend event undercounts the agenda relative to the hero tile
+    // (2026-08-23 UX audit regression).
+    thisWeek: {
+      events: thisWeekEvents,
     },
     protectedPrep: buildCalendarProtectedPrep(events, todayIso),
     sync: buildCalendarSync(trackerData, calendarProviderStatus),
@@ -3216,11 +3236,11 @@ function buildStrategyReviewTrigger(bucket, reviewSignal = {}) {
   if (reviewed && meetsThreshold) {
     const waitNote =
       newOutcomes > 0
-        ? `${newOutcomes} new outcome${newOutcomes === 1 ? "" : "s"} since — re-review at ${STRATEGY_REVIEW_NEW_SIGNAL}.`
-        : "No new outcomes since — nothing new to retune on yet.";
+        ? `${newOutcomes} new outcome${newOutcomes === 1 ? "" : "s"} since the last review. Re-review at ${STRATEGY_REVIEW_NEW_SIGNAL}.`
+        : "No new outcomes since the last review. Nothing new to retune on yet.";
     return {
       ready: false,
-      title: "Strategy reviewed — watching for new signal",
+      title: "Strategy reviewed: watching for new signal",
       summary: `Reviewed ${reviewAgeLabel(daysSinceReview)}. ${waitNote}`,
       ctaLabel: "Review details",
       ctaAction: "jobs",
@@ -3269,7 +3289,7 @@ function buildReevaluationProgress(reevaluationData) {
   }
   const isDue = Boolean(due);
   const label = isDue
-    ? `${totalCurrent}/${totalThreshold} rejections — review due`
+    ? `${totalCurrent}/${totalThreshold} rejections: review due`
     : `${totalCurrent}/${totalThreshold} rejections since last review`;
   return { totalCurrent, totalThreshold, due: isDue, familyLines, label };
 }
@@ -3794,7 +3814,7 @@ function staleAction(row, sourceRecord = {}, communications = [], now = new Date
       state: "ghosted",
       label: "Ghosted",
       title: `Close the loop on ${row.company}`,
-      summary: `${row.company} has been silent for ${daysQuiet} days — past the ${STRATEGY_GHOSTED_AFTER_DAYS}-day ghosted line. Send a final nudge or archive it.`,
+      summary: `${row.company} has been silent for ${daysQuiet} days, past the ${STRATEGY_GHOSTED_AFTER_DAYS}-day ghosted line. Send a final nudge or archive it.`,
       meta: `${daysQuiet}d silent · ${row.stageGroupLabel}`,
       dueAt: latest,
       dueText: `${daysQuiet}d silent`,
@@ -3907,7 +3927,7 @@ function compRangeView(row, sourceRecord = {}, profileComp = {}) {
     marketLo: null,
     marketP50: null,
     marketHi: null,
-    basis: "No posted comp and no comparable roles yet — gather a number before deciding.",
+    basis: "No posted comp and no comparable roles yet. Gather a number before deciding.",
     confidence: "",
     sampleSize: 0,
   };
@@ -3921,8 +3941,8 @@ function missingCompAction(row, estimate) {
     label: "Comp",
     title: hasEstimate ? `Confirm comp for ${row.company}` : `Resolve comp for ${row.company}`,
     summary: hasEstimate
-      ? `No posted band. Best guess $${estimate.lowK}K–$${estimate.highK}K (mid $${estimate.midpointK}K) from ${estimate.sampleSize} comparable${estimate.sampleSize === 1 ? "" : "s"} — confirm before promoting.`
-      : "No posted comp and no comparable roles yet — gather a number before deciding.",
+      ? `No posted band. Best guess $${estimate.lowK}K–$${estimate.highK}K (mid $${estimate.midpointK}K) from ${estimate.sampleSize} comparable${estimate.sampleSize === 1 ? "" : "s"}. Confirm before promoting.`
+      : "No posted comp and no comparable roles yet. Gather a number before deciding.",
     meta: `${row.sourceLabel} · ${row.role}`,
     dueAt: "",
     dueText: hasEstimate ? "Confirm" : "Review",
@@ -4184,7 +4204,7 @@ function buildHealthBadge(ch) {
   if (!ch?.rating || ch.rating === "healthy") return null;
   const word = ch.rating === "risky" ? "Risky" : "Watch";
   const scope = ch.forFunction ? `${word} for ${ch.forFunction}` : word;
-  return { rating: ch.rating, label: word, title: `Company health: ${scope} — internal signal` };
+  return { rating: ch.rating, label: word, title: `Company health: ${scope} (internal signal)` };
 }
 
 // Short "Mon D" label for an artifact's <kind>GeneratedAt stamp

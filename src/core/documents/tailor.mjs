@@ -428,11 +428,16 @@ export function buildStructuredResumeMarkdown({
     sections.push(`## Skills\n\n${skillLines}`);
   }
 
-  // --- Education (only if the proposal supplied entries and honesty allows it) ---
+  // --- Education (only if the proposal supplied entries AND honesty opts in —
+  // add_education_section is opt-in everywhere else in the app (candidate-
+  // defaults.mjs, templates/honesty.example.yml, packet/generate.mjs's own
+  // honesty fallback all default it to false), so this must require === true,
+  // not merely "not explicitly false", or an absent/undefined honesty.education
+  // silently adds an Education section nobody opted into) ---
   if (
     Array.isArray(proposal.education) &&
     proposal.education.length > 0 &&
-    honesty?.education?.add_education_section !== false
+    honesty?.education?.add_education_section === true
   ) {
     sections.push(`## Education\n\n${proposal.education.map((entry) => `- ${entry}`).join("\n")}`);
   }

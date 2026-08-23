@@ -451,7 +451,7 @@ export async function runSourcedScan({
   for (const company of companies) {
     const result = await scanCompanies(
       { ...config, tracked_companies: [company] },
-      { fetchImpl, companyFilter: null }
+      { fetchImpl, resolveHost, companyFilter: null }
     );
     await acceptBatch(result, { kind: "company", label: company.name });
     if (write && !standaloneConfigMode && result.errors.length === 0) {
@@ -466,8 +466,8 @@ export async function runSourcedScan({
     const singleton = singleSearchSourceConfig(searchSources, task.source);
     const result =
       task.kind === "rss"
-        ? await scanSearchSources(singleton, { fetchImpl })
-        : await scanBoards(singleton, { fetchImpl });
+        ? await scanSearchSources(singleton, { fetchImpl, resolveHost })
+        : await scanBoards(singleton, { fetchImpl, resolveHost });
     await acceptBatch(result, {
       kind: task.kind,
       label: task.source.label || task.source.provider || task.kind,

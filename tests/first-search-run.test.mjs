@@ -22,6 +22,7 @@ import {
   startFirstSearchRun,
 } from "../src/core/onboarding/first-search-run.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
+import { buildWellfoundUrl } from "../src/core/providers/wellfound.mjs";
 
 const cleanupRoots = [];
 
@@ -298,6 +299,86 @@ test("prepareFirstSearchSources only re-syncs stored entries owned by the domain
     stored.find((source) => source.url === orphanedMarker.url),
     orphanedMarker,
     "a marked entry without a generated counterpart must stay untouched"
+  );
+});
+
+test('prepareFirstSearchSources reconciles a legacy machine-generated "AI engineer" RemoteVibeCodingJobs/Wellfound entry instead of keeping it forever', async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot);
+  // Override targeting with a title that produces a distinct slug/URL from the
+  // stale "AI engineer" literal below, so a survived legacy entry is
+  // distinguishable from a freshly regenerated one rather than coincidentally
+  // slugifying to the same URL.
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        { name: "Platform", priority: "primary", titles: ["Platform Reliability Engineer"] },
+      ],
+    },
+  });
+
+  const legacyRemoteVibeCodingJobs = {
+    provider: "RemoteVibeCodingJobs",
+    source_type: "url-query",
+    label: "Remote Vibe Coding Jobs",
+    query: "AI engineer",
+    rssUrl: "https://remotevibecodingjobs.com/feed.xml",
+    enabled: true,
+  };
+  const legacyWellfoundUrl = buildWellfoundUrl({ role: "AI engineer", remote: true });
+  const legacyWellfound = {
+    provider: "Wellfound",
+    source_type: "browser",
+    label: "Wellfound",
+    url: legacyWellfoundUrl,
+    enabled: true,
+  };
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      title_filter: {},
+      location_filter: null,
+      searches: [legacyRemoteVibeCodingJobs, legacyWellfound],
+      tracked_companies: [],
+      source_catalog: {},
+    },
+  });
+
+  const result = await prepareFirstSearchSources({ repoRoot, env: {} });
+
+  const stored = result.searchSources.searches;
+  assert.equal(
+    stored.some(
+      (source) => source.provider === "RemoteVibeCodingJobs" && source.query === "AI engineer"
+    ),
+    false,
+    "the legacy hardcoded RemoteVibeCodingJobs query must not survive the merge"
+  );
+  assert.equal(
+    stored.some((source) => source.provider === "Wellfound" && source.url === legacyWellfoundUrl),
+    false,
+    "the legacy hardcoded Wellfound URL must not survive the merge"
+  );
+  assert.equal(
+    stored.some(
+      (source) =>
+        source.provider === "RemoteVibeCodingJobs" &&
+        source.query === "Platform Reliability Engineer"
+    ),
+    true,
+    "the freshly generated title-derived RemoteVibeCodingJobs entry must take its place"
+  );
+  assert.equal(
+    stored.some(
+      (source) =>
+        source.provider === "Wellfound" &&
+        source.url === buildWellfoundUrl({ role: "Platform Reliability Engineer", remote: true })
+    ),
+    true,
+    "the freshly generated title-derived Wellfound entry must take its place"
   );
 });
 

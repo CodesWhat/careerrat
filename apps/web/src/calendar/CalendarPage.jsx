@@ -385,6 +385,12 @@ function collectCalendarEvents(calendar) {
   const events = [];
   if (Array.isArray(calendar?.today?.events)) events.push(...calendar.today.events);
   if (Array.isArray(calendar?.upcoming?.events)) events.push(...calendar.upcoming.events);
+  // Canonical, uncapped "This Week" collection (dashboard-data.js's
+  // buildCalendar) — the hero metric counts against this exact set, so it
+  // has to be in the agenda's pool too, or a >6-event week or a weekend
+  // event (excluded from the Mon-Fri-only week.days/week.events below) would
+  // undercount the agenda relative to the hero tile.
+  if (Array.isArray(calendar?.thisWeek?.events)) events.push(...calendar.thisWeek.events);
   if (Array.isArray(calendar?.weeks)) {
     calendar.weeks.forEach((week) => {
       if (Array.isArray(week?.events)) events.push(...week.events);

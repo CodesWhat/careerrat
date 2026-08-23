@@ -255,6 +255,36 @@ test("buildSearchSources: exactly one RemoteVibeCodingJobs entry with rssUrl whe
   );
 });
 
+test("buildSearchSources: no hardcoded tech literal — explicit tech domain with no titles configured yet omits the tech aggregators entirely", () => {
+  // domain-neutral rule: no personal/tech default hardcoded. An explicit tech
+  // domain with an empty role_buckets can't derive a real query, so the
+  // RemoteVibeCodingJobs/Wellfound aggregators must be skipped rather than
+  // falling back to a hardcoded "AI engineer" literal that would misrepresent
+  // any non-AI tech candidate (e.g. embedded, mobile, SRE).
+  const techProfileNoTitles = {
+    ...profile,
+    candidate: { ...profile.candidate, domain: "software engineering" },
+  };
+  const result = buildSearchSources({ role_buckets: [] }, techProfileNoTitles);
+
+  assert.equal(
+    result.searches.some((s) => s.provider === "RemoteVibeCodingJobs"),
+    false,
+    "RemoteVibeCodingJobs must not appear when no title can be derived"
+  );
+  assert.equal(
+    result.searches.some((s) => s.provider === "Wellfound"),
+    false,
+    "Wellfound must not appear when no title can be derived"
+  );
+  assert.ok(
+    !result.searches.some(
+      (s) => s.query === "AI engineer" || (s.url && s.url.includes("ai-engineer"))
+    ),
+    "no search entry may fall back to the hardcoded 'AI engineer' literal"
+  );
+});
+
 test("buildSearchSources: seeds broad public fallback plus tech boards for tech", () => {
   const result = buildSearchSources(targeting, {
     ...profile,
@@ -424,7 +454,7 @@ test("buildSearchSources: source_catalog has aggregators, ats, remote_boards", (
 
 test("buildSearchSources: source_catalog exposes all public Career Ops providers", () => {
   const result = buildSearchSources(targeting, profile);
-  assert.equal(result.source_catalog.deterministic_providers.length, 73);
+  assert.equal(result.source_catalog.deterministic_providers.length, 77);
   assert.ok(result.source_catalog.deterministic_providers.includes("bamboohr"));
   assert.ok(result.source_catalog.deterministic_providers.includes("workday"));
   assert.equal(result.source_catalog.deterministic_providers.includes("local-parser"), false);

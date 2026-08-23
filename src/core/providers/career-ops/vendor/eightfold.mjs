@@ -51,7 +51,7 @@ const DEFAULT_MAX_PAGES = 200;
 const MAX_PAGES_CAP = 1000;
 // Same-host pacing between pages inside one tenant's own pagination loop.
 // Eightfold's edge rate-limits bursts, and a 616-job board is 62 requests.
-const INTER_PAGE_DELAY_MS = 150;
+const INTER_PAGE_DELAY_MS = 250;
 
 const RETRY_POLICY = { retries: 3, baseDelayMs: 500, maxDelayMs: 8_000 };
 
@@ -70,7 +70,7 @@ function assertEightfoldUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`eightfold: URL must use HTTPS: ${url}`);
   if (!EIGHTFOLD_HOST_RE.test(parsed.hostname)) {
-    throw new Error(`eightfold: untrusted hostname "${parsed.hostname}". Must match *.eightfold.ai`);
+    throw new Error(`eightfold: untrusted hostname "${parsed.hostname}" — must match *.eightfold.ai`);
   }
   return url;
 }
@@ -317,7 +317,7 @@ export default {
     }
 
     if (total !== null && all.length < total && maxPages * PAGE_SIZE < total) {
-      console.error(`⚠️  eightfold: ${entry.name} truncated at max_pages=${maxPages} (${all.length} of ${total} jobs). Raise max_pages on this entry for more`);
+      console.error(`⚠️  eightfold: ${entry.name} truncated at max_pages=${maxPages} (${all.length} of ${total} jobs) — raise max_pages on this entry for more`);
     }
 
     return all;
