@@ -4807,6 +4807,15 @@ describe("AskBar — deep-ingest dock", () => {
     expect(textOf(cta)).toBe("Start deep ingest");
   });
 
+  it("stays hidden on the deep-ingest page itself — the nudge would tell a user mid-wizard to go start it", () => {
+    dashboardContext.useDashboardSnapshot.mockReturnValue({
+      setup: { readiness: { deep_ingest_complete: false } },
+    });
+    routerState.pathname = "/deep-ingest";
+    const tree = render();
+    expect(byClass(tree, "ask-bar__nudge")).toBeFalsy();
+  });
+
   it("dismissing the dock hides it on the next render", () => {
     dashboardContext.useDashboardSnapshot.mockReturnValue({
       setup: { readiness: { deep_ingest_complete: false } },

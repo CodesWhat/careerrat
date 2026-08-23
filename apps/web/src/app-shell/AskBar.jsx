@@ -841,7 +841,7 @@ export function AskBar() {
         onDragLeave={() => setDragActive(false)}
         onDrop={handleDrop}
       >
-        {deepIngest.needed && !deepIngest.dismissed ? (
+        {deepIngest.needed && !deepIngest.dismissed && location.pathname !== "/deep-ingest" ? (
           <DeepIngestDock onDismiss={deepIngest.dismiss} />
         ) : null}
         <UpdateAvailableDock />

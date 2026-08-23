@@ -403,8 +403,8 @@ export function PeopleList({ emptyMessage = "", onOpen, people }) {
         ) : (
           <>
             <p>
-              Portal-only application threads (no-reply@workday/ashby/greenhouse) are intentionally
-              excluded; this fills in once a human recruiter or hiring-team thread is captured.
+              Recruiters and hiring managers you've actually talked to will show up here once you
+              capture a message from them. Automated application-portal emails don't count.
             </p>
             <Button onClick={focusAskBar} variant="secondary">
               Paste a message to capture a contact
@@ -452,7 +452,9 @@ function PersonCard({ card, onOpen }) {
           {card.stateLabel}
         </span>
         <span className="network__person-meta">
-          <span>{card.nextTouch}</span>
+          <span>
+            <span className="network__person-meta-label">Next:</span> {card.nextTouch}
+          </span>
           <span>
             <ClockIcon />
             {formatRelativeDate(card.latestAt)}

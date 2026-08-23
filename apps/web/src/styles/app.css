@@ -2250,8 +2250,8 @@ button {
 }
 
 /* Forces the "these links create an event" line onto its own row below the
-   .ics/Google/Outlook links, overriding the nowrap it would otherwise inherit
-   from .calendar__event-trailing. */
+   Download file/Google/Outlook links, overriding the nowrap it would
+   otherwise inherit from .calendar__event-trailing. */
 .calendar__export-hint {
   flex-basis: 100%;
   white-space: normal;
@@ -5027,6 +5027,13 @@ button {
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.onboarding-runtime__choice-detail summary {
+  cursor: pointer;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 750;
 }
 
 .onboarding-runtime__choice-action {
