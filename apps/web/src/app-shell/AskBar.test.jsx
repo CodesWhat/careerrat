@@ -5051,3 +5051,187 @@ describe("AskBar — mount-time rehydration (G-09)", () => {
     expect(textOf(byClass(tree, "ask-bar__answer"))).toBe("Live answer.");
   });
 });
+
+// ---------------------------------------------------------------------------
+// 10. --askbar-clearance (UX audit 2026-08-23) — the ResizeObserver effect
+// that keeps .app-shell__content's bottom padding matched to the dock's own
+// rendered footprint (see app.css's `.app-shell__content` and this file's
+// module-level comment on the effect itself). `rootRef` is the very first
+// `useRef` call in AskBar's body (before inputRef/fileInputRef/etc.), so it
+// is reliably `hooks.refs[0]` once a render has run — same "grab the ref
+// object directly" approach this harness has no other way to exercise a
+// DOM-measuring effect with, since renderAskBar() never attaches real DOM
+// nodes to the elements it returns.
+// ---------------------------------------------------------------------------
+
+class FakeResizeObserver {
+  constructor(cb) {
+    this.cb = cb;
+    FakeResizeObserver.instances.push(this);
+  }
+  observe(node) {
+    this.observed = node;
+  }
+  disconnect() {
+    this.disconnected = true;
+  }
+}
+FakeResizeObserver.instances = [];
+
+describe("AskBar — --askbar-clearance", () => {
+  let realResizeObserver;
+  let realWindow;
+
+  beforeEach(() => {
+    FakeResizeObserver.instances = [];
+    realResizeObserver = globalThis.ResizeObserver;
+    realWindow = globalThis.window;
+    globalThis.document.documentElement = {
+      style: { setProperty: vi.fn(), removeProperty: vi.fn() },
+    };
+  });
+
+  afterEach(() => {
+    globalThis.ResizeObserver = realResizeObserver;
+    globalThis.window = realWindow;
+  });
+
+  it("does nothing on mount before the dock node is attached (fallback CSS var stays in charge)", () => {
+    globalThis.ResizeObserver = FakeResizeObserver;
+    globalThis.window = {
+      innerHeight: 844,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    };
+
+    render(); // rootRef.current is still null — nothing for the effect to observe
+    runPendingEffects();
+
+    expect(FakeResizeObserver.instances).toHaveLength(0);
+    expect(document.documentElement.style.setProperty).not.toHaveBeenCalled();
+    // The guard returns before any cleanup is registered, so nothing ever
+    // clears the var either — app.css's `var(--askbar-clearance, 120px)`
+    // fallback is what's actually "in charge" here.
+    expect(document.documentElement.style.removeProperty).not.toHaveBeenCalled();
+  });
+
+  it("no-ops when ResizeObserver isn't available, even with a dock node attached", () => {
+    globalThis.ResizeObserver = undefined;
+    globalThis.window = {
+      innerHeight: 844,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    };
+
+    render();
+    hooks.refs[0].current = { getBoundingClientRect: () => ({ top: 700 }), closest: () => null };
+    runPendingEffects();
+
+    expect(document.documentElement.style.setProperty).not.toHaveBeenCalled();
+    expect(document.documentElement.style.removeProperty).not.toHaveBeenCalled();
+  });
+
+  it("observes the dock node and seeds --askbar-clearance from its rendered footprint", () => {
+    globalThis.ResizeObserver = FakeResizeObserver;
+    const addEventListener = vi.fn();
+    globalThis.window = { innerHeight: 844, addEventListener, removeEventListener: vi.fn() };
+
+    render();
+    const fakeNode = { getBoundingClientRect: () => ({ top: 700 }), closest: () => null };
+    hooks.refs[0].current = fakeNode;
+    runPendingEffects();
+
+    expect(FakeResizeObserver.instances).toHaveLength(1);
+    const observer = FakeResizeObserver.instances[0];
+    expect(observer.observed).toBe(fakeNode);
+    expect(addEventListener).toHaveBeenCalledWith("resize", expect.any(Function));
+    // (844 - 700) + the 24px buffer.
+    expect(document.documentElement.style.setProperty).toHaveBeenCalledWith(
+      "--askbar-clearance",
+      "168px"
+    );
+  });
+
+  it("re-measures live as the dock grows (a nudge/turn card expanding, a multiline capture textarea)", () => {
+    globalThis.ResizeObserver = FakeResizeObserver;
+    globalThis.window = {
+      innerHeight: 844,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    };
+
+    render();
+    const fakeNode = { getBoundingClientRect: () => ({ top: 700 }), closest: () => null };
+    hooks.refs[0].current = fakeNode;
+    runPendingEffects();
+
+    fakeNode.getBoundingClientRect = () => ({ top: 500 }); // the dock grew taller, so its top edge moved up
+    FakeResizeObserver.instances[0].cb();
+
+    // (844 - 500) + the 24px buffer.
+    expect(document.documentElement.style.setProperty).toHaveBeenLastCalledWith(
+      "--askbar-clearance",
+      "368px"
+    );
+  });
+
+  it("excludes the letterbox below a centered, capped .app-shell on a tall desktop viewport", () => {
+    // Above the 860px desktop cap (app.css's @media (min-height: 860.02px)),
+    // .app-shell is height/max-height: 860px and vertically centered, so a
+    // much taller viewport (1200px here) leaves empty space below the
+    // shell's own bottom edge. window.innerHeight - rect.top would count
+    // that empty letterbox as usable clearance; measuring to the shell's
+    // own bounding rect bottom instead must not.
+    globalThis.ResizeObserver = FakeResizeObserver;
+    globalThis.window = {
+      innerHeight: 1200,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    };
+
+    render();
+    const shell = { getBoundingClientRect: () => ({ bottom: 860 }) };
+    const fakeNode = {
+      getBoundingClientRect: () => ({ top: 700 }),
+      closest: (selector) => (selector === ".app-shell" ? shell : null),
+    };
+    hooks.refs[0].current = fakeNode;
+    runPendingEffects();
+
+    // (860 - 700) + the 24px buffer — NOT (1200 - 700) + 24 = 524px, which
+    // would include the ~340px letterbox below the capped shell.
+    expect(document.documentElement.style.setProperty).toHaveBeenCalledWith(
+      "--askbar-clearance",
+      "184px"
+    );
+  });
+
+  it("disconnects the observer and clears the CSS var on cleanup", () => {
+    globalThis.ResizeObserver = FakeResizeObserver;
+    const removeEventListener = vi.fn();
+    globalThis.window = {
+      innerHeight: 844,
+      addEventListener: vi.fn(),
+      removeEventListener,
+    };
+
+    render();
+    hooks.refs[0].current = { getBoundingClientRect: () => ({ top: 700 }), closest: () => null };
+    // This effect is registered last among AskBar's six useEffect calls, so
+    // on a first render it's the last entry runPendingEffects() would run —
+    // capture its index here (before that queue gets drained) so the
+    // cleanup it returns can be invoked directly below, the same way React
+    // itself would on unmount.
+    const myIndex = hooks.pending[hooks.pending.length - 1].index;
+    runPendingEffects();
+
+    const observer = FakeResizeObserver.instances[0];
+    hooks.effectCleanups[myIndex]();
+
+    expect(observer.disconnected).toBe(true);
+    expect(removeEventListener).toHaveBeenCalledWith("resize", expect.any(Function));
+    expect(document.documentElement.style.removeProperty).toHaveBeenCalledWith(
+      "--askbar-clearance"
+    );
+  });
+});
