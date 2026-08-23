@@ -2081,6 +2081,39 @@ test("candidateEvidenceMerge rejects residual placeholders and current_base toke
   }
 });
 
+test("candidateEvidenceMerge rejects a claim carrying an own current_base key and persists nothing", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+
+  assert.throws(
+    () =>
+      candidateEvidenceMerge({
+        repoRoot,
+        claims: [
+          {
+            id: "comp-leak-claim",
+            claim: "Negotiated a strong offer.",
+            evidence: "Resume",
+            current_base: 185000,
+          },
+        ],
+      }),
+    (error) => {
+      assert.equal(error.code, "EVIDENCE_GUARD_REJECTED");
+      assert.equal(error.message, "evidence claim(s) refused by the honesty/privacy guard");
+      assert.equal(Array.isArray(error.errors), true);
+      assert.equal(error.errors.length, 1);
+      assert.equal(error.errors[0].id, "comp-leak-claim");
+      assert.match(error.errors[0].message, /current_base key/);
+      return true;
+    }
+  );
+
+  const db = openDb({ repoRoot });
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM candidate_evidence_claims").get().n, 0);
+});
+
 test("candidateEvidenceMerge rejects a malformed links/role_signals/forbidden_wording container (validation parity with evidence-writer)", () => {
   for (const field of ["links", "role_signals", "forbidden_wording"]) {
     assert.throws(

@@ -1003,25 +1003,26 @@ async function fetchRss(source = {}, { fetchImpl = fetch, resolveHost, dispatche
   if (!url) return [];
   // guardedFetch has no timeoutMs of its own (see its own comment). The
   // caller supplies the deadline via init.signal, same as career-ops-registry's
-  // request(). Without one, a stalled DNS lookup or a server that never
-  // responds hangs this call forever instead of failing the source.
+  // request(). One try/finally (mirroring that request()'s own timer scoping)
+  // keeps the abort timer live across BOTH the guarded fetch AND the body
+  // read below, clearing it only once response.text() has settled. A two-
+  // finally split that cleared it right after guardedFetch resolved would
+  // stop covering a host that returns headers and then stalls the body,
+  // hanging that read forever instead of failing the source on deadline.
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), RSS_TIMEOUT_MS);
-  let guarded;
+  let close = null;
   try {
-    guarded = await guardedFetch(
+    const guarded = await guardedFetch(
       url,
       { signal: controller.signal },
       { fetchImpl, resolveHost, dispatcherFactory }
     );
-  } finally {
-    clearTimeout(timeout);
-  }
-  if (!guarded.ok) {
-    const blockedUrl = guarded.finalUrl && guarded.finalUrl !== url ? guarded.finalUrl : url;
-    throw new Error(`RSS request blocked for ${blockedUrl}: ${guarded.reason}`);
-  }
-  try {
+    if (!guarded.ok) {
+      const blockedUrl = guarded.finalUrl && guarded.finalUrl !== url ? guarded.finalUrl : url;
+      throw new Error(`RSS request blocked for ${blockedUrl}: ${guarded.reason}`);
+    }
+    close = guarded.close;
     if (!guarded.response.ok) {
       throw new Error(`${url} returned HTTP ${guarded.response.status}`);
     }
@@ -1029,7 +1030,8 @@ async function fetchRss(source = {}, { fetchImpl = fetch, resolveHost, dispatche
     const { items } = parseFeed(xml);
     return feedItemsToOffers(items, { source });
   } finally {
-    await guarded.close();
+    clearTimeout(timeout);
+    if (close) await close();
   }
 }
 

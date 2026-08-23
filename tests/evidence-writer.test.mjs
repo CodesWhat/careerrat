@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-
+import { validateClaimFields } from "../src/core/profile/evidence-validation.mjs";
 import {
   computeEvidenceWrite,
   loadEvidence,
@@ -78,6 +78,26 @@ test("validateClaims refuses the private current_base field token", () => {
   const v = validateClaims([goodClaim({ evidence: "Logged current_base in the notes." })]);
   assert.equal(v.ok, false);
   assert.ok(v.errors.some((e) => e.message.includes("current_base")));
+});
+
+test("validateClaims refuses a claim carrying an own current_base key", () => {
+  // Distinct from the value-leak test above: no `current_base` text anywhere in the
+  // probed fields, just a private comp figure sitting under its own top-level key
+  // (evidence.schema.json's claim items allow additionalProperties, so nothing else
+  // would catch this).
+  const v = validateClaims([goodClaim({ current_base: 185000 })]);
+  assert.equal(v.ok, false);
+  assert.ok(v.errors.some((e) => e.message.includes("current_base key")));
+});
+
+test("validateClaimFields rejects a claim with an own current_base property", () => {
+  const errors = validateClaimFields({ ...goodClaim(), current_base: 185000 }, 'claim "portal"');
+  assert.ok(errors.some((e) => e.message.includes("current_base key")));
+});
+
+test("validateClaimFields does not flag a claim with no current_base key", () => {
+  const errors = validateClaimFields(goodClaim(), 'claim "portal"');
+  assert.ok(!errors.some((e) => e.message.includes("current_base")));
 });
 
 test("validateClaims rejects links/role_signals/forbidden_wording that aren't arrays", () => {

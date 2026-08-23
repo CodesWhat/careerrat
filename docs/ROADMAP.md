@@ -313,7 +313,7 @@ nurse, a driver, and an engineer each bring their own config.
 ## Release status (v0.13.0, updated August 23, 2026)
 
 **v0.13.0 is the current release.** It closes the below-cut remainder from the
-v0.12 whole-app review (#197), fixes the regressions a fresh full-surface UX
+v0.12 whole-app review (#180, fixed by #197), fixes the regressions a fresh full-surface UX
 audit confirmed, led by the ask bar dock being invisible on phone-sized
 viewports (#198), rolls the vendored career-ops providers to the latest
 upstream pin and routes every outbound sweep request through the SSRF guard
