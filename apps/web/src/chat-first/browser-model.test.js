@@ -69,6 +69,9 @@ describe("chat-first browser model", () => {
         fit: 88,
         compStatus: "comp ✓",
         mode: "remote",
+        stage: "Sourced",
+        sourceLabel: "Greenhouse",
+        postedAt: "2026-08-22T12:00:00Z",
       },
       {
         id: "b",
@@ -77,6 +80,9 @@ describe("chat-first browser model", () => {
         fit: 78,
         compStatus: "comp pending",
         mode: "hybrid",
+        stage: "Review hold",
+        sourceLabel: "Lever",
+        postedAt: "2026-07-01T12:00:00Z",
       },
     ];
 
@@ -84,6 +90,13 @@ describe("chat-first browser model", () => {
       filterSearchJobs(jobs, { query: "remote", fit80: true, comp: true, remote: true }).map(
         (job) => job.id
       )
+    ).toEqual(["a"]);
+    expect(
+      filterSearchJobs(
+        jobs,
+        { stage: "sourced", source: "greenhouse", posted: "7d" },
+        new Date("2026-08-24T12:00:00Z")
+      ).map((job) => job.id)
     ).toEqual(["a"]);
     expect(
       filterFiles(

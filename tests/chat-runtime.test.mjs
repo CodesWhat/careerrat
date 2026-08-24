@@ -19,6 +19,7 @@ import {
   createChatRuntime,
   resolveAllowedChatSkills,
   resolveCandidateChatContext,
+  resolveDirectChatSkills,
 } from "../src/core/ai/chat-runtime.mjs";
 import {
   CHAT_SESSION_RUNTIME_TIMEOUT_MS,
@@ -33,6 +34,7 @@ import {
   candidateConfigPatch,
   candidateEvidenceMerge,
   candidateSetupInitialize,
+  skillChatThreadRead,
 } from "../src/core/db/verbs.mjs";
 
 // Forces resolveAIRoute() to resolve route.type === "installed" deterministically
@@ -269,24 +271,29 @@ function stripJavaScriptComments(source) {
 // resolveAllowedChatSkills
 // ---------------------------------------------------------------------------
 
-test("resolveAllowedChatSkills: defaults to onboarding, discovery, and intake chat skills when CAREERRAT_CHAT_SKILLS is unset", () => {
+test("resolveAllowedChatSkills: defaults only to the visible installed chat surfaces", () => {
   const repoRoot = tempRepoWithSkill([
     "ingest-profile",
     "research-boards",
-    "discover-companies",
-    "search-jobs",
-    "email-comms",
-    "track-outcomes",
+    "research-company",
+    "research-comp",
+    "company-health",
   ]);
   try {
     assert.deepEqual(resolveAllowedChatSkills({ repoRoot, env: {} }), [
       "ingest-profile",
       "research-boards",
-      "discover-companies",
-      "search-jobs",
-      "email-comms",
-      "track-outcomes",
+      "research-company",
+      "research-comp",
+      "company-health",
     ]);
+    assert.deepEqual(
+      resolveDirectChatSkills({
+        repoRoot,
+        env: { CAREERRAT_CHAT_SKILLS: "research-boards,discover-companies" },
+      }),
+      ["research-boards"]
+    );
   } finally {
     cleanup(repoRoot);
   }
@@ -447,6 +454,33 @@ test("createChatRuntime.startSession: rejects a skill outside the chat allowlist
   }
 });
 
+test("createChatRuntime.startSession: installed chat rejects search-jobs even when an env override opts it in", async () => {
+  const repoRoot = tempRepoWithSkill("search-jobs");
+  const env = { CAREERRAT_CHAT_SKILLS: "search-jobs" };
+  const binDir = selectFakeClaudeRuntime({ repoRoot, env });
+  let spawned = false;
+  const runtime = createChatRuntime({
+    repoRoot,
+    env,
+    runInstalledRuntimeStreamImpl: async () => {
+      spawned = true;
+      throw new Error("must not spawn");
+    },
+  });
+  try {
+    await assert.rejects(
+      runtime.startSession({ skill: "search-jobs", input: "search" }),
+      (error) =>
+        error.code === "SKILL_NOT_ALLOWED" && /dedicated CareerRat workflow/i.test(error.message)
+    );
+    assert.equal(spawned, false);
+  } finally {
+    runtime.shutdown();
+    cleanup(repoRoot);
+    cleanup(binDir);
+  }
+});
+
 test("createChatRuntime.startSession: rejects with NO_AI_ROUTE before touching the SDK loader", async () => {
   const repoRoot = tempRepoWithSkill("ingest-profile");
   let loadSdkCalled = false;
@@ -542,7 +576,7 @@ test("chat-runtime source resolves a local-read or network-only profile per skil
   assert.doesNotMatch(source, /\bRUNTIME_TOOLS\b/);
 });
 
-test("createChatRuntime.startSession: discovery gets network-only tools while onboarding keeps local reads", async () => {
+test("createChatRuntime.startSession: visible board research gets network-only tools while onboarding keeps local reads", async () => {
   const repoRoot = tempRepoWithSkill(["ingest-profile", "research-boards", "discover-companies"]);
   try {
     const seenToolsBySkill = new Map();
@@ -562,10 +596,9 @@ test("createChatRuntime.startSession: discovery gets network-only tools while on
     try {
       await chatRuntime.startSession({ skill: "ingest-profile" });
       await chatRuntime.startSession({ skill: "research-boards" });
-      await chatRuntime.startSession({ skill: "discover-companies" });
       assert.deepEqual(seenToolsBySkill.get("ingest-profile"), [...APP_SAFE_RUNTIME_TOOLS]);
       assert.deepEqual(seenToolsBySkill.get("research-boards"), [...CHAT_RUNTIME_TOOLS]);
-      assert.deepEqual(seenToolsBySkill.get("discover-companies"), [...CHAT_RUNTIME_TOOLS]);
+      assert.equal(seenToolsBySkill.has("discover-companies"), false);
       assert.equal(seenToolsBySkill.get("research-boards").includes("Read"), false);
       assert.equal(seenToolsBySkill.get("ingest-profile").includes("WebSearch"), false);
     } finally {
@@ -670,6 +703,149 @@ test("createChatRuntime: a replacement process waits on the durable unanswered a
       assert.match(resumedInputs[0], /What is your minimum base salary\?/);
       assert.match(resumedInputs[0], /\$200,000 base\./);
       assert.match(resumedInputs[0], /durable conversation/i);
+    } finally {
+      replacementRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime: visible research chats persist their typed handoff and reopen without duplicating the finished turn", async () => {
+  const repoRoot = tempRepoWithSkill("research-company");
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
+  candidateSetupInitialize({ repoRoot, env });
+  const typedReply =
+    'Research ready.\n\n```careerrat:discovery\n{"kind":"company_research_result","company":"Acme","slug":"acme","markdown":"research"}\n```';
+  try {
+    const firstRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => fakeStreamingSdk([turnMessagesWithReply(typedReply, 1)]),
+    });
+    const first = await firstRuntime.startSession({ skill: "research-company" });
+    await waitForPredicate(() => firstRuntime.getSession(first.chatId)?.state === "idle");
+    firstRuntime.shutdown();
+
+    const stored = skillChatThreadRead({ repoRoot, env, skill: "research-company" });
+    assert.equal(stored.messages.length, 1);
+    assert.equal(stored.messages[0].text, typedReply);
+    assert.equal(stored.thread.turnState, "awaiting-user");
+
+    const resumedInputs = [];
+    const replacementRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () =>
+        fakeStreamingSdk([turnMessagesWithReply("Continued.", 2)], {
+          onTurnInput: (input) => resumedInputs.push(input.message.content),
+        }),
+    });
+    try {
+      const resumed = await replacementRuntime.startSession({ skill: "research-company" });
+      assert.equal(resumed.state, "idle");
+      assert.equal(resumedInputs.length, 0);
+    } finally {
+      replacementRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime: visible research chats persist terminal runtime errors", async () => {
+  const repoRoot = tempRepoWithSkill("research-company");
+  const env = {};
+  candidateSetupInitialize({ repoRoot, env });
+  selectInstalledRuntime({ repoRoot, env });
+  try {
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => {
+        throw new Error("Agent SDK must not load for an installed route");
+      },
+      runInstalledRuntimeImpl: async () => {
+        throw new Error("Research timed out.");
+      },
+    });
+    try {
+      const started = await chatRuntime.startSession({ skill: "research-company" });
+      await waitForPredicate(() => chatRuntime.getSession(started.chatId)?.state === "idle");
+      const stored = skillChatThreadRead({ repoRoot, env, skill: "research-company" });
+      assert.equal(stored.messages.length, 1);
+      assert.equal(stored.messages[0].kind, "agent_error");
+      assert.equal(stored.messages[0].text, "Research timed out.");
+      assert.equal(stored.thread.turnState, "failed");
+    } finally {
+      chatRuntime.shutdown();
+    }
+
+    let resumedRuns = 0;
+    const replacementRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => {
+        throw new Error("Agent SDK must not load for an installed route");
+      },
+      runInstalledRuntimeImpl: async () => {
+        resumedRuns += 1;
+        return { text: "Retried.", model: null, usage: null };
+      },
+    });
+    try {
+      const resumed = await replacementRuntime.startSession({ skill: "research-company" });
+      assert.equal(resumed.state, "idle");
+      assert.equal(resumedRuns, 0, "reopening a failed thread must not start a hidden retry");
+    } finally {
+      replacementRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime: SDK pump failures persist once and reopen visibly without a hidden retry", async () => {
+  const repoRoot = tempRepoWithSkill("research-company");
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
+  candidateSetupInitialize({ repoRoot, env });
+  const failingSdk = {
+    query: () => {
+      async function* events() {
+        yield { type: "system", subtype: "init", session_id: "sdk-failed" };
+        throw new Error("SDK research connection failed.");
+      }
+      const stream = events();
+      stream.interrupt = async () => {};
+      stream.close = () => {};
+      return stream;
+    },
+  };
+  try {
+    const chatRuntime = createChatRuntime({ repoRoot, env, loadSdk: async () => failingSdk });
+    const started = await chatRuntime.startSession({ skill: "research-company" });
+    await waitForPredicate(() => chatRuntime.getSession(started.chatId)?.state === "closed");
+    chatRuntime.shutdown();
+
+    const stored = skillChatThreadRead({ repoRoot, env, skill: "research-company" });
+    assert.equal(stored.messages.length, 1);
+    assert.equal(stored.messages[0].kind, "agent_error");
+    assert.equal(stored.messages[0].text, "SDK research connection failed.");
+    assert.equal(stored.thread.turnState, "failed");
+
+    const resumedInputs = [];
+    const replacementRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () =>
+        fakeStreamingSdk([turnMessagesWithReply("Retried.", 2)], {
+          onTurnInput: (input) => resumedInputs.push(input.message.content),
+        }),
+    });
+    try {
+      const resumed = await replacementRuntime.startSession({ skill: "research-company" });
+      assert.equal(resumed.state, "idle");
+      assert.equal(resumedInputs.length, 0);
     } finally {
       replacementRuntime.shutdown();
     }
@@ -784,7 +960,7 @@ test("createChatRuntime: installed runtime replacement also waits and replays th
   }
 });
 
-test("createChatRuntime: first restart adopts an existing onboarding draft into the canonical thread", async () => {
+test("createChatRuntime: ignores an obsolete onboarding draft when the canonical thread is empty", async () => {
   const repoRoot = tempRepoWithSkill("ingest-profile");
   const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
   candidateSetupInitialize({ repoRoot, env });
@@ -801,26 +977,21 @@ test("createChatRuntime: first restart adopts an existing onboarding draft into 
     }),
     "utf8"
   );
-  const resumedInputs = [];
   const chatRuntime = createChatRuntime({
     repoRoot,
     env,
-    loadSdk: async () =>
-      fakeStreamingSdk([turnMessagesWithReply("Thanks, I have the full context.", 3)], {
-        onTurnInput: (input) => resumedInputs.push(input.message.content),
-      }),
+    loadSdk: async () => {
+      throw new Error("intentional SDK load failure");
+    },
   });
   try {
-    const resumed = await chatRuntime.startSession({ skill: "ingest-profile" });
-    assert.equal(resumed.state, "idle");
-    assert.equal(resumedInputs.length, 0);
-
-    chatRuntime.postMessage(resumed.chatId, "$200,000 base.");
-    await waitForPredicate(() => chatRuntime.getSession(resumed.chatId)?.state === "idle");
-    assert.equal(resumedInputs.length, 1);
-    assert.match(resumedInputs[0], /Which locations work for you\?/);
-    assert.match(resumedInputs[0], /Remote in the US works for me\./);
-    assert.match(resumedInputs[0], /What is your minimum base salary\?/);
+    await assert.rejects(
+      chatRuntime.startSession({ skill: "ingest-profile" }),
+      /intentional SDK load failure/
+    );
+    const db = openDb({ repoRoot, env });
+    assert.equal(db.prepare("SELECT count(*) AS count FROM skill_chat_threads").get().count, 0);
+    assert.equal(db.prepare("SELECT count(*) AS count FROM skill_chat_messages").get().count, 0);
   } finally {
     chatRuntime.shutdown();
     cleanup(repoRoot);
@@ -933,137 +1104,6 @@ test("createChatRuntime: a mid-turn throw (not our own abort) closes the session
       const lastChatState = events.filter((e) => e.type === "chat_state").pop();
       assert.equal(lastChatState.data.state, "closed");
       assert.equal(lastChatState.data.reason, "error");
-    } finally {
-      chatRuntime.shutdown();
-    }
-  } finally {
-    cleanup(repoRoot);
-  }
-});
-
-// ---------------------------------------------------------------------------
-// onClose — the M10 Lane-C completion-loop hook (intake-route.mjs's
-// executeLaneC registers one of these per confirmed intake item so a chat
-// session's terminal transition can map to an intake done/error outcome).
-// ---------------------------------------------------------------------------
-
-test("createChatRuntime.onClose: fires with {chatId, reason, lastError:null} on a user-initiated close", async () => {
-  const repoRoot = tempRepoWithSkill("ingest-profile");
-  try {
-    const chatRuntime = createChatRuntime({
-      repoRoot,
-      env: { ANTHROPIC_API_KEY: "sk-ant-test" },
-      loadSdk: async () => fakeStreamingSdk([turnMessages(1)]),
-    });
-    try {
-      const { chatId } = await chatRuntime.startSession({ skill: "ingest-profile" });
-      await waitForPredicate(() => chatRuntime.getSession(chatId)?.state === "idle");
-
-      let payload = null;
-      chatRuntime.onClose(chatId, (p) => {
-        payload = p;
-      });
-      chatRuntime.closeSession(chatId, "closed");
-
-      assert.deepEqual(payload, { chatId, reason: "closed", lastError: null });
-    } finally {
-      chatRuntime.shutdown();
-    }
-  } finally {
-    cleanup(repoRoot);
-  }
-});
-
-test("createChatRuntime.onClose: an 'error' close carries the session's last error-event message as lastError", async () => {
-  const repoRoot = tempRepoWithSkill("ingest-profile");
-  try {
-    const chatRuntime = createChatRuntime({
-      repoRoot,
-      env: { ANTHROPIC_API_KEY: "sk-ant-test" },
-      loadSdk: async () => ({
-        query: () => {
-          async function* gen() {
-            yield { type: "system", subtype: "init", session_id: "s1" };
-            throw new Error("boom mid-turn");
-          }
-          const it = gen();
-          it.interrupt = async () => {};
-          it.close = () => {};
-          it.return = async () => ({ value: undefined, done: true });
-          return it;
-        },
-      }),
-    });
-    try {
-      const { chatId } = await chatRuntime.startSession({ skill: "ingest-profile" });
-      let payload = null;
-      chatRuntime.onClose(chatId, (p) => {
-        payload = p;
-      });
-      await waitForPredicate(() => chatRuntime.getSession(chatId)?.state === "closed");
-
-      assert.equal(payload.chatId, chatId);
-      assert.equal(payload.reason, "error");
-      assert.match(payload.lastError, /boom mid-turn/);
-    } finally {
-      chatRuntime.shutdown();
-    }
-  } finally {
-    cleanup(repoRoot);
-  }
-});
-
-test("createChatRuntime.onClose: a throwing callback never breaks the close path, and a second registered callback still fires", async () => {
-  const repoRoot = tempRepoWithSkill("ingest-profile");
-  try {
-    const chatRuntime = createChatRuntime({
-      repoRoot,
-      env: { ANTHROPIC_API_KEY: "sk-ant-test" },
-      loadSdk: async () => fakeStreamingSdk([turnMessages(1)]),
-    });
-    try {
-      const { chatId } = await chatRuntime.startSession({ skill: "ingest-profile" });
-      await waitForPredicate(() => chatRuntime.getSession(chatId)?.state === "idle");
-
-      let secondFired = false;
-      chatRuntime.onClose(chatId, () => {
-        throw new Error("listener blew up");
-      });
-      chatRuntime.onClose(chatId, () => {
-        secondFired = true;
-      });
-
-      assert.doesNotThrow(() => chatRuntime.closeSession(chatId, "closed"));
-      assert.equal(secondFired, true);
-      assert.equal(chatRuntime.getSession(chatId).state, "closed");
-    } finally {
-      chatRuntime.shutdown();
-    }
-  } finally {
-    cleanup(repoRoot);
-  }
-});
-
-test("createChatRuntime.onClose: never double-fires — a repeated close() call is a no-op per closeSessionInternal's idempotency guard", async () => {
-  const repoRoot = tempRepoWithSkill("ingest-profile");
-  try {
-    const chatRuntime = createChatRuntime({
-      repoRoot,
-      env: { ANTHROPIC_API_KEY: "sk-ant-test" },
-      loadSdk: async () => fakeStreamingSdk([turnMessages(1)]),
-    });
-    try {
-      const { chatId } = await chatRuntime.startSession({ skill: "ingest-profile" });
-      await waitForPredicate(() => chatRuntime.getSession(chatId)?.state === "idle");
-
-      let fireCount = 0;
-      chatRuntime.onClose(chatId, () => {
-        fireCount++;
-      });
-      chatRuntime.closeSession(chatId, "closed");
-      chatRuntime.closeSession(chatId, "closed"); // already closed — no-op
-
-      assert.equal(fireCount, 1);
     } finally {
       chatRuntime.shutdown();
     }
@@ -1277,6 +1317,13 @@ test("createChatRuntime.startSession (installed route): runs turns through the s
       await waitForPredicate(() => idleCount() >= 1);
       assert.equal(calls.length, 1);
       assert.equal(calls[0].runtime.id, "custom");
+      assert.deepEqual(calls[0].tools, ["Skill"]);
+      assert.equal(
+        calls[0].tools.some((tool) => ["Read", "Glob", "Grep"].includes(tool)),
+        false
+      );
+      assert.match(calls[0].prompt, /can only return its bounded model result/i);
+      assert.doesNotMatch(calls[0].prompt, /\.agents\/skills\/ingest-profile\/SKILL\.md/);
       assert.doesNotMatch(calls[0].prompt, /Reply 1/); // turn 1 has no prior transcript yet
       // Chat-appropriate closing instruction, never the one-shot
       // buildInstalledRuntimePrompt line — that line would tell the model to
@@ -1347,6 +1394,7 @@ test("createChatRuntime.startSession (installed route): threads skill + repoRoot
       assert.equal(calls[0].skill, "research-company");
       assert.equal(calls[0].repoRoot, repoRoot);
       assert.deepEqual(calls[0].tools, [...CHAT_RUNTIME_TOOLS]);
+      assert.match(calls[0].prompt, /Research is read-only.*visible app-owned action/i);
       // P0 regression: a live six-axis research turn over WebSearch/WebFetch
       // reliably exceeds runInstalledRuntime's ONE_SHOT_RUNTIME_TIMEOUT_MS
       // default (wave-4 packaged QA: two consecutive SSE-confirmed

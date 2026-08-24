@@ -1,10 +1,10 @@
 name: desktop-release
 
 # Fully automated desktop release pipeline. Pushing a tag `vX.Y.Z` builds the
-# macOS app, signs and notarizes the DMG, uploads it to that tag's GitHub
-# release, and flips the release from draft to published. Zero human action
-# once the tag is pushed and the one-time signing secrets are configured
-# (docs/RELEASE.md's "One-time CI signing setup").
+# macOS and Windows apps from the exact tag. The DMG is always signed and
+# notarized. Windows is attached only after SignPath returns a valid
+# Authenticode signature; until Foundation approval/configuration exists, the
+# unsigned installer remains a clearly labeled Actions-only QA artifact.
 #
 # The Homebrew cask is NOT updated from here. CodesWhat/homebrew-tap carries
 # its own update-careerrat-cask.yml (cron + dispatch) that watches the latest
@@ -21,16 +21,22 @@ name: desktop-release
 # other jobs as a job output / env var, never spliced directly into a `run:`
 # script body — that's the template-injection pattern zizmor flags.
 #
-# publish.yml already fires on `release: published`, so flipping the release
-# in `publish-release` below also triggers the npm publish. release-assets.yml
-# also fires on that event and re-confirms the .dmg is attached; by the time
-# it runs here the asset upload already happened, so it's a no-op detector.
+# Events created with a workflow's GITHUB_TOKEN do not start other workflows.
+# `publish-release` therefore dispatches publish.yml, release-assets.yml, and
+# sbom.yml explicitly after the release is published with its DMG attached,
+# then waits for all three runs and propagates any failure. GitHub makes
+# workflow_dispatch the explicit exception to that suppression, so this stays
+# automatic without a PAT or GitHub App credential.
 
 on:
   push:
     tags:
       - "v*.*.*"
   workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
 
 permissions: {}
 
@@ -74,12 +80,64 @@ jobs:
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
+  prepare-draft-release:
+    name: prepare draft release
+    needs: resolve-tag
+    runs-on: ubuntu-latest
+    outputs:
+      release-id: ${{ steps.draft-release.outputs.release-id }}
+    permissions:
+      contents: write # create or inspect the one immutable draft for this tag
+    env:
+      TAG: ${{ needs.resolve-tag.outputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Harden the runner (block all outbound calls except the allowlist)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+      - name: Create or reuse exactly one draft release
+        id: draft-release
+        run: |
+          set -euo pipefail
+          matches="$(gh api "repos/$REPO/releases" --paginate --slurp | jq -c --arg tag "$TAG" \
+            'add | [.[] | select(.tag_name==$tag)]')"
+          count="$(jq 'length' <<<"$matches")"
+          if [ "$count" -gt 1 ]; then
+            echo "::error::Found $count releases for tag $TAG; refusing to choose one."
+            exit 1
+          elif [ "$count" -eq 1 ]; then
+            if [ "$(jq -r '.[0].draft' <<<"$matches")" != "true" ]; then
+              echo "::error::Release $TAG is already published, not a draft; refusing to replace public assets."
+              exit 1
+            fi
+            echo "Draft release $TAG already exists."
+          else
+            gh release create "$TAG" --repo "$REPO" --draft --title "$TAG" --generate-notes \
+              --notes "Code signing policy: https://github.com/$REPO/blob/$TAG/docs/CODE_SIGNING_POLICY.md"
+          fi
+          final_matches="$(gh api "repos/$REPO/releases" --paginate --slurp | jq -c --arg tag "$TAG" \
+            'add | [.[] | select(.tag_name==$tag)]')"
+          if [ "$(jq 'length' <<<"$final_matches")" -ne 1 ] || \
+            [ "$(jq -r '.[0].draft' <<<"$final_matches")" != "true" ]; then
+            echo "::error::Release $TAG is not one exact draft after preparation."
+            exit 1
+          fi
+          release_id="$(jq -er '.[0].id | select(type == "number" and . > 0)' <<<"$final_matches")"
+          echo "release-id=$release_id" >> "$GITHUB_OUTPUT"
+
   build-notarize-upload:
     name: build, notarize, upload dmg
-    needs: resolve-tag
-    runs-on: macos-14
+    needs: [resolve-tag, prepare-draft-release]
+    # Pinned arm64 image. macos-14 entered deprecation on 2026-07-06 and can
+    # brown out before its 2026-11-02 retirement; macos-15 is its supported
+    # arm64 replacement and matches the package's arm64-only target.
+    runs-on: macos-15
     permissions:
-      contents: write
+      contents: write # create the draft release and upload its signed DMG
     # GH_TOKEN is deliberately NOT job-level env here: electron-builder
     # auto-activates its own GitHub publishing whenever it sees GH_TOKEN or
     # GITHUB_TOKEN (app-builder-lib PublishManager), then fails trying to
@@ -87,11 +145,6 @@ jobs:
     # it, and the electron-builder build never does.
     env:
       TAG: ${{ needs.resolve-tag.outputs.tag }}
-      CSC_LINK: ${{ secrets.CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
     steps:
       - name: Harden the runner (audit all outbound calls)
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
@@ -119,7 +172,28 @@ jobs:
           # poisoned shared dependency cache must never be able to reach it.
           # Same fix as publish.yml's setup-node step.
           package-manager-cache: false
+      - name: Assert the tag matches the desktop package version
+        # release-upload.mjs derives its upload target from package.json, not
+        # from the pushed tag. If the two diverge, the upload would clobber a
+        # different release's assets; refuse before the expensive build runs.
+        run: |
+          set -euo pipefail
+          pkg_tag="v$(node -p "require('./apps/desktop/package.json').version")"
+          if [ "$pkg_tag" != "$TAG" ]; then
+            echo "::error::Tag $TAG does not match apps/desktop/package.json ($pkg_tag); refusing to build."
+            exit 1
+          fi
+      - name: Install dependencies
+        run: npm ci
+      - name: Build and stage the app without signing credentials
+        run: npm run app:build && npm --workspace apps/desktop run stage
       - name: Verify required signing and notarization secrets are set
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
           set -euo pipefail
           missing=()
@@ -134,48 +208,16 @@ jobs:
             exit 1
           fi
           echo "Required signing and notarization secrets are present."
-      - name: Ensure a GitHub release exists for the tag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # List-API lookup, not `gh release view`: drafts aren't addressable
-        # by tag and gh's fallback varies by version. Refuses to pile a
-        # second draft onto a tag that somehow already has two.
-        # `--slurp` piped to the real jq, not gh's `--jq`: gh applies `--jq`
-        # once per page, so an aggregate filter like `length` counts one page
-        # at a time past 100 releases (and `--slurp` can't combine with
-        # gh's `--jq` at all). jq's `--arg` also keeps the tag out of the
-        # filter text.
-        run: |
-          set -euo pipefail
-          count="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --slurp | jq --arg tag "$TAG" \
-            'add | [.[] | select(.tag_name==$tag)] | length')"
-          if [ "$count" -gt 1 ]; then
-            echo "::error::Found $count releases for tag $TAG; refusing to add another."
-            exit 1
-          elif [ "$count" -eq 1 ]; then
-            echo "Release $TAG already exists."
-          else
-            echo "No release found for $TAG; creating a draft."
-            gh release create "$TAG" --draft --title "$TAG" --generate-notes
-          fi
       - name: Write the App Store Connect API key to a runner-temp file
+        id: apple-key
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
         run: |
           set -euo pipefail
           key_path="$RUNNER_TEMP/apple-api-key.p8"
           printf '%s' "$APPLE_API_KEY" | base64 --decode > "$key_path"
           chmod 600 "$key_path"
-          echo "APPLE_API_KEY=$key_path" >> "$GITHUB_ENV"
-      - name: Assert the tag matches the desktop package version
-        # release-upload.mjs derives its upload target from package.json, not
-        # from the pushed tag. If the two diverge, the upload would clobber a
-        # different release's assets; refuse before the expensive build runs.
-        run: |
-          set -euo pipefail
-          pkg_tag="v$(node -p "require('./apps/desktop/package.json').version")"
-          if [ "$pkg_tag" != "$TAG" ]; then
-            echo "::error::Tag $TAG does not match apps/desktop/package.json ($pkg_tag); refusing to build."
-            exit 1
-          fi
+          echo "key-path=$key_path" >> "$GITHUB_OUTPUT"
       - name: Import the signing identity into a persistent keychain
         # electron-builder imports CSC_LINK into a temporary keychain and
         # deletes it when its process exits (removeKeychain is registered
@@ -184,6 +226,9 @@ jobs:
         # process, so the identity must also live in a keychain that
         # survives. This one does, and sits in the user search list so
         # codesign resolves the identity by name.
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           umask 077
@@ -199,36 +244,188 @@ jobs:
           # shellcheck disable=SC2086
           security list-keychains -d user -s "$keychain" $existing
           rm -f "$RUNNER_TEMP/signing-cert.p12"
-      - name: Install dependencies
-        run: npm ci
-      - name: Build, sign, notarize, staple, and verify the desktop release
-        run: npm run desktop:dist
+      - name: Build and notarize the app
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ steps.apple-key.outputs.key-path }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: npm --workspace apps/desktop run package:mac
+      - name: Sign, notarize, and staple the DMG
+        env:
+          APPLE_API_KEY: ${{ steps.apple-key.outputs.key-path }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: npm --workspace apps/desktop run release:dmg
+      - name: Remove signing material from the runner
+        if: ${{ always() }}
+        run: |
+          rm -f "$RUNNER_TEMP/apple-api-key.p8"
+          rm -f "$RUNNER_TEMP/signing-cert.p12"
+          security delete-keychain "$RUNNER_TEMP/desktop-release.keychain-db" 2>/dev/null || true
+      - name: Verify the signed and notarized release
+        run: npm --workspace apps/desktop run verify:release
+      - name: Launch the exact signed packaged app
+        run: npm --workspace apps/desktop run verify:packaged
       - name: Upload the dmg to the release
         env:
+          CAREERRAT_RELEASE_ID: ${{ needs.prepare-draft-release.outputs.release-id }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm --workspace apps/desktop run release:upload
 
+  build-windows-upload:
+    name: build, verify, and conditionally sign Windows
+    needs: [resolve-tag, prepare-draft-release]
+    runs-on: windows-latest
+    permissions:
+      actions: read # submit the workflow artifact id to the pinned SignPath action
+      contents: write # attach only the Authenticode-verified result to the draft
+    outputs:
+      published: ${{ steps.windows-result.outputs.published }}
+    env:
+      EXPECTED_RELEASE_ID: ${{ needs.prepare-draft-release.outputs.release-id }}
+      TAG: ${{ needs.resolve-tag.outputs.tag }}
+      VERSION: ${{ needs.resolve-tag.outputs.tag }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Harden the runner (audit dependency, browser, and signing endpoints)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve-tag.outputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Install dependencies
+        run: npm ci
+      - name: Assert the tag matches the desktop package version
+        shell: pwsh
+        run: |
+          $expected = "v$((Get-Content apps/desktop/package.json | ConvertFrom-Json).version)"
+          if ($env:TAG -ne $expected) { throw "Tag $env:TAG does not match $expected" }
+          "VERSION=$($env:TAG.TrimStart('v'))" | Out-File $env:GITHUB_ENV -Append
+      - name: Build the unsigned Windows x64 NSIS installer
+        run: npm run dist:windows --workspace apps/desktop
+      - name: Install, mount, export PDF, launch Chromium, and uninstall
+        run: npm run verify:windows --workspace apps/desktop
+      - name: Upload the unsigned QA input for provenance and optional signing
+        id: unsigned-windows
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: careerrat-${{ needs.resolve-tag.outputs.tag }}-windows-x64-unsigned-qa
+          path: apps/desktop/dist/CareerRat-*-win-x64-Setup.exe
+          if-no-files-found: error
+          retention-days: 14
+      - name: Submit the installer to SignPath Foundation
+        id: sign-windows
+        if: ${{ vars.SIGNPATH_ENABLED == 'true' }}
+        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_CREDENTIAL }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.unsigned-windows.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: apps/desktop/dist/signpath-signed
+      - name: Verify the signed Windows installer
+        if: ${{ vars.SIGNPATH_ENABLED == 'true' }}
+        shell: pwsh
+        run: |
+          $expected = "CareerRat-$env:VERSION-win-x64-Setup.exe"
+          $signed = Get-ChildItem apps/desktop/dist/signpath-signed -Recurse -File -Filter $expected
+          if ($signed.Count -ne 1) { throw "Expected one signed $expected, found $($signed.Count)" }
+          $destination = Join-Path apps/desktop/dist $expected
+          Copy-Item $signed.FullName $destination -Force
+          $signature = Get-AuthenticodeSignature $destination
+          if ($signature.Status -ne 'Valid') { throw "Authenticode status is $($signature.Status)" }
+          if ($signature.SignerCertificate.Subject -notlike '*SignPath Foundation*') {
+            throw "Unexpected signer: $($signature.SignerCertificate.Subject)"
+          }
+          npm run verify:windows --workspace apps/desktop
+          $hash = (Get-FileHash $destination -Algorithm SHA256).Hash.ToLowerInvariant()
+          $checksum = "apps/desktop/dist/CareerRat-$env:VERSION-win-x64-SHA256.txt"
+          "$hash  $expected" | Set-Content $checksum -Encoding ascii
+      - name: Upload the verified signed Windows installer
+        id: signed-windows
+        if: ${{ vars.SIGNPATH_ENABLED == 'true' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $expected = "CareerRat-$env:VERSION-win-x64-Setup.exe"
+          $destination = "apps/desktop/dist/$expected"
+          $checksum = "apps/desktop/dist/CareerRat-$env:VERSION-win-x64-SHA256.txt"
+          if (-not (Test-Path $destination) -or -not (Test-Path $checksum)) {
+            throw "Verified signed Windows release assets are missing"
+          }
+          function Assert-DraftRelease {
+            $json = (& gh api "repos/$env:REPO/releases" --paginate --slurp | Out-String)
+            if ($LASTEXITCODE -ne 0) { throw "Could not revalidate release $env:TAG" }
+            $pages = ConvertFrom-Json -InputObject $json
+            $releases = @($pages | ForEach-Object { $_ })
+            $matches = @($releases | Where-Object { $_.tag_name -eq $env:TAG })
+            if ($matches.Count -ne 1) {
+              throw "Expected one release for $env:TAG, found $($matches.Count)"
+            }
+            $release = $matches[0]
+            if ($release.draft -ne $true) { throw "Release $env:TAG is no longer a draft" }
+            if ([string]$release.id -ne $env:EXPECTED_RELEASE_ID) {
+              throw "Release identity changed from $env:EXPECTED_RELEASE_ID to $($release.id)"
+            }
+          }
+          foreach ($asset in @($destination, $checksum)) {
+            Assert-DraftRelease
+            & gh release upload $env:TAG $asset --repo $env:REPO
+            if ($LASTEXITCODE -ne 0) { throw "Failed to upload $asset to draft $env:TAG" }
+          }
+      - name: Record Windows publication state
+        id: windows-result
+        shell: pwsh
+        env:
+          SIGNED_WINDOWS_OUTCOME: ${{ steps.signed-windows.outcome }}
+        run: |
+          if ($env:SIGNED_WINDOWS_OUTCOME -eq 'success') {
+            'published=true' | Out-File $env:GITHUB_OUTPUT -Append
+          } else {
+            'published=false' | Out-File $env:GITHUB_OUTPUT -Append
+            Write-Host 'SignPath is not configured yet. The unsigned installer remains an Actions-only QA artifact.'
+          }
+
   publish-release:
     name: publish release
-    needs: [resolve-tag, build-notarize-upload]
+    needs: [resolve-tag, prepare-draft-release, build-notarize-upload, build-windows-upload]
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # publish the gated release after the DMG upload
+      # Required only for the explicit workflow_dispatch calls below. GitHub
+      # suppresses release-event workflows when the publishing API call uses
+      # GITHUB_TOKEN, while workflow_dispatch is allowed to start them.
+      actions: write # dispatch the three post-release workflows
+      # gh run watch reads each dispatched run's check suite before returning
+      # its final exit status to this job.
+      checks: read # propagate each dispatched workflow's final check status
     env:
       TAG: ${{ needs.resolve-tag.outputs.tag }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       REPO: ${{ github.repository }}
+      EXPECTED_RELEASE_ID: ${{ needs.prepare-draft-release.outputs.release-id }}
+      WINDOWS_PUBLISHED: ${{ needs.build-windows-upload.outputs.published }}
     steps:
       - name: Harden the runner (block all outbound calls except the allowlist)
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: block
-          # This job only calls `gh api repos/.../releases` (list + PATCH);
-          # observed on run 32487926861 (same gh-to-api.github.com pattern
-          # captured on the resolve-tag job across runs 32487926861 and
-          # 32487059880). This job's own audit trace didn't capture a
-          # discrete endpoint-called event, but it runs the identical `gh
-          # api` tooling against the same host.
+          # Release lookup/publication plus workflow dispatch and child-run
+          # status checks all use GitHub's API through gh. The release calls
+          # were observed on run 32487926861; dispatch/watch adds API paths on
+          # the same host without widening the egress allowlist.
           allowed-endpoints: >
             api.github.com:443
       - name: Publish the release once the dmg asset is confirmed
@@ -252,11 +449,59 @@ jobs:
             echo "::error::Found $count releases for tag $TAG; refusing to guess which to publish."
             exit 1
           fi
-          release="$(jq '.[0]' <<<"$matches")"
+          listed_release_id="$(jq -er '.[0].id | select(type == "number" and . > 0)' <<<"$matches")"
+          if [ "$listed_release_id" != "$EXPECTED_RELEASE_ID" ]; then
+            echo "::error::Release identity changed from $EXPECTED_RELEASE_ID to $listed_release_id; refusing to publish."
+            exit 1
+          fi
+          release="$(gh api "repos/$REPO/releases/$EXPECTED_RELEASE_ID")"
+          if [ "$(jq -r '.tag_name' <<<"$release")" != "$TAG" ] || \
+            [ "$(jq -r '.id' <<<"$release")" != "$EXPECTED_RELEASE_ID" ]; then
+            echo "::error::Prepared release $EXPECTED_RELEASE_ID no longer resolves to $TAG."
+            exit 1
+          fi
+          if [ "$(jq -r '.draft' <<<"$release")" != "true" ]; then
+            echo "::error::Release $TAG is no longer the prepared draft; refusing to publish or dispatch."
+            exit 1
+          fi
           if ! jq -er '[.assets[].name | select(endswith(".dmg"))] | length > 0' <<<"$release" >/dev/null; then
             echo "::error::Release $TAG has no .dmg asset attached; refusing to publish."
             exit 1
           fi
-          release_id="$(jq -r '.id' <<<"$release")"
-          gh api -X PATCH "repos/$REPO/releases/$release_id" -F draft=false >/dev/null
-          echo "Published $TAG (release id $release_id)."
+          if [ "$WINDOWS_PUBLISHED" = "true" ] && \
+            ! jq -er '[.assets[].name | select(endswith(".exe"))] | length > 0' <<<"$release" >/dev/null; then
+            echo "::error::Windows signing succeeded but the release has no signed .exe; refusing to publish."
+            exit 1
+          fi
+          gh api -X PATCH "repos/$REPO/releases/$EXPECTED_RELEASE_ID" -F draft=false >/dev/null
+          echo "Published $TAG (release id $EXPECTED_RELEASE_ID)."
+      - name: Dispatch post-release publishing and verification
+        # GITHUB_TOKEN-created release events do not trigger workflows, but
+        # workflow_dispatch does. Pin every dispatch to the already-validated
+        # release tag so package, asset, and SBOM jobs read the same tree that
+        # produced the attached DMG.
+        run: |
+          set -euo pipefail
+          downstream_run_ids=()
+          for workflow in publish.yml release-assets.yml sbom.yml; do
+            dispatch="$(gh api -X POST -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/$REPO/actions/workflows/$workflow/dispatches" -f ref="$TAG" \
+              -F return_run_details=true)"
+            if ! run_id="$(jq -er '.workflow_run_id | select(type == "number" and . > 0)' <<<"$dispatch")"; then
+              echo "::error::GitHub accepted $workflow but returned no usable run identity."
+              exit 1
+            fi
+            downstream_run_ids+=("$run_id")
+            echo "Dispatched $workflow at $TAG as run $run_id."
+          done
+
+          downstream_failures=0
+          for run_id in "${downstream_run_ids[@]}"; do
+            if ! gh run watch "$run_id" --repo "$REPO" --compact --exit-status; then
+              downstream_failures=$((downstream_failures + 1))
+            fi
+          done
+          if [ "$downstream_failures" -gt 0 ]; then
+            echo "::error::$downstream_failures post-release workflow(s) failed."
+            exit 1
+          fi

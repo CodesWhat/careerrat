@@ -6,11 +6,11 @@
 // Unlike every verb in app.mjs/sourced.mjs/comm.mjs, these do NOT go through
 // verbs/shared.mjs's runVerb(): no meta.version/last_updated_at bump, no
 // exportToTracker() call after commit — confirming an intake item into a
-// real domain write (Lane A's appSetStatus, or whatever a Lane B/C skill
-// calls) is what bumps those, exactly as it already does today; intake's own
+// real domain write (Lane A's appSetStatus, a Lane B skill, or a Lane W intent)
+// is what bumps those, exactly as it already does today; intake's own
 // state machine (captured -> classifying -> proposed/needs_you -> confirmed
 // -> running -> done/error, plus the dismissed side branch) is invisible to
-// tracker.json and the legacy dashboard render by design.
+// tracker.json and the canonical recovery export by design.
 //
 // Activity logging is deliberately narrow: only intakeDecide's "confirm" path
 // logs ONE activity_events row (type: "system", the closest fit in
@@ -247,40 +247,4 @@ export function intakeList({ repoRoot, env, status, limit } = {}) {
 export function intakeOne({ repoRoot, env, id } = {}) {
   const db = requireDb({ repoRoot, env });
   return readItem(db, id);
-}
-
-// ---------------------------------------------------------------------------
-// reconcileOrphanedLaneCIntakeItems — boot-time cleanup for chat-runtime.mjs's
-// in-memory-only session lifetime (M10). chat-runtime sessions do NOT survive
-// a process restart (see that file's own header comment), so any intake item
-// left "running" with a Lane C dispatch from a PREVIOUS process lifetime is
-// orphaned by definition — its onClose() callback can never fire, because the
-// session it refers to no longer exists. Without this, such an item is stuck
-// "running" forever (IntakeCard.jsx's canDismiss/canReclassify both exclude
-// "running" — zero user-facing recovery today, per ROADMAP.md's carried gap).
-//
-// Call this ONCE, at server boot, before accepting traffic (see
-// tracker-dev.mjs's createDevServer()) — it protects both existing orphans
-// left over from before this feature shipped AND every future restart's
-// in-flight Lane C items.
-// ---------------------------------------------------------------------------
-export function reconcileOrphanedLaneCIntakeItems({ repoRoot, env } = {}) {
-  return runIntakeVerb({ repoRoot, env }, (db) => {
-    const rows = db
-      .prepare(
-        `SELECT id FROM ${TABLE} WHERE status = 'running' AND json_extract(data, '$.dispatch.lane') = 'C'`
-      )
-      .all();
-    const now = nowIso();
-    const reconciledIds = [];
-    for (const { id } of rows) {
-      const existing = requireItem(db, id);
-      const updated = { ...existing, status: "error", error: "interrupted by restart" };
-      delete updated.createdAt;
-      delete updated.updatedAt;
-      writeItem(db, id, updated, now);
-      reconciledIds.push(id);
-    }
-    return { reconciledIds };
-  });
 }

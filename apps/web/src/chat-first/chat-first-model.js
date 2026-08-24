@@ -1,3 +1,4 @@
+import { cleanAgentCopy } from "./agent-copy.js";
 import { buildLocationPolicy } from "./location-policy.js";
 
 const SUBMIT_POLICY = Object.freeze({
@@ -5,6 +6,8 @@ const SUBMIT_POLICY = Object.freeze({
   actionLabel: "Open form and submit",
   note: "Nothing sends until you press submit.",
 });
+
+import { buildSkillChatThreads } from "./skill-chat-model.js";
 
 function list(value) {
   return Array.isArray(value) ? value : [];
@@ -20,12 +23,28 @@ export function artifactEmoji(kind) {
 }
 
 function normalizeSearchRow(row, source) {
+  const compensationState = String(row?.evaluation?.compensation?.status || "").toLowerCase();
+  const compactComp = String(row?.comp || row?.base || "").trim();
+  const finitePresent = (value) =>
+    value !== null && value !== undefined && Number.isFinite(Number(value));
+  const hasResolvedComp =
+    finitePresent(row?.compMidpointK) ||
+    finitePresent(row?.baseK) ||
+    Boolean(compactComp && !/^(?:verify|unknown|pending|n\/a)$/i.test(compactComp));
+  const compStatus =
+    row?.compStatus ||
+    (compensationState === "clears-floor" ||
+    (hasResolvedComp && row?.actionState !== "missing-comp")
+      ? "comp ✓"
+      : compensationState === "below-floor"
+        ? "comp below floor"
+        : "comp pending");
   return {
     ...row,
     id: row?.id || row?.detailId || "",
     stage: row?.stage || row?.status || row?.location || "Needs triage",
     evaluationRequired: source === "sourced",
-    compStatus: row?.compStatus || "comp pending",
+    compStatus,
     source,
   };
 }
@@ -43,13 +62,15 @@ function titleCase(value, fallback = "In play") {
 function normalizeThread(thread, nextActionIds) {
   const last = list(thread?.messages).at(-1);
   const stage = titleCase(thread?.stage);
+  const lastText =
+    last?.role === "user" ? String(last?.text || "").trim() : cleanAgentCopy(last?.text);
   const communicationNeedsAction = list(thread?.communications).some((communication) =>
     ["needs-reply", "drafted", "blocked"].includes(String(communication?.status || ""))
   );
   return {
     ...thread,
     title: thread?.company || thread?.role || "Job conversation",
-    subtitle: last?.text || stage,
+    subtitle: lastText || stage,
     needsAction:
       Boolean(thread?.needsAction) ||
       nextActionIds.has(thread?.applicationId) ||
@@ -172,8 +193,13 @@ function pipelineOutcomeStageKey(row) {
 
 function reachedPipelineMilestone(row, milestone) {
   const stage = pipelineStageKey(row);
-  if (milestone === "applied") return true;
+  if (milestone === "applied") {
+    return !["", "application", "manual-apply", "prospect", "reviewed-hold", "sourced"].includes(
+      stage
+    );
+  }
   if (milestone === "heard-back") {
+    if (!reachedPipelineMilestone(row, "applied")) return false;
     if (
       row?.terminal &&
       !row?.terminalExitStage &&
@@ -312,7 +338,7 @@ function touchNeeds(items) {
   }));
 }
 
-function collapseSourcedDecisions(items) {
+function collapseSourcedDecisions(items, agentName) {
   const needs = list(items);
   const sourced = needs.filter((item) => item?.kind === "sourced-decision");
   if (sourced.length < 2) return needs;
@@ -333,7 +359,7 @@ function collapseSourcedDecisions(items) {
     sourceIds,
     items: sourced,
     title: `${sourceIds.length} qualified jobs are ready`,
-    detail: "Review them together before Paul prepares each application.",
+    detail: `Review them together before ${agentName} prepares each application.`,
     primaryLabel: `Apply to ${sourceIds.length} jobs`,
     secondaryLabel: "Review",
     tone: "plain",
@@ -341,7 +367,7 @@ function collapseSourcedDecisions(items) {
   return remaining;
 }
 
-function flattenPeople(network) {
+function flattenPeople(network, agentName) {
   const people = [];
   for (const company of list(network?.companies)) {
     for (const contact of list(company?.contacts)) {
@@ -358,7 +384,8 @@ function flattenPeople(network) {
         next: company.nextTouch || null,
         needsTouch: Boolean(company.nextTouch),
         actionLabel:
-          contact.actionLabel || (!company.applicationId && !company.nextTouch ? "Ask Paul" : null),
+          contact.actionLabel ||
+          (!company.applicationId && !company.nextTouch ? `Ask ${agentName}` : null),
       });
     }
   }
@@ -368,6 +395,7 @@ function flattenPeople(network) {
 export function buildChatFirstView(dashboardInput, runtimeInput) {
   const dashboard = dashboardInput || {};
   const runtime = runtimeInput || {};
+  const agentName = runtime.agentName || "Paul";
   const allThreads = list(runtime.jobThreads).length
     ? list(runtime.jobThreads)
     : list(runtime.threads);
@@ -384,40 +412,56 @@ export function buildChatFirstView(dashboardInput, runtimeInput) {
       ? list(runtime.archivedThreads)
       : allThreads.filter((thread) => thread.archived)
   ).map((thread) => normalizeThread(thread, nextActionIds));
-  const search = [
-    ...list(dashboard.sourcedRoles).map((row) => normalizeSearchRow(row, "sourced")),
-    ...list(dashboard.reviewHoldRoles).map((row) => normalizeSearchRow(row, "reviewed-hold")),
+  const dashboardSearchRows = list(dashboard.jobs?.rows).filter((row) => row?.source === "sourced");
+  const richSearchRows = new Map(dashboardSearchRows.map((row) => [String(row.id), row]));
+  const searchSeeds = [
+    ...list(dashboard.sourcedRoles).map((row) => ({ row, source: "sourced" })),
+    ...list(dashboard.reviewHoldRoles).map((row) => ({ row, source: "reviewed-hold" })),
   ];
+  const seenSearchIds = new Set();
+  const search = searchSeeds.length
+    ? searchSeeds.flatMap(({ row, source }) => {
+        const id = String(row?.id || row?.detailId || "");
+        if (seenSearchIds.has(id)) return [];
+        seenSearchIds.add(id);
+        return [normalizeSearchRow({ ...row, ...(richSearchRows.get(id) || {}) }, source)];
+      })
+    : dashboardSearchRows.map((row) => normalizeSearchRow(row, "sourced"));
   const pipelineRows = list(dashboard.jobs?.rows).filter((row) => row?.source !== "sourced");
   const rawFiles = list(dashboard.library?.cards).length
     ? list(dashboard.library.cards)
     : list(dashboard.library?.index);
   const files = [...rawFiles.map(normalizeFile), ...jobArtifactFiles(dashboard.jobs?.details)];
-  const people = flattenPeople(dashboard.network);
+  const people = flattenPeople(dashboard.network, agentName);
   const missions = list(runtime.missions);
   const gates = submitGates(missions);
   const hasCanonicalNeeds = list(runtime.needsYou).length > 0;
   const canonicalNeeds = hasCanonicalNeeds
     ? list(runtime.needsYou)
     : list(dashboard.allNextSteps).map(normalizeNextStep);
-  const needsYou = collapseSourcedDecisions([
-    ...gates,
-    ...canonicalNeeds.filter(
-      (item) =>
-        !gates.some((gate) => gate.applicationId && gate.applicationId === item.applicationId)
-    ),
-    ...(hasCanonicalNeeds ? [] : touchNeeds(runtime.touchDue)),
-  ]);
+  const needsYou = collapseSourcedDecisions(
+    [
+      ...gates,
+      ...canonicalNeeds.filter(
+        (item) =>
+          !gates.some((gate) => gate.applicationId && gate.applicationId === item.applicationId)
+      ),
+      ...(hasCanonicalNeeds ? [] : touchNeeds(runtime.touchDue)),
+    ],
+    agentName
+  );
 
   return {
-    agentName: runtime.agentName || "Paul",
+    agentName,
     candidateName: dashboard.settings?.profile?.candidate || "",
     locationPolicy: buildLocationPolicy(dashboard.settings?.profile?.location),
     mainThread: runtime.mainThread || { id: "workspace-main", messages: [] },
+    skillChats: buildSkillChatThreads(runtime.mainThread, runtime.skillChats),
     threads,
     archivedThreads,
     needsYou,
     deepIngestPrompt: runtime.deepIngestPrompt || { visible: false },
+    deepIngestThread: runtime.deepIngestThread || null,
     missions,
     activeMission:
       missions.find((mission) => mission.status === "running" || mission.status === "paused") ||
@@ -428,7 +472,7 @@ export function buildChatFirstView(dashboardInput, runtimeInput) {
     submitPolicy: SUBMIT_POLICY,
     counts: {
       search: search.length,
-      pipeline: dashboard.jobs?.visibleCount ?? pipelineRows.length,
+      pipeline: dashboard.stats?.inPlay ?? dashboard.jobs?.visibleCount ?? pipelineRows.length,
       files: files.length,
       people: people.length,
       touchDue: list(runtime.touchDue).length,
@@ -515,7 +559,8 @@ export function chatFirstReducer(state, action) {
       return {
         ...state,
         activeThread: action.id || "today",
-        activeApplicationId: action.id && action.id !== "today" ? action.id : null,
+        activeApplicationId:
+          action.id && !["today", "ingest"].includes(action.id) ? action.id : null,
         browse: false,
       };
     case "ingest.open":

@@ -97,3 +97,53 @@ describe("desktop smoke PDF renderer verification", () => {
     assert.deepEqual(result, { bytes: 15 });
   });
 });
+
+describe("desktop smoke browser automation verification", () => {
+  it("opens about:blank through the staged Playwright adapter and always cleans up", async () => {
+    assert.equal(typeof desktopSmoke.verifySmokeBrowserAutomation, "function");
+    const calls = [];
+
+    const result = await desktopSmoke.verifySmokeBrowserAutomation({
+      profileDir: "/tmp/careerrat-browser-smoke",
+      createOps: (options) => {
+        calls.push(["create", options]);
+        return {
+          openTab: async (input) => calls.push(["open", input]),
+          close: async () => calls.push(["close"]),
+        };
+      },
+      removeDir: (path) => calls.push(["remove", path]),
+    });
+
+    assert.deepEqual(result, { launched: true });
+    assert.deepEqual(calls, [
+      [
+        "create",
+        { profileDir: "/tmp/careerrat-browser-smoke", headless: true, channel: "chromium" },
+      ],
+      ["open", { url: "about:blank" }],
+      ["close"],
+      ["remove", "/tmp/careerrat-browser-smoke"],
+    ]);
+  });
+
+  it("closes the browser and removes its profile when launch verification fails", async () => {
+    const calls = [];
+
+    await assert.rejects(
+      desktopSmoke.verifySmokeBrowserAutomation({
+        profileDir: "/tmp/careerrat-browser-smoke-failure",
+        createOps: () => ({
+          openTab: async () => {
+            throw new Error("Chromium missing");
+          },
+          close: async () => calls.push("close"),
+        }),
+        removeDir: () => calls.push("remove"),
+      }),
+      /Chromium missing/
+    );
+
+    assert.deepEqual(calls, ["close", "remove"]);
+  });
+});

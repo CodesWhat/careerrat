@@ -29,12 +29,14 @@ export {
   candidateConfigPatch,
   candidateEvidenceMerge,
   candidateEvidenceRemoveOne,
+  candidateEvidenceReplace,
   candidateSetupInitialize,
 } from "./candidate.mjs";
 export {
   chatFirstStateFromDb,
   chatFirstStateGet,
   deepIngestPromptDismiss,
+  deepIngestThreadOpen,
   ensureJobThreadInDb,
   jobThreadMessageAppend,
   jobThreadSetArchived,
@@ -84,6 +86,7 @@ export {
   deepIngestLaneSetState,
   deepIngestProposalDecision,
   deepIngestProposalPut,
+  deepIngestScannedSourcePersist,
   deepIngestSourceCreate,
   deepIngestSourceGet,
   deepIngestSourceList,
@@ -97,7 +100,6 @@ export {
   intakeList,
   intakeOne,
   intakeUpdate,
-  reconcileOrphanedLaneCIntakeItems,
 } from "./intake.mjs";
 export {
   linkedinProposalBatchGet,
@@ -122,10 +124,10 @@ export {
 export { relationshipLeadSetStatus, relationshipLeadUpsertBatch } from "./relationship.mjs";
 export { ExportFailedError, kvGet, kvUpsert, NotFoundError } from "./shared.mjs";
 export {
+  skillChatDecisionSet,
   skillChatMessageAppend,
   skillChatThreadRead,
   skillChatThreadSetTurnState,
-  skillChatTranscriptAdopt,
 } from "./skill-chat.mjs";
 export { sourceWatermarkUpsert } from "./source.mjs";
 export {

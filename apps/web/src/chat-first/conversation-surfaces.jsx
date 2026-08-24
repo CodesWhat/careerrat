@@ -1,16 +1,29 @@
+import { resolvePersistedErrorCopy } from "../lib/errorCopy.js";
+import { cleanAgentCopy } from "./agent-copy.js";
 import { UploadIcon } from "./chat-first-icons.jsx";
 import { artifactEmoji } from "./chat-first-model.js";
+import { skillChatCompletionFor, skillChatDiscoveryPresentation } from "./skill-chat-model.js";
 import "./chat-first.css";
 
 const EMPTY_LIST = [];
 
+function jobLocationCopy(job) {
+  const location = String(job?.location || "").trim();
+  const mode = String(job?.mode || "").trim();
+  if (!mode) return location;
+  if (location.toLowerCase().includes(mode.toLowerCase())) return location;
+  const modeLabel = mode.replace(/\b\w/g, (letter) => letter.toUpperCase());
+  return [location, modeLabel].filter(Boolean).join(" · ");
+}
+
 function AgentBubble({ agentName = "Paul", children }) {
+  const copy = typeof children === "string" ? cleanAgentCopy(children) : children;
   return (
     <div className="chat-first-message chat-first-message--agent">
       <span className="chat-first-avatar" role="img" aria-label={agentName}>
         🐀
       </span>
-      <div className="chat-first-bubble">{children}</div>
+      <div className="chat-first-bubble">{copy}</div>
     </div>
   );
 }
@@ -133,7 +146,20 @@ export function MessageTranscript({
   agentName = "Paul",
   onArtifactAction,
   onMessageAction,
+  onIntentAction,
+  intentBusy = false,
 }) {
+  const latestActionStateIndex = messages.reduce((latestIndex, message, index) => {
+    return ["action_result", "action_error", "agent_error"].includes(message?.kind)
+      ? index
+      : latestIndex;
+  }, -1);
+  const latestActionState = messages[latestActionStateIndex];
+  const latestActions = (latestActionState?.metadata?.nextActions || EMPTY_LIST).filter(
+    (action) => action?.intent?.type && action?.intent?.entity
+  );
+  const latestActionableIndex = latestActions.length ? latestActionStateIndex : -1;
+
   return (
     <div className="chat-first-conversation-flow">
       {messages.map((message, index) => {
@@ -149,11 +175,14 @@ export function MessageTranscript({
         let content;
         if (isReceipt) {
           const action = message.onAction || onMessageAction;
+          const errorState = isError
+            ? resolvePersistedErrorCopy(message.error, message.text)
+            : null;
           content = (
             <RunReceipt
               receipt={{
                 mark: message.metadata?.mark || (isError ? "!" : undefined),
-                label: message.text || message.error?.message || "Action updated",
+                label: errorState?.message || message.text || "Action updated",
                 tone: isError ? "error" : undefined,
                 actionLabel:
                   message.metadata?.actionLabel ||
@@ -193,6 +222,8 @@ export function MessageTranscript({
           );
         } else if (message.role === "user") {
           content = <UserBubble>{message.text}</UserBubble>;
+        } else if (!message.text && Array.isArray(message.artifacts) && message.artifacts.length) {
+          content = null;
         } else {
           content = <AgentBubble agentName={agentName}>{message.text}</AgentBubble>;
         }
@@ -200,10 +231,111 @@ export function MessageTranscript({
           <div className="chat-first-transcript-entry" key={key}>
             {content}
             <AttachedArtifacts message={message} onArtifactAction={onArtifactAction} />
+            {index === latestActionableIndex && typeof onIntentAction === "function" ? (
+              <div className="chat-first-inline-actions">
+                {latestActions.map((action, actionIndex) => (
+                  <button
+                    className={`chat-first-pill chat-first-pill--${actionIndex === 0 ? "lime" : "outline"}`}
+                    type="button"
+                    key={
+                      action.id ||
+                      `${action.intent.type}:${action.intent.entity.type}:${action.intent.entity.id}:${action.label}`
+                    }
+                    disabled={intentBusy}
+                    onClick={() => onIntentAction(action.intent, message, action)}
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
         );
       })}
     </div>
+  );
+}
+
+export function SkillChatConversation({
+  thread,
+  messages = EMPTY_LIST,
+  agentName = "Paul",
+  busy = false,
+  onDecision,
+  onComplete,
+}) {
+  const completion = skillChatCompletionFor(messages);
+  const decorated = messages.map((message) => ({
+    ...message,
+    artifacts: (message.artifacts || EMPTY_LIST).map((artifact) => {
+      const presentation = skillChatDiscoveryPresentation(artifact);
+      const decided = artifact.decision?.status === "completed";
+      if (artifact.kind === "discovery_complete") {
+        return {
+          ...artifact,
+          ...presentation,
+          subtitle: decided
+            ? "Board discovery is complete"
+            : completion?.ready
+              ? "Every source proposal is decided"
+              : `${completion?.pendingCount || 0} source proposal${completion?.pendingCount === 1 ? "" : "s"} still need a decision`,
+          actionLabel: completion?.ready && !busy ? "Finish board discovery" : null,
+          onAction: completion?.ready && !busy ? () => onComplete?.(artifact) : undefined,
+          secondaryActions: [],
+        };
+      }
+      return {
+        ...artifact,
+        ...presentation,
+        subtitle: decided
+          ? `${presentation.subtitle} · ${artifact.decision.action === "save" ? "saved" : "discarded"}`
+          : presentation.subtitle,
+        actionLabel: decided ? null : "Save to workspace",
+        onAction: decided || busy ? undefined : () => onDecision?.(artifact, "save"),
+        secondaryActions: decided
+          ? []
+          : [
+              {
+                id: "discard",
+                label: "Discard",
+                onAction: busy ? undefined : () => onDecision?.(artifact, "discard"),
+              },
+            ],
+      };
+    }),
+  }));
+  return (
+    <div className="chat-first-conversation-flow">
+      <div className="chat-first-conversation-eyebrow">
+        {String(thread?.title || "Research").toUpperCase()}
+      </div>
+      <MessageTranscript messages={decorated} agentName={agentName} />
+      {thread?.state === "running" ? (
+        <RunReceipt receipt={{ mark: "◐", label: `${agentName} is researching…` }} />
+      ) : null}
+    </div>
+  );
+}
+
+export function SkillChatContext({ thread }) {
+  return (
+    <aside className="chat-first-context-stack" aria-label="Research thread">
+      <div className="chat-first-eyebrow chat-first-context-stack__heading">RESEARCH THREAD</div>
+      <section className="chat-first-context-card chat-first-context-card--ink">
+        <div className="chat-first-eyebrow">
+          {thread?.state === "running" ? "LIVE" : "SAVED LOCALLY"}
+        </div>
+        <strong>{thread?.title || "Research"}</strong>
+        <span>{thread?.state === "running" ? "Working now" : "Ready when you come back"}</span>
+      </section>
+      <section className="chat-first-context-card">
+        <strong>Nothing gets hidden</strong>
+        <span>
+          Research runs stay in this thread. Save writes through CareerRat’s reviewed workspace
+          actions. Discard writes nothing.
+        </span>
+      </section>
+    </aside>
   );
 }
 
@@ -227,6 +359,8 @@ export function TodayConversation({
   userMessages = EMPTY_LIST,
   onArtifactAction,
   onMessageAction,
+  onIntentAction,
+  intentBusy = false,
 }) {
   return (
     <div className="chat-first-conversation-flow">
@@ -239,6 +373,8 @@ export function TodayConversation({
           agentName={agentName}
           onArtifactAction={onArtifactAction}
           onMessageAction={onMessageAction}
+          onIntentAction={onIntentAction}
+          intentBusy={intentBusy}
         />
       ) : null}
       {artifacts.map((artifact) => (
@@ -294,6 +430,8 @@ export function JobConversation({
   messages = EMPTY_LIST,
   onArtifactAction,
   onMessageAction,
+  onIntentAction,
+  intentBusy = false,
 }) {
   return (
     <div className="chat-first-conversation-flow">
@@ -337,6 +475,8 @@ export function JobConversation({
           agentName={agentName}
           onArtifactAction={onArtifactAction}
           onMessageAction={onMessageAction}
+          onIntentAction={onIntentAction}
+          intentBusy={intentBusy}
         />
       ) : null}
     </div>
@@ -366,6 +506,8 @@ export function CanonicalJobConversation({
   onCoach,
   onArtifactAction,
   onMessageAction,
+  onIntentAction,
+  intentBusy = false,
 }) {
   const draft = communication?.draft;
   const actions = draft
@@ -390,43 +532,70 @@ export function CanonicalJobConversation({
       messages={threadMessages}
       onArtifactAction={onArtifactAction}
       onMessageAction={onMessageAction}
+      onIntentAction={onIntentAction}
+      intentBusy={intentBusy}
     />
   );
 }
 
-export function JobContextPanel({
-  job,
-  summary,
-  summaryPosition = "before-files",
-  files = EMPTY_LIST,
-  note,
-  action,
-}) {
-  const summaryCard = summary ? (
-    <section className="chat-first-context-card chat-first-context-card--cream">
-      <strong>{summary.title}</strong>
-      {(summary.lines || EMPTY_LIST).map((line) => (
-        <span key={line}>{line}</span>
-      ))}
-    </section>
-  ) : null;
+export function JobContextPanel({ job, summary, files = EMPTY_LIST, note, action }) {
+  const location = jobLocationCopy(job);
 
   return (
     <aside className="chat-first-context-stack" aria-label="This job">
       <div className="chat-first-eyebrow chat-first-context-stack__heading">THIS JOB</div>
       {job ? (
-        <section className="chat-first-context-card">
+        <section className="chat-first-context-card chat-first-context-card--job">
           <strong className="chat-first-context-card__title">{job.company}</strong>
-          <span className="chat-first-context-card__meta">
-            {job.role} · {job.stage}
-          </span>
-          <div className="chat-first-context-card__score">
-            <strong>{job.fit}</strong>
-            {job.badge ? <span>{job.badge}</span> : null}
+          <span className="chat-first-context-card__meta">{job.role}</span>
+          <div className="chat-first-context-card__facts">
+            <span className="chat-first-context-card__fact chat-first-context-card__fact--fit">
+              <small>FIT</small>
+              <strong>{job.fit}</strong>
+            </span>
+            <span className="chat-first-context-card__fact chat-first-context-card__fact--status">
+              <small>{summary ? summary.title : "STATUS"}</small>
+              <strong>{job.stage}</strong>
+              {summary
+                ? (summary.lines || EMPTY_LIST).map((line) => <span key={line}>{line}</span>)
+                : null}
+            </span>
+            {job.compensation ? (
+              <span className="chat-first-context-card__fact chat-first-context-card__fact--comp">
+                <small>COMPENSATION</small>
+                <strong>{job.compensation}</strong>
+                {job.compensationNote ? <span>{job.compensationNote}</span> : null}
+              </span>
+            ) : null}
+            {location ? (
+              <span className="chat-first-context-card__fact chat-first-context-card__fact--location">
+                <small>LOCATION</small>
+                <strong>{location}</strong>
+              </span>
+            ) : null}
           </div>
+          {(job.fitReasons || EMPTY_LIST).length ? (
+            <div className="chat-first-context-card__section">
+              <strong>Why it fits</strong>
+              <ul>
+                {(job.fitReasons || EMPTY_LIST).slice(0, 3).map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {(job.risks || EMPTY_LIST).length ? (
+            <div className="chat-first-context-card__section">
+              <strong>Watch</strong>
+              <ul>
+                {(job.risks || EMPTY_LIST).slice(0, 3).map((risk) => (
+                  <li key={risk}>{risk}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </section>
       ) : null}
-      {summaryPosition === "after-files" ? null : summaryCard}
       {files.map((file) => (
         <section className="chat-first-file-card" key={file.id}>
           <span aria-hidden="true">{file.icon || "📄"}</span>
@@ -450,10 +619,14 @@ export function JobContextPanel({
           ) : null}
         </section>
       ))}
-      {summaryPosition === "after-files" ? summaryCard : null}
       {note ? <div className="chat-first-dashed-note">{note}</div> : null}
       {action ? (
-        <button className="chat-first-context-action" type="button" onClick={action.onAction}>
+        <button
+          className="chat-first-context-action"
+          type="button"
+          disabled={Boolean(action.disabled)}
+          onClick={action.onAction}
+        >
           {action.label}
         </button>
       ) : null}
@@ -464,8 +637,11 @@ export function JobContextPanel({
 export function MockInterviewConversation({
   company,
   round,
+  status = "active",
+  summary,
   questionNumber,
   totalQuestions,
+  questionReady = true,
   question,
   interviewer,
   interviewerHint,
@@ -474,6 +650,7 @@ export function MockInterviewConversation({
   tighten,
   previousFeedback,
   retryPrompt,
+  turns = EMPTY_LIST,
   agentName = "Paul",
 }) {
   const contextLabel = round
@@ -505,6 +682,30 @@ export function MockInterviewConversation({
     );
   }
 
+  if (status === "ended") {
+    return (
+      <div className="chat-first-conversation-flow">
+        <div className="chat-first-conversation-eyebrow">
+          MOCK INTERVIEW · {contextLabel} · SESSION COMPLETE
+        </div>
+        {summary ? <AgentBubble agentName={agentName}>{summary}</AgentBubble> : null}
+        {turns.map((turn) => (
+          <div
+            className="chat-first-conversation-flow"
+            key={turn.questionId || turn.questionNumber}
+          >
+            <div className="chat-first-conversation-eyebrow">
+              TRANSCRIPT · QUESTION {turn.questionNumber}
+            </div>
+            <AgentBubble agentName={agentName}>{turn.question}</AgentBubble>
+            {turn.answer ? <UserBubble>{turn.answer}</UserBubble> : null}
+            {feedbackCard(turn)}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="chat-first-conversation-flow">
       <div className="chat-first-conversation-eyebrow">
@@ -512,8 +713,8 @@ export function MockInterviewConversation({
       </div>
       {feedbackCard(previousFeedback)}
       <AgentBubble agentName={agentName}>
-        {question}{" "}
-        {interviewerHint || interviewer ? (
+        {questionReady && question ? question : "Preparing your first question…"}{" "}
+        {questionReady && (interviewerHint || interviewer) ? (
           <span className="chat-first-muted">({interviewerHint || interviewer})</span>
         ) : null}
       </AgentBubble>
@@ -524,10 +725,16 @@ export function MockInterviewConversation({
   );
 }
 
-export function MockInterviewContext({ title, detail, loadedContext, onEnd }) {
+export function MockInterviewContext({ title, detail, loadedContext, status = "active", onEnd }) {
+  const ended = status === "ended";
   return (
-    <aside className="chat-first-context-stack" aria-label="Live session">
-      <div className="chat-first-eyebrow chat-first-context-stack__heading">LIVE SESSION</div>
+    <aside
+      className="chat-first-context-stack"
+      aria-label={ended ? "Session review" : "Live session"}
+    >
+      <div className="chat-first-eyebrow chat-first-context-stack__heading">
+        {ended ? "SESSION REVIEW" : "LIVE SESSION"}
+      </div>
       <section className="chat-first-context-card chat-first-context-card--ink">
         <div className="chat-first-eyebrow">MOCK INTERVIEW</div>
         <strong>{title}</strong>
@@ -542,7 +749,7 @@ export function MockInterviewContext({ title, detail, loadedContext, onEnd }) {
         type="button"
         onClick={onEnd}
       >
-        End session → back to thread
+        {ended ? "Back to thread" : "End session → back to thread"}
       </button>
     </aside>
   );
@@ -710,8 +917,11 @@ export function DeepIngestConversation({
       ) : null}
       {proposals.length ? (
         <section className="chat-first-deep-review" aria-label="Proposal review queue">
-          <div className="chat-first-eyebrow">REVIEW QUEUE</div>
-          {proposals.map((proposal) => {
+          <div className="chat-first-eyebrow">REVIEW 1 OF {reviewCount || proposals.length}</div>
+          <p className="chat-first-deep-review__note">
+            One grounded finding at a time. Your decision brings up the next one.
+          </p>
+          {proposals.slice(0, 1).map((proposal) => {
             const editing = editingId === proposal.id;
             const title = editing ? editDraft.title : proposal.title;
             const summary = editing ? editDraft.summary : proposal.summary;
@@ -954,7 +1164,7 @@ export function SubmitGateModal({
             type="button"
             onClick={onSubmit}
           >
-            Open {channel} &amp; submit ↗
+            Return to {channel} &amp; submit ↗
           </button>
         </footer>
       </section>

@@ -28,7 +28,7 @@ function SectionHeading({ label, actionLabel, onAction }) {
   );
 }
 
-function Lines({ values, fallback = "Tell Paul what belongs here." }) {
+function Lines({ values, fallback = "Nothing recorded yet." }) {
   const lines = safeArray(values);
   return lines.length > 0 ? (
     lines.map((line) => <span key={String(line)}>{line}</span>)
@@ -47,7 +47,7 @@ function ProfileGrid({ agentName, profile = {}, onEditSection, onOpenFiles }) {
       <article className="cf-profile__card">
         <SectionHeading label="TARGETS" onAction={() => onEditSection?.("targets")} />
         <div className="cf-profile__lines cf-profile__lines--strong">
-          <Lines values={profile?.targets} />
+          <Lines values={profile?.targets} fallback={`Tell ${agentName} what belongs here.`} />
         </div>
       </article>
       <article className="cf-profile__card">
@@ -135,7 +135,10 @@ function SettingsView({
   engine = {},
   permissions = [],
   sources = {},
+  publicSyncPreference = { enabled: true, source: "default", updatedAt: null },
+  publicSyncBusy = false,
   onPermissionChange,
+  onPublicSyncChange,
   onChangeEngine,
   onShowTechnicalDetails,
   onAddSource,
@@ -159,7 +162,8 @@ function SettingsView({
           computer.
         </strong>
         <span className="cf-settings__muted">
-          Your files stay on your machine. No account, no CareerRat server.
+          Your private candidate files stay on this machine. Public company and board metadata
+          follows the sharing setting below.
         </span>
         <div className="cf-settings__links">
           <button type="button" onClick={() => onChangeEngine?.()}>
@@ -225,6 +229,39 @@ function SettingsView({
           )}
         </div>
       </article>
+      <article className="cf-settings__card cf-settings__public-sync">
+        <div className="cf-settings__permission">
+          <div>
+            <strong>Share public company and board metadata</strong>
+            <span>
+              Share public company and board metadata to improve CareerRat for future searches.
+            </span>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={publicSyncPreference.enabled !== false}
+            aria-label={`Share public company and board metadata: ${publicSyncPreference.enabled !== false ? "on" : "off"}`}
+            className="cf-settings__switch"
+            disabled={publicSyncBusy}
+            onClick={() => onPublicSyncChange?.(publicSyncPreference.enabled === false)}
+          >
+            <span />
+          </button>
+        </div>
+        <p className="cf-settings__note">
+          This can include company domains, career pages, ATS board links, providers, and scan
+          confidence. It never sends résumé text, profile data, applications, private notes,
+          compensation, fit scores, or local files.
+        </p>
+        <span className="cf-settings__public-sync-status">
+          {publicSyncPreference.enabled === false
+            ? "Off · no public metadata shared"
+            : publicSyncPreference.source === "default"
+              ? "On by default · public metadata only"
+              : "On · public metadata only"}
+        </span>
+      </article>
       <article className="cf-settings__card cf-settings__data-card">
         <div>
           <strong>Your data</strong>
@@ -259,6 +296,7 @@ function SettingsDialog({ title, children, onClose }) {
 }
 
 function runtimeStatus(choice, selectedId) {
+  if (choice.selectable === false) return "Secure tool runs unavailable";
   if (choice.id === selectedId && choice.ready) return "Selected";
   if (choice.ready) return "Ready";
   if (choice.status === "authentication_required") return "Sign-in needed";
@@ -275,25 +313,33 @@ function EnginePicker({ engine, busy, onClose, onSelect, onConnect, onRetry, onR
       </p>
       <div className="cf-settings-dialog__runtime-list">
         {choices.map((choice) => {
-          const selected = choice.id === engine?.selectedId && choice.ready;
+          const selected =
+            choice.id === engine?.selectedId && choice.ready && choice.selectable !== false;
           return (
-            <article className="cf-settings-dialog__runtime" key={choice.id}>
+            <article
+              className="cf-settings-dialog__runtime"
+              data-selected={selected ? "true" : undefined}
+              key={choice.id}
+            >
               <div className="cf-settings-dialog__runtime-copy">
                 <RuntimeIcon runtimeId={choice.id} name={choice.name} size={22} />
                 <div>
                   <strong>{choice.name || "AI engine"}</strong>
                   <span>{runtimeStatus(choice, engine?.selectedId)}</span>
+                  {choice.selectable === false && choice.capabilityReason ? (
+                    <span>{choice.capabilityReason}</span>
+                  ) : null}
                 </div>
               </div>
               {selected ? (
-                <span className="cf-settings-dialog__selected">Current</span>
-              ) : choice.ready ? (
+                <span className="cf-settings-dialog__current">Current</span>
+              ) : choice.ready && choice.selectable !== false ? (
                 <button type="button" disabled={busy} onClick={() => onSelect?.(choice.id)}>
                   Use this tool
                 </button>
-              ) : choice.action === "open_terminal" ? (
+              ) : choice.selectable === false ? null : choice.action === "open_terminal" ? (
                 <button type="button" disabled={busy} onClick={() => onConnect?.(choice.id)}>
-                  Open Terminal to sign in
+                  Sign in
                 </button>
               ) : (
                 <button type="button" disabled={busy} onClick={() => onRetry?.(choice.id)}>
@@ -359,9 +405,19 @@ function browserPresenceLabel(status) {
   );
 }
 
-function TechnicalDetails({ agentName, engine, browser = {}, onClose }) {
+function TechnicalDetails({
+  agentName,
+  engine,
+  browser = {},
+  providerBusy,
+  onProviderChange,
+  onClose,
+}) {
   const playwright = browser?.playwright || {};
   const presenceStatus = browser?.presenceStatus || "unknown";
+  const providerOptions = safeArray(browser?.options);
+  const selectedProvider =
+    providerOptions.find((option) => option.id === browser?.providerId) || providerOptions[0];
   return (
     <SettingsDialog title="Technical details" onClose={onClose}>
       <div className="cf-settings-dialog__technical">
@@ -370,6 +426,26 @@ function TechnicalDetails({ agentName, engine, browser = {}, onClose }) {
           {engine?.name || "the selected AI engine"}.
         </p>
         <p>Your candidate files stay on this computer. The selected tool uses its own login.</p>
+        <div className="cf-settings-dialog__technical-row">
+          <label htmlFor="cf-browser-automation-provider">
+            <strong>Browser automation provider</strong>
+          </label>
+          <select
+            id="cf-browser-automation-provider"
+            value={browser?.providerId || ""}
+            disabled={providerBusy || providerOptions.length === 0}
+            onChange={(event) => onProviderChange?.(event.target.value)}
+          >
+            {providerOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <small>
+            {selectedProvider?.needs || "Choose which supervised browser CareerRat uses."}
+          </small>
+        </div>
         <div className="cf-settings-dialog__technical-row">
           <div className="cf-settings-dialog__technical-heading">
             <strong>Browser connection</strong>
@@ -502,11 +578,14 @@ export function ProfileSettings({
   browser = {},
   permissions = [],
   sources = {},
+  publicSyncPreference = { enabled: true, source: "default", updatedAt: null },
+  publicSyncBusy = false,
   onBack,
   onTabChange,
   onEditSection,
   onOpenFiles,
   onPermissionChange,
+  onPublicSyncChange,
   onChangeEngine,
   onShowTechnicalDetails,
   onAddSource,
@@ -525,6 +604,8 @@ export function ProfileSettings({
   onSourceDraftChange,
   onSubmitSource,
   technicalDetailsOpen = false,
+  browserProviderBusy = false,
+  onBrowserProviderChange,
   onCloseTechnicalDetails,
   profileEditor = null,
   editorValues = {},
@@ -568,7 +649,10 @@ export function ProfileSettings({
             engine,
             permissions,
             sources,
+            publicSyncPreference,
+            publicSyncBusy,
             onPermissionChange,
+            onPublicSyncChange,
             onChangeEngine,
             onShowTechnicalDetails,
             onAddSource,
@@ -600,6 +684,8 @@ export function ProfileSettings({
           agentName={agentName}
           engine={engine}
           browser={browser}
+          providerBusy={browserProviderBusy}
+          onProviderChange={onBrowserProviderChange}
           onClose={onCloseTechnicalDetails}
         />
       ) : null}

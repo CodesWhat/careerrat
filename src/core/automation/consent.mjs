@@ -370,9 +370,9 @@ export function automationStatus({
 // first write (opt-in: the first `enable`/`consent` creates it).
 // ---------------------------------------------------------------------------
 
-export function ensureAutomationFile({ root = DEFAULT_ROOT } = {}) {
-  const dest = userPath({ repoRoot: root }, AUTOMATION_FILE);
-  const display = displayPath({ repoRoot: root }, AUTOMATION_FILE);
+export function ensureAutomationFile({ root = DEFAULT_ROOT, env = process.env } = {}) {
+  const dest = userPath({ repoRoot: root, env }, AUTOMATION_FILE);
+  const display = displayPath({ repoRoot: root, env }, AUTOMATION_FILE);
   if (existsSync(dest)) return { created: false, path: display };
   mkdirSync(dirname(dest), { recursive: true });
   copyFileSync(join(root, AUTOMATION_TEMPLATE), dest);

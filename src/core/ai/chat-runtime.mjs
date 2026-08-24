@@ -46,8 +46,6 @@
 // injected so these tests never spawn a real CLI subprocess.
 
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { dbExists } from "../db/connection.mjs";
 import {
   candidateArtifactExists,
@@ -55,10 +53,8 @@ import {
   skillChatMessageAppend,
   skillChatThreadRead,
   skillChatThreadSetTurnState,
-  skillChatTranscriptAdopt,
 } from "../db/verbs.mjs";
 import { computeSetupProgress } from "../onboarding/setup-progress.mjs";
-import { userPath } from "../paths/workspace.mjs";
 import { resolveAIRoute } from "./call-ai.mjs";
 import {
   CHAT_SESSION_RUNTIME_TIMEOUT_MS,
@@ -68,7 +64,11 @@ import {
   supportsInstalledRuntimeStreaming,
 } from "./installed-runtimes.mjs";
 import { createRuntimeToolPolicy } from "./runtime-tool-policy.mjs";
-import { resolveChatRuntimeTools } from "./runtime-tools.mjs";
+import {
+  installedSkillRuntimePosture,
+  resolveChatRuntimeTools,
+  resolveInstalledSkillRuntimeTools,
+} from "./runtime-tools.mjs";
 import {
   buildChildEnv,
   buildPrompt,
@@ -79,7 +79,13 @@ import {
 } from "./skill-runtime.mjs";
 import { appendUsageEvent } from "./usage-log.mjs";
 
-const DURABLE_CHAT_SKILLS = new Set(["ingest-profile"]);
+const DURABLE_CHAT_SKILLS = new Set([
+  "ingest-profile",
+  "research-boards",
+  "research-company",
+  "research-comp",
+  "company-health",
+]);
 const DURABLE_CHAT_PROMPT_CHAR_LIMIT = 64_000;
 
 // Lane A / R6 — the current form-defaults.declined_fields key list, read once
@@ -212,28 +218,18 @@ function assistantEventText(event) {
     .trim();
 }
 
-function compatibilityOnboardingTranscript({ repoRoot, env }) {
-  const path = userPath({ repoRoot, env }, ".internal/onboarding-draft.json");
-  if (!existsSync(path)) return [];
-  try {
-    return boundedDurableTranscript(JSON.parse(readFileSync(path, "utf8"))?.transcript);
-  } catch {
-    return [];
-  }
-}
-
-// Default-restricted to conversational setup and confirm-first workflow skills:
-// ingest-profile (M2's original interview target), research-boards /
-// discover-companies / search-jobs (the post-onboarding discovery pipeline
-// surfaced by Quick Start), plus M9's Lane C intake targets email-comms and
-// track-outcomes. Widened deliberately, not silently: these skills either ask
-// the user before consequential writes (research-boards/discover-companies) or
-// explicitly stop before tailoring/filling/submitting (search-jobs). The
-// opposite one-shot runtime remains narrower because nobody is present to
-// answer questions there. Same "empty string explicitly locks it down, unset
-// falls back to the default" semantics as CAREERRAT_RUNTIME_SKILLS.
-const DEFAULT_CHAT_SKILLS =
-  "ingest-profile,research-boards,discover-companies,search-jobs,email-comms,track-outcomes,research-company,research-comp,company-health";
+// These are the only generic chats with a visible product surface and a typed
+// save path. search-jobs stays on its dedicated AI-web route; app workflows and
+// model-result skills stay on workspace-agent/core pipelines instead of being
+// advertised as raw chat capabilities.
+const DIRECT_CHAT_SKILLS = Object.freeze([
+  "ingest-profile",
+  "research-boards",
+  "research-company",
+  "research-comp",
+  "company-health",
+]);
+const DEFAULT_CHAT_SKILLS = DIRECT_CHAT_SKILLS.join(",");
 
 export function resolveAllowedChatSkills({ repoRoot, env = process.env } = {}) {
   return resolveSkillAllowlist({
@@ -242,6 +238,11 @@ export function resolveAllowedChatSkills({ repoRoot, env = process.env } = {}) {
     envVar: "CAREERRAT_CHAT_SKILLS",
     defaultValue: DEFAULT_CHAT_SKILLS,
   });
+}
+
+export function resolveDirectChatSkills({ repoRoot, env = process.env } = {}) {
+  const allowed = new Set(resolveAllowedChatSkills({ repoRoot, env }));
+  return DIRECT_CHAT_SKILLS.filter((skill) => allowed.has(skill));
 }
 
 // ---------------------------------------------------------------------------
@@ -495,15 +496,6 @@ export function createChatRuntime({
   const sessions = new Map();
   let sweepTimer = null;
 
-  // M10 — chatId -> Set<callback> for onClose() below. A side registry, not a
-  // field on the session record itself, so a caller can register interest in a
-  // session's terminal transition (e.g. intake-route.mjs's Lane C completion
-  // loop) without the runtime's own session bookkeeping knowing anything about
-  // who's listening or why. Cleared per-chatId once closeSessionInternal fires
-  // (a session closes exactly once — see that function's own idempotency
-  // guard — so listeners fire exactly once too, then this entry is dropped).
-  const closeListeners = new Map();
-
   function currentCandidateContext(skill) {
     return resolveCandidateContextImpl({ repoRoot, env, skill });
   }
@@ -512,25 +504,14 @@ export function createChatRuntime({
     if (!DURABLE_CHAT_SKILLS.has(skill) || !dbExists({ repoRoot, env })) {
       return { thread: null, transcript: [] };
     }
-    let stored = skillChatThreadRead({ repoRoot, env, skill });
-    if (!stored.messages.length) {
-      const compatibilityTranscript = compatibilityOnboardingTranscript({ repoRoot, env });
-      if (compatibilityTranscript.length) {
-        stored = skillChatTranscriptAdopt({
-          repoRoot,
-          env,
-          skill,
-          messages: compatibilityTranscript,
-        });
-      }
-    }
+    const stored = skillChatThreadRead({ repoRoot, env, skill });
     return {
       thread: stored.thread,
       transcript: boundedDurableTranscript(stored.messages),
     };
   }
 
-  function persistDurableMessage(session, role, text, { visibility } = {}) {
+  function persistDurableMessage(session, role, text, { kind, visibility } = {}) {
     if (!session.persistDurably) return;
     skillChatMessageAppend({
       repoRoot,
@@ -538,32 +519,11 @@ export function createChatRuntime({
       skill: session.skill,
       role,
       text,
+      kind,
       visibility,
       runtimeSessionId: session.id,
     });
     session.durableMessageCount += 1;
-  }
-
-  // Registers `callback({chatId, reason, lastError})` to run the moment
-  // `chatId` transitions to "closed" (see closeSessionInternal below for the
-  // six possible `reason` values). Safe to call for a session that hasn't
-  // closed yet — the only supported use — there's no dispatch for a chatId
-  // that's already closed (its listener set was already dropped, and a stale
-  // callback would never fire, silently). Multiple callbacks may register for
-  // the same chatId; each fires once.
-  function onClose(chatId, callback) {
-    if (!closeListeners.has(chatId)) closeListeners.set(chatId, new Set());
-    closeListeners.get(chatId).add(callback);
-  }
-
-  // The message of the most recent `type:"error"` event this session ever
-  // broadcast, or null. Only meaningful when closing for reason "error" (see
-  // pump()'s catch block, the only place that ever records one).
-  function lastErrorMessage(session) {
-    for (let i = session.events.length - 1; i >= 0; i--) {
-      if (session.events[i].type === "error") return session.events[i].data?.message ?? null;
-    }
-    return null;
   }
 
   function summarize(session) {
@@ -629,25 +589,6 @@ export function createChatRuntime({
     session.closeReason = reason;
     session.lastActivityAt = now();
 
-    // Fire onClose() listeners right alongside the SSE broadcast below — before
-    // it, so a listener that itself triggers a synchronous intakeUpdate (see
-    // intake-route.mjs's executeLaneC) always observes this session as fully
-    // closed. A throwing listener must never break session teardown for
-    // everyone else (pushQueue close, SSE end, other listeners) — caught and
-    // dropped, not rethrown.
-    const listeners = closeListeners.get(session.id);
-    if (listeners) {
-      closeListeners.delete(session.id);
-      const lastError = reason === "error" ? lastErrorMessage(session) : null;
-      for (const callback of listeners) {
-        try {
-          callback({ chatId: session.id, reason, lastError });
-        } catch {
-          // a listener's own error must never crash the pump/close path
-        }
-      }
-    }
-
     try {
       session.pushQueue?.close();
     } catch {
@@ -677,12 +618,27 @@ export function createChatRuntime({
     for (const evt of events) {
       const assistantText = assistantEventText(evt);
       if (assistantText) persistDurableMessage(session, "assistant", assistantText);
+      if (evt.type === "error" && evt.data?.message) {
+        persistDurableMessage(session, "assistant", evt.data.message, { kind: "agent_error" });
+        if (session.persistDurably) {
+          skillChatThreadSetTurnState({
+            repoRoot,
+            env,
+            skill: session.skill,
+            turnState: "failed",
+          });
+        }
+      }
       if (evt.type === "result" && session.persistDurably && session.durableMessageCount > 0) {
+        const failed =
+          evt.data?.ok === false ||
+          evt.data?.is_error === true ||
+          String(evt.data?.subtype || "").startsWith("error");
         skillChatThreadSetTurnState({
           repoRoot,
           env,
           skill: session.skill,
-          turnState: "awaiting-user",
+          turnState: failed ? "failed" : "awaiting-user",
         });
       }
       recordAndBroadcast(session, evt);
@@ -772,7 +728,7 @@ export function createChatRuntime({
         signal: turnController.signal,
         model:
           String(env.CAREERRAT_INSTALLED_AI_MODEL || env.ANTHROPIC_MODEL || "").trim() || undefined,
-        tools: resolveChatRuntimeTools({ skill: session.skill }),
+        tools: session.runtimeTools,
         // A chat-session turn over CHAT_RUNTIME_TOOLS (WebSearch/WebFetch/
         // Skill, never Read, see runtime-tools.mjs) does live web research,
         // not a bounded one-shot completion. runInstalledRuntime's own
@@ -926,6 +882,15 @@ export function createChatRuntime({
       if (session.abortController.signal.aborted) {
         closeSessionInternal(session, "aborted");
       } else {
+        persistDurableMessage(session, "assistant", err.message, { kind: "agent_error" });
+        if (session.persistDurably) {
+          skillChatThreadSetTurnState({
+            repoRoot,
+            env,
+            skill: session.skill,
+            turnState: "failed",
+          });
+        }
         recordAndBroadcast(session, { type: "error", data: { message: err.message } });
         closeSessionInternal(session, "error");
       }
@@ -988,6 +953,14 @@ export function createChatRuntime({
       err.code = "NO_AI_ROUTE";
       throw err;
     }
+    if (route.type === "installed" && !DIRECT_CHAT_SKILLS.includes(trimmedSkill)) {
+      const err = new Error(
+        `skill "${trimmedSkill}" is not available through installed chat; use its dedicated CareerRat workflow`
+      );
+      err.code = "SKILL_NOT_ALLOWED";
+      err.allowed = [...DIRECT_CHAT_SKILLS];
+      throw err;
+    }
 
     const durableState = durableChatState(trimmedSkill);
     const restoredTranscript = durableState.transcript;
@@ -995,7 +968,7 @@ export function createChatRuntime({
     const awaitingUser =
       resumed &&
       (durableState.thread?.turnState
-        ? durableState.thread.turnState === "awaiting-user"
+        ? ["awaiting-user", "failed"].includes(durableState.thread.turnState)
         : restoredTranscript[restoredTranscript.length - 1]?.role === "assistant");
 
     // route.type === "installed": the user picked a local CLI (codex/gemini/
@@ -1101,16 +1074,12 @@ export function createChatRuntime({
     return { chatId: id, skill: trimmedSkill, state: session.state };
   }
 
-  // startSession's route.type === "installed" branch. Skips loadSdk/
-  // buildChildEnv/createRuntimeToolPolicy entirely — those are Agent-SDK-
-  // child-process concerns that don't apply to a raw installed-CLI spawn
-  // (see installed-runtimes.mjs's runInstalledRuntime, and skill-runtime.mjs's
-  // own runSkillStream installed branch, which skips the same three for the
-  // same reason). `systemPrompt` is built once here (skillMdPath hint, same
-  // as runSkillStream's installed branch, since there's no native `skills`
-  // SDK option loading the SKILL.md for us) and replayed unchanged by every
-  // runInstalledTurn() call for this session's lifetime; only `transcript`
-  // grows turn over turn.
+  // startSession's route.type === "installed" branch. Skips loadSdk and the
+  // SDK tool policy. The raw CLI spawn applies its own child-environment
+  // allowlist and per-call tool boundary in installed-runtimes.mjs.
+  // `systemPrompt` is built once here and the installed CLI's
+  // scoped Skill tool loads the isolated SKILL.md. Every runInstalledTurn()
+  // replays that prompt; only `transcript` grows turn over turn.
   async function startInstalledSession({
     trimmedSkill,
     input,
@@ -1119,17 +1088,16 @@ export function createChatRuntime({
     resumed,
     awaitingUser,
   }) {
-    const runtimeTools = resolveChatRuntimeTools({ skill: trimmedSkill });
-    const skillMdPath = join(repoRoot, ".agents", "skills", trimmedSkill, "SKILL.md");
+    const runtimeTools = resolveInstalledSkillRuntimeTools({ skill: trimmedSkill });
+    const installedPosture = installedSkillRuntimePosture({ skill: trimmedSkill });
     const systemPrompt =
       `${buildPrompt({
         skill: trimmedSkill,
         input: resumed ? undefined : input,
         mode: "conversational",
-        skillMdPath,
         declinedFields: resolveDeclinedFieldKeys({ repoRoot, env }),
       })}\n\n` +
-      `This app-authorized run is limited to these capabilities: ${runtimeTools.join(", ") || "none"}. Do not exceed that scope.`;
+      `This app-authorized run is limited to these capabilities: ${runtimeTools.join(", ") || "none"}. Do not exceed that scope. ${installedPosture}`;
 
     const abortController = new AbortController();
     const id = randomUUID();
@@ -1145,6 +1113,7 @@ export function createChatRuntime({
       query: null,
       pushQueue: null,
       systemPrompt,
+      runtimeTools,
       transcript: restoredTranscript.map((message) => ({
         role: message.role,
         content: message.text,
@@ -1462,7 +1431,6 @@ export function createChatRuntime({
     interrupt,
     closeSession,
     subscribe,
-    onClose,
     sweepOnce,
     startSweep,
     stopSweep,

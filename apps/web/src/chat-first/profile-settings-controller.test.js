@@ -9,6 +9,11 @@ describe("profile settings controller mapping", () => {
   it("maps canonical candidate, engine, source, and permission state into the handoff", () => {
     const model = buildProfileSettingsModel({
       onboard: {
+        publicSyncPreference: {
+          enabled: false,
+          source: "user",
+          updatedAt: "2026-08-23T12:30:00Z",
+        },
         data: {
           profile: {
             candidate: { name: "Scott" },
@@ -51,6 +56,7 @@ describe("profile settings controller mapping", () => {
             counts: { confirmed: 6 },
           },
           honesty: { claims: { do_not_fabricate: ["No invented metrics"] } },
+          modes: { agent_name: "Scout" },
         },
       },
       runtimes: {
@@ -156,6 +162,10 @@ describe("profile settings controller mapping", () => {
       },
     });
     expect(model.engine).toMatchObject({ name: "Codex", connected: true, selectedId: "codex" });
+    expect(model.agentName).toBe("Scout");
+    expect(
+      model.permissions.find((row) => row.id === "authenticated_apply_preparation")?.description
+    ).toBe("Scout fills authenticated forms, you press every submit");
     expect(model.engine.choices.map((choice) => choice.id)).toEqual(["codex", "custom"]);
     expect(model.permissions.map((row) => [row.id, row.enabled])).toEqual([
       ["draft_documents", true],
@@ -164,11 +174,33 @@ describe("profile settings controller mapping", () => {
       ["mail_access", false],
     ]);
     expect(model.browser).toEqual({
+      providerId: "auto",
       provider: "Automatic browser connection",
+      effectiveProviderId: "extension",
       effectiveProvider: "Chrome extension",
       presenceStatus: "unverified",
       presenceDetail: "Google Chrome detected. Confirm the extension is signed in.",
       automaticFillSupported: false,
+      options: [
+        {
+          id: "auto",
+          label: "Automatic browser connection",
+          needs: "",
+          automatedApply: false,
+        },
+        {
+          id: "extension",
+          label: "Chrome extension",
+          needs: "",
+          automatedApply: false,
+        },
+        {
+          id: "playwright",
+          label: "Playwright persistent profile",
+          needs: "",
+          automatedApply: true,
+        },
+      ],
       playwright: {
         packageInstalled: true,
         browserInstalled: true,
@@ -181,6 +213,11 @@ describe("profile settings controller mapping", () => {
       pinnedCount: 1,
       blockedCount: 1,
       lastSweep: "2026-08-23T12:00:00Z",
+    });
+    expect(model.publicSyncPreference).toEqual({
+      enabled: false,
+      source: "user",
+      updatedAt: "2026-08-23T12:30:00Z",
     });
   });
 
@@ -203,6 +240,11 @@ describe("profile settings controller mapping", () => {
     expect(
       model.permissions.filter((row) => row.id !== "draft_documents").every((row) => row.mutable)
     ).toBe(true);
+    expect(model.publicSyncPreference).toEqual({
+      enabled: true,
+      source: "default",
+      updatedAt: null,
+    });
   });
 
   it("turns every editable profile section into a canonical whole-section write", () => {
@@ -295,6 +337,44 @@ describe("profile settings controller mapping", () => {
           search_preferences: { cadence: { mode: "weekly" } },
         },
       },
+    ]);
+  });
+
+  it("preserves every target bucket name, priority, and signal while editing its titles", () => {
+    const roleBuckets = [
+      {
+        name: "Core platform",
+        priority: "primary",
+        titles: ["Staff Engineer"],
+        fit_signals: ["distributed systems"],
+      },
+      {
+        name: "Applied AI",
+        priority: "stretch",
+        titles: ["AI Platform Lead"],
+        fit_signals: ["agent workflows"],
+      },
+      {
+        name: "Operator roles",
+        priority: "oe",
+        titles: ["Fractional CTO"],
+      },
+    ];
+
+    expect(
+      profileSectionSavePlan(
+        "targets",
+        {
+          titles: "Principal Platform Engineer",
+          "titles:1": "Applied AI Engineering Lead",
+          "titles:2": "Fractional CTO",
+        },
+        { roleBuckets }
+      )[0].patch.role_buckets
+    ).toEqual([
+      { ...roleBuckets[0], titles: ["Principal Platform Engineer"] },
+      { ...roleBuckets[1], titles: ["Applied AI Engineering Lead"] },
+      roleBuckets[2],
     ]);
   });
 

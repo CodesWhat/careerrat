@@ -74,13 +74,17 @@ const MESSAGES = [
 ];
 
 describe("FirstRunExperience", () => {
-  it("uses the handoff ink fill and lime outline without a glow for the selected rail item", () => {
+  it("uses an ink-only selected rail item with no lime surround or avatar tile", () => {
     const css = readFileSync(fileURLToPath(new URL("./first-run.css", import.meta.url)), "utf8");
     const rule = css.match(/\.cf-first-run__paul-card\s*\{([^}]*)\}/)?.[1] || "";
+    const avatarRule = css.match(/\.cf-first-run__rail-avatar\s*\{([^}]*)\}/)?.[1] || "";
 
-    expect(rule).toMatch(/background:\s*#17171a/);
-    expect(rule).toMatch(/border:\s*2px\s+solid\s+#e6fa8d/);
-    expect(rule).not.toMatch(/box-shadow/);
+    expect(rule).toMatch(/background:\s*var\(--cf-selection-fill\)/);
+    expect(rule).toMatch(/border:\s*var\(--cf-selection-border\)/);
+    expect(rule).toMatch(/box-shadow:\s*var\(--cf-selection-shadow\)/);
+    expect(rule).toMatch(/outline:\s*var\(--cf-selection-outline\)/);
+    expect(rule).not.toMatch(/#e6fa8d|rgba\(230,\s*250,\s*141/);
+    expect(avatarRule).toMatch(/background:\s*var\(--cf-selection-avatar-surface\)/);
   });
 
   it("uses the fixed chat-first top bar and workspace frame during setup", async () => {
@@ -125,6 +129,18 @@ describe("FirstRunExperience", () => {
     const choices = tree.props.children[2];
     choices.props.children[1].props.onClick();
     expect(onSelectEngine).toHaveBeenCalledWith("codex");
+  });
+
+  it("marks the configured engine as selected without a separate accent tile", async () => {
+    const { FirstRunExperience } = await loadFirstRun();
+    const html = renderToStaticMarkup(
+      <FirstRunExperience
+        stage="engine"
+        engines={[{ ...ENGINES[0], recommended: false, selected: true }]}
+      />
+    );
+
+    expect(html).toContain('aria-pressed="true"');
   });
 
   it("keeps first run to four compact icon choices and leaves the full list in settings", async () => {
@@ -202,6 +218,32 @@ describe("FirstRunExperience", () => {
     settings.props.onClick();
     expect(onRetryEngine).not.toHaveBeenCalled();
     expect(onOpenSettings).toHaveBeenCalledTimes(2);
+    expect(onSelectEngine).not.toHaveBeenCalled();
+  });
+
+  it("keeps a detected runtime without a secure tool boundary visible but not selectable", async () => {
+    const { FirstRunExperience } = await loadFirstRun();
+    const onSelectEngine = vi.fn();
+    const tree = FirstRunExperience({
+      stage: "engine",
+      engines: [
+        {
+          id: "codex",
+          name: "Codex",
+          detected: true,
+          ready: true,
+          selectable: false,
+          capabilityReason: "Detected, but CareerRat cannot safely use this CLI for tool runs yet.",
+        },
+      ],
+      onSelectEngine,
+    });
+    const html = renderToStaticMarkup(tree);
+
+    expect(html).toContain("cannot safely use this CLI");
+    expect(
+      findElement(tree, (node) => node.type === "button" && textOf(node).includes("Codex"))
+    ).toBe(null);
     expect(onSelectEngine).not.toHaveBeenCalled();
   });
 
@@ -416,6 +458,28 @@ describe("FirstRunExperience", () => {
     expect(html).toContain("Reading resume.pdf");
   });
 
+  it("presents assistant emphasis and headings without raw markdown controls", async () => {
+    const { FirstRunChat } = await loadFirstRun();
+    const html = renderToStaticMarkup(
+      <FirstRunChat
+        agentName="Paul"
+        messages={[
+          {
+            id: "formatted",
+            role: "assistant",
+            text: "## Next step\n**First question:** what role are you after?\n- Staff frontend",
+          },
+        ]}
+        knowledge={[]}
+        progress={{ completed: 0, total: 8 }}
+      />
+    );
+
+    expect(html).toContain("Next step\nFirst question: what role are you after?\n- Staff frontend");
+    expect(html).not.toContain("## Next step");
+    expect(html).not.toContain("**First question:**");
+  });
+
   it("sends suggested and typed answers through actions without local demo progression", async () => {
     const { FirstRunChat } = await loadFirstRun();
     const onChooseOption = vi.fn();
@@ -454,14 +518,15 @@ describe("FirstRunExperience", () => {
     const css = readFileSync(fileURLToPath(new URL("./first-run.css", import.meta.url)), "utf8");
 
     expect(css).toContain("grid-template-columns: 250px minmax(0, 1fr) 272px");
-    expect(css).toContain("#edf5fb");
-    expect(css).toContain("#e6fa8d");
+    expect(css).toContain("var(--canvas)");
+    expect(css).toContain("var(--lime)");
     expect(css).toContain("min-width: 1100px");
     expect(css).toContain(".cf-first-run__knowledge-card-heading");
     expect(css).toContain(".cf-first-run__knowledge-acknowledgement");
     expect(css).toContain(".cf-first-run__editor-cover");
     expect(css).toContain(".cf-first-run__composer-notice");
     expect(css).toContain(".cf-first-run__file-action");
+    expect(css).toMatch(/\.cf-first-run__assistant-bubble\s*\{[^}]*white-space:\s*pre-wrap/s);
     expect(css).not.toContain(".cf-first-run__confirmation-actions");
     expect(css).toMatch(
       /\.cf-first-run__engine-choices\s*\{[^}]*grid-template-columns:\s*repeat\(4,/s

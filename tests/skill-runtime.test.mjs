@@ -12,6 +12,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { DEFAULT_MODEL, DEFAULT_SMALL_FAST_MODEL } from "../src/core/ai/ai-config.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 import {
@@ -27,11 +28,9 @@ import {
 import { computeCost, readUsageEvents } from "../src/core/ai/usage-log.mjs";
 
 // `skillNames` accepts a single name (most tests only need one) or an array
-// — the default-allowlist tests need "evaluate-job", "answer-question",
-// "tailor-application", and "resume-extract" fixtures present since
-// DEFAULT_RUNTIME_SKILLS now names all four (resolveAllowedSkills filters the
-// default against discovered dirs, so a fixture missing one of them would
-// silently under-assert the real default).
+// — the default-allowlist tests need every default runtime skill fixture
+// present (resolveAllowedSkills filters the default against discovered dirs,
+// so a fixture missing one would silently under-assert the real default).
 function tempRepoWithSkill(skillNames = "test-skill") {
   const names = Array.isArray(skillNames) ? skillNames : [skillNames];
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-skill-runtime-"));
@@ -75,18 +74,17 @@ test("discoverSkillDirs: returns [] when .agents/skills doesn't exist", () => {
 // resolveAllowedSkills
 // ---------------------------------------------------------------------------
 
-test("resolveAllowedSkills: defaults to evaluate-job + answer-question + tailor-application + resume-extract when CAREERRAT_RUNTIME_SKILLS is unset", () => {
+test("resolveAllowedSkills: returns every shipped default when CAREERRAT_RUNTIME_SKILLS is unset", () => {
   const repoRoot = tempRepoWithSkill([
     "evaluate-job",
     "answer-question",
     "tailor-application",
     "resume-extract",
+    "intake-extract",
   ]);
   try {
     assert.deepEqual(resolveAllowedSkills({ repoRoot, env: {} }), [
-      "evaluate-job",
-      "answer-question",
-      "tailor-application",
+      "intake-extract",
       "resume-extract",
     ]);
   } finally {
@@ -436,7 +434,7 @@ test("runSkillStream: rejects with NO_AI_ROUTE when neither BYOK nor proxy env i
         skill: "evaluate-job",
         input: "hi",
         repoRoot,
-        env: {},
+        env: { CAREERRAT_RUNTIME_SKILLS: "evaluate-job" },
         onEvent: () => {},
         loadSdk: async () => {
           loadSdkCalled = true;
@@ -569,6 +567,42 @@ test("runtime tool profiles structurally separate local reads from network resea
   );
 });
 
+test("installed Claude maps every shipped skill exactly once to its smallest enforceable capability", async () => {
+  const {
+    INSTALLED_SKILL_CAPABILITIES,
+    resolveInstalledSkillRuntimeCapability,
+    resolveInstalledSkillRuntimeTools,
+  } = await import("../src/core/ai/runtime-tools.mjs");
+  const expected = discoverSkillDirs(fileURLToPath(new URL("..", import.meta.url)));
+  const mapped = Object.values(INSTALLED_SKILL_CAPABILITIES).flat().sort();
+  assert.deepEqual(mapped, expected);
+  assert.equal(new Set(mapped).size, expected.length);
+  assert.deepEqual(resolveInstalledSkillRuntimeTools({ skill: "answer-question" }), ["Skill"]);
+  assert.deepEqual(resolveInstalledSkillRuntimeTools({ skill: "resume-extract" }), [
+    "Read",
+    "Skill",
+  ]);
+  assert.deepEqual(resolveInstalledSkillRuntimeTools({ skill: "research-company" }), [
+    "WebSearch",
+    "WebFetch",
+    "Skill",
+  ]);
+  assert.deepEqual(resolveInstalledSkillRuntimeCapability({ skill: "apply-job" }), {
+    kind: "appWorkflow",
+    completion: "app_owned_workflow",
+    tools: ["Skill"],
+  });
+  assert.deepEqual(resolveInstalledSkillRuntimeCapability({ skill: "research-company" }), {
+    kind: "publicWeb",
+    completion: "visible_save_required",
+    tools: ["WebSearch", "WebFetch", "Skill"],
+  });
+  assert.throws(
+    () => resolveInstalledSkillRuntimeTools({ skill: "unknown-skill" }),
+    /no installed runtime capability/i
+  );
+});
+
 test("runSkillStream: default caller gets app-safe runtime tools passed to query()", async () => {
   const { APP_SAFE_RUNTIME_TOOLS } = await import("../src/core/ai/runtime-tools.mjs");
   const repoRoot = tempRepoWithSkill("evaluate-job");
@@ -581,7 +615,10 @@ test("runSkillStream: default caller gets app-safe runtime tools passed to query
       operation: "job.gate",
       input: "hi",
       repoRoot,
-      env: { ANTHROPIC_API_KEY: "sk-ant-test" },
+      env: {
+        ANTHROPIC_API_KEY: "sk-ant-test",
+        CAREERRAT_RUNTIME_SKILLS: "evaluate-job",
+      },
       onEvent: () => {},
       loadSdk: async () => ({
         query: ({ options }) => {
@@ -656,7 +693,10 @@ test("runSkillStream: toolProfile 'tool-heavy' is disabled before the SDK loads"
         skill: "evaluate-job",
         input: "hi",
         repoRoot,
-        env: { ANTHROPIC_API_KEY: "sk-ant-test" },
+        env: {
+          ANTHROPIC_API_KEY: "sk-ant-test",
+          CAREERRAT_RUNTIME_SKILLS: "evaluate-job",
+        },
         toolProfile: "tool-heavy",
         onEvent: () => {},
         loadSdk: async () => {
@@ -680,7 +720,10 @@ test("runSkillStream: drives the stubbed query to completion, in order, and retu
       skill: "evaluate-job",
       input: "https://example.test/job/123",
       repoRoot,
-      env: { ANTHROPIC_API_KEY: "sk-ant-test" },
+      env: {
+        ANTHROPIC_API_KEY: "sk-ant-test",
+        CAREERRAT_RUNTIME_SKILLS: "evaluate-job",
+      },
       onEvent: (evt) => events.push(evt.type),
       loadSdk: async () => fakeSdk(SAMPLE_RUN),
     });
@@ -703,7 +746,10 @@ test("runSkillStream: BYOK route writes one usage_event per model used (proxy al
       operation: "job.gate",
       input: "hi",
       repoRoot,
-      env: { ANTHROPIC_API_KEY: "sk-ant-test" },
+      env: {
+        ANTHROPIC_API_KEY: "sk-ant-test",
+        CAREERRAT_RUNTIME_SKILLS: "evaluate-job",
+      },
       onEvent: () => {},
       loadSdk: async () => fakeSdk(SAMPLE_RUN),
     });
@@ -732,6 +778,7 @@ test("runSkillStream: proxy route writes NO usage_event of its own (the proxy al
       env: {
         CAREERRAT_AI_PROXY_URL: "http://127.0.0.1:7788",
         CAREERRAT_AI_PROXY_TOKEN: "devtoken",
+        CAREERRAT_RUNTIME_SKILLS: "evaluate-job",
       },
       onEvent: () => {},
       loadSdk: async () => fakeSdk(SAMPLE_RUN),
@@ -751,7 +798,10 @@ test("runSkillStream: aborting mid-run (client disconnect) stops the loop and re
       skill: "evaluate-job",
       input: "hi",
       repoRoot,
-      env: { ANTHROPIC_API_KEY: "sk-ant-test" },
+      env: {
+        ANTHROPIC_API_KEY: "sk-ant-test",
+        CAREERRAT_RUNTIME_SKILLS: "evaluate-job",
+      },
       signal: externalController.signal,
       onEvent: (evt) => {
         events.push(evt.type);
@@ -772,11 +822,15 @@ test("runSkillStream: aborting mid-run (client disconnect) stops the loop and re
 
 test("runSkillStream: a selected installed CLI bypasses the Agent SDK and streams bounded events", async () => {
   const repoRoot = tempRepoWithSkill("resume-extract");
+  const uploadDir = join(repoRoot, "workspace", "intake", "resume-uploads");
+  const upload = join(uploadDir, "resume.pdf");
+  mkdirSync(uploadDir, { recursive: true });
+  writeFileSync(upload, "resume", "utf8");
   const env = {
     CAREERRAT_RUNTIME_SKILLS: "resume-extract",
     ANTHROPIC_MODEL: "claude-haiku-4-5-20251001",
   };
-  writeInstalledRuntimeSelection({ repoRoot, env, runtimeId: "codex" });
+  writeInstalledRuntimeSelection({ repoRoot, env, runtimeId: "claude" });
   try {
     const events = [];
     const calls = [];
@@ -784,15 +838,18 @@ test("runSkillStream: a selected installed CLI bypasses the Agent SDK and stream
       skill: "resume-extract",
       action: "extract",
       operation: "resume.extract",
-      input: { path: "/tmp/resume.pdf" },
+      input: { path: upload },
       repoRoot,
       env,
       tools: ["Read"],
+      approvedReadPaths: [upload],
       outputSchema: { type: "object", required: ["full_text"] },
-      runtimeInventory: [{ id: "codex", name: "Codex", path: "/safe/codex", available: true }],
+      runtimeInventory: [
+        { id: "claude", name: "Claude Code", path: "/safe/claude", available: true },
+      ],
       runInstalledRuntimeImpl: async (input) => {
         calls.push(input);
-        return { text: '{"full_text":"Morgan Hale"}', runtimeId: "codex", usage: null };
+        return { text: '{"full_text":"Morgan Hale"}', runtimeId: "claude", usage: null };
       },
       loadSdk: async () => {
         throw new Error("Agent SDK must not load for an installed runtime");
@@ -801,24 +858,26 @@ test("runSkillStream: a selected installed CLI bypasses the Agent SDK and stream
     });
     assert.deepEqual(result, { ok: true, aborted: false });
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].runtime.id, "codex");
+    assert.equal(calls[0].runtime.id, "claude");
     assert.equal(
       calls[0].model,
-      undefined,
-      "an Anthropic-only fast-model override must never be passed to Codex"
+      "claude-haiku-4-5-20251001",
+      "the Anthropic extraction override is valid for Claude"
     );
     // Threaded so installed-runtimes.mjs can materialize an isolated skill
     // cwd for the "claude" runtimeId (see tests/installed-runtime.test.mjs) —
     // harmless/unused for every other installed runtime, codex included.
     assert.equal(calls[0].skill, "resume-extract");
     assert.equal(calls[0].repoRoot, repoRoot);
-    assert.deepEqual(calls[0].tools, ["Read"]);
+    assert.deepEqual(calls[0].tools, ["Read", "Skill"]);
+    assert.deepEqual(calls[0].approvedReadPaths, [upload]);
     assert.deepEqual(calls[0].outputSchema, {
       type: "object",
       required: ["full_text"],
     });
-    assert.match(calls[0].prompt, /\.agents\/skills\/resume-extract\/SKILL\.md/);
-    assert.match(calls[0].prompt, /\/tmp\/resume\.pdf/);
+    assert.doesNotMatch(calls[0].prompt, /\.agents\/skills\/resume-extract\/SKILL\.md/);
+    assert.match(calls[0].prompt, new RegExp(upload.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(calls[0].prompt, /can only return its bounded model result/i);
     assert.deepEqual(
       events.map(({ type }) => type),
       ["system", "assistant", "result"]

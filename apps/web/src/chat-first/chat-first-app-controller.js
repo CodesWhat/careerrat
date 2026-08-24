@@ -287,6 +287,80 @@ export async function commitComposerTurn({ api, text, preview, context }) {
   return { kind: "message", response };
 }
 
+export async function projectWorkspaceResultToJobThread({
+  api,
+  applicationId,
+  response,
+  fallbackText,
+}) {
+  const payload = response?.data || response;
+  const message = list(payload?.messages)
+    .filter((item) => item?.role === "assistant")
+    .at(-1);
+  return api.appendJobThreadMessage({
+    applicationId,
+    role: "assistant",
+    kind: message?.kind || "status",
+    text: message?.text || fallbackText || "That action is complete.",
+    ...(message?.metadata ? { metadata: message.metadata } : {}),
+    ...(Array.isArray(message?.artifacts) ? { artifacts: message.artifacts } : {}),
+  });
+}
+
+export async function commitJobThreadComposer({ api, applicationId, text }) {
+  const context = { pathname: "/jobs", jobId: applicationId };
+  const previewResponse = await api.previewWorkspaceQuery(text, context);
+  const preview = previewResponse?.data || previewResponse;
+  if (!preview?.action?.intent) return api.sendJobThreadTurn({ applicationId, text });
+
+  await api.appendJobThreadMessage({
+    applicationId,
+    role: "user",
+    kind: "text",
+    text,
+  });
+  const result = await commitComposerTurn({ api, text, preview, context });
+  await projectWorkspaceResultToJobThread({
+    api,
+    applicationId,
+    response: result.response,
+    fallbackText:
+      result.kind === "mission"
+        ? "I routed that into a supervised apply mission. It can prepare and fill the form, and it will stop before final Submit."
+        : `${preview.action.label || "That action"} is complete.`,
+  });
+  return result;
+}
+
+export function isMockInterviewStartRequest(text) {
+  const normalized = String(text || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ");
+  const namesMock =
+    /\bmock interview\b/.test(normalized) ||
+    /\binterview practice\b/.test(normalized) ||
+    /\bpractice interview\b/.test(normalized);
+  if (!namesMock) return false;
+  if (/\b(end|stop|close|review|reopen|continue|resume)\b/.test(normalized)) return false;
+  return /\b(start|run|begin|launch|do|practice|conduct|give)\b/.test(normalized);
+}
+
+export async function startMockFromJobThread({ api, applicationId, text, title, context } = {}) {
+  await api.appendJobThreadMessage({
+    applicationId,
+    role: "user",
+    kind: "text",
+    text,
+  });
+  return api.startMockInterview({
+    applicationId,
+    questionTotal: 6,
+    title,
+    context,
+  });
+}
+
 function applicationHandoff(detail, prepareStep) {
   const source = detail?.data || detail || {};
   const direct =
@@ -489,6 +563,17 @@ export function openApplicationHandoff(gate, openWindow = globalThis.window?.ope
   return true;
 }
 
+export async function focusApplicationHandoff(gate, runWorkspaceIntent) {
+  const applicationId = String(gate?.applicationId || "").trim();
+  if (!applicationId || typeof runWorkspaceIntent !== "function") return false;
+  await runWorkspaceIntent(
+    "job.prepare-submit",
+    { type: "application", id: applicationId },
+    { resumeSession: true, focusSession: true }
+  );
+  return true;
+}
+
 function latestForQuestion(messages, kind, questionNumber) {
   return list(messages)
     .filter((message) => message?.kind === kind && message?.questionNumber === questionNumber)
@@ -506,7 +591,10 @@ function displayLabel(value, fallback) {
 export function mockStartContext(thread, detail = {}) {
   const source = detail?.data || detail || {};
   const conversation = list(source?.conversations).at(-1) || null;
-  const round = displayLabel(conversation?.kind || thread?.stage, "Interview");
+  const rawRound = String(conversation?.kind || thread?.stage || "");
+  const round = /screen|assessment|technical|hiring manager|interview|onsite|final/i.test(rawRound)
+    ? displayLabel(rawRound, "Interview")
+    : "Interview";
   const interviewerName = String(conversation?.who || "").trim();
   const interviewerRole = String(conversation?.processNote || "").trim();
   const artifacts = list(source?.drawer?.artifacts).length
@@ -537,6 +625,18 @@ export function mockStartContext(thread, detail = {}) {
         .join(" · "),
     },
   };
+}
+
+export function selectMockSession(sessions, applicationId) {
+  const applicationKey = String(applicationId || "").trim();
+  const matching = list(sessions).filter(
+    (session) => !applicationKey || session?.applicationId === applicationKey
+  );
+  return (
+    matching.find((session) => session?.status !== "ended") ||
+    matching.find((session) => session?.status === "ended") ||
+    null
+  );
 }
 
 export function mapMockSession(session) {
@@ -571,9 +671,26 @@ export function mapMockSession(session) {
     null;
   const interviewerHint =
     context?.interviewerHint || [interviewer, interviewerRole].filter(Boolean).join(" · ") || null;
+  const turns = questions.map((item) => {
+    const itemNumber = Number(item.questionNumber);
+    const itemAnswer = latestForQuestion(normalizedMessages, "answer", itemNumber);
+    const itemFeedback = feedbackItems
+      .filter((candidate) => Number(candidate?.questionNumber) === itemNumber)
+      .at(-1);
+    return {
+      questionId: item.id || null,
+      questionNumber: itemNumber,
+      question: item.text,
+      answer: itemAnswer?.text || null,
+      worked: itemFeedback?.worked || null,
+      tighten: itemFeedback?.tighten || null,
+    };
+  });
   return {
     id: session?.id || null,
     ...(session?.applicationId ? { applicationId: session.applicationId } : {}),
+    status: session?.status || "active",
+    summary: session?.summary || null,
     title: session?.title || context?.title || "Mock interview",
     company: context?.company || session?.company || null,
     round: context?.round || context?.interviewRound || session?.round || null,
@@ -582,7 +699,8 @@ export function mapMockSession(session) {
     loadedContext: context?.loadedContext || session?.loadedContext || null,
     questionNumber,
     totalQuestions: Number(session?.questionTotal || session?.questionCount) || 1,
-    question: question?.text || "Tell me about the experience most relevant to this role.",
+    questionReady: Boolean(question?.text),
+    question: question?.text || null,
     userAnswer: answer?.text || null,
     worked: feedback?.worked || null,
     tighten: feedback?.tighten || null,
@@ -594,5 +712,6 @@ export function mapMockSession(session) {
         }
       : null,
     retryPrompt: null,
+    turns,
   };
 }

@@ -6,7 +6,10 @@ import { Readable } from "node:stream";
 import { afterEach, test } from "node:test";
 
 import { mountInstalledRuntimeRoutes } from "../src/cli/installed-runtime-route.mjs";
-import { loadInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
+import {
+  loadInstalledRuntimeSelection,
+  writeInstalledRuntimeSelection,
+} from "../src/core/ai/runtime-selection.mjs";
 
 const roots = new Set();
 
@@ -90,7 +93,7 @@ const INVENTORY = [
   },
 ];
 
-test("inventory probes installed CLIs, auto-selects the first ready one, and persists it", async () => {
+test("inventory does not auto-select a ready CLI without a proven tool boundary", async () => {
   const server = boot({
     inventory: INVENTORY,
     probes: {
@@ -100,7 +103,7 @@ test("inventory probes installed CLIs, auto-selects the first ready one, and per
   });
   const response = await request(server, "GET", "/api/settings/ai-runtimes");
   assert.equal(response.status, 200);
-  assert.equal(response.body.selectedId, "codex");
+  assert.equal(response.body.selectedId, null);
   assert.equal(response.body.providerFallback, false);
   assert.deepEqual(
     response.body.runtimes.map(({ id, status, ready, selected }) => ({
@@ -111,13 +114,13 @@ test("inventory probes installed CLIs, auto-selects the first ready one, and per
     })),
     [
       { id: "claude", status: "authentication_required", ready: false, selected: false },
-      { id: "codex", status: "ready", ready: true, selected: true },
+      { id: "codex", status: "ready", ready: true, selected: false },
       { id: "gemini", status: "not_installed", ready: false, selected: false },
       { id: "custom", status: "not_installed", ready: false, selected: false },
     ]
   );
   assert.deepEqual(loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }), {
-    runtimeId: "codex",
+    runtimeId: null,
     providerFallback: false,
     customCommand: null,
   });
@@ -130,7 +133,7 @@ test("inventory probes installed CLIs, auto-selects the first ready one, and per
   );
 });
 
-test("inventory leaves selectedId null when two or more CLIs are ready — the picker screen decides, not an auto-select", async () => {
+test("inventory auto-selects the sole ready CLI with a proven tool boundary", async () => {
   const server = boot({
     inventory: INVENTORY,
     probes: {
@@ -140,22 +143,92 @@ test("inventory leaves selectedId null when two or more CLIs are ready — the p
   });
   const response = await request(server, "GET", "/api/settings/ai-runtimes");
   assert.equal(response.status, 200);
-  assert.equal(response.body.selectedId, null);
+  assert.equal(response.body.selectedId, "claude");
   assert.equal(response.body.providerFallback, false);
   assert.deepEqual(
     response.body.runtimes.map(({ id, ready, selected }) => ({ id, ready, selected })),
     [
-      { id: "claude", ready: true, selected: false },
+      { id: "claude", ready: true, selected: true },
       { id: "codex", ready: true, selected: false },
       { id: "gemini", ready: false, selected: false },
       { id: "custom", ready: false, selected: false },
     ]
   );
   assert.deepEqual(loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }), {
+    runtimeId: "claude",
+    providerFallback: false,
+    customCommand: null,
+  });
+});
+
+test("detected CLIs without a proven tool boundary stay visible but cannot be selected", async () => {
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {
+      claude: { status: "ready", ready: true, action: null },
+      codex: { status: "ready", ready: true, action: null },
+    },
+  });
+
+  const inventory = await request(server, "GET", "/api/settings/ai-runtimes");
+  const claude = inventory.body.runtimes.find(({ id }) => id === "claude");
+  const codex = inventory.body.runtimes.find(({ id }) => id === "codex");
+  const custom = inventory.body.runtimes.find(({ id }) => id === "custom");
+  assert.equal(claude.selectable, true);
+  assert.equal(codex.selectable, false);
+  assert.equal(custom.selectable, false);
+  assert.match(codex.capabilityReason, /cannot safely run CareerRat tools/i);
+
+  const selectCodex = await request(server, "POST", "/api/settings/ai-runtime/select", {
+    runtimeId: "codex",
+  });
+  assert.equal(selectCodex.status, 409);
+  assert.equal(selectCodex.body.code, "RUNTIME_CAPABILITY_UNSUPPORTED");
+});
+
+test("inventory clears a stale unsupported selection instead of reporting it connected", async () => {
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {
+      claude: { status: "signed_out", ready: false, action: "open_terminal" },
+      codex: { status: "ready", ready: true, action: null },
+    },
+  });
+  writeInstalledRuntimeSelection({
+    repoRoot: server.repoRoot,
+    env: server.env,
+    runtimeId: "codex",
+    providerFallback: false,
+  });
+
+  const response = await request(server, "GET", "/api/settings/ai-runtimes");
+  assert.equal(response.status, 200);
+  assert.equal(response.body.selectedId, null);
+  assert.equal(response.body.runtimes.find(({ id }) => id === "codex").selected, false);
+  assert.deepEqual(loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }), {
     runtimeId: null,
     providerFallback: false,
     customCommand: null,
   });
+});
+
+test("custom commands can be tested but cannot become the tool-bearing CareerRat runtime", async () => {
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {},
+    probeCustomImpl: async () => ({ ok: true, elapsedMs: 4, output: "ok" }),
+  });
+  const probe = await request(server, "POST", "/api/settings/ai-runtime/custom/test", {
+    command: "/safe/custom-agent",
+  });
+  assert.equal(probe.status, 200);
+  assert.equal(probe.body.ok, true);
+
+  const select = await request(server, "POST", "/api/settings/ai-runtime/custom/select", {
+    command: "/safe/custom-agent",
+  });
+  assert.equal(select.status, 409);
+  assert.equal(select.body.code, "RUNTIME_CAPABILITY_UNSUPPORTED");
 });
 
 test("runtime probe returns the requested runtime's current readiness", async () => {
@@ -341,7 +414,7 @@ test("custom/test rejects a blank command without invoking the probe", async () 
   assert.equal(calls.length, 0);
 });
 
-test("custom/select persists the custom command and it appears as the selected 'custom' entry", async () => {
+test("custom/select rejects a command without persisting unsupported runtime state", async () => {
   const server = boot({
     inventory: INVENTORY,
     probes: {
@@ -352,34 +425,20 @@ test("custom/select persists the custom command and it appears as the selected '
   const select = await request(server, "POST", "/api/settings/ai-runtime/custom/select", {
     command: "~/bin/my-agent --name sonnet",
   });
-  assert.equal(select.status, 200);
-  assert.deepEqual(select.body, {
-    ok: true,
-    selectedId: "custom",
-    customCommand: "~/bin/my-agent --name sonnet",
-  });
+  assert.equal(select.status, 409);
+  assert.equal(select.body.code, "RUNTIME_CAPABILITY_UNSUPPORTED");
   assert.deepEqual(loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }), {
-    runtimeId: "custom",
+    runtimeId: null,
     providerFallback: false,
-    customCommand: "~/bin/my-agent --name sonnet",
+    customCommand: null,
   });
 
   const inventoryResponse = await request(server, "GET", "/api/settings/ai-runtimes");
   assert.equal(inventoryResponse.status, 200);
-  assert.equal(inventoryResponse.body.selectedId, "custom");
+  assert.equal(inventoryResponse.body.selectedId, null);
   const customEntry = inventoryResponse.body.runtimes.find(({ id }) => id === "custom");
-  assert.deepEqual(customEntry, {
-    id: "custom",
-    name: "Custom command",
-    commandShape: "~/bin/my-agent --name sonnet",
-    path: "~/bin/my-agent --name sonnet",
-    available: true,
-    warning: null,
-    status: "ready_unverified",
-    ready: true,
-    action: null,
-    selected: true,
-  });
+  assert.equal(customEntry.selectable, false);
+  assert.equal(customEntry.selected, false);
 });
 
 test("custom/select rejects a blank command without persisting anything", async () => {
@@ -396,7 +455,7 @@ test("custom/select rejects a blank command without persisting anything", async 
   });
 });
 
-test("selecting a detected runtime after a custom command was chosen nulls customCommand (current intended behavior)", async () => {
+test("selecting a supported runtime clears stale unsupported custom-command state", async () => {
   const server = boot({
     inventory: INVENTORY,
     probes: {
@@ -404,10 +463,13 @@ test("selecting a detected runtime after a custom command was chosen nulls custo
       codex: { status: "ready", ready: true, action: null },
     },
   });
-  const custom = await request(server, "POST", "/api/settings/ai-runtime/custom/select", {
-    command: "~/bin/my-agent",
+  writeInstalledRuntimeSelection({
+    repoRoot: server.repoRoot,
+    env: server.env,
+    runtimeId: "custom",
+    providerFallback: false,
+    customCommand: "~/bin/my-agent",
   });
-  assert.equal(custom.status, 200);
   assert.deepEqual(loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }), {
     runtimeId: "custom",
     providerFallback: false,

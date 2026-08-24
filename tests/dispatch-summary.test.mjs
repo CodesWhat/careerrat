@@ -44,15 +44,6 @@ test("summarizeDispatch: run_skill (Lane B)", () => {
   assert.equal(summary, "run evaluate-job");
 });
 
-test("summarizeDispatch: chat_skill (Lane C)", () => {
-  const summary = summarizeDispatch({
-    lane: "C",
-    action: "chat_skill",
-    params: { skill: "email-comms" },
-  });
-  assert.equal(summary, "hand off to email-comms");
-});
-
 test("ISSUE-038 summarizeDispatch names a workspace-agent intent without implying another chat", () => {
   const summary = summarizeDispatch({
     lane: "W",

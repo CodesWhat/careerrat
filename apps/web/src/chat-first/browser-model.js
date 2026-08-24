@@ -53,7 +53,15 @@ export function pipelineRowsWithWidths(rows) {
   }));
 }
 
-export function filterSearchJobs(jobs, filters = {}) {
+function filterKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+export function filterSearchJobs(jobs, filters = {}, now = new Date()) {
   const query = String(filters.query || "")
     .trim()
     .toLowerCase();
@@ -74,8 +82,37 @@ export function filterSearchJobs(jobs, filters = {}) {
     ) {
       return false;
     }
+    if (
+      filters.stage &&
+      filters.stage !== "all" &&
+      filterKey(job?.stage || job?.stageLabel || job?.status) !== filters.stage
+    ) {
+      return false;
+    }
+    if (
+      filters.source &&
+      filters.source !== "all" &&
+      filterKey(job?.sourceLabel || job?.channel || job?.source) !== filters.source
+    ) {
+      return false;
+    }
+    if (filters.posted && filters.posted !== "all") {
+      const days = Number.parseInt(filters.posted, 10);
+      const postedAt = new Date(job?.postedAt || job?.datePosted || "");
+      const current = now instanceof Date ? now : new Date(now);
+      const age = current.getTime() - postedAt.getTime();
+      if (
+        !Number.isFinite(days) ||
+        !Number.isFinite(postedAt.getTime()) ||
+        !Number.isFinite(current.getTime()) ||
+        age < 0 ||
+        age > days * 86_400_000
+      ) {
+        return false;
+      }
+    }
     if (!query) return true;
-    return `${job?.company || ""} ${job?.role || ""} ${job?.stage || ""} ${job?.location || ""}`
+    return `${job?.company || ""} ${job?.role || ""} ${job?.stage || ""} ${job?.location || ""} ${job?.sourceLabel || ""}`
       .toLowerCase()
       .includes(query);
   });

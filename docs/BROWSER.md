@@ -51,10 +51,10 @@ tracked path. See the **Browser Automation Contract** (Local-only + safety) in `
 
 **Write skill prose tool-agnostically** — say "use the session browser," not a
 specific vendor tool or MCP namespace. `auto` is the default: it uses Orca's visible,
-supervised browser inside an Orca workspace and the compatible extension session
-otherwise. Playwright persistent profiles remain an explicit fallback. If the selected
-provider cannot execute the concrete workflow, CareerRat exposes a supervised/manual
-handoff instead of claiming the browser ran.
+supervised browser inside an Orca workspace, bundled Playwright in the packaged desktop
+app, and the compatible extension session otherwise. If the selected provider cannot
+execute the concrete workflow, CareerRat exposes a supervised/manual handoff instead of
+claiming the browser ran.
 
 Capabilities the agent uses at this layer (each maps to whichever provider is active):
 
@@ -128,9 +128,10 @@ mail login wall, mail 2FA prompt, captcha, or unexpected interstitial.
 
 Which provider drives the live session is itself a setting. `auto` is the
 **recommended default** and selects a browser CareerRat can detect without asking the
-candidate to understand their CLI or extension setup. Explicit overrides are `extension`,
-`orca` (a supervised embedded browser available inside Orca workspaces), or
-`playwright` (the fallback: a one-time interactive login per platform, persistent
+candidate to understand their CLI or extension setup. It selects Orca inside an Orca
+workspace, bundled Playwright in the packaged desktop app, and the compatible extension
+otherwise. Explicit overrides are `extension`, `orca` (a supervised embedded browser
+available inside Orca workspaces), or `playwright` (a one-time interactive login per platform, persistent
 profile at `~/.careerrat/board-profiles/<platform>`). It's a *how-it-runs* choice and
 never affects `mayRun()` — provider does not gate whether a capability is allowed.
 Change it the same safe way as the toggles (dry-run by default, schema-validated,

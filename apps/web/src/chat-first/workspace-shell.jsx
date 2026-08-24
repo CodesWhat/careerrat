@@ -22,6 +22,14 @@ function Dot({ label = "Needs action" }) {
   return <span className="chat-first-dot" role="img" aria-label={label} />;
 }
 
+const ICON_BADGE_TONES = ["lime", "sky", "lilac", "cool", "cream"];
+
+function iconBadgeTone(identity) {
+  const value = String(identity || "card");
+  const sum = [...value].reduce((total, character) => total + character.codePointAt(0), 0);
+  return ICON_BADGE_TONES[sum % ICON_BADGE_TONES.length];
+}
+
 function RailIcon({ kind }) {
   const icons = {
     search: SearchIcon,
@@ -106,6 +114,8 @@ export function ThreadRail({
   agentName = "Paul",
   activeThread = "today",
   needsAction = false,
+  deepIngestThread = null,
+  skillThreads = EMPTY_LIST,
   threads = EMPTY_LIST,
   browserLaunchers = EMPTY_LIST,
   archiveThreads = EMPTY_LIST,
@@ -126,7 +136,10 @@ export function ThreadRail({
         onClick={() => onSelectThread?.("today")}
       >
         <span className="chat-first-thread-card__title">
-          <span className="chat-first-avatar chat-first-avatar--small" aria-hidden="true">
+          <span
+            className={`chat-first-thread-card__icon-badge chat-first-thread-card__icon-badge--${iconBadgeTone(agentName)}`}
+            aria-hidden="true"
+          >
             🐀
           </span>
           <span>{agentName}</span>
@@ -136,6 +149,58 @@ export function ThreadRail({
           main chat · briefs, missions, questions
         </span>
       </button>
+
+      {deepIngestThread ? (
+        <button
+          className={`chat-first-thread-card chat-first-thread-card--deep${activeThread === deepIngestThread.id ? " is-active" : ""}`}
+          type="button"
+          aria-current={activeThread === deepIngestThread.id ? "page" : undefined}
+          onClick={() => onSelectThread?.(deepIngestThread.id)}
+        >
+          <span className="chat-first-thread-card__title">
+            <span
+              className={`chat-first-thread-card__icon-badge chat-first-thread-card__icon-badge--${iconBadgeTone(deepIngestThread.id)}`}
+              aria-hidden="true"
+            >
+              <PickaxeIcon />
+            </span>
+            <span>{deepIngestThread.title}</span>
+          </span>
+          <span className="chat-first-thread-card__subtitle">{deepIngestThread.subtitle}</span>
+        </button>
+      ) : null}
+
+      {skillThreads.length ? (
+        <>
+          <div className="chat-first-eyebrow chat-first-thread-rail__heading">
+            RESEARCH · {skillThreads.length}
+          </div>
+          {skillThreads.map((thread) => {
+            const active = activeThread === thread.id;
+            return (
+              <button
+                className={`chat-first-thread-card chat-first-thread-card--skill${active ? " is-active" : ""}`}
+                type="button"
+                key={thread.id}
+                aria-current={active ? "page" : undefined}
+                onClick={() => onSelectThread?.(thread.id)}
+              >
+                <span className="chat-first-thread-card__title">
+                  <SearchIcon />
+                  <span>{thread.title}</span>
+                  {thread.state === "running" ? <Dot label="Research running" /> : null}
+                </span>
+                <span className="chat-first-thread-card__subtitle">
+                  {thread.subtitle ||
+                    (thread.state === "running"
+                      ? "research running · progress stays here"
+                      : "research saved · open anytime")}
+                </span>
+              </button>
+            );
+          })}
+        </>
+      ) : null}
 
       <div
         className={`chat-first-eyebrow chat-first-thread-rail__heading${threads.length ? "" : " chat-first-thread-rail__heading--empty"}`}
@@ -285,6 +350,7 @@ export function Composer({
 export function NeedsYouPanel({
   items = EMPTY_LIST,
   deepIngestPrompt = { visible: true },
+  deepIngestStarted = false,
   onStartIngest,
   onDismissIngest,
 }) {
@@ -356,7 +422,7 @@ export function NeedsYouPanel({
               type="button"
               onClick={onStartIngest}
             >
-              Start
+              {deepIngestStarted ? "Continue" : "Start"}
             </button>
           </section>
         </div>

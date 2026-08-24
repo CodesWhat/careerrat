@@ -1,8 +1,13 @@
 ---
 name: coach-gaps
 description: When a job's evaluate-job verdict lands at gate REVIEW with named fit gaps, name each gap a plan the candidate can act on — either an honest evidence-claim draft grounded in evidence already on record, or an explicit no-close-path — and route a confirmed draft through the evidence firewall before offering a re-evaluation.
-tier_1_inputs: [application.evaluation.gate, application.evaluation.fitRisks, candidate/evidence.yml#claims, saved JD body]
-tier_2_inputs: []
+metadata:
+  tier_1_inputs:
+    - application.evaluation.gate
+    - application.evaluation.fitRisks
+    - candidate/evidence.yml#claims
+    - saved JD body
+  tier_2_inputs: []
 ---
 
 # coach-gaps

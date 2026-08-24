@@ -3960,7 +3960,7 @@ function manualReviewAction(row) {
   };
 }
 
-function defaultJobAction(row) {
+function defaultJobAction(row, sourceRecord = {}) {
   if (row.terminal) {
     return {
       state: "archived",
@@ -3976,6 +3976,23 @@ function defaultJobAction(row) {
     };
   }
   if (row.source === "application") {
+    if (row.stage === "reviewed-hold") {
+      const cleared = String(sourceRecord.evaluation?.gate || sourceRecord.gate || "") === "keep";
+      return {
+        state: "review",
+        label: cleared ? "Prepare" : "Review",
+        title: cleared ? `Prepare ${row.company}` : `Review ${row.company}`,
+        summary: cleared
+          ? "This role cleared review and is ready for application preparation. It has not been submitted."
+          : "Application preparation is on hold pending review. It has not been submitted.",
+        meta: `${row.fit} · ${row.stageGroupLabel}`,
+        dueAt: "",
+        dueText: cleared ? "Prepare" : "Review",
+        tone: "secondary",
+        workstream: "review",
+        cta: "Open details",
+      };
+    }
     return {
       state: "watch",
       label: "Wait",
@@ -4064,7 +4081,7 @@ function buildJobAction(row, sourceRecord = {}, communications = [], now = new D
   // follow-up due next week is not yet an action — let it fall through to watch/default.
   if (followAction?.state === "needs-action") return followAction;
   if (needsManualReview(row)) return manualReviewAction(row);
-  return defaultJobAction(row);
+  return defaultJobAction(row, sourceRecord);
 }
 
 // Decay is an add-on state that can attach to ANY non-terminal stage, not just
@@ -4512,6 +4529,7 @@ function applicationJobRow(app, index, communications = [], now = new Date(), pr
     sourceLabel: source.label,
     sourceIcon: source.icon,
     appliedAt: app.appliedAt || "",
+    postedAt: app.postedAt || "",
     appliedLabel: formatDateShort(app.appliedAt, "Tracked"),
     initials: initials(app.company),
     domain: app.domain || app.companyDomain || "",
@@ -4602,6 +4620,8 @@ function sourcedJobRow(role, index, now = new Date(), profileComp = {}) {
     sourceLabel: source.label,
     sourceIcon: source.icon,
     appliedAt: "",
+    postedAt: role.postedAt || "",
+    sourcedAt: role.sourcedAt || "",
     appliedLabel: "Sourced",
     initials: initials(role.company),
     domain: role.domain || role.companyDomain || "",
@@ -4613,6 +4633,19 @@ function sourcedJobRow(role, index, now = new Date(), profileComp = {}) {
     terminal,
     note: role.note || role.fitBucket || "",
   };
+  const compensationState = String(role?.evaluation?.compensation?.status || "").toLowerCase();
+  const compensationView = compRangeView(row, role, profileComp);
+  row.compStatus =
+    role.compStatus ||
+    (compensationState === "clears-floor"
+      ? "comp ✓"
+      : compensationState === "below-floor"
+        ? "comp below floor"
+        : compensationView.hasMarket &&
+            (compensationView.floorK === null ||
+              Number(compensationView.marketHi) >= Number(compensationView.floorK))
+          ? "comp ✓"
+          : "comp pending");
   applyJobAction(row, role, [], now);
   row.searchText = [
     row.company,
@@ -5273,7 +5306,7 @@ export function buildDashboardViewModel(
 // shape + render the events into the existing pulse timeline. See SPEC.md §2.
 // ---------------------------------------------------------------------------
 
-// Per-type Lucide glyph for the timeline dot (paths match the dashboard-shell markup).
+// Per-type Lucide glyph for activity timeline consumers.
 const ACTIVITY_ICON_PATHS = {
   sourced: '<path d="m8 11 2 2 4-4"/><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
   evaluated:

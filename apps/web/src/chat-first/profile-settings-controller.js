@@ -77,11 +77,19 @@ function browserModel(automation) {
   const configured = options.find((option) => option?.id === session.provider);
   const effective = options.find((option) => option?.id === session.effectiveProvider);
   return {
+    providerId: session.provider || null,
     provider: configured?.label || session.provider || "Not configured",
+    effectiveProviderId: session.effectiveProvider || null,
     effectiveProvider: effective?.label || session.effectiveProvider || "Not detected",
     presenceStatus: session.presence?.status || "unknown",
     presenceDetail: session.presence?.detail || "Browser readiness has not been checked yet.",
     automaticFillSupported: Boolean((configured || effective)?.automatedApply),
+    options: options.map((option) => ({
+      id: option?.id,
+      label: option?.label || option?.id || "Browser provider",
+      needs: option?.needs || "",
+      automatedApply: option?.automatedApply === true,
+    })),
     playwright: {
       packageInstalled: session.tooling?.playwright?.packageInstalled === true,
       browserInstalled: session.tooling?.playwright?.browserInstalled === true,
@@ -133,6 +141,10 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
   const companySources = list(sources?.companies);
   const runtime = selectedRuntime(runtimes);
   const targets = list(targeting.role_buckets).flatMap((bucket) => list(bucket?.titles));
+  const roleBuckets = list(targeting.role_buckets).map((bucket) => ({
+    ...bucket,
+    titles: [...list(bucket?.titles)],
+  }));
   const dealbreakers = list(targeting.cut_signals).map(signalLabel).filter(Boolean);
   const keepSignals = list(targeting.keep_signals).map(signalLabel).filter(Boolean);
   const compensation = profile.compensation || {};
@@ -142,9 +154,11 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
   const cadence = targeting.search_preferences?.cadence?.mode || "daily";
   const fitFloor = Number(targeting.fit_bands?.fit_floor);
   const displayedFitFloor = Number.isFinite(fitFloor) ? fitFloor : 70;
+  const agentName = data.modes?.agent_name || "Paul";
+  const publicSyncPreference = onboard?.publicSyncPreference || {};
 
   return {
-    agentName: data.modes?.agent_name || "Paul",
+    agentName,
     profile: {
       targets,
       compensation: {
@@ -173,12 +187,24 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
         targets: {
           id: "targets",
           title: "Edit targets",
-          fields: [
-            field("titles", "Target role titles", "textarea", lineValue(targets), {
-              rows: 6,
-              placeholder: "One role title per line",
-            }),
-          ],
+          roleBuckets,
+          fields: (roleBuckets.length
+            ? roleBuckets
+            : [{ name: "Primary targets", titles: targets }]
+          ).map((bucket, index) =>
+            field(
+              index === 0 ? "titles" : `titles:${index}`,
+              roleBuckets.length > 1
+                ? `${bucket.name || `Target lane ${index + 1}`} titles`
+                : "Target role titles",
+              "textarea",
+              lineValue(bucket.titles),
+              {
+                rows: 6,
+                placeholder: "One role title per line",
+              }
+            )
+          ),
         },
         compensation: {
           id: "compensation",
@@ -284,11 +310,16 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
     },
     engine: {
       name: runtime?.name || "AI engine",
-      connected: Boolean(runtime?.ready),
+      connected: Boolean(runtime?.ready && runtime?.selectable !== false),
       selectedId: runtimes?.selectedId || null,
       choices: list(runtimes?.runtimes).map((choice) => ({ ...choice })),
     },
     browser: browserModel(automation),
+    publicSyncPreference: {
+      enabled: publicSyncPreference.enabled !== false,
+      source: publicSyncPreference.source || "default",
+      updatedAt: publicSyncPreference.updatedAt || null,
+    },
     permissions: [
       {
         id: "draft_documents",
@@ -308,7 +339,7 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
       {
         id: "authenticated_apply_preparation",
         name: "Prepare application forms",
-        description: "Paul fills authenticated forms, you press every submit",
+        description: `${agentName} fills authenticated forms, you press every submit`,
         enabled: capabilityEnabled(automation, "authenticated_apply_preparation"),
         mutable: true,
       },
@@ -334,15 +365,27 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
 
 export function profileSectionSavePlan(section, values = {}, editor = {}) {
   if (section === "targets") {
-    const titles = lines(values.titles);
-    if (!titles.length) throw new Error("Add at least one target role.");
+    const existingBuckets = list(editor?.roleBuckets);
+    const roleBuckets = existingBuckets.length
+      ? existingBuckets.map((bucket, index) => ({
+          ...bucket,
+          titles: lines(values[index === 0 ? "titles" : `titles:${index}`]),
+        }))
+      : [
+          {
+            name: "Primary targets",
+            priority: "primary",
+            titles: lines(values.titles),
+          },
+        ];
+    if (!roleBuckets.some((bucket) => bucket.titles.length)) {
+      throw new Error("Add at least one target role.");
+    }
     return [
       {
         kind: "candidate",
         name: "targeting",
-        patch: {
-          role_buckets: [{ name: "Primary targets", priority: "primary", titles }],
-        },
+        patch: { role_buckets: roleBuckets },
       },
     ];
   }

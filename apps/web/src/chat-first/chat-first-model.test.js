@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { buildDashboardViewModel } from "../../../../src/core/tracker/dashboard-data.js";
+import { buildCartView, filterSearchJobs } from "./browser-model.js";
 import {
   artifactEmoji,
   buildChatFirstView,
@@ -143,6 +145,90 @@ const runtime = {
 };
 
 describe("buildChatFirstView", () => {
+  it("unwraps an old structured assistant reply in the thread rail", () => {
+    const view = buildChatFirstView(dashboard, {
+      ...runtime,
+      jobThreads: [
+        {
+          ...runtime.jobThreads[0],
+          messages: [
+            {
+              id: "legacy-reply",
+              role: "assistant",
+              kind: "text",
+              text: '{"reply":"The packet is ready for review."}',
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(view.threads[0].subtitle).toBe("The packet is ready for review.");
+  });
+
+  it("maps canonical dashboard compensation results into real browser filters and cart state", () => {
+    const actualDashboard = buildDashboardViewModel(
+      {
+        sourced: [
+          {
+            id: "posted-clear",
+            company: "Clear Co",
+            role: "Staff Engineer",
+            status: "sourced",
+            fitScore: 90,
+            base: "$200,000 - $240,000",
+          },
+          {
+            id: "evaluated-clear",
+            company: "Evaluated Co",
+            role: "Principal Engineer",
+            status: "reviewed-hold",
+            fitScore: 88,
+            base: "verify",
+            evaluation: { compensation: { status: "clears-floor" } },
+          },
+          {
+            id: "unknown-comp",
+            company: "Unknown Co",
+            role: "Platform Engineer",
+            status: "sourced",
+            fitScore: 86,
+            base: "verify",
+          },
+        ],
+        applications: [],
+        communications: [],
+      },
+      {
+        settings: {
+          profile: {
+            candidate: "Riley",
+            minimumBase: "$190K",
+            minimumBaseK: 190,
+          },
+        },
+      }
+    );
+    const view = buildChatFirstView(actualDashboard, {});
+
+    expect(view.browser.search).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "posted-clear", compStatus: "comp ✓" }),
+        expect.objectContaining({ id: "evaluated-clear", compStatus: "comp ✓" }),
+        expect.objectContaining({ id: "unknown-comp", compStatus: "comp pending" }),
+      ])
+    );
+    expect(
+      filterSearchJobs(view.browser.search, { comp: true })
+        .map((row) => row.id)
+        .sort()
+    ).toEqual(["evaluated-clear", "posted-clear"]);
+    expect(buildCartView(view.browser.search)).toMatchObject({
+      count: 3,
+      compPendingCount: 1,
+    });
+  });
+
   it("uses durable thread state and maps every browser surface from canonical data", () => {
     const view = buildChatFirstView(dashboard, runtime);
 
@@ -337,6 +423,36 @@ describe("buildChatFirstView", () => {
     ]);
   });
 
+  it("personalizes generated action copy with the configured agent name", () => {
+    const view = buildChatFirstView(
+      {
+        ...dashboard,
+        network: {
+          companies: [
+            {
+              company: "Wayne Enterprises",
+              contacts: [{ id: "lucius", name: "Lucius Fox", type: "Hiring manager" }],
+            },
+          ],
+        },
+      },
+      {
+        ...runtime,
+        agentName: "Scout",
+        missions: [],
+        needsYou: [
+          { id: "source-a", kind: "sourced-decision", sourceId: "source-a" },
+          { id: "source-b", kind: "sourced-decision", sourceId: "source-b" },
+        ],
+      }
+    );
+
+    expect(view.browser.people[0].actionLabel).toBe("Ask Scout");
+    expect(view.needsYou.find((item) => item.kind === "sourced-decision-group")?.detail).toContain(
+      "before Scout prepares each application"
+    );
+  });
+
   it("reserves the red thread dot for durable user actions, not ordinary agent replies", () => {
     const view = buildChatFirstView(
       { ...dashboard, allNextSteps: [] },
@@ -366,6 +482,26 @@ describe("buildChatFirstView", () => {
     expect(view.browser.search).toEqual([]);
     expect(view.activeMission).toBeNull();
     expect(view.deepIngestPrompt).toEqual({ visible: false });
+  });
+
+  it("maps a durable Deep ingest thread and can navigate away and back without job context", () => {
+    const view = buildChatFirstView(
+      {},
+      {
+        deepIngestThread: {
+          id: "ingest",
+          title: "Deep ingest",
+          subtitle: "add work history and review grounded evidence",
+        },
+      }
+    );
+    expect(view.deepIngestThread).toMatchObject({ id: "ingest", title: "Deep ingest" });
+
+    let state = chatFirstReducer(createChatFirstState(), { type: "thread.open", id: "ingest" });
+    expect(state).toMatchObject({ activeThread: "ingest", activeApplicationId: null });
+    state = chatFirstReducer(state, { type: "thread.open", id: "today" });
+    state = chatFirstReducer(state, { type: "thread.open", id: "ingest" });
+    expect(state).toMatchObject({ activeThread: "ingest", activeApplicationId: null });
   });
 
   it("routes an unlinked real contact to Paul instead of showing a dead thread action", () => {
@@ -428,6 +564,41 @@ describe("buildChatFirstView", () => {
     expect(
       filterPipelineJobs(view.browser.pipeline.jobs, "withdrawn").map((row) => row.id)
     ).toEqual(["withdrawn"]);
+  });
+
+  it("does not count a reviewed-hold role as applied or heard back", () => {
+    const view = buildChatFirstView(
+      {
+        ...dashboard,
+        stats: { inPlay: 0 },
+        jobs: {
+          ...dashboard.jobs,
+          visibleCount: 1,
+          rows: [
+            {
+              id: "hold-1",
+              company: "Curri",
+              role: "Senior Software Engineer",
+              status: "reviewed-hold",
+              stage: "reviewed-hold",
+              stageLabel: "Reviewed Hold",
+              terminal: false,
+            },
+          ],
+        },
+      },
+      { ...runtime, missions: [] }
+    );
+
+    expect(view.counts.pipeline).toBe(0);
+    expect(view.browser.pipeline.applicationCount).toBe(1);
+    expect(view.browser.pipeline.rows).toEqual([
+      expect.objectContaining({ id: "applied", count: 0 }),
+      expect.objectContaining({ id: "heard-back", count: 0 }),
+      expect.objectContaining({ id: "onsite", count: 0 }),
+      expect.objectContaining({ id: "final", count: 0 }),
+      expect.objectContaining({ id: "offer", count: 0 }),
+    ]);
   });
 });
 

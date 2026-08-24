@@ -179,15 +179,14 @@ tracker before telling the user to open the dashboard.
 - If port 7777 is in use, verify whether it is already CareerRat. If it is not,
   start with another port, for example `careerrat tracker-dev --port 7778`, and
   tell the user the actual URL.
-- After changing `workspace/tracker.json`, `candidate/`, dashboard source, or
-  other tracker-visible data, keep the dev server running so the open page hot
-  reloads. Run `careerrat tracker` when a recovery snapshot and summary are
-  needed; it no longer publishes a second dashboard.
-- **Live reload is event-driven, not a poll.** `careerrat tracker-dev` watches
-  `workspace/tracker.json` (and `activity.jsonl`, `candidate/modes.yml`,
-  `src/core/tracker/*`) with `fs.watch`, refreshes its canonical view model, and
-  pushes a Server-Sent-Events `reload` to the open page. A write to the source
-  of truth reaches the screen within ~120ms — there is no refresh timer.
+- After changing tracker-visible data, keep the app server running so the open
+  React shell receives the update. Run `careerrat tracker` when a recovery
+  snapshot and summary are needed; it no longer publishes a second dashboard.
+- **Live data updates are event-driven, not a poll.** `careerrat tracker-dev`
+  watches `workspace/tracker.json` and `workspace/activity.jsonl` with
+  `fs.watch`, then pushes typed `tracker-update` or `activity-update`
+  Server-Sent Events. The React shell reloads canonical data from those events;
+  the server does not run a child renderer or rebuild HTML.
 - **There is one dashboard.** The old static tracker page is retired. For every
   live session, point the user at `careerrat tracker-dev`
   (`http://localhost:7777`).
@@ -1412,8 +1411,18 @@ token burn. Split each skill's inputs into two tiers and load lazily:
 Skills that delegate declare the split in frontmatter so the boundary is explicit:
 
 ```yaml
-tier_1_inputs: [modes.yml, automation consent, targeting.excluded_companies, profile.compensation.comp_floors, watermark]
-tier_2_inputs: [evidence.yml, writing-style.md, tracker.json bodies, fetched JD/web bodies]
+metadata:
+  tier_1_inputs:
+    - modes.yml
+    - automation consent
+    - targeting.excluded_companies
+    - profile.compensation.comp_floors
+    - watermark
+  tier_2_inputs:
+    - evidence.yml
+    - writing-style.md
+    - tracker.json bodies
+    - fetched JD/web bodies
 ```
 
 Each delegating skill's STEP 0 separates "load to decide" from "load to do" so the

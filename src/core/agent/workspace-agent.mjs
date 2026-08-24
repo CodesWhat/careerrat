@@ -73,6 +73,7 @@ import { evaluateAndPersistPacketGate } from "../packet/evaluate.mjs";
 import { exportPacketArtifacts } from "../packet/exports.mjs";
 import { generateApplicationPacket } from "../packet/generate-operation.mjs";
 import {
+  confirmOneOffScreeningAnswer,
   draftOneOffScreeningAnswers,
   saveOneOffScreeningAnswer,
 } from "../packet/one-off-answer.mjs";
@@ -134,6 +135,7 @@ export const EXECUTABLE_INTENTS = new Set([
   "job.generate-documents",
   "job.export-documents",
   "screening.answer",
+  "screening.answer-confirm",
   "screening.answer-save",
   "search.run",
   "sourced.promote",
@@ -329,10 +331,54 @@ function unsupported(type) {
   return error;
 }
 
-function actionError(message, code) {
+function actionError(message, code, { diagnostics } = {}) {
   const error = new Error(message);
   error.code = code;
+  if (diagnostics) error.diagnostics = diagnostics;
   return error;
+}
+
+function notFoundError(type, id) {
+  const labels = {
+    application: "saved application",
+    communication: "communication thread",
+    sourced: "sourced role",
+    intake: "intake item",
+  };
+  return actionError(`That ${labels[type] || "workspace item"} could not be found.`, "NOT_FOUND", {
+    diagnostics: { entity: { type, id: String(id || "") } },
+  });
+}
+
+function visibleActionError(error, entity) {
+  const rawMessage = String(error?.message || "The action could not be completed.");
+  const labels = {
+    application: "this application",
+    candidate: "the candidate profile",
+    communication: "this conversation",
+    company: "this company",
+    "company-proposal": "this company proposal",
+    intake: "this intake item",
+    "linkedin-proposal": "this LinkedIn proposal",
+    sourced: "this sourced role",
+    workspace: "this workspace",
+  };
+  const type = String(entity?.type || "").trim();
+  const id = String(entity?.id || "").trim();
+  const label = labels[type] || "this workspace item";
+  let message = rawMessage;
+  const references = [type && id ? `${type}:${id}` : "", id !== type ? id : ""]
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length);
+  for (const reference of references) message = message.replaceAll(reference, label);
+  if (error && typeof error === "object" && message !== rawMessage) {
+    error.diagnostics = {
+      ...(error.diagnostics && typeof error.diagnostics === "object" ? error.diagnostics : {}),
+      rawMessage,
+    };
+    error.message = message;
+  }
+  return message;
 }
 
 function profileSettingList(values, label) {
@@ -356,21 +402,21 @@ function profileSettingList(values, label) {
 function applicationForIntent({ repoRoot, env, id }) {
   const db = requireDb({ repoRoot, env });
   const row = db.prepare("SELECT data FROM applications WHERE id = ?").get(String(id));
-  if (!row) throw actionError(`Application not found: ${id}`, "NOT_FOUND");
+  if (!row) throw notFoundError("application", id);
   return JSON.parse(row.data);
 }
 
 function communicationForIntent({ repoRoot, env, id }) {
   const db = requireDb({ repoRoot, env });
   const row = db.prepare("SELECT data FROM communications WHERE id = ?").get(String(id));
-  if (!row) throw actionError(`Communication not found: ${id}`, "NOT_FOUND");
+  if (!row) throw notFoundError("communication", id);
   return JSON.parse(row.data);
 }
 
 function sourcedForIntent({ repoRoot, env, id }) {
   const db = requireDb({ repoRoot, env });
   const row = db.prepare("SELECT data FROM sourced WHERE id = ?").get(String(id));
-  if (!row) throw actionError(`Sourced role not found: ${id}`, "NOT_FOUND");
+  if (!row) throw notFoundError("sourced", id);
   return JSON.parse(row.data);
 }
 
@@ -587,7 +633,7 @@ async function captureIntakeJobRequest({
   now,
 }) {
   const item = intakeOne({ repoRoot, env, id: intakeId });
-  if (!item) throw actionError(`Intake item not found: ${intakeId}`, "NOT_FOUND");
+  if (!item) throw notFoundError("intake", intakeId);
   if (item.status !== "confirmed" || item.decision !== "confirm") {
     throw actionError(
       "Review and confirm this job before CareerRat saves and evaluates it.",
@@ -1500,10 +1546,11 @@ function evaluationNextActions(gate, applicationId, fitRisks = []) {
     ];
   }
   const actions = [
-    {
-      label: gate === "cut" ? "Review why this was cut" : "Review this job",
-      href: `/jobs?open=${encodeURIComponent(applicationId)}`,
-    },
+    navigationAction(gate === "cut" ? "Review why this was cut" : "Review this job", {
+      surface: "job",
+      entityType: "application",
+      entityId: applicationId,
+    }),
   ];
   // Coaching only ever offers on a review verdict with named gaps — never on
   // cut (nothing to coach toward) — matching coaching.plan's own trigger
@@ -1520,17 +1567,42 @@ function evaluationNextActions(gate, applicationId, fitRisks = []) {
   return actions;
 }
 
+function navigationAction(
+  label,
+  { surface, entityType = "workspace", entityId = WORKSPACE_THREAD_ID, section, artifactKind } = {}
+) {
+  return {
+    label,
+    intent: {
+      type: "ui.navigate",
+      entity: { type: entityType, id: entityId },
+      input: {
+        surface,
+        ...(section ? { section } : {}),
+        ...(artifactKind ? { artifactKind } : {}),
+      },
+    },
+  };
+}
+
 const QUESTION_CAPTURE_DEFERRED = "QUESTION_CAPTURE_DEFERRED";
 
-function isQuestionCaptureGap(gap) {
+function isDeferredQuestionGap(gap) {
+  const kind = String(gap?.kind || "").toLowerCase();
+  const code = String(gap?.code || "").toUpperCase();
+  return kind === "answers" && code === QUESTION_CAPTURE_DEFERRED;
+}
+
+function isNonBlockingPacketGap(gap) {
+  const kind = String(gap?.kind || "").toLowerCase();
+  const code = String(gap?.code || "").toUpperCase();
   return (
-    String(gap?.kind || "").toLowerCase() === "answers" &&
-    String(gap?.code || "").toUpperCase() === QUESTION_CAPTURE_DEFERRED
+    isDeferredQuestionGap(gap) || (kind === "coverletter" && code === "COVER_LETTER_CONFIRMATION")
   );
 }
 
 function blockingPacketGaps(gaps) {
-  return gaps.filter((gap) => !isQuestionCaptureGap(gap));
+  return gaps.filter((gap) => !isNonBlockingPacketGap(gap));
 }
 
 // Server-side corroboration for job.apply's resumeSession shortcut (see the
@@ -1570,7 +1642,38 @@ function questionCaptureFromApplication(application) {
     answerableCount,
     excludedCount,
     demographicSectionPresent: summary.demographicSectionPresent === true,
+    ...(Array.isArray(summary.answerableIds)
+      ? { answerableIds: summary.answerableIds.map(String) }
+      : {}),
+    ...(Array.isArray(summary.excludedIds) ? { excludedIds: summary.excludedIds.map(String) } : {}),
   };
+}
+
+function packetQuestionLineageIsStale(application) {
+  const manifest = application?.packetManifest;
+  const summary = manifest?.questions;
+  if (!summary || typeof summary !== "object" || Array.isArray(summary)) return false;
+  const idsFrom = (value) => (Array.isArray(value) ? value : []);
+
+  const capturedIds = new Set(
+    [...idsFrom(summary.answerableIds), ...idsFrom(summary.excludedIds)]
+      .map((id) => String(id || "").trim())
+      .filter(Boolean)
+  );
+  const lineage = manifest.answerLineage;
+  const lineageIds = new Set(
+    [...idsFrom(lineage?.answeredQuestionIds), ...idsFrom(lineage?.excludedQuestionIds)]
+      .map((id) => String(id || "").trim())
+      .filter(Boolean)
+  );
+  if (capturedIds.size > 0) {
+    if (capturedIds.size !== lineageIds.size) return true;
+    return [...capturedIds].some((id) => !lineageIds.has(id));
+  }
+
+  const capturedCount =
+    (Number(summary.answerableCount) || 0) + (Number(summary.excludedCount) || 0);
+  return capturedCount > 0 && capturedCount !== lineageIds.size;
 }
 
 function siteRequiredQuestionCapture(extra = {}) {
@@ -1608,8 +1711,10 @@ async function prepareApplicationQuestions({
       url,
       fetchImpl,
     });
-    const answerableCount = Array.isArray(capture?.questions) ? capture.questions.length : 0;
-    const excludedCount = Array.isArray(capture?.excluded) ? capture.excluded.length : 0;
+    const questions = Array.isArray(capture?.questions) ? capture.questions : [];
+    const excluded = Array.isArray(capture?.excluded) ? capture.excluded : [];
+    const answerableCount = questions.length;
+    const excludedCount = excluded.length;
     if (answerableCount + excludedCount === 0) {
       return siteRequiredQuestionCapture({ attempted: true });
     }
@@ -1619,6 +1724,8 @@ async function prepareApplicationQuestions({
       answerableCount,
       excludedCount,
       demographicSectionPresent: capture?.demographicSectionPresent === true,
+      answerableIds: questions.map((question) => String(question.id)),
+      excludedIds: excluded.map((question) => String(question.id)),
     };
   } catch (error) {
     return siteRequiredQuestionCapture({
@@ -1702,14 +1809,14 @@ function applicationHandoffArtifact(
 }
 
 function packetNextActions(gaps, applicationId, hasHandoff, executorAvailable = false) {
-  const blockingGaps = gaps.filter((gap) => !isQuestionCaptureGap(gap));
+  const blockingGaps = gaps.filter((gap) => !isNonBlockingPacketGap(gap));
   if (blockingGaps.length === 0 && hasHandoff) {
     if (executorAvailable) {
       return [
         {
           label: "Start supervised apply",
           intent: {
-            type: "job.apply",
+            type: "job.prepare-submit",
             entity: { type: "application", id: applicationId },
           },
         },
@@ -1726,10 +1833,11 @@ function packetNextActions(gaps, applicationId, hasHandoff, executorAvailable = 
     ];
   }
   return [
-    {
-      label: "Review application",
-      href: `/jobs?open=${encodeURIComponent(applicationId)}`,
-    },
+    navigationAction("Review application", {
+      surface: "job",
+      entityType: "application",
+      entityId: applicationId,
+    }),
   ];
 }
 
@@ -1743,16 +1851,17 @@ function tailoredPacketNextActions(applicationId) {
         input: { formats: ["pdf"] },
       },
     },
-    {
-      label: "Review documents",
-      href: `/jobs?open=${encodeURIComponent(applicationId)}`,
-    },
+    navigationAction("Review documents", {
+      surface: "files",
+      entityType: "application",
+      entityId: applicationId,
+    }),
   ];
 }
 
 function packetGapText(gaps, questionCaptureDeferred, { tailoring = false } = {}) {
   const blockingCount = blockingPacketGaps(gaps).length;
-  const questionsPending = questionCaptureDeferred || gaps.some(isQuestionCaptureGap);
+  const questionsPending = questionCaptureDeferred || gaps.some(isDeferredQuestionGap);
   const reviewVerb = blockingCount === 1 ? "needs" : "need";
   if (tailoring) {
     if (questionsPending && blockingCount === 0) {
@@ -1782,6 +1891,7 @@ async function generateDocumentsWithQuestionFallback({
   applicationId,
   formats,
   applyIntent,
+  force = false,
   generateDocumentsImpl,
 }) {
   const invoke = (nextApplyIntent) =>
@@ -1792,6 +1902,7 @@ async function generateDocumentsWithQuestionFallback({
         applicationId,
         applyIntent: nextApplyIntent,
         formats,
+        ...(force ? { force: true } : {}),
       },
     });
   try {
@@ -2196,7 +2307,7 @@ function searchExpandedCompaniesAction() {
 }
 
 function currentSearchAction() {
-  return { label: "Review the current job search", href: "/jobs?tab=search" };
+  return navigationAction("Review the current job search", { surface: "search" });
 }
 
 function companyProposalOperationError(operation) {
@@ -2382,6 +2493,7 @@ export async function executeWorkspaceIntent({
   applyJobImpl,
   captureQuestionsImpl = capturePacketQuestions,
   answerScreeningQuestionsImpl = draftOneOffScreeningAnswers,
+  confirmScreeningAnswerImpl = confirmOneOffScreeningAnswer,
   saveScreeningAnswerImpl = saveOneOffScreeningAnswer,
   prepareSchedulingPlanImpl = planSchedulingReply,
   draftStrategyReviewImpl = draftStrategyReview,
@@ -2412,6 +2524,60 @@ export async function executeWorkspaceIntent({
       const reusableAnswers = (operation.answers || []).filter(
         (answer) => answer.durable && answer.uploadReady
       );
+      const applicationAnswers = operation.applicationId
+        ? (operation.answers || []).filter(
+            (answer) => answer.uploadReady && answer.confirmationRequired === true
+          )
+        : [];
+      const applicationActions =
+        applicationAnswers.length === 1
+          ? [
+              {
+                label: "Use this answer",
+                intent: {
+                  type: "screening.answer-confirm",
+                  entity: { type: "application", id: operation.applicationId },
+                  input: {
+                    questionId: applicationAnswers[0].questionId,
+                    question: applicationAnswers[0].question,
+                    answer: applicationAnswers[0].answer,
+                  },
+                },
+              },
+            ]
+          : applicationAnswers.length > 1
+            ? [
+                {
+                  label: "Use reviewed answers",
+                  intent: {
+                    type: "screening.answer-confirm",
+                    entity: { type: "application", id: operation.applicationId },
+                    input: {
+                      answers: applicationAnswers.map((answer) => ({
+                        questionId: answer.questionId,
+                        question: answer.question,
+                        answer: answer.answer,
+                      })),
+                    },
+                  },
+                },
+              ]
+            : [];
+      const reusableActions =
+        (operation.answers || []).length === 1
+          ? reusableAnswers.map((answer) => ({
+              label: "Save for future applications",
+              intent: {
+                type: "screening.answer-save",
+                entity: { type: "candidate", id: "candidate" },
+                input: {
+                  question: answer.question,
+                  key: answer.key,
+                  answer: answer.answer,
+                },
+              },
+            }))
+          : [];
       const count = (operation.answers || []).length;
       return appendActionResult({
         repoRoot,
@@ -2436,20 +2602,71 @@ export async function executeWorkspaceIntent({
           requiresReview: true,
           persisted: false,
           ai: operation.ai || { used: false },
-          ...(reusableAnswers.length
+          ...(applicationActions.length || reusableActions.length
             ? {
-                nextActions: reusableAnswers.map((answer) => ({
-                  label: "Save for future applications",
-                  intent: {
-                    type: "screening.answer-save",
-                    entity: { type: "candidate", id: "candidate" },
-                    input: {
-                      question: answer.question,
-                      key: answer.key,
-                      answer: answer.answer,
+                nextActions: [...applicationActions, ...reusableActions],
+              }
+            : {}),
+        },
+        operationResult: operation,
+        now,
+      });
+    }
+
+    if (normalized.type === "screening.answer-confirm") {
+      const operation = await confirmScreeningAnswerImpl({
+        repoRoot,
+        env,
+        applicationId: normalized.entity.id,
+        questionId: input.questionId,
+        question: input.question,
+        answer: input.answer,
+        answers: input.answers,
+      });
+      const manifest = operation.packetManifest || {};
+      const uploadReady = manifest.uploadReady === true;
+      const gapCount = Number.isInteger(manifest.gapCount)
+        ? manifest.gapCount
+        : Array.isArray(manifest.gaps)
+          ? manifest.gaps.length
+          : 0;
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: uploadReady
+          ? `Confirmed ${operation.answers?.length > 1 ? "these answers" : "this answer"}. The application packet is ready to resume.`
+          : `Confirmed ${operation.answers?.length > 1 ? "these answers" : "this answer"}. ${gapCount} packet item${gapCount === 1 ? "" : "s"} still need review.`,
+        artifacts: [
+          {
+            kind: "screening_answer_confirmed",
+            title: "Application answer confirmed",
+            applicationId: operation.applicationId,
+            questionId: operation.questionId,
+            question: operation.question,
+            answer: operation.answer,
+            answers: operation.answers,
+            artifactPath: operation.artifactPath,
+          },
+        ],
+        metadata: {
+          state: "confirmed",
+          persisted: true,
+          uploadReady,
+          gapCount,
+          ...(uploadReady
+            ? {
+                nextActions: [
+                  {
+                    label: "Resume supervised apply",
+                    intent: {
+                      type: "job.prepare-submit",
+                      entity: { type: "application", id: operation.applicationId },
+                      input: { resumeSession: true },
                     },
                   },
-                })),
+                ],
               }
             : {}),
         },
@@ -2488,7 +2705,7 @@ export async function executeWorkspaceIntent({
 
     if (normalized.type === "communication.capture-inbound") {
       const item = intakeOne({ repoRoot, env, id: normalized.entity.id });
-      if (!item) throw actionError(`Intake item not found: ${normalized.entity.id}`, "NOT_FOUND");
+      if (!item) throw notFoundError("intake", normalized.entity.id);
       if (item.status !== "confirmed" || item.decision !== "confirm") {
         throw actionError(
           "Review and confirm this recruiter message before it changes communication state.",
@@ -2552,7 +2769,7 @@ export async function executeWorkspaceIntent({
 
     if (normalized.type === "interview.capture-context") {
       const item = intakeOne({ repoRoot, env, id: normalized.entity.id });
-      if (!item) throw actionError(`Intake item not found: ${normalized.entity.id}`, "NOT_FOUND");
+      if (!item) throw notFoundError("intake", normalized.entity.id);
       if (item.status !== "confirmed" || item.decision !== "confirm") {
         throw actionError(
           "Review and confirm this interview context before it changes application state.",
@@ -2637,10 +2854,12 @@ export async function executeWorkspaceIntent({
           state: "ready",
           applicationId: normalized.entity.id,
           nextActions: [
-            {
-              label: "Open dossier",
-              href: `/jobs?dossier=${encodeURIComponent(normalized.entity.id)}`,
-            },
+            navigationAction("Open dossier", {
+              surface: "files",
+              entityType: "application",
+              entityId: normalized.entity.id,
+              artifactKind: "interview-dossier",
+            }),
           ],
         },
         now,
@@ -3004,8 +3223,8 @@ export async function executeWorkspaceIntent({
         metadata: {
           state: added ? "added" : "existing",
           nextActions: [
-            { label: "Search jobs", href: "/jobs?tab=search" },
-            { label: "Manage sources", href: "/settings" },
+            navigationAction("Search jobs", { surface: "search" }),
+            navigationAction("Manage sources", { surface: "settings", section: "sources" }),
           ],
         },
         operationResult: operation,
@@ -3054,8 +3273,8 @@ export async function executeWorkspaceIntent({
         metadata: {
           state: added ? "added" : "existing",
           nextActions: [
-            { label: "Search jobs", href: "/jobs?tab=search" },
-            { label: "Manage sources", href: "/settings" },
+            navigationAction("Search jobs", { surface: "search" }),
+            navigationAction("Manage sources", { surface: "settings", section: "sources" }),
           ],
         },
         operationResult: operation,
@@ -3119,8 +3338,8 @@ export async function executeWorkspaceIntent({
         metadata: {
           state: input.enabled ? "enabled" : "disabled",
           nextActions: [
-            { label: "Search jobs", href: "/jobs?tab=search" },
-            { label: "Manage sources", href: "/settings" },
+            navigationAction("Search jobs", { surface: "search" }),
+            navigationAction("Manage sources", { surface: "settings", section: "sources" }),
           ],
         },
         operationResult: operation,
@@ -3156,8 +3375,8 @@ export async function executeWorkspaceIntent({
         metadata: {
           state: artifact.state,
           nextActions: [
-            { label: "Search jobs", href: "/jobs?tab=search" },
-            { label: "Manage sources", href: "/settings" },
+            navigationAction("Search jobs", { surface: "search" }),
+            navigationAction("Manage sources", { surface: "settings", section: "sources" }),
           ],
         },
         operationResult: operation,
@@ -3557,7 +3776,11 @@ export async function executeWorkspaceIntent({
                     input: { force: true },
                   },
                 },
-                { label: "Open in Jobs", href: `/jobs?open=${encodeURIComponent(row.id)}` },
+                navigationAction("Open in Jobs", {
+                  surface: entityType === "application" ? "job" : "search",
+                  entityType,
+                  entityId: row.id,
+                }),
               ],
             },
             now,
@@ -3637,7 +3860,11 @@ export async function executeWorkspaceIntent({
         metadata: {
           state: "recorded",
           nextActions: [
-            { label: "Open in Jobs", href: `/jobs?open=${encodeURIComponent(row.id)}` },
+            navigationAction("Open in Jobs", {
+              surface: entityType === "application" ? "job" : "search",
+              entityType,
+              entityId: row.id,
+            }),
           ],
         },
         now,
@@ -5350,10 +5577,11 @@ export async function executeWorkspaceIntent({
           engine: scheduling.ai?.engine || null,
           elapsedMs: scheduling.ai?.elapsedMs ?? null,
           nextActions: [
-            {
-              label: "Review job and reply",
-              href: `/jobs?open=${encodeURIComponent(application.id)}`,
-            },
+            navigationAction("Review job and reply", {
+              surface: "job",
+              entityType: "application",
+              entityId: application.id,
+            }),
           ],
         },
         operationResult: operation,
@@ -6045,10 +6273,11 @@ export async function executeWorkspaceIntent({
             gapCount: gaps.length,
             blockingGapCount,
             nextActions: [
-              {
-                label: "Review application",
-                href: `/jobs?open=${encodeURIComponent(normalized.entity.id)}`,
-              },
+              navigationAction("Review application", {
+                surface: "job",
+                entityType: "application",
+                entityId: normalized.entity.id,
+              }),
             ],
           },
           operationResult: { ...packet, gaps },
@@ -6066,6 +6295,72 @@ export async function executeWorkspaceIntent({
         captureQuestionsImpl,
         fetchImpl: searchFetchImpl,
       });
+    }
+
+    if (resumeApplicationSession && packetQuestionLineageIsStale(application)) {
+      const { packet, questionCaptureDeferred } = await generateDocumentsWithQuestionFallback({
+        repoRoot,
+        env,
+        applicationId: normalized.entity.id,
+        applyIntent: true,
+        formats: ["pdf"],
+        force: true,
+        generateDocumentsImpl,
+      });
+      const gaps = packetGapsForApplication(packet.gaps, application, true);
+      const blockingGapCount = blockingPacketGaps(gaps).length;
+      if (blockingGapCount > 0) {
+        return appendActionResult({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          text: `The captured application questions changed, so CareerRat rebuilt the packet. ${packetGapText(
+            gaps,
+            questionCaptureDeferred
+          )} The application was not marked Applied.`,
+          artifacts: [
+            {
+              kind: "packet_generation",
+              purpose: "application",
+              title: `${applicationLabel(application)}: Documents`,
+              applicationId: normalized.entity.id,
+              status: packet.status || "reviewable",
+              uploadReady: Boolean(packet.uploadReady),
+              artifacts: packet.artifacts || {},
+              gaps,
+              blockingGapCount,
+            },
+          ],
+          metadata: {
+            state: prepareSubmit ? "blocked" : "needs-input",
+            applicationId: normalized.entity.id,
+            submissionVerified: false,
+            uploadReady: Boolean(packet.uploadReady),
+            gapCount: gaps.length,
+            blockingGapCount,
+            nextActions: [
+              navigationAction("Review application", {
+                surface: "job",
+                entityType: "application",
+                entityId: normalized.entity.id,
+              }),
+              {
+                label: "Resume supervised preparation",
+                intent: {
+                  type: "job.prepare-submit",
+                  entity: { type: "application", id: normalized.entity.id },
+                  input: { resumeSession: true },
+                },
+              },
+            ],
+          },
+          operationResult: { ...packet, gaps },
+          now,
+        });
+      }
+      application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
+      questionCapture = questionCaptureFromApplication(application) || questionCapture;
     }
 
     const applySafetyBlockReason = resumeApplicationSession
@@ -6133,9 +6428,11 @@ export async function executeWorkspaceIntent({
         now,
       });
     }
-    const executorInput = prepareSubmit
-      ? { ...input, resumeSession: true, prepareOnly: true }
-      : input;
+    const executorInput = {
+      ...input,
+      ...(prepareSubmit ? { resumeSession: true } : {}),
+      prepareOnly: true,
+    };
     let execution = await applyJobImpl({
       repoRoot,
       env,
@@ -6144,7 +6441,8 @@ export async function executeWorkspaceIntent({
       postingUrl,
       questionCapture,
       input: executorInput,
-      ...(prepareSubmit ? { prepareOnly: true } : {}),
+      prepareOnly: true,
+      ...(input.focusSession === true ? { focusSession: true } : {}),
     });
     if (execution?.state === "questions-captured" && execution?.questionCaptureUpdated === true) {
       application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
@@ -6155,6 +6453,7 @@ export async function executeWorkspaceIntent({
         applicationId: normalized.entity.id,
         applyIntent: true,
         formats: ["pdf"],
+        force: true,
         generateDocumentsImpl,
       });
       const gaps = packetGapsForApplication(packet.gaps, application, true);
@@ -6201,14 +6500,15 @@ export async function executeWorkspaceIntent({
             gapCount: gaps.length,
             blockingGapCount,
             nextActions: [
+              navigationAction("Review application", {
+                surface: "job",
+                entityType: "application",
+                entityId: normalized.entity.id,
+              }),
               {
-                label: "Review application",
-                href: `/jobs?open=${encodeURIComponent(normalized.entity.id)}`,
-              },
-              {
-                label: prepareSubmit ? "Resume supervised preparation" : "Resume supervised apply",
+                label: "Resume supervised preparation",
                 intent: {
-                  type: prepareSubmit ? "job.prepare-submit" : "job.apply",
+                  type: "job.prepare-submit",
                   entity: { type: "application", id: normalized.entity.id },
                   input: { resumeSession: true },
                 },
@@ -6231,9 +6531,10 @@ export async function executeWorkspaceIntent({
           ...executorInput,
           resumeSession: true,
           renderedQuestionsReady: true,
-          ...(prepareSubmit ? { prepareOnly: true } : {}),
+          prepareOnly: true,
         },
-        ...(prepareSubmit ? { prepareOnly: true } : {}),
+        prepareOnly: true,
+        ...(input.focusSession === true ? { focusSession: true } : {}),
       });
     }
     if (execution?.available === false || execution?.state === "unavailable") {
@@ -6306,11 +6607,11 @@ export async function executeWorkspaceIntent({
           submissionVerified: false,
           nextActions: [
             {
-              label: prepareSubmit ? "Resume supervised preparation" : "Rescan and verify",
+              label: "Return to supervised application",
               intent: {
-                type: prepareSubmit ? "job.prepare-submit" : "job.apply",
+                type: "job.prepare-submit",
                 entity: { type: "application", id: normalized.entity.id },
-                input: { resumeSession: true },
+                input: { resumeSession: true, focusSession: true },
               },
             },
             {
@@ -6326,7 +6627,7 @@ export async function executeWorkspaceIntent({
         now,
       });
     }
-    if (prepareSubmit && (execution?.verified === true || execution?.state === "submitted")) {
+    if (execution?.verified === true || execution?.state === "submitted") {
       return appendActionResult({
         repoRoot,
         env,
@@ -6361,7 +6662,7 @@ export async function executeWorkspaceIntent({
         now,
       });
     }
-    if (prepareSubmit && execution?.verified !== true) {
+    if (execution?.verified !== true) {
       const detail = String(execution?.reason || "The supervised preparation could not continue.");
       return appendActionResult({
         repoRoot,
@@ -6378,54 +6679,22 @@ export async function executeWorkspaceIntent({
         now,
       });
     }
-    if (execution?.verified !== true) {
-      const detail = String(
-        execution?.reason || "No verified submission confirmation was returned."
-      );
-      throw actionError(
-        `${detail} The application was not marked Applied.`,
-        "APPLICATION_NOT_VERIFIED"
-      );
-    }
-
-    const appliedAt = resolvedDate(execution.submittedAt, now);
-    appSetStatus({
-      repoRoot,
-      env,
-      id: normalized.entity.id,
-      to: "applied",
-      note: "Applied on site. Submission verified.",
-      appliedAt,
-    });
-    const confirmation = execution.confirmation
-      ? String(execution.confirmation)
-      : "Verified submission confirmation";
-    return appendActionResult({
-      repoRoot,
-      env,
-      normalized,
-      intentMessage,
-      text: `Submitted and verified the application for ${applicationLabel(application)}.`,
-      artifacts: Array.isArray(execution.artifacts) ? execution.artifacts : undefined,
-      metadata: {
-        state: "submitted",
-        submissionVerified: true,
-        appliedAt,
-        confirmation,
-      },
-      now,
-    });
+    throw actionError(
+      "The supervised preparation ended without a safe handoff. The application was not marked Applied.",
+      "APPLICATION_PREPARATION_FAILED"
+    );
   } catch (error) {
+    const visibleError = visibleActionError(error, normalized.entity);
     workspaceMessageAppend({
       repoRoot,
       env,
       role: "assistant",
       kind: "action_error",
-      text: String(error?.message || "The action could not be completed."),
+      text: visibleError,
       entity: normalized.entity,
       error: {
         code: error?.code || "ACTION_FAILED",
-        message: String(error?.message || "The action could not be completed."),
+        message: visibleError,
       },
       metadata: { intentMessageId: intentMessage.message.id },
       now,
@@ -6787,8 +7056,8 @@ function schedulingRequestFromText(text) {
 function screeningQuestionRequestFromText(text) {
   const value = String(text || "").trim();
   const patterns = [
-    /^(?:(?:how\s+should\s+i|(?:can|could|would)\s+you|please)\s+)?(?:answer|respond\s+to)\s+(?:(?:this|the|an?)\s+)?(?:application|screening|form(?:[-\s]+form)?)\s+questions?\s*[:-]\s*([\s\S]+)$/i,
-    /^what\s+should\s+i\s+say\s+(?:for|to)\s+(?:(?:this|the|an?)\s+)?(?:application|screening|form(?:[-\s]+form)?)\s+questions?\s*[:-]\s*([\s\S]+)$/i,
+    /^(?:(?:how\s+should\s+i|(?:can|could|would)\s+you|please)\s+)?(?:answer|respond\s+to)\s+(?:(?:this|these|the|an?)\s+)?(?:application|screening|form(?:[-\s]+form)?)\s+questions?\s*[:-]\s*([\s\S]+)$/i,
+    /^what\s+should\s+i\s+say\s+(?:for|to)\s+(?:(?:this|these|the|an?)\s+)?(?:application|screening|form(?:[-\s]+form)?)\s+questions?\s*[:-]\s*([\s\S]+)$/i,
   ];
   for (const pattern of patterns) {
     const questionText = value.match(pattern)?.[1]?.trim();
@@ -7830,7 +8099,7 @@ const ACTION_PREVIEW_RULES = [
     test: (text, context) =>
       Boolean(openJobId(context)) &&
       looksLikeApplicationPreparation(text) &&
-      /\b(?:this|the)\s+(?:job|role|posting)\b/i.test(text),
+      /\b(?:this|the)\s+(?:job|role|posting|application)\b/i.test(text),
     label: "Evaluate and prepare this saved job",
     intent: (_text, context) => ({
       type: "job.prepare-request",

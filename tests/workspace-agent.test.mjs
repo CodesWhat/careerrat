@@ -47,6 +47,7 @@ import { sourceWatermarkUpsert } from "../src/core/db/verbs/source.mjs";
 import { sourcedUpsertBatch } from "../src/core/db/verbs/sourced.mjs";
 import { buildCompanySeedContext } from "../src/core/discovery/company-context.mjs";
 import { companyDiscoveryFingerprint } from "../src/core/discovery/company-discovery-cadence.mjs";
+import { draftOneOffScreeningAnswers } from "../src/core/packet/one-off-answer.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import {
   readResearch,
@@ -254,7 +255,7 @@ test("onboarding handoff prepends Paul context once without disturbing work alre
     env: {},
     role: "user",
     kind: "intent",
-    text: "Search for qualified jobs (workspace:workspace-main).",
+    text: "Search for qualified jobs.",
     intent: {
       type: "search.run",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
@@ -320,7 +321,7 @@ test("onboarding handoff prepends Paul context once without disturbing work alre
         sequence: 4,
         role: "user",
         kind: "intent",
-        text: "Search for qualified jobs (workspace:workspace-main).",
+        text: "Search for qualified jobs.",
         source: undefined,
       },
     ]
@@ -344,13 +345,106 @@ test("onboarding handoff prepends Paul context once without disturbing work alre
       "Got it. I’ll keep all companies in play and focus there.",
       "Remote is fine too.",
       "Setup is complete and your first search is underway. I’ll continue here.",
-      "Search for qualified jobs (workspace:workspace-main).",
+      "Search for qualified jobs.",
     ]
   );
   assert.equal(
     changedMessages.filter((message) => message.id === "existing-search-intent").length,
     1
   );
+});
+
+test("intent transcript copy hides entity ids and names supervised resumes distinctly", () => {
+  const repoRoot = tempRepo();
+  workspaceIntentAppend({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.apply",
+      entity: { type: "application", id: "qa-curri-answer-confirm" },
+    },
+  });
+  workspaceIntentAppend({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.apply",
+      entity: { type: "application", id: "qa-curri-answer-confirm" },
+      input: { resumeSession: true },
+    },
+  });
+
+  const copy = workspaceThreadRead({ repoRoot, env: {} }).messages.map((message) => message.text);
+  assert.deepEqual(copy, ["Apply on this site.", "Resume supervised application."]);
+  assert.doesNotMatch(copy.join("\n"), /qa-curri|application:/);
+});
+
+test("lookup failures keep raw entity ids in diagnostics and out of the transcript", async () => {
+  const repoRoot = tempRepo();
+  const rawId = "application:missing-private-id";
+  let thrown;
+
+  try {
+    await executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "job.apply",
+        entity: { type: "application", id: rawId },
+      },
+    });
+  } catch (error) {
+    thrown = error;
+  }
+
+  assert.equal(thrown?.code, "NOT_FOUND");
+  assert.equal(thrown?.message, "That saved application could not be found.");
+  assert.deepEqual(thrown?.diagnostics, { entity: { type: "application", id: rawId } });
+  const last = workspaceThreadRead({ repoRoot, env: {} }).messages.at(-1);
+  assert.equal(last.kind, "action_error");
+  assert.equal(last.text, "That saved application could not be found.");
+  assert.equal(last.error.message, "That saved application could not be found.");
+  assert.doesNotMatch(`${last.text}\n${last.error.message}`, /missing-private-id|application:/);
+});
+
+test("action error persistence scrubs selected entity ids from arbitrary executor failures", async () => {
+  const repoRoot = tempRepo();
+  const rawId = "app-private-company-health";
+  const rawMessage = `Provider failed for application:${rawId} while opening ${rawId}.`;
+  seedApplication(repoRoot, {
+    id: rawId,
+    company: "Riverside Health",
+    role: "Registered Nurse",
+  });
+  let thrown;
+
+  try {
+    await executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "company.health",
+        entity: { type: "application", id: rawId },
+        input: {},
+      },
+      startCompanyHealthImpl: async () => {
+        throw new Error(rawMessage);
+      },
+    });
+  } catch (error) {
+    thrown = error;
+  }
+
+  assert.equal(
+    thrown?.message,
+    "Provider failed for this application while opening this application."
+  );
+  assert.equal(thrown?.diagnostics?.rawMessage, rawMessage);
+  const last = workspaceThreadRead({ repoRoot, env: {} }).messages.at(-1);
+  assert.equal(last.kind, "action_error");
+  assert.equal(last.text, thrown.message);
+  assert.equal(last.error.message, thrown.message);
+  assert.doesNotMatch(`${last.text}\n${last.error.message}`, /app-private|application:/);
 });
 
 test("typed intents reject unknown action types and mismatched entity types before persistence", () => {
@@ -459,8 +553,22 @@ test("job-board discovery starts a visible research session inside workspace-mai
     },
   ]);
   assert.deepEqual(result.messages.at(-1).metadata.nextActions, [
-    { label: "Search jobs", href: "/jobs?tab=search" },
-    { label: "Manage sources", href: "/settings" },
+    {
+      label: "Search jobs",
+      intent: {
+        type: "ui.navigate",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { surface: "search" },
+      },
+    },
+    {
+      label: "Manage sources",
+      intent: {
+        type: "ui.navigate",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { surface: "settings", section: "sources" },
+      },
+    },
   ]);
 });
 
@@ -784,6 +892,14 @@ test("company.health reuses a fresh rating already on the tracked row, and input
   assert.equal(reusedArtifact.rating, "watch");
   assert.equal(reusedArtifact.fitDelta, -3);
   assert.equal(reused.messages.at(-1).metadata.state, "reused");
+  assert.deepEqual(reused.messages.at(-1).metadata.nextActions[1], {
+    label: "Open in Jobs",
+    intent: {
+      type: "ui.navigate",
+      entity: { type: "application", id: "app-riverside" },
+      input: { surface: "job" },
+    },
+  });
 
   const calls = [];
   const forced = await executeWorkspaceIntent({
@@ -1056,6 +1172,16 @@ test("company.health-record writes a rating onto the application row through com
   assert.equal(last.artifacts[0].applicationId, "app-riverside");
   assert.equal(last.artifacts[0].rating, "watch");
   assert.equal(last.text, "Riverside Health: watch for clinical staffing, as of 2026-08-15.");
+  assert.deepEqual(last.metadata.nextActions, [
+    {
+      label: "Open in Jobs",
+      intent: {
+        type: "ui.navigate",
+        entity: { type: "application", id: "app-riverside" },
+        input: { surface: "job" },
+      },
+    },
+  ]);
 
   const persisted = readApplication(repoRoot, "app-riverside");
   assert.equal(persisted.companyHealth.rating, "watch");
@@ -1888,8 +2014,22 @@ test("a confirmed Ask action adds one board URL and keeps the receipt in workspa
     },
   ]);
   assert.deepEqual(result.messages.at(-1).metadata.nextActions, [
-    { label: "Search jobs", href: "/jobs?tab=search" },
-    { label: "Manage sources", href: "/settings" },
+    {
+      label: "Search jobs",
+      intent: {
+        type: "ui.navigate",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { surface: "search" },
+      },
+    },
+    {
+      label: "Manage sources",
+      intent: {
+        type: "ui.navigate",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { surface: "settings", section: "sources" },
+      },
+    },
   ]);
 });
 
@@ -1930,8 +2070,22 @@ test("a confirmed Ask action adds one keyword search through source setup", asyn
   assert.equal(result.messages.at(-1).artifacts[0].added, true);
   assert.equal(result.messages.at(-1).artifacts[0].target, "staff AI engineer");
   assert.deepEqual(result.messages.at(-1).metadata.nextActions, [
-    { label: "Search jobs", href: "/jobs?tab=search" },
-    { label: "Manage sources", href: "/settings" },
+    {
+      label: "Search jobs",
+      intent: {
+        type: "ui.navigate",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { surface: "search" },
+      },
+    },
+    {
+      label: "Manage sources",
+      intent: {
+        type: "ui.navigate",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { surface: "settings", section: "sources" },
+      },
+    },
   ]);
 });
 
@@ -1981,8 +2135,22 @@ test("a confirmed Ask action toggles one deterministically resolved search sourc
     },
   ]);
   assert.deepEqual(result.messages.at(-1).metadata.nextActions, [
-    { label: "Search jobs", href: "/jobs?tab=search" },
-    { label: "Manage sources", href: "/settings" },
+    {
+      label: "Search jobs",
+      intent: {
+        type: "ui.navigate",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { surface: "search" },
+      },
+    },
+    {
+      label: "Manage sources",
+      intent: {
+        type: "ui.navigate",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { surface: "settings", section: "sources" },
+      },
+    },
   ]);
 });
 
@@ -2322,6 +2490,8 @@ test("job.prepare-request asks for the application link when a pasted JD has no 
     message.artifacts.some((artifact) => artifact.kind === "application_handoff"),
     false
   );
+  assert.equal(message.metadata.nextActions[0].intent.type, "ui.navigate");
+  assert.equal(message.metadata.nextActions[0].intent.input.surface, "job");
 });
 
 test("job.evaluate-request resolves one named saved job without guessing an id", async () => {
@@ -2673,7 +2843,11 @@ test("job.prepare-request stops on REVIEW and hands the unresolved decision to t
   assert.equal(generated, 0);
   assert.equal(result.messages.at(-1).metadata.state, "review");
   assert.equal(result.messages.at(-1).metadata.nextActions[0].label, "Review this job");
-  assert.match(result.messages.at(-1).metadata.nextActions[0].href, /^\/jobs\?open=/);
+  assert.deepEqual(result.messages.at(-1).metadata.nextActions[0].intent, {
+    type: "ui.navigate",
+    entity: { type: "application", id: result.messages.at(-1).metadata.applicationId },
+    input: { surface: "job" },
+  });
 });
 
 test("job.prepare-request generates a KEEP packet and returns the review/apply handoff", async () => {
@@ -2815,6 +2989,8 @@ test("job.prepare-request captures public application questions before generatin
     answerableCount: 1,
     excludedCount: 1,
     demographicSectionPresent: true,
+    answerableIds: ["why-acme"],
+    excludedIds: ["eeo"],
   });
   assert.match(result.messages.at(-1).text, /captured 1 application question/i);
 });
@@ -2864,7 +3040,7 @@ test("job.prepare-request offers the connected supervised executor as the next A
   const handoff = last.artifacts.find((artifact) => artifact.kind === "application_handoff");
   assert.equal(handoff.executorAvailable, true);
   assert.equal(last.metadata.nextActions[0].label, "Start supervised apply");
-  assert.equal(last.metadata.nextActions[0].intent.type, "job.apply");
+  assert.equal(last.metadata.nextActions[0].intent.type, "job.prepare-submit");
 });
 
 test("job.prepare-request falls back to pasted questions when public capture returns nothing", async () => {
@@ -3122,7 +3298,8 @@ test("job.tailor-request evaluates a KEEP job and generates reviewable documents
   assert.equal(result.messages.at(-1).metadata.nextActions[0].label, "Export documents");
   assert.equal(result.messages.at(-1).metadata.nextActions[0].intent.type, "job.export-documents");
   assert.equal(result.messages.at(-1).metadata.nextActions[1].label, "Review documents");
-  assert.match(result.messages.at(-1).metadata.nextActions[1].href, /^\/jobs\?open=/);
+  assert.equal(result.messages.at(-1).metadata.nextActions[1].intent.type, "ui.navigate");
+  assert.equal(result.messages.at(-1).metadata.nextActions[1].intent.input.surface, "files");
   assert.match(result.messages.at(-1).text, /tailored résumé and cover letter/i);
   assert.match(result.messages.at(-1).text, /tailored documents are ready to review/i);
   assert.doesNotMatch(result.messages.at(-1).text, /submission handoff|will be completed/i);
@@ -3751,7 +3928,14 @@ test("finishing search-triggered company review links to the running search", as
   });
 
   assert.deepEqual(result.messages.at(-1).metadata.nextActions, [
-    { label: "Review the current job search", href: "/jobs?tab=search" },
+    {
+      label: "Review the current job search",
+      intent: {
+        type: "ui.navigate",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { surface: "search" },
+      },
+    },
   ]);
 });
 
@@ -4705,7 +4889,14 @@ test("natural interview prep resolves one application and returns the dossier in
   assert.deepEqual(result.messages[1].entity, { type: "application", id: "app-temporal" });
   assert.equal(result.messages[1].artifacts[0].kind, "interview_dossier");
   assert.deepEqual(result.messages[1].metadata.nextActions, [
-    { label: "Open dossier", href: "/jobs?dossier=app-temporal" },
+    {
+      label: "Open dossier",
+      intent: {
+        type: "ui.navigate",
+        entity: { type: "application", id: "app-temporal" },
+        input: { surface: "files", artifactKind: "interview-dossier" },
+      },
+    },
   ]);
 });
 
@@ -4883,7 +5074,14 @@ test("natural scheduling requests prepare a timezone-explicit draft and tentativ
   assert.equal(message.metadata.requiresReview, true);
   assert.equal(message.metadata.calendarChecked, true);
   assert.deepEqual(message.metadata.nextActions, [
-    { label: "Review job and reply", href: "/jobs?open=app-temporal" },
+    {
+      label: "Review job and reply",
+      intent: {
+        type: "ui.navigate",
+        entity: { type: "application", id: "app-temporal" },
+        input: { surface: "job" },
+      },
+    },
   ]);
 });
 
@@ -5460,11 +5658,13 @@ test("one-off screening questions draft inside Ask and offer confirmed durable r
         answers: [
           {
             key: "will you now or later require sponsorship",
+            questionId: "q-sponsorship",
             question: "Will you now or later require sponsorship?",
             answer: "I do not require employment sponsorship.",
             source: "profile",
             durable: true,
             uploadReady: true,
+            confirmationRequired: true,
           },
         ],
         excluded: [],
@@ -5485,6 +5685,18 @@ test("one-off screening questions draft inside Ask and offer confirmed durable r
   assert.equal(message.metadata.persisted, false);
   assert.deepEqual(message.metadata.nextActions, [
     {
+      label: "Use this answer",
+      intent: {
+        type: "screening.answer-confirm",
+        entity: { type: "application", id: "app-temporal" },
+        input: {
+          questionId: "q-sponsorship",
+          question: "Will you now or later require sponsorship?",
+          answer: "I do not require employment sponsorship.",
+        },
+      },
+    },
+    {
       label: "Save for future applications",
       intent: {
         type: "screening.answer-save",
@@ -5498,6 +5710,284 @@ test("one-off screening questions draft inside Ask and offer confirmed durable r
     },
   ]);
   assert.match(message.text, /review this answer/i);
+});
+
+test("real one-off answer chain groups exact packet confirmations into one bounded action", async () => {
+  const repoRoot = tempRepo();
+  const answerPath = "workspace/tailored/temporal-grouped-answers.md";
+  mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
+  writeFileSync(join(repoRoot, answerPath), "# Application answers\n", "utf8");
+  seedApplication(repoRoot, {
+    artifacts: { answersSource: answerPath },
+    packetManifest: {
+      applicationId: "app-temporal",
+      uploadReady: false,
+      status: "reviewable",
+      gapCount: 2,
+      gaps: [
+        {
+          kind: "answers",
+          code: "ANSWER_CONFIRMATION_REQUIRED",
+          questionId: "manifest-first",
+          message: "Answer “Confirm your first-shift availability”.",
+        },
+        {
+          kind: "answers",
+          code: "ANSWER_CONFIRMATION_REQUIRED",
+          questionId: "manifest-second",
+          message: "Answer “Confirm your second-shift availability”.",
+        },
+      ],
+      artifacts: { answersSource: answerPath },
+    },
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "screening.answer",
+      entity: { type: "application", id: "app-temporal" },
+      input: { questionText: "Confirm availability for both shifts" },
+    },
+    answerScreeningQuestionsImpl: (input) =>
+      draftOneOffScreeningAnswers({
+        ...input,
+        repoRoot,
+        env: {},
+        captureQuestionsImpl: async () => ({
+          questions: [
+            { id: "capture-first", label: "Confirm your first-shift availability" },
+            { id: "capture-second", label: "Confirm your second-shift availability" },
+          ],
+          excluded: [],
+        }),
+        draftAnswersImpl: async () => ({
+          answers: [
+            {
+              questionId: "capture-first",
+              question: "Confirm your first-shift availability",
+              answer: "I am available for the first shift.",
+              uploadReady: true,
+              source: "profile",
+            },
+            {
+              questionId: "capture-second",
+              question: "Confirm your second-shift availability",
+              answer: "I am available for the second shift.",
+              uploadReady: true,
+              source: "profile",
+            },
+          ],
+          ai: { used: false },
+        }),
+        buildContextImpl: () => ({ profile: {}, evidence: { claims: [] } }),
+      }),
+  });
+
+  assert.deepEqual(result.messages.at(-1).metadata.nextActions, [
+    {
+      label: "Use reviewed answers",
+      intent: {
+        type: "screening.answer-confirm",
+        entity: { type: "application", id: "app-temporal" },
+        input: {
+          answers: [
+            {
+              questionId: "manifest-first",
+              question: "Confirm your first-shift availability",
+              answer: "I am available for the first shift.",
+            },
+            {
+              questionId: "manifest-second",
+              question: "Confirm your second-shift availability",
+              answer: "I am available for the second shift.",
+            },
+          ],
+        },
+      },
+    },
+  ]);
+});
+
+test("user-supplied screening pairs resolve the exact live gaps and leave only final submit gated", async () => {
+  const repoRoot = tempRepo();
+  const answerPath = "workspace/tailored/curri-user-answers.md";
+  mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
+  writeFileSync(join(repoRoot, answerPath), "# Application answers\n", "utf8");
+  const answerGaps = [
+    {
+      kind: "answers",
+      code: "ANSWER_CONFIRMATION_REQUIRED",
+      questionId: "rendered-linkedin-url",
+      message: "Answer “LinkedIn URL*”.",
+    },
+    {
+      kind: "answers",
+      code: "ANSWER_CONFIRMATION_REQUIRED",
+      questionId: "rendered-why-curri",
+      message: "Answer “Why do you want to work at Curri? *”.",
+    },
+    {
+      kind: "answers",
+      code: "ANSWER_CONFIRMATION_REQUIRED",
+      questionId: "rendered-plumber",
+      message:
+        "Answer “What is the name of the plumber who sparked the idea for Curri for Matt and Brian, Curri's Co-Founders?*”.",
+    },
+  ];
+  const coverLetterGap = {
+    kind: "coverLetter",
+    code: "COVER_LETTER_CONFIRMATION",
+    message: "Review and confirm the cover letter proof points.",
+  };
+  seedApplication(repoRoot, {
+    company: "Curri",
+    role: "Senior Software Engineer",
+    status: "reviewed-hold",
+    evaluation: { gate: "keep", fitScore: 87 },
+    artifacts: { answersSource: answerPath },
+    packetManifest: {
+      applicationId: "app-temporal",
+      generatedAt: "2026-08-24T18:40:48.594Z",
+      uploadReady: false,
+      status: "reviewable",
+      gapCount: 4,
+      gaps: [coverLetterGap, ...answerGaps],
+      artifacts: { answersSource: answerPath },
+    },
+  });
+  const questionText =
+    "LinkedIn URL: https://www.linkedin.com/in/riley-chen-careerrat-qa; Why do you want to work at Curri?: I want to help turn painful construction logistics into reliable software.; What is the name of the plumber who sparked the idea for Curri for Matt and Brian, Curri’s Co-Founders?: Mike.";
+
+  const drafted = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "screening.answer",
+      entity: { type: "application", id: "app-temporal" },
+      input: { questionText },
+    },
+  });
+  const draftMessage = drafted.messages.at(-1);
+  assert.equal(draftMessage.artifacts[0].answers.length, 3);
+  assert.deepEqual(
+    draftMessage.artifacts[0].answers.map((answer) => answer.questionId),
+    answerGaps.map((gap) => gap.questionId)
+  );
+  assert.deepEqual(draftMessage.metadata.nextActions, [
+    {
+      label: "Use reviewed answers",
+      intent: {
+        type: "screening.answer-confirm",
+        entity: { type: "application", id: "app-temporal" },
+        input: {
+          answers: [
+            {
+              questionId: "rendered-linkedin-url",
+              question: "LinkedIn URL*",
+              answer: "https://www.linkedin.com/in/riley-chen-careerrat-qa",
+            },
+            {
+              questionId: "rendered-why-curri",
+              question: "Why do you want to work at Curri? *",
+              answer: "I want to help turn painful construction logistics into reliable software.",
+            },
+            {
+              questionId: "rendered-plumber",
+              question:
+                "What is the name of the plumber who sparked the idea for Curri for Matt and Brian, Curri's Co-Founders?*",
+              answer: "Mike.",
+            },
+          ],
+        },
+      },
+    },
+  ]);
+
+  const confirmed = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: draftMessage.metadata.nextActions[0].intent,
+  });
+  const application = readApplication(repoRoot, "app-temporal");
+  const confirmation = confirmed.messages.at(-1);
+  assert.deepEqual(application.packetManifest.gaps, [coverLetterGap]);
+  assert.equal(application.packetManifest.uploadReady, true);
+  assert.equal(application.packetManifest.status, "upload-ready");
+  assert.equal(application.status, "reviewed-hold");
+  assert.equal(confirmation.metadata.nextActions.length, 1);
+  assert.equal(confirmation.metadata.nextActions[0].intent.type, "job.prepare-submit");
+  assert.equal(confirmation.metadata.nextActions[0].intent.input.resumeSession, true);
+  assert.equal(confirmation.metadata.submissionVerified, undefined);
+});
+
+test("real one-off answer chain hides confirmation when duplicate labels have no exact id", async () => {
+  const repoRoot = tempRepo();
+  const answerPath = "workspace/tailored/temporal-ambiguous-answers.md";
+  mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
+  writeFileSync(join(repoRoot, answerPath), "# Application answers\n", "utf8");
+  seedApplication(repoRoot, {
+    artifacts: { answersSource: answerPath },
+    packetManifest: {
+      applicationId: "app-temporal",
+      uploadReady: false,
+      status: "reviewable",
+      gapCount: 2,
+      gaps: [
+        {
+          kind: "answers",
+          code: "ANSWER_CONFIRMATION_REQUIRED",
+          questionId: "q-first",
+          message: "Answer “Confirm your availability”.",
+        },
+        {
+          kind: "answers",
+          code: "ANSWER_CONFIRMATION_REQUIRED",
+          questionId: "q-second",
+          message: "Answer “Confirm your availability”.",
+        },
+      ],
+      artifacts: { answersSource: answerPath },
+    },
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "screening.answer",
+      entity: { type: "application", id: "app-temporal" },
+      input: { questionText: "Confirm availability" },
+    },
+    answerScreeningQuestionsImpl: (input) =>
+      draftOneOffScreeningAnswers({
+        ...input,
+        repoRoot,
+        env: {},
+        captureQuestionsImpl: async () => ({
+          questions: [
+            { id: "q-first", label: "Confirm your availability" },
+            { id: "q-second", label: "Confirm your availability" },
+          ],
+          excluded: [],
+        }),
+        draftAnswersImpl: async () => ({
+          answers: [
+            {
+              question: "Confirm your availability",
+              answer: "I am available in two weeks.",
+              uploadReady: true,
+              source: "profile",
+            },
+          ],
+          ai: { used: false },
+        }),
+        buildContextImpl: () => ({ profile: {}, evidence: { claims: [] } }),
+      }),
+  });
+
+  assert.equal(result.messages.at(-1).metadata.nextActions, undefined);
 });
 
 test("one-off screening questions reuse saved profile disclosures without requiring AI", async () => {
@@ -5561,6 +6051,79 @@ test("confirmed reusable screening answers persist through the owning candidate 
   assert.equal(message.metadata.persisted, true);
   assert.equal(message.metadata.nextActions, undefined);
   assert.match(message.text, /future applications/i);
+});
+
+test("confirming a job-specific screening answer clears its packet gap and unblocks resume", async () => {
+  const repoRoot = tempRepo();
+  const answerPath = "workspace/tailored/temporal-answers.md";
+  mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
+  writeFileSync(join(repoRoot, answerPath), "# Application answers\n", "utf8");
+  seedApplication(repoRoot, {
+    evaluation: { gate: "keep", fitScore: 92 },
+    artifacts: { answersSource: answerPath },
+    packetManifest: {
+      applicationId: "app-temporal",
+      generatedAt: "2026-08-24T12:00:00.000Z",
+      uploadReady: false,
+      status: "reviewable",
+      gapCount: 1,
+      gaps: [
+        {
+          kind: "answers",
+          code: "ANSWER_CONFIRMATION_REQUIRED",
+          questionId: "q-motivation",
+          message: "Answer “Why do you want to work at Temporal Labs?”.",
+        },
+      ],
+      artifacts: { answersSource: answerPath },
+    },
+  });
+
+  let confirmed;
+  await assert.doesNotReject(async () => {
+    confirmed = await executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "screening.answer-confirm",
+        entity: { type: "application", id: "app-temporal" },
+        input: {
+          questionId: "q-motivation",
+          question: "Why do you want to work at Temporal Labs?",
+          answer: "Temporal Labs builds the durable AI infrastructure I have led in production.",
+        },
+      },
+    });
+  });
+
+  const application = readApplication(repoRoot, "app-temporal");
+  assert.deepEqual(application.packetManifest.gaps, []);
+  assert.equal(application.packetManifest.gapCount, 0);
+  assert.equal(application.packetManifest.uploadReady, true);
+  assert.equal(application.packetManifest.status, "upload-ready");
+  assert.equal(confirmed.messages.at(-1).metadata.state, "confirmed");
+  assert.equal(confirmed.messages.at(-1).metadata.nextActions[0].intent.type, "job.prepare-submit");
+
+  let applyCalls = 0;
+  const resumed = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.apply",
+      entity: { type: "application", id: "app-temporal" },
+      input: { resumeSession: true },
+    },
+    applyJobImpl: async () => {
+      applyCalls += 1;
+      return { verified: true, submittedAt: "2026-08-24T12:05:00.000Z" };
+    },
+    now: () => new Date("2026-08-24T12:05:00.000Z"),
+  });
+
+  assert.equal(applyCalls, 1);
+  assert.equal(readApplication(repoRoot, "app-temporal").status, "reviewed-hold");
+  assert.equal(resumed.messages.at(-1).metadata.submissionVerified, false);
+  assert.notEqual(resumed.messages.at(-1).metadata.state, "blocked");
 });
 
 test("Apply on site returns a manual handoff without changing status when no executor is connected", async () => {
@@ -5653,6 +6216,8 @@ test("Apply on site captures supported public questions before the supervised ha
     answerableCount: 1,
     excludedCount: 0,
     demographicSectionPresent: false,
+    answerableIds: ["q1"],
+    excludedIds: [],
   });
 });
 
@@ -5780,6 +6345,8 @@ test("Apply on site rebuilds the packet after the live browser discovers rendere
       }
       assert.equal(questionCapture.state, "captured");
       assert.equal(questionCapture.answerableCount, 2);
+      assert.deepEqual(questionCapture.answerableIds, ["q1", "q2"]);
+      assert.deepEqual(questionCapture.excludedIds, []);
       return {
         available: true,
         verified: false,
@@ -5795,24 +6362,22 @@ test("Apply on site rebuilds the packet after the live browser discovers rendere
   assert.equal(result.messages.at(-1).artifacts[0].questionCapture.answerableCount, 2);
 });
 
-test("Apply on site writes Applied only after its executor returns verified confirmation", async () => {
+test("Apply on site never writes Applied when its executor claims verified confirmation", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot);
 
-  await assert.rejects(
-    executeWorkspaceIntent({
-      repoRoot,
-      env: {},
-      intent: {
-        type: "job.apply",
-        entity: { type: "application", id: "app-temporal" },
-      },
-      ...preparedApplyDeps(),
-      applyJobImpl: async () => ({ verified: false, reason: "No confirmation page found." }),
-    }),
-    (error) => error.code === "APPLICATION_NOT_VERIFIED"
-  );
+  const unverified = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.apply",
+      entity: { type: "application", id: "app-temporal" },
+    },
+    ...preparedApplyDeps(),
+    applyJobImpl: async () => ({ verified: false, reason: "No confirmation page found." }),
+  });
   assert.equal(readApplication(repoRoot, "app-temporal").status, "reviewed-hold");
+  assert.equal(unverified.messages.at(-1).metadata.submissionVerified, false);
 
   const calls = [];
   const result = await executeWorkspaceIntent({
@@ -5836,13 +6401,14 @@ test("Apply on site writes Applied only after its executor returns verified conf
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].applicationId, "app-temporal");
+  assert.equal(calls[0].prepareOnly, true);
+  assert.equal(calls[0].input.prepareOnly, true);
   const app = readApplication(repoRoot, "app-temporal");
-  assert.equal(app.status, "applied");
-  assert.equal(app.appliedAt, "2026-08-09T15:45:00.000Z");
-  assert.match(app.statusNote, /verified/i);
+  assert.equal(app.status, "reviewed-hold");
+  assert.equal(app.appliedAt, undefined);
   assert.equal(result.messages.at(-1).kind, "action_result");
-  assert.equal(result.messages.at(-1).metadata.submissionVerified, true);
-  assert.equal(result.messages.at(-1).metadata.confirmation, "Application received");
+  assert.equal(result.messages.at(-1).metadata.submissionVerified, false);
+  assert.match(result.messages.at(-1).text, /not marked Applied/i);
 });
 
 test("Apply on site keeps an active supervised browser session without treating it as failure", async () => {
@@ -5880,8 +6446,8 @@ test("Apply on site keeps an active supervised browser session without treating 
   assert.equal(last.metadata.submissionVerified, false);
   assert.equal(last.artifacts[0].kind, "application_handoff");
   assert.equal(last.artifacts[0].session.filledCount, 5);
-  assert.equal(last.metadata.nextActions[0].label, "Rescan and verify");
-  assert.equal(last.metadata.nextActions[0].intent.type, "job.apply");
+  assert.equal(last.metadata.nextActions[0].label, "Return to supervised application");
+  assert.equal(last.metadata.nextActions[0].intent.type, "job.prepare-submit");
   assert.match(last.text, /filled 5 fields/i);
   assert.match(last.text, /attached 2 files/i);
   assert.match(last.text, /not marked Applied/i);
@@ -5972,7 +6538,8 @@ test("job.apply's resumeSession proceeds straight to the executor once the persi
   });
 
   assert.equal(applyCalls, 1, "a corroborated resumeSession must still reach the executor");
-  assert.equal(readApplication(repoRoot, "app-temporal").status, "applied");
+  assert.equal(readApplication(repoRoot, "app-temporal").status, "reviewed-hold");
+  assert.equal(result.messages.at(-1).metadata.submissionVerified, false);
   assert.notEqual(result.messages.at(-1).metadata.state, "blocked");
 });
 
@@ -7510,6 +8077,8 @@ test("workspace action errors return actionable client statuses instead of serve
     ["STRATEGY_APPLY_UNSUPPORTED", 400],
     ["STRATEGY_APPLY_INVALID", 400],
     ["STRATEGY_APPLY_STALE", 409],
+    ["ANSWER_CONFIRMATION_NOT_FOUND", 409],
+    ["ANSWER_CONFIRMATION_AMBIGUOUS", 409],
     ["SETTINGS_CHANGE_UNSUPPORTED", 400],
     ["SETTINGS_CHANGE_INVALID", 400],
     ["CALENDAR_WRITE_PROVIDER_INVALID", 400],
@@ -7533,6 +8102,14 @@ test("workspace action errors return actionable client statuses instead of serve
     assert.equal(response.status, expectedStatus, code);
     assert.equal(response.body.code, code);
   }
+});
+
+test("runtime transcript actions never point at retired page routes", () => {
+  const source = readFileSync(
+    new URL("../src/core/agent/workspace-agent.mjs", import.meta.url),
+    "utf8"
+  );
+  assert.doesNotMatch(source, /href:\s*[`'"]\/jobs\?/);
 });
 
 test("workspace ambiguity errors expose only structured candidate-safe match labels", async () => {
@@ -8863,4 +9440,22 @@ test("every workspace intent offered via WORKSPACE_INTENT_ENTITY_TYPES is implem
     [],
     `these intents are offered to the user but throw "not implemented yet" when selected: ${unimplemented.join(", ")}`
   );
+});
+
+test("every offered workspace intent persists natural user copy instead of undefined or entity ids", () => {
+  const repoRoot = tempRepo();
+  for (const [type, entityTypes] of Object.entries(WORKSPACE_INTENT_ENTITY_TYPES)) {
+    workspaceIntentAppend({
+      repoRoot,
+      env: {},
+      intent: { type, entity: { type: entityTypes[0], id: `qa-${type}` } },
+    });
+  }
+
+  const messages = workspaceThreadRead({ repoRoot, env: {} }).messages;
+  assert.equal(messages.length, Object.keys(WORKSPACE_INTENT_ENTITY_TYPES).length);
+  for (const message of messages) {
+    assert.doesNotMatch(message.text, /undefined|qa-|\b(?:application|workspace|communication):/i);
+    assert.match(message.text, /^[A-Z].+\.$/);
+  }
 });

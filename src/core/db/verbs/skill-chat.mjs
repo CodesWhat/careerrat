@@ -4,7 +4,10 @@ import { requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
 
 const CHAT_ROLES = new Set(["user", "assistant"]);
+const CHAT_KINDS = new Set(["agent_error"]);
 const TURN_STATES = new Set(["awaiting-assistant", "awaiting-user", "failed", "completed"]);
+const DECISION_ACTIONS = new Set(["save", "discard"]);
+const DECISION_STATES = new Set(["completed", "failed"]);
 
 function cleanSkill(value) {
   const skill = String(value ?? "").trim();
@@ -90,6 +93,7 @@ export function skillChatMessageAppend({
   skill,
   role,
   text,
+  kind,
   visibility,
   runtimeSessionId,
   now,
@@ -102,6 +106,12 @@ export function skillChatMessageAppend({
     throw error;
   }
   const cleanMessage = cleanText(text);
+  const cleanKind = kind == null ? null : String(kind).trim();
+  if (cleanKind && !CHAT_KINDS.has(cleanKind)) {
+    const error = new Error(`unsupported chat message kind: ${cleanKind}`);
+    error.code = "BAD_KIND";
+    throw error;
+  }
   const cleanVisibility = visibility === "internal" ? "internal" : null;
   const at = dateIso(now);
   const db = requireDb({ repoRoot, env });
@@ -128,6 +138,7 @@ export function skillChatMessageAppend({
       role: cleanRole,
       text: cleanMessage,
       createdAt: at,
+      ...(cleanKind ? { kind: cleanKind } : {}),
       ...(cleanVisibility ? { visibility: cleanVisibility } : {}),
       ...(runtimeSessionId ? { runtimeSessionId: String(runtimeSessionId).slice(0, 500) } : {}),
     };
@@ -149,65 +160,6 @@ export function skillChatMessageAppend({
       thread.id
     );
     return { ok: true, thread: updatedThread, message };
-  });
-}
-
-export function skillChatTranscriptAdopt({
-  repoRoot,
-  env = process.env,
-  skill,
-  messages,
-  now,
-} = {}) {
-  const clean = cleanSkill(skill);
-  const normalized = (Array.isArray(messages) ? messages : []).flatMap((message) => {
-    const role = String(message?.role || "").trim();
-    if (!CHAT_ROLES.has(role)) return [];
-    try {
-      return [{ role, text: cleanText(message?.text) }];
-    } catch {
-      return [];
-    }
-  });
-  const at = dateIso(now);
-  const db = requireDb({ repoRoot, env });
-
-  return withTransaction(db, () => {
-    const existing = readThread(db, clean);
-    if (existing) {
-      return {
-        ok: true,
-        adopted: false,
-        thread: existing,
-        messages: readMessages(db, existing.id),
-      };
-    }
-    if (!normalized.length) return { ok: true, adopted: false, thread: null, messages: [] };
-
-    const lastRole = normalized[normalized.length - 1].role;
-    const thread = createThread(clean, at, {
-      messageCount: normalized.length,
-      turnState: lastRole === "assistant" ? "awaiting-user" : "awaiting-assistant",
-    });
-    thread.lastRole = lastRole;
-    db.prepare("INSERT INTO skill_chat_threads (id, data) VALUES (?, ?)").run(
-      thread.id,
-      JSON.stringify(thread)
-    );
-    const insert = db.prepare(
-      "INSERT INTO skill_chat_messages (id, thread_id, sequence, data) VALUES (?, ?, ?, ?)"
-    );
-    const adoptedMessages = normalized.map((message, index) => ({
-      id: randomUUID(),
-      threadId: thread.id,
-      sequence: index + 1,
-      ...message,
-      createdAt: at,
-    }));
-    for (const message of adoptedMessages) {
-      insert.run(message.id, thread.id, message.sequence, JSON.stringify(message));
-    }
-    return { ok: true, adopted: true, thread, messages: adoptedMessages };
   });
 }
 
@@ -240,5 +192,64 @@ export function skillChatThreadSetTurnState({
       updated.id
     );
     return { ok: true, thread: updated };
+  });
+}
+
+export function skillChatDecisionSet({
+  repoRoot,
+  env = process.env,
+  skill,
+  decisionId,
+  action,
+  status = "completed",
+  resultText,
+  now,
+} = {}) {
+  const clean = cleanSkill(skill);
+  const id = String(decisionId ?? "").trim();
+  if (!id || id.length > 500 || id.includes("\0")) {
+    const error = new Error("chat decision id is invalid");
+    error.code = "BAD_DECISION_ID";
+    throw error;
+  }
+  const cleanAction = String(action || "").trim();
+  if (!DECISION_ACTIONS.has(cleanAction)) {
+    const error = new Error(`unsupported chat decision action: ${cleanAction}`);
+    error.code = "BAD_DECISION_ACTION";
+    throw error;
+  }
+  const cleanStatus = String(status || "").trim();
+  if (!DECISION_STATES.has(cleanStatus)) {
+    const error = new Error(`unsupported chat decision status: ${cleanStatus}`);
+    error.code = "BAD_DECISION_STATUS";
+    throw error;
+  }
+  const summary = cleanText(resultText);
+  const at = dateIso(now);
+  const db = requireDb({ repoRoot, env });
+  return withTransaction(db, () => {
+    const thread = readThread(db, clean);
+    if (!thread) {
+      const error = new Error(`no durable chat thread for skill "${clean}"`);
+      error.code = "NOT_FOUND";
+      throw error;
+    }
+    const decision = {
+      id,
+      action: cleanAction,
+      status: cleanStatus,
+      resultText: summary,
+      updatedAt: at,
+    };
+    const decisions = (Array.isArray(thread.decisions) ? thread.decisions : []).filter(
+      (candidate) => candidate?.id !== id
+    );
+    decisions.push(decision);
+    const updated = { ...thread, decisions: decisions.slice(-200), updatedAt: at };
+    db.prepare("UPDATE skill_chat_threads SET data = ? WHERE id = ?").run(
+      JSON.stringify(updated),
+      updated.id
+    );
+    return { ok: true, thread: updated, decision };
   });
 }

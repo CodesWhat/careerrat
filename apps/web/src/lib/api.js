@@ -172,12 +172,26 @@ export function finishOnboarding() {
   });
 }
 
+export function setPublicSyncPreference(enabled) {
+  return apiFetch("/api/onboard/public-sync-preference", {
+    method: "POST",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
 export function getInstalledAiRuntimes() {
   return apiFetch("/api/settings/ai-runtimes");
 }
 
 export function getAutomationSettings() {
   return apiFetch("/api/settings/automation");
+}
+
+export function setAutomationSessionProvider(provider) {
+  return apiFetch("/api/settings/automation/session", {
+    method: "POST",
+    body: JSON.stringify({ provider }),
+  });
 }
 
 export function probeInstalledAiRuntime(runtimeId) {
@@ -397,6 +411,13 @@ export function saveEvidenceSeed(claims) {
   });
 }
 
+export function replaceEvidenceClaims(claims) {
+  return apiFetch("/api/onboard/candidate/evidence/replace", {
+    method: "POST",
+    body: JSON.stringify({ claims }),
+  });
+}
+
 // POST /api/onboard/candidate/evidence/remove — delete exactly one evidence
 // claim by id (Library drawer's Delete affordance for evidence-kind cards).
 // Editing an existing claim reuses saveCandidateFile("evidence", {claims}) —
@@ -505,6 +526,20 @@ export function sendChatMessage(chatId, text) {
   });
 }
 
+export function recordSkillChatDecision(decision) {
+  return apiFetch("/api/chat/decision", {
+    method: "POST",
+    body: JSON.stringify(decision || {}),
+  });
+}
+
+export function completeDiscovery(step) {
+  return apiFetch("/api/discovery/complete", {
+    method: "POST",
+    body: JSON.stringify({ step }),
+  });
+}
+
 export function findChatBySkill(skill) {
   return apiFetch(`/api/chat/by-skill?skill=${encodeURIComponent(skill)}`);
 }
@@ -548,7 +583,7 @@ export function recordExternalApplication({ id, appliedAt } = {}) {
 }
 
 export function applyOnSite({ id } = {}) {
-  return runWorkspaceIntent("job.apply", { type: "application", id });
+  return runWorkspaceIntent("job.prepare-submit", { type: "application", id });
 }
 
 // POST /api/data/app/interview — appScheduleInterview verb. A second call
@@ -775,6 +810,13 @@ export function dismissDeepIngestPrompt() {
   });
 }
 
+export function openDeepIngestThread() {
+  return apiFetch("/api/chat-first/deep-ingest/open", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
 export function decideChatFirstSourced(payload = {}) {
   return apiFetch("/api/chat-first/sourced/decision", {
     method: "POST",
@@ -782,10 +824,17 @@ export function decideChatFirstSourced(payload = {}) {
   });
 }
 
-export function appendJobThreadMessage({ applicationId, role, kind, text, metadata } = {}) {
+export function appendJobThreadMessage({
+  applicationId,
+  role,
+  kind,
+  text,
+  metadata,
+  artifacts,
+} = {}) {
   return apiFetch("/api/chat-first/job-thread/message", {
     method: "POST",
-    body: JSON.stringify({ applicationId, role, kind, text, metadata }),
+    body: JSON.stringify({ applicationId, role, kind, text, metadata, artifacts }),
   });
 }
 

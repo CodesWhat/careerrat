@@ -3,7 +3,7 @@
 // http.createServer, mirroring tests/data-route.test.mjs's bootServer() and
 // tests/assist-route.test.mjs's fakeSdk() convention. `runSkillStream` and
 // `chatRuntime` are hand-rolled stubs here — no real Agent SDK subprocess,
-// no real chat-runtime session pump — so Lane A/B/C execution is fully
+// no real chat-runtime session pump — so Lane A/B execution is fully
 // observable and deterministic.
 import assert from "node:assert/strict";
 import {
@@ -24,12 +24,7 @@ import { deflateRawSync } from "node:zlib";
 import { mountIntakeRoutes } from "../src/cli/intake-route.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
-import {
-  intakeCapture,
-  intakeOne,
-  intakeUpdate,
-  reconcileOrphanedLaneCIntakeItems,
-} from "../src/core/db/verbs.mjs";
+import { intakeCapture, intakeOne, intakeUpdate } from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
 
@@ -1399,7 +1394,7 @@ test("POST /api/intake/classify: re-runs classification on an existing item and 
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/intake/confirm — Lane A/B/C execution
+// POST /api/intake/confirm — Lane A/B/W execution
 // ---------------------------------------------------------------------------
 
 test("POST /api/intake/confirm: 400 missing id, 404 unknown id, 409 when not 'proposed'", async () => {
@@ -1821,7 +1816,7 @@ test("ISSUE-038 POST /api/intake/confirm routes recruiter email through workspac
   }
 });
 
-test("POST /api/intake/confirm: Lane C starts a new chat session when none is live, and registers an onClose listener that resolves the item done", async () => {
+test("POST /api/intake/confirm rejects an obsolete Lane C row without consulting chat runtime", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
   const { id } = intakeCapture({ repoRoot, rawInput: "recruiter email text", inputKind: "text" });
@@ -1837,171 +1832,22 @@ test("POST /api/intake/confirm: Lane C starts a new chat session when none is li
     },
   });
 
-  let startSessionCalled = null;
-  const onCloseCallbacks = new Map();
   const chatRuntime = {
-    findBySkill: () => null,
-    postMessage: () => {
-      throw new Error("must not postMessage when no live session exists");
+    findBySkill() {
+      throw new Error("obsolete intake must not consult skill chat sessions");
     },
-    startSession: async ({ skill, input }) => {
-      startSessionCalled = { skill, input };
-      return { chatId: "chat-new", skill, state: "running" };
-    },
-    onClose: (chatId, cb) => {
-      onCloseCallbacks.set(chatId, cb);
+    startSession() {
+      throw new Error("obsolete intake must not start a skill chat session");
     },
   };
 
   const server = await bootServer(repoRoot, { chatRuntime });
   try {
     const { status, body } = await postJson(server, "/api/intake/confirm", { id });
-    assert.equal(status, 200);
-    assert.equal(body.item.status, "running");
-    assert.equal(body.item.result.chatId, "chat-new");
-    assert.equal(startSessionCalled.skill, "email-comms");
-    assert.equal(startSessionCalled.input.intakeId, id);
-
-    // Simulate chat-runtime's own onClose firing once the session ends —
-    // "process_exited" (the generator returning on its own) maps to "done".
-    assert.ok(onCloseCallbacks.has("chat-new"), "expected an onClose listener for chat-new");
-    onCloseCallbacks.get("chat-new")({ reason: "process_exited", lastError: null });
-    assert.equal(intakeOne({ repoRoot, id }).status, "done");
-  } finally {
-    await closeServer(server);
-  }
-});
-
-test("POST /api/intake/confirm: Lane C reuses an existing live session via postMessage instead of starting a new one, and its onClose reports an error with the last error message", async () => {
-  const repoRoot = tempRepo();
-  openDb({ repoRoot });
-  const { id } = intakeCapture({ repoRoot, rawInput: "recruiter email text", inputKind: "text" });
-  intakeUpdate({
-    repoRoot,
-    id,
-    patch: {
-      status: "proposed",
-      kind: "recruiter-email",
-      classification: classificationFixture({ kind: "recruiter-email" }),
-      trackerMatch: null,
-      dispatch: { lane: "C", action: "chat_skill", params: { skill: "email-comms" } },
-    },
-  });
-
-  let postMessageArgs = null;
-  const onCloseCallbacks = new Map();
-  const chatRuntime = {
-    findBySkill: (skill) =>
-      skill === "email-comms" ? { chatId: "chat-live", skill, state: "idle" } : null,
-    postMessage: (chatId, text) => {
-      postMessageArgs = { chatId, text };
-      return { accepted: true };
-    },
-    startSession: async () => {
-      throw new Error("must not start a new session when one is already live");
-    },
-    onClose: (chatId, cb) => {
-      onCloseCallbacks.set(chatId, cb);
-    },
-  };
-
-  const server = await bootServer(repoRoot, { chatRuntime });
-  try {
-    const { status, body } = await postJson(server, "/api/intake/confirm", { id });
-    assert.equal(status, 200);
-    assert.equal(body.item.result.chatId, "chat-live");
-    assert.equal(postMessageArgs.chatId, "chat-live");
-    assert.match(postMessageArgs.text, /recruiter email text/);
-
-    assert.ok(onCloseCallbacks.has("chat-live"), "expected an onClose listener for chat-live");
-    onCloseCallbacks.get("chat-live")({ reason: "error", lastError: "model blew up mid-turn" });
-    const settled = intakeOne({ repoRoot, id });
-    assert.equal(settled.status, "error");
-    assert.match(settled.error, /model blew up mid-turn/);
-  } finally {
-    await closeServer(server);
-  }
-});
-
-// Data-table-driven: every one of chat-runtime.mjs's 6 possible close reasons
-// maps to the exact intake outcome the M10 decisions memo (§5) specifies. Each
-// case confirms its OWN fresh intake item against a Lane C dispatch (sharing
-// one fake chatRuntime whose findBySkill always misses, so every confirm
-// starts a distinct new session) — isolating one close-reason -> outcome
-// mapping per assertion, independent of the two scenario tests above.
-test("POST /api/intake/confirm: Lane C's onClose maps every chat-runtime close reason to the correct intake outcome", async () => {
-  const repoRoot = tempRepo();
-  openDb({ repoRoot });
-
-  const cases = [
-    { reason: "process_exited", lastError: null, status: "done" },
-    { reason: "closed", lastError: null, status: "done" },
-    { reason: "idle_timeout", lastError: null, status: "done" },
-    {
-      reason: "error",
-      lastError: "the model threw",
-      status: "error",
-      errorMatch: /the model threw/,
-    },
-    { reason: "aborted", lastError: null, status: "error", errorMatch: /session aborted/ },
-    {
-      reason: "shutdown",
-      lastError: null,
-      status: "error",
-      errorMatch: /server restarted mid-session/,
-    },
-  ];
-
-  let sessionCounter = 0;
-  const onCloseCallbacks = new Map();
-  const chatRuntime = {
-    findBySkill: () => null,
-    postMessage: () => {
-      throw new Error("must not postMessage — findBySkill always misses in this test");
-    },
-    startSession: async ({ skill }) => {
-      sessionCounter += 1;
-      const chatId = `chat-${sessionCounter}`;
-      return { chatId, skill, state: "running" };
-    },
-    onClose: (chatId, cb) => {
-      onCloseCallbacks.set(chatId, cb);
-    },
-  };
-
-  const server = await bootServer(repoRoot, { chatRuntime });
-  try {
-    for (const testCase of cases) {
-      const { id } = intakeCapture({
-        repoRoot,
-        rawInput: "recruiter email text",
-        inputKind: "text",
-      });
-      intakeUpdate({
-        repoRoot,
-        id,
-        patch: {
-          status: "proposed",
-          kind: "recruiter-email",
-          classification: classificationFixture({ kind: "recruiter-email" }),
-          trackerMatch: null,
-          dispatch: { lane: "C", action: "chat_skill", params: { skill: "email-comms" } },
-        },
-      });
-
-      const { body } = await postJson(server, "/api/intake/confirm", { id });
-      const chatId = body.item.result.chatId;
-      assert.ok(onCloseCallbacks.has(chatId), `expected an onClose listener for ${chatId}`);
-
-      onCloseCallbacks.get(chatId)({ reason: testCase.reason, lastError: testCase.lastError });
-      const settled = intakeOne({ repoRoot, id });
-      assert.equal(
-        settled.status,
-        testCase.status,
-        `close reason "${testCase.reason}" should map to status "${testCase.status}"`
-      );
-      if (testCase.errorMatch) assert.match(settled.error, testCase.errorMatch);
-    }
+    assert.equal(status, 409);
+    assert.equal(body.ok, false);
+    assert.match(body.error, /reclassify/i);
+    assert.equal(intakeOne({ repoRoot, id }).status, "proposed");
   } finally {
     await closeServer(server);
   }
@@ -2031,79 +1877,6 @@ test("POST /api/intake/dismiss: happy path from 'proposed', 409 from a non-dismi
   } finally {
     await closeServer(server);
   }
-});
-
-// ---------------------------------------------------------------------------
-// reconcileOrphanedLaneCIntakeItems — M10 boot-time cleanup for chat-runtime's
-// in-memory-only session lifetime (see src/core/db/verbs/intake.mjs's own doc
-// comment). Server wiring (tracker-dev.mjs calling this once at boot) is
-// covered by tests/api-server.test.mjs; this is the verb's own behavior.
-// ---------------------------------------------------------------------------
-
-test("reconcileOrphanedLaneCIntakeItems: flips a stuck running+Lane-C item to error, and leaves everything else untouched", async () => {
-  const repoRoot = tempRepo();
-  openDb({ repoRoot });
-
-  // The orphan: running, Lane C dispatch, from a process lifetime that's gone.
-  const { id: orphanId } = intakeCapture({
-    repoRoot,
-    rawInput: "recruiter email",
-    inputKind: "text",
-  });
-  intakeUpdate({
-    repoRoot,
-    id: orphanId,
-    patch: {
-      status: "running",
-      dispatch: { lane: "C", action: "chat_skill", params: { skill: "email-comms" } },
-      result: { chatId: "chat-from-a-dead-process" },
-    },
-  });
-
-  // A running Lane B item — untouched (its own runSkillStream background
-  // promise, not chat-runtime, resolves it; not this routine's concern).
-  const { id: laneBRunningId } = intakeCapture({ repoRoot, rawInput: "a JD", inputKind: "text" });
-  intakeUpdate({
-    repoRoot,
-    id: laneBRunningId,
-    patch: {
-      status: "running",
-      dispatch: { lane: "B", action: "run_skill", params: { skill: "evaluate-job" } },
-    },
-  });
-
-  // An already-done Lane C item — untouched (not "running").
-  const { id: laneCDoneId } = intakeCapture({
-    repoRoot,
-    rawInput: "recruiter email 2",
-    inputKind: "text",
-  });
-  intakeUpdate({
-    repoRoot,
-    id: laneCDoneId,
-    patch: {
-      status: "done",
-      dispatch: { lane: "C", action: "chat_skill", params: { skill: "email-comms" } },
-      result: { chatId: "chat-that-finished-fine" },
-    },
-  });
-
-  const result = reconcileOrphanedLaneCIntakeItems({ repoRoot });
-  assert.deepEqual(result.reconciledIds, [orphanId]);
-
-  const orphan = intakeOne({ repoRoot, id: orphanId });
-  assert.equal(orphan.status, "error");
-  assert.equal(orphan.error, "interrupted by restart");
-
-  assert.equal(intakeOne({ repoRoot, id: laneBRunningId }).status, "running");
-  assert.equal(intakeOne({ repoRoot, id: laneCDoneId }).status, "done");
-});
-
-test("reconcileOrphanedLaneCIntakeItems: a no-op pass (nothing running) returns an empty list without throwing", async () => {
-  const repoRoot = tempRepo();
-  openDb({ repoRoot });
-  const result = reconcileOrphanedLaneCIntakeItems({ repoRoot });
-  assert.deepEqual(result.reconciledIds, []);
 });
 
 test("Universal Intake stays separate from the Deep ingest local route owner", () => {

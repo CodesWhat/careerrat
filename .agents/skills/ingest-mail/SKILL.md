@@ -1,8 +1,13 @@
 ---
 name: ingest-mail
 description: Read job-search email updates from Apple Mail on macOS or, with separate mail_access consent, Gmail/Outlook webmail through the session browser; fold recruiter replies and status changes into CareerRat tracker communication state. Opt-in, local-only, read-only.
-tier_1_inputs: [source/opt-in gate, watermark window, tracker thread match keys]
-tier_2_inputs: [matched-message full bodies]
+metadata:
+  tier_1_inputs:
+    - source/opt-in gate
+    - watermark window
+    - tracker thread match keys
+  tier_2_inputs:
+    - matched-message full bodies
 ---
 
 # ingest-mail
@@ -305,6 +310,7 @@ discriminator:
   like `minimum_base` in `profile.yml`).
 
 Route each gate type through its owning command:
+
 - Company exclusion → `careerrat gate exclude-company "<Company>" --write --confirm`
 - Comp floor change → `careerrat gate comp-floor <N> --write --confirm`
 - Per-application follow-up pause → `workspace/tracker.json` (that record's

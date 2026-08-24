@@ -51,9 +51,9 @@ async function renderHtmlWithElectron({ BrowserWindow, html }) {
 }
 
 /**
- * Start the private PDF renderer used by the staged Node engine. Electron
- * already ships Chromium, so the desktop build should never carry a second
- * Playwright browser or rely on a developer cache under ~/Library.
+ * Start the private PDF renderer used by the staged Node engine. PDF export
+ * uses Electron's Chromium directly; the separate hermetic Playwright browser
+ * bundled for supervised application automation is not involved here.
  */
 export async function startDesktopPdfRenderer({
   BrowserWindow,
@@ -142,6 +142,7 @@ export function resolveDesktopRuntimePaths({
   appDir,
   userDataPath,
   resourcesPath,
+  careerratHomeOverride,
 } = {}) {
   const isBrandedDevLaunch =
     isPackaged && appDir && isNodeModulesElectronResourcesPath(resourcesPath);
@@ -168,10 +169,14 @@ export function resolveDesktopRuntimePaths({
 
     return {
       isPackaged: true,
-      careerratHome: join(userDataPath, "data"),
+      careerratHome: String(careerratHomeOverride || "").trim() || join(userDataPath, "data"),
       repoRoot: join(resourcesPath, "careerrat"),
     };
   }
+}
+
+export function resolveDesktopSmokeEngineRoot({ isPackaged, repoRoot, desktopDir }) {
+  return isPackaged ? repoRoot : join(desktopDir, "staging", "careerrat");
 }
 
 function isNodeModulesElectronResourcesPath(resourcesPath) {

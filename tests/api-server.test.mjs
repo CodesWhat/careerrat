@@ -14,8 +14,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createDevServer } from "../src/cli/tracker-dev.mjs";
-import { closeAll, openDb } from "../src/core/db/connection.mjs";
-import { intakeCapture, intakeOne, intakeUpdate, sourceConfigGet } from "../src/core/db/verbs.mjs";
+import { openDb } from "../src/core/db/connection.mjs";
+import { sourceConfigGet } from "../src/core/db/verbs.mjs";
 import { resolveUserPaths } from "../src/core/paths/workspace.mjs";
 import { defaultAdapter } from "../src/core/storage/storage-adapter.mjs";
 import { resolveTrackerBindHost } from "../src/core/tracker/request-security.mjs";
@@ -425,56 +425,6 @@ test("the production intake mount preserves a requested apply action", async () 
         requestedAction: "prepare",
       },
     ]);
-  } finally {
-    teardown(dev, repoRoot);
-  }
-});
-
-// ---------------------------------------------------------------------------
-// M10 — boot-time Lane-C orphan reconciliation. createDevServer() must run
-// reconcileOrphanedLaneCIntakeItems() once before returning (see that
-// function's own doc comment in src/core/db/verbs/intake.mjs and its call
-// site in tracker-dev.mjs) so a "running" Lane C intake item left over from a
-// PREVIOUS process's chat-runtime session — one that can never resolve on its
-// own, since chat-runtime sessions don't survive a restart — is never stuck
-// forever. reconcileOrphanedLaneCIntakeItems() itself is unit-tested in
-// tests/intake-route.test.mjs; this test is the wiring: does booting the real
-// server actually call it.
-// ---------------------------------------------------------------------------
-
-test("createDevServer(): reconciles an orphaned running+Lane-C intake item at boot, before serving any request", async () => {
-  const repoRoot = tempRepo();
-  writeTracker(repoRoot);
-  openDb({ repoRoot });
-  const { id } = intakeCapture({ repoRoot, rawInput: "recruiter email", inputKind: "text" });
-  intakeUpdate({
-    repoRoot,
-    id,
-    patch: {
-      status: "running",
-      dispatch: { lane: "C", action: "chat_skill", params: { skill: "email-comms" } },
-      result: { chatId: "chat-from-before-the-restart" },
-    },
-  });
-
-  const dev = await bootServer(repoRoot);
-  try {
-    const item = intakeOne({ repoRoot, id });
-    assert.equal(item.status, "error");
-    assert.equal(item.error, "interrupted by restart");
-  } finally {
-    teardown(dev, repoRoot);
-    closeAll();
-  }
-});
-
-test("createDevServer(): boots fine (reconciliation is best-effort) when no db exists yet", async () => {
-  const repoRoot = tempRepo();
-  writeTracker(repoRoot);
-  const dev = await bootServer(repoRoot);
-  try {
-    const res = await fetch(`${baseUrl(dev)}/api/health`);
-    assert.equal(res.status, 200);
   } finally {
     teardown(dev, repoRoot);
   }

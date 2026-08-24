@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -138,6 +138,119 @@ describe("ThreadRail", () => {
     expect(html).not.toContain("Initrode · Rejected");
   });
 
+  it("renders the durable Deep ingest thread with a pickaxe and selects it like any thread", () => {
+    const onSelectThread = vi.fn();
+    const tree = ThreadRail({
+      ...baseProps,
+      activeThread: "ingest",
+      deepIngestThread: {
+        id: "ingest",
+        title: "Deep ingest",
+        subtitle: "add work history and review grounded evidence",
+      },
+      onSelectThread,
+    });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(visit);
+      if (typeof node.type === "function") return visit(node.type(node.props));
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+    const deepButton = buttons.find((button) =>
+      String(button.props.className || "").includes("chat-first-thread-card--deep")
+    );
+    expect(markup(tree)).toContain('data-icon="pickaxe"');
+    expect(markup(tree)).toContain("chat-first-thread-card__icon-badge");
+    expect(markup(tree)).toContain('aria-current="page"');
+    deepButton.props.onClick();
+    expect(onSelectThread).toHaveBeenCalledWith("ingest");
+  });
+
+  it("gives Paul and Deep ingest the same small badge geometry with stable varied palette colors", () => {
+    const html = markup(
+      <ThreadRail
+        {...baseProps}
+        activeThread="ingest"
+        deepIngestThread={{
+          id: "ingest",
+          title: "Deep ingest",
+          subtitle: "add work history and review grounded evidence",
+        }}
+      />
+    );
+    const css = readFileSync(fileURLToPath(new URL("./chat-first.css", import.meta.url)), "utf8");
+    const badgeRule = css.match(/\.chat-first-thread-card__icon-badge\s*\{([^}]*)\}/)?.[1] || "";
+    const badgeIconRule =
+      css.match(/\.chat-first-thread-card__icon-badge svg\s*\{([^}]*)\}/)?.[1] || "";
+
+    expect(html.match(/class="chat-first-thread-card__icon-badge /g)).toHaveLength(2);
+    expect(html).toContain("chat-first-thread-card__icon-badge--lilac");
+    expect(html).toContain("chat-first-thread-card__icon-badge--lime");
+    expect(html).not.toContain("chat-first-avatar--small");
+    expect(badgeRule).toMatch(/width:\s*24px/);
+    expect(badgeRule).toMatch(/height:\s*24px/);
+    expect(badgeRule).toMatch(/border-radius:\s*9px/);
+    expect(badgeRule).not.toMatch(/background:/);
+    expect(badgeRule).toMatch(/font-size:\s*14px/);
+    expect(badgeIconRule).toMatch(/width:\s*14px/);
+    expect(badgeIconRule).toMatch(/height:\s*14px/);
+    for (const [tone, surface] of [
+      ["lime", "--lime"],
+      ["sky", "--sky"],
+      ["lilac", "--lilac"],
+      ["cool", "--tint-cool-2"],
+      ["cream", "--cream-edge"],
+    ]) {
+      expect(css).toMatch(
+        new RegExp(
+          `\\.chat-first-thread-card__icon-badge--${tone}\\s*\\{[^}]*background:\\s*var\\(${surface}\\)`
+        )
+      );
+    }
+    expect(css).not.toMatch(
+      /\.chat-first-thread-card\.is-active \.chat-first-thread-card__icon-badge\s*\{/
+    );
+  });
+
+  it("renders durable visible research chats as ordinary navigable threads", () => {
+    const onSelectThread = vi.fn();
+    const tree = ThreadRail({
+      ...baseProps,
+      activeThread: "skill:research-company",
+      skillThreads: [
+        {
+          id: "skill:research-company",
+          title: "Researching Acme",
+          subtitle: "research complete · review the result",
+          state: "idle",
+        },
+      ],
+      onSelectThread,
+    });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(visit);
+      if (typeof node.type === "function") return visit(node.type(node.props));
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+
+    expect(markup(tree)).toContain("RESEARCH · 1");
+    expect(markup(tree)).toContain("Researching Acme");
+    expect(markup(tree)).toContain('aria-current="page"');
+    buttons
+      .find((button) =>
+        String(button.props.className || "").includes("chat-first-thread-card--skill")
+      )
+      .props.onClick();
+    expect(onSelectThread).toHaveBeenCalledWith("skill:research-company");
+  });
+
   it("expands archived conversations without treating them as deleted", () => {
     const html = markup(<ThreadRail {...baseProps} archiveOpen />);
 
@@ -230,6 +343,20 @@ describe("NeedsYouPanel", () => {
     expect(html).not.toContain("GO DEEPER");
     expect(html).not.toContain("Deep ingest your history");
   });
+
+  it("continues an existing durable deep-ingest thread from the Today dock", () => {
+    const html = markup(
+      <NeedsYouPanel
+        items={[]}
+        deepIngestPrompt={{ visible: true }}
+        deepIngestStarted={true}
+        onStartIngest={() => {}}
+      />
+    );
+
+    expect(html).toContain(">Continue</button>");
+    expect(html).not.toContain(">Start</button>");
+  });
 });
 
 describe("ChatFirstWorkspace", () => {
@@ -252,6 +379,81 @@ describe("ChatFirstWorkspace", () => {
     expect(html).toContain('data-slot="rail"');
     expect(html).toContain('data-slot="conversation"');
     expect(html).toContain('data-slot="context"');
+  });
+
+  it("keeps selected conversation rows pure ink with no glow or focus surround", () => {
+    const foundation = readFileSync(
+      fileURLToPath(new URL("./app-foundation.css", import.meta.url)),
+      "utf8"
+    );
+    const css = readFileSync(fileURLToPath(new URL("./chat-first.css", import.meta.url)), "utf8");
+    const firstRun = readFileSync(
+      fileURLToPath(new URL("./first-run.css", import.meta.url)),
+      "utf8"
+    );
+    const browser = readFileSync(
+      fileURLToPath(new URL("./workspace-browser.css", import.meta.url)),
+      "utf8"
+    );
+    const profile = readFileSync(
+      fileURLToPath(new URL("./profile-settings.css", import.meta.url)),
+      "utf8"
+    );
+    const activeRule = css.match(/\.chat-first-thread-card\.is-active\s*\{([^}]*)\}/)?.[1] || "";
+    const activeFocusRule =
+      css.match(
+        /\.chat-first-workspace \.chat-first-thread-card\.is-active:focus-visible\s*\{([^}]*)\}/
+      )?.[1] || "";
+    const badgeIconRule =
+      css.match(/\.chat-first-thread-card__icon-badge svg\s*\{([^}]*)\}/)?.[1] || "";
+    const firstRunRule = firstRun.match(/\.cf-first-run__paul-card\s*\{([^}]*)\}/)?.[1] || "";
+    const firstRunAvatar = firstRun.match(/\.cf-first-run__rail-avatar\s*\{([^}]*)\}/)?.[1] || "";
+    const browserTab =
+      browser.match(/\.cf-browser__tab\[aria-selected="true"\]\s*\{([^}]*)\}/)?.[1] || "";
+    const profileTab =
+      profile.match(/\.cf-profile__tabs button\[aria-current="page"\]\s*\{([^}]*)\}/)?.[1] || "";
+
+    expect(foundation).toMatch(/--cf-selection-fill:\s*var\(--ink\)/);
+    expect(foundation).toMatch(/--cf-selection-foreground:\s*var\(--paper\)/);
+    expect(foundation).toMatch(/--cf-selection-border:\s*0/);
+    expect(foundation).toMatch(/--cf-selection-outline:\s*0/);
+    expect(foundation).toMatch(/--cf-selection-shadow:\s*none/);
+    expect(foundation).toMatch(/--cf-selection-avatar-surface:\s*transparent/);
+    for (const rule of [activeRule, firstRunRule, browserTab, profileTab]) {
+      expect(rule).toMatch(/background:\s*var\(--cf-selection-fill\)/);
+      expect(rule).toMatch(/color:\s*var\(--cf-selection-foreground\)/);
+      expect(rule).toMatch(/border:\s*var\(--cf-selection-border\)/);
+      expect(rule).toMatch(/outline:\s*var\(--cf-selection-outline\)/);
+      expect(rule).toMatch(/box-shadow:\s*var\(--cf-selection-shadow\)/);
+      expect(rule).not.toMatch(/lime|#e6fa8d|rgba\(230,\s*250,\s*141|color-mix/);
+    }
+    expect(activeFocusRule).toMatch(/outline:\s*var\(--cf-selection-outline\)/);
+    expect(activeFocusRule).toMatch(/box-shadow:\s*var\(--cf-selection-shadow\)/);
+    expect(badgeIconRule).toMatch(/width:\s*14px/);
+    expect(badgeIconRule).toMatch(/height:\s*14px/);
+    expect(firstRunAvatar).toMatch(/background:\s*var\(--cf-selection-avatar-surface\)/);
+  });
+
+  it("allows only component-scoped custom properties in inline chat-first styles", () => {
+    const directory = fileURLToPath(new URL(".", import.meta.url));
+    const occurrences = readdirSync(directory)
+      .filter((name) => name.endsWith(".jsx") && !name.endsWith(".test.jsx"))
+      .flatMap((name) => {
+        const source = readFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url)), "utf8");
+        expect(source, name).not.toMatch(
+          /style=\{\{(?:(?!\}\}).)*\b(?:transform|width|height|fontSize)\s*:/s
+        );
+        return [...source.matchAll(/style=\{\{([^}]+)\}\}/g)].map((match) => ({
+          name,
+          declaration: match[1],
+        }));
+      });
+
+    expect(occurrences.length).toBeGreaterThan(0);
+    for (const { name, declaration } of occurrences) {
+      expect(declaration, name).not.toMatch(/\b(?:transform|width|height|fontSize)\s*:/);
+      expect(declaration, name).toMatch(/^\s*"--cf-[a-z-]+"\s*:/);
+    }
   });
 
   it("reserves the native macOS controls and marks only chrome as draggable", () => {
@@ -285,7 +487,7 @@ describe("ChatFirstWorkspace", () => {
     const css = readFileSync(fileURLToPath(new URL("./chat-first.css", import.meta.url)), "utf8");
 
     expect(css).toMatch(
-      /\.chat-first-pill--ink\s*\{[^}]*color:\s*var\(--cf-lime[^}]*background:\s*var\(--cf-ink/s
+      /\.chat-first-pill--ink\s*\{[^}]*color:\s*var\(--lime[^}]*background:\s*var\(--ink/s
     );
   });
 
@@ -303,7 +505,7 @@ describe("ChatFirstWorkspace", () => {
     expect(css).toMatch(/\.chat-first-pill\s*\{[^}]*border-radius:\s*999px/s);
     expect(css).not.toMatch(/\.chat-first-pill\s*\{[^}]*min-height:/s);
     expect(css).toMatch(
-      /\.chat-first-needs \.chat-first-pill--outline\s*\{[^}]*padding:\s*5px 13px[^}]*border-color:\s*#e3e0d6/s
+      /\.chat-first-needs \.chat-first-pill--outline\s*\{[^}]*padding:\s*5px 13px[^}]*border-color:\s*var\(--line-warm\)/s
     );
   });
 

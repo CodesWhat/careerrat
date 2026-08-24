@@ -42,8 +42,6 @@ const APP_DEFAULT_FILES = [
   "src/cli/packet-route.mjs",
   "src/cli/search-route.mjs",
   "src/cli/sourcing-route.mjs",
-  "src/core/ai/answer-page.mjs",
-  "src/core/onboarding/packet-page.mjs",
   "apps/desktop/main.mjs",
 ];
 
@@ -130,14 +128,6 @@ const CLASSIFIED_RETAINED_RUNTIME_FILES = [
   },
 ];
 
-const CLASSIFIED_LEGACY_STATIC_RUNTIME_FILES = [
-  {
-    file: "src/core/onboarding/chat-page.mjs",
-    classification: "legacy static chat page explicit chat client",
-    patterns: [/\/api\/chat\/start/, /\/api\/chat\/events/],
-  },
-];
-
 const CLASSIFIED_EXPLICIT_CHAT_SLICES = [
   {
     file: "apps/web/src/lib/api.js",
@@ -164,13 +154,9 @@ const CLASSIFIED_EXPLICIT_CHAT_SLICES = [
   },
   {
     file: "src/cli/intake-route.mjs",
-    label: "confirm-first intake retained runtime dispatch",
-    slices: [
-      ["function executeLaneB", "function buildChatHandoffText"],
-      ["async function executeLaneC", "export function mountIntakeRoutes"],
-      ['addRoute("POST", "/api/intake/confirm"', 'addRoute("POST", "/api/intake/dismiss"'],
-    ],
-    patterns: [/\brunSkillStream\b/, /\bchatRuntime\.startSession\b/],
+    label: "confirm-first intake background skill dispatch",
+    slices: [["function executeLaneB", "async function executeLaneW"]],
+    patterns: [/\brunSkillStream\b/],
   },
   {
     file: "src/cli/onboard-route.mjs",
@@ -384,11 +370,8 @@ test("explicit chat handoffs and narrow retained-runtime slices are classified b
   }
 });
 
-test("retained runtime owners and legacy/static clients remain explicitly classified", () => {
-  for (const entry of [
-    ...CLASSIFIED_RETAINED_RUNTIME_FILES,
-    ...CLASSIFIED_LEGACY_STATIC_RUNTIME_FILES,
-  ]) {
+test("retained runtime owners remain explicitly classified", () => {
+  for (const entry of CLASSIFIED_RETAINED_RUNTIME_FILES) {
     const source = stripJavaScriptComments(readSource(entry.file));
     assertClassifiedPatterns(source, entry.patterns, labelFor(entry.file, entry.classification));
   }

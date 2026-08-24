@@ -98,15 +98,44 @@ export function SearchToolbar({ sourceSweep = {}, onRunSweep, onOpenSourceHealth
   );
 }
 
-function FilterBar({ query = "", filters = {}, onQueryChange, onFilter }) {
-  const options = [
-    { label: "Fit 80+", key: "fit80", supported: true },
-    { label: "Stage ▾", supported: false },
-    { label: "Comp ✓", key: "comp", supported: true },
-    { label: "Remote ▾", key: "remote", supported: true },
-    { label: "Source ▾", supported: false },
-    { label: "Posted ▾", supported: false },
-  ];
+function filterKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function filterChoices(jobs, valueFor) {
+  const choices = new Map();
+  for (const job of safeArray(jobs)) {
+    const label = String(valueFor(job) || "").trim();
+    const value = filterKey(label);
+    if (label && value && !choices.has(value)) choices.set(value, label);
+  }
+  return [...choices].map(([value, label]) => ({ value, label }));
+}
+
+function FilterSelect({ label, value = "all", options, onChange }) {
+  return (
+    <select
+      className={`cf-filter cf-filter--select${value !== "all" ? " cf-filter--active" : ""}`}
+      value={value}
+      aria-label={`Filter by ${label.toLowerCase()}`}
+      onChange={(event) => onChange?.(event.target.value)}
+    >
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function FilterBar({ jobs = [], query = "", filters = {}, onQueryChange, onFilter }) {
+  const stages = filterChoices(jobs, (job) => job?.stage || job?.stageLabel || job?.status);
+  const sources = filterChoices(jobs, (job) => job?.sourceLabel || job?.channel || job?.source);
   return (
     <div className="cf-search__filters">
       <span className="cf-eyebrow">FOUND · NEEDS TRIAGE</span>
@@ -120,26 +149,52 @@ function FilterBar({ query = "", filters = {}, onQueryChange, onFilter }) {
           onChange={(event) => onQueryChange?.(event.target.value)}
         />
       </label>
-      {options.map((filter) => {
-        const active = filter.key ? filters[filter.key] === true : false;
-        return (
-          <button
-            key={filter.label}
-            type="button"
-            className={`cf-filter${active ? " cf-filter--active" : ""}`}
-            aria-pressed={active}
-            disabled={!filter.supported}
-            title={
-              filter.supported
-                ? undefined
-                : "This filter needs source metadata that is not available yet."
-            }
-            onClick={() => onFilter?.(filter.key)}
-          >
-            {filter.label}
-          </button>
-        );
-      })}
+      <button
+        type="button"
+        className={`cf-filter${filters.fit80 ? " cf-filter--active" : ""}`}
+        aria-pressed={filters.fit80 === true}
+        onClick={() => onFilter?.("fit80")}
+      >
+        Fit 80+
+      </button>
+      <FilterSelect
+        label="Stage"
+        value={filters.stage}
+        options={[{ value: "all", label: "Stage" }, ...stages]}
+        onChange={(value) => onFilter?.("stage", value)}
+      />
+      <button
+        type="button"
+        className={`cf-filter${filters.comp ? " cf-filter--active" : ""}`}
+        aria-pressed={filters.comp === true}
+        onClick={() => onFilter?.("comp")}
+      >
+        Comp ✓
+      </button>
+      <button
+        type="button"
+        className={`cf-filter${filters.remote ? " cf-filter--active" : ""}`}
+        aria-pressed={filters.remote === true}
+        onClick={() => onFilter?.("remote")}
+      >
+        Remote
+      </button>
+      <FilterSelect
+        label="Source"
+        value={filters.source}
+        options={[{ value: "all", label: "Source" }, ...sources]}
+        onChange={(value) => onFilter?.("source", value)}
+      />
+      <FilterSelect
+        label="Posted date"
+        value={filters.posted}
+        options={[
+          { value: "all", label: "Posted" },
+          { value: "7d", label: "Posted · 7 days" },
+          { value: "30d", label: "Posted · 30 days" },
+        ]}
+        onChange={(value) => onFilter?.("posted", value)}
+      />
     </div>
   );
 }
@@ -184,7 +239,7 @@ export function SearchJobRow({ job, selected, onToggleSelection }) {
       <div className="cf-job-row__fit">
         <strong>{Number(job?.fit) || 0}</strong>
         <span className="cf-job-row__fit-track">
-          <span className="cf-job-row__fit-fill" style={{ width: `${width}%` }} />
+          <span className="cf-job-row__fit-fill" style={{ "--cf-fit-width": `${width}%` }} />
         </span>
       </div>
     </label>
@@ -193,6 +248,7 @@ export function SearchJobRow({ job, selected, onToggleSelection }) {
 
 export function SearchPanel({
   jobs = [],
+  filterJobs = jobs,
   selection = [],
   sourceSweep = {},
   locationPolicy = {},
@@ -215,6 +271,7 @@ export function SearchPanel({
       />
       <LocationScope policy={locationPolicy} />
       <FilterBar
+        jobs={filterJobs}
         query={query}
         filters={filters}
         onQueryChange={onQueryChange}
@@ -241,10 +298,12 @@ export function SearchPanel({
 function PipelineFunnel({ pipeline = {}, onStageSelect }) {
   const rows = pipelineRowsWithWidths(pipeline?.rows);
   const leaks = pipelineRowsWithWidths(pipeline?.leaks);
+  const applicationCount = Number(pipeline?.applicationCount) || 0;
   return (
     <div className="cf-pipeline__funnel">
       <div className="cf-pipeline__summary">
-        {Number(pipeline?.applicationCount) || 0} applications · where they stand
+        {applicationCount} application{applicationCount === 1 ? "" : "s"} · where{" "}
+        {applicationCount === 1 ? "it stands" : "they stand"}
       </div>
       {rows.map((row) => (
         <button
@@ -258,7 +317,7 @@ function PipelineFunnel({ pipeline = {}, onStageSelect }) {
           <span className="cf-pipeline__track">
             <span
               className={`cf-pipeline__bar${row.highlight ? " cf-pipeline__bar--offer" : ""}`}
-              style={{ width: `${row.width}%` }}
+              style={{ "--cf-pipeline-width": `${row.width}%` }}
             >
               {row.count}
             </span>
@@ -277,7 +336,10 @@ function PipelineFunnel({ pipeline = {}, onStageSelect }) {
             >
               <span className="cf-pipeline__label">{row.label}</span>
               <span className="cf-pipeline__track">
-                <span className="cf-pipeline__bar" style={{ width: `${row.width}%` }}>
+                <span
+                  className="cf-pipeline__bar"
+                  style={{ "--cf-pipeline-width": `${row.width}%` }}
+                >
                   {row.count}
                 </span>
               </span>
@@ -337,6 +399,7 @@ export function PipelinePanel({ pipeline = {}, view = "funnel", onStageSelect, o
 
 export function FilesPanel({
   files = [],
+  agentName = "Paul",
   activeFilter = "All",
   onOpenFile,
   onExportFile,
@@ -387,7 +450,7 @@ export function FilesPanel({
             </article>
           ))
         ) : (
-          <EmptyPanel>No files yet. Artifacts appear here as Paul builds them.</EmptyPanel>
+          <EmptyPanel>No files yet. Artifacts appear here as {agentName} builds them.</EmptyPanel>
         )}
       </div>
       <p className="cf-browser__footnote">every claim in these traces to your evidence bank</p>
@@ -477,6 +540,9 @@ export function PeoplePanel({
 
 export function SchedulePanel({ groups = [], onAction, onCalendarAction }) {
   const days = safeArray(groups);
+  const canExportCalendar = days.some((group) =>
+    safeArray(group?.items).some((item) => item?.export)
+  );
   return (
     <section className="cf-browser__panel cf-schedule" role="tabpanel" aria-label="Schedule">
       <div className="cf-schedule__days">
@@ -518,6 +584,7 @@ export function SchedulePanel({ groups = [], onAction, onCalendarAction }) {
             key={label}
             type="button"
             className="cf-button cf-button--outline"
+            disabled={!canExportCalendar}
             onClick={() => onCalendarAction?.(label)}
           >
             {label}
@@ -525,7 +592,9 @@ export function SchedulePanel({ groups = [], onAction, onCalendarAction }) {
         ))}
       </div>
       <p className="cf-browser__footnote">
-        These create events in your calendar app. Nothing stays in sync.
+        {canExportCalendar
+          ? "These create events in your calendar app. Nothing stays in sync."
+          : "Calendar exports appear when something is scheduled."}
       </p>
     </section>
   );
@@ -690,6 +759,7 @@ export function WorkspaceBrowser({
         ) : activeTab === "files" ? (
           <FilesPanel
             files={files}
+            agentName={agentName}
             activeFilter={filters.files}
             onOpenFile={onOpenFile}
             onExportFile={onExportFile}
@@ -712,6 +782,7 @@ export function WorkspaceBrowser({
         ) : (
           <SearchPanel
             jobs={jobs}
+            filterJobs={cartJobs}
             selection={selection}
             sourceSweep={sourceSweep}
             locationPolicy={locationPolicy}

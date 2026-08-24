@@ -108,6 +108,7 @@ function createApi(draft = { transcript: [] }) {
     initOnboard: vi.fn().mockResolvedValue({ ok: true }),
     parseResumeText: vi.fn().mockResolvedValue({ profileSeed: {}, evidenceSeed: { claims: [] } }),
     removeEvidenceClaim: vi.fn().mockResolvedValue({ ok: true }),
+    replaceEvidenceClaims: vi.fn().mockResolvedValue({ ok: true }),
     saveCandidateFile: vi.fn().mockResolvedValue({ ok: true }),
     saveEvidenceSeed: vi.fn().mockResolvedValue({ ok: true }),
     saveOnboardingDraft: vi.fn().mockResolvedValue({ ok: true }),
@@ -237,34 +238,6 @@ describe("FirstRunController chat event reconciliation", () => {
     ]);
   });
 
-  it("upgrades an older persisted assistant message during full replay", async () => {
-    const module = await import("./FirstRunController.jsx");
-    const api = createApi({
-      transcript: [
-        {
-          role: "assistant",
-          text: "First question",
-          blocks: [],
-        },
-      ],
-    });
-    let view = await bootController(module, api);
-    const subscription = sse.calls.at(-1);
-
-    subscription.options.onEvent("assistant", assistantPayload("First question"), {
-      lastEventId: "2",
-    });
-    view = rerender(module, api);
-
-    expect(view.props.messages).toHaveLength(1);
-    expect(view.props.messages[0]).toMatchObject({
-      id: "chat-chat-1-event-2",
-      chatId: "chat-1",
-      eventId: 2,
-      text: "First question",
-    });
-  });
-
   it("saves a group of extracted profile facts without rendering per-fact controls", async () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi();
@@ -350,12 +323,172 @@ describe("FirstRunController chat event reconciliation", () => {
     });
 
     await view.props.onSaveKnowledgeSection(
-      { id: "evidence", editor: { existingClaimIds: ["seed-001"] } },
+      {
+        id: "evidence",
+        editor: {
+          existingClaimIds: ["seed-001"],
+          existingClaims: [{ id: "seed-001", claim: "Led a team", evidence: "Candidate resume" }],
+        },
+      },
       { claims: "Led a team :: Candidate resume" }
     );
-    expect(api.removeEvidenceClaim).toHaveBeenCalledWith("seed-001");
-    expect(api.saveEvidenceSeed).toHaveBeenCalledWith([
-      { claim: "Led a team", evidence: "Candidate resume" },
+    expect(api.replaceEvidenceClaims).toHaveBeenCalledWith([
+      { id: "seed-001", claim: "Led a team", evidence: "Candidate resume" },
+    ]);
+    expect(api.removeEvidenceClaim).not.toHaveBeenCalled();
+  });
+
+  it("round-trips named target lanes and evidence claim ids through whole-section edits", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    const view = await bootController(module, api);
+    const roleBuckets = [
+      {
+        name: "Platform",
+        priority: "primary",
+        titles: ["Staff Engineer"],
+        fit_signals: ["distributed systems"],
+      },
+      {
+        name: "Applied AI",
+        priority: "stretch",
+        titles: ["AI Platform Lead"],
+      },
+      { name: "Operator", priority: "oe", titles: ["Fractional CTO"] },
+    ];
+
+    await view.props.onSaveKnowledgeSection(
+      { id: "roles", editor: { roleBuckets } },
+      {
+        titles: "Principal Platform Engineer",
+        "titles:1": "Applied AI Engineering Lead",
+        "titles:2": "Fractional CTO",
+      }
+    );
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("targeting", {
+      role_buckets: [
+        { ...roleBuckets[0], titles: ["Principal Platform Engineer"] },
+        { ...roleBuckets[1], titles: ["Applied AI Engineering Lead"] },
+        roleBuckets[2],
+      ],
+    });
+
+    await view.props.onSaveKnowledgeSection(
+      {
+        id: "evidence",
+        editor: {
+          existingClaims: [
+            { id: "seed-001", claim: "Built the first version", evidence: "Resume" },
+            { id: "seed-002", claim: "Led the rollout", evidence: "Project notes" },
+          ],
+        },
+      },
+      { claims: "Built the production version :: Resume v2\nLed the rollout :: Project notes" }
+    );
+    expect(api.replaceEvidenceClaims).toHaveBeenCalledWith([
+      { id: "seed-001", claim: "Built the production version", evidence: "Resume v2" },
+      { id: "seed-002", claim: "Led the rollout", evidence: "Project notes" },
+    ]);
+    expect(api.removeEvidenceClaim).not.toHaveBeenCalled();
+    expect(api.saveEvidenceSeed).not.toHaveBeenCalled();
+  });
+
+  it("leaves the existing evidence bank untouched when atomic replacement fails", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    api.replaceEvidenceClaims.mockRejectedValueOnce(new Error("replacement rolled back"));
+    const view = await bootController(module, api);
+
+    await expect(
+      view.props.onSaveKnowledgeSection(
+        {
+          id: "evidence",
+          editor: {
+            existingClaims: [
+              { id: "seed-001", claim: "Built the first version", evidence: "Resume" },
+            ],
+          },
+        },
+        { claims: "Built the production version :: Resume v2" }
+      )
+    ).rejects.toThrow("replacement rolled back");
+    expect(api.removeEvidenceClaim).not.toHaveBeenCalled();
+    expect(api.saveEvidenceSeed).not.toHaveBeenCalled();
+  });
+
+  it("preserves evidence ids only for exact or unambiguous edits", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    const existingClaims = [
+      { id: "id-a", claim: "Claim A", evidence: "Resume A" },
+      { id: "id-b", claim: "Claim B", evidence: "Resume B" },
+    ];
+    const item = { id: "evidence", editor: { existingClaims } };
+    const view = await bootController(module, api);
+
+    await view.props.onSaveKnowledgeSection(item, {
+      claims: "New claim :: Notes\nClaim A :: Resume A\nClaim B :: Resume B",
+    });
+    expect(api.replaceEvidenceClaims).toHaveBeenLastCalledWith([
+      { claim: "New claim", evidence: "Notes" },
+      { id: "id-a", claim: "Claim A", evidence: "Resume A" },
+      { id: "id-b", claim: "Claim B", evidence: "Resume B" },
+    ]);
+
+    await view.props.onSaveKnowledgeSection(item, { claims: "Claim B :: Resume B" });
+    expect(api.replaceEvidenceClaims).toHaveBeenLastCalledWith([
+      { id: "id-b", claim: "Claim B", evidence: "Resume B" },
+    ]);
+
+    await view.props.onSaveKnowledgeSection(item, {
+      claims: "Claim B :: Resume B\nClaim A :: Resume A",
+    });
+    expect(api.replaceEvidenceClaims).toHaveBeenLastCalledWith([
+      { id: "id-b", claim: "Claim B", evidence: "Resume B" },
+      { id: "id-a", claim: "Claim A", evidence: "Resume A" },
+    ]);
+
+    await view.props.onSaveKnowledgeSection(item, {
+      claims: "Claim B :: Resume B\nClaim A, edited :: Resume A v2",
+    });
+    expect(api.replaceEvidenceClaims).toHaveBeenLastCalledWith([
+      { id: "id-b", claim: "Claim B", evidence: "Resume B" },
+      { id: "id-a", claim: "Claim A, edited", evidence: "Resume A v2" },
+    ]);
+
+    await view.props.onSaveKnowledgeSection(item, {
+      claims: "New claim :: Notes\nClaim A, edited :: Resume A v2\nClaim B :: Resume B",
+    });
+    expect(api.replaceEvidenceClaims).toHaveBeenLastCalledWith([
+      { claim: "New claim", evidence: "Notes" },
+      { claim: "Claim A, edited", evidence: "Resume A v2" },
+      { id: "id-b", claim: "Claim B", evidence: "Resume B" },
+    ]);
+
+    await view.props.onSaveKnowledgeSection(
+      {
+        id: "evidence",
+        editor: {
+          existingClaims: [
+            ...existingClaims,
+            { id: "id-c", claim: "Claim C", evidence: "Resume C" },
+          ],
+        },
+      },
+      { claims: "New claim :: Notes\nClaim A, edited :: Resume A v2\nClaim C :: Resume C" }
+    );
+    expect(api.replaceEvidenceClaims).toHaveBeenLastCalledWith([
+      { claim: "New claim", evidence: "Notes" },
+      { claim: "Claim A, edited", evidence: "Resume A v2" },
+      { id: "id-c", claim: "Claim C", evidence: "Resume C" },
+    ]);
+
+    await view.props.onSaveKnowledgeSection(item, {
+      claims: "  CLAIM A   :: Resume A\nClaim B :: Resume B",
+    });
+    expect(api.replaceEvidenceClaims).toHaveBeenLastCalledWith([
+      { id: "id-a", claim: "CLAIM A", evidence: "Resume A" },
+      { id: "id-b", claim: "Claim B", evidence: "Resume B" },
     ]);
   });
 

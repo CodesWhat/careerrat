@@ -3,11 +3,13 @@ import * as controller from "./chat-first-app-controller.js";
 import {
   calendarAction,
   commitComposerTurn,
+  commitJobThreadComposer,
   createMissionAndRun,
   downloadBinaryArtifact,
   downloadTextArtifact,
   engineUnavailable,
   findGate,
+  focusApplicationHandoff,
   isEngineFailure,
   mapActivityItems,
   mapComposerChips,
@@ -18,6 +20,7 @@ import {
   resolveNeedDecision,
   resolvePersonAction,
   selectedSourcedDismissal,
+  selectMockSession,
   sourceSweepPresentation,
 } from "./chat-first-app-controller.js";
 
@@ -267,6 +270,205 @@ describe("chat-first app controller", () => {
     expect(result.kind).toBe("mission");
   });
 
+  it("converts an open saved-job prepare request into the same user-gated mission", async () => {
+    const api = {
+      runWorkspaceIntent: vi.fn(),
+      createChatFirstMission: vi.fn().mockResolvedValue({ data: { mission: { id: "m2" } } }),
+      runChatFirstMission: vi.fn().mockResolvedValue({ data: { mission: { id: "m2" } } }),
+    };
+    const preview = {
+      action: {
+        label: "Evaluate and prepare this saved job",
+        intent: {
+          type: "job.prepare-request",
+          entity: { type: "workspace", id: "workspace-main" },
+          input: { jobId: "app-curri" },
+        },
+      },
+    };
+
+    await commitComposerTurn({ api, text: "Fill this application", preview });
+
+    expect(api.runWorkspaceIntent).not.toHaveBeenCalled();
+    expect(api.createChatFirstMission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Apply to 1 role",
+        mode: "prepare-to-submit",
+        jobs: [expect.objectContaining({ type: "application", id: "app-curri" })],
+      })
+    );
+  });
+
+  it("routes an actionable job-thread message into a durable mission instead of generic AI chat", async () => {
+    const api = {
+      previewWorkspaceQuery: vi.fn().mockResolvedValue({
+        data: {
+          action: {
+            label: "Evaluate and prepare this saved job",
+            intent: {
+              type: "job.prepare-request",
+              entity: { type: "workspace", id: "workspace-main" },
+              input: { jobId: "app-curri" },
+            },
+          },
+        },
+      }),
+      appendJobThreadMessage: vi.fn().mockResolvedValue({ ok: true }),
+      sendJobThreadTurn: vi.fn(),
+      createChatFirstMission: vi.fn().mockResolvedValue({ data: { mission: { id: "m3" } } }),
+      runChatFirstMission: vi.fn().mockResolvedValue({ data: { mission: { id: "m3" } } }),
+    };
+
+    const result = await commitJobThreadComposer({
+      api,
+      applicationId: "app-curri",
+      text: "Prepare and fill this application, but do not submit it.",
+    });
+
+    expect(api.sendJobThreadTurn).not.toHaveBeenCalled();
+    expect(api.appendJobThreadMessage).toHaveBeenNthCalledWith(1, {
+      applicationId: "app-curri",
+      role: "user",
+      kind: "text",
+      text: "Prepare and fill this application, but do not submit it.",
+    });
+    expect(api.appendJobThreadMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        applicationId: "app-curri",
+        role: "assistant",
+        text: expect.stringMatching(/supervised apply mission.*final Submit/i),
+      })
+    );
+    expect(result.kind).toBe("mission");
+  });
+
+  it("routes job-thread mock-interview language into the durable mock API", async () => {
+    expect(controller.isMockInterviewStartRequest).toBeTypeOf("function");
+    expect(controller.startMockFromJobThread).toBeTypeOf("function");
+    if (
+      typeof controller.isMockInterviewStartRequest !== "function" ||
+      typeof controller.startMockFromJobThread !== "function"
+    ) {
+      return;
+    }
+
+    expect(
+      controller.isMockInterviewStartRequest("Start a mock interview for this Curri role.")
+    ).toBe(true);
+    expect(controller.isMockInterviewStartRequest("Run mock interview practice.")).toBe(true);
+    expect(controller.isMockInterviewStartRequest("End this mock interview.")).toBe(false);
+    expect(controller.isMockInterviewStartRequest("Review the mock interview.")).toBe(false);
+
+    const api = {
+      appendJobThreadMessage: vi.fn().mockResolvedValue({ ok: true }),
+      startMockInterview: vi.fn().mockResolvedValue({
+        data: { session: { id: "mock-curri", applicationId: "app-curri", status: "active" } },
+      }),
+      sendJobThreadTurn: vi.fn(),
+    };
+
+    const result = await controller.startMockFromJobThread({
+      api,
+      applicationId: "app-curri",
+      text: "Start a mock interview for this Curri role.",
+      title: "Reviewed hold practice",
+      context: {
+        company: "Curri",
+        role: "Senior Software Engineer",
+        round: "Reviewed hold",
+        loadedContext: "confirmed story bank",
+      },
+    });
+
+    expect(api.appendJobThreadMessage).toHaveBeenCalledWith({
+      applicationId: "app-curri",
+      role: "user",
+      kind: "text",
+      text: "Start a mock interview for this Curri role.",
+    });
+    expect(api.startMockInterview).toHaveBeenCalledWith({
+      applicationId: "app-curri",
+      questionTotal: 6,
+      title: "Reviewed hold practice",
+      context: {
+        company: "Curri",
+        role: "Senior Software Engineer",
+        round: "Reviewed hold",
+        loadedContext: "confirmed story bank",
+      },
+    });
+    expect(api.sendJobThreadTurn).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      data: { session: { id: "mock-curri", status: "active" } },
+    });
+  });
+
+  it("projects a classified workspace result and its one review action into the job thread", async () => {
+    const nextActions = [
+      {
+        label: "Use reviewed answers",
+        intent: {
+          type: "screening.answer-confirm",
+          entity: { type: "application", id: "app-curri" },
+          input: { answers: [{ questionId: "linkedin", answer: "https://example.test/riley" }] },
+        },
+      },
+    ];
+    const artifacts = [
+      {
+        kind: "screening_answers",
+        title: "Curri: Screening answers",
+        answers: [{ questionId: "linkedin", answer: "https://example.test/riley" }],
+      },
+    ];
+    const api = {
+      previewWorkspaceQuery: vi.fn().mockResolvedValue({
+        data: {
+          action: {
+            label: "Draft an evidence-backed screening answer",
+            intent: {
+              type: "screening.answer",
+              entity: { type: "application", id: "app-curri" },
+              input: { questionText: "LinkedIn URL: https://example.test/riley" },
+            },
+          },
+        },
+      }),
+      appendJobThreadMessage: vi.fn().mockResolvedValue({ ok: true }),
+      sendJobThreadTurn: vi.fn(),
+      runWorkspaceIntent: vi.fn().mockResolvedValue({
+        data: {
+          messages: [
+            {
+              role: "assistant",
+              kind: "action_result",
+              text: "I drafted this answer. Review it before using it. Nothing was submitted.",
+              metadata: { state: "reviewable", nextActions },
+              artifacts,
+            },
+          ],
+        },
+      }),
+    };
+
+    await commitJobThreadComposer({
+      api,
+      applicationId: "app-curri",
+      text: "Answer this application question: LinkedIn URL",
+    });
+
+    expect(api.sendJobThreadTurn).not.toHaveBeenCalled();
+    expect(api.appendJobThreadMessage).toHaveBeenNthCalledWith(2, {
+      applicationId: "app-curri",
+      role: "assistant",
+      kind: "action_result",
+      text: "I drafted this answer. Review it before using it. Nothing was submitted.",
+      metadata: { state: "reviewable", nextActions },
+      artifacts,
+    });
+  });
+
   it("creates draft-only and prepare-to-submit cart missions from current rows", async () => {
     const api = {
       createChatFirstMission: vi.fn().mockResolvedValue({ data: { mission: { id: "m2" } } }),
@@ -343,6 +545,33 @@ describe("chat-first app controller", () => {
       "noopener,noreferrer"
     );
     expect(openApplicationHandoff({ handoffUrl: "javascript:alert(1)" }, open)).toBe(false);
+  });
+
+  it("returns a submit gate to the retained supervised session instead of opening its URL", async () => {
+    const runWorkspaceIntent = vi.fn().mockResolvedValue({ ok: true });
+    const gate = {
+      applicationId: "app-1",
+      handoffUrl: "https://jobs.example.test/submit",
+    };
+
+    await expect(focusApplicationHandoff(gate, runWorkspaceIntent)).resolves.toBe(true);
+    expect(runWorkspaceIntent).toHaveBeenCalledWith(
+      "job.prepare-submit",
+      { type: "application", id: "app-1" },
+      { resumeSession: true, focusSession: true }
+    );
+  });
+
+  it("does not fall back to a fresh URL when a submit gate has no retained application owner", async () => {
+    const runWorkspaceIntent = vi.fn();
+
+    await expect(
+      focusApplicationHandoff(
+        { handoffUrl: "https://jobs.example.test/submit" },
+        runWorkspaceIntent
+      )
+    ).resolves.toBe(false);
+    expect(runWorkspaceIntent).not.toHaveBeenCalled();
   });
 
   it("resolves every canonical Needs You decision to its durable owner action", () => {
@@ -506,6 +735,8 @@ describe("chat-first app controller", () => {
       })
     ).toEqual({
       id: "mock-2",
+      status: "active",
+      summary: null,
       title: "Hiring manager practice",
       company: "Cyberdyne",
       round: "Hiring manager",
@@ -514,6 +745,7 @@ describe("chat-first app controller", () => {
       loadedContext: "Dossier and Nexus story",
       questionNumber: 3,
       totalQuestions: 6,
+      questionReady: true,
       question: "Tell me about the migration.",
       userAnswer: null,
       worked: null,
@@ -524,7 +756,106 @@ describe("chat-first app controller", () => {
         tighten: "Lead with impact",
       },
       retryPrompt: null,
+      turns: [
+        {
+          questionId: "q2",
+          questionNumber: 2,
+          question: "Why now?",
+          answer: "Because…",
+          worked: "Specific",
+          tighten: "Lead with impact",
+        },
+        {
+          questionId: "q3",
+          questionNumber: 3,
+          question: "Tell me about the migration.",
+          answer: null,
+          worked: null,
+          tighten: null,
+        },
+      ],
     });
+  });
+
+  it("marks an empty durable mock as preparing instead of inventing a fallback question", () => {
+    expect(
+      mapMockSession({
+        id: "mock-preparing",
+        status: "active",
+        questionTotal: 6,
+        currentQuestion: 0,
+        messages: [],
+        feedback: [],
+      })
+    ).toMatchObject({
+      status: "active",
+      questionReady: false,
+      question: null,
+      turns: [],
+    });
+  });
+
+  it("maps every ended-session turn and its feedback for durable review", () => {
+    expect(
+      mapMockSession({
+        id: "mock-ended",
+        status: "ended",
+        summary: "Strong evidence. Tighten the tradeoff.",
+        questionTotal: 2,
+        currentQuestion: 2,
+        messages: [
+          { id: "q1", kind: "question", questionNumber: 1, text: "Why this role?" },
+          { id: "a1", kind: "answer", questionNumber: 1, text: "The product fit." },
+          { id: "q2", kind: "question", questionNumber: 2, text: "Describe the migration." },
+          { id: "a2", kind: "answer", questionNumber: 2, text: "I led three teams." },
+        ],
+        feedback: [
+          { questionNumber: 1, worked: "Specific motivation", tighten: "Name the user" },
+          { questionNumber: 2, worked: "Clear ownership", tighten: "Explain the tradeoff" },
+        ],
+      })
+    ).toMatchObject({
+      status: "ended",
+      summary: "Strong evidence. Tighten the tradeoff.",
+      questionReady: true,
+      turns: [
+        {
+          questionNumber: 1,
+          question: "Why this role?",
+          answer: "The product fit.",
+          worked: "Specific motivation",
+          tighten: "Name the user",
+        },
+        {
+          questionNumber: 2,
+          question: "Describe the migration.",
+          answer: "I led three teams.",
+          worked: "Clear ownership",
+          tighten: "Explain the tradeoff",
+        },
+      ],
+    });
+  });
+
+  it("reselects the owning job's ended mock after a dashboard reload", () => {
+    expect(
+      selectMockSession(
+        [
+          { id: "mock-other", applicationId: "app-other", status: "active" },
+          { id: "mock-ended", applicationId: "app-1", status: "ended" },
+        ],
+        "app-1"
+      )
+    ).toMatchObject({ id: "mock-ended", status: "ended" });
+    expect(
+      selectMockSession(
+        [
+          { id: "mock-ended", applicationId: "app-1", status: "ended" },
+          { id: "mock-active", applicationId: "app-1", status: "active" },
+        ],
+        "app-1"
+      )
+    ).toMatchObject({ id: "mock-active", status: "active" });
   });
 
   it("builds mock-session display context from the owning job and latest real round", () => {
@@ -550,6 +881,22 @@ describe("chat-first app controller", () => {
         round: "Hiring manager",
         interviewer: { name: "Nina Sharp", role: "VP Engineering" },
         loadedContext: "Cyberdyne dossier · confirmed story bank",
+      },
+    });
+  });
+
+  it("uses a neutral interview round when a reviewed job has no scheduled round yet", () => {
+    expect(
+      mockStartContext(
+        { company: "Curri", role: "Senior Software Engineer", stage: "reviewed hold" },
+        {}
+      )
+    ).toMatchObject({
+      title: "Interview practice",
+      context: {
+        company: "Curri",
+        role: "Senior Software Engineer",
+        round: "Interview",
       },
     });
   });

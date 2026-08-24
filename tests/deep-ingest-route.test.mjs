@@ -1,7 +1,15 @@
 // Phase 08 Wave 0 RED contracts for the local Deep ingest API surface.
 // These tests intentionally fail until src/cli/deep-ingest-route.mjs exists.
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -227,6 +235,51 @@ function assertVisibleOutcome(body) {
     body?.data?.error,
   ].filter(Boolean);
   assert.equal(flags.length, 1, "each submitted source must expose exactly one visible outcome");
+}
+
+function invalidProposalScan(input, sourceId) {
+  const text = Buffer.from(input.bytes || []).toString("utf8");
+  const chunk = {
+    id: `${sourceId}_chunk_001`,
+    sourceId,
+    index: 0,
+    chunkKind: "text",
+    text,
+    charStart: 0,
+    charEnd: text.length,
+    byteStart: 0,
+    byteEnd: Buffer.byteLength(text),
+  };
+  return {
+    status: "proposal_ready",
+    source: {
+      id: sourceId,
+      targetShape: input.targetShape,
+      sourceKind: "file",
+      status: "proposal_ready",
+      label: input.fileName,
+      artifactPath: input.artifactPath,
+      metadata: { fileName: input.fileName, artifactPath: input.artifactPath },
+      textLength: text.length,
+    },
+    outcome: {
+      id: `outcome_${sourceId}`,
+      sourceId,
+      status: "proposal_ready",
+      targetShape: input.targetShape,
+      visible: true,
+      reason: null,
+    },
+    chunks: [chunk],
+    proposal: {
+      id: `proposal_${sourceId}`,
+      sourceId,
+      targetShape: "invalid-target",
+      lane: "evidence_claims",
+      status: "review_needed",
+      validation: { status: "source_scanned" },
+    },
+  };
 }
 
 function tempHomeEnv() {
@@ -609,6 +662,179 @@ test("POST /api/deep-ingest/sources/upload enforces file caps and creates a save
   }
 });
 
+test("POST /api/deep-ingest/sources/upload removes staged bytes after validation or scanning fails", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const uploadDir = userPath({ repoRoot, env: {} }, "workspace/deep-ingest/sources");
+  const server = await bootServer(repoRoot, {
+    scanSource: async () => {
+      throw new Error("scanner exploded");
+    },
+  });
+  try {
+    const invalidTarget = await postRaw(
+      server,
+      "/api/deep-ingest/sources/upload?targetShape=not-a-lane&name=invalid.md",
+      Buffer.from("invalid target")
+    );
+    assert.equal(invalidTarget.status, 400);
+    assert.deepEqual(existsSync(uploadDir) ? readdirSync(uploadDir) : [], []);
+
+    const scanFailure = await postRaw(
+      server,
+      "/api/deep-ingest/sources/upload?targetShape=evidence&name=scan.md",
+      Buffer.from("scan failure")
+    );
+    assert.equal(scanFailure.status, 400);
+    assert.match(scanFailure.body.error, /scanner exploded/i);
+    assert.deepEqual(existsSync(uploadDir) ? readdirSync(uploadDir) : [], []);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/deep-ingest/sources/upload rolls back a new source when proposal persistence fails", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const uploadDir = userPath({ repoRoot, env: {} }, "workspace/deep-ingest/sources");
+  const server = await bootServer(repoRoot, {
+    scanSource: async ({ input }) => invalidProposalScan(input, "deep_src_atomic_new"),
+  });
+  try {
+    const before = await getJson(server, "/api/deep-ingest/state");
+    const failed = await postRaw(
+      server,
+      "/api/deep-ingest/sources/upload?targetShape=evidence&name=atomic-new.md",
+      Buffer.from("This source must roll back.")
+    );
+    assert.equal(failed.status, 400);
+    assert.match(failed.body.error, /target shape/i);
+
+    const after = await getJson(server, "/api/deep-ingest/state");
+    assert.deepEqual(after.body.data.sources, before.body.data.sources);
+    assert.deepEqual(after.body.data.sourceChunks, before.body.data.sourceChunks);
+    assert.deepEqual(after.body.data.proposals, before.body.data.proposals);
+    assert.deepEqual(after.body.data.laneStates, before.body.data.laneStates);
+    assert.deepEqual(existsSync(uploadDir) ? readdirSync(uploadDir) : [], []);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/deep-ingest/sources/upload restores the prior source and file when replacement proposal persistence fails", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const uploadDir = userPath({ repoRoot, env: {} }, "workspace/deep-ingest/sources");
+  const firstServer = await bootServer(repoRoot);
+  let sourceId;
+  let before;
+  let beforeFiles;
+  try {
+    const saved = await postRaw(
+      firstServer,
+      "/api/deep-ingest/sources/upload?targetShape=evidence&name=atomic-replace.md",
+      Buffer.from("Original source text.")
+    );
+    assert.equal(saved.status, 200);
+    sourceId = saved.body.data.source.id;
+    before = (await getJson(firstServer, "/api/deep-ingest/state")).body.data;
+    beforeFiles = readdirSync(uploadDir).sort();
+    assert.equal(beforeFiles.length, 1);
+  } finally {
+    await closeServer(firstServer);
+  }
+
+  const failingServer = await bootServer(repoRoot, {
+    scanSource: async ({ input }) => invalidProposalScan(input, sourceId),
+  });
+  try {
+    const failed = await postRaw(
+      failingServer,
+      "/api/deep-ingest/sources/upload?targetShape=evidence&name=atomic-replace.md",
+      Buffer.from("Replacement text that must roll back.")
+    );
+    assert.equal(failed.status, 400);
+    assert.match(failed.body.error, /target shape/i);
+
+    const after = (await getJson(failingServer, "/api/deep-ingest/state")).body.data;
+    assert.deepEqual(after.sources, before.sources);
+    assert.deepEqual(after.sourceChunks, before.sourceChunks);
+    assert.deepEqual(after.proposals, before.proposals);
+    assert.deepEqual(after.laneStates, before.laneStates);
+    assert.deepEqual(readdirSync(uploadDir).sort(), beforeFiles);
+    assert.equal(existsSync(userPath({ repoRoot, env: {} }, before.sources[0].artifactPath)), true);
+  } finally {
+    await closeServer(failingServer);
+  }
+});
+
+test("POST /api/deep-ingest/sources/upload replaces an owned artifact without orphaning the prior file", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const server = await bootServer(repoRoot);
+  try {
+    const first = await postRaw(
+      server,
+      "/api/deep-ingest/sources/upload?targetShape=evidence&name=repeat.md",
+      Buffer.from("Same evidence source.")
+    );
+    assert.equal(first.status, 200);
+    const firstPath = userPath({ repoRoot, env: {} }, first.body.data.source.artifactPath);
+    assert.equal(existsSync(firstPath), true);
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const replacement = await postRaw(
+      server,
+      "/api/deep-ingest/sources/upload?targetShape=evidence&name=repeat.md",
+      Buffer.from("Same evidence source.")
+    );
+    assert.equal(replacement.status, 200);
+    const replacementPath = userPath(
+      { repoRoot, env: {} },
+      replacement.body.data.source.artifactPath
+    );
+    assert.notEqual(replacementPath, firstPath);
+    assert.equal(existsSync(firstPath), false);
+    assert.equal(existsSync(replacementPath), true);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/deep-ingest/sources/upload gives concurrent same-name uploads distinct owned paths", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const server = await bootServer(repoRoot);
+  const originalNow = Date.now;
+  Date.now = () => 1_787_602_901_963;
+  try {
+    const first = await postRaw(
+      server,
+      "/api/deep-ingest/sources/upload?targetShape=evidence&name=collision.md",
+      Buffer.from("First source.")
+    );
+    const second = await postRaw(
+      server,
+      "/api/deep-ingest/sources/upload?targetShape=evidence&name=collision.md",
+      Buffer.from("Second source.")
+    );
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.notEqual(first.body.data.source.artifactPath, second.body.data.source.artifactPath);
+    assert.equal(
+      existsSync(userPath({ repoRoot, env: {} }, first.body.data.source.artifactPath)),
+      true
+    );
+    assert.equal(
+      existsSync(userPath({ repoRoot, env: {} }, second.body.data.source.artifactPath)),
+      true
+    );
+  } finally {
+    Date.now = originalNow;
+    await closeServer(server);
+  }
+});
+
 test("ISSUE-015: POST /api/deep-ingest/sources/remove deletes only undrafted source state", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
@@ -647,6 +873,109 @@ test("ISSUE-015: POST /api/deep-ingest/sources/remove deletes only undrafted sou
     const missing = await postJson(server, "/api/deep-ingest/sources/remove", {});
     assert.equal(missing.status, 400);
     assert.match(missing.body.error, /sourceId/i);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/deep-ingest/sources/remove deletes owned uploads and tolerates an already-missing file", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const server = await bootServer(repoRoot);
+  try {
+    const saved = await postRaw(
+      server,
+      "/api/deep-ingest/sources/upload?targetShape=evidence&name=remove.md",
+      Buffer.from("Owned source artifact.")
+    );
+    assert.equal(saved.status, 200);
+    const sourceId = saved.body.data.source.id;
+    const artifactPath = userPath({ repoRoot, env: {} }, saved.body.data.source.artifactPath);
+    assert.equal(existsSync(artifactPath), true);
+
+    unlinkSync(artifactPath);
+    const removed = await postJson(server, "/api/deep-ingest/sources/remove", { sourceId });
+    assert.equal(removed.status, 200);
+    assert.equal(removed.body.ok, true);
+    assert.equal(existsSync(artifactPath), false);
+
+    const savedAgain = await postRaw(
+      server,
+      "/api/deep-ingest/sources/upload?targetShape=evidence&name=remove-again.md",
+      Buffer.from("Another owned source artifact.")
+    );
+    assert.equal(savedAgain.status, 200);
+    const nextArtifactPath = userPath(
+      { repoRoot, env: {} },
+      savedAgain.body.data.source.artifactPath
+    );
+    const removedAgain = await postJson(server, "/api/deep-ingest/sources/remove", {
+      sourceId: savedAgain.body.data.source.id,
+    });
+    assert.equal(removedAgain.status, 200);
+    assert.equal(existsSync(nextArtifactPath), false);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/deep-ingest/sources/remove never deletes unowned or unconfined artifacts", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const uploadDir = userPath({ repoRoot, env: {} }, "workspace/deep-ingest/sources");
+  mkdirSync(uploadDir, { recursive: true });
+  const unownedPath = join(uploadDir, "unowned.md");
+  writeFileSync(unownedPath, "not owned by this source");
+  const outsidePath = join(repoRoot, "must-survive.md");
+  writeFileSync(outsidePath, "keep me");
+  const traversalPath = userPath(
+    { repoRoot, env: {} },
+    "workspace/deep-ingest/sources/../../../must-also-survive.md"
+  );
+  mkdirSync(join(repoRoot, "workspace"), { recursive: true });
+  writeFileSync(traversalPath, "keep me too");
+
+  const unsafeSources = [
+    {
+      id: "deep_src_unowned_artifact",
+      artifactPath: "workspace/deep-ingest/sources/unowned.md",
+    },
+    {
+      id: "deep_src_absolute_artifact",
+      artifactPath: outsidePath,
+      metadata: { ownedUpload: true },
+    },
+    {
+      id: "deep_src_traversal_artifact",
+      artifactPath: "workspace/deep-ingest/sources/../../../must-also-survive.md",
+      metadata: { ownedUpload: true },
+    },
+  ];
+  for (const source of unsafeSources) {
+    deepIngestSourceCreate({
+      repoRoot,
+      input: {
+        id: source.id,
+        targetShape: "auto",
+        sourceKind: "file",
+        text: "Unsafe artifact metadata.",
+        artifactPath: source.artifactPath,
+        metadata: source.metadata,
+      },
+    });
+  }
+
+  const server = await bootServer(repoRoot);
+  try {
+    for (const source of unsafeSources) {
+      const removed = await postJson(server, "/api/deep-ingest/sources/remove", {
+        sourceId: source.id,
+      });
+      assert.equal(removed.status, 200);
+    }
+    assert.equal(existsSync(unownedPath), true);
+    assert.equal(existsSync(outsidePath), true);
+    assert.equal(existsSync(traversalPath), true);
   } finally {
     await closeServer(server);
   }

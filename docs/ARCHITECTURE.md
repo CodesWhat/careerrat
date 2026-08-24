@@ -187,33 +187,31 @@ quick-start and next actions call `/api/discovery/quick-start` or
 `ChatPanel` renders the live session instead of hiding a background runtime
 handoff.
 
-### Retained Full Skill Runtime
+### Bounded Skill and Chat Runtime
 
-`POST /api/skill/run` remains the allowlisted full runtime for workflows that
-need broad tools, long orchestration, streamed visibility, or retained
-`SKILL.md` execution. It is not the default route for deterministic scans,
-proposal decisions, source writes, or local app actions with existing owners.
-It is also not the ordinary route for packet generation or one-off packet answer
-drafting; `evaluate-job`, `tailor-application`, and `answer-question` remain
-explicit handoffs for agent-led workflows, broad browser work, nuanced judgment,
-and supervised submission flows.
+`POST /api/skill/run` exposes only `intake-extract` and `resume-extract`. Each
+installed run receives one canonical uploaded file plus its isolated skill
+copy. App workflows, browser work, and durable mutations stay behind their
+typed routes and the workspace agent. The generic chat surface exposes only
+`ingest-profile`, `research-boards`, `research-company`, `research-comp`, and
+`company-health`. Company discovery stays on the app-owned reviewed proposal
+path, and `search-jobs` stays on its dedicated AI web-search route.
 
-The one-shot runtime has an app-safe default tool profile: Read, Glob, Grep, and Skill.
-Those filesystem tools are restricted to the selected skill plus approved
-candidate, workspace, config, and template roots; credential and internal-state
-paths fail closed. Network research uses a separate profile containing WebSearch, WebFetch, and Skill
-but no local filesystem tools, so fetched prompt injection
-cannot reach candidate files. Both profiles use programmatic permission checks
-and a PreToolUse enforcement hook. Unrelated server environment variables are
-not inherited by the Agent SDK child. Unsandboxed tool-heavy execution is disabled;
-Write, Edit, and Bash are not exposed by an embedded runtime profile.
+The packaged app detects the full installed CLI registry but permits only
+Claude Code 2.1.241 or newer for tool-bearing skill and chat execution. Its
+per-call settings deny all filesystem reads except the exact approved upload
+and isolated skill, separate public-web research from candidate files, and use
+the guarded CareerRat fetch MCP instead of native broad fetch. Codex and other
+CLIs fail closed before spawn because they do not provide an equivalent proven
+boundary. Both one-shot and streaming children inherit an allowlisted process
+environment, not server credentials. Source-only provider fallback remains a
+separate Agent SDK path.
 
 Visible chat handoffs are separate from app-default actions. They are explicit
 user-selected sessions, not hidden fallbacks from local API errors.
 
-Compatibility/static tracker pages are compatibility/debug/export aids. They
-are not normal product UX; the Electron and React product path is `/app`, with
-`/app/onboarding` for first-run workspaces.
+The React product at `/app` is the only HTML product surface. First-run state,
+workspace operations, and agent-led handoffs all stay inside that shell.
 
 The chat-first shell persists threads and missions independently of any one AI
 vendor. See [CHAT_FIRST_RUNTIME.md](CHAT_FIRST_RUNTIME.md).

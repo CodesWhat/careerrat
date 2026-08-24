@@ -385,6 +385,7 @@ export function parseResume(text) {
     summary,
     sections,
     links,
+    explicitTargetTitles: extractExplicitTargetTitles(lines),
   };
 }
 
@@ -592,12 +593,83 @@ function isPlausibleTitle(candidate) {
   return true;
 }
 
+const EXPLICIT_TARGET_ROLES_RE =
+  /^(?:target|desired|preferred)\s+(?:roles?|titles?|positions?)\s*:\s*(.+)$/i;
+const EXPLICIT_TARGET_ROLES_HEADING_RE =
+  /^(?:target|desired|preferred)\s+(?:roles?|titles?|positions?)$/i;
+
+function appendExplicitTargetTitles(output, seen, value) {
+  for (const rawTitle of String(value || "")
+    .replace(/[.;]+$/, "")
+    .split(/\s*[;,|]\s*/)) {
+    const title = rawTitle.trim();
+    const key = title.toLowerCase();
+    if (!isPlausibleTitle(title) || seen.has(key)) continue;
+    seen.add(key);
+    output.push(title);
+    if (output.length >= MAX_TARGETING_TITLES) return true;
+  }
+  return false;
+}
+
+function extractExplicitTargetTitles(lines) {
+  const titles = [];
+  const seen = new Set();
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const cleaned = stripBullet(stripMarkdownHeading(lines[index]));
+    const inline = cleaned.match(EXPLICIT_TARGET_ROLES_RE);
+    if (inline) {
+      if (appendExplicitTargetTitles(titles, seen, inline[1])) return titles;
+      continue;
+    }
+    if (!EXPLICIT_TARGET_ROLES_HEADING_RE.test(cleaned)) continue;
+
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      const line = String(lines[cursor] || "");
+      if (!line.trim()) continue;
+      if (isHeading(line)) break;
+      if (!isBulletLine(line)) break;
+      const value = stripBullet(line);
+      if (/^[^:]{1,40}:\s*/.test(value)) break;
+      if (appendExplicitTargetTitles(titles, seen, value)) return titles;
+    }
+  }
+
+  return titles;
+}
+
+function explicitTargetTitles(parsed) {
+  const titles = Array.isArray(parsed?.explicitTargetTitles)
+    ? parsed.explicitTargetTitles.slice(0, MAX_TARGETING_TITLES)
+    : [];
+  const seen = new Set(titles.map((title) => title.toLowerCase()));
+  if (titles.length >= MAX_TARGETING_TITLES) return titles;
+
+  for (const block of [...(parsed?.sections?.other || []), parsed?.summary || ""]) {
+    for (const line of String(block).split("\n")) {
+      const match = stripBullet(line).match(EXPLICIT_TARGET_ROLES_RE);
+      if (!match) continue;
+      if (appendExplicitTargetTitles(titles, seen, match[1])) return titles;
+    }
+  }
+
+  return titles;
+}
+
 // Derive a targeting-role seed from parsed experience blocks: each block's
 // header line yields at most one plausible job title, generic separator/
 // plausibility heuristics only (no hardcoded title/keyword lists — this repo
 // stays domain-neutral). Returns null when no title survives so callers can
 // skip sending an empty seed.
 export function deriveTargetingSeed(parsed) {
+  const statedTitles = explicitTargetTitles(parsed);
+  if (statedTitles.length) {
+    return {
+      role_buckets: [{ name: "Primary", priority: "primary", titles: statedTitles }],
+    };
+  }
+
   const blocks = parsed?.sections?.experience || [];
   const titles = [];
   const seen = new Set();

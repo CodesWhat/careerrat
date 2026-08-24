@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,9 +15,11 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import {
+  buildInstalledRuntimeChildEnv,
   buildInstalledRuntimeInvocation,
   CHAT_SESSION_RUNTIME_TIMEOUT_MS,
   detectInstalledRuntimes,
+  fetchInstalledRuntimePublicUrl,
   INSTALLED_RUNTIME_DEFINITIONS,
   materializeIsolatedSkillCwd,
   ONE_SHOT_RUNTIME_TIMEOUT_MS,
@@ -93,6 +96,10 @@ function executable(path) {
   mkdirSync(join(path, ".."), { recursive: true });
   writeFileSync(path, "#!/bin/sh\nexit 0\n", "utf8");
   chmodSync(path, 0o755);
+}
+
+function verifiedClaudeVersion() {
+  return { status: 0, stdout: "2.1.241 (Claude Code)", stderr: "" };
 }
 
 test("runtime registry covers the supported installed CLI set", () => {
@@ -190,7 +197,13 @@ test("auth probe exposes only bounded readiness state, never CLI account output"
       },
     }
   );
-  assert.deepEqual(ready, { status: "ready", ready: true, action: null });
+  assert.deepEqual(ready, {
+    status: "ready",
+    ready: true,
+    action: null,
+    toolExecutionSupported: false,
+    capabilityReason: "Detected, but this CLI cannot safely run CareerRat tools yet.",
+  });
   assert.equal(JSON.stringify(ready).includes("morgan@example.com"), false);
   assert.equal(calls[0].executablePath, "/safe/codex");
   assert.deepEqual(calls[0].args, ["login", "status"]);
@@ -199,7 +212,13 @@ test("auth probe exposes only bounded readiness state, never CLI account output"
 
   const signedOut = probeInstalledRuntime(
     { id: "claude", path: "/safe/claude", available: true },
-    { spawnSyncImpl: () => ({ status: 1, stdout: "", stderr: "email secret" }) }
+    {
+      spawnSyncImpl(_path, args) {
+        return args[0] === "--version"
+          ? { status: 0, stdout: "2.1.241 (Claude Code)", stderr: "" }
+          : { status: 1, stdout: "", stderr: "email secret" };
+      },
+    }
   );
   assert.deepEqual(signedOut, {
     status: "authentication_required",
@@ -207,6 +226,54 @@ test("auth probe exposes only bounded readiness state, never CLI account output"
     action: "open_terminal",
   });
   assert.equal(JSON.stringify(signedOut).includes("secret"), false);
+});
+
+test("Claude readiness fails closed below the verified CLI boundary version", () => {
+  const calls = [];
+  const unsupported = probeInstalledRuntime(
+    { id: "claude", path: "/safe/claude", available: true },
+    {
+      spawnSyncImpl(_path, args) {
+        calls.push(args);
+        return { status: 0, stdout: "2.1.200 (Claude Code)", stderr: "" };
+      },
+    }
+  );
+  assert.deepEqual(unsupported, {
+    status: "unsupported_capability",
+    ready: false,
+    action: null,
+    toolExecutionSupported: false,
+    capabilityReason: "Update Claude Code to 2.1.241 or newer for secure CareerRat tool runs.",
+  });
+  assert.deepEqual(calls, [["--version"]]);
+});
+
+test("tool-bearing Claude runs re-verify the boundary version before model spawn", async () => {
+  const repoRoot = tempRepoWithOneSkill("ingest-profile");
+  let spawned = false;
+  try {
+    await assert.rejects(
+      runInstalledRuntime({
+        runtime: { id: "claude", name: "Claude Code", path: "/safe/claude" },
+        prompt: "onboard",
+        skill: "ingest-profile",
+        repoRoot,
+        tools: ["Skill"],
+        spawnSyncImpl: () => ({ status: 0, stdout: "2.1.200 (Claude Code)", stderr: "" }),
+        spawnImpl() {
+          spawned = true;
+          return fakeInstalledChild({
+            stdout: JSON.stringify({ type: "result", subtype: "success", result: "bad" }),
+          });
+        },
+      }),
+      { code: RUNTIME_TOOL_PROFILE_UNSUPPORTED }
+    );
+    assert.equal(spawned, false);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
 });
 
 test("fixed invocation adapters pass prompts on stdin and never use a shell", () => {
@@ -220,7 +287,7 @@ test("fixed invocation adapters pass prompts on stdin and never use a shell", ()
       maxProperties: 2,
     },
     model: "sonnet",
-    tools: ["Read"],
+    tools: [],
   });
   assert.equal(claude.command, "/safe/claude");
   assert.equal(claude.options.shell, false);
@@ -230,16 +297,13 @@ test("fixed invocation adapters pass prompts on stdin and never use a shell", ()
   assert.equal(claudeSchema.$schema, undefined);
   assert.equal(claudeSchema.$id, undefined);
   assert.equal(claudeSchema.maxProperties, 2);
-  assert.ok(
-    claude.args.includes("--safe-mode"),
-    "headless app calls must not inherit project hooks, MCP servers, or CLAUDE.md context"
-  );
+  assert.equal(claude.args.includes("--safe-mode"), false);
+  assert.ok(claude.args.includes("--settings"));
+  assert.ok(claude.args.includes("--strict-mcp-config"));
   assert.ok(claude.args.includes("--no-session-persistence"));
   assert.ok(claude.args.includes("--permission-mode"));
-  assert.deepEqual(
-    claude.args.slice(claude.args.indexOf("--tools"), claude.args.indexOf("--tools") + 4),
-    ["--tools", "Read", "--allowedTools", "Read"]
-  );
+  assert.equal(claude.args[claude.args.indexOf("--tools") + 1], "");
+  assert.equal(claude.args.includes("--allowedTools"), false);
   assert.equal(claude.args.includes("PROMPT_SECRET"), false);
 
   const codex = buildInstalledRuntimeInvocation({
@@ -259,6 +323,204 @@ test("fixed invocation adapters pass prompts on stdin and never use a shell", ()
   assert.ok(codex.args.includes("--output-schema"));
   assert.equal(codex.args.at(-1), "-");
   assert.equal(codex.options.shell, false);
+});
+
+test("claude exact-read invocation approves only the uploaded file and isolated skill", () => {
+  const repoRoot = tempRepoWithOneSkill("resume-extract", "Read only the supplied resume.\n");
+  let isolatedCwd;
+  try {
+    const uploadDir = join(repoRoot, "workspace", "intake", "resume-uploads");
+    mkdirSync(uploadDir, { recursive: true });
+    const upload = join(uploadDir, "resume.pdf");
+    const sibling = join(uploadDir, "other.pdf");
+    writeFileSync(upload, "resume", "utf8");
+    writeFileSync(sibling, "private sibling", "utf8");
+    isolatedCwd = materializeIsolatedSkillCwd({ repoRoot, skill: "resume-extract" });
+
+    const invocation = buildInstalledRuntimeInvocation({
+      runtimeId: "claude",
+      executablePath: "/safe/claude",
+      repoRoot,
+      isolatedCwd,
+      approvedReadPaths: [upload],
+      tools: ["Read", "Skill"],
+      skill: "resume-extract",
+    });
+    const settings = JSON.parse(invocation.args[invocation.args.indexOf("--settings") + 1]);
+    assert.deepEqual(settings.sandbox.filesystem.denyRead, ["//**"]);
+    assert.deepEqual(
+      new Set(settings.sandbox.filesystem.allowRead),
+      new Set([realpathSync(upload), realpathSync(isolatedCwd)])
+    );
+    assert.equal(settings.sandbox.filesystem.allowRead.includes(sibling), false);
+    assert.equal(
+      settings.sandbox.filesystem.allowRead.includes(join(repoRoot, "workspace")),
+      false
+    );
+    assert.equal(
+      settings.sandbox.filesystem.allowRead.includes(join(repoRoot, "candidate")),
+      false
+    );
+    assert.equal(invocation.args.includes("--safe-mode"), false);
+    assert.ok(invocation.args.includes("--strict-mcp-config"));
+    assert.ok(invocation.args.includes("--no-chrome"));
+    const allowed = invocation.args[invocation.args.indexOf("--allowedTools") + 1];
+    assert.doesNotMatch(
+      allowed,
+      /(?:^|,)Read(?:,|$)/,
+      "Read must never be approved without a path"
+    );
+    assert.match(allowed, /Read\(\/\//);
+    assert.match(allowed, /Skill\(resume-extract\)/);
+  } finally {
+    if (isolatedCwd) rmSync(isolatedCwd, { recursive: true, force: true });
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("claude exact-read invocation fails closed for missing, outside, and symlink-aliased paths", () => {
+  const repoRoot = tempRepoWithOneSkill("resume-extract");
+  const uploadDir = join(repoRoot, "workspace", "intake", "resume-uploads");
+  const outside = join(repoRoot, "workspace", "tracker.json");
+  const target = join(uploadDir, "resume.pdf");
+  const alias = join(uploadDir, "alias.pdf");
+  mkdirSync(uploadDir, { recursive: true });
+  writeFileSync(outside, "tracker", "utf8");
+  writeFileSync(target, "resume", "utf8");
+  symlinkSync(target, alias);
+
+  try {
+    for (const approvedReadPaths of [[], [join(uploadDir, "missing.pdf")], [outside], [alias]]) {
+      assert.throws(
+        () =>
+          buildInstalledRuntimeInvocation({
+            runtimeId: "claude",
+            executablePath: "/safe/claude",
+            repoRoot,
+            approvedReadPaths,
+            tools: ["Read", "Skill"],
+            skill: "resume-extract",
+          }),
+        { code: "RUNTIME_READ_BOUNDARY_INVALID" }
+      );
+    }
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("claude exact-read invocation resolves uploads from CAREERRAT_HOME in packaged layout", () => {
+  const repoRoot = tempRepoWithOneSkill("resume-extract");
+  const privateHome = tempRoot();
+  const uploadDir = join(privateHome, "workspace", "intake", "resume-uploads");
+  const upload = join(uploadDir, "resume.pdf");
+  mkdirSync(uploadDir, { recursive: true });
+  writeFileSync(upload, "resume", "utf8");
+  let isolatedCwd;
+  try {
+    isolatedCwd = materializeIsolatedSkillCwd({ repoRoot, skill: "resume-extract" });
+    const invocation = buildInstalledRuntimeInvocation({
+      runtimeId: "claude",
+      executablePath: "/safe/claude",
+      repoRoot,
+      env: { CAREERRAT_HOME: privateHome },
+      isolatedCwd,
+      approvedReadPaths: [upload],
+      tools: ["Read", "Skill"],
+      skill: "resume-extract",
+    });
+    const settings = JSON.parse(invocation.args[invocation.args.indexOf("--settings") + 1]);
+    assert.ok(settings.sandbox.filesystem.allowRead.includes(realpathSync(upload)));
+    assert.equal(
+      settings.sandbox.filesystem.allowRead.some((path) =>
+        path.startsWith(join(repoRoot, "workspace"))
+      ),
+      false
+    );
+  } finally {
+    if (isolatedCwd) rmSync(isolatedCwd, { recursive: true, force: true });
+    rmSync(repoRoot, { recursive: true, force: true });
+    rmSync(privateHome, { recursive: true, force: true });
+  }
+});
+
+test("claude web invocation replaces native WebFetch with the guarded CareerRat MCP fetch tool", () => {
+  const repoRoot = tempRepoWithOneSkill("research-company");
+  try {
+    const invocation = buildInstalledRuntimeInvocation({
+      runtimeId: "claude",
+      executablePath: "/safe/claude",
+      repoRoot,
+      tools: ["WebSearch", "WebFetch", "Skill"],
+      skill: "research-company",
+    });
+    const visible = invocation.args[invocation.args.indexOf("--tools") + 1].split(",");
+    assert.ok(visible.includes("WebSearch"));
+    assert.ok(visible.includes("Skill"));
+    assert.equal(visible.includes("WebFetch"), false);
+    const mcp = JSON.parse(invocation.args[invocation.args.indexOf("--mcp-config") + 1]);
+    assert.deepEqual(Object.keys(mcp.mcpServers), ["careerrat_public_web"]);
+    const allowed = invocation.args[invocation.args.indexOf("--allowedTools") + 1];
+    assert.match(allowed, /mcp__careerrat_public_web__fetch/);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("CareerRat public-web fetch rejects private targets before invoking the network helper", async () => {
+  let called = false;
+  const result = await fetchInstalledRuntimePublicUrl("http://127.0.0.1/private", {
+    fetchPublicHttpTextImpl: async () => {
+      called = true;
+      return { ok: true };
+    },
+  });
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /private|local|non-public/i);
+  assert.equal(called, false);
+});
+
+test("CareerRat public-web fetch delegates public URLs to the DNS-pinned guarded fetch", async () => {
+  const calls = [];
+  const result = await fetchInstalledRuntimePublicUrl("https://example.com/jobs", {
+    fetchPublicHttpTextImpl: async (url, options) => {
+      calls.push({ url, options });
+      return {
+        ok: true,
+        finalUrl: url,
+        status: 200,
+        contentType: "text/html",
+        rawText: "Remote role",
+      };
+    },
+  });
+  assert.equal(result.isError, undefined);
+  assert.deepEqual(calls, [
+    {
+      url: "https://example.com/jobs",
+      options: { timeoutMs: 15000, maxBytes: 512 * 1024, maxRedirects: 4 },
+    },
+  ]);
+  assert.match(result.content[0].text, /Remote role/);
+});
+
+test("tool-bearing installed runs reject Codex before spawn even for the local-read profile", async () => {
+  let spawned = false;
+  await assert.rejects(
+    runInstalledRuntime({
+      runtime: { id: "codex", name: "Codex", path: "/safe/codex" },
+      prompt: "read the workspace",
+      skill: "resume-extract",
+      repoRoot: "/safe/workspace",
+      tools: ["Read"],
+      spawnImpl() {
+        spawned = true;
+        return fakeInstalledChild();
+      },
+    }),
+    { code: RUNTIME_TOOL_PROFILE_UNSUPPORTED }
+  );
+  assert.equal(spawned, false);
 });
 
 test("newly added installed CLIs deliver the prompt on stdin with a fixed, shell-free argv", () => {
@@ -485,6 +747,36 @@ test("installed runtime failures distinguish nonzero exit, timeout, and cancella
   }
 });
 
+test("runInstalledRuntime surfaces a redacted Claude JSON failure from stdout on nonzero exit", async () => {
+  const exposedCredential = "sk-ant-api03-should-not-escape";
+  await assert.rejects(
+    runInstalledRuntime({
+      runtime: { id: "claude", path: "/safe/claude" },
+      prompt: "hello",
+      timeoutMs: 2000,
+      spawnImpl: () =>
+        fakeInstalledChild({
+          status: 1,
+          stdout: JSON.stringify({
+            type: "result",
+            subtype: "error_during_execution",
+            is_error: true,
+            result: `Not logged in. Run /login. ${exposedCredential}`,
+            session_id: "private-session-id",
+          }),
+        }),
+    }),
+    (error) => {
+      assert.equal(error.code, "RUNTIME_EXIT");
+      assert.match(error.message, /Not logged in\. Run \/login\./);
+      assert.match(error.message, /\[redacted\]/);
+      assert.doesNotMatch(error.message, new RegExp(exposedCredential));
+      assert.doesNotMatch(error.message, /private-session-id/);
+      return true;
+    }
+  );
+});
+
 // P0 regression: runInstalledRuntime's `timeoutMs` has two named tiers (see
 // installed-runtimes.mjs's own comment above their definitions). Bounded
 // one-shot calls (evaluate-job, tailor-application, resume-extract, ...) must
@@ -655,17 +947,19 @@ test("buildInstalledRuntimeInvocation: a claude call with a materialized skill t
   assert.ok(idx >= 0, "expected --setting-sources in argv");
   assert.equal(withSkill.args[idx + 1], "project");
 
-  // No skill (or isolation unavailable) — unchanged today's behavior.
+  // No skill gets an empty project setting source and no visible tools.
   const withoutSkill = buildInstalledRuntimeInvocation({
     runtimeId: "claude",
     executablePath: "/safe/claude",
-    tools: ["Read"],
+    tools: [],
   });
-  assert.ok(withoutSkill.args.includes("--safe-mode"));
-  assert.equal(withoutSkill.args.includes("--setting-sources"), false);
+  assert.equal(withoutSkill.args.includes("--safe-mode"), false);
+  const noSkillSettings = withoutSkill.args.indexOf("--setting-sources");
+  assert.ok(noSkillSettings >= 0);
+  assert.equal(withoutSkill.args[noSkillSettings + 1], "");
 });
 
-test("materializeIsolatedSkillCwd: symlinks exactly the named skill into an isolated .claude/skills/<skill>, nothing else from the project", () => {
+test("materializeIsolatedSkillCwd: copies exactly the named skill into an isolated .claude/skills/<skill>, nothing else from the project", () => {
   const repoRoot = tempRepoWithOneSkill("research-company", "Trigger word PROBE.\n");
   let isolated;
   try {
@@ -687,6 +981,90 @@ test("materializeIsolatedSkillCwd: returns null (never throws) when the skill or
     assert.equal(materializeIsolatedSkillCwd({ repoRoot, skill: "not-a-real-skill" }), null);
     assert.equal(materializeIsolatedSkillCwd({ repoRoot: null, skill: "research-company" }), null);
     assert.equal(materializeIsolatedSkillCwd({ repoRoot, skill: null }), null);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("buildInstalledRuntimeChildEnv retains only process/auth paths, locale, and model selectors", () => {
+  const childEnv = buildInstalledRuntimeChildEnv({
+    env: {
+      PATH: "/usr/bin",
+      HOME: "/Users/morgan",
+      USER: "morgan",
+      LOGNAME: "morgan",
+      TMPDIR: "/private/tmp",
+      LANG: "en_US.UTF-8",
+      CAREERRAT_HOME: "/Users/morgan/CareerRat",
+      ANTHROPIC_MODEL: "claude-sonnet",
+      CLAUDE_CONFIG_DIR: "/Users/morgan/.config/claude",
+      ANTHROPIC_API_KEY: "sentinel-anthropic",
+      GH_TOKEN: "sentinel-github",
+      AWS_SECRET_ACCESS_KEY: "sentinel-aws",
+      APPLE_ID_PASSWORD: "sentinel-apple",
+    },
+  });
+  assert.deepEqual(childEnv, {
+    PATH: "/usr/bin",
+    HOME: "/Users/morgan",
+    USER: "morgan",
+    LOGNAME: "morgan",
+    TMPDIR: "/private/tmp",
+    LANG: "en_US.UTF-8",
+    CAREERRAT_HOME: "/Users/morgan/CareerRat",
+    ANTHROPIC_MODEL: "claude-sonnet",
+    CLAUDE_CONFIG_DIR: "/Users/morgan/.config/claude",
+  });
+});
+
+test("runInstalledRuntime scrubs server secrets from both version and one-shot Claude children", async () => {
+  const repoRoot = tempRepoWithOneSkill("ingest-profile");
+  const env = {
+    PATH: "/usr/bin",
+    HOME: "/Users/morgan",
+    USER: "morgan",
+    LOGNAME: "morgan",
+    TMPDIR: "/private/tmp",
+    LANG: "en_US.UTF-8",
+    CAREERRAT_HOME: join(repoRoot, "private"),
+    ANTHROPIC_API_KEY: "sentinel-anthropic",
+    GH_TOKEN: "sentinel-github",
+    AWS_SECRET_ACCESS_KEY: "sentinel-aws",
+    APPLE_ID_PASSWORD: "sentinel-apple",
+  };
+  const seenEnvs = [];
+  try {
+    await runInstalledRuntime({
+      runtime: { id: "claude", path: "/safe/claude" },
+      prompt: "onboard",
+      skill: "ingest-profile",
+      repoRoot,
+      tools: ["Skill"],
+      env,
+      timeoutMs: 2000,
+      spawnSyncImpl(_command, _args, options) {
+        seenEnvs.push(options.env);
+        return verifiedClaudeVersion();
+      },
+      spawnImpl(_command, _args, options) {
+        seenEnvs.push(options.env);
+        return fakeInstalledChild({
+          stdout: JSON.stringify({ type: "result", subtype: "success", result: "ok" }),
+        });
+      },
+    });
+    assert.equal(seenEnvs.length, 2);
+    for (const childEnv of seenEnvs) {
+      assert.equal(childEnv.HOME, "/Users/morgan");
+      assert.equal(childEnv.USER, "morgan");
+      assert.equal(childEnv.LOGNAME, "morgan");
+      assert.equal(childEnv.PATH, "/usr/bin");
+      assert.equal(childEnv.CAREERRAT_HOME, env.CAREERRAT_HOME);
+      assert.equal(childEnv.ANTHROPIC_API_KEY, undefined);
+      assert.equal(childEnv.GH_TOKEN, undefined);
+      assert.equal(childEnv.AWS_SECRET_ACCESS_KEY, undefined);
+      assert.equal(childEnv.APPLE_ID_PASSWORD, undefined);
+    }
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
@@ -731,6 +1109,7 @@ process.stdin.on("end", () => {
       cwd: repoRoot, // the caller's ordinary cwd — must be overridden, not used
       tools: ["WebSearch", "WebFetch", "Skill"],
       timeoutMs: 5000,
+      spawnSyncImpl: verifiedClaudeVersion,
     });
     const data = JSON.parse(result.text);
     capturedIsolatedCwd = data.cwd;
@@ -752,14 +1131,12 @@ process.stdin.on("end", () => {
   assert.equal(existsSync(capturedIsolatedCwd), false);
 });
 
-test("runInstalledRuntime (claude + skill, Read granted): skips isolation — the one-shot app-safe profile needs cwd=repoRoot for its SKILL.md's relative workspace reads", async () => {
-  // evaluate-job/tailor-application/resume-extract/... (APP_SAFE_RUNTIME_TOOLS:
-  // Read, Glob, Grep, Skill) instruct relative-path reads like "Open
-  // workspace/tracker.json" that only resolve against the real repoRoot.
-  // Isolating cwd for those would silently break every one of those reads,
-  // so runInstalledRuntime must leave --safe-mode + cwd=repoRoot alone
-  // whenever Read is among the granted tools, even with skill+repoRoot given.
-  const repoRoot = tempRepoWithOneSkill("evaluate-job", "Trigger word PROBE.\n");
+test("runInstalledRuntime (claude exact-read skill): isolates cwd and passes only one approved upload", async () => {
+  const repoRoot = tempRepoWithOneSkill("resume-extract", "Trigger word PROBE.\n");
+  const uploadDir = join(repoRoot, "workspace", "intake", "resume-uploads");
+  const upload = join(uploadDir, "resume.pdf");
+  mkdirSync(uploadDir, { recursive: true });
+  writeFileSync(upload, "resume", "utf8");
   const executablePath = join(repoRoot, "fake-claude-read");
   writeFileSync(
     executablePath,
@@ -774,6 +1151,7 @@ process.stdin.on("end", () => {
       cwd: process.cwd(),
       usedSafeMode: process.argv.includes("--safe-mode"),
       usedSettingSources: process.argv.includes("--setting-sources"),
+      settings: JSON.parse(process.argv[process.argv.indexOf("--settings") + 1]),
     },
   }));
 });
@@ -784,68 +1162,55 @@ process.stdin.on("end", () => {
   try {
     const result = await runInstalledRuntime({
       runtime: { id: "claude", path: executablePath },
-      prompt: "run evaluate-job",
-      skill: "evaluate-job",
+      prompt: "run resume-extract",
+      skill: "resume-extract",
       repoRoot,
       cwd: repoRoot,
-      tools: ["Read", "Glob", "Grep", "Skill"],
+      tools: ["Read", "Skill"],
+      approvedReadPaths: [upload],
       timeoutMs: 5000,
+      spawnSyncImpl: verifiedClaudeVersion,
     });
     const data = JSON.parse(result.text);
-    assert.equal(realpathSync(data.cwd), realpathSync(repoRoot));
-    assert.equal(data.usedSafeMode, true);
-    assert.equal(data.usedSettingSources, false);
+    assert.notEqual(data.cwd, realpathSync(repoRoot));
+    assert.equal(data.usedSafeMode, false);
+    assert.equal(data.usedSettingSources, true);
+    assert.deepEqual(
+      new Set(data.settings.sandbox.filesystem.allowRead),
+      new Set([realpathSync(upload), data.cwd])
+    );
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
 });
 
-test("runInstalledRuntime (claude + skill, Glob/Grep without Read): still skips isolation — any repo-inspecting tool needs cwd=repoRoot", async () => {
-  // Read is not the only tool that resolves against the repository: Glob and
-  // Grep inspect files relative to cwd too. A profile granting either without
-  // Read must keep --safe-mode + cwd=repoRoot exactly like the Read case.
+test("runInstalledRuntime rejects broad Glob/Grep tools before spawning Claude", async () => {
   const repoRoot = tempRepoWithOneSkill("evaluate-job", "Trigger word PROBE.\n");
-  const executablePath = join(repoRoot, "fake-claude-grep");
-  writeFileSync(
-    executablePath,
-    `#!/usr/bin/env node
-process.stdin.resume();
-process.stdin.on("end", () => {
-  process.stdout.write(JSON.stringify({
-    type: "result",
-    subtype: "success",
-    result: "ignored",
-    structured_output: {
-      cwd: process.cwd(),
-      usedSafeMode: process.argv.includes("--safe-mode"),
-      usedSettingSources: process.argv.includes("--setting-sources"),
-    },
-  }));
-});
-`,
-    "utf8"
-  );
-  chmodSync(executablePath, 0o755);
+  let spawned = false;
   try {
-    const result = await runInstalledRuntime({
-      runtime: { id: "claude", path: executablePath },
-      prompt: "run evaluate-job",
-      skill: "evaluate-job",
-      repoRoot,
-      cwd: repoRoot,
-      tools: ["Glob", "Grep", "Skill"],
-      timeoutMs: 5000,
-    });
-    const data = JSON.parse(result.text);
-    assert.equal(realpathSync(data.cwd), realpathSync(repoRoot));
-    assert.equal(data.usedSafeMode, true);
-    assert.equal(data.usedSettingSources, false);
+    await assert.rejects(
+      runInstalledRuntime({
+        runtime: { id: "claude", path: "/safe/claude" },
+        prompt: "run evaluate-job",
+        skill: "evaluate-job",
+        repoRoot,
+        cwd: repoRoot,
+        tools: ["Glob", "Grep", "Skill"],
+        spawnSyncImpl: verifiedClaudeVersion,
+        spawnImpl() {
+          spawned = true;
+          return fakeInstalledChild();
+        },
+      }),
+      { code: "RUNTIME_READ_BOUNDARY_INVALID" }
+    );
+    assert.equal(spawned, false);
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
 });
 
-test("runInstalledRuntime (claude, no skill): unchanged --safe-mode behavior at the caller's own cwd", async () => {
+test("runInstalledRuntime (claude, no skill): uses isolated inline settings at the caller cwd", async () => {
   const root = tempRoot();
   const executablePath = join(root, "fake-claude-plain");
   writeFileSync(
@@ -876,7 +1241,7 @@ process.stdin.on("end", () => {
     // child (process.cwd() reports the real path) — compare realpaths rather
     // than the raw strings so this isn't platform-flaky.
     assert.equal(realpathSync(data.cwd), realpathSync(root));
-    assert.equal(data.usedSafeMode, true);
+    assert.equal(data.usedSafeMode, false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -933,49 +1298,55 @@ test("runInstalledRuntime fails closed for another non-claude runtime + the rest
 
 test("runInstalledRuntime: claude + the same restricted chat tool profile is unaffected, and still builds --tools/--allowedTools", async () => {
   const spawnCalls = [];
-  const result = await runInstalledRuntime({
-    runtime: { id: "claude", path: "/safe/claude" },
-    prompt: "research this company",
-    tools: ["WebSearch", "WebFetch", "Skill"],
-    timeoutMs: 2000,
-    spawnImpl: (command, args, options) => {
-      spawnCalls.push({ command, args, options });
-      return fakeInstalledChild({
-        stdout: JSON.stringify({ type: "result", subtype: "success", result: "ok" }),
-      });
-    },
-  });
-  assert.equal(spawnCalls.length, 1, "claude must still spawn for the chat tool profile");
-  const args = spawnCalls[0].args;
-  const toolsIdx = args.indexOf("--tools");
-  assert.ok(toolsIdx >= 0, "expected --tools in argv");
-  assert.equal(args[toolsIdx + 1], "WebSearch,WebFetch,Skill");
-  const allowedIdx = args.indexOf("--allowedTools");
-  assert.ok(allowedIdx >= 0, "expected --allowedTools in argv");
-  assert.equal(args[allowedIdx + 1], "WebSearch,WebFetch,Skill");
-  assert.equal(result.text, "ok");
+  const repoRoot = tempRepoWithOneSkill("research-company");
+  try {
+    const result = await runInstalledRuntime({
+      runtime: { id: "claude", path: "/safe/claude" },
+      prompt: "research this company",
+      skill: "research-company",
+      repoRoot,
+      tools: ["WebSearch", "WebFetch", "Skill"],
+      timeoutMs: 2000,
+      spawnSyncImpl: verifiedClaudeVersion,
+      spawnImpl: (command, args, options) => {
+        spawnCalls.push({ command, args, options });
+        return fakeInstalledChild({
+          stdout: JSON.stringify({ type: "result", subtype: "success", result: "ok" }),
+        });
+      },
+    });
+    assert.equal(spawnCalls.length, 1, "claude must still spawn for the chat tool profile");
+    const args = spawnCalls[0].args;
+    const toolsIdx = args.indexOf("--tools");
+    assert.ok(toolsIdx >= 0, "expected --tools in argv");
+    assert.equal(args[toolsIdx + 1], "WebSearch,Skill");
+    const allowed = args[args.indexOf("--allowedTools") + 1];
+    assert.match(allowed, /WebSearch/);
+    assert.match(allowed, /Skill\(research-company\)/);
+    assert.match(allowed, /mcp__careerrat_public_web__fetch/);
+    assert.doesNotMatch(allowed, /WebFetch/);
+    assert.equal(result.text, "ok");
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
 });
 
-test("runInstalledRuntime: codex + the app-safe one-shot profile still proceeds and spawns — regression guard proving the fail-closed check does not break Codex on its normal path", async () => {
-  const spawnCalls = [];
-  const result = await runInstalledRuntime({
-    runtime: { id: "codex", path: "/safe/codex" },
-    prompt: "evaluate this job",
-    tools: ["Read", "Glob", "Grep", "Skill"],
-    timeoutMs: 2000,
-    spawnImpl: (command, args, options) => {
-      spawnCalls.push({ command, args, options });
-      return fakeInstalledChild({
-        stdout: `${JSON.stringify({
-          type: "item.completed",
-          item: { type: "agent_message", text: "evaluated" },
-        })}\n`,
-      });
-    },
-  });
-  assert.equal(spawnCalls.length, 1, "codex must still spawn for the app-safe one-shot profile");
-  assert.equal(spawnCalls[0].command, "/safe/codex");
-  assert.equal(result.text, "evaluated");
+test("runInstalledRuntime: codex rejects the former app-safe profile before spawn", async () => {
+  let spawned = false;
+  await assert.rejects(
+    runInstalledRuntime({
+      runtime: { id: "codex", path: "/safe/codex" },
+      prompt: "evaluate this job",
+      skill: "evaluate-job",
+      tools: ["Skill"],
+      spawnImpl() {
+        spawned = true;
+        return fakeInstalledChild();
+      },
+    }),
+    { code: RUNTIME_TOOL_PROFILE_UNSUPPORTED }
+  );
+  assert.equal(spawned, false);
 });
 
 // ---------------------------------------------------------------------------
@@ -1032,6 +1403,31 @@ test("runInstalledRuntimeStream rejects with RUNTIME_STREAMING_UNSUPPORTED befor
   assert.equal(spawnCalls, 0, "the spawn was invoked despite the capability gate");
 });
 
+test("runInstalledRuntimeStream re-verifies Claude's boundary version before a chat spawn", async () => {
+  const repoRoot = tempRepoWithOneSkill("research-company");
+  let spawned = false;
+  try {
+    await assert.rejects(
+      runInstalledRuntimeStream({
+        runtime: { id: "claude", name: "Claude Code", path: "/safe/claude" },
+        prompt: "research",
+        skill: "research-company",
+        repoRoot,
+        tools: ["WebSearch", "WebFetch", "Skill"],
+        spawnSyncImpl: () => ({ status: 0, stdout: "2.1.200 (Claude Code)", stderr: "" }),
+        spawnImpl() {
+          spawned = true;
+          return fakeStreamingChild();
+        },
+      }),
+      { code: RUNTIME_TOOL_PROFILE_UNSUPPORTED }
+    );
+    assert.equal(spawned, false);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("runInstalledRuntimeStream: a text-only turn calls onMessage once per NDJSON line, in order, and resolves the terminal result's text/usage/model/sessionId", async () => {
   const lines = [
     { type: "system", subtype: "init", session_id: "sess-1" },
@@ -1063,6 +1459,58 @@ test("runInstalledRuntimeStream: a text-only turn calls onMessage once per NDJSO
   assert.equal(result.model, "claude-sonnet");
   assert.equal(result.sessionId, "sess-1");
   assert.equal(result.runtimeId, "claude");
+});
+
+test("runInstalledRuntimeStream scrubs server secrets while retaining HOME-based CLI auth", async () => {
+  const repoRoot = tempRepoWithOneSkill("ingest-profile");
+  const env = {
+    PATH: "/usr/bin",
+    HOME: "/Users/morgan",
+    TEMP: "/tmp",
+    CAREERRAT_HOME: join(repoRoot, "private"),
+    ANTHROPIC_API_KEY: "sentinel-anthropic",
+    GITHUB_TOKEN: "sentinel-github",
+    NPM_TOKEN: "sentinel-npm",
+    APPLE_ID_PASSWORD: "sentinel-apple",
+  };
+  const seenEnvs = [];
+  const terminal = {
+    type: "result",
+    subtype: "success",
+    result: "ok",
+    session_id: "sess-safe-env",
+  };
+  try {
+    await runInstalledRuntimeStream({
+      runtime: { id: "claude", path: "/safe/claude" },
+      prompt: "onboard",
+      skill: "ingest-profile",
+      repoRoot,
+      tools: ["Skill"],
+      env,
+      timeoutMs: 2000,
+      spawnSyncImpl(_command, _args, options) {
+        seenEnvs.push(options.env);
+        return verifiedClaudeVersion();
+      },
+      spawnImpl(_command, _args, options) {
+        seenEnvs.push(options.env);
+        return fakeStreamingChild({ chunks: [ndjson([terminal])] });
+      },
+    });
+    assert.equal(seenEnvs.length, 2);
+    for (const childEnv of seenEnvs) {
+      assert.equal(childEnv.HOME, "/Users/morgan");
+      assert.equal(childEnv.PATH, "/usr/bin");
+      assert.equal(childEnv.CAREERRAT_HOME, env.CAREERRAT_HOME);
+      assert.equal(childEnv.ANTHROPIC_API_KEY, undefined);
+      assert.equal(childEnv.GITHUB_TOKEN, undefined);
+      assert.equal(childEnv.NPM_TOKEN, undefined);
+      assert.equal(childEnv.APPLE_ID_PASSWORD, undefined);
+    }
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
 });
 
 test("runInstalledRuntimeStream: a turn with two tool calls (one isError result) streams every message, mappable via mapSdkMessage into the same tool_use/tool_result frames the SDK path produces", async () => {

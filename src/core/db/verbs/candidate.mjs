@@ -738,6 +738,56 @@ function assertCleanEvidenceClaims(claims) {
   }
 }
 
+function evidenceIdsInValue(value, targetIds, found = new Set()) {
+  if (Array.isArray(value)) {
+    for (const item of value) evidenceIdsInValue(item, targetIds, found);
+    return found;
+  }
+  if (!isPlainObject(value)) return found;
+  for (const [key, nested] of Object.entries(value)) {
+    const normalizedKey = key.toLowerCase().replace(/[_-]/g, "");
+    if (normalizedKey === "evidenceids" && Array.isArray(nested)) {
+      for (const rawId of nested) {
+        const id = String(rawId || "").trim();
+        if (targetIds.has(id)) found.add(id);
+      }
+    }
+    evidenceIdsInValue(nested, targetIds, found);
+  }
+  return found;
+}
+
+function evidenceReferences(db, claimIds) {
+  const targetIds = new Set(claimIds.map(String).filter(Boolean));
+  if (targetIds.size === 0) return [];
+  const references = [];
+  for (const { id, data } of db.prepare("SELECT id, data FROM applications ORDER BY id").all()) {
+    for (const claimId of evidenceIdsInValue(JSON.parse(data), targetIds)) {
+      references.push({ claimId, owner: `application:${id}` });
+    }
+  }
+  for (const { id, data } of db
+    .prepare("SELECT id, data FROM deep_ingest_story_bank ORDER BY id")
+    .all()) {
+    for (const claimId of evidenceIdsInValue(JSON.parse(data), targetIds)) {
+      references.push({ claimId, owner: `story:${id}` });
+    }
+  }
+  return references;
+}
+
+function assertEvidenceClaimsUnused(db, claimIds) {
+  const references = evidenceReferences(db, claimIds);
+  if (references.length === 0) return;
+  const err = new Error(
+    "evidence claims still cited by saved application material cannot be removed"
+  );
+  err.code = "EVIDENCE_IN_USE";
+  err.claimIds = [...new Set(references.map(({ claimId }) => claimId))];
+  err.references = references;
+  throw err;
+}
+
 export function candidateEvidenceMerge({ repoRoot, env, claims, recordActivity = true } = {}) {
   if (!Array.isArray(claims)) {
     const err = new Error("claims must be an array");
@@ -812,6 +862,101 @@ export function candidateEvidenceMerge({ repoRoot, env, claims, recordActivity =
   );
 }
 
+export function candidateEvidenceReplace({ repoRoot, env, claims, recordActivity = true } = {}) {
+  if (!Array.isArray(claims)) {
+    const err = new Error("claims must be an array");
+    err.code = "BAD_REQUEST";
+    throw err;
+  }
+  assertCleanEvidenceClaims(claims);
+  return runVerb(
+    { repoRoot, env },
+    (db) => {
+      const existing = readEvidence(db).claims;
+      const existingByText = new Map(
+        existing.map((claim) => [String(claim?.claim || "").trim(), String(claim?.id || "")])
+      );
+      const reservedIds = new Set([
+        ...existing.map((claim) => String(claim?.id || "")),
+        ...claims.map((claim) => String(claim?.id || "").trim()).filter(Boolean),
+      ]);
+      const usedIds = new Set();
+      const usedTexts = new Set();
+      const normalized = claims.map((raw, index) => {
+        const claimText = String(raw?.claim || "").trim();
+        const explicitId = String(raw?.id || "").trim();
+        if (!claimText) {
+          const err = new Error(`claims[${index}] is missing claim text`);
+          err.code = "BAD_REQUEST";
+          throw err;
+        }
+        if (usedTexts.has(claimText)) {
+          const err = new Error(`duplicate evidence claim text: "${claimText}"`);
+          err.code = "BAD_REQUEST";
+          throw err;
+        }
+        let id = explicitId;
+        const exactExistingId = existingByText.get(claimText);
+        if (!id && exactExistingId && !usedIds.has(exactExistingId)) id = exactExistingId;
+        if (!id) id = nextClaimId(reservedIds);
+        if (usedIds.has(id)) {
+          const err = new Error(`duplicate evidence claim id: "${id}"`);
+          err.code = "BAD_REQUEST";
+          throw err;
+        }
+        usedTexts.add(claimText);
+        usedIds.add(id);
+        reservedIds.add(id);
+        return {
+          ...raw,
+          id,
+          claim: claimText,
+          evidence: String(raw?.evidence || "").trim(),
+        };
+      });
+
+      const evidence = { claims: normalized };
+      assertValid("evidence", evidence);
+      const previousIds = new Set(existing.map((claim) => String(claim?.id || "")));
+      const removedIds = existing
+        .map((claim) => String(claim?.id || ""))
+        .filter((id) => id && !usedIds.has(id));
+      assertEvidenceClaimsUnused(db, removedIds);
+      const removed = removedIds.length;
+      const replaced = normalized.filter((claim) => previousIds.has(claim.id)).length;
+      const now = new Date().toISOString();
+      db.prepare("DELETE FROM candidate_evidence_claims").run();
+      const insert = db.prepare(
+        "INSERT INTO candidate_evidence_claims (id, data, updated_at) VALUES (?, ?, ?)"
+      );
+      for (const claim of normalized) insert.run(claim.id, JSON.stringify(claim), now);
+
+      const saved = readEvidence(db);
+      assertValid("evidence", saved);
+      const meta = recordActivity ? bumpMeta(db) : null;
+      const event = recordActivity
+        ? logActivityEvent(db, {
+            type: "system",
+            title: "Evidence bank updated",
+            summary: `${normalized.length} evidence ${normalized.length === 1 ? "claim" : "claims"} saved as one section.`,
+            tags: ["operation:candidate:evidence-replace"],
+          })
+        : null;
+      return {
+        replaced,
+        added: normalized.length - replaced,
+        removed,
+        total: saved.claims.length,
+        data: saved,
+        setup: refreshCandidateSetup(db),
+        meta,
+        event,
+      };
+    },
+    { requireExistingTracker: true }
+  );
+}
+
 function nextClaimId(usedIds) {
   let n = 1;
   let id = `seed-${String(n).padStart(3, "0")}`;
@@ -844,6 +989,7 @@ export function candidateEvidenceRemoveOne({ repoRoot, env, id } = {}) {
         err.code = "NOT_FOUND";
         throw err;
       }
+      assertEvidenceClaimsUnused(db, [claimId]);
       db.prepare("DELETE FROM candidate_evidence_claims WHERE id = ?").run(claimId);
       const removedClaim = JSON.parse(existing.data);
       const meta = bumpMeta(db);

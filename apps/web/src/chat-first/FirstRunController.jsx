@@ -40,14 +40,71 @@ function moneyAmount(value) {
   return Number.isFinite(amount) ? amount : 0;
 }
 
-function parsedClaims(value) {
-  return cleanLines(value).map((line) => {
+function normalizedClaimText(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function parsedClaims(value, existingClaims = []) {
+  const existing = list(existingClaims);
+  const byText = new Map();
+  existing.forEach((claim) => {
+    const text = normalizedClaimText(claim?.claim);
+    if (!text) return;
+    const matches = byText.get(text) || [];
+    matches.push(claim);
+    byText.set(text, matches);
+  });
+  const rows = cleanLines(value).map((line) => {
     const [claim, ...evidenceParts] = line.split("::");
     return {
       claim: claim.trim(),
       evidence: evidenceParts.join("::").trim() || "Candidate-entered in the profile editor",
     };
   });
+  const rowCounts = rows.reduce((counts, row) => {
+    const text = normalizedClaimText(row.claim);
+    counts.set(text, (counts.get(text) || 0) + 1);
+    return counts;
+  }, new Map());
+  const usedIds = new Set();
+  rows.forEach((row) => {
+    const text = normalizedClaimText(row.claim);
+    const matches = list(byText.get(text));
+    const exactMatch = matches.length === 1 && rowCounts.get(text) === 1 ? matches[0] : null;
+    const exactId = String(exactMatch?.id || "");
+    if (exactId && !usedIds.has(exactId)) {
+      row.id = exactId;
+      usedIds.add(exactId);
+    }
+  });
+
+  const unmatchedRows = rows.filter((row) => !row.id);
+  const unusedExisting = existing.filter((claim) => claim?.id && !usedIds.has(String(claim.id)));
+  if (unmatchedRows.length === 1 && unusedExisting.length === 1) {
+    unmatchedRows[0].id = String(unusedExisting[0].id);
+  }
+  return rows;
+}
+
+function editedRoleBuckets(editor, values) {
+  const existing = list(editor?.roleBuckets);
+  if (!existing.length) {
+    return [
+      {
+        name: "Primary targets",
+        priority: "primary",
+        titles: cleanLines(values.titles),
+      },
+    ];
+  }
+  return existing.map((bucket, index) => ({
+    ...bucket,
+    titles: cleanLines(values[index === 0 ? "titles" : `titles:${index}`]),
+  }));
 }
 
 function resumeContext(candidatePatch, targetingSeed) {
@@ -296,22 +353,7 @@ export function FirstRunController({
       };
       setMessages((current) => {
         if (current.some((message) => message.id === id)) return current;
-        const legacyIndex = current.findIndex(
-          (message) =>
-            message?.role === "assistant" &&
-            !Number.isSafeInteger(Number(message?.eventId)) &&
-            message?.text === next.text
-        );
-        if (legacyIndex < 0) return [...current, next];
-        const reconciled = current.slice();
-        const legacy = reconciled[legacyIndex];
-        const blocks = list(legacy.blocks).length ? legacy.blocks : next.blocks;
-        reconciled[legacyIndex] = {
-          ...next,
-          blocks,
-          options: blocks.length ? confirmationOptions(blocks) : next.options,
-        };
-        return reconciled;
+        return [...current, next];
       });
       setSubmitting(false);
     } else if (type === "chat_state" && data?.state === "idle") {
@@ -609,10 +651,12 @@ export function FirstRunController({
         if (!text) throw new Error("Paste resume text before saving this section.");
         await saveResumeSeed(await api.parseResumeText(text, { save: true }));
       } else if (sectionId === "roles") {
-        const titles = cleanLines(values.titles);
-        if (!titles.length) throw new Error("Add at least one target role.");
+        const roleBuckets = editedRoleBuckets(item?.editor, values);
+        if (!roleBuckets.some((bucket) => bucket.titles.length)) {
+          throw new Error("Add at least one target role.");
+        }
         await api.saveCandidateFile("targeting", {
-          role_buckets: [{ name: "Primary targets", priority: "primary", titles }],
+          role_buckets: roleBuckets,
         });
       } else if (sectionId === "companies") {
         await api.saveCandidateFile("targeting", {
@@ -623,11 +667,8 @@ export function FirstRunController({
           },
         });
       } else if (sectionId === "evidence") {
-        for (const id of list(item?.editor?.existingClaimIds)) {
-          await api.removeEvidenceClaim(id);
-        }
-        const claims = parsedClaims(values.claims);
-        if (claims.length) await api.saveEvidenceSeed(claims);
+        const claims = parsedClaims(values.claims, item?.editor?.existingClaims);
+        await api.replaceEvidenceClaims(claims);
       } else if (sectionId === "guardrails") {
         await api.saveCandidateFile("targeting", { cut_signals: cleanLines(values.signals) });
       } else if (sectionId === "quickFacts") {
@@ -677,7 +718,9 @@ export function FirstRunController({
           )
           .then(() => connectChat(chatId))
           .catch(() =>
-            setEngineError("The section is saved, but Paul has not acknowledged it yet.")
+            setEngineError(
+              `The section is saved, but ${configuredAgentName} has not acknowledged it yet.`
+            )
           );
       }
       return true;
@@ -727,14 +770,18 @@ export function FirstRunController({
           .sendChatMessage(chatId, kickoff)
           .then(() => connectChat(chatId))
           .catch(() =>
-            setEngineError("The resume is saved, but Paul has not acknowledged it yet.")
+            setEngineError(
+              `The resume is saved, but ${configuredAgentName} has not acknowledged it yet.`
+            )
           );
       } else {
         void api
           .startChat(INTERVIEW_SKILL, { input: kickoff })
           .then((session) => connectChat(session.chatId))
           .catch(() =>
-            setEngineError("The resume is saved, but Paul has not acknowledged it yet.")
+            setEngineError(
+              `The resume is saved, but ${configuredAgentName} has not acknowledged it yet.`
+            )
           );
       }
       return true;

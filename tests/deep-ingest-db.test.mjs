@@ -397,6 +397,7 @@ test("ISSUE-015: removing an undrafted source cascades its scan stub but protect
     sourceId: removable.id,
     removedProposals: 1,
     removedChunks: 1,
+    artifactPath: null,
   });
   assert.equal(deepIngestStateGet({ repoRoot }).sources.length, 0);
   assert.equal(deepIngestStateGet({ repoRoot }).proposals.length, 0);
@@ -429,6 +430,44 @@ test("ISSUE-015: removing an undrafted source cascades its scan stub but protect
     (err) => err.code === "SOURCE_HAS_DRAFTS"
   );
   assert.equal(deepIngestStateGet({ repoRoot }).sources.length, 1);
+});
+
+test("Deep ingest source writes surface owned artifact replacement and removal metadata", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const { deepIngestSourceCreate, deepIngestSourceRemove } = await loadDeepIngestVerbs();
+
+  const first = deepIngestSourceCreate({
+    repoRoot,
+    input: {
+      id: "deep_src_artifact_lifecycle",
+      targetShape: "evidence",
+      sourceKind: "file",
+      text: "Same source text.",
+      artifactPath: "workspace/deep-ingest/sources/first.md",
+      metadata: { ownedUpload: true },
+    },
+  });
+  assert.equal(first.replacedArtifactPath, null);
+
+  const replacement = deepIngestSourceCreate({
+    repoRoot,
+    input: {
+      id: "deep_src_artifact_lifecycle",
+      targetShape: "evidence",
+      sourceKind: "file",
+      text: "Same source text.",
+      artifactPath: "workspace/deep-ingest/sources/replacement.md",
+      metadata: { ownedUpload: true },
+    },
+  });
+  assert.equal(replacement.replacedArtifactPath, "workspace/deep-ingest/sources/first.md");
+
+  const removed = deepIngestSourceRemove({
+    repoRoot,
+    sourceId: "deep_src_artifact_lifecycle",
+  });
+  assert.equal(removed.artifactPath, "workspace/deep-ingest/sources/replacement.md");
 });
 
 test("proposal decisions enforce expected-version conflicts and keep unconfirmed proposals out of trusted candidate state", async () => {

@@ -1,8 +1,14 @@
 ---
 name: research-boards
-description: Web-search + legitimacy-screen NEW job boards for the candidate's domain/role families -> propose adding through `careerrat searches`, confirm-first.
-tier_1_inputs: [profile.candidate.domain, targeting role families, STEP 0 dedup set, modes verdict]
-tier_2_inputs: [per-board WebFetch bodies]
+description: Web-search + legitimacy-screen NEW job boards for the candidate's domain/role families → propose adding through `careerrat searches`, confirm-first.
+metadata:
+  tier_1_inputs:
+    - profile.candidate.domain
+    - targeting role families
+    - STEP 0 dedup set
+    - modes verdict
+  tier_2_inputs:
+    - per-board WebFetch bodies
 ---
 
 # research-boards

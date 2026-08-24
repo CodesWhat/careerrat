@@ -5,7 +5,7 @@
 //
 // SHIPPED MECHANISM: native skill invocation via the SDK's `skills` option,
 // not prompt-injection. Verified against the installed
-// @anthropic-ai/claude-agent-sdk@0.3.199 sdk.d.ts (not from memory):
+// @anthropic-ai/claude-agent-sdk@0.3.233 sdk.d.ts (not from memory):
 //   - `Options.skills: string[]` is documented as "the single place to turn
 //     skills on" and auto-enables the Skill tool.
 //   - `Options.settingSources: ['project']` loads this repo's own CLAUDE.md
@@ -24,9 +24,10 @@
 // Claude Code reads) and flagging live verification as an open item is more
 // honest than guessing at a fallback with no evidence it's needed.
 //
-// The SDK itself is a devDependency only (Phase 0 spike posture — the
-// published npm package stays zero runtime deps). It is never imported at
-// module scope; `loadClaudeAgentSdk()` dynamic-imports it lazily so a
+// The SDK itself is a devDependency only. Published npm installs do not pull
+// it in with production dependencies, while desktop staging installs it
+// explicitly. It is never imported at module scope; `loadClaudeAgentSdk()`
+// dynamic-imports it lazily so a
 // workspace-only install of careerrat (no devDependencies) degrades to a clear
 // 501 from the route instead of crashing at require-time.
 
@@ -36,7 +37,12 @@ import { resolveModelConfig } from "./ai-config.mjs";
 import { resolveAIRoute } from "./call-ai.mjs";
 import { runInstalledRuntime } from "./installed-runtimes.mjs";
 import { createRuntimeToolPolicy } from "./runtime-tool-policy.mjs";
-import { APP_SAFE_RUNTIME_TOOLS, resolveRuntimeTools } from "./runtime-tools.mjs";
+import {
+  APP_SAFE_RUNTIME_TOOLS,
+  installedSkillRuntimePosture,
+  resolveInstalledSkillRuntimeTools,
+  resolveRuntimeTools,
+} from "./runtime-tools.mjs";
 import { appendUsageEvent, computeCost, deriveUsageFeature } from "./usage-log.mjs";
 
 // ---------------------------------------------------------------------------
@@ -58,29 +64,13 @@ export function discoverSkillDirs(repoRoot) {
     .sort();
 }
 
-// Default-restricted to evaluate-job (P0-5's target), answer-question (the
-// Interactive Q&A slice's target — see .agents/skills/answer-question),
-// tailor-application (M4's target — the /packet view's "Generate packet"
-// button, see src/cli/packet-route.mjs), resume-extract (M8's target —
-// the onboarding wizard's PDF/image résumé-drop step, see
-// src/cli/onboard-route.mjs's POST /api/onboard/resume-ai), and
-// intake-extract (the Universal Intake file-upload lane's PDF/image branch,
-// see src/cli/intake-route.mjs's POST /api/intake/upload). Widened
-// deliberately, not silently: resume-extract and intake-extract are both
-// first-party features every install needs the moment a candidate drops a
-// PDF, not an operator opt-in like a hypothetical third-party skill would
-// be. Empty string explicitly set in env means "nothing is allowed" — only
-// an *unset* env var falls back to the default, so an operator can
-// deliberately lock the runtime down.
-//
-// search-jobs is deliberately NOT in this default: unlike the skills above,
-// it's a WebSearch-capable lane (see runtime-tools.mjs's "chat" profile) —
-// letting an operator's blanket CAREERRAT_RUNTIME_SKILLS opt-in reach it
-// would hand every one-shot run open-ended web access it never asked for.
-// Only the Jobs page's AI Web Search lane may run it, via a scoped per-call
-// env override — see ai-web-search.mjs's own call into runSkillStream.
-const DEFAULT_RUNTIME_SKILLS =
-  "evaluate-job,answer-question,tailor-application,resume-extract,intake-extract";
+// The raw one-shot HTTP surface is intentionally limited to extraction. Every
+// workflow with app state, browser activity, or durable writes stays behind
+// its typed app-owned route. Internal dedicated pipelines may opt a skill into
+// runSkillStream with CAREERRAT_RUNTIME_SKILLS, but that does not advertise or
+// expose it through POST /api/skill/run.
+const DIRECT_SKILL_RUN_SKILLS = Object.freeze(["intake-extract", "resume-extract"]);
+const DEFAULT_RUNTIME_SKILLS = DIRECT_SKILL_RUN_SKILLS.join(",");
 
 // Shared allowlist-resolution shape both the one-shot embedded runtime
 // (CAREERRAT_RUNTIME_SKILLS, below) and the conversational chat runtime
@@ -108,6 +98,11 @@ export function resolveAllowedSkills({ repoRoot, env = process.env } = {}) {
     envVar: "CAREERRAT_RUNTIME_SKILLS",
     defaultValue: DEFAULT_RUNTIME_SKILLS,
   });
+}
+
+export function resolveDirectSkillRunSkills({ repoRoot, env = process.env } = {}) {
+  const allowed = new Set(resolveAllowedSkills({ repoRoot, env }));
+  return DIRECT_SKILL_RUN_SKILLS.filter((skill) => allowed.has(skill));
 }
 
 // ---------------------------------------------------------------------------
@@ -195,10 +190,9 @@ export function buildChildEnv({
 
   // ELECTRON_RUN_AS_NODE: no-op under plain node. Under an Electron host (see
   // apps/desktop/main.mjs) this SDK query() spawns its own CLI child (and
-  // that child can spawn further descendants) — same "process.execPath is
-  // the Electron binary" hazard tracker-dev.mjs's renderOnce() has, so it
-  // needs the same fix. Checked the installed
-  // @anthropic-ai/claude-agent-sdk@0.3.199's sdk.d.ts/sdk.mjs rather than
+  // that child can spawn further descendants) — process.execPath is the
+  // Electron binary, so the child needs an explicit Node runtime. Checked the installed
+  // @anthropic-ai/claude-agent-sdk@0.3.233's sdk.d.ts/sdk.mjs rather than
   // assuming: `Options.executable` ("JavaScript runtime to use … Auto-detected
   // if not specified") defaults to the literal string `"node"` and is
   // resolved via the SDK's own bundled execa-style PATH lookup — NOT via
@@ -510,6 +504,7 @@ export async function runSkillStream({
   // app-safe is the default.
   tools,
   toolProfile,
+  approvedReadPaths,
   outputSchema,
   runtimeInventory = null,
   runInstalledRuntimeImpl = runInstalledRuntime,
@@ -542,17 +537,18 @@ export async function runSkillStream({
   const runtimeTools = resolveRuntimeTools({ tools, toolProfile });
 
   if (route.type === "installed") {
+    const installedRuntimeTools = resolveInstalledSkillRuntimeTools({ skill });
+    const installedPosture = installedSkillRuntimePosture({ skill });
     const prompt = `${buildPrompt({
       skill,
       input,
-      skillMdPath: join(repoRoot, ".agents", "skills", skill, "SKILL.md"),
-    })}\n\nThis app-authorized run is limited to these capabilities: ${runtimeTools.join(", ") || "none"}. Do not exceed that scope.`;
+    })}\n\nThis app-authorized run is limited to these capabilities: ${installedRuntimeTools.join(", ") || "none"}. Do not exceed that scope. ${installedPosture}`;
     onEvent({
       type: "system",
       data: {
         subtype: "init",
         runtime: route.runtime.id,
-        tools: runtimeTools,
+        tools: installedRuntimeTools,
       },
     });
     try {
@@ -575,7 +571,8 @@ export async function runSkillStream({
               (route.runtime.id === "claude" ? env.ANTHROPIC_MODEL : "") ||
               ""
           ).trim() || undefined,
-        tools: runtimeTools,
+        tools: installedRuntimeTools,
+        approvedReadPaths,
         outputSchema,
       });
       if (signal?.aborted) return { ok: false, aborted: true };

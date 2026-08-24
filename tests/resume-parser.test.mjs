@@ -236,6 +236,95 @@ Senior Backend Engineer, Sample Labs
   );
 });
 
+test("explicit target roles win over company-first experience headings", () => {
+  const text = `
+# Riley Chen
+
+## Experience
+
+### Northstar Labs, Senior Software Engineer, 2022 to present
+
+- Led a React and TypeScript redesign used by 120,000 monthly users.
+
+### Harbor Systems, Software Engineer, 2018 to 2022
+
+- Shipped JavaScript, React, and Node.js features for a SaaS platform.
+
+## Preferences
+
+- Target roles: Senior Software Engineer, Staff Frontend Engineer, Full Stack Engineer.
+- Location: remote within the United States, or New York City local and hybrid roles.
+`.trim();
+
+  assert.deepEqual(deriveTargetingSeed(parseResume(text)).role_buckets[0].titles, [
+    "Senior Software Engineer",
+    "Staff Frontend Engineer",
+    "Full Stack Engineer",
+  ]);
+});
+
+test("target roles written directly in a markdown heading are retained", () => {
+  const text = `
+# Riley Chen
+
+## Experience
+
+### Northstar Labs, Senior Software Engineer, 2022 to present
+
+- Built accessible products.
+
+## Target roles: Staff Frontend Engineer, Full Stack Engineer
+`.trim();
+
+  assert.deepEqual(deriveTargetingSeed(parseResume(text)).role_buckets[0].titles, [
+    "Staff Frontend Engineer",
+    "Full Stack Engineer",
+  ]);
+});
+
+test("target-role headings can introduce a bullet list", () => {
+  const text = `
+# Riley Chen
+
+## Experience
+
+### Northstar Labs, Senior Software Engineer, 2022 to present
+
+- Built accessible products.
+
+## Target roles
+
+- Staff Frontend Engineer
+- Full Stack Engineer
+`.trim();
+
+  assert.deepEqual(deriveTargetingSeed(parseResume(text)).role_buckets[0].titles, [
+    "Staff Frontend Engineer",
+    "Full Stack Engineer",
+  ]);
+});
+
+test("target roles stated inside summary text win over inferred experience headings", () => {
+  const text = `
+# Riley Chen
+
+## Summary
+
+Target roles: Staff Frontend Engineer, Full Stack Engineer.
+
+## Experience
+
+### Northstar Labs, Senior Software Engineer, 2022 to present
+
+- Built accessible products.
+`.trim();
+
+  assert.deepEqual(deriveTargetingSeed(parseResume(text)).role_buckets[0].titles, [
+    "Staff Frontend Engineer",
+    "Full Stack Engineer",
+  ]);
+});
+
 test("ISSUE-004: evidence excludes employment metadata and never absorbs the next job header", () => {
   const text = readFileSync(
     join(TEST_ROOT, "tests/fixtures/resume/morgan-hale-pdftotext.txt"),

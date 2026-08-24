@@ -10,9 +10,9 @@
   min-width: 1000px;
   min-height: 100vh;
   overflow-y: auto;
-  background: #edf5fb;
-  color: #17171a;
-  font-family: "Figtree", system-ui, sans-serif;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font);
 }
 
 .cf-profile button {
@@ -40,7 +40,7 @@
   padding: 4px 0;
   border: 0;
   background: transparent;
-  color: #55584a;
+  color: var(--ink-soft);
   font-size: 12.5px;
   font-weight: 700;
   cursor: pointer;
@@ -67,21 +67,32 @@
   padding: 6px 16px;
   border: 0;
   border-radius: 999px;
-  background: #fff;
-  color: #55584a;
+  background: var(--white);
+  color: var(--ink-soft);
   font-size: 12.5px;
   font-weight: 700;
   cursor: pointer;
 }
 
 .cf-profile__tabs button[aria-current="page"] {
-  background: #17171a;
-  color: #fdfcf7;
+  border: var(--cf-selection-border);
+  color: var(--cf-selection-foreground);
+  outline: var(--cf-selection-outline);
+  background: var(--cf-selection-fill);
+  box-shadow: var(--cf-selection-shadow);
+}
+
+.cf-profile button:focus-visible,
+.cf-profile input:focus-visible,
+.cf-profile textarea:focus-visible,
+.cf-profile select:focus-visible {
+  outline: var(--cf-focus-ring);
+  outline-offset: 2px;
 }
 
 .cf-profile__hint {
   margin-left: auto;
-  color: #7d8894;
+  color: var(--slate);
   font-size: 12px;
   font-weight: 600;
 }
@@ -101,7 +112,7 @@
 .cf-settings__card {
   padding: 16px 18px;
   border-radius: 20px;
-  background: #fff;
+  background: var(--white);
 }
 
 .cf-profile__section-heading {
@@ -112,7 +123,7 @@
 
 .cf-profile__section-heading > span,
 .cf-settings__eyebrow {
-  color: #7d8894;
+  color: var(--slate);
   font-size: 10.5px;
   font-weight: 800;
   letter-spacing: 0.07em;
@@ -123,7 +134,7 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: #7d8894;
+  color: var(--slate);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
@@ -148,7 +159,7 @@
 .cf-profile__explanation,
 .cf-profile__empty-copy {
   margin-top: 1px;
-  color: #7d8894;
+  color: var(--slate);
   font-weight: 500;
 }
 
@@ -170,7 +181,7 @@
 }
 
 .cf-profile__comp span {
-  color: #7d8894;
+  color: var(--slate);
   font-size: 11.5px;
 }
 
@@ -188,14 +199,14 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 5px 12px;
   margin-top: 9px;
-  color: #55584a;
+  color: var(--ink-soft);
   font-size: 12px;
   font-weight: 650;
 }
 
 .cf-profile__location-boundary {
   margin-top: 9px;
-  color: #7d8894;
+  color: var(--slate);
   font-size: 11.5px;
 }
 
@@ -204,13 +215,13 @@
   margin-top: 9px;
   padding: 3px 8px;
   border-radius: 999px;
-  background: #d9a6f4;
+  background: var(--lilac);
   font-size: 10.5px;
   font-weight: 800;
 }
 
 .cf-profile__confirmation--confirmed {
-  background: #e6fa8d;
+  background: var(--lime);
 }
 
 .cf-settings {
@@ -242,13 +253,13 @@
   margin-left: auto;
   padding: 3px 12px;
   border-radius: 999px;
-  background: #e6fa8d;
+  background: var(--lime);
   font-size: 11.5px;
   font-weight: 700;
 }
 
 .cf-settings__disconnected {
-  background: #d9a6f4;
+  background: var(--lilac);
 }
 
 .cf-settings__card > strong {
@@ -260,7 +271,7 @@
 .cf-settings__source-copy > span,
 .cf-settings__permission > div > span,
 .cf-settings__data-card > div > span {
-  color: #7d8894;
+  color: var(--slate);
   font-size: 12px;
 }
 
@@ -274,7 +285,7 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: #7d8894;
+  color: var(--slate);
   font-size: 12px;
   text-decoration: underline;
   cursor: pointer;
@@ -285,7 +296,7 @@
   align-items: center;
   gap: 12px;
   padding: 9px 0;
-  border-bottom: 1.5px solid #f0f2f5;
+  border-bottom: 1.5px solid var(--tint-cool-3);
 }
 
 .cf-settings__permission > div {
@@ -308,7 +319,7 @@
   padding: 0;
   border: 0;
   border-radius: 999px;
-  background: #d7dee4;
+  background: var(--line-cool-2);
   cursor: pointer;
   transition: background 0.15s;
 }
@@ -320,12 +331,12 @@
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--white);
   transition: left 0.15s;
 }
 
 .cf-settings__switch[aria-checked="true"] {
-  background: #17171a;
+  background: var(--ink);
 }
 
 .cf-settings__switch[aria-checked="true"] > span {
@@ -336,16 +347,22 @@
   flex: none;
   padding: 4px 10px;
   border-radius: 999px;
-  background: #e8edf2;
-  color: #55584a;
+  background: var(--tint-cool-2);
+  color: var(--ink-soft);
   font-size: 11.5px;
   font-weight: 800;
 }
 
 .cf-settings__note {
   margin: 6px 0 0;
-  color: #7d8894;
+  color: var(--slate);
   font-size: 12px;
+}
+
+.cf-settings__public-sync-status {
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  font-weight: 700;
 }
 
 .cf-settings__source-copy {
@@ -380,16 +397,16 @@
 
 .cf-settings__outline-button {
   padding: 7px 15px;
-  border: 1.5px solid #d9d5c9;
+  border: 1.5px solid var(--line-warm-2);
   border-radius: 999px;
-  background: #fff;
+  background: var(--white);
   font-size: 12.5px;
   font-weight: 700;
   cursor: pointer;
 }
 
 .cf-settings__outline-button:hover {
-  background: #faf7ef;
+  background: var(--cream);
 }
 
 .cf-settings-dialog__cover {
@@ -400,7 +417,7 @@
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(23, 23, 26, 0.45);
+  background: var(--scrim-sheet);
 }
 
 .cf-settings-dialog {
@@ -409,8 +426,8 @@
   overflow-y: auto;
   padding: 18px;
   border-radius: 24px;
-  background: #fff;
-  box-shadow: 0 24px 60px rgba(20, 20, 10, 0.3);
+  background: var(--white);
+  box-shadow: var(--shadow-sheet);
 }
 
 .cf-settings-dialog > header {
@@ -430,7 +447,7 @@
   margin-left: auto;
   border: 0;
   border-radius: 50%;
-  background: #f2f6f9;
+  background: var(--tint-cool);
   font-size: 19px;
   cursor: pointer;
 }
@@ -438,7 +455,7 @@
 .cf-settings-dialog__intro,
 .cf-settings-dialog__technical p {
   margin: 10px 0 0;
-  color: #55584a;
+  color: var(--ink-soft);
   font-size: 13px;
   line-height: 1.55;
 }
@@ -450,7 +467,7 @@
   margin-top: 12px;
   padding: 11px 13px;
   border-radius: 14px;
-  background: #faf7ef;
+  background: var(--cream);
   font-size: 13px;
 }
 
@@ -467,32 +484,42 @@
 }
 
 .cf-settings-dialog__technical-row > span {
-  color: #55584a;
+  color: var(--ink-soft);
   overflow-wrap: anywhere;
+}
+
+.cf-settings-dialog__technical-row select {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1.5px solid var(--line-warm-2);
+  border-radius: 12px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
 }
 
 .cf-settings-dialog__status {
   flex: none;
   padding: 2px 8px;
   border-radius: 999px;
-  background: #e8edf2;
-  color: #55584a;
+  background: var(--tint-cool-2);
+  color: var(--ink-soft);
   font-size: 10.5px;
   font-weight: 800;
 }
 
 .cf-settings-dialog__status--ready {
-  background: #e6fa8d;
-  color: #17171a;
+  background: var(--lime);
+  color: var(--ink);
 }
 
 .cf-settings-dialog__status--missing {
-  background: #ffd8d2;
-  color: #17171a;
+  background: var(--red-soft);
+  color: var(--ink);
 }
 
 .cf-settings-dialog__technical-row small {
-  color: #7d8894;
+  color: var(--slate);
   font-size: 11.5px;
   line-height: 1.4;
 }
@@ -510,17 +537,17 @@
   justify-content: space-between;
   gap: 12px;
   padding: 12px 14px;
-  border: 1.5px dashed #c9d4dc;
+  border: 1.5px dashed var(--line-cool);
   border-radius: 16px;
-  color: #55584a;
+  color: var(--ink-soft);
   font-size: 12.5px;
 }
 
 .cf-settings-dialog__empty button {
   padding: 6px 12px;
-  border: 1.5px solid #d9d5c9;
+  border: 1.5px solid var(--line-warm-2);
   border-radius: 999px;
-  background: #faf7ef;
+  background: var(--cream);
   font-size: 11.5px;
   font-weight: 800;
   cursor: pointer;
@@ -531,9 +558,9 @@
   align-items: center;
   gap: 12px;
   padding: 12px 14px;
-  border: 1.5px solid #e3e0d6;
+  border: 1.5px solid var(--line-warm);
   border-radius: 16px;
-  background: #faf7ef;
+  background: var(--cream);
 }
 
 .cf-settings-dialog__runtime > div {
@@ -574,18 +601,18 @@
 }
 
 .cf-settings-dialog__runtime > div span {
-  color: #7d8894;
+  color: var(--slate);
   font-size: 11.5px;
 }
 
 .cf-settings-dialog__runtime button,
-.cf-settings-dialog__selected,
+.cf-settings-dialog__current,
 .cf-settings-dialog__actions button {
   flex: none;
   padding: 6px 12px;
-  border: 1.5px solid #d9d5c9;
+  border: 1.5px solid var(--line-warm-2);
   border-radius: 999px;
-  background: #fff;
+  background: var(--white);
   font-size: 11.5px;
   font-weight: 800;
 }
@@ -595,10 +622,31 @@
   cursor: pointer;
 }
 
-.cf-settings-dialog__selected,
+.cf-settings-dialog__current {
+  border: 0;
+  color: inherit;
+  background: transparent;
+}
+
+.cf-settings-dialog__runtime[data-selected="true"] {
+  border: var(--cf-selection-border);
+  color: var(--cf-selection-foreground);
+  outline: var(--cf-selection-outline);
+  background: var(--cf-selection-fill);
+  box-shadow: var(--cf-selection-shadow);
+}
+
+.cf-settings-dialog__runtime[data-selected="true"] .cf-runtime-icon {
+  background: var(--cf-selection-avatar-surface);
+}
+
+.cf-settings-dialog__runtime[data-selected="true"] > div span {
+  color: var(--gray-dim);
+}
+
 .cf-settings-dialog__actions button[type="submit"] {
-  border-color: #17171a;
-  background: #e6fa8d;
+  border-color: var(--ink);
+  background: var(--lime);
 }
 
 .cf-settings-dialog__form {
@@ -609,7 +657,7 @@
 }
 
 .cf-settings-dialog__form label {
-  color: #55584a;
+  color: var(--ink-soft);
   font-size: 12px;
   font-weight: 800;
 }
@@ -619,10 +667,10 @@
 .cf-settings-dialog__form select {
   width: 100%;
   padding: 10px 12px;
-  border: 1.5px solid #d9d5c9;
+  border: 1.5px solid var(--line-warm-2);
   border-radius: 13px;
-  background: #faf7ef;
-  color: #17171a;
+  background: var(--cream);
+  color: var(--ink);
   font: inherit;
   font-size: 13px;
 }
@@ -644,7 +692,7 @@
 
 .cf-profile-editor__field > span,
 .cf-profile-editor__check > span {
-  color: #55584a;
+  color: var(--ink-soft);
   font-size: 12px;
   font-weight: 800;
 }
@@ -661,7 +709,7 @@
   width: 17px;
   height: 17px;
   margin: 0;
-  accent-color: #17171a;
+  accent-color: var(--ink);
 }
 
 .cf-profile-editor__actions > button:first-child {

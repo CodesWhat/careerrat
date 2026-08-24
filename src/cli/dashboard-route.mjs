@@ -5,13 +5,8 @@
 // Jobs disagreeing because they were fetched a few seconds apart against a
 // db that changed in between (see the M10 design doc §2).
 //
-// Design: extract, don't rewrite. `buildDashboardViewModel` (src/core/tracker/
-// dashboard-data.js) is the same JSON view-model builder used to power this
-// route — reused here completely UNMODIFIED, never forked. (The legacy
-// static-HTML dashboard render this route was originally extracted from —
-// `careerrat tracker`, src/cli/tracker.mjs — has since been retired; tracker.mjs
-// now only snapshots/summarizes tracker.json. This route is the sole live
-// caller of buildDashboardViewModel.) Its verified input contract (read
+// `buildDashboardViewModel` (src/core/tracker/dashboard-data.js) is the shared
+// JSON view-model builder used by this route. Its verified input contract (read
 // directly off its own top ~20 lines, `buildDashboardViewModel(trackerData,
 // {now, activityEvents, modes, settings, library, agentGuidance,
 // calendarProviderStatus})`) is assembled from these sources:

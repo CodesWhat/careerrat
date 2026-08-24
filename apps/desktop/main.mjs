@@ -2,8 +2,8 @@
 // local server (M5 of the paid-POC journey). This process NEVER forks a
 // skill itself; it boots the same createDevServer() the browser-only
 // `careerrat tracker-dev` uses (see src/cli/tracker-dev.mjs) and wraps it in a
-// native window. Every skill still runs through that one embedded Agent SDK
-// runtime — open-core discipline stays intact.
+// native window. Packaged AI work runs through the user's selected installed
+// CLI. The proprietary Agent SDK is not shipped in the app bundle.
 //
 // Two run modes:
 //   dev  (`npm run desktop` from repo root) — unpackaged window over the live
@@ -15,8 +15,9 @@
 // `--smoke`: boot the server, GET /api/health from inside this process,
 // then actually create the window and require its real route to finish
 // loading (see waitForLoad below — health-only isn't enough, see the trap-1
-// comment) — print "SMOKE OK <url>" and exit 0 (no interaction) once both
-// pass. The scripted verification path for `npx electron . --smoke`.
+// comment), render a PDF, and launch the configured browser adapter — print
+// "SMOKE OK <url>" and exit 0 (no interaction) once all checks pass. The
+// scripted verification path for `npx electron . --smoke`.
 
 import {
   app,
@@ -27,7 +28,7 @@ import {
   nativeImage,
   shell,
 } from "electron";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { get as httpGet } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -37,9 +38,14 @@ import {
   choosePreferredPort,
   decideExternalOpen,
   resolveDesktopRuntimePaths,
+  resolveDesktopSmokeEngineRoot,
   startDesktopPdfRenderer,
 } from "./desktop-runtime.mjs";
-import { verifySmokeHttpSurface, verifySmokePdfExport } from "./desktop-smoke.mjs";
+import {
+  verifySmokeBrowserAutomation,
+  verifySmokeHttpSurface,
+  verifySmokePdfExport,
+} from "./desktop-smoke.mjs";
 import {
   CHECK_INTERVAL_MS as UPDATE_CHECK_INTERVAL_MS,
   DEFAULT_STATE as DEFAULT_UPDATE_STATE,
@@ -54,10 +60,9 @@ import { buildBrowserWindowOptions } from "./window-options.mjs";
 
 // --- Trap 1 -----------------------------------------------------------------
 // Inside Electron, `process.execPath` is the Electron binary, not a plain
-// `node`. tracker-dev's renderOnce() spawns `process.execPath [tracker.mjs]`,
-// and the Agent SDK's own CLI child spawn works the same way — unpatched,
-// either child would try to launch a *new* Electron GUI instance instead of
-// running headless. FIXED AT THE SOURCE, not here: setting
+// `node`. The Agent SDK's CLI child spawn would try to launch a new Electron
+// GUI instance instead of running headless. FIXED AT THE SOURCE, not here:
+// setting
 // `process.env.ELECTRON_RUN_AS_NODE = "1"` globally in this main process was
 // tried first and was wrong — Chromium's OWN helper processes (GPU, network,
 // renderer, utility) inherit process.env too, so they ALSO booted as plain
@@ -65,9 +70,8 @@ import { buildBrowserWindowOptions } from "./window-options.mjs";
 // `--type=…` flags ("bad option: --type=gpu-process" etc.), which silently
 // killed rendering (a real window never painted) while still letting
 // `--smoke` pass (it renders nothing, so nothing exposed the breakage). The
-// env var is now set per-spawn, scoped to exactly the two child processes
-// that need it (see src/cli/tracker-dev.mjs's renderOnce() and
-// src/core/ai/skill-runtime.mjs's buildChildEnv()) — never on this process's
+// env var is now set per-spawn by
+// src/core/ai/skill-runtime.mjs's buildChildEnv() — never on this process's
 // own env, which Chromium's helpers inherit from.
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const isSmoke = process.argv.includes("--smoke");
@@ -99,11 +103,24 @@ const runtimePaths = resolveDesktopRuntimePaths({
   appDir: __dirname,
   userDataPath: app.isPackaged ? app.getPath("userData") : undefined,
   resourcesPath: process.resourcesPath,
+  careerratHomeOverride: app.isPackaged && isSmoke ? process.env.CAREERRAT_HOME : undefined,
 });
 if (runtimePaths.careerratHome) {
   process.env.CAREERRAT_HOME = runtimePaths.careerratHome;
 }
+if (runtimePaths.isPackaged || isSmoke) {
+  process.env.PLAYWRIGHT_BROWSERS_PATH = "0";
+}
+if (runtimePaths.isPackaged) {
+  process.env.CAREERRAT_PACKAGED_DESKTOP = "1";
+  process.env.CAREERRAT_DESKTOP_CLI_ONLY = "1";
+}
 let repoRoot = runtimePaths.repoRoot;
+const smokeEngineRoot = resolveDesktopSmokeEngineRoot({
+  isPackaged: runtimePaths.isPackaged,
+  repoRoot,
+  desktopDir: __dirname,
+});
 
 // --- Trap 4 -------------------------------------------------------------
 // One helper resolves both the dev and packaged import path. In dev,
@@ -114,6 +131,10 @@ let repoRoot = runtimePaths.repoRoot;
 // already-resolved repoRoot is correct — no dev/packaged branch needed here.
 function loadEngineModule(relPath) {
   return import(pathToFileURL(join(repoRoot, relPath)).href);
+}
+
+function loadSmokeEngineModule(relPath) {
+  return import(pathToFileURL(join(smokeEngineRoot, relPath)).href);
 }
 
 function log(msg) {
@@ -174,14 +195,13 @@ let updateResult = { updateAvailable: false, version: null, releaseUrl: null, dm
 let updateCheckInitialTimer = null;
 let updateCheckTimer = null;
 
-// --smoke never renders anything — it's a scripted server-only check (boot,
-// GET /api/health, print, exit). Skipping GPU process bring-up entirely (as
-// opposed to just passing a `--disable-gpu` chromium flag, which still
-// spins the process up before deciding not to use it) keeps the smoke path
+// Smoke creates and verifies a real app window, but none of its acceptance
+// checks require hardware acceleration. Skipping GPU process bring-up entirely
+// (as opposed to just passing a `--disable-gpu` Chromium flag, which still
+// spins the process up before deciding not to use it) keeps the scripted path
 // robust on machines where third-party endpoint-security software intercepts
-// helper-process exec() and breaks Chromium's GPU/network process bootstrap
-// — a real-world failure mode this shell has actually hit in testing, not a
-// hypothetical. Must be called before app.whenReady().
+// helper-process exec() and breaks Chromium's GPU process bootstrap. Must be
+// called before app.whenReady().
 if (isSmoke) {
   app.disableHardwareAcceleration();
 }
@@ -193,25 +213,17 @@ async function boot() {
   // above, which also must land before any engine module reads process.env.
   process.env.CAREERRAT_DESKTOP_SHELL = "1";
 
-  // ISSUE-028: the packaged staged engine deliberately does not carry
-  // Playwright or a second Chromium download. Start a token-authenticated,
-  // loopback-only bridge to Electron's already-bundled Chromium before the
-  // engine mounts packet/export routes, then let documents/export.mjs route
-  // PDF work through it. No renderer token is written to disk or logged.
+  // ISSUE-028: PDF export uses Electron's already-bundled Chromium rather
+  // than the separate Playwright Chromium staged for supervised browser
+  // automation. Start that token-authenticated, loopback-only PDF bridge
+  // before the engine mounts packet/export routes. No renderer credential is
+  // written to disk or logged.
   pdfRenderer = await startDesktopPdfRenderer({ BrowserWindow });
   process.env.CAREERRAT_DESKTOP_PDF_RENDER_URL = pdfRenderer.url;
   process.env.CAREERRAT_DESKTOP_PDF_RENDER_TOKEN = pdfRenderer.token;
 
   const { createDevServer } = await loadEngineModule("src/cli/tracker-dev.mjs");
   dev = createDevServer({ repoRoot });
-
-  // Tolerate a fresh data root (no tracker.json yet) — an empty workspace
-  // can legitimately fail to render; log and keep booting so a first-run
-  // candidate still reaches /onboard instead of a crashed app.
-  const rendered = await dev.renderOnce();
-  if (!rendered.ok) {
-    log(`initial render skipped: ${rendered.error}`);
-  }
 
   dev.startWatching();
 
@@ -653,6 +665,21 @@ app.whenReady().then(async () => {
         renderPdf,
         readFile: readFileSync,
         removeFile: (path) => rmSync(path, { force: true }),
+      });
+
+      // Exercise the packaged engine's real browser adapter and its hermetic
+      // Chromium, then remove the throwaway persistent profile on both success
+      // and failure.
+      const { createPlaywrightOps } = await loadSmokeEngineModule(
+        "src/core/apply/playwright-ops.mjs"
+      );
+      const smokeBrowserProfile = mkdtempSync(
+        join(app.getPath("temp"), "careerrat-browser-smoke-")
+      );
+      await verifySmokeBrowserAutomation({
+        profileDir: smokeBrowserProfile,
+        createOps: createPlaywrightOps,
+        removeDir: (path) => rmSync(path, { recursive: true, force: true }),
       });
 
       log(`SMOKE OK ${url}`);

@@ -9,7 +9,7 @@ import { resolveUserPaths } from "../paths/workspace.mjs";
 
 class ExportChangedError extends Error {}
 
-export class WorkspaceExportBusyError extends Error {
+class WorkspaceExportBusyError extends Error {
   constructor(message = "workspace changed repeatedly during export; try again") {
     super(message);
     this.name = "WorkspaceExportBusyError";

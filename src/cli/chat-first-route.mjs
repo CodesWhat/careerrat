@@ -1,6 +1,7 @@
 import { executeWorkspaceIntent } from "../core/agent/workspace-agent.mjs";
 import {
   deepIngestPromptDismiss,
+  deepIngestThreadOpen,
   jobThreadMessageAppend,
   jobThreadSetArchived,
   jobThreadSetPinned,
@@ -269,6 +270,10 @@ export function mountChatFirstRoutes({
 
   addRoute("POST", "/api/chat-first/deep-ingest-prompt/dismiss", (req, res) =>
     withBody(req, res, () => deepIngestPromptDismiss(pathCtx))
+  );
+
+  addRoute("POST", "/api/chat-first/deep-ingest/open", (req, res) =>
+    withBody(req, res, () => deepIngestThreadOpen(pathCtx))
   );
 
   addRoute("POST", "/api/chat-first/touch-due/dismiss", (req, res) =>

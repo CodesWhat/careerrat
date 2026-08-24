@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import { createApplyDriver } from "../src/core/apply/apply-driver.mjs";
 import { EASY_APPLY_STEPS, findAdvanceButtonRef } from "../src/core/apply/form-fill.mjs";
 
 const GREENHOUSE_URL = "https://job-boards.greenhouse.io/example/jobs/123";
+const ASHBY_URL = "https://jobs.ashbyhq.com/curri/d616afe4-311f-4c73-8dc9-87c40f8c7ea8";
 const EASY_APPLY_URL = "https://www.linkedin.com/jobs/view/4123456789/?easyApplyModal=true";
 const WORKDAY_URL = "https://acme.wd5.myworkdayjobs.com/en-US/External/job/req-123";
 
@@ -59,6 +63,9 @@ function createFakeOps(steps) {
         log.push({ op: "screenshot" });
         return { data: "", format: "png" };
       },
+      async focusTab(args) {
+        log.push({ op: "focusTab", ...args });
+      },
     },
   };
 }
@@ -67,17 +74,21 @@ function makeDriver({
   ops,
   maxFormSteps,
   captureQuestionsImpl,
+  candidateConfigGetImpl,
+  loadAnswerMapImpl,
   saveScreenshotImpl,
   mayRunImpl,
+  repoRoot = "/repo",
+  env = {},
 } = {}) {
   return createApplyDriver({
     ops,
     providerLabel: "orca",
-    repoRoot: "/repo",
-    env: {},
+    repoRoot,
+    env,
     mayRunImpl: mayRunImpl ?? (() => ({ allowed: true })),
-    candidateConfigGetImpl: () => CONFIG,
-    loadAnswerMapImpl: async () => new Map(),
+    candidateConfigGetImpl: candidateConfigGetImpl ?? (() => CONFIG),
+    loadAnswerMapImpl: loadAnswerMapImpl ?? (async () => new Map()),
     captureQuestionsImpl:
       captureQuestionsImpl ??
       (async ({ questions }) => ({
@@ -89,6 +100,138 @@ function makeDriver({
     maxFormSteps,
   });
 }
+
+test("native radio groups use default and reviewed answers, select only their intended options, and verify filled state", async () => {
+  const log = [];
+  const selected = { workAuthorization: "", sponsorship: "" };
+  const snapshot = () => ({
+    origin: GREENHOUSE_URL,
+    pageText:
+      "Work authorization\nWill you now or in the future require sponsorship?\nSubmit application",
+    refs: {
+      e1: {
+        role: "radio-group",
+        name: "Work authorization",
+        required: true,
+        options: [
+          { label: "Yes", ref: "e1" },
+          { label: "No", ref: "e2" },
+        ],
+        stateKnown: true,
+        value: selected.workAuthorization,
+      },
+      e2: { role: "radio", name: "No", required: true, field: false },
+      e3: {
+        role: "radio-group",
+        name: "Will you now or in the future require sponsorship?",
+        required: true,
+        options: [
+          { label: "Yes", ref: "e3" },
+          { label: "No", ref: "e4" },
+        ],
+        stateKnown: true,
+        value: selected.sponsorship,
+      },
+      e4: { role: "radio", name: "No", required: true, field: false },
+      e5: { role: "button", name: "Submit application", required: false },
+    },
+  });
+  const ops = {
+    async openTab() {
+      return { pageId: "page-radio" };
+    },
+    async snapshot() {
+      return snapshot();
+    },
+    async clickButton({ ref }) {
+      log.push(ref);
+      if (ref === "e1") selected.workAuthorization = "Yes";
+      if (ref === "e4") selected.sponsorship = "No";
+      if (ref === "e5") throw new Error("Submit must remain untouched");
+    },
+    async screenshot() {
+      throw new Error("No confirmation screenshot is expected before submit");
+    },
+  };
+  const execute = makeDriver({
+    ops,
+    loadAnswerMapImpl: async () =>
+      new Map([["will you now or in the future require sponsorship", "No"]]),
+  });
+
+  const result = await execute({
+    applicationId: "app-native-radios",
+    application: { id: "app-native-radios", link: GREENHOUSE_URL },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  });
+
+  assert.equal(result.state, "awaiting-submit");
+  assert.equal(result.verified, false);
+  assert.equal(result.session.filledCount, 2);
+  assert.deepEqual(result.session.unresolved, []);
+  assert.deepEqual(log, ["e1", "e4"]);
+  assert.deepEqual(selected, { workAuthorization: "Yes", sponsorship: "No" });
+});
+
+test("Ashby detail pages open the Application tab before filling and uploading, then stop before submit", async () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-apply-driver-"));
+  try {
+    const resumePath = join(repoRoot, "workspace", "tailored", "resume.pdf");
+    mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
+    writeFileSync(resumePath, "fake resume");
+    const detailPage = {
+      origin: ASHBY_URL,
+      pageText: "Overview\nApply for this Job",
+      refs: refsOf([
+        ["e1", "tab", "Overview", false],
+        ["e2", "tab", "Application", false],
+        ["e3", "link", "Apply for this Job", false],
+        ["e4", "button", "Apply for this Job", false],
+      ]),
+    };
+    const formPage = {
+      origin: `${ASHBY_URL}/application`,
+      pageText:
+        '- textbox "Full Name" [required, ref=e5]\n- button "Resume" [required, ref=e6]\n- button "Submit Application" [ref=e7]',
+      refs: refsOf([
+        ["e5", "textbox", "Full Name", true],
+        ["e6", "button", "Resume", true],
+        ["e7", "button", "Submit Application", false],
+      ]),
+    };
+    const { ops, log } = createFakeOps([detailPage, formPage]);
+    const execute = makeDriver({ ops, repoRoot });
+
+    const result = await execute({
+      applicationId: "app-ashby-detail",
+      application: {
+        id: "app-ashby-detail",
+        link: ASHBY_URL,
+        artifacts: { resumePdf: "workspace/tailored/resume.pdf" },
+      },
+      postingUrl: ASHBY_URL,
+      questionCapture: { state: "captured" },
+      prepareOnly: true,
+    });
+
+    assert.equal(result.state, "awaiting-submit");
+    assert.equal(result.currentUrl, `${ASHBY_URL}/application`);
+    assert.equal(result.session.filledCount, 1);
+    assert.equal(result.session.uploadedCount, 1);
+    assert.deepEqual(
+      log.filter((entry) => entry.op === "clickButton"),
+      [{ op: "clickButton", pageId: "page-1", ref: "e2" }],
+      "the portal transition clicks only the exact Application tab, never either apply or submit control"
+    );
+    assert.deepEqual(
+      log.filter((entry) => entry.op === "upload"),
+      [{ op: "upload", pageId: "page-1", ref: "e6", files: resumePath }]
+    );
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
 
 test("LinkedIn form preparation uses the supervised-preparation consent capability", async () => {
   const seen = [];
@@ -598,6 +741,80 @@ test("question capture is re-evaluated per step: a later step's custom questions
     captures[0].questions.map(({ label }) => label),
     ["Why do you want this role?"]
   );
+});
+
+test("saved question capture is refreshed when a newly rendered required field is missing from its IDs", async () => {
+  const step = {
+    origin: ASHBY_URL,
+    pageText: "Application questions",
+    refs: refsOf([
+      ["e1", "textbox", "Why this role?", true],
+      ["e2", "radio-group", "Are you willing to travel?", true],
+    ]),
+  };
+  const { ops } = createFakeOps([step]);
+  const captures = [];
+  const execute = makeDriver({
+    ops,
+    captureQuestionsImpl: async (input) => {
+      captures.push(input);
+      return { questions: input.questions, excluded: [], demographicSectionPresent: false };
+    },
+  });
+
+  const result = await execute({
+    applicationId: "app-stale-question-capture",
+    application: { id: "app-stale-question-capture" },
+    postingUrl: ASHBY_URL,
+    questionCapture: {
+      state: "captured",
+      answerableCount: 1,
+      excludedCount: 0,
+      answerableIds: ["rendered-why-this-role"],
+      excludedIds: [],
+    },
+  });
+
+  assert.equal(result.state, "questions-captured");
+  assert.equal(captures.length, 1);
+  assert.deepEqual(
+    captures[0].questions.map(({ id }) => id),
+    ["rendered-why-this-role", "rendered-are-you-willing-to-travel"]
+  );
+});
+
+test("saved question capture without ID arrays uses its persisted counts to detect new fields", async () => {
+  const step = {
+    origin: ASHBY_URL,
+    pageText: "Application questions",
+    refs: refsOf([
+      ["e1", "textbox", "Why this role?", true],
+      ["e2", "radio-group", "Are you willing to travel?", true],
+    ]),
+  };
+  const { ops } = createFakeOps([step]);
+  const captures = [];
+  const execute = makeDriver({
+    ops,
+    captureQuestionsImpl: async (input) => {
+      captures.push(input);
+      return { questions: input.questions, excluded: [], demographicSectionPresent: false };
+    },
+  });
+
+  const result = await execute({
+    applicationId: "app-legacy-question-capture",
+    application: { id: "app-legacy-question-capture" },
+    postingUrl: ASHBY_URL,
+    questionCapture: {
+      state: "captured",
+      answerableCount: 1,
+      excludedCount: 0,
+    },
+  });
+
+  assert.equal(result.state, "questions-captured");
+  assert.equal(captures.length, 1);
 });
 
 test("step cap after real fills reports cumulative counts, not zero", async () => {
@@ -1130,6 +1347,100 @@ test("prepare-only advances through an explicit Next step and stops at the submi
   assert.deepEqual(
     log.filter((entry) => entry.op === "clickButton"),
     [{ op: "clickButton", pageId: "page-1", ref: "e1" }]
+  );
+});
+
+test("focusSession returns to the exact retained prepared page without opening or filling another tab", async () => {
+  const reviewPage = {
+    origin: `${GREENHOUSE_URL}?step=review`,
+    pageText: "Review your application",
+    refs: refsOf([["e1", "button", "Submit application", false]]),
+  };
+  const { ops, log } = createFakeOps([reviewPage]);
+  const execute = makeDriver({ ops });
+
+  await execute({
+    applicationId: "app-focus",
+    application: { id: "app-focus" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+  const focused = await execute({
+    applicationId: "app-focus",
+    application: { id: "app-focus" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+    focusSession: true,
+  });
+
+  assert.equal(focused.state, "awaiting-submit");
+  assert.equal(focused.verified, false);
+  assert.equal(focused.session.focused, true);
+  assert.equal(
+    log.filter((entry) => entry.op === "openTab").length,
+    1,
+    "the handoff reuses the retained page instead of opening the URL again"
+  );
+  assert.deepEqual(
+    log.filter((entry) => entry.op === "focusTab"),
+    [{ op: "focusTab", pageId: "page-1" }]
+  );
+  assert.equal(
+    log.some((entry) => entry.op === "clickButton"),
+    false
+  );
+});
+
+test("focusSession refuses to manufacture a new browser tab when no prepared page is retained", async () => {
+  const { ops, log } = createFakeOps([]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-not-prepared",
+    application: { id: "app-not-prepared" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+    focusSession: true,
+  });
+
+  assert.equal(result.state, "unavailable");
+  assert.match(result.reason, /no prepared browser session/i);
+  assert.equal(
+    log.some((entry) => entry.op === "openTab"),
+    false
+  );
+});
+
+test("prepare-only never clicks a plain Continue control that turns out to submit", async () => {
+  const formPage = {
+    origin: GREENHOUSE_URL,
+    pageText: "Application details",
+    refs: refsOf([["e1", "button", "Continue", false]]),
+  };
+  const confirmationPage = {
+    origin: `${GREENHOUSE_URL}/confirmation`,
+    pageText: "Thank you for applying",
+    refs: {},
+  };
+  const { ops, log } = createFakeOps([formPage, confirmationPage]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-continue-submits",
+    application: { id: "app-continue-submits" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.equal(result.state, "awaiting-submit");
+  assert.equal(result.verified, false);
+  assert.equal(
+    log.some((entry) => entry.op === "clickButton"),
+    false
   );
 });
 

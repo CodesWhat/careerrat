@@ -59,7 +59,25 @@ test("the tracked repository root contains only entry-point documentation", () =
   );
 });
 
-test("shared runtime fonts live under the asset tree", async () => {
+test("every explicit workflow test path exists", async () => {
+  const workflowsDir = join(root, ".github/workflows");
+  const missing = [];
+
+  for (const entry of await readdir(workflowsDir, { withFileTypes: true })) {
+    if (!entry.isFile() || !/\.ya?ml$/.test(entry.name)) continue;
+    const source = await readFile(join(workflowsDir, entry.name), "utf8");
+    const paths = source.match(
+      /\b(?:tests|apps\/[A-Za-z0-9._/-]+)\/[A-Za-z0-9._/-]+\.test\.(?:mjs|cjs|js|jsx|ts|tsx)\b/g
+    );
+    for (const path of new Set(paths || [])) {
+      if (!existsSync(join(root, path))) missing.push(`${entry.name}: ${path}`);
+    }
+  }
+
+  assert.deepEqual(missing, [], `Workflow test paths must exist:\n${missing.join("\n")}`);
+});
+
+test("document export fonts stay packaged while the app bundles its own fonts", async () => {
   assert.equal(existsSync(join(root, "fonts")), false, "root fonts/ should not exist");
   for (const file of ["Geist-OFL.txt", "GeistMonoVF.woff2", "GeistVF.woff2"]) {
     assert.equal(existsSync(join(root, "assets", "fonts", file)), true, `${file} should ship`);
@@ -70,7 +88,7 @@ test("shared runtime fonts live under the asset tree", async () => {
   const webFoundation = await readText("apps/web/src/chat-first/app-foundation.css");
   const pkg = JSON.parse(await readText("package.json"));
   const webPkg = JSON.parse(await readText("apps/web/package.json"));
-  assert.match(trackerDev, /join\(repoRoot, "assets", "fonts"\)/);
+  assert.doesNotMatch(trackerDev, /FONTS_DIR|serveFont|"\/fonts\//);
   assert.match(documentExport, /join\(repoRoot, "assets", "fonts", file\)/);
   assert.match(webFoundation, /@fontsource\/figtree\/400\.css/);
   assert.equal(webPkg.dependencies["@fontsource/figtree"], "^5.3.0");
@@ -186,8 +204,8 @@ test("start and update reconcile stale local app runtimes without killing foreig
 
 test("the trusted-publishing workflow installs dependencies before npm publish", async () => {
   const workflow = await readText(".github/workflows/publish.yml");
-  const installAt = workflow.indexOf("run: npm ci");
-  const publishAt = workflow.indexOf("npm publish --provenance");
+  const installAt = workflow.indexOf("run: corepack npm ci");
+  const publishAt = workflow.indexOf("corepack npm publish --provenance");
 
   assert.notEqual(installAt, -1, "trusted publishing must install the locked dependency graph");
   assert.ok(installAt < publishAt, "npm ci must run before npm publish triggers prepack");
@@ -354,7 +372,8 @@ test("the app ships one fixed light visual mode", async () => {
   assert.doesNotMatch(index, /theme-init\.js/);
   assert.equal(existsSync(join(root, "apps/web/public/theme-init.js")), false);
   assert.doesNotMatch(`${foundation}\n${workspace}`, /\[data-theme=["']?dark/);
-  assert.match(foundation, /background:\s*#edf5fb/);
+  assert.match(foundation, /--canvas:\s*#edf5fb/);
+  assert.match(foundation, /body\s*\{[^}]*background:\s*var\(--canvas\)/s);
 });
 
 test("local user data roots are excluded from git, docker, and Vercel surfaces", async () => {

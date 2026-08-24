@@ -1,18 +1,23 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ArtifactViewerModal } from "../jobs/ArtifactViewerModal.jsx";
 import { runJobsPageSearch } from "../jobs/jobsSearch.js";
+import { resolveErrorCopy } from "../lib/errorCopy.js";
+import { useEventSource } from "../lib/sse.js";
 import { chatFirstApi } from "./api.js";
 import { filterFiles, filterPeople, filterSearchJobs } from "./browser-model.js";
 import {
   calendarAction,
   commitComposerTurn,
+  commitJobThreadComposer,
   createMissionAndStart,
   downloadBinaryArtifact,
   downloadTextArtifact,
   engineUnavailable,
   findGate,
+  focusApplicationHandoff,
   isEngineFailure,
+  isMockInterviewStartRequest,
   loadChatFirstArtifact,
   mapActivityItems,
   mapComposerChips,
@@ -20,12 +25,15 @@ import {
   mockStartContext,
   openApplicationHandoff,
   packetExportReceipt,
+  projectWorkspaceResultToJobThread,
   resolveNeedDecision,
   resolvePersonAction,
   resumeHydratedMission,
   scheduleApplicationId,
   selectedSourcedDismissal,
+  selectMockSession,
   sourceSweepPresentation,
+  startMockFromJobThread,
 } from "./chat-first-app-controller.js";
 import {
   artifactEmoji,
@@ -43,6 +51,8 @@ import {
   JobContextPanel,
   MockInterviewContext,
   MockInterviewConversation,
+  SkillChatContext,
+  SkillChatConversation,
   SubmitGateModal,
   TodayConversation,
 } from "./conversation-surfaces.jsx";
@@ -53,6 +63,17 @@ import {
   captureSourceAndRefresh,
   decideProposalAndRefresh,
 } from "./deep-ingest-controller.js";
+import {
+  commitSkillChatCompletion,
+  commitSkillChatDecision,
+  hydrateSkillChatMessages,
+  reduceSkillChatEvent,
+  resolveSkillChatSession,
+  skillChatEventNeedsHydration,
+  skillChatFromWorkspaceResult,
+  skillChatStreamUrl,
+  skillChatSubmitBlocked,
+} from "./skill-chat-model.js";
 import { WorkspaceBrowser } from "./WorkspaceBrowser.jsx";
 import {
   ChatFirstWorkspace,
@@ -67,9 +88,21 @@ const DEFAULT_BROWSER_FILTERS = Object.freeze({
   fit80: true,
   comp: false,
   remote: false,
+  stage: "all",
+  source: "all",
+  posted: "all",
   files: "All",
   people: "all",
 });
+const SKILL_CHAT_EVENT_TYPES = [
+  "assistant",
+  "chat_state",
+  "error",
+  "result",
+  "system",
+  "tool_result",
+  "tool_use",
+];
 
 function list(value) {
   return Array.isArray(value) ? value : EMPTY_LIST;
@@ -83,6 +116,64 @@ function titleCase(value, fallback = "In play") {
     .filter(Boolean)
     .map((word) => `${word[0].toUpperCase()}${word.slice(1)}`)
     .join(" ");
+}
+
+export function dispatchChatFirstMessageIntent(
+  intent,
+  { openJob, openBrowser, openSettings, openArtifact, openSourced, runWorkspaceIntent } = {}
+) {
+  if (!intent?.type || !intent?.entity) return null;
+  if (intent.type !== "ui.navigate") return runWorkspaceIntent?.(intent) ?? null;
+
+  const surface = String(intent.input?.surface || "").trim();
+  if (surface === "job") return openJob?.(intent.entity.id) ?? null;
+  if (surface === "files" && intent.input?.artifactKind) {
+    return openArtifact?.(intent.entity, intent.input.artifactKind) ?? null;
+  }
+  if (surface === "search" && intent.entity.type === "sourced") {
+    return openSourced?.(intent.entity.id) ?? null;
+  }
+  if (["search", "files", "schedule", "people", "pipeline"].includes(surface)) {
+    return openBrowser?.(surface) ?? null;
+  }
+  if (surface === "settings") return openSettings?.(intent.input?.section) ?? null;
+  return null;
+}
+
+export function revealSourcedTarget(id, { dispatch, setQuery, setBrowserFilters } = {}) {
+  const targetId = String(id || "").trim();
+  if (!targetId) return null;
+  setQuery?.("");
+  setBrowserFilters?.((current) => ({
+    ...current,
+    fit80: false,
+    comp: false,
+    remote: false,
+    stage: "all",
+    source: "all",
+    posted: "all",
+  }));
+  dispatch?.({ type: "selection.replace", ids: [targetId] });
+  dispatch?.({ type: "browser.open", tab: "search" });
+  return targetId;
+}
+
+export async function loadChatFirstNavigationArtifact({ api, entity, artifactKind, files = [] }) {
+  if (!entity?.id || !artifactKind) return null;
+  const expectedKind = String(artifactKind).replaceAll("-", " ").toLowerCase();
+  const file = list(files).find(
+    (candidate) =>
+      candidate.applicationId === entity.id &&
+      String(candidate.kind || candidate.name || "")
+        .toLowerCase()
+        .includes(expectedKind)
+  );
+  const artifact = await loadChatFirstArtifact({
+    api,
+    applicationId: entity.id,
+    file: file || { kind: artifactKind, applicationId: entity.id },
+  });
+  return artifact ? { title: file?.name || "Interview dossier", artifact } : null;
 }
 
 function threadForUi(view, ui) {
@@ -166,7 +257,27 @@ export function packetRows(packet) {
 }
 
 function errorCopy(error) {
-  return error?.body?.error || error?.message || "That run could not finish.";
+  return resolveErrorCopy(error).message;
+}
+
+export async function runChatFirstOperation(
+  operation,
+  { refetch, setBusy, setError, setEngineDown } = {}
+) {
+  setBusy?.(true);
+  setError?.(null);
+  try {
+    const result = await operation();
+    await refetch?.();
+    setEngineDown?.(false);
+    return result;
+  } catch (cause) {
+    setError?.(errorCopy(cause));
+    if (isEngineFailure(cause)) setEngineDown?.(true);
+    return null;
+  } finally {
+    setBusy?.(false);
+  }
 }
 
 function browserLaunchers(view) {
@@ -217,10 +328,13 @@ function jobContext(view, thread, mockSession, actions) {
   const source = detail?.data || detail;
   const offerPosition =
     String(thread.stage || "").toLowerCase() === "offer" ? offerPositionLine(source) : null;
-  const lines = [offerPosition, source?.statusNote, source?.nextAction, source?.compNote]
+  const lines = [offerPosition, source?.statusNote, source?.nextAction]
     .map(jobContextLine)
     .filter(Boolean)
     .slice(0, 3);
+  const compensation = [source?.compSummary, source?.comp, source?.base, thread?.comp]
+    .map(jobContextLine)
+    .find(Boolean);
   const files = artifactRows(detail).map((file) => {
     const dossier = /interview dossier/i.test(String(file.kind || file.name || ""));
     return {
@@ -230,12 +344,28 @@ function jobContext(view, thread, mockSession, actions) {
     };
   });
   const canRunMock =
-    /screen|assessment|technical|hiring manager|interview|onsite|final/i.test(
+    /review|saved|screen|assessment|technical|hiring manager|interview|onsite|final/i.test(
       String(thread.stage || "")
     ) || files.some((file) => /interview dossier/i.test(String(file.kind || file.name || "")));
-  const canContinueMock =
+  const matchingMock =
     Boolean(mockSession?.id) &&
     (!mockSession.applicationId || mockSession.applicationId === thread.applicationId);
+  const mockAction = matchingMock
+    ? mockSession.status === "ended"
+      ? {
+          label: "Review mock interview",
+          onAction: () => actions.openMock?.(thread.applicationId),
+        }
+      : mockSession.questionReady
+        ? {
+            label: "Continue mock interview",
+            onAction: () => actions.openMock?.(thread.applicationId),
+          }
+        : {
+            label: "Preparing first question…",
+            disabled: true,
+          }
+    : null;
   return (
     <JobContextPanel
       job={{
@@ -243,17 +373,17 @@ function jobContext(view, thread, mockSession, actions) {
         role: thread.role || "Role",
         stage: titleCase(thread.stage),
         fit: Number.isFinite(Number(thread.fitScore)) ? Number(thread.fitScore) : "Fit pending",
-        badge: source?.conversations?.length
-          ? `${source.conversations.length} rounds logged`
-          : "thread history saved",
+        compensation,
+        compensationNote: source?.compNote || null,
+        location: thread.location || source?.location || null,
+        mode: thread.modeLabel || thread.mode || source?.modeLabel || source?.mode || null,
+        fitReasons: source?.roleFit?.why || [],
+        risks: source?.roleFit?.risks || [],
       }}
       summary={
         lines.length
           ? {
-              title:
-                String(thread.stage).toLowerCase() === "offer"
-                  ? "Negotiation position"
-                  : "Current position",
+              title: String(thread.stage).toLowerCase() === "offer" ? "NEGOTIATION" : "STATUS",
               lines,
             }
           : null
@@ -261,19 +391,19 @@ function jobContext(view, thread, mockSession, actions) {
       files={files}
       note="Every run, draft, and round for this job lives here, not in the main chat."
       action={
-        canRunMock
+        mockAction ||
+        (canRunMock
           ? {
-              label: canContinueMock ? "Continue mock interview" : "Run mock interview",
-              onAction: () =>
-                (canContinueMock ? actions.openMock : actions.startMock)?.(thread.applicationId),
+              label: "Run mock interview",
+              onAction: () => actions.startMock?.(thread.applicationId),
             }
-          : null
+          : null)
       }
     />
   );
 }
 
-function composerFor({ view, ui, composerValue, busy, actions }) {
+function composerFor({ view, ui, composerValue, busy, activeSkillChat, actions }) {
   const chips = mapComposerChips(ui.composerChips, [
     ...view.browser.search,
     ...view.threads,
@@ -283,7 +413,7 @@ function composerFor({ view, ui, composerValue, busy, actions }) {
     <Composer
       agentName={view.agentName}
       value={composerValue}
-      disabled={busy}
+      disabled={busy || skillChatSubmitBlocked(activeSkillChat)}
       chips={chips}
       onChange={actions.setComposer}
       onSubmit={actions.submitComposer}
@@ -309,13 +439,14 @@ export function ChatFirstAppView({
   technicalDetails = null,
   busy = false,
   error = null,
+  activeSkillChat = null,
   actions = {},
 }) {
   const activeJob = threadForUi(view, ui);
   const activeMission = missionForView(view);
   const railActive =
     ui.activeThread === "mock" && activeJob ? activeJob.id : activeJob?.id || ui.activeThread;
-  const composer = composerFor({ view, ui, composerValue, busy, actions });
+  const composer = composerFor({ view, ui, composerValue, busy, activeSkillChat, actions });
   const topBar = (
     <TopBar
       agentName={view.agentName}
@@ -415,7 +546,21 @@ export function ChatFirstAppView({
 
   let conversation;
   let context;
-  if (ui.activeThread === "ingest") {
+  if (activeSkillChat) {
+    conversation = (
+      <ConversationPanel composer={composer}>
+        <SkillChatConversation
+          thread={activeSkillChat}
+          messages={activeSkillChat.messages}
+          agentName={view.agentName}
+          busy={busy}
+          onDecision={actions.decideSkillChatDiscovery}
+          onComplete={actions.completeSkillChatDiscovery}
+        />
+      </ConversationPanel>
+    );
+    context = <SkillChatContext thread={activeSkillChat} />;
+  } else if (ui.activeThread === "ingest") {
     conversation = (
       <ConversationPanel composer={composer}>
         <DeepIngestConversation
@@ -456,8 +601,21 @@ export function ChatFirstAppView({
     );
   } else if (ui.activeThread === "mock") {
     const mapped = mockSession || mapMockSession({});
+    const mockComposer =
+      mapped.status === "ended"
+        ? null
+        : mapped.questionReady
+          ? composer
+          : composerFor({
+              view,
+              ui,
+              composerValue,
+              busy: true,
+              activeSkillChat,
+              actions,
+            });
     conversation = (
-      <ConversationPanel composer={composer}>
+      <ConversationPanel composer={mockComposer}>
         <MockInterviewConversation
           {...mapped}
           company={activeJob?.company || activeJob?.title}
@@ -468,8 +626,15 @@ export function ChatFirstAppView({
     context = (
       <MockInterviewContext
         title={`${activeJob?.role || "Role"} practice`}
-        detail={`Question ${mapped.questionNumber} of ${mapped.totalQuestions}`}
+        detail={
+          mapped.status === "ended"
+            ? `${mapped.turns.length} questions completed`
+            : mapped.questionReady
+              ? `Question ${mapped.questionNumber} of ${mapped.totalQuestions}`
+              : "Preparing first question"
+        }
         loadedContext={mapped.loadedContext || "Job description and confirmed story bank"}
+        status={mapped.status}
         onEnd={actions.endMock}
       />
     );
@@ -490,6 +655,8 @@ export function ChatFirstAppView({
           onCoach={actions.coachCommunication}
           onArtifactAction={(artifact) => actions.openThreadArtifact?.(activeJob, artifact)}
           onMessageAction={actions.openActivity}
+          onIntentAction={(intent) => actions.runMessageIntent?.(intent)}
+          intentBusy={busy}
         />
       </ConversationPanel>
     );
@@ -507,6 +674,8 @@ export function ChatFirstAppView({
           messages={view.mainThread?.messages || []}
           onArtifactAction={(artifact) => actions.openThreadArtifact?.(null, artifact)}
           onMessageAction={actions.openActivity}
+          onIntentAction={(intent) => actions.runMessageIntent?.(intent)}
+          intentBusy={busy}
           mission={missionPresentation(activeMission, {
             onPause: () => actions.pauseMission?.(activeMission.id),
             onResume: () => actions.resumeMission?.(activeMission.id),
@@ -522,6 +691,7 @@ export function ChatFirstAppView({
           onSecondary: () => actions.decideNeed?.(item, "secondary"),
         }))}
         deepIngestPrompt={view.deepIngestPrompt}
+        deepIngestStarted={Boolean(view.deepIngestThread)}
         onStartIngest={actions.openIngest}
         onDismissIngest={actions.dismissIngestPrompt}
       />
@@ -536,6 +706,8 @@ export function ChatFirstAppView({
           agentName={view.agentName}
           activeThread={railActive}
           needsAction={view.needsYou.length > 0}
+          deepIngestThread={view.deepIngestThread}
+          skillThreads={view.skillChats}
           threads={view.threads}
           browserLaunchers={browserLaunchers(view)}
           archiveThreads={view.archivedThreads}
@@ -588,6 +760,8 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   const [deepReceipt, setDeepReceipt] = useState(null);
   const [artifactViewer, setArtifactViewer] = useState(null);
   const [gatePacket, setGatePacket] = useState(null);
+  const [skillChatState, setSkillChatState] = useState(null);
+  const skillChatCursorsRef = useRef(new Map());
 
   const baseView = useMemo(
     () => buildChatFirstView(dashboard.data || {}, dashboard.data?.chatFirst || {}),
@@ -605,6 +779,12 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     };
   }, [baseView, newSearchIds]);
   const activeJob = threadForUi(view, ui);
+  const persistedSkillChat = list(view.skillChats).find((thread) => thread.id === ui.activeThread);
+  const activeSkillChat = persistedSkillChat
+    ? skillChatState?.id === persistedSkillChat.id
+      ? { ...persistedSkillChat, ...skillChatState }
+      : { ...persistedSkillChat, messages: hydrateSkillChatMessages(persistedSkillChat) }
+    : null;
   const rawGate = useMemo(
     () => findGate(view.missions, ui.gateId, view.jobDetails),
     [ui.gateId, view.jobDetails, view.missions]
@@ -617,11 +797,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         packet: packetRows(gatePacket).length ? packetRows(gatePacket) : list(rawGate.packet),
       }
     : null;
-  const rawMock = list(view.mockSessions).find(
-    (session) =>
-      session?.status !== "ended" &&
-      (!activeJob?.applicationId || session?.applicationId === activeJob.applicationId)
-  );
+  const rawMock = selectMockSession(view.mockSessions, activeJob?.applicationId);
   const mockSession = rawMock ? mapMockSession(rawMock) : null;
   const deepReview = buildDeepIngestReview(deepState);
   const deepIngest = {
@@ -734,6 +910,86 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   }, [api]);
 
   useEffect(() => {
+    if (!persistedSkillChat) {
+      setSkillChatState(null);
+      return;
+    }
+    let cancelled = false;
+    setSkillChatState({
+      ...persistedSkillChat,
+      messages: hydrateSkillChatMessages(persistedSkillChat),
+      cursor: 0,
+      streamAfter: 0,
+    });
+    void resolveSkillChatSession(api, persistedSkillChat)
+      .then((session) => {
+        if (cancelled) return;
+        const cursor = skillChatCursorsRef.current.get(session.chatId) || 0;
+        setSkillChatState((current) =>
+          current?.id === persistedSkillChat.id
+            ? {
+                ...current,
+                chatId: session.chatId,
+                state: session.state,
+                cursor,
+                streamAfter: cursor,
+              }
+            : current
+        );
+      })
+      .catch((cause) => {
+        if (cancelled) return;
+        const message = errorCopy(cause);
+        setSkillChatState((current) =>
+          current?.id === persistedSkillChat.id
+            ? {
+                ...current,
+                state: "idle",
+                messages: [
+                  ...list(current.messages),
+                  {
+                    id: `skill-session-error:${persistedSkillChat.id}`,
+                    role: "assistant",
+                    kind: "agent_error",
+                    text: message,
+                  },
+                ],
+              }
+            : current
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, persistedSkillChat]);
+
+  const handleSkillChatEvent = useCallback(
+    (type, raw, metadata) => {
+      const eventId = Number(metadata?.lastEventId);
+      setSkillChatState((current) => {
+        if (!current?.chatId) return current;
+        const next = reduceSkillChatEvent(current, {
+          chatId: current.chatId,
+          type,
+          raw,
+          eventId,
+        });
+        if (next !== current) skillChatCursorsRef.current.set(current.chatId, next.cursor);
+        return next;
+      });
+      if (skillChatEventNeedsHydration(type)) void dashboard.refetch();
+    },
+    [dashboard.refetch]
+  );
+
+  const activeSkillChatStreamUrl = skillChatStreamUrl(activeSkillChat);
+  useEventSource(activeSkillChatStreamUrl, {
+    types: SKILL_CHAT_EVENT_TYPES,
+    onEvent: handleSkillChatEvent,
+    enabled: Boolean(activeSkillChat?.chatId),
+  });
+
+  useEffect(() => {
     const mission = missionForView(view);
     const execution = resumeHydratedMission({
       api,
@@ -750,20 +1006,12 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   }, [api, dashboard.refetch, view]);
 
   async function run(operation) {
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await operation();
-      await dashboard.refetch();
-      setEngineDown(false);
-      return result;
-    } catch (cause) {
-      setError(errorCopy(cause));
-      if (isEngineFailure(cause)) setEngineDown(true);
-      return null;
-    } finally {
-      setBusy(false);
-    }
+    return runChatFirstOperation(operation, {
+      refetch: dashboard.refetch,
+      setBusy,
+      setError,
+      setEngineDown,
+    });
   }
 
   function openThread(id) {
@@ -773,15 +1021,45 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   async function submitComposer(text) {
     const clean = String(text || "").trim();
     if (!clean || busy) return;
+    if (persistedSkillChat && skillChatSubmitBlocked(activeSkillChat)) return;
+    if (activeJob?.applicationId && isMockInterviewStartRequest(clean)) {
+      if (rawMock?.applicationId === activeJob.applicationId) {
+        setComposerValue("");
+        dispatch({ type: "mock.open", applicationId: activeJob.applicationId });
+        return;
+      }
+      const setup = mockStartContext(activeJob, view.jobDetails?.[activeJob.applicationId]);
+      const mockResult = await run(() =>
+        startMockFromJobThread({
+          api,
+          applicationId: activeJob.applicationId,
+          text: clean,
+          title: setup.title,
+          context: setup.context,
+        })
+      );
+      if (mockResult) {
+        setComposerValue("");
+        dispatch({ type: "mock.open", applicationId: activeJob.applicationId });
+      }
+      return;
+    }
     const result = await run(async () => {
-      if (ui.activeThread === "mock" && rawMock?.id) {
+      if (activeSkillChat?.chatId) {
+        return api.sendChatMessage(activeSkillChat.chatId, clean);
+      }
+      if (ui.activeThread === "mock" && rawMock?.id && rawMock.status !== "ended") {
         return api.sendMockInterviewTurn({ sessionId: rawMock.id, text: clean });
       }
       if (ui.activeThread === "ingest") {
         return captureSourceAndRefresh({ api, kind: "paste", value: clean });
       }
       if (activeJob?.applicationId) {
-        return api.sendJobThreadTurn({ applicationId: activeJob.applicationId, text: clean });
+        return commitJobThreadComposer({
+          api,
+          applicationId: activeJob.applicationId,
+          text: clean,
+        });
       }
       const contextId = ui.composerChips[0];
       const context = contextId ? { pathname: "/jobs", jobId: contextId } : undefined;
@@ -794,6 +1072,8 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       });
     });
     if (result) setComposerValue("");
+    const launchedSkillChat = skillChatFromWorkspaceResult(result);
+    if (launchedSkillChat) dispatch({ type: "thread.open", id: launchedSkillChat.id });
     if (ui.activeThread === "ingest" && result?.view) {
       setDeepState(result.view);
       const next = buildDeepIngestReview(result.view);
@@ -876,7 +1156,9 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   }
 
   async function endMock() {
-    if (rawMock?.id) await run(() => api.endMockInterview({ sessionId: rawMock.id }));
+    if (rawMock?.id && rawMock.status !== "ended") {
+      await run(() => api.endMockInterview({ sessionId: rawMock.id }));
+    }
     dispatch({ type: "mock.close" });
   }
 
@@ -1087,6 +1369,104 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     }
   }
 
+  async function runMessageIntent(intent) {
+    const result = await dispatchChatFirstMessageIntent(intent, {
+      openJob,
+      openBrowser: (surface) => dispatch({ type: "browser.open", tab: surface }),
+      openArtifact: async (entity, artifactKind) => {
+        const result = await run(() =>
+          loadChatFirstNavigationArtifact({
+            api,
+            entity,
+            artifactKind,
+            files: view.browser.files,
+          })
+        );
+        if (result) setArtifactViewer(result);
+        return result;
+      },
+      openSourced: (id) => revealSourcedTarget(id, { dispatch, setQuery, setBrowserFilters }),
+      openSettings: (section) =>
+        navigate("/settings", {
+          state: { activeTab: "settings", ...(section ? { section } : {}) },
+        }),
+      runWorkspaceIntent: (typedIntent) =>
+        run(async () => {
+          const response = await api.runWorkspaceIntent(
+            typedIntent.type,
+            typedIntent.entity,
+            typedIntent.input || {}
+          );
+          if (
+            activeJob?.applicationId &&
+            typedIntent.entity?.type === "application" &&
+            typedIntent.entity.id === activeJob.applicationId
+          ) {
+            await projectWorkspaceResultToJobThread({
+              api,
+              applicationId: activeJob.applicationId,
+              response,
+              fallbackText: "That application action is complete.",
+            });
+          }
+          return response;
+        }),
+    });
+    const launchedSkillChat = skillChatFromWorkspaceResult(result);
+    if (launchedSkillChat) dispatch({ type: "thread.open", id: launchedSkillChat.id });
+    return result;
+  }
+
+  async function decideSkillChatDiscovery(item, action) {
+    if (!activeSkillChat?.skill || !item?.id || !["save", "discard"].includes(action)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await commitSkillChatDecision({
+        api,
+        skill: activeSkillChat.skill,
+        item,
+        action,
+      });
+    } catch (cause) {
+      const resultText = errorCopy(cause);
+      setSkillChatState((current) =>
+        current?.id === activeSkillChat.id
+          ? {
+              ...current,
+              messages: [
+                ...list(current.messages),
+                {
+                  id: `decision-error:${item.id}:${Date.now()}`,
+                  role: "assistant",
+                  kind: "action_error",
+                  text: resultText,
+                },
+              ],
+            }
+          : current
+      );
+      setError(resultText);
+    } finally {
+      await dashboard.refetch().catch(() => undefined);
+      setBusy(false);
+    }
+  }
+
+  async function completeSkillChatDiscovery(item) {
+    if (!activeSkillChat?.skill || !item?.id) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await commitSkillChatCompletion({ api, skill: activeSkillChat.skill, item });
+    } catch (cause) {
+      setError(errorCopy(cause));
+    } finally {
+      await dashboard.refetch().catch(() => undefined);
+      setBusy(false);
+    }
+  }
+
   const actions = {
     setComposer: setComposerValue,
     submitComposer,
@@ -1106,10 +1486,13 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     dismissSelection,
     chatAboutSelection: () => dispatch({ type: "selection.chat" }),
     runCartMission,
+    runMessageIntent,
+    decideSkillChatDiscovery,
+    completeSkillChatDiscovery,
     runSweep,
     setQuery,
     openSourceHealth: () => navigate("/settings", { state: { activeTab: "settings" } }),
-    filterBrowser: (filter) => {
+    filterBrowser: (filter, value) => {
       if (ui.browse === "files") {
         setBrowserFilters((current) => ({ ...current, files: filter }));
         return;
@@ -1120,6 +1503,10 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       }
       if (["fit80", "comp", "remote"].includes(filter)) {
         setBrowserFilters((current) => ({ ...current, [filter]: !current[filter] }));
+        return;
+      }
+      if (["stage", "source", "posted"].includes(filter)) {
+        setBrowserFilters((current) => ({ ...current, [filter]: value || "all" }));
       }
     },
     selectPipelineStage: (stageId) => {
@@ -1168,6 +1555,11 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       const kind = String(artifact?.kind || "").toLowerCase();
       if (kind.includes("search")) {
         dispatch({ type: "browser.open", tab: "search" });
+        return;
+      }
+      if (["research_chat", "board_discovery_chat"].includes(artifact?.kind)) {
+        const launched = skillChatFromWorkspaceResult({ messages: [{ artifacts: [artifact] }] });
+        if (launched) dispatch({ type: "thread.open", id: launched.id });
         return;
       }
       if (kind.includes("evidence") || kind.includes("story")) {
@@ -1245,7 +1637,11 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         setError("No calendar event is ready to export yet.");
       }
     },
-    openIngest: () => dispatch({ type: "ingest.open" }),
+    openIngest: async () => {
+      if (typeof api.openDeepIngestThread !== "function") return;
+      const result = await run(() => api.openDeepIngestThread());
+      if (result) dispatch({ type: "ingest.open" });
+    },
     dismissIngestPrompt: async () => {
       if (typeof api.dismissDeepIngestPrompt !== "function") return;
       await run(() => api.dismissDeepIngestPrompt());
@@ -1281,9 +1677,15 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         ids: activeGate?.applicationId ? [activeGate.applicationId] : [],
       });
     },
-    openGateHandoff: () => {
-      if (!openApplicationHandoff(activeGate))
-        setError("The prepared application does not have a safe portal link yet.");
+    openGateHandoff: async () => {
+      const focused = await run(() =>
+        focusApplicationHandoff(activeGate, (type, entity, input) =>
+          api.runWorkspaceIntent(type, entity, input)
+        )
+      );
+      if (focused === false) {
+        setError("The prepared application session is not available yet.");
+      }
     },
     openJobFile: async (applicationId, _id, file) => {
       const normalizedFile = {
@@ -1337,6 +1739,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         error ||
         (dashboard.noDatabase ? "CareerRat needs local setup before the workspace can open." : null)
       }
+      activeSkillChat={activeSkillChat}
       actions={actions}
     />
   );

@@ -1,7 +1,7 @@
 // discovery-route.mjs — supervised app orchestration for the post-onboarding
 // discovery pipeline. This is deliberately not a hidden batch runner:
-// research-boards and discover-companies are confirm-first skills, and
-// search-jobs must stop at sourced/review state before gate/apply flows.
+// research-boards is a visible confirm-first chat. Company discovery stays on
+// the app-owned proposal path, and search-jobs stops at sourced/review state.
 
 import { DISCOVERY_PIPELINE, recordDiscoveryCompletion } from "../core/agent-guidance.mjs";
 import { dbExists } from "../core/db/connection.mjs";
@@ -25,8 +25,6 @@ import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 export const DISCOVERY_CHAT_SKILLS = [
   "research-boards",
-  "discover-companies",
-  "search-jobs",
   "research-company",
   "research-comp",
   "company-health",
@@ -35,10 +33,6 @@ export const DISCOVERY_CHAT_SKILLS = [
 const DISCOVERY_STEP_NOTES = {
   "research-boards":
     "Run research-boards, propose useful boards, and stop at the skill's confirm-first write gate.",
-  "discover-companies":
-    "Run discover-companies, propose employer ATS boards, and stop at the skill's confirm-first write gate.",
-  "search-jobs":
-    "Run search-jobs for the first sweep or refresh, save sourced roles, capture reachable JD bodies, and queue sourced roles that still need setup answers.",
   "research-company":
     "Run research-company for the requested company and compose a cited workspace/research/<slug>.md artifact.",
   "research-comp":
@@ -78,6 +72,15 @@ export function normalizeDiscoveryGuidance(guidance) {
     nextSkill,
     message: guidance?.message || `Ask your agent to run ${nextSkill} next.`,
     ctaLabel: guidance?.ctaLabel || `Run ${nextSkill}`,
+  };
+}
+
+function normalizeFirstSearchGuidance(guidance) {
+  if (String(guidance?.nextSkill || "").trim() !== "search-jobs") return null;
+  return {
+    nextSkill: "search-jobs",
+    message: guidance?.message || "Discovery is complete. Run the first search next.",
+    ctaLabel: guidance?.ctaLabel || "Run first search",
   };
 }
 
@@ -259,13 +262,16 @@ async function startOrReuseDiscoveryChat({ chatRuntime, guidance, source, candid
 }
 
 function quickStartGuidance(body, liveGuidance) {
+  if (String(liveGuidance?.nextSkill || "").trim()) {
+    return normalizeFirstSearchGuidance(liveGuidance) || normalizeDiscoveryGuidance(liveGuidance);
+  }
+  const preparedGuidance = {
+    nextSkill: body?.nextSkill,
+    message: body?.nextMessage,
+    ctaLabel: body?.nextSkill ? `Run ${body.nextSkill}` : null,
+  };
   return (
-    normalizeDiscoveryGuidance(liveGuidance) ||
-    normalizeDiscoveryGuidance({
-      nextSkill: body?.nextSkill,
-      message: body?.nextMessage,
-      ctaLabel: body?.nextSkill ? `Run ${body.nextSkill}` : null,
-    })
+    normalizeFirstSearchGuidance(preparedGuidance) || normalizeDiscoveryGuidance(preparedGuidance)
   );
 }
 
@@ -618,6 +624,18 @@ export function mountDiscoveryRoutes({
 
   addRoute("POST", "/api/discovery/next", async (_req, res) => {
     const rawGuidance = loadAgentGuidance({ root: repoRoot, env });
+    const firstSearchGuidance = normalizeFirstSearchGuidance(rawGuidance);
+    if (firstSearchGuidance) {
+      sendJson(res, 200, {
+        ok: true,
+        pipeline: DISCOVERY_PIPELINE,
+        guidance: firstSearchGuidance,
+        readyForFirstSearch: true,
+        chat: null,
+        activeDiscoveryChat: findActiveDiscoveryChat(chatRuntime),
+      });
+      return;
+    }
     const guidance = normalizeDiscoveryGuidance(rawGuidance);
     if (!guidance) {
       sendJson(res, 200, {

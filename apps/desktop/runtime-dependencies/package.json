@@ -1,0 +1,13 @@
+{
+  "name": "@careerrat/desktop-engine-dependencies",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "htmlparser2": "12.0.0",
+    "jszip": "3.10.1",
+    "mammoth": "1.12.1",
+    "playwright": "1.62.1",
+    "sanitize-html": "2.17.7",
+    "undici": "7.29.0"
+  }
+}

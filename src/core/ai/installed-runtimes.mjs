@@ -12,13 +12,78 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  realpathSync,
   rmSync,
-  symlinkSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
-import { APP_SAFE_RUNTIME_TOOLS, CHAT_RUNTIME_TOOLS } from "./runtime-tools.mjs";
+import { delimiter, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
+import { fetchPublicHttpText, validatePublicHttpUrl } from "../net/public-http-fetch.mjs";
+import { userPath } from "../paths/workspace.mjs";
+
+const CLAUDE_BOUNDARY_MINIMUM_VERSION = "2.1.241";
+const UNSUPPORTED_CAPABILITY_REASON =
+  "Detected, but this CLI cannot safely run CareerRat tools yet.";
+const PUBLIC_WEB_SERVER_NAME = "careerrat_public_web";
+const PUBLIC_WEB_FETCH_TOOL = `mcp__${PUBLIC_WEB_SERVER_NAME}__fetch`;
+const PUBLIC_WEB_SERVER_ARG = "--careerrat-public-web";
+const INSTALLED_RUNTIME_MODULE_PATH = fileURLToPath(import.meta.url);
+const EXACT_READ_ROOTS = Object.freeze({
+  "intake-extract": ["workspace", "intake", "uploads"],
+  "resume-extract": ["workspace", "intake", "resume-uploads"],
+});
+
+const INSTALLED_CHILD_ENV_KEYS = Object.freeze([
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "USERPROFILE",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "XDG_CACHE_HOME",
+  "CLAUDE_CONFIG_DIR",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "LANG",
+  "LANGUAGE",
+  "LC_ALL",
+  "LC_CTYPE",
+  "TZ",
+  "TERM",
+  "COLORTERM",
+  "NO_COLOR",
+  "SystemRoot",
+  "SYSTEMROOT",
+  "WINDIR",
+  "PATHEXT",
+  "COMSPEC",
+  "CAREERRAT_HOME",
+  "CAREERRAT_INSTALLED_AI_MODEL",
+  "ANTHROPIC_MODEL",
+  "ANTHROPIC_SMALL_FAST_MODEL",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "NODE_EXTRA_CA_CERTS",
+]);
+
+export function buildInstalledRuntimeChildEnv({ env = process.env } = {}) {
+  const childEnv = {};
+  for (const key of INSTALLED_CHILD_ENV_KEYS) {
+    if (env[key] !== undefined) childEnv[key] = env[key];
+  }
+  return childEnv;
+}
 
 export const INSTALLED_RUNTIME_DEFINITIONS = [
   {
@@ -31,14 +96,15 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     // The only installed runtime whose CLI actually has a tool-allowlist
     // mechanism (`--tools`/`--allowedTools`, wired in
     // buildInstalledRuntimeInvocation's "claude" branch below). Every other
-    // runtime in this registry ignores the `tools` param entirely — see
-    // runInstalledRuntime's chat-tool-profile guard, which fails closed for
-    // any of them rather than silently granting an unscoped tool surface.
+    // runtime in this registry ignores the `tools` param entirely. The run
+    // choke points fail closed for every tool-bearing skill/chat call rather
+    // than silently granting an unscoped tool surface.
     // Absent on every other definition means "unsupported," deliberately —
     // do not add this key anywhere else without also verifying that CLI has
     // a real per-call tool restriction, the way this one was verified against
     // the real installed `claude` CLI (see the file header comment).
-    chatToolProfileSupported: true,
+    toolExecutionSupported: true,
+    minimumBoundaryVersion: CLAUDE_BOUNDARY_MINIMUM_VERSION,
     // The only installed runtime whose CLI has a documented NDJSON streaming
     // output mode (`--output-format stream-json --verbose`, wired in
     // buildInstalledRuntimeInvocation's "claude" branch below) that emits the
@@ -227,8 +293,71 @@ export function detectInstalledRuntimes(options = {}) {
       available: Boolean(path),
       warning: definition.warning || null,
       installUrl: definition.installUrl || null,
+      toolExecutionSupported: definition.toolExecutionSupported === true,
+      capabilityReason:
+        definition.toolExecutionSupported === true ? null : UNSUPPORTED_CAPABILITY_REASON,
     };
   });
+}
+
+export function installedRuntimeToolExecutionCapability(runtimeId) {
+  const definition = INSTALLED_RUNTIME_DEFINITIONS.find(({ id }) => id === runtimeId);
+  return {
+    supported: definition?.toolExecutionSupported === true,
+    reason: definition?.toolExecutionSupported === true ? null : UNSUPPORTED_CAPABILITY_REASON,
+    minimumVersion: definition?.minimumBoundaryVersion || null,
+  };
+}
+
+function parseVersion(value) {
+  const match = String(value || "").match(/\b(\d+)\.(\d+)\.(\d+)\b/);
+  return match ? match.slice(1).map(Number) : null;
+}
+
+function versionAtLeast(value, floor) {
+  const actual = parseVersion(value);
+  const minimum = parseVersion(floor);
+  if (!actual || !minimum) return false;
+  for (let index = 0; index < 3; index += 1) {
+    if (actual[index] > minimum[index]) return true;
+    if (actual[index] < minimum[index]) return false;
+  }
+  return true;
+}
+
+function assertInstalledRuntimeBoundaryVersion(
+  runtime,
+  { spawnSyncImpl = spawnSync, env = process.env, timeoutMs = 5000 } = {}
+) {
+  const definition = INSTALLED_RUNTIME_DEFINITIONS.find(({ id }) => id === runtime?.id);
+  if (!definition?.minimumBoundaryVersion) return;
+  let result;
+  const childEnv = buildInstalledRuntimeChildEnv({ env });
+  try {
+    result = spawnSyncImpl(runtime.path, ["--version"], {
+      shell: false,
+      windowsHide: true,
+      encoding: "utf8",
+      timeout: timeoutMs,
+      env: childEnv,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch {
+    result = null;
+  }
+  if (
+    result?.status !== 0 ||
+    !versionAtLeast(
+      `${result?.stdout || ""}\n${result?.stderr || ""}`,
+      definition.minimumBoundaryVersion
+    )
+  ) {
+    throw runtimeError(
+      `${definition.name} ${definition.minimumBoundaryVersion} or newer is required for secure CareerRat tool runs.`,
+      RUNTIME_TOOL_PROFILE_UNSUPPORTED,
+      { runtimeId: runtime.id }
+    );
+  }
 }
 
 export function probeInstalledRuntime(
@@ -240,6 +369,38 @@ export function probeInstalledRuntime(
   }
   const definition = INSTALLED_RUNTIME_DEFINITIONS.find(({ id }) => id === runtime.id);
   if (!definition) return { status: "unsupported", ready: false, action: null };
+  const childEnv = buildInstalledRuntimeChildEnv({ env });
+
+  if (definition.toolExecutionSupported === true && definition.minimumBoundaryVersion) {
+    let versionResult;
+    try {
+      versionResult = spawnSyncImpl(runtime.path, ["--version"], {
+        shell: false,
+        windowsHide: true,
+        encoding: "utf8",
+        timeout: timeoutMs,
+        env: childEnv,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch {
+      versionResult = null;
+    }
+    if (
+      versionResult?.status !== 0 ||
+      !versionAtLeast(
+        `${versionResult?.stdout || ""}\n${versionResult?.stderr || ""}`,
+        definition.minimumBoundaryVersion
+      )
+    ) {
+      return {
+        status: "unsupported_capability",
+        ready: false,
+        action: null,
+        toolExecutionSupported: false,
+        capabilityReason: `Update ${definition.name} to ${definition.minimumBoundaryVersion} or newer for secure CareerRat tool runs.`,
+      };
+    }
+  }
 
   let result;
   try {
@@ -248,7 +409,7 @@ export function probeInstalledRuntime(
       windowsHide: true,
       encoding: "utf8",
       timeout: timeoutMs,
-      env,
+      env: childEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });
   } catch {
@@ -262,12 +423,188 @@ export function probeInstalledRuntime(
       status: definition.authProbe.launchOnly ? "ready_unverified" : "ready",
       ready: true,
       action: null,
+      toolExecutionSupported: definition.toolExecutionSupported === true,
+      capabilityReason:
+        definition.toolExecutionSupported === true ? null : UNSUPPORTED_CAPABILITY_REASON,
     };
   }
   return {
     status: "authentication_required",
     ready: false,
     action: "open_terminal",
+  };
+}
+
+function existingCanonicalPath(path) {
+  try {
+    return realpathSync(path);
+  } catch {
+    return null;
+  }
+}
+
+const RUNTIME_READ_BOUNDARY_INVALID = "RUNTIME_READ_BOUNDARY_INVALID";
+
+function isWithin(root, candidate) {
+  const remainder = relative(root, candidate);
+  return (
+    remainder === "" ||
+    (!remainder.startsWith(`..${sep}`) && remainder !== ".." && !isAbsolute(remainder))
+  );
+}
+
+function exactApprovedReadPaths({ repoRoot, env, skill, approvedReadPaths } = {}) {
+  const rootSegments = EXACT_READ_ROOTS[skill];
+  if (
+    !repoRoot ||
+    !rootSegments ||
+    !Array.isArray(approvedReadPaths) ||
+    approvedReadPaths.length !== 1
+  ) {
+    throw runtimeError(
+      `Skill "${skill || "unknown"}" requires one explicit saved-upload read path.`,
+      RUNTIME_READ_BOUNDARY_INVALID,
+      { runtimeId: "claude", skill: skill || null }
+    );
+  }
+
+  const lexicalAllowedRoot = resolve(userPath({ repoRoot, env }, join(...rootSegments)));
+  const canonicalAllowedRoot = existingCanonicalPath(lexicalAllowedRoot);
+  if (!canonicalAllowedRoot) {
+    throw runtimeError(
+      `Skill "${skill}" cannot resolve its saved-upload boundary.`,
+      RUNTIME_READ_BOUNDARY_INVALID,
+      { runtimeId: "claude", skill }
+    );
+  }
+
+  const approved = approvedReadPaths.map((candidate) => {
+    const lexical = resolve(String(candidate || ""));
+    const canonical = existingCanonicalPath(lexical);
+    const expectedCanonical = resolve(canonicalAllowedRoot, relative(lexicalAllowedRoot, lexical));
+    const isFile = canonical ? statSync(canonical).isFile() : false;
+    if (
+      !canonical ||
+      !isFile ||
+      !isWithin(lexicalAllowedRoot, lexical) ||
+      !isWithin(canonicalAllowedRoot, canonical) ||
+      canonical !== expectedCanonical
+    ) {
+      throw runtimeError(
+        `Skill "${skill}" received a read path outside its exact saved-upload boundary.`,
+        RUNTIME_READ_BOUNDARY_INVALID,
+        { runtimeId: "claude", skill }
+      );
+    }
+    return canonical;
+  });
+  return [...new Set(approved)];
+}
+
+function approvedInstalledRuntimeReadPaths({
+  repoRoot,
+  env,
+  skill,
+  isolatedCwd,
+  approvedReadPaths,
+} = {}) {
+  return [
+    ...exactApprovedReadPaths({ repoRoot, env, skill, approvedReadPaths }),
+    existingCanonicalPath(isolatedCwd),
+  ].filter(Boolean);
+}
+
+function permissionAbsolutePath(path) {
+  const normalized = resolve(path).split(sep).join("/");
+  if (/^[A-Za-z]:\//.test(normalized)) {
+    return `//${normalized[0].toLowerCase()}${normalized.slice(2)}`;
+  }
+  return `//${normalized.replace(/^\/+/, "")}`;
+}
+
+function scopedReadRule(path) {
+  const absolute = permissionAbsolutePath(path);
+  try {
+    return statSync(path).isDirectory() ? `Read(${absolute}/**)` : `Read(${absolute})`;
+  } catch {
+    return `Read(${absolute})`;
+  }
+}
+
+function publicWebMcpConfig({ runtimeHostPath = process.execPath } = {}) {
+  return {
+    mcpServers: {
+      [PUBLIC_WEB_SERVER_NAME]: {
+        command: runtimeHostPath,
+        args: [INSTALLED_RUNTIME_MODULE_PATH, PUBLIC_WEB_SERVER_ARG],
+        env: { ELECTRON_RUN_AS_NODE: "1" },
+      },
+    },
+  };
+}
+
+function emptyMcpConfig() {
+  return { mcpServers: {} };
+}
+
+function claudeRuntimeBoundary({
+  repoRoot,
+  env,
+  skill,
+  tools,
+  isolatedCwd,
+  approvedReadPaths,
+  runtimeHostPath,
+} = {}) {
+  const requested = new Set(Array.isArray(tools) ? tools.filter(Boolean) : []);
+  const usesFiles = ["Read", "Glob", "Grep"].some((tool) => requested.has(tool));
+  if (requested.has("Glob") || requested.has("Grep")) {
+    throw runtimeError(
+      "Installed CareerRat skills do not expose broad file discovery tools.",
+      RUNTIME_READ_BOUNDARY_INVALID,
+      { runtimeId: "claude" }
+    );
+  }
+  const readPaths = usesFiles
+    ? approvedInstalledRuntimeReadPaths({
+        repoRoot,
+        env,
+        skill,
+        isolatedCwd,
+        approvedReadPaths,
+      })
+    : [existingCanonicalPath(isolatedCwd)].filter(Boolean);
+
+  const usesPublicWeb = requested.has("WebSearch") || requested.has("WebFetch");
+  const visibleTools = [...requested].filter((tool) => tool !== "WebFetch");
+  const allowedTools = [];
+  if (usesFiles) allowedTools.push(...readPaths.map(scopedReadRule));
+  if (requested.has("Skill") && skill) allowedTools.push(`Skill(${skill})`);
+  if (requested.has("WebSearch")) allowedTools.push("WebSearch");
+  if (usesPublicWeb) allowedTools.push(PUBLIC_WEB_FETCH_TOOL);
+
+  return {
+    visibleTools,
+    allowedTools,
+    settings: {
+      permissions: {
+        defaultMode: "dontAsk",
+        deny: ["Bash", "Edit", "Write", "NotebookEdit", "Agent", "WebFetch"],
+      },
+      sandbox: {
+        allowUnsandboxedCommands: false,
+        filesystem: {
+          denyRead: ["//**"],
+          allowRead: usesFiles ? readPaths : isolatedCwd ? [isolatedCwd] : [],
+        },
+        network: {
+          allowLocalBinding: false,
+          allowAllUnixSockets: false,
+          deniedDomains: ["localhost", "*.localhost", "0.0.0.0", "127.0.0.1", "169.254.169.254"],
+        },
+      },
+    },
+    mcpConfig: usesPublicWeb ? publicWebMcpConfig({ runtimeHostPath }) : emptyMcpConfig(),
   };
 }
 
@@ -284,6 +621,11 @@ export function buildInstalledRuntimeInvocation({
   // is only safe when the spawn's cwd is guaranteed to contain nothing but
   // that one skill.
   skill,
+  repoRoot,
+  env = process.env,
+  isolatedCwd,
+  approvedReadPaths,
+  runtimeHostPath,
   // Only meaningful for runtimeId === "claude" (the only definition with
   // streamingSupported: true — see the registry above). Swaps
   // `--output-format json` for `--output-format stream-json --verbose`:
@@ -299,28 +641,25 @@ export function buildInstalledRuntimeInvocation({
     options: { shell: false, windowsHide: true },
   };
   if (runtimeId === "claude") {
+    const boundary = claudeRuntimeBoundary({
+      repoRoot,
+      env,
+      skill,
+      tools,
+      isolatedCwd,
+      approvedReadPaths,
+      runtimeHostPath,
+    });
     const args = [
       "-p",
-      // The app supplies the complete task/skill context in `prompt` below.
-      // Loading a user's project hooks, plugins, MCP servers, auto-memory, and
-      // CLAUDE.md here is both unnecessary and extremely expensive: in a real
-      // CareerRat checkout it added ~136k input tokens and pushed a PDF extract
-      // beyond the two-minute runtime limit. Safe mode keeps subscription auth
-      // and built-in tools available while isolating this bounded app call —
-      // EXCEPT `--safe-mode`'s own help text is explicit that it disables
-      // "skills" outright, which leaves the Skill tool's registry empty even
-      // for a project-local `.claude/skills/<name>` this call actually wants
-      // (verified against the real installed CLI: a --safe-mode run's Skill
-      // tool lists only Anthropic's fixed built-in skills, never a project
-      // skill). When the caller has already isolated `cwd` to a temp dir
-      // containing nothing but that one skill (runInstalledRuntime's
-      // materializeIsolatedSkillCwd), `--setting-sources project` gets the
-      // same cost/privacy posture --safe-mode promises — confirmed empirically
-      // at ~5k cache-creation input tokens against that isolated cwd, not the
-      // ~136k a real project cwd produces — while the Skill tool actually
-      // resolves the skill. Every other call (no skill / isolation unavailable)
-      // keeps exactly today's --safe-mode behavior.
-      ...(skill ? ["--setting-sources", "project"] : ["--safe-mode"]),
+      "--setting-sources",
+      skill ? "project" : "",
+      "--settings",
+      JSON.stringify(boundary.settings),
+      "--strict-mcp-config",
+      "--mcp-config",
+      JSON.stringify(boundary.mcpConfig),
+      "--no-chrome",
       "--output-format",
       streaming ? "stream-json" : "json",
       ...(streaming ? ["--verbose"] : []),
@@ -328,9 +667,10 @@ export function buildInstalledRuntimeInvocation({
       "dontAsk",
       "--no-session-persistence",
     ];
-    const allowedTools = Array.isArray(tools) ? tools.filter(Boolean) : [];
-    args.push("--tools", allowedTools.join(","));
-    if (allowedTools.length) args.push("--allowedTools", allowedTools.join(","));
+    args.push("--tools", boundary.visibleTools.join(","));
+    if (boundary.allowedTools.length) {
+      args.push("--allowedTools", boundary.allowedTools.join(","));
+    }
     if (model) args.push("--model", model);
     if (schema) args.push("--json-schema", JSON.stringify(sanitizeInstalledOutputSchema(schema)));
     return { ...common, args };
@@ -425,22 +765,12 @@ function sanitizeCodexOutputSchema(value) {
 }
 
 // ---------------------------------------------------------------------------
-// Isolated skill cwd — the fix for the installed "claude" runtime's Skill
-// tool coming up empty under --safe-mode (see buildInstalledRuntimeInvocation's
-// comment above). Builds an app-owned, ephemeral cwd containing nothing but
-// `.claude/skills/<skill>/`, symlinked to this repo's own `.agents/skills/<skill>`
-// (the same source of truth scripts/install-skills.mjs shims into `.claude/skills`
-// for a real checkout) — falling back to a copied tree the same way that
-// script does when symlinks aren't available (e.g. Windows without developer
-// mode). Verified empirically against the real installed CLI: a symlinked
-// skill directory's contents resolve without the CLI walking up to the
-// symlink target's real project root — spawning `claude -p --setting-sources
-// project` from this cwd exposes exactly that one skill (plus Anthropic's
-// fixed built-in skills) at the same ~5k-cache-creation-token cost
-// --safe-mode's own baseline carries, never the real repo's other skills,
-// CLAUDE.md, hooks, or MCP config. Never throws — returns null so callers
-// fall back to plain --safe-mode (today's behavior) if the skill's SKILL.md
-// can't be found or the temp dir can't be created.
+// Isolated skill cwd. Builds an app-owned, ephemeral cwd containing nothing but
+// `.claude/skills/<skill>/`, copied from the repo's own
+// `.agents/skills/<skill>`. A copy keeps the project-settings loader inside
+// the isolated tree instead of following a skill symlink back toward the real
+// checkout. The caller treats a null result as a hard boundary failure, never
+// as permission to fall back to the repo cwd.
 // ---------------------------------------------------------------------------
 
 function copySkillTree(src, dest) {
@@ -465,11 +795,7 @@ export function materializeIsolatedSkillCwd({ repoRoot, skill } = {}) {
     const skillsDir = join(tempDir, ".claude", "skills");
     mkdirSync(skillsDir, { recursive: true });
     const dest = join(skillsDir, skill);
-    try {
-      symlinkSync(sourceDir, dest, "dir");
-    } catch {
-      copySkillTree(sourceDir, dest);
-    }
+    copySkillTree(sourceDir, dest);
     return tempDir;
   } catch {
     if (tempDir) {
@@ -532,6 +858,7 @@ export async function probeCustomRuntimeCommand({
   }
   const startedAt = Date.now();
   const [bin, ...args] = argv;
+  const childEnv = buildInstalledRuntimeChildEnv({ env });
 
   let child;
   try {
@@ -539,7 +866,7 @@ export async function probeCustomRuntimeCommand({
       shell: false,
       windowsHide: true,
       cwd,
-      env,
+      env: childEnv,
       stdio: ["pipe", "pipe", "pipe"],
     });
   } catch (error) {
@@ -674,6 +1001,36 @@ function safeRuntimeDiagnostic(value) {
     .slice(0, 4000);
 }
 
+function claudeFailureDiagnostic(value) {
+  let envelope = value;
+  if (typeof value === "string") {
+    const source = value.replace(ANSI_COLOR_SEQUENCE, "").trim();
+    if (!source || source.length > 64 * 1024) return "";
+    try {
+      envelope = JSON.parse(source);
+    } catch {
+      return "";
+    }
+  }
+  if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) return "";
+  const candidates = [
+    envelope.result,
+    envelope.error?.message,
+    envelope.message,
+    ...(Array.isArray(envelope.errors) ? envelope.errors : []),
+  ];
+  for (const candidate of candidates) {
+    const message =
+      typeof candidate === "string"
+        ? candidate
+        : candidate && typeof candidate === "object"
+          ? candidate.message
+          : "";
+    if (typeof message === "string" && message.trim()) return safeRuntimeDiagnostic(message);
+  }
+  return "";
+}
+
 function runtimeError(message, code, fields = {}) {
   const error = new Error(message);
   error.code = code;
@@ -686,28 +1043,6 @@ function runtimeError(message, code, fields = {}) {
 // runtime-tools.mjs's own callers tell a bad profile name apart from a spawn
 // failure.
 export const RUNTIME_TOOL_PROFILE_UNSUPPORTED = "RUNTIME_TOOL_PROFILE_UNSUPPORTED";
-
-// Tools that only ever appear in the restricted chat profile (WebSearch/
-// WebFetch — see runtime-tools.mjs's CHAT_RUNTIME_TOOLS/APP_SAFE_RUNTIME_TOOLS
-// and its own "structural prompt-injection boundary" comment). Computed as a
-// set difference against those two canonical exports rather than duplicated
-// here as a hardcoded tool-name list, so this stays correct automatically if
-// either profile's tool set ever changes. Discriminator choice: a tool-count
-// check or an allowlist of runtime ids would both silently rot the moment a
-// profile's shape changes; comparing against the canonical exports can't.
-const CHAT_ONLY_RUNTIME_TOOLS = new Set(
-  CHAT_RUNTIME_TOOLS.filter((tool) => !APP_SAFE_RUNTIME_TOOLS.includes(tool))
-);
-
-// True when `tools` requests the restricted chat profile (any network-only
-// tool from CHAT_ONLY_RUNTIME_TOOLS), as opposed to the ordinary app-safe
-// one-shot profile (Read/Glob/Grep/Skill) every evaluate-job/tailor-application/
-// resume-extract-style call uses. Only the chat profile is a boundary
-// violation on a runtime with no tool-allowlist mechanism — the app-safe
-// profile never requests network tools, so it's unaffected either way.
-function isRestrictedChatToolProfile(tools) {
-  return Array.isArray(tools) && tools.some((tool) => CHAT_ONLY_RUNTIME_TOOLS.has(tool));
-}
 
 function parseClaudeResult(stdout) {
   let envelope;
@@ -787,17 +1122,14 @@ export async function runInstalledRuntime({
   signal,
   timeoutMs = ONE_SHOT_RUNTIME_TIMEOUT_MS,
   spawnImpl = spawn,
+  spawnSyncImpl = spawnSync,
   onEvent,
-  // Skill this call is running (a directory name under `<repoRoot>/.agents/skills`)
-  // and the repo root to resolve it against. Both optional — omit either and
-  // this behaves exactly as before (--safe-mode, spawned at `cwd`). When both
-  // are given and the skill's SKILL.md is found, the call spawns instead
-  // against materializeIsolatedSkillCwd()'s isolated cwd with
-  // `--setting-sources project`, so the Skill tool actually resolves this one
-  // skill (see buildInstalledRuntimeInvocation's comment for why --safe-mode
-  // alone can't do that).
+  // A tool-bearing skill always runs in materializeIsolatedSkillCwd()'s
+  // single-skill project. Exact-read skills must also supply one canonical
+  // saved upload through approvedReadPaths; broad repo reads fail closed.
   skill = null,
   repoRoot = null,
+  approvedReadPaths = [],
 } = {}) {
   if (!runtime?.id || !runtime?.path) {
     throw runtimeError("No installed AI runtime is selected.", "RUNTIME_NOT_SELECTED");
@@ -805,29 +1137,18 @@ export async function runInstalledRuntime({
   if (signal?.aborted) {
     throw runtimeError("Installed AI request was cancelled.", "RUNTIME_CANCELLED");
   }
-  // Shared choke point: every caller (call-ai.mjs, skill-runtime.mjs,
-  // chat-runtime.mjs) reaches a spawn only through this function, so the
-  // fail-closed check belongs here rather than duplicated per caller. Codex
-  // `exec` (and every other non-claude runtime) has no tool-allowlist
-  // mechanism at all — verified against the real installed CLI, see this
-  // file's registry comment on `chatToolProfileSupported` — so there is
-  // nothing to pass a restricted profile through to. Only the restricted
-  // chat profile (network research, no Read) is a boundary violation; the
-  // app-safe one-shot profile these same runtimes already handle for
-  // evaluate-job/tailor-application/resume-extract is unaffected and keeps
-  // spawning exactly as before.
-  if (isRestrictedChatToolProfile(tools)) {
-    const definition = INSTALLED_RUNTIME_DEFINITIONS.find(({ id }) => id === runtime.id);
-    if (!definition?.chatToolProfileSupported) {
-      throw runtimeError(
-        `${definition?.name || runtime.id} has no tool-allowlist mechanism, so it cannot run ` +
-          "CareerRat's restricted research-chat tool profile (network access without local file " +
-          "access).",
-        RUNTIME_TOOL_PROFILE_UNSUPPORTED,
-        { runtimeId: runtime.id }
-      );
-    }
+  const definition = INSTALLED_RUNTIME_DEFINITIONS.find(({ id }) => id === runtime.id);
+  const toolBearing = Boolean(skill) || (Array.isArray(tools) && tools.length > 0);
+  if (toolBearing && definition?.toolExecutionSupported !== true) {
+    throw runtimeError(
+      `${definition?.name || runtime.id} is detected, but it cannot safely run CareerRat tools. ` +
+        "Choose Claude Code 2.1.241 or newer, or use the explicit provider fallback.",
+      RUNTIME_TOOL_PROFILE_UNSUPPORTED,
+      { runtimeId: runtime.id }
+    );
   }
+  const childEnv = buildInstalledRuntimeChildEnv({ env });
+  if (toolBearing) assertInstalledRuntimeBoundaryVersion(runtime, { spawnSyncImpl, env: childEnv });
 
   let tempDir = null;
   let skillCwd = null;
@@ -841,19 +1162,15 @@ export async function runInstalledRuntime({
         mode: 0o600,
       });
     }
-    // Only isolate cwd for tool profiles that have no Read/Glob/Grep. The
-    // one-shot runtime's app-safe profile (evaluate-job, tailor-application,
-    // resume-extract, ...) grants Read and its own SKILL.md files instruct
-    // relative-path workspace reads ("Open workspace/tracker.json", "Read
-    // candidate/application-limits.yml") that only resolve against the real
-    // repoRoot — isolating cwd there would silently break every one of those
-    // reads. The chat runtime's CHAT_RUNTIME_TOOLS profile (WebSearch/
-    // WebFetch/Skill, never Read — see runtime-tools.mjs's own "structural
-    // prompt-injection boundary" comment) has no such dependency, so it's the
-    // only shape this isolation is safe for.
-    const requiresRepoCwd = ["Read", "Glob", "Grep"].some((tool) => tools.includes(tool));
-    if (runtime.id === "claude" && skill && !requiresRepoCwd) {
+    if (runtime.id === "claude" && skill) {
       skillCwd = materializeIsolatedSkillCwd({ repoRoot, skill });
+      if (!skillCwd) {
+        throw runtimeError(
+          `Could not create the isolated CareerRat runtime for skill "${skill}".`,
+          "RUNTIME_BOUNDARY_UNAVAILABLE",
+          { runtimeId: runtime.id }
+        );
+      }
     }
     const invocation = buildInstalledRuntimeInvocation({
       runtimeId: runtime.id,
@@ -864,9 +1181,13 @@ export async function runInstalledRuntime({
       tools,
       // Only tell the arg-builder a skill is "ready" once isolation actually
       // succeeded — never claim --setting-sources project against a plain
-      // repoRoot cwd, which would reintroduce the ~136k-token blowup
-      // --safe-mode exists to prevent.
+      // repoRoot cwd, which would reintroduce the full checkout context and
+      // defeat the per-call filesystem boundary.
       skill: skillCwd ? skill : undefined,
+      repoRoot,
+      env,
+      isolatedCwd: skillCwd,
+      approvedReadPaths,
     });
 
     const result = await new Promise((resolve, reject) => {
@@ -875,7 +1196,7 @@ export async function runInstalledRuntime({
         child = spawnImpl(invocation.command, invocation.args, {
           ...invocation.options,
           cwd: skillCwd || cwd,
-          env,
+          env: childEnv,
           detached: process.platform !== "win32",
           stdio: ["pipe", "pipe", "pipe"],
         });
@@ -960,7 +1281,9 @@ export async function runInstalledRuntime({
             return;
           }
           if (status !== 0) {
-            const diagnostic = safeRuntimeDiagnostic(stderr);
+            const diagnostic =
+              (runtime.id === "claude" ? claudeFailureDiagnostic(stdout) : "") ||
+              safeRuntimeDiagnostic(stderr);
             reject(
               runtimeError(
                 `Installed AI CLI exited with status ${status}${diagnostic ? `: ${diagnostic}` : "."}`,
@@ -1042,11 +1365,13 @@ export async function runInstalledRuntimeStream({
   signal,
   timeoutMs = ONE_SHOT_RUNTIME_TIMEOUT_MS,
   spawnImpl = spawn,
+  spawnSyncImpl = spawnSync,
   // Skill this call is running — same isolated-cwd semantics as
   // runInstalledRuntime's own skill/repoRoot params (see
   // materializeIsolatedSkillCwd and buildInstalledRuntimeInvocation above).
   skill = null,
   repoRoot = null,
+  approvedReadPaths = [],
   // Called once per raw NDJSON message, in stream order, as soon as it's
   // fully parsed — including the terminal "result" message. A throwing
   // callback must never break the pump; caught and dropped.
@@ -1066,29 +1391,31 @@ export async function runInstalledRuntimeStream({
   if (signal?.aborted) {
     throw runtimeError("Installed AI request was cancelled.", "RUNTIME_CANCELLED");
   }
-  // Same fail-closed guard as runInstalledRuntime — kept here too so a future
-  // streamingSupported runtime with no tool-allowlist mechanism can't slip
-  // the restricted chat tool profile through this path either.
-  if (isRestrictedChatToolProfile(tools)) {
-    const definition = INSTALLED_RUNTIME_DEFINITIONS.find(({ id }) => id === runtime.id);
-    if (!definition?.chatToolProfileSupported) {
-      throw runtimeError(
-        `${definition?.name || runtime.id} has no tool-allowlist mechanism, so it cannot run ` +
-          "CareerRat's restricted research-chat tool profile (network access without local file " +
-          "access).",
-        RUNTIME_TOOL_PROFILE_UNSUPPORTED,
-        { runtimeId: runtime.id }
-      );
-    }
+  const definition = INSTALLED_RUNTIME_DEFINITIONS.find(({ id }) => id === runtime.id);
+  if ((Boolean(skill) || tools.length > 0) && definition?.toolExecutionSupported !== true) {
+    throw runtimeError(
+      `${definition?.name || runtime.id} is detected, but it cannot safely run CareerRat tools. ` +
+        "Choose Claude Code 2.1.241 or newer, or use the explicit provider fallback.",
+      RUNTIME_TOOL_PROFILE_UNSUPPORTED,
+      { runtimeId: runtime.id }
+    );
+  }
+  const childEnv = buildInstalledRuntimeChildEnv({ env });
+  if (skill || tools.length > 0) {
+    assertInstalledRuntimeBoundaryVersion(runtime, { spawnSyncImpl, env: childEnv });
   }
 
   let skillCwd = null;
   try {
-    // Same isolation rule as runInstalledRuntime's own comment: only skip
-    // cwd=repoRoot when the granted tool profile has no Read/Glob/Grep.
-    const requiresRepoCwd = ["Read", "Glob", "Grep"].some((tool) => tools.includes(tool));
-    if (runtime.id === "claude" && skill && !requiresRepoCwd) {
+    if (runtime.id === "claude" && skill) {
       skillCwd = materializeIsolatedSkillCwd({ repoRoot, skill });
+      if (!skillCwd) {
+        throw runtimeError(
+          `Could not create the isolated CareerRat runtime for skill "${skill}".`,
+          "RUNTIME_BOUNDARY_UNAVAILABLE",
+          { runtimeId: runtime.id }
+        );
+      }
     }
     const invocation = buildInstalledRuntimeInvocation({
       runtimeId: runtime.id,
@@ -1096,6 +1423,10 @@ export async function runInstalledRuntimeStream({
       model,
       tools,
       skill: skillCwd ? skill : undefined,
+      repoRoot,
+      env,
+      isolatedCwd: skillCwd,
+      approvedReadPaths,
       streaming: true,
     });
 
@@ -1105,7 +1436,7 @@ export async function runInstalledRuntimeStream({
         child = spawnImpl(invocation.command, invocation.args, {
           ...invocation.options,
           cwd: skillCwd || cwd,
-          env,
+          env: childEnv,
           detached: process.platform !== "win32",
           stdio: ["pipe", "pipe", "pipe"],
         });
@@ -1219,7 +1550,9 @@ export async function runInstalledRuntimeStream({
             return;
           }
           if (status !== 0) {
-            const diagnostic = safeRuntimeDiagnostic(stderr);
+            const diagnostic =
+              (runtime.id === "claude" ? claudeFailureDiagnostic(finalResult) : "") ||
+              safeRuntimeDiagnostic(stderr);
             reject(
               runtimeError(
                 `Installed AI CLI exited with status ${status}${diagnostic ? `: ${diagnostic}` : "."}`,
@@ -1273,3 +1606,118 @@ export async function runInstalledRuntimeStream({
     if (skillCwd) rmSync(skillCwd, { recursive: true, force: true });
   }
 }
+
+export async function fetchInstalledRuntimePublicUrl(
+  url,
+  { fetchPublicHttpTextImpl = fetchPublicHttpText } = {}
+) {
+  const checked = validatePublicHttpUrl(url);
+  if (!checked.ok) {
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Public URL rejected: ${checked.reason}` }],
+    };
+  }
+  const result = await fetchPublicHttpTextImpl(checked.url, {
+    timeoutMs: 15000,
+    maxBytes: 512 * 1024,
+    maxRedirects: 4,
+  });
+  if (!result.ok) {
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Public fetch failed: ${result.reason}` }],
+    };
+  }
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          url: result.finalUrl || checked.url,
+          status: result.status,
+          contentType: result.contentType || null,
+          text: result.rawText,
+        }),
+      },
+    ],
+  };
+}
+
+function writeMcpMessage(message) {
+  process.stdout.write(`${JSON.stringify(message)}\n`);
+}
+
+async function handlePublicWebMcpRequest(message) {
+  if (!message || message.id === undefined) return;
+  const base = { jsonrpc: "2.0", id: message.id };
+  if (message.method === "initialize") {
+    writeMcpMessage({
+      ...base,
+      result: {
+        protocolVersion: message.params?.protocolVersion || "2025-06-18",
+        capabilities: { tools: {} },
+        serverInfo: { name: PUBLIC_WEB_SERVER_NAME, version: "1.0.0" },
+      },
+    });
+    return;
+  }
+  if (message.method === "ping") {
+    writeMcpMessage({ ...base, result: {} });
+    return;
+  }
+  if (message.method === "tools/list") {
+    writeMcpMessage({
+      ...base,
+      result: {
+        tools: [
+          {
+            name: "fetch",
+            description:
+              "Fetch one public HTTP(S) page through CareerRat's DNS-pinned private-network guard.",
+            inputSchema: {
+              type: "object",
+              properties: { url: { type: "string", format: "uri" } },
+              required: ["url"],
+              additionalProperties: false,
+            },
+          },
+        ],
+      },
+    });
+    return;
+  }
+  if (message.method === "tools/call" && message.params?.name === "fetch") {
+    writeMcpMessage({
+      ...base,
+      result: await fetchInstalledRuntimePublicUrl(message.params?.arguments?.url),
+    });
+    return;
+  }
+  writeMcpMessage({
+    ...base,
+    error: { code: -32601, message: "Method not found" },
+  });
+}
+
+function startPublicWebMcpServer() {
+  const input = createInterface({ input: process.stdin, crlfDelay: Number.POSITIVE_INFINITY });
+  input.on("line", (line) => {
+    let message;
+    try {
+      message = JSON.parse(line);
+    } catch {
+      return;
+    }
+    Promise.resolve(handlePublicWebMcpRequest(message)).catch((error) => {
+      if (message?.id === undefined) return;
+      writeMcpMessage({
+        jsonrpc: "2.0",
+        id: message.id,
+        error: { code: -32603, message: safeRuntimeDiagnostic(error?.message) || "Internal error" },
+      });
+    });
+  });
+}
+
+if (process.argv.includes(PUBLIC_WEB_SERVER_ARG)) startPublicWebMcpServer();

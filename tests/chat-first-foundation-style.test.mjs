@@ -24,9 +24,14 @@ function cssRule(css, selector) {
 
 describe("chat-first foundation styles", () => {
   it("keeps the fixed workspace base and controller alert", () => {
-    assert.match(cssRule(foundation, "body"), /margin:\s*0/);
-    assert.match(cssRule(foundation, "body"), /background:\s*#edf5fb/);
-    assert.match(cssRule(foundation, "body"), /font-family:\s*"Figtree"/);
+    const root = cssRule(foundation, ":root");
+    const body = cssRule(foundation, "body");
+
+    assert.match(root, /--canvas:\s*#edf5fb/);
+    assert.match(root, /--font:\s*"Figtree",\s*system-ui,\s*sans-serif/);
+    assert.match(body, /margin:\s*0/);
+    assert.match(body, /background:\s*var\(--canvas\)/);
+    assert.match(body, /font-family:\s*var\(--font\)/);
     assert.match(cssRule(workspace, ".chat-first-workspace"), /height:\s*100dvh/);
     assert.match(cssRule(workspace, ".chat-first-controller-alert"), /position:\s*absolute/);
   });

@@ -1,4 +1,4 @@
-# electron-builder config for the CareerRat desktop shell (M5, macOS-first).
+# electron-builder config for the CareerRat desktop shell.
 #
 # `npm run dist` runs `stage.mjs` first (builds staging/careerrat, the
 # extraResources tree below) then electron-builder itself.
@@ -31,15 +31,20 @@ extraResources:
     filter:
       - "**/*"
       - ".agents/**"
-      - ".claude/**"
       - "apps/web/dist/**"
       - "!**/.DS_Store"
   # electron-builder's copy filter rejects a root-level `node_modules`
-  # directory inside a FileSet, so copy the staged SDK tree as its own source.
+  # directory inside a FileSet, so copy staged runtime dependencies as their
+  # own source. The explicit browser filter keeps electron-builder from
+  # dropping Playwright's hidden hermetic Chromium directory.
   - from: staging/careerrat/node_modules
     to: careerrat/node_modules
     filter:
       - "**/*"
+      - "playwright-core/.local-browsers/**"
+      - "!playwright-core/.local-browsers/.links/**"
+      - "!@anthropic-ai/claude-agent-sdk"
+      - "!@anthropic-ai/claude-agent-sdk/**"
       - "!**/.DS_Store"
 mac:
   icon: build/icon.icns
@@ -54,3 +59,19 @@ mac:
   entitlementsInherit: build/entitlements.mac.inherit.plist
   gatekeeperAssess: false
   notarize: true
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+  requestedExecutionLevel: asInvoker
+  artifactName: "${productName}-${version}-win-${arch}-Setup.${ext}"
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: CareerRat
+  deleteAppDataOnUninstall: false

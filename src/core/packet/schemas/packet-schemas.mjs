@@ -145,6 +145,20 @@ export const packetManifestSchema = {
         source: workspacePath,
       },
     },
+    confirmedAnswers: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["questionId", "question", "answer", "confirmedAt"],
+        additionalProperties: false,
+        properties: {
+          questionId: stringOrNull,
+          question: { type: "string" },
+          answer: { type: "string" },
+          confirmedAt: { type: "string" },
+        },
+      },
+    },
     sources: {
       type: "object",
       additionalProperties: true,

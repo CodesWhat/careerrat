@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { GENERIC_ERROR_MESSAGE } from "../lib/errorCopy.js";
 import {
   CanonicalJobConversation,
   ConversationPanel,
@@ -13,6 +14,7 @@ import {
   MessageTranscript,
   MockInterviewContext,
   MockInterviewConversation,
+  SkillChatConversation,
   SubmitGateModal,
   TodayConversation,
 } from "./conversation-surfaces.jsx";
@@ -22,6 +24,55 @@ function markup(node) {
 }
 
 describe("TodayConversation", () => {
+  it("renders current user turns on the shared quiet message surface", () => {
+    const foundation = readFileSync(
+      fileURLToPath(new URL("./app-foundation.css", import.meta.url)),
+      "utf8"
+    );
+    const css = readFileSync(fileURLToPath(new URL("./chat-first.css", import.meta.url)), "utf8");
+    const html = markup(
+      <MessageTranscript
+        messages={[
+          {
+            id: "intent",
+            role: "user",
+            kind: "intent",
+            text: "Use this reviewed answer for the application.",
+          },
+        ]}
+      />
+    );
+
+    expect(html).toContain("Use this reviewed answer for the application.");
+    expect(foundation).toMatch(/--cf-message-user-surface:\s*var\(--tint-cool-2\)/);
+    expect(foundation).toMatch(/--cf-message-user-foreground:\s*var\(--ink\)/);
+    expect(css).toMatch(
+      /\.chat-first-bubble--user\s*\{[^}]*color:\s*var\(--cf-message-user-foreground\)[^}]*background:\s*var\(--cf-message-user-surface\)/s
+    );
+    expect(css).not.toMatch(/\.chat-first-bubble--user\s*\{[^}]*background:\s*var\(--ink\)/s);
+  });
+
+  it("presents agent emphasis and headings without raw markdown controls", () => {
+    const css = readFileSync(fileURLToPath(new URL("./chat-first.css", import.meta.url)), "utf8");
+    const html = markup(
+      <MessageTranscript
+        messages={[
+          {
+            id: "formatted",
+            role: "assistant",
+            kind: "text",
+            text: "## Search update\n**Good news:** three roles match.\n- New York",
+          },
+        ]}
+      />
+    );
+
+    expect(html).toContain("Search update\nGood news: three roles match.\n- New York");
+    expect(html).not.toContain("## Search update");
+    expect(html).not.toContain("**Good news:**");
+    expect(css).toMatch(/\.chat-first-bubble\s*\{[^}]*white-space:\s*pre-wrap/s);
+  });
+
   it("keeps indented cards at the handoff intrinsic desktop widths", () => {
     const css = readFileSync(fileURLToPath(new URL("./chat-first.css", import.meta.url)), "utf8");
 
@@ -125,7 +176,8 @@ describe("TodayConversation", () => {
     expect(html).toContain("📄");
     expect(html).toContain("✉️");
     expect(html).toContain("Evidence backed");
-    expect(html).toContain("Source sweep could not finish.");
+    expect(html).toContain(GENERIC_ERROR_MESSAGE);
+    expect(html).not.toContain("Source sweep could not finish.");
     expect(html).toContain("chat-first-run-receipt--error");
     expect(onArtifactAction).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "resume" }),
@@ -133,6 +185,139 @@ describe("TodayConversation", () => {
     );
     expect(onMessageAction).toHaveBeenCalledWith(expect.objectContaining({ id: "done" }));
   });
+
+  it("maps persisted and legacy transcript errors without rendering raw internal copy", () => {
+    const raw = "answers contains unresolved placeholders";
+    const messages = [
+      {
+        id: "persisted-error",
+        role: "assistant",
+        kind: "action_error",
+        text: raw,
+        error: { code: "ACTION_FAILED", message: raw },
+      },
+      {
+        id: "legacy-error",
+        role: "assistant",
+        kind: "agent_error",
+        text: `body.${raw}`,
+      },
+      {
+        id: "mapped-error",
+        role: "assistant",
+        kind: "agent_error",
+        text: "No AI key is configured for this workspace",
+        error: { code: "missing_key", message: "No AI key is configured for this workspace" },
+      },
+    ];
+
+    const html = markup(<MessageTranscript messages={messages} />);
+
+    expect(html).toContain("No AI key is connected yet.");
+    expect(html).toContain(GENERIC_ERROR_MESSAGE);
+    expect(html).not.toContain(raw);
+    expect(html).not.toContain(`body.${raw}`);
+    expect(messages[0].error.message).toBe(raw);
+  });
+
+  it("renders typed actions only for the latest actionable result", () => {
+    const onIntentAction = vi.fn();
+    const useAnswer = {
+      type: "screening.answer-confirm",
+      entity: { type: "application", id: "app-curri" },
+      input: { question: "Who inspired Curri?", answer: "Mike" },
+    };
+    const resumeApply = {
+      type: "job.apply",
+      entity: { type: "application", id: "app-curri" },
+      input: { resumeSession: true },
+    };
+    const tree = MessageTranscript({
+      onIntentAction,
+      messages: [
+        {
+          id: "drafted",
+          role: "assistant",
+          kind: "action_result",
+          text: "Review this answer before using it.",
+          metadata: { nextActions: [{ label: "Use this answer", intent: useAnswer }] },
+        },
+        {
+          id: "confirmed",
+          role: "assistant",
+          kind: "action_result",
+          text: "Confirmed this answer.",
+          metadata: {
+            nextActions: [{ label: "Resume supervised apply", intent: resumeApply }],
+          },
+        },
+      ],
+    });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) {
+        node.forEach(visit);
+        return;
+      }
+      if (typeof node.type === "function") {
+        visit(node.type(node.props));
+        return;
+      }
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+
+    const labels = buttons.map((button) => button.props.children);
+    expect(labels).toContain("Resume supervised apply");
+    expect(labels).not.toContain("Use this answer");
+    buttons.find((button) => button.props.children === "Resume supervised apply").props.onClick();
+    expect(onIntentAction).toHaveBeenCalledWith(
+      resumeApply,
+      expect.objectContaining({ id: "confirmed" }),
+      expect.objectContaining({ label: "Resume supervised apply" })
+    );
+  });
+
+  it.each(["action_result", "action_error"])(
+    "retires old typed actions after a terminal %s without follow-ups",
+    (terminalKind) => {
+      const html = markup(
+        <MessageTranscript
+          onIntentAction={vi.fn()}
+          messages={[
+            {
+              id: "offered",
+              role: "assistant",
+              kind: "action_result",
+              text: "Review this answer before using it.",
+              metadata: {
+                nextActions: [
+                  {
+                    label: "Use this answer",
+                    intent: {
+                      type: "screening.answer-confirm",
+                      entity: { type: "application", id: "app-curri" },
+                    },
+                  },
+                ],
+              },
+            },
+            {
+              id: "terminal",
+              role: "assistant",
+              kind: terminalKind,
+              text:
+                terminalKind === "action_error" ? "That action failed." : "That action is done.",
+            },
+          ]}
+        />
+      );
+
+      expect(html).not.toContain("Use this answer");
+    }
+  );
 
   it("derives the handoff glyph for durable transcript artifacts", () => {
     const html = markup(
@@ -236,6 +421,69 @@ describe("TodayConversation", () => {
     expect(html).toContain("Drafting packet 1 of 3 · Aperture Science");
     expect(html).toContain("submits gate back here");
     expect(html).toContain("pause");
+  });
+});
+
+describe("SkillChatConversation", () => {
+  it("never renders the raw completion marker and gates completion on proposal decisions", () => {
+    const onComplete = vi.fn();
+    const completion = {
+      id: "discovery:research-boards:discovery_complete:research-boards",
+      kind: "discovery_complete",
+      step: "research-boards",
+    };
+    const messages = [
+      {
+        id: "result",
+        role: "assistant",
+        kind: "text",
+        text: "Board review is ready.",
+        artifacts: [
+          {
+            id: "source-1",
+            kind: "source_proposal",
+            label: "Remote OK",
+            url: "https://remoteok.com/remote-dev-jobs",
+          },
+          completion,
+        ],
+      },
+    ];
+
+    const pending = SkillChatConversation({
+      thread: { title: "Job board discovery", state: "idle" },
+      messages,
+      onComplete,
+    });
+    expect(markup(pending)).not.toContain("Finish board discovery");
+    expect(markup(pending)).not.toContain("careerrat:discovery");
+
+    const ready = SkillChatConversation({
+      thread: { title: "Job board discovery", state: "idle" },
+      messages: [
+        {
+          ...messages[0],
+          artifacts: [
+            { ...messages[0].artifacts[0], decision: { action: "discard", status: "completed" } },
+            completion,
+          ],
+        },
+      ],
+      onComplete,
+    });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(visit);
+      if (typeof node.type === "function") return visit(node.type(node.props));
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(ready);
+    const finish = buttons.find((button) => button.props.children === "Finish board discovery");
+    expect(finish).toBeTruthy();
+    finish.props.onClick();
+    expect(onComplete).toHaveBeenCalledWith(completion);
   });
 });
 
@@ -362,7 +610,11 @@ describe("JobConversation and JobContextPanel", () => {
           role: "Staff ML Engineer",
           stage: "Interview",
           fit: 86,
-          badge: "panel Thu 10am",
+          compensation: "$190,000 - $225,000",
+          location: "New York, NY",
+          mode: "Hybrid",
+          fitReasons: ["Platform scale matches the role"],
+          risks: ["No robotics experience recorded"],
         }}
         summary={{
           title: "Prep plan",
@@ -385,14 +637,25 @@ describe("JobConversation and JobContextPanel", () => {
     expect(html).toContain("THIS JOB");
     expect(html).toContain("Cyberdyne Systems");
     expect(html).toContain("86");
+    expect(html).toContain("COMPENSATION");
+    expect(html).toContain("$190,000 - $225,000");
+    expect(html).toContain("New York, NY · Hybrid");
     expect(html).toContain("Prep plan");
+    expect(html).toContain("chat-first-context-card__fact--status");
+    expect(html).toContain("<small>Prep plan</small>");
+    expect(html).not.toContain(
+      '<div class="chat-first-context-card__section"><strong>Prep plan</strong>'
+    );
+    expect(html).toContain("Why it fits");
+    expect(html).toContain("Watch");
+    expect(html).not.toContain("chat-first-context-card--cream");
     expect(html).toContain("Interview dossier");
     expect(html).toContain("Open");
     expect(html).toContain("Export PDF");
     expect(html).toContain("Run mock interview");
   });
 
-  it("can place a prep summary after files for interview-stage context", () => {
+  it("never lets retired placement hints detach a job summary from the structured card", () => {
     const html = markup(
       <JobContextPanel
         job={{ company: "Cyberdyne", role: "Staff ML Engineer", stage: "Interview", fit: 86 }}
@@ -402,7 +665,28 @@ describe("JobConversation and JobContextPanel", () => {
       />
     );
 
-    expect(html.indexOf("Interview dossier")).toBeLessThan(html.indexOf("Prep plan"));
+    expect(html).toContain("chat-first-context-card__fact--status");
+    expect(html).toContain("<small>Prep plan</small>");
+    expect(html).not.toContain("chat-first-context-card--cream");
+    expect(html.indexOf("Prep plan")).toBeLessThan(html.indexOf("Interview dossier"));
+  });
+
+  it("does not repeat a work mode already stated by the location", () => {
+    const html = markup(
+      <JobContextPanel
+        job={{
+          company: "Curri",
+          role: "Senior Software Engineer",
+          stage: "Reviewed Hold",
+          fit: 85,
+          location: "Remote - United States",
+          mode: "remote",
+        }}
+      />
+    );
+
+    expect(html).toContain("Remote - United States");
+    expect(html).not.toContain("Remote - United States · Remote");
   });
 });
 
@@ -592,6 +876,29 @@ describe("focused conversation modes", () => {
     expect(html).toContain("Reject");
   });
 
+  it("shows deep-ingest findings one at a time instead of an action wall", () => {
+    const proposals = Array.from({ length: 8 }, (_, index) => ({
+      id: `proposal-${index + 1}`,
+      lane: index ? "open_gaps" : "evidence_claims",
+      title: index ? `Later finding ${index + 1}` : "First grounded finding",
+      summary: `Finding ${index + 1} summary`,
+    }));
+    const html = markup(
+      <DeepIngestConversation
+        counts={{ reviewQueue: 8 }}
+        proposals={proposals}
+        onConfirm={() => {}}
+        onDefer={() => {}}
+        onReject={() => {}}
+      />
+    );
+
+    expect(html).toContain("REVIEW 1 OF 8");
+    expect(html).toContain("First grounded finding");
+    expect(html).not.toContain("Later finding 2");
+    expect((html.match(/chat-first-deep-proposal"/g) || []).length).toBe(1);
+  });
+
   it("summarizes the evidence bank and keeps pause navigation in context", () => {
     const html = markup(
       <DeepIngestContext
@@ -657,7 +964,7 @@ describe("SubmitGateModal", () => {
     expect(html).toContain("Demographic / EEO questions");
     expect(html).toContain("left blank for you · never auto-answered");
     expect(html).toContain("Nothing sends until you press submit.");
-    expect(html).toContain("Open Greenhouse &amp; submit ↗");
+    expect(html).toContain("Return to Greenhouse &amp; submit ↗");
   });
 
   it("renders nothing when the gate is closed", () => {

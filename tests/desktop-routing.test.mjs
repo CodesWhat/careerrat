@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { chooseDesktopRoute, normalizeDesktopRoute } from "../apps/desktop/desktop-routing.mjs";
 
@@ -20,5 +21,12 @@ describe("desktop route selection", () => {
       }),
       "/app/settings"
     );
+  });
+
+  it("boots the SPA directly without the retired tracker renderer or /onboard remediation", () => {
+    const main = readFileSync("apps/desktop/main.mjs", "utf8");
+    assert.doesNotMatch(main, /\.renderOnce\(/);
+    assert.doesNotMatch(main, /\/onboard\b/);
+    assert.match(main, /chooseDesktopRoute/);
   });
 });

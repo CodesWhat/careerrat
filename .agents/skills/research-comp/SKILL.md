@@ -1,8 +1,14 @@
 ---
 name: research-comp
 description: Web-search market comp for a role+location → cited workspace/research/comp-bench-*.md that feeds evaluate-job COMP CHECK/ANCHOR and a confirm-first gate write-back.
-tier_1_inputs: [profile.compensation floor/target, profile.candidate.domain, role/location params, modes verdict]
-tier_2_inputs: [per-source WebSearch/WebFetch bodies]
+metadata:
+  tier_1_inputs:
+    - profile.compensation floor/target
+    - profile.candidate.domain
+    - role/location params
+    - modes verdict
+  tier_2_inputs:
+    - per-source WebSearch/WebFetch bodies
 ---
 
 # research-comp
@@ -91,6 +97,7 @@ Use `WebSearch` to gather market compensation data. Select sources appropriate t
 Do not default to levels.fyi when `candidate.domain` is not tech; a bare assumption that every candidate is a software engineer is wrong.
 
 **Per source, record:**
+
 - URL
 - Title / publication
 - Fetched date (today ISO)

@@ -9,7 +9,6 @@ import { describe, expect, it } from "vitest";
 const sourceRoot = process.env.CAREERRAT_STYLE_SOURCE_ROOT
   ? resolve(process.env.CAREERRAT_STYLE_SOURCE_ROOT)
   : fileURLToPath(new URL("../src", import.meta.url));
-const palettePath = resolve(sourceRoot, "chat-first/chat-first.css");
 const foundationPath = resolve(sourceRoot, "chat-first/app-foundation.css");
 
 function walkFiles(directory) {
@@ -56,10 +55,14 @@ function cssDeclarations(path) {
 
 const declarations = cssFiles.flatMap(cssDeclarations);
 
-function ruleTokens(selector) {
-  const css = stripCssComments(readFileSync(palettePath, "utf8"));
+function ruleBody(path, selector) {
+  const css = stripCssComments(readFileSync(path, "utf8"));
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const body = css.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+  return css.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+}
+
+function ruleCustomProperties(path, selector) {
+  const body = ruleBody(path, selector);
   return new Map(
     [...body.matchAll(/(--[-\w]+)\s*:\s*([^;]+);/g)].map((match) => [
       match[1],
@@ -68,13 +71,13 @@ function ruleTokens(selector) {
   );
 }
 
-const chatFirstTokens = ruleTokens(".chat-first-workspace");
+const foundationProperties = ruleCustomProperties(foundationPath, ":root");
 
-function tokenMismatches(tokens, expected) {
+function customPropertyMismatches(properties, expected) {
   return Object.entries(expected).flatMap(([name, value]) =>
-    tokens.get(name) === value
+    properties.get(name) === value
       ? []
-      : [`chat-first.css ${name}: ${tokens.get(name) ?? "missing"}`]
+      : [`app-foundation.css ${name}: ${properties.get(name) ?? "missing"}`]
   );
 }
 
@@ -87,24 +90,26 @@ function textOccurrences(files, pattern) {
   });
 }
 
-function resolvesToAccent(name, tokens, seen = new Set()) {
-  if (name === "--cf-lime" || name.startsWith("--cf-lime-")) return true;
+function resolvesToAccent(name, properties, seen = new Set()) {
+  if (name === "--lime" || name.startsWith("--lime-")) return true;
   if (seen.has(name)) return false;
 
-  const value = tokens.get(name);
+  const value = properties.get(name);
   if (!value) return false;
 
   const nextSeen = new Set(seen).add(name);
   return [...value.matchAll(/var\(\s*(--[-\w]+)/g)].some((match) =>
-    resolvesToAccent(match[1], tokens, nextSeen)
+    resolvesToAccent(match[1], properties, nextSeen)
   );
 }
 
 const accentVariables = new Set(
-  [...chatFirstTokens.keys()].filter((name) => resolvesToAccent(name, chatFirstTokens))
+  [...foundationProperties.keys()].filter((name) =>
+    resolvesToAccent(name, foundationProperties)
+  )
 );
 const rawAccentColors = new Set(
-  [chatFirstTokens.get("--cf-lime")].filter(Boolean).map((value) => value.toLowerCase())
+  [foundationProperties.get("--lime")].filter(Boolean).map((value) => value.toLowerCase())
 );
 
 function hasAccentColor(value) {
@@ -138,14 +143,18 @@ describe("CareerRat chat-first surfaces", () => {
   it("allows only the handoff dropdown and modal elevations", () => {
     const allowedValues = new Set([
       "none",
-      "0 14px 40px rgba(20, 20, 10, 0.18)",
-      "0 24px 60px rgba(20, 20, 10, 0.3)",
+      "var(--cf-selection-shadow)",
+      "var(--shadow-popover)",
+      "var(--shadow-modal)",
+      "var(--shadow-sheet)",
+      "var(--shadow-hair)",
     ]);
     const offenders = declarations
       .filter(({ property, value }) => property.endsWith("box-shadow") && !allowedValues.has(value))
       .map(({ file, line, value }) => `${file}:${line}: box-shadow: ${value}`);
 
     expect(offenders, offenders.join("\n")).toEqual([]);
+    expect(readFileSync(foundationPath, "utf8")).toMatch(/--cf-selection-shadow:\s*none/);
   });
 
   it("does not use gradients in CSS property values", () => {
@@ -166,22 +175,233 @@ describe("CareerRat chat-first surfaces", () => {
 });
 
 describe("CareerRat chat-first palette", () => {
-  it("pins the fixed handoff palette", () => {
-    const mismatches = tokenMismatches(
-      chatFirstTokens,
+  it("defines the authoritative handoff palette and elevations in the foundation", () => {
+    const mismatches = customPropertyMismatches(
+      foundationProperties,
       {
-        "--cf-bg": "#edf5fb",
-        "--cf-panel": "#ffffff",
-        "--cf-cream": "#faf7ef",
-        "--cf-ink": "#17171a",
-        "--cf-lime": "#e6fa8d",
-        "--cf-lavender": "#d9a6f4",
-        "--cf-sky": "#8fd0f8",
-        "--cf-red": "#f04c38",
+        "--ink": "#17171a",
+        "--ink-soft": "#55584a",
+        "--ink-warm-deep": "#3a3a35",
+        "--ink-deepest": "#26261f",
+        "--paper": "#fdfcf7",
+        "--white": "#ffffff",
+        "--canvas": "#edf5fb",
+        "--cream": "#faf7ef",
+        "--cream-light": "#fffdf6",
+        "--cream-edge": "#f5f1e5",
+        "--lime": "#e6fa8d",
+        "--lime-deep": "#def780",
+        "--lime-bar": "#d9ef7a",
+        "--sky": "#8fd0f8",
+        "--lilac": "#d9a6f4",
+        "--lilac-tint": "#f3e8fb",
+        "--red": "#f04c38",
+        "--slate": "#7d8894",
+        "--gray": "#a5a5ab",
+        "--gray-dim": "#9a9a92",
+        "--gray-warm": "#c9c9c0",
+        "--line-warm": "#e3e0d6",
+        "--line-warm-2": "#d9d5c9",
+        "--line-cool": "#c9d4dc",
+        "--line-cool-2": "#d7dee4",
+        "--tint-cool": "#f2f6f9",
+        "--tint-cool-2": "#e8edf2",
+        "--tint-cool-3": "#f0f2f5",
+        "--shadow-popover": "0 14px 40px rgba(20, 20, 10, 0.18)",
+        "--shadow-modal": "0 24px 60px rgba(20, 20, 10, 0.35)",
+        "--shadow-sheet": "0 24px 60px rgba(20, 20, 10, 0.3)",
+        "--shadow-hair": "0 1px 3px rgba(0, 0, 0, 0.25)",
+        "--scrim-modal": "rgba(23, 23, 26, 0.55)",
+        "--scrim-sheet": "rgba(23, 23, 26, 0.45)",
       }
     );
 
     expect(mismatches, mismatches.join("\n")).toEqual([]);
+  });
+
+  it("keeps every raw CSS color in the shared foundation", () => {
+    const offenders = [];
+    for (const declaration of declarations) {
+      if (declaration.file === "chat-first/app-foundation.css" && declaration.property.startsWith("--")) {
+        continue;
+      }
+      for (const match of declaration.value.matchAll(/#[0-9a-f]{3,8}\b|rgba?\([^)]*\)/gi)) {
+        offenders.push(
+          `${declaration.file}:${declaration.line}: ${declaration.property}: ${match[0]}`
+        );
+      }
+    }
+
+    expect(offenders, offenders.join("\n")).toEqual([]);
+  });
+});
+
+describe("CareerRat selection and focus states", () => {
+  const selectionRules = [
+    ["chat-first/chat-first.css", ".chat-first-thread-card.is-active"],
+    ["chat-first/first-run.css", '.cf-first-run__engine-choice[aria-pressed="true"]'],
+    ["chat-first/first-run.css", ".cf-first-run__paul-card"],
+    ["chat-first/workspace-browser.css", '.cf-browser__tab[aria-selected="true"]'],
+    ["chat-first/workspace-browser.css", ".cf-browser .cf-filter--active"],
+    ["chat-first/workspace-browser.css", ".cf-job-row--selected"],
+    ["chat-first/profile-settings.css", '.cf-profile__tabs button[aria-current="page"]'],
+    ["chat-first/profile-settings.css", '.cf-settings-dialog__runtime[data-selected="true"]'],
+  ];
+
+  it("uses one ink-only selection contract across every selectable surface", () => {
+    expect(foundationProperties.get("--cf-selection-fill")).toBe("var(--ink)");
+    expect(foundationProperties.get("--cf-selection-foreground")).toBe("var(--paper)");
+    expect(foundationProperties.get("--cf-selection-border")).toBe("0");
+    expect(foundationProperties.get("--cf-selection-outline")).toBe("0");
+    expect(foundationProperties.get("--cf-selection-shadow")).toBe("none");
+    expect(foundationProperties.get("--cf-selection-avatar-surface")).toBe("transparent");
+
+    for (const [file, selector] of selectionRules) {
+      const body = ruleBody(resolve(sourceRoot, file), selector);
+      expect(body, `${file} ${selector}`).toMatch(
+        /background:\s*var\(--cf-selection-fill\)/
+      );
+      expect(body, `${file} ${selector}`).toMatch(
+        /color:\s*var\(--cf-selection-foreground\)/
+      );
+      expect(body, `${file} ${selector}`).toMatch(
+        /border:\s*var\(--cf-selection-border\)/
+      );
+      expect(body, `${file} ${selector}`).toMatch(
+        /outline:\s*var\(--cf-selection-outline\)/
+      );
+      expect(body, `${file} ${selector}`).toMatch(
+        /box-shadow:\s*var\(--cf-selection-shadow\)/
+      );
+      expect(body, `${file} ${selector}`).not.toMatch(/lime|lilac|sky|color-mix|#[0-9a-f]/i);
+    }
+  });
+
+  it("keeps selected icon tiles transparent and free of accent surrounds", () => {
+    const iconRules = [
+      ["chat-first/first-run.css", ".cf-first-run__rail-avatar"],
+      [
+        "chat-first/first-run.css",
+        '.cf-first-run__engine-choice[aria-pressed="true"] .cf-runtime-icon',
+      ],
+      [
+        "chat-first/profile-settings.css",
+        '.cf-settings-dialog__runtime[data-selected="true"] .cf-runtime-icon',
+      ],
+    ];
+
+    for (const [file, selector] of iconRules) {
+      const body = ruleBody(resolve(sourceRoot, file), selector);
+      expect(body, `${file} ${selector}`).toMatch(
+        /background:\s*var\(--cf-selection-avatar-surface\)/
+      );
+      expect(body, `${file} ${selector}`).not.toMatch(
+        /(?:^|;)\s*(?:border|outline|box-shadow)\s*:|lime|lilac|sky|#[0-9a-f]/i
+      );
+    }
+  });
+
+  it("does not let auxiliary selected-state rules reintroduce a visual surround", () => {
+    const allowedVisualValues = new Set([
+      "var(--cf-selection-fill)",
+      "var(--cf-selection-border)",
+      "var(--cf-selection-outline)",
+      "var(--cf-selection-shadow)",
+      "var(--cf-selection-avatar-surface)",
+      "transparent",
+    ]);
+    const stateRules = cssFiles.flatMap((path) => {
+      const css = stripCssComments(readFileSync(path, "utf8"));
+      return [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+        .filter(
+          (match) =>
+            /is-active|--active|--selected|aria-(?:selected|current|pressed)|data-selected/.test(
+              match[1]
+            ) &&
+            !/:not\([^)]*(?:active|selected)/.test(match[1]) &&
+            !/activity__mark--active|knowledge-card--active/.test(match[1])
+        )
+        .map((match) => ({ file: fileLabel(path), selector: match[1].trim(), body: match[2] }));
+    });
+    const offenders = stateRules.flatMap(({ file, selector, body }) =>
+      [...body.matchAll(/(?:^|;)\s*(background|border|outline|box-shadow)\s*:\s*([^;]+)/g)]
+        .filter((match) => !allowedVisualValues.has(match[2].trim()))
+        .map((match) => `${file} ${selector}: ${match[1]}: ${match[2].trim()}`)
+    );
+
+    expect(stateRules.length).toBeGreaterThan(selectionRules.length);
+    expect(offenders, offenders.join("\n")).toEqual([]);
+  });
+
+  it("keeps keyboard focus sky on controls and suppresses it on selected rows", () => {
+    const focusRules = cssFiles.flatMap((path) => {
+      const css = stripCssComments(readFileSync(path, "utf8"));
+      return [...css.matchAll(/([^{}]*:focus(?:-visible|-within)?[^{}]*)\{([^}]*)\}/g)].map(
+        (match) => ({ file: fileLabel(path), selector: match[1].trim(), body: match[2] })
+      );
+    });
+    const outlined = focusRules.filter(({ body }) => /\boutline\s*:/.test(body));
+    const selected = outlined.filter(({ selector }) =>
+      /is-active|--selected|aria-(?:selected|current|pressed)|data-selected/.test(selector)
+    );
+    const ordinaryOffenders = outlined
+      .filter(({ selector }) => !selected.some((rule) => rule.selector === selector))
+      .filter(
+        ({ body }) =>
+          !/outline:\s*var\(--cf-focus-ring(?:-compact)?\)/.test(body) ||
+          /selection|lime|color-mix|#(?:17171a|e6fa8d)/i.test(body)
+      )
+      .map(({ file, selector }) => `${file}: ${selector}`);
+    const selectedOffenders = selected
+      .filter(
+        ({ body }) =>
+          !/outline:\s*var\(--cf-selection-outline\)/.test(body) ||
+          !/box-shadow:\s*var\(--cf-selection-shadow\)/.test(body) ||
+          /cf-focus-ring|lime|color-mix|#[0-9a-f]/i.test(body)
+      )
+      .map(({ file, selector }) => `${file}: ${selector}`);
+
+    expect(foundationProperties.get("--cf-focus-ring")).toBe("3px solid var(--sky)");
+    expect(foundationProperties.get("--cf-focus-ring-compact")).toBe("2px solid var(--sky)");
+    expect(outlined.length).toBeGreaterThan(0);
+    expect(selected.length).toBeGreaterThan(0);
+    expect(ordinaryOffenders, ordinaryOffenders.join("\n")).toEqual([]);
+    expect(selectedOffenders, selectedOffenders.join("\n")).toEqual([]);
+  });
+});
+
+describe("CareerRat JSX styling boundary", () => {
+  it("allows inline styles to set only reviewed dynamic measurements", () => {
+    const allowedProperties = new Set([
+      "--cf-fit-width",
+      "--cf-pipeline-width",
+      "--cf-progress-width",
+      "--cf-runtime-font-size",
+      "--cf-runtime-scale",
+      "--cf-runtime-size",
+    ]);
+    const jsxFiles = sourceFiles.filter(
+      (path) => extname(path) === ".jsx" && !path.endsWith(".test.jsx")
+    );
+    const styleObjects = jsxFiles.flatMap((path) => {
+      const source = readFileSync(path, "utf8");
+      return [...source.matchAll(/style=\{\{([\s\S]*?)\}\}/g)].map((match) => ({
+        file: fileLabel(path),
+        body: match[1],
+      }));
+    });
+
+    expect(styleObjects.length).toBeGreaterThan(0);
+    for (const { file, body } of styleObjects) {
+      const keys = [...body.matchAll(/(?:^|,)\s*(["'][^"']+["']|[$\w]+)\s*:/g)].map((match) =>
+        match[1].replace(/^["']|["']$/g, "")
+      );
+      expect(keys.length, `${file}: ${body}`).toBeGreaterThan(0);
+      expect(
+        keys.filter((key) => !allowedProperties.has(key)),
+        `${file}: ${body}`
+      ).toEqual([]);
+    }
   });
 });
 
@@ -193,9 +413,8 @@ describe("CareerRat typography", () => {
     )]
       .map((match) => match[1])
       .sort();
-    const hasFigtreeFamily = declarations.some(
-      ({ property, value }) => property === "font-family" && /^"Figtree"\s*,/.test(value)
-    );
+    const hasFigtreeFamily =
+      foundationProperties.get("--font") === '"Figtree", system-ui, sans-serif';
 
     expect({ importedWeights, hasFigtreeFamily }).toEqual({
       importedWeights: ["400", "500", "600", "700", "800"],
@@ -209,6 +428,7 @@ describe("CareerRat typography", () => {
         ({ property, value }) =>
           property === "font-family" &&
           value !== "inherit" &&
+          value !== "var(--font)" &&
           !/^"Figtree"\s*,\s*system-ui\s*,\s*sans-serif$/.test(value)
       )
       .map(({ file, line, value }) => `${file}:${line}: font-family: ${value}`);

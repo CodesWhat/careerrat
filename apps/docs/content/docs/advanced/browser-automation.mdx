@@ -35,9 +35,9 @@ forms, reading in-platform DMs, polling ATS status. The agent reads the live DOM
 before each action, never uses hardcoded selectors, and stays confirm-first.
 
 **Automatic provider selection:** Orca's visible supervised browser is used inside an
-Orca workspace; the compatible extension session is selected otherwise. Playwright
-persistent profiles remain an explicit fallback at
-`~/.careerrat/board-profiles/<platform>`. If the selected provider cannot execute a
+Orca workspace; bundled Playwright is selected in the packaged desktop app; the
+compatible extension session is selected otherwise. Playwright keeps persistent profiles
+at `~/.careerrat/board-profiles/<platform>`. If the selected provider cannot execute a
 workflow, CareerRat shows a supervised/manual handoff instead of claiming it ran.
 
 Automatic is the default. Settings shows the effective browser and allows an explicit

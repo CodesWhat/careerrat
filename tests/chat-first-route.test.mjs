@@ -118,6 +118,7 @@ test("chat-first route module mounts the complete durable write surface", async 
     "POST /api/chat-first/mock/end",
     "POST /api/chat-first/sourced/decision",
     "POST /api/chat-first/deep-ingest-prompt/dismiss",
+    "POST /api/chat-first/deep-ingest/open",
     "POST /api/chat-first/touch-due/dismiss",
   ]) {
     assert.equal(routes.has(key), true, key);
@@ -140,6 +141,20 @@ test("deep ingest prompt dismiss route returns the durable updated aggregate", a
   assert.equal(replay.status, 200);
   assert.equal(replay.body.data.reused, true);
   assert.equal(replay.body.data.prompt.dismissedAt, dismissed.body.data.prompt.dismissedAt);
+});
+
+test("deep ingest open route returns the same first-class thread on replay", async () => {
+  const repoRoot = tempRepo();
+  const routes = await boot(repoRoot);
+
+  const first = await invoke(routes, "POST", "/api/chat-first/deep-ingest/open", {});
+  const replay = await invoke(routes, "POST", "/api/chat-first/deep-ingest/open", {});
+
+  assert.equal(first.status, 200);
+  assert.equal(first.body.data.thread.id, "ingest");
+  assert.equal(first.body.data.state.deepIngestThread.id, "ingest");
+  assert.equal(replay.body.data.reused, true);
+  assert.deepEqual(replay.body.data.thread, first.body.data.thread);
 });
 
 test("dossier PDF route returns a real no-store attachment from the canonical exporter", async () => {
@@ -479,6 +494,31 @@ test("job-thread turn persists both sides and grounds bounded AI in canonical ap
   assert.match(prompt, /Staff Platform Engineer/);
   assert.match(prompt, /How should I frame my migration story/);
   assert.doesNotMatch(prompt, /987654|current_base/);
+});
+
+test("job-thread turn unwraps a nested JSON reply before it reaches the chat bubble", async () => {
+  const repoRoot = tempRepo();
+  appUpsert({
+    repoRoot,
+    row: {
+      id: "app-nested-reply",
+      company: "Curri",
+      role: "Senior Software Engineer",
+      status: "reviewed-hold",
+    },
+  });
+  const routes = await boot(repoRoot, {
+    callAIImpl: async () =>
+      aiReply({ reply: JSON.stringify({ reply: "I can prepare and fill the form safely." }) }),
+  });
+
+  const turn = await invoke(routes, "POST", "/api/chat-first/job-thread/turn", {
+    applicationId: "app-nested-reply",
+    text: "What can you do here?",
+  });
+
+  assert.equal(turn.status, 200);
+  assert.equal(turn.body.data.assistantMessage.text, "I can prepare and fill the form safely.");
 });
 
 test("AI-backed mock start and turn persist role-calibrated question, answer, feedback, and next question", async () => {

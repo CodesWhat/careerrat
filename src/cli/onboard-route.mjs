@@ -9,9 +9,8 @@
 // those rows, and YAML is materialized only by write-config as compatibility
 // output. The deterministic resume parser still handles plain-text/markdown
 // resumes without a model, while BYOK AI routes are optional assists. The
-// companion byte-static page is src/core/onboarding/onboard-page.mjs, mounted
-// at GET /onboard by tracker-dev.mjs. M8 adds exactly one AI-touching
-// route here (POST /api/onboard/resume-ai, for the PDF/image case
+// React onboarding lives under /app. M8 adds exactly one AI-touching route
+// here (POST /api/onboard/resume-ai, for the PDF/image case
 // resume-parser.mjs can't handle) rather than a separate file, since it's the
 // same résumé-intake concern as the existing POST /api/onboard/resume. The
 // route returns the shared bounded-AI envelope, while the web API wrapper
@@ -71,6 +70,7 @@ import {
   candidateConfigPatch,
   candidateEvidenceMerge,
   candidateEvidenceRemoveOne,
+  candidateEvidenceReplace,
   candidateSetupInitialize,
   publicSyncPreferenceGet,
   publicSyncPreferenceSet,
@@ -254,8 +254,8 @@ function hasUsableResumeExtraction(extracted) {
   return candidateFacts || claimFacts || sectionFacts;
 }
 
-// Detect resume text that is actually binary (a PDF/DOCX read client-side as
-// text, per onboard-page.mjs's FileReader.readAsText hint). Two tells: literal
+// Detect resume text that is actually binary (a PDF/DOCX decoded as text).
+// Two tells: literal
 // NUL bytes (never legitimate in text), or a high ratio of U+FFFD replacement
 // characters (what a lossy UTF-8 decode of binary data produces). 1% is a
 // deliberately low bar — real resumes have essentially zero replacement
@@ -992,6 +992,12 @@ function writeDbCompatibilityBundle(repoRoot, pathCtx, config) {
   return { written, sources };
 }
 
+function prepareDbSearchSources(pathCtx, config) {
+  const sources = buildDbSearchSources(pathCtx, config);
+  sourceConfigPut({ ...pathCtx, name: "search-sources", data: sources });
+  return sources;
+}
+
 function sendCandidateError(res, err) {
   sendJson(res, err?.code === "NO_DATABASE" ? 409 : 400, {
     ok: false,
@@ -1052,13 +1058,12 @@ export function prepareQuickStartSourcing({ repoRoot, env = process.env } = {}) 
     };
   }
 
-  const { written, sources } = writeDbCompatibilityBundle(repoRoot, pathCtx, config);
+  const sources = prepareDbSearchSources(pathCtx, config);
   const searchCount = Array.isArray(sources?.searches) ? sources.searches.length : 0;
   return {
     status: 200,
     body: {
       ok: true,
-      written,
       readiness: setup.readiness,
       missing: setup.missing,
       locks: {
@@ -2083,6 +2088,7 @@ export function mountOnboardRoutes({
         // model this server is normally configured for.
         env: correction ? env : { ...env, ANTHROPIC_MODEL: fastModel },
         tools: ["Read"],
+        approvedReadPaths: [savedPath],
         outputSchema: schema,
         onEvent: (evt) => {
           if (onProgress) {
@@ -2205,6 +2211,35 @@ export function mountOnboardRoutes({
       sendJson(res, 200, { ok: true });
     });
   }
+
+  // -------------------------------------------------------------------------
+  // POST /api/onboard/candidate/evidence/replace — replace one whole evidence
+  // section atomically while preserving every supplied durable claim id.
+  // -------------------------------------------------------------------------
+  addRoute("POST", "/api/onboard/candidate/evidence/replace", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+    } catch (err) {
+      sendJson(res, err.status || 400, { error: err.message });
+      return;
+    }
+    const posted = Array.isArray(body?.claims) ? body.claims : null;
+    if (!posted) {
+      sendJson(res, 400, { ok: false, error: "body.claims must be an array" });
+      return;
+    }
+    if (!dbExists(pathCtx)) {
+      sendJson(res, 409, { ok: false, error: "SQLite candidate setup is required" });
+      return;
+    }
+    try {
+      const result = candidateEvidenceReplace({ ...pathCtx, claims: posted });
+      sendJson(res, 200, { ok: true, ...result });
+    } catch (err) {
+      sendCandidateError(res, err);
+    }
+  });
 
   // -------------------------------------------------------------------------
   // POST /api/onboard/candidate/evidence/remove — { id } delete exactly one

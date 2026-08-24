@@ -38,6 +38,7 @@ async function chatFirstApi() {
   for (const name of [
     "chatFirstStateGet",
     "deepIngestPromptDismiss",
+    "deepIngestThreadOpen",
     "jobThreadMessageAppend",
     "jobThreadSetArchived",
     "jobThreadSetPinned",
@@ -101,6 +102,62 @@ test("migration 012 creates durable chat-first thread, mission, and mock intervi
   }
 });
 
+test("chat-first state hydrates durable research threads and their saved or discarded decisions", async () => {
+  const api = await import("../src/core/db/verbs.mjs");
+  const repoRoot = tempRepo();
+
+  api.skillChatMessageAppend({
+    repoRoot,
+    skill: "research-company",
+    role: "assistant",
+    text: "Research ready for review.",
+    runtimeSessionId: "runtime-chat-1",
+    now: new Date("2026-08-24T15:00:00.000Z"),
+  });
+  api.skillChatDecisionSet({
+    repoRoot,
+    skill: "research-company",
+    decisionId: "discovery:company:acme",
+    action: "save",
+    resultText: "Saved research for Acme to your workspace.",
+    now: new Date("2026-08-24T15:01:00.000Z"),
+  });
+  api.skillChatMessageAppend({
+    repoRoot,
+    skill: "research-comp",
+    role: "assistant",
+    text: "Benchmark ready for review.",
+    runtimeSessionId: "runtime-chat-2",
+    now: new Date("2026-08-24T15:02:00.000Z"),
+  });
+  api.skillChatDecisionSet({
+    repoRoot,
+    skill: "research-comp",
+    decisionId: "discovery:comp:staff-new-york",
+    action: "discard",
+    resultText: "Discarded the benchmark. Nothing was saved.",
+    now: new Date("2026-08-24T15:03:00.000Z"),
+  });
+
+  closeAll();
+  const state = api.chatFirstStateGet({ repoRoot });
+  expectSkillChat(state.skillChats, "research-company", {
+    message: "Research ready for review.",
+    decisionAction: "save",
+  });
+  expectSkillChat(state.skillChats, "research-comp", {
+    message: "Benchmark ready for review.",
+    decisionAction: "discard",
+  });
+});
+
+function expectSkillChat(threads, skill, { message, decisionAction }) {
+  const thread = threads.find((candidate) => candidate.skill === skill);
+  assert.ok(thread, `${skill} thread should be present`);
+  assert.equal(thread.messages[0].text, message);
+  assert.equal(thread.decisions[0].action, decisionAction);
+}
+
 test("deep ingest prompt dismissal is durable and idempotent", async () => {
   const api = await import("../src/core/db/verbs.mjs");
   const repoRoot = tempRepo();
@@ -132,6 +189,55 @@ test("deep ingest prompt dismissal is durable and idempotent", async () => {
   });
   assert.equal(replay.reused, true);
   assert.equal(replay.prompt.dismissedAt, "2026-08-23T17:00:00.000Z");
+});
+
+test("deep ingest open creates one durable derived thread and reuses it after restart", async () => {
+  const api = await import("../src/core/db/verbs.mjs");
+  const repoRoot = tempRepo();
+
+  assert.equal(api.chatFirstStateGet({ repoRoot }).deepIngestThread, null);
+  const first = api.deepIngestThreadOpen({
+    repoRoot,
+    now: new Date("2026-08-24T15:00:00.000Z"),
+  });
+  assert.equal(first.reused, false);
+  assert.deepEqual(first.thread, {
+    id: "ingest",
+    title: "Deep ingest",
+    subtitle: "add work history and review grounded evidence",
+    startedAt: "2026-08-24T15:00:00.000Z",
+  });
+
+  closeAll();
+  assert.deepEqual(api.chatFirstStateGet({ repoRoot }).deepIngestThread, first.thread);
+  const replay = api.deepIngestThreadOpen({
+    repoRoot,
+    now: new Date("2026-08-24T16:00:00.000Z"),
+  });
+  assert.equal(replay.reused, true);
+  assert.deepEqual(replay.thread, first.thread);
+});
+
+test("saved Deep ingest state earns the same thread without a separate open write", async () => {
+  const api = await import("../src/core/db/verbs.mjs");
+  const repoRoot = tempRepo();
+  api.deepIngestSourceCreate({
+    repoRoot,
+    input: {
+      sourceKind: "paste",
+      targetShape: "auto",
+      text: "Led a platform migration and cut deploy time in half.",
+      createdAt: "2026-08-24T15:30:00.000Z",
+      updatedAt: "2026-08-24T15:30:00.000Z",
+    },
+  });
+
+  assert.deepEqual(api.chatFirstStateGet({ repoRoot }).deepIngestThread, {
+    id: "ingest",
+    title: "Deep ingest",
+    subtitle: "add work history and review grounded evidence",
+    startedAt: "2026-08-24T15:30:00.000Z",
+  });
 });
 
 test("deep ingest completion hides an undismissed prompt from canonical lane state", async () => {
@@ -195,7 +301,13 @@ test("an inbound human or scheduled interview earns a durable job thread, while 
 test("pinning, messaging, and manual archive state survive restart without copying job lifecycle facts", async () => {
   const api = await chatFirstApi();
   const repoRoot = tempRepo();
-  seedApplication(repoRoot, { id: "app-pinned", company: "Tyrell Corp", status: "offer" });
+  seedApplication(repoRoot, {
+    id: "app-pinned",
+    company: "Tyrell Corp",
+    status: "offer",
+    location: "New York, NY",
+    mode: "hybrid",
+  });
 
   api.jobThreadSetPinned({
     repoRoot,
@@ -208,6 +320,8 @@ test("pinning, messaging, and manual archive state survive restart without copyi
     applicationId: "app-pinned",
     role: "user",
     text: "Coach me through the offer call.",
+    metadata: { state: "reviewable" },
+    artifacts: [{ kind: "screening_answers", title: "Offer answers" }],
     now: new Date("2026-08-23T16:01:00.000Z"),
   });
   api.jobThreadSetArchived({
@@ -225,6 +339,12 @@ test("pinning, messaging, and manual archive state survive restart without copyi
   assert.equal(thread.archiveReason, "user");
   assert.equal(thread.messages.length, 1);
   assert.equal(thread.messages[0].text, "Coach me through the offer call.");
+  assert.equal(thread.location, "New York, NY");
+  assert.equal(thread.mode, "hybrid");
+  assert.deepEqual(thread.messages[0].metadata, { state: "reviewable" });
+  assert.deepEqual(thread.messages[0].artifacts, [
+    { kind: "screening_answers", title: "Offer answers" },
+  ]);
 
   const db = openDb({ repoRoot });
   const stored = JSON.parse(
@@ -232,6 +352,57 @@ test("pinning, messaging, and manual archive state survive restart without copyi
   );
   assert.equal(stored.archiveEligible, undefined);
   assert.equal(stored.touchDue, undefined);
+});
+
+test("promoted scanner facts reach job threads and their AI context", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  const { sourcedPromote, sourcedUpsertBatch } = await import("../src/core/db/verbs.mjs");
+  const { sourcedRowsFromScanOffers } = await import("../src/core/scoring/sourced-persistence.mjs");
+  const [row] = sourcedRowsFromScanOffers(
+    [
+      {
+        company: "Scanner Facts Corp",
+        title: "Staff JavaScript Engineer",
+        url: "https://jobs.example.test/scanner-facts",
+        location: "Remote - United States",
+        comp: "$185,000 - $215,000",
+        fit: "high",
+        score: 91,
+      },
+    ],
+    "2026-08-24T15:00:00.000Z"
+  );
+  sourcedUpsertBatch({ repoRoot, rows: [row] });
+  sourcedPromote({ repoRoot, id: row.id });
+  api.jobThreadMessageAppend({
+    repoRoot,
+    applicationId: row.id,
+    role: "user",
+    text: "What should I know about this job?",
+  });
+
+  const thread = api
+    .chatFirstStateGet({ repoRoot })
+    .jobThreads.find((item) => item.applicationId === row.id);
+  assert.equal(thread.location, "Remote - United States");
+  assert.equal(thread.mode, "remote");
+  assert.equal(thread.comp, "$185,000 - $215,000");
+
+  let request;
+  await api.jobThreadTurn({
+    repoRoot,
+    applicationId: row.id,
+    text: "Does the location and compensation fit?",
+    call: async (options) => {
+      request = options;
+      return { content: [{ type: "text", text: JSON.stringify({ reply: "Yes." }) }] };
+    },
+  });
+  const application = JSON.parse(request.messages[0].content).canonicalContext.application;
+  assert.equal(application.location, "Remote - United States");
+  assert.equal(application.mode, "remote");
+  assert.equal(application.compensation, "$185,000 - $215,000");
 });
 
 test("earned job threads project canonical conversations and communications without storing copies", async () => {
@@ -1886,6 +2057,97 @@ test("mock start resumes the newest empty active session without an explicit ses
 
   assert.equal(resumed.session.id, existing.id);
   assert.equal(resumed.question.questionNumber, 1);
+});
+
+test("mock start repairs descriptive model metadata into an interview question", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-mock-question-repair",
+    company: "Question Repair Corp",
+    role: "Platform Engineer",
+    status: "interview",
+  });
+
+  const started = await api.mockInterviewStartWithAI({
+    repoRoot,
+    id: "mock-question-repair",
+    applicationId: "app-mock-question-repair",
+    runAI: async () => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          question:
+            "Behavioral interview prompt focused on migration leadership and cross-functional tradeoffs.",
+        },
+        ai: { used: true },
+      },
+    }),
+  });
+
+  assert.equal(
+    started.question.text,
+    "Walk me through a specific example involving migration leadership and cross-functional tradeoffs."
+  );
+});
+
+test("mock start unwraps a JSON-encoded question string from an installed runtime", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-mock-question-json",
+    company: "Question JSON Corp",
+    role: "Platform Engineer",
+    status: "interview",
+  });
+
+  const started = await api.mockInterviewStartWithAI({
+    repoRoot,
+    id: "mock-question-json",
+    applicationId: "app-mock-question-json",
+    runAI: async () => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          question:
+            '{"question":"How would you keep a dispatcher cache fast without surfacing stale data?"}',
+        },
+        ai: { used: true },
+      },
+    }),
+  });
+
+  assert.equal(
+    started.question.text,
+    "How would you keep a dispatcher cache fast without surfacing stale data?"
+  );
+});
+
+test("mock start preserves a contextual multi-sentence question", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-mock-context-question",
+    company: "Context Question Corp",
+    role: "Product Engineer",
+    status: "interview",
+  });
+  const question =
+    "At Curri, drivers use the product in the field. How would you measure whether a new feature works for them? Walk me through your first week.";
+
+  const started = await api.mockInterviewStartWithAI({
+    repoRoot,
+    id: "mock-context-question",
+    applicationId: "app-mock-context-question",
+    runAI: async () => ({
+      status: 200,
+      body: { ok: true, data: { question }, ai: { used: true } },
+    }),
+  });
+
+  assert.equal(started.question.text, question);
 });
 
 test("chat-first reads fail closed and never create a database implicitly", async () => {

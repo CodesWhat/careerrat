@@ -14,6 +14,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { mountChatRoute } from "../src/cli/chat-route.mjs";
 import { createChatRuntime } from "../src/core/ai/chat-runtime.mjs";
+import { closeAll, openDb } from "../src/core/db/connection.mjs";
+import { skillChatMessageAppend } from "../src/core/db/verbs.mjs";
 import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
 
 // ---------------------------------------------------------------------------
@@ -789,6 +791,54 @@ test("GET /api/chat/list: 200 with every tracked session", async () => {
     assert.ok("createdAt" in list[0] && "lastActivityAt" in list[0]);
   } finally {
     chatRuntime.shutdown();
+    await closeServer(server);
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("POST /api/chat/decision records visible skill-chat save and discard results durably", async () => {
+  const repoRoot = tempRepoWithSkill("research-company");
+  openDb({ repoRoot });
+  skillChatMessageAppend({
+    repoRoot,
+    skill: "research-company",
+    role: "assistant",
+    text: "Research ready for review.",
+  });
+  const chatRuntime = {
+    findBySkill() {
+      return null;
+    },
+    listSessions() {
+      return [];
+    },
+  };
+  const server = await bootServer(chatRuntime, repoRoot);
+  try {
+    const response = await fetch(`${baseUrl(server)}/api/chat/decision`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        skill: "research-company",
+        decisionId: "discovery:company:acme",
+        action: "discard",
+        resultText: "Discarded Acme research. Nothing was saved.",
+      }),
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.decision.action, "discard");
+
+    closeAll();
+    const db = openDb({ repoRoot });
+    const thread = JSON.parse(
+      db.prepare("SELECT data FROM skill_chat_threads WHERE skill = ?").get("research-company").data
+    );
+    assert.equal(thread.decisions[0].id, "discovery:company:acme");
+    assert.equal(thread.decisions[0].resultText, "Discarded Acme research. Nothing was saved.");
+  } finally {
+    closeAll();
     await closeServer(server);
     rmSync(repoRoot, { recursive: true, force: true });
   }

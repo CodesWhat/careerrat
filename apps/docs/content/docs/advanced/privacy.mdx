@@ -18,7 +18,7 @@ not a service.
 
 ## The packaged desktop app checks for updates
 
-The packaged macOS desktop app makes one outbound request the browser dev app
+The packaged desktop app makes one outbound request the browser dev app
 and the npm CLI do not: once a day, it sends an unauthenticated `GET` to
 GitHub's public releases API (`api.github.com/repos/CodesWhat/careerrat/releases/latest`)
 to see whether a newer version has shipped. The request carries no candidate
@@ -45,15 +45,15 @@ and docs only: the CareerRat app and CLI you run locally send nothing to it.
 
 ## What the agent API receives
 
-When your agent generates text (tailoring a résumé, drafting an email), your
-selected runtime may call its AI provider — Anthropic, OpenAI, Google, or another
-supported provider. The text it sends includes
+When your agent generates text (tailoring a résumé, drafting an email), its
+runtime may call an AI provider. Packaged in-app skill and chat execution
+currently uses boundary-verified Claude Code and therefore Anthropic; Codex and
+other compatible agents can still run the outer terminal workspace flow. The text sent includes
 the relevant portions of your candidate profile, JD body, and instructions.
 Review that provider's privacy and retention terms before use.
 
 CareerRat does not send that context to a CareerRat-operated service. The local
-app invokes the runtime you selected, and that runtime communicates with its
-provider under the provider's terms.
+runtime communicates with its provider under that provider's terms.
 
 ## Compensation privacy
 

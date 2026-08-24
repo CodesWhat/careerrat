@@ -31,7 +31,8 @@ export function runtimeSelectionReady(state) {
   const selectedId = String(state?.selectedId || "").trim();
   if (!selectedId) return false;
   return list(state?.runtimes).some(
-    (runtime) => runtime?.id === selectedId && runtime?.ready === true
+    (runtime) =>
+      runtime?.id === selectedId && runtime?.ready === true && runtime?.selectable !== false
   );
 }
 
@@ -47,10 +48,12 @@ export function firstRunRuntimeChoices(state) {
       name: runtime.name,
       detected: runtime.available === true,
       ready: runtime.ready === true,
+      selectable: runtime.selectable !== false,
       selected: runtime.id === state?.selectedId,
       recommended: runtime.id === "claude",
       status: runtime.status,
       action: runtime.action,
+      capabilityReason: runtime.capabilityReason || null,
     }));
 }
 
@@ -99,16 +102,24 @@ function buildKnowledgeEditor(key, state) {
     };
   }
   if (key === "roles") {
+    const roleBuckets = list(targeting.role_buckets).map((bucket) => ({
+      ...bucket,
+      titles: [...list(bucket?.titles)],
+    }));
     return {
-      fields: [
-        editorField(
-          "titles",
-          "Target role titles",
-          "textarea",
-          lineValue(list(targeting.role_buckets).flatMap((bucket) => list(bucket?.titles))),
-          { placeholder: "One role title per line", rows: 5 }
-        ),
-      ],
+      roleBuckets,
+      fields: (roleBuckets.length ? roleBuckets : [{ name: "Primary targets", titles: [] }]).map(
+        (bucket, index) =>
+          editorField(
+            index === 0 ? "titles" : `titles:${index}`,
+            roleBuckets.length > 1
+              ? `${bucket.name || `Target lane ${index + 1}`} titles`
+              : "Target role titles",
+            "textarea",
+            lineValue(bucket.titles),
+            { placeholder: "One role title per line", rows: 5 }
+          )
+      ),
     };
   }
   if (key === "companies") {
@@ -139,6 +150,7 @@ function buildKnowledgeEditor(key, state) {
     const claims = list(evidence.claims);
     return {
       existingClaimIds: claims.map((claim) => claim?.id).filter(Boolean),
+      existingClaims: claims.map((claim) => ({ ...claim })),
       fields: [
         editorField(
           "claims",

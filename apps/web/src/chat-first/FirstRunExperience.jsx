@@ -1,3 +1,4 @@
+import { cleanAgentCopy } from "./agent-copy.js";
 import { SendUpIcon } from "./chat-first-icons.jsx";
 import { isFirstRunExtractedFact } from "./first-run-controller.js";
 import { RuntimeIcon } from "./RuntimeIcon.jsx";
@@ -9,10 +10,7 @@ function safeArray(value) {
 }
 
 function compactAssistantText(value) {
-  return String(value || "")
-    .replace(/\r\n?/g, "\n")
-    .replace(/\n(?:\s*\n)+/g, "\n")
-    .trim();
+  return cleanAgentCopy(value);
 }
 
 const RESUME_ACCEPT = ".pdf,.docx,.txt,.md,image/*";
@@ -36,6 +34,7 @@ function progressValues(progress = {}) {
 }
 
 function engineStatus(engine) {
+  if (engine.selectable === false) return "Secure tool runs unavailable";
   if (engine.ready) return engine.selected ? "Selected" : "Ready";
   if (engine.status === "authentication_required") return "Sign-in needed";
   if (!engine.detected) return "Not found";
@@ -93,17 +92,21 @@ export function EngineSelection({
                   {engineStatus(engine)}
                   {engine.detected ? " · detected ✓" : ""}
                 </span>
+                {engine.selectable === false && engine.capabilityReason ? (
+                  <span>{engine.capabilityReason}</span>
+                ) : null}
                 {engine.recommended ? (
                   <span className="cf-first-run__recommended">RECOMMENDED</span>
                 ) : null}
               </>
             );
-            if (engine.ready) {
+            if (engine.ready && engine.selectable !== false) {
               return (
                 <button
                   key={engine.id}
                   type="button"
                   className={className}
+                  aria-pressed={Boolean(engine.selected)}
                   disabled={submitting}
                   onClick={() => onSelectEngine?.(engine.id)}
                 >
@@ -250,7 +253,10 @@ function KnowledgePanel({ agentName, knowledge = [], progress = {}, onEditSectio
         aria-valuemax={current.total}
         aria-valuenow={current.completed}
       >
-        <span className="cf-first-run__progress-value" style={{ width: `${current.percent}%` }} />
+        <span
+          className="cf-first-run__progress-value"
+          style={{ "--cf-progress-width": `${current.percent}%` }}
+        />
       </div>
       <div className="cf-first-run__knowledge-cards">
         {safeArray(knowledge).length > 0 ? (

@@ -168,6 +168,7 @@ describe("ProfileSettings", () => {
         permissions={PERMISSIONS}
         engine={{ name: "Claude Code", connected: true }}
         sources={{ scannedCount: 72, pinnedCount: 4, lastSweep: "7:02am", blockedCount: 1 }}
+        publicSyncPreference={{ enabled: true, source: "default", updatedAt: null }}
       />
     );
 
@@ -179,7 +180,39 @@ describe("ProfileSettings", () => {
     expect(html).toContain('role="switch"');
     expect(html).toContain('aria-checked="false"');
     expect(html).toContain("Always on");
-    expect(html.match(/role="switch"/g)).toHaveLength(1);
+    expect(html).toContain("Share public company and board metadata");
+    expect(html).toContain(
+      "company domains, career pages, ATS board links, providers, and scan confidence"
+    );
+    expect(html).toContain(
+      "never sends résumé text, profile data, applications, private notes, compensation, fit scores, or local files"
+    );
+    expect(html).toContain("On by default · public metadata only");
+    expect(html).toContain('aria-label="Share public company and board metadata: on"');
+    expect(html.match(/role="switch"/g)).toHaveLength(2);
+  });
+
+  it("lets the candidate opt out and back in from App settings", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const onPublicSyncChange = vi.fn();
+    const tree = ProfileSettings({
+      activeTab: "settings",
+      permissions: PERMISSIONS,
+      publicSyncPreference: { enabled: false, source: "user", updatedAt: null },
+      onPublicSyncChange,
+    });
+    const toggle = findElement(
+      tree,
+      (node) =>
+        node.type === "button" &&
+        node.props?.["aria-label"] === "Share public company and board metadata: off"
+    );
+
+    expect(toggle).not.toBeNull();
+    expect(toggle.props["aria-checked"]).toBe(false);
+    expect(renderToStaticMarkup(tree)).toContain("Off · no public metadata shared");
+    toggle.props.onClick();
+    expect(onPublicSyncChange).toHaveBeenCalledWith(true);
   });
 
   it("renders actionable engine setup, source entry, and technical details dialogs inline", async () => {
@@ -192,6 +225,7 @@ describe("ProfileSettings", () => {
     const onSourceDraftChange = vi.fn();
     const onSubmitSource = vi.fn();
     const onCloseTechnicalDetails = vi.fn();
+    const onBrowserProviderChange = vi.fn();
     const tree = ProfileSettings({
       agentName: "Maya",
       activeTab: "settings",
@@ -212,11 +246,27 @@ describe("ProfileSettings", () => {
         ],
       },
       browser: {
+        providerId: "auto",
         provider: "Automatic browser connection",
+        effectiveProviderId: "extension",
         effectiveProvider: "Chrome extension",
         presenceStatus: "unverified",
         presenceDetail: "Google Chrome detected. Confirm the extension is signed in.",
         automaticFillSupported: false,
+        options: [
+          {
+            id: "auto",
+            label: "Automatic browser connection",
+            needs: "the bundled or supervised browser",
+            automatedApply: false,
+          },
+          {
+            id: "playwright",
+            label: "Playwright persistent profile",
+            needs: "one sign-in per platform",
+            automatedApply: true,
+          },
+        ],
         playwright: {
           ready: true,
           detail: "Playwright and Chromium are installed.",
@@ -234,12 +284,14 @@ describe("ProfileSettings", () => {
       onSourceDraftChange,
       onSubmitSource,
       onCloseTechnicalDetails,
+      onBrowserProviderChange,
     });
     const html = renderToStaticMarkup(tree);
 
     expect(html).toContain("Choose an AI engine");
     expect(html.match(/cf-runtime-icon/g)).toHaveLength(2);
-    expect(html).toContain("Open Terminal to sign in");
+    expect(html).toContain(">Sign in</button>");
+    expect(html).not.toMatch(/open terminal/i);
     expect(html).toContain("Retry detection");
     expect(html).toContain("Add a niche board");
     expect(html).toContain('value="https://jobs.example.com"');
@@ -252,11 +304,13 @@ describe("ProfileSettings", () => {
     expect(html).toContain("Ready");
     expect(html).toContain("Automatic application fill");
     expect(html).toContain("Unavailable with this browser connection");
+    expect(html).toContain("Browser automation provider");
+    expect(html).toContain("Playwright persistent profile");
     expect(html).not.toContain("window.prompt");
 
     findElement(
       tree,
-      (node) => node.type === "button" && textOf(node) === "Open Terminal to sign in"
+      (node) => node.type === "button" && textOf(node) === "Sign in"
     ).props.onClick();
     findElement(
       tree,
@@ -264,6 +318,49 @@ describe("ProfileSettings", () => {
     ).props.onClick();
     expect(onConnectEngine).toHaveBeenCalledWith("claude");
     expect(onRetryEngine).toHaveBeenCalledWith("codex");
+    findElement(
+      tree,
+      (node) => node.type === "select" && node.props.id === "cf-browser-automation-provider"
+    ).props.onChange({ target: { value: "playwright" } });
+    expect(onBrowserProviderChange).toHaveBeenCalledWith("playwright");
+  });
+
+  it("keeps unsupported detected CLIs visible without a Use action", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const onSelectEngine = vi.fn();
+    const tree = ProfileSettings({
+      activeTab: "settings",
+      permissions: PERMISSIONS,
+      engine: {
+        name: "Claude Code",
+        connected: true,
+        selectedId: "claude",
+        choices: [
+          {
+            id: "claude",
+            name: "Claude Code",
+            available: true,
+            ready: true,
+            selectable: true,
+          },
+          {
+            id: "codex",
+            name: "Codex",
+            available: true,
+            ready: true,
+            selectable: false,
+            capabilityReason: "Detected, but cannot safely run CareerRat tools yet.",
+          },
+        ],
+      },
+      enginePickerOpen: true,
+      onSelectEngine,
+    });
+    const html = renderToStaticMarkup(tree);
+
+    expect(html).toContain("cannot safely run CareerRat tools");
+    expect(html).not.toContain("Use this tool");
+    expect(onSelectEngine).not.toHaveBeenCalled();
   });
 
   it("keeps an empty engine picker actionable", async () => {

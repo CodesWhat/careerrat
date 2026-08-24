@@ -18,6 +18,7 @@ test("final submission has no setting, compatibility branch, or one-click capabi
     "src/core/automation/consent.mjs",
     "src/core/tracker/settings-snapshot.mjs",
     "src/core/agent/workspace-agent.mjs",
+    ".agents/skills/apply-job/SKILL.md",
     "templates/form-defaults.example.yml",
     "templates/automation.example.yml",
     "README.md",

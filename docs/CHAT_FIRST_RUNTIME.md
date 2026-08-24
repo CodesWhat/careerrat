@@ -26,10 +26,12 @@ does not explain the current decision, conversation, or due action.
 
 ## Returning to a conversation
 
-CareerRat rehydrates a returning agent from its own durable state. Claude, Codex,
-Gemini, and future runtimes can therefore switch without changing conversation
-identity or losing product state. Installed Claude invocations disable native
-session persistence, and installed Codex invocations are ephemeral.
+CareerRat rehydrates a returning agent from its own durable state, so
+conversation identity is runtime-neutral. The packaged app currently permits
+only boundary-verified Claude Code 2.1.241 or newer for in-app skill and chat
+execution, and disables its native session persistence. Codex, Gemini, and the
+other registry entries are detected but not selectable for tool-bearing in-app
+runs; they can still drive the workspace through the terminal agent flow.
 
 Vendor-specific exact-session resume handles may be added later as optional
 acceleration metadata. They cannot become the source of truth because retention,

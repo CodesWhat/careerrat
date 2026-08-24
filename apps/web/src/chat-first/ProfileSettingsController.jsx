@@ -26,6 +26,8 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   const [sourceDialogBusy, setSourceDialogBusy] = useState(false);
   const [sourceDraft, setSourceDraft] = useState("");
   const [technicalDetailsOpen, setTechnicalDetailsOpen] = useState(false);
+  const [browserProviderBusy, setBrowserProviderBusy] = useState(false);
+  const [publicSyncBusy, setPublicSyncBusy] = useState(false);
   const [editingSection, setEditingSection] = useState(null);
   const [editorValues, setEditorValues] = useState({});
   const [editorBusy, setEditorBusy] = useState(false);
@@ -123,6 +125,32 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
     }
   }
 
+  async function changePublicSync(enabled) {
+    setPublicSyncBusy(true);
+    setError(null);
+    try {
+      await api.setPublicSyncPreference(enabled);
+      await load();
+    } catch (cause) {
+      setError(cause?.message || "That public metadata setting could not be saved.");
+    } finally {
+      setPublicSyncBusy(false);
+    }
+  }
+
+  async function changeBrowserProvider(provider) {
+    setBrowserProviderBusy(true);
+    setError(null);
+    try {
+      await api.setAutomationSessionProvider(provider);
+      await load();
+    } catch (cause) {
+      setError(cause?.message || "That browser automation provider could not be saved.");
+    } finally {
+      setBrowserProviderBusy(false);
+    }
+  }
+
   function changeEngine() {
     setEnginePickerOpen(true);
   }
@@ -215,6 +243,8 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
         onEditSection={editSection}
         onOpenFiles={() => navigate("/", { state: { browse: "files" } })}
         onPermissionChange={changePermission}
+        publicSyncBusy={publicSyncBusy}
+        onPublicSyncChange={changePublicSync}
         onChangeEngine={changeEngine}
         onShowTechnicalDetails={() => setTechnicalDetailsOpen(true)}
         onAddSource={addSource}
@@ -235,6 +265,8 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
         onSourceDraftChange={setSourceDraft}
         onSubmitSource={submitSource}
         technicalDetailsOpen={technicalDetailsOpen}
+        browserProviderBusy={browserProviderBusy}
+        onBrowserProviderChange={changeBrowserProvider}
         onCloseTechnicalDetails={() => setTechnicalDetailsOpen(false)}
         profileEditor={editingSection ? model.profile?.editors?.[editingSection] : null}
         editorValues={editorValues}

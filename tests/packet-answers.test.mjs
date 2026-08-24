@@ -18,6 +18,7 @@ import {
 } from "../src/core/apply/form-questions.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
+import { appUpsert } from "../src/core/db/verbs/app.mjs";
 import { candidateConfigPatch, candidateEvidenceMerge } from "../src/core/db/verbs/candidate.mjs";
 import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
 
@@ -856,4 +857,123 @@ test("POST /api/packet/answers builds real DB context when only applicationId is
   assert.match(seen[0], /Route Context Candidate/);
   assert.match(seen[0], /ev-route-context/);
   assert.match(seen[0], /Build customer-facing agentic workflows/i);
+});
+
+test("forced answer regeneration preserves three prior application answers and gaps only a newly captured question", async () => {
+  const repoRoot = tempRepo();
+  seedApp(repoRoot);
+  const application = readApp(repoRoot, "app-packet");
+  appUpsert({
+    repoRoot,
+    env: {},
+    row: {
+      ...application,
+      link: "https://jobs.ashbyhq.com/acme-ai/example",
+      packetManifest: {
+        applicationId: "app-packet",
+        generatedAt: "2026-08-24T12:00:00.000Z",
+        uploadReady: true,
+        status: "upload-ready",
+        gapCount: 0,
+        gaps: [],
+        artifacts: {},
+        confirmedAnswers: [
+          {
+            questionId: "q-linkedin",
+            question: "LinkedIn URL*",
+            answer: "https://www.linkedin.com/in/alexrivera",
+            confirmedAt: "2026-08-24T12:01:00.000Z",
+          },
+          {
+            questionId: "q-motivation",
+            question: "Why Acme AI?*",
+            answer: "I want to build reliable customer workflows at Acme AI.",
+            confirmedAt: "2026-08-24T12:02:00.000Z",
+          },
+          {
+            questionId: "q-founder",
+            question: "Who inspired Acme AI's founding?*",
+            answer: "Morgan.",
+            confirmedAt: "2026-08-24T12:03:00.000Z",
+          },
+        ],
+      },
+    },
+  });
+  const { capturePacketQuestions } = await loadQuestionsModule();
+  await capturePacketQuestions({
+    repoRoot,
+    env: {},
+    applicationId: "app-packet",
+    source: "rendered",
+    questions: [
+      { id: "q-linkedin", label: "LinkedIn URL*", type: "text", required: true },
+      { id: "q-motivation", label: "Why Acme AI?*", type: "text", required: true },
+      {
+        id: "q-founder",
+        label: "Who inspired Acme AI's founding?*",
+        type: "text",
+        required: true,
+      },
+      {
+        id: "q-travel",
+        label: "Would you be willing to travel?",
+        type: "radio",
+        required: true,
+        options: ["Yes", "No"],
+      },
+    ],
+  });
+  const seenQuestionIds = [];
+  const routes = mountDirectRoutes(repoRoot, {
+    packetAnswersCall: async (options) => {
+      const prompt = options.messages.at(-1).content;
+      const questions = JSON.parse(prompt.split("Questions:\n")[1].split("\n\nContext:")[0]);
+      seenQuestionIds.push(...questions.map(({ id }) => id));
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              answers: [
+                {
+                  questionId: "q-travel",
+                  answer: "NEEDS YOU: choose Yes or No based on your availability.",
+                  evidenceIds: [],
+                  gap: "personal travel availability",
+                },
+              ],
+            }),
+          },
+        ],
+        model: "claude-test",
+      };
+    },
+  });
+
+  const result = await postJsonDirect(routes, "/api/packet/answers", {
+    applicationId: "app-packet",
+  });
+
+  assert.equal(result.status, 200);
+  assert.deepEqual(seenQuestionIds, ["q-travel"]);
+  assert.deepEqual(
+    result.body.data.answers.slice(0, 3).map(({ questionId, answer }) => ({ questionId, answer })),
+    [
+      { questionId: "q-linkedin", answer: "https://www.linkedin.com/in/alexrivera" },
+      {
+        questionId: "q-motivation",
+        answer: "I want to build reliable customer workflows at Acme AI.",
+      },
+      { questionId: "q-founder", answer: "Morgan." },
+    ]
+  );
+  assert.deepEqual(
+    result.body.data.answers
+      .filter((answer) => answer.uploadReady === false)
+      .map((answer) => answer.questionId),
+    ["q-travel"]
+  );
+  assert.equal(result.body.data.uploadReady, false);
+  assert.equal(result.body.data.manual.required, true);
 });

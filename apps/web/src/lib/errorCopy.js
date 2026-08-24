@@ -134,7 +134,8 @@ const RULES = [
     action: { label: "Finish setup", to: "/onboarding" },
   },
   {
-    match: ({ raw }) => startsWith(raw, "No search config found"),
+    match: ({ raw, code }) =>
+      code === "SOURCE_SETUP_REQUIRED" || startsWith(raw, "No search config found"),
     message: "No search sources are set up yet.",
     action: { label: "Open Settings", to: "/settings" },
   },
@@ -449,6 +450,32 @@ export function resolveErrorCopy(err) {
     action: { label: "Try again", retry: true },
     detail: raw,
   };
+}
+
+export function resolvePersistedErrorCopy(errorRecord, legacyText) {
+  const record =
+    errorRecord && typeof errorRecord === "object" && !Array.isArray(errorRecord)
+      ? errorRecord
+      : {};
+  const nested =
+    record.error && typeof record.error === "object" && !Array.isArray(record.error)
+      ? record.error
+      : {};
+  const raw = [
+    typeof errorRecord === "string" ? errorRecord : null,
+    record.message,
+    nested.message,
+    legacyText,
+  ].find((value) => typeof value === "string" && value.trim());
+  const statusValue = Number(record.status ?? nested.status);
+  const status = Number.isInteger(statusValue) && statusValue > 0 ? statusValue : null;
+  return resolveErrorCopy(
+    new ApiError(status, {
+      error: raw || null,
+      code: record.code || nested.code || null,
+      details: record.details || nested.details || null,
+    })
+  );
 }
 
 // Shared by every catch site across the app that resolves an error through

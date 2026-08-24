@@ -49,6 +49,31 @@ describe("chat-first onboarding controller", () => {
     ]);
   });
 
+  it("requires a secure CareerRat tool boundary, not authentication alone", async () => {
+    const controller = await import("./first-run-controller.js");
+    const state = {
+      selectedId: "codex",
+      runtimes: [
+        {
+          id: "codex",
+          name: "Codex",
+          available: true,
+          ready: true,
+          selectable: false,
+          capabilityReason: "Detected, but cannot safely run CareerRat tools yet.",
+        },
+      ],
+    };
+
+    expect(controller.runtimeSelectionReady(state)).toBe(false);
+    expect(controller.firstRunRuntimeChoices(state)[0]).toMatchObject({
+      id: "codex",
+      ready: true,
+      selectable: false,
+      capabilityReason: "Detected, but cannot safely run CareerRat tools yet.",
+    });
+  });
+
   it("uses the configured agent name from persisted onboarding state", async () => {
     const controller = await import("./first-run-controller.js");
 

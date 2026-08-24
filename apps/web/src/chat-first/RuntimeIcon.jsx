@@ -193,7 +193,7 @@ const ICONS = {
         alt=""
         aria-hidden="true"
         {...props}
-        style={{ transform: "scale(0.85)" }}
+        style={{ "--cf-runtime-scale": "0.85" }}
       />
     );
   },
@@ -240,7 +240,10 @@ export function RuntimeIcon({ runtimeId, name, size = 20, className }) {
   return (
     <span
       className={`cf-runtime-icon cf-runtime-icon--monogram${className ? ` ${className}` : ""}`}
-      style={{ width: size, height: size, fontSize: Math.round(size * 0.55) }}
+      style={{
+        "--cf-runtime-size": `${size}px`,
+        "--cf-runtime-font-size": `${Math.round(size * 0.55)}px`,
+      }}
       aria-hidden="true"
     >
       {letter}

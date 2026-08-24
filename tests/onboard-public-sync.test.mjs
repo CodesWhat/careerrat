@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -7,14 +7,16 @@ import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { mountOnboardRoutes } from "../src/cli/onboard-route.mjs";
 import { closeAll } from "../src/core/db/connection.mjs";
-import { candidateSetupInitialize } from "../src/core/db/verbs.mjs";
-import { ONBOARD_PAGE_HTML } from "../src/core/onboarding/onboard-page.mjs";
+import {
+  candidateConfigGet,
+  candidateEvidenceMerge,
+  candidateSetupInitialize,
+} from "../src/core/db/verbs.mjs";
 import {
   CANDIDATE_FILES,
   COPY_ONLY_CANDIDATE_FILES,
   OPTIONAL_CANDIDATE_FILES,
 } from "../src/core/profile/candidate-setup.mjs";
-import { extractInlineScript } from "./html-test-helpers.mjs";
 
 const cleanupRoots = [];
 const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -118,6 +120,52 @@ test("onboarding state reports public sync preference enabled by default", async
   });
 });
 
+test("evidence replacement route updates one whole validated section and rejects unsafe partial writes", async () => {
+  const repoRoot = tempRepo();
+  candidateEvidenceMerge({
+    repoRoot,
+    claims: [
+      { id: "seed-001", claim: "Original claim", evidence: "Resume" },
+      { id: "seed-002", claim: "Omitted claim", evidence: "Notes" },
+    ],
+  });
+  const server = bootServer(repoRoot);
+
+  const replaced = await postJson(server, "/api/onboard/candidate/evidence/replace", {
+    claims: [{ id: "seed-001", claim: "Edited claim", evidence: "Resume v2" }],
+  });
+  assert.equal(replaced.status, 200);
+  assert.deepEqual(candidateConfigGet({ repoRoot }).evidence.claims, [
+    { id: "seed-001", claim: "Edited claim", evidence: "Resume v2" },
+  ]);
+
+  const rejected = await postJson(server, "/api/onboard/candidate/evidence/replace", {
+    claims: [
+      { id: "seed-001", claim: "Would otherwise write", evidence: "Resume" },
+      { id: "seed-002", claim: "TODO replace me", evidence: "Notes" },
+    ],
+  });
+  assert.equal(rejected.status, 400);
+  assert.deepEqual(candidateConfigGet({ repoRoot }).evidence.claims, [
+    { id: "seed-001", claim: "Edited claim", evidence: "Resume v2" },
+  ]);
+});
+
+test("evidence replacement requires SQLite and never writes a compatibility file", async () => {
+  const repoRoot = tempRepo();
+  closeAll();
+  rmSync(join(repoRoot, ".careerrat"), { recursive: true, force: true });
+  const server = bootServer(repoRoot);
+
+  const result = await postJson(server, "/api/onboard/candidate/evidence/replace", {
+    claims: [{ id: "seed-001", claim: "Should not write", evidence: "Resume" }],
+  });
+
+  assert.equal(result.status, 409);
+  assert.match(result.body.error, /SQLite candidate setup is required/);
+  assert.equal(existsSync(join(repoRoot, "candidate/evidence.yml")), false);
+});
+
 test("POST /api/onboard/public-sync-preference persists local opt-out and opt-in", async () => {
   const repoRoot = tempRepo();
   const server = bootServer(repoRoot);
@@ -140,41 +188,4 @@ test("POST /api/onboard/public-sync-preference persists local opt-out and opt-in
   });
   assert.equal(invalid.status, 400);
   assert.match(invalid.body.error.message, /enabled/i);
-});
-
-test("onboarding page includes default-on public sync UI hooks and no-private-data copy", () => {
-  for (const hook of [
-    'data-hook="public-sync-toggle"',
-    'data-hook="public-sync-status"',
-    'data-hook="public-sync-copy"',
-    'data-hook="public-sync-save"',
-    'data-hook="public-sync-error"',
-  ]) {
-    assert.ok(ONBOARD_PAGE_HTML.includes(hook), `expected ${hook}`);
-  }
-
-  assert.match(ONBOARD_PAGE_HTML, /public company and board metadata/i);
-  assert.match(ONBOARD_PAGE_HTML, /improve CareerRat/i);
-  for (const phrase of [
-    /resume/i,
-    /profile/i,
-    /applications/i,
-    /private notes/i,
-    /compensation/i,
-    /fit scores/i,
-    /local files/i,
-  ]) {
-    assert.match(ONBOARD_PAGE_HTML, phrase);
-  }
-});
-
-test("onboarding page script wires public sync preference without template literals", () => {
-  const script = extractInlineScript(ONBOARD_PAGE_HTML);
-  assert.ok(script, "expected inline script");
-  assert.doesNotThrow(() => {
-    // eslint-disable-next-line no-new-func
-    new Function(script);
-  });
-  assert.equal(script.includes("`"), false);
-  assert.match(script, /public-sync-preference/);
 });

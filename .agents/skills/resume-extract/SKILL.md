@@ -1,7 +1,9 @@
 ---
 name: resume-extract
-description: Read a dropped PDF/image résumé, or a markdown conversion of a dropped DOCX résumé, and emit one fenced JSON block matching the onboarding profile/targeting-draft schema — no prose, no invented factual claims, unknown contact fields left null. Backend-only: invoked by the embedded runtime for POST /api/onboard/resume-ai and POST /api/onboard/resume-docx's AI upgrade, never chat-routed or run conversationally.
-tier_1_inputs: [intake file path]
+description: "Read a dropped PDF/image résumé, or a markdown conversion of a dropped DOCX résumé, and emit one fenced JSON block matching the onboarding profile/targeting-draft schema — no prose, no invented factual claims, unknown contact fields left null. Backend-only: invoked by the embedded runtime for POST /api/onboard/resume-ai and POST /api/onboard/resume-docx's AI upgrade, never chat-routed or run conversationally."
+metadata:
+  tier_1_inputs:
+    - intake file path
 ---
 
 # resume-extract

@@ -8,8 +8,8 @@
 // driving stays agent-side (snapshot/read each step, zero hardcoded selectors).
 //
 // Provider preference (see AGENTS.md → Browser Automation Contract):
-//   1. auto       — use Orca in an Orca workspace, otherwise the compatible
-//                   extension session.
+//   1. auto       — use Orca in an Orca workspace, bundled Playwright in the
+//                   packaged desktop app, otherwise the compatible extension.
 //   2. extension  — Chrome extension (Claude-in-Chrome / Codex), which holds the
 //                   user's logins + password store.
 //   3. orca       — Orca's supervised embedded browser.
@@ -128,21 +128,22 @@ export function profilePath(platform, { profileRoot } = {}) {
 
 // resolveAutoTarget — the one piece of resolveSession()'s logic that decides what
 // the "auto" meta-provider actually becomes right now: Orca inside an Orca
-// workspace, the extension otherwise. Shared so describeProviders() can report
-// the SAME resolved provider resolveSession() would pick, instead of each
-// re-deriving it (and risking drift).
+// workspace, bundled Playwright in the packaged desktop app, and the extension
+// otherwise. Shared so describeProviders() can report the SAME resolved provider
+// resolveSession() would pick, instead of each re-deriving it (and risking drift).
 function resolveAutoTarget(env) {
-  return env?.ORCA_WORKTREE_ID ? "orca" : "extension";
+  if (env?.ORCA_WORKTREE_ID) return "orca";
+  if (env?.CAREERRAT_PACKAGED_DESKTOP === "1") return "playwright";
+  return "extension";
 }
 
 // describeProviders — the provider list for display (Settings, `automation
 // status`). "auto" is a meta-choice, not a concrete provider, so its advertised
-// `automatedApply` is resolved against what it actually becomes right now (Orca
-// workspace or not) rather than the descriptor's own optimistic `true`. Outside
-// an Orca workspace, "auto" resolves to the extension executor, which genuinely
-// can't drive automatic apply — reporting `true` there is exactly the UI/runtime
-// mismatch this resolves: the same resolved-provider truth backs both the option
-// list here and the session JSON (consent.mjs#automationStatus).
+// `automatedApply` is resolved against what it actually becomes right now (Orca /
+// packaged desktop state) rather than the descriptor's own optimistic `true`.
+// Outside Orca and the packaged desktop app, "auto" resolves to the extension
+// executor, which genuinely can't drive automatic apply. The same resolved-provider
+// truth backs both the option list here and the session JSON.
 export function describeProviders({ env = process.env } = {}) {
   return PROVIDER_PREFERENCE.map((id) => {
     const descriptor = PROVIDERS[id];

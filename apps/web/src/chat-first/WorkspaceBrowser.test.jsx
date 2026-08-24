@@ -81,6 +81,25 @@ function baseProps(overrides = {}) {
 }
 
 describe("WorkspaceBrowser", () => {
+  it("keeps missing-source recovery inside the new Settings source surface", async () => {
+    const { SearchToolbar } = await loadBrowser();
+    const onOpenSourceHealth = vi.fn();
+    const tree = SearchToolbar({
+      sourceSweep: { status: "error", summary: "No enabled search sources are configured yet." },
+      onOpenSourceHealth,
+    });
+    const buttons = Array.isArray(tree.props.children)
+      ? tree.props.children
+      : [tree.props.children];
+    const sourceHealth = buttons.find(
+      (child) => child?.type === "button" && child.props.children === "source health"
+    );
+
+    sourceHealth.props.onClick();
+    expect(onOpenSourceHealth).toHaveBeenCalledOnce();
+    expect(renderToStaticMarkup(tree)).not.toMatch(/\/onboard|write-config|\/jobs/);
+  });
+
   it("uses the exact full-width cart action geometry from the handoff", () => {
     const css = readFileSync(
       fileURLToPath(new URL("./workspace-browser.css", import.meta.url)),
@@ -121,6 +140,7 @@ describe("WorkspaceBrowser", () => {
     const { SearchPanel, SelectionCart } = await loadBrowser();
     const onToggleSelection = vi.fn();
     const onRunSweep = vi.fn();
+    const onFilter = vi.fn();
     const onChatAbout = vi.fn();
     const onDraftAndApply = vi.fn();
     const search = SearchPanel({
@@ -129,6 +149,7 @@ describe("WorkspaceBrowser", () => {
       sourceSweep: { status: "idle", summary: "today · 11 found" },
       onToggleSelection,
       onRunSweep,
+      onFilter,
     });
     const cart = SelectionCart({
       jobs: JOBS,
@@ -150,6 +171,14 @@ describe("WorkspaceBrowser", () => {
     const firstRow = resultList.props.children[0].type(resultList.props.children[0].props);
     firstRow.props.children[0].props.onChange();
     expect(onToggleSelection).toHaveBeenCalledWith("tyrell");
+
+    const filterBar = searchButtons[2].type(searchButtons[2].props);
+    const sourceControl = filterBar.props.children.find(
+      (child) => child?.props?.label === "Source"
+    );
+    const sourceSelect = sourceControl.type(sourceControl.props);
+    sourceSelect.props.onChange({ target: { value: "greenhouse" } });
+    expect(onFilter).toHaveBeenCalledWith("source", "greenhouse");
 
     const actions = cart.props.children[2];
     actions.props.children[1].props.onClick();
@@ -223,6 +252,22 @@ describe("WorkspaceBrowser", () => {
     expect(list).toContain("E Corp");
   });
 
+  it("uses singular application copy for one tracked role", async () => {
+    const { WorkspaceBrowser } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <WorkspaceBrowser
+        {...baseProps({
+          activeTab: "pipeline",
+          pipelineView: "funnel",
+          pipeline: { ...PIPELINE, applicationCount: 1 },
+        })}
+      />
+    );
+
+    expect(html).toContain("1 application · where it stands");
+    expect(html).not.toContain("1 applications");
+  });
+
   it("renders real Files, People, and Schedule data with handoff copy", async () => {
     const { WorkspaceBrowser } = await loadBrowser();
     const files = renderToStaticMarkup(
@@ -264,6 +309,13 @@ describe("WorkspaceBrowser", () => {
                   meta: "Onsite",
                   kind: "interview",
                   actionLabel: "Open prep",
+                  export: {
+                    googleUrl: "https://calendar.google.com/calendar/render?action=TEMPLATE",
+                    outlookUrl:
+                      "https://outlook.live.com/calendar/0/deeplink/compose?subject=Interview",
+                    filename: "interview.ics",
+                    ics: "BEGIN:VCALENDAR\r\nEND:VCALENDAR",
+                  },
                 },
               ],
             },
@@ -281,6 +333,16 @@ describe("WorkspaceBrowser", () => {
     expect(schedule).toContain("Nothing stays in sync.");
   });
 
+  it("disables calendar exports when nothing is scheduled", async () => {
+    const { WorkspaceBrowser } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <WorkspaceBrowser {...baseProps({ activeTab: "schedule", schedule: [] })} />
+    );
+
+    expect(html).toContain("Calendar exports appear when something is scheduled.");
+    expect(html.match(/disabled=""/g)).toHaveLength(3);
+  });
+
   it("keeps selected jobs in the cart when search filters hide their rows", async () => {
     const { WorkspaceBrowser } = await loadBrowser();
     const html = renderToStaticMarkup(
@@ -295,6 +357,16 @@ describe("WorkspaceBrowser", () => {
 
     expect(html).toContain("Aperture Science");
     expect(html).toContain("comp pending");
+  });
+
+  it("personalizes empty artifact copy with the configured agent name", async () => {
+    const { WorkspaceBrowser } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <WorkspaceBrowser {...baseProps({ activeTab: "files", files: [], agentName: "Scout" })} />
+    );
+
+    expect(html).toContain("Artifacts appear here as Scout builds them.");
+    expect(html).not.toContain("Paul builds them");
   });
 
   it("only calls an all-sourced cart dismissal Dismiss all", async () => {
@@ -323,31 +395,76 @@ describe("WorkspaceBrowser", () => {
     expect(mixed).not.toContain("Dismiss all");
   });
 
-  it("marks real filters as controlled and disables unsupported dropdown stubs", async () => {
+  it("renders stage, source, and posted filters as controlled accessible selects", async () => {
     const { WorkspaceBrowser } = await loadBrowser();
     const html = renderToStaticMarkup(
       <WorkspaceBrowser
         {...baseProps({
-          filters: { fit80: false, comp: true, remote: false, files: "Evidence", people: "all" },
+          jobs: [
+            { ...JOBS[0], sourceLabel: "Greenhouse", postedAt: "2026-08-22T12:00:00Z" },
+            { ...JOBS[1], sourceLabel: "Lever", postedAt: "2026-08-20T12:00:00Z" },
+          ],
+          filters: {
+            fit80: false,
+            comp: true,
+            remote: false,
+            stage: "staff",
+            source: "greenhouse",
+            posted: "7d",
+            files: "Evidence",
+            people: "all",
+          },
         })}
       />
     );
 
     expect(html).toContain('aria-pressed="false">Fit 80+');
     expect(html).toContain('aria-pressed="true">Comp ✓');
-    expect(html).toContain('disabled=""');
+    expect(html).toContain('aria-label="Filter by stage"');
+    expect(html).toContain('aria-label="Filter by source"');
+    expect(html).toContain('aria-label="Filter by posted date"');
+    expect(html).toContain('<option value="greenhouse" selected="">Greenhouse</option>');
+    expect(html).toContain('<option value="7d" selected="">Posted · 7 days</option>');
+    expect(html).not.toContain('disabled=""');
   });
 
-  it("uses the final handoff colors in an isolated stylesheet", () => {
+  it("keeps unfiltered stage and source domains available when crossed filters return no rows", async () => {
+    const { WorkspaceBrowser } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <WorkspaceBrowser
+        {...baseProps({
+          jobs: [],
+          cartJobs: [
+            { ...JOBS[0], stage: "New", sourceLabel: "Greenhouse" },
+            { ...JOBS[1], stage: "Reviewed", sourceLabel: "Lever" },
+          ],
+          selection: [],
+          filters: {
+            stage: "new",
+            source: "lever",
+          },
+        })}
+      />
+    );
+
+    expect(html).toContain("No jobs need triage right now.");
+    expect(html).toContain('<option value="new" selected="">New</option>');
+    expect(html).toContain('<option value="reviewed">Reviewed</option>');
+    expect(html).toContain('<option value="greenhouse">Greenhouse</option>');
+    expect(html).toContain('<option value="lever" selected="">Lever</option>');
+  });
+
+  it("consumes the final handoff palette from the shared foundation", () => {
     const css = readFileSync(
       fileURLToPath(new URL("./workspace-browser.css", import.meta.url)),
       "utf8"
     );
 
-    expect(css).toContain("#edf5fb");
-    expect(css).toContain("#e6fa8d");
-    expect(css).toContain("#d9a6f4");
-    expect(css).toContain("#f04c38");
+    expect(css).not.toMatch(/--cf-(?:bg|ink|lime|lavender|red)\s*:/);
+    expect(css).toContain("var(--ink)");
+    expect(css).toContain("var(--lime)");
+    expect(css).toContain("var(--lilac)");
+    expect(css).toContain("var(--red)");
     expect(css).toContain("grid-template-columns: 46px minmax(0, 1fr) 280px");
   });
 });

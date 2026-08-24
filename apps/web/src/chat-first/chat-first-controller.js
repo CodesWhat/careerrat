@@ -1,10 +1,13 @@
 export function resolveComposerCommit(preview, text) {
   if (preview?.action?.intent) {
-    if (preview.action.intent.type === "job.apply") {
+    const intent = preview.action.intent;
+    const savedJobId =
+      intent.type === "job.prepare-request" ? String(intent.input?.jobId || "").trim() : "";
+    if (intent.type === "job.apply" || intent.type === "job.prepare-submit" || savedJobId) {
       return {
         kind: "mission",
         mode: "prepare-to-submit",
-        jobs: [preview.action.intent.entity],
+        jobs: [savedJobId ? { type: "application", id: savedJobId } : preview.action.intent.entity],
       };
     }
     return {

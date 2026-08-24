@@ -348,10 +348,9 @@ export function mountPacketRoutes({
     const body = await readPacketBody(req, res);
     if (body === null) return;
     try {
-      // The standalone one-off Q&A flow (answer-page.mjs) always supplies its
-      // own ad hoc context (company/role typed by the user, no applicationId)
-      // and is left untouched here. A caller that instead identifies a real
-      // tracked application (appId/applicationId) but omits `context` was
+      // A caller can supply ad hoc context without an application id. A caller
+      // that instead identifies a real tracked application (appId/applicationId)
+      // but omits `context` was
       // silently falling through to draftPacketAnswers' own `context = {}`
       // default — no profile/evidence/honesty/deep-ingest lanes ever reached
       // the draft. Build the same DB-backed context generatePacket() builds

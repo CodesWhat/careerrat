@@ -1,13 +1,6 @@
-// tests/evaluate-page.test.mjs
-// node:test suite for GET /api/runtime/config (src/cli/skill-run-route.mjs) —
-// the allowlist route the SPA's evaluate flow polls to decide which decision
-// actions can run. Covers the route's shape and confirms mounting it didn't
-// disturb other routes. Does not re-test POST /api/skill/run's SSE/abort/
-// status-code mechanics — that's tests/skill-run-route.test.mjs's job.
-//
-// The legacy GET /evaluate static compatibility page (src/core/ai/
-// evaluate-page.mjs) this file used to also cover was retired; its
-// page-specific tests were removed with it.
+// GET /api/runtime/config exposes the installed, enabled skill allowlist used
+// by the React app. POST /api/skill/run mechanics remain covered separately in
+// skill-run-route.test.mjs.
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -21,7 +14,7 @@ import { resolveUserPaths } from "../src/core/paths/workspace.mjs";
 // directories for each name in `skillNames` — same convention
 // tests/skill-runtime.test.mjs's tempRepoWithSkill() uses, just multi-skill.
 function tempRepoWithSkills(skillNames = []) {
-  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-evaluate-page-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-runtime-config-"));
   mkdirSync(resolveUserPaths({ repoRoot }).workspaceDir, { recursive: true });
   for (const name of skillNames) {
     const dir = join(repoRoot, ".agents/skills", name);
@@ -54,43 +47,48 @@ function teardown(dev, repoRoot) {
 // GET /api/runtime/config
 // ---------------------------------------------------------------------------
 
-test("GET /api/runtime/config returns the evaluate-job-only default allowlist", async () => {
-  const repoRoot = tempRepoWithSkills(["evaluate-job", "track-outcomes"]);
+test("GET /api/runtime/config returns only the two direct exact-read skills by default", async () => {
+  const repoRoot = tempRepoWithSkills([
+    "intake-extract",
+    "resume-extract",
+    "evaluate-job",
+    "track-outcomes",
+  ]);
   const dev = await bootServer(repoRoot, { env: {} });
   try {
     const res = await fetch(`${baseUrl(dev)}/api/runtime/config`);
     assert.equal(res.status, 200);
     assert.match(res.headers.get("content-type") || "", /application\/json/);
     const body = await res.json();
-    assert.deepEqual(body.skills, ["evaluate-job"]);
+    assert.deepEqual(body.skills, ["intake-extract", "resume-extract"]);
   } finally {
     teardown(dev, repoRoot);
   }
 });
 
-test("GET /api/runtime/config reflects CAREERRAT_RUNTIME_SKILLS opting more skills in", async () => {
-  const repoRoot = tempRepoWithSkills(["evaluate-job", "track-outcomes"]);
+test("GET /api/runtime/config never advertises app workflows through the raw skill route", async () => {
+  const repoRoot = tempRepoWithSkills(["resume-extract", "evaluate-job", "track-outcomes"]);
   const dev = await bootServer(repoRoot, {
-    env: { CAREERRAT_RUNTIME_SKILLS: "evaluate-job,track-outcomes" },
+    env: { CAREERRAT_RUNTIME_SKILLS: "evaluate-job,track-outcomes,resume-extract" },
   });
   try {
     const res = await fetch(`${baseUrl(dev)}/api/runtime/config`);
     const body = await res.json();
-    assert.deepEqual(body.skills, ["evaluate-job", "track-outcomes"]);
+    assert.deepEqual(body.skills, ["resume-extract"]);
   } finally {
     teardown(dev, repoRoot);
   }
 });
 
-test("GET /api/runtime/config never lists a skill directory without a SKILL.md", async () => {
-  const repoRoot = tempRepoWithSkills(["evaluate-job"]);
+test("GET /api/runtime/config never lists a direct skill directory without a SKILL.md", async () => {
+  const repoRoot = tempRepoWithSkills(["intake-extract"]);
   const dev = await bootServer(repoRoot, {
-    env: { CAREERRAT_RUNTIME_SKILLS: "evaluate-job,not-a-real-skill" },
+    env: { CAREERRAT_RUNTIME_SKILLS: "intake-extract,resume-extract,not-a-real-skill" },
   });
   try {
     const res = await fetch(`${baseUrl(dev)}/api/runtime/config`);
     const body = await res.json();
-    assert.deepEqual(body.skills, ["evaluate-job"]);
+    assert.deepEqual(body.skills, ["intake-extract"]);
   } finally {
     teardown(dev, repoRoot);
   }

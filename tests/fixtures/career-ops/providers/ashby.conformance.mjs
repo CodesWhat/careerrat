@@ -123,6 +123,31 @@ try {
     fail(`parseCompensation(no interval) = ${JSON.stringify(noInterval)}`);
   }
 
+  const currentShape = parseCompensation({
+    compensation: {
+      summaryComponents: [
+        {
+          compensationType: "Salary",
+          interval: "1 YEAR",
+          currencyCode: "USD",
+          minValue: 185000,
+          maxValue: 215000,
+        },
+        { compensationType: "EquityPercentage", interval: "NONE" },
+      ],
+    },
+  });
+  if (
+    currentShape &&
+    currentShape.min === 185000 &&
+    currentShape.max === 215000 &&
+    currentShape.currency === "USD"
+  ) {
+    pass("parseCompensation() reads Ashby's current summaryComponents salary shape");
+  } else {
+    fail(`parseCompensation(current summaryComponents) = ${JSON.stringify(currentShape)}`);
+  }
+
   if (
     parseCompensation({ compensation: { interval: "7 MOON", minValue: 1, maxValue: 2 } }) === null
   ) {

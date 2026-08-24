@@ -312,6 +312,26 @@ test("previewWorkspaceIntent: this job resolves to the explicitly open saved job
   });
 });
 
+test("previewWorkspaceIntent: a supervised fill request resolves to the open application", () => {
+  const repoRoot = tempRepo();
+  const context = { pathname: "/jobs", jobId: "app-curri" };
+  const result = previewWorkspaceIntent({
+    text: "Proceed with this application, prepare and fill the form, but do not submit it.",
+    context,
+    repoRoot,
+    env: {},
+  });
+
+  assert.deepEqual(result.action, {
+    label: "Evaluate and prepare this saved job",
+    intent: {
+      type: "job.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobId: "app-curri" },
+    },
+  });
+});
+
 test("previewWorkspaceIntent: never guesses what 'this job' means without an open job", () => {
   const repoRoot = tempRepo();
   const result = previewWorkspaceIntent({
@@ -574,6 +594,24 @@ test("previewWorkspaceIntent: explicit screening questions become typed Ask acti
     type: "screening.answer",
     entity: { type: "application", id: "app-temporal" },
     input: { questionText: "Why are you interested in this role?" },
+  });
+
+  const grouped = previewWorkspaceIntent({
+    text: "Answer these application questions: LinkedIn URL: https://www.linkedin.com/in/riley; Why this role?: Strong fit.",
+    context: { pathname: "/jobs", jobId: "app-temporal" },
+    repoRoot,
+    env: {},
+  });
+  assert.deepEqual(grouped.action, {
+    label: "Draft an evidence-backed answer",
+    intent: {
+      type: "screening.answer",
+      entity: { type: "application", id: "app-temporal" },
+      input: {
+        questionText:
+          "LinkedIn URL: https://www.linkedin.com/in/riley; Why this role?: Strong fit.",
+      },
+    },
   });
 
   assert.equal(
