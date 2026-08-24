@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -430,7 +430,20 @@ test("npm package allowlist names app files, not broad private-data roots", asyn
   assert.ok(files.includes(".agents/skills/apply-job/SKILL.md"));
   assert.ok(files.includes(".agents/skills/calendar-sync/SKILL.md"));
   assert.ok(files.includes(".agents/skills/relationship-sourcing/SKILL.md"));
-  for (const entry of files.filter((item) => item.startsWith(".agents/skills/"))) {
+  const packagedSkills = files.filter((item) => item.startsWith(".agents/skills/")).sort();
+  const sourceSkills = (await readdir(join(root, ".agents/skills"), { withFileTypes: true }))
+    .filter(
+      (entry) =>
+        entry.isDirectory() && existsSync(join(root, ".agents/skills", entry.name, "SKILL.md"))
+    )
+    .map((entry) => `.agents/skills/${entry.name}/SKILL.md`)
+    .sort();
+  assert.deepEqual(
+    packagedSkills,
+    sourceSkills,
+    "every runtime-neutral source skill must ship in the npm package"
+  );
+  for (const entry of packagedSkills) {
     await assert.doesNotReject(readText(entry), `${entry} should exist before packaging`);
   }
 

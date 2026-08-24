@@ -36,6 +36,7 @@
     ".agents/skills/answer-question/SKILL.md",
     ".agents/skills/apply-job/SKILL.md",
     ".agents/skills/calendar-sync/SKILL.md",
+    ".agents/skills/coach-gaps/SKILL.md",
     ".agents/skills/company-health/SKILL.md",
     ".agents/skills/configure/SKILL.md",
     ".agents/skills/discover-companies/SKILL.md",

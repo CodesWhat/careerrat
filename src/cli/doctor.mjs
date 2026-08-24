@@ -111,9 +111,9 @@ function ensureUserDir(path) {
   if (!existsSync(fullPath)) mkdirSync(fullPath, { recursive: true });
 }
 
-// Skills are discoverable by Claude Code only when each source skill in
-// .agents/skills/ also resolves under .claude/skills/ (a symlink or copied
-// tree). `careerrat install-skills` creates/repairs that shim.
+// .agents/skills is the runtime-neutral source of truth. Claude Code additionally
+// needs the optional .claude/skills shim that `careerrat install-skills` repairs.
+// A missing shim is useful diagnostics, but must not block Codex or other agents.
 function skillNames() {
   const dir = join(root, ".agents", "skills");
   if (!existsSync(dir)) return [];
@@ -193,7 +193,6 @@ const agentGuidance = buildAgentGuidance({
   missingUser,
   candidateConfigSource: candidateSource,
   missingSystem,
-  skillsNotDiscoverable,
   modes,
   candidateSetupReadiness,
   searchReadiness,
@@ -206,7 +205,6 @@ const result = {
   ok:
     missingUser.length === 0 &&
     missingSystem.length === 0 &&
-    skillsNotDiscoverable.length === 0 &&
     modes.valid &&
     (candidateSetupReadiness ? candidateSetupReadiness.readiness?.search_ready === true : true),
   missingUser,
@@ -266,7 +264,7 @@ if (missingSystem.length > 0) {
 }
 
 if (skillsNotDiscoverable.length > 0) {
-  console.log("Skills not discoverable by Claude Code:");
+  console.log("Claude Code skill shim missing (CareerRat skills remain available):");
   for (const name of skillsNotDiscoverable) console.log(`- ${name}`);
   console.log("  fix: run `careerrat install-skills` (shims .claude/skills -> .agents/skills).");
   console.log("");
@@ -383,16 +381,13 @@ printAgentGuidance(agentGuidance);
 console.log("");
 
 if (result.ok) {
-  console.log("All required files are present and skills are discoverable.");
+  console.log("All required files are present and CareerRat skills are available.");
 } else if (!modes.valid) {
   console.log("CareerRat scaffold is present, but candidate/modes.yml is invalid.");
   console.log("Run `careerrat modes status` for details.");
 } else if (candidateSetupReadiness?.readiness?.search_ready === false) {
   console.log("CareerRat scaffold is present, but candidate setup is not search-ready yet.");
   console.log("Run the ingest-profile skill or continue onboarding.");
-} else if (missingUser.length === 0 && missingSystem.length === 0) {
-  console.log("Scaffold and setup look good, but skills aren't discoverable yet.");
-  console.log("Run `careerrat install-skills` so Claude Code can invoke /apply-job etc.");
 } else {
   console.log("CareerRat scaffold is present, but local candidate setup is incomplete.");
   console.log("Run the ingest-profile skill or copy templates into candidate/.");
