@@ -19,6 +19,31 @@ test("release workflows use one global lane so branch backfills cannot race thei
   }
 });
 
+test("desktop release rejects unsigned or lightweight release tags", async () => {
+  const source = await workflow("desktop-release.yml");
+  const resolve = source.slice(
+    source.indexOf("  resolve-tag:"),
+    source.indexOf("  prepare-draft-release:")
+  );
+
+  const tagRefAt = resolve.indexOf("git/ref/tags/$TAG");
+  const tagRecordAt = resolve.indexOf("git/tags/$tag_object");
+  const tagNameAt = resolve.indexOf("'.tag'");
+  const targetTypeAt = resolve.indexOf("'.object.type'", tagRecordAt);
+  const compareAt = resolve.indexOf("compare/$tag_commit...main");
+  const outputAt = resolve.indexOf('echo "tag=$tag"');
+
+  assert.ok(tagRefAt >= 0 && tagRecordAt > tagRefAt);
+  assert.ok(tagNameAt > tagRecordAt, "the signed tag object's own name must be checked");
+  assert.ok(targetTypeAt > tagNameAt, "the signed tag must peel directly to a commit");
+  assert.ok(compareAt > targetTypeAt, "the tagged commit must be compared with protected main");
+  assert.ok(outputAt > compareAt, "no tag output may escape before every trust check passes");
+  assert.match(resolve, /\[ "\$recorded_tag" != "\$TAG" \]/);
+  assert.match(resolve, /\[ "\$target_type" != "commit" \]/);
+  assert.match(resolve, /"\$main_relation" != "ahead"[\s\S]*"\$main_relation" != "identical"/);
+  assert.match(resolve, /"\$verified" != "true"[\s\S]*"\$reason" != "valid"/);
+});
+
 test("npm publish grants its OIDC credential only to the publishing job", async () => {
   const source = await workflow("publish.yml");
   const job = source.slice(source.indexOf("  npm-publish:"));

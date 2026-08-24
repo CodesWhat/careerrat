@@ -78,6 +78,36 @@ jobs:
             echo "::error::Resolved tag '$tag' does not match vX.Y.Z"
             exit 1
           fi
+          TAG="$tag"
+          tag_ref="$(gh api "repos/$REPO/git/ref/tags/$TAG")"
+          if [ "$(jq -r '.object.type' <<<"$tag_ref")" != "tag" ]; then
+            echo "::error::Release tag $TAG is lightweight; a signed annotated tag is required."
+            exit 1
+          fi
+          tag_object="$(jq -er '.object.sha' <<<"$tag_ref")"
+          tag_record="$(gh api "repos/$REPO/git/tags/$tag_object")"
+          recorded_tag="$(jq -r '.tag' <<<"$tag_record")"
+          if [ "$recorded_tag" != "$TAG" ]; then
+            echo "::error::Release ref $TAG points to an annotated tag named $recorded_tag."
+            exit 1
+          fi
+          target_type="$(jq -r '.object.type' <<<"$tag_record")"
+          if [ "$target_type" != "commit" ]; then
+            echo "::error::Release tag $TAG must point directly to one commit, not $target_type."
+            exit 1
+          fi
+          tag_commit="$(jq -er '.object.sha' <<<"$tag_record")"
+          verified="$(jq -r '.verification.verified' <<<"$tag_record")"
+          reason="$(jq -r '.verification.reason' <<<"$tag_record")"
+          if [ "$verified" != "true" ] || [ "$reason" != "valid" ]; then
+            echo "::error::Release tag $TAG has no valid cryptographic signature (reason: $reason)."
+            exit 1
+          fi
+          main_relation="$(gh api "repos/$REPO/compare/$tag_commit...main" --jq '.status')"
+          if [ "$main_relation" != "ahead" ] && [ "$main_relation" != "identical" ]; then
+            echo "::error::Release tag $TAG does not point to a commit reachable from protected main."
+            exit 1
+          fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
   prepare-draft-release:
@@ -103,6 +133,7 @@ jobs:
         id: draft-release
         run: |
           set -euo pipefail
+          policy_note="Code signing policy: https://github.com/$REPO/blob/$TAG/docs/CODE_SIGNING_POLICY.md"
           matches="$(gh api "repos/$REPO/releases" --paginate --slurp | jq -c --arg tag "$TAG" \
             'add | [.[] | select(.tag_name==$tag)]')"
           count="$(jq 'length' <<<"$matches")"
@@ -114,16 +145,31 @@ jobs:
               echo "::error::Release $TAG is already published, not a draft; refusing to replace public assets."
               exit 1
             fi
+            release_id="$(jq -er '.[0].id | select(type == "number" and . > 0)' <<<"$matches")"
+            existing_body="$(jq -r '.[0].body // ""' <<<"$matches")"
+            if ! grep -Fq "$policy_note" <<<"$existing_body"; then
+              if [ -n "$existing_body" ]; then
+                updated_body="$(printf '%s\n\n%s' "$existing_body" "$policy_note")"
+              else
+                updated_body="$policy_note"
+              fi
+              gh api -X PATCH "repos/$REPO/releases/$release_id" -f body="$updated_body" >/dev/null
+            fi
             echo "Draft release $TAG already exists."
           else
             gh release create "$TAG" --repo "$REPO" --draft --title "$TAG" --generate-notes \
-              --notes "Code signing policy: https://github.com/$REPO/blob/$TAG/docs/CODE_SIGNING_POLICY.md"
+              --notes "$policy_note"
           fi
           final_matches="$(gh api "repos/$REPO/releases" --paginate --slurp | jq -c --arg tag "$TAG" \
             'add | [.[] | select(.tag_name==$tag)]')"
           if [ "$(jq 'length' <<<"$final_matches")" -ne 1 ] || \
             [ "$(jq -r '.[0].draft' <<<"$final_matches")" != "true" ]; then
             echo "::error::Release $TAG is not one exact draft after preparation."
+            exit 1
+          fi
+          final_body="$(jq -r '.[0].body // ""' <<<"$final_matches")"
+          if ! grep -Fq "$policy_note" <<<"$final_body"; then
+            echo "::error::Draft release $TAG is missing its Code signing policy link."
             exit 1
           fi
           release_id="$(jq -er '.[0].id | select(type == "number" and . > 0)' <<<"$final_matches")"
@@ -333,6 +379,9 @@ jobs:
           artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
           github-artifact-id: ${{ steps.unsigned-windows.outputs.artifact-id }}
           wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          parameters: |
+            version: ${{ toJSON(env.VERSION) }}
           output-artifact-directory: apps/desktop/dist/signpath-signed
       - name: Verify the signed Windows installer
         if: ${{ vars.SIGNPATH_ENABLED == 'true' }}

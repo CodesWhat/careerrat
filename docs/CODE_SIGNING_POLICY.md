@@ -21,8 +21,9 @@ This policy covers the open-source CareerRat desktop application in
 [`CodesWhat/careerrat`](https://github.com/CodesWhat/careerrat), distributed
 under the MIT license. The planned signed artifact is the Windows x64 NSIS
 installer produced from an exact `vX.Y.Z` tag by the repository's GitHub-hosted
-Windows runner. The artifact configuration may also sign the project-owned
-`CareerRat.exe` inside that installer if SignPath requires it.
+Windows runner. The SignPath request covers that outer NSIS installer. The
+installed `CareerRat.exe` is not represented as separately signed by this
+pipeline.
 
 The desktop artifact includes open-source third-party dependencies under their
 respective licenses. It excludes the proprietary Claude Agent SDK. It does not
@@ -47,8 +48,10 @@ cannot be verified.
 
 ## Build and signing procedure
 
-1. A signed `vX.Y.Z` Git tag selects the exact source revision. The desktop and
-   root package versions must match the tag.
+1. A signed, annotated `vX.Y.Z` Git tag selects the exact source revision. The
+   workflow verifies the tag's cryptographic signature through GitHub's tag API,
+   requires its commit to be reachable from protected `main`, and requires the
+   desktop and root package versions to match the tag.
 2. GitHub Actions checks out that tag without persisted Git credentials on a
    GitHub-hosted `windows-latest` runner, installs the reviewed root lock with
    `npm ci`, and builds the unsigned NSIS input with publishing disabled.

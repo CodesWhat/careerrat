@@ -412,6 +412,8 @@ test("SignPath wiring is inert until approval and repository configuration exist
   assert.match(windows, /signpath\/github-action-submit-signing-request@[0-9a-f]{40}/i);
   assert.match(windows, /if:\s*\$\{\{[^\n]*SIGNPATH_ENABLED[^\n]*==\s*'true'/);
   assert.match(windows, /wait-for-completion:\s+true/);
+  assert.match(windows, /wait-for-completion-timeout-in-seconds:\s+3600/);
+  assert.match(windows, /parameters:\s*\|[\s\S]*version:\s*\$\{\{\s*toJSON\(env\.VERSION\)\s*\}\}/);
   assert.match(policy, /^# Code signing policy/m);
   assert.match(policy, /planned[\s\S]*pending/i);
   assert.match(
@@ -421,8 +423,33 @@ test("SignPath wiring is inert until approval and repository configuration exist
   assert.match(policy, /Authors[\s\S]*Reviewers[\s\S]*Approvers/);
   assert.match(policy, /privacy/i);
   assert.match(policy, /uninstall/i);
+  assert.doesNotMatch(policy, /may also sign[\s\S]*CareerRat\.exe/i);
   assert.match(readme, /Code signing policy/);
   assert.match(releaseDocs, /Code signing policy/);
+  assert.doesNotMatch(releaseDocs, /open `\/app\/onboarding`/);
+});
+
+test("release preparation preserves the code signing policy link on reused drafts", async () => {
+  const release = await text(".github/workflows/desktop-release.yml");
+  const prepare = release.slice(
+    release.indexOf("  prepare-draft-release:"),
+    release.indexOf("  build-notarize-upload:")
+  );
+
+  assert.match(prepare, /Code signing policy:/);
+  assert.match(prepare, /releases\/\$release_id/);
+  assert.match(prepare, /-X PATCH/);
+  assert.match(prepare, /existing_body/);
+  assert.match(prepare, /policy_note/);
+  assert.match(prepare, /printf '%s\\n\\n%s' "\$existing_body" "\$policy_note"/);
+
+  const finalFetchAt = prepare.indexOf("final_matches=");
+  const finalBodyAt = prepare.indexOf("final_body=", finalFetchAt);
+  const finalPolicyCheckAt = prepare.indexOf('grep -Fq "$policy_note" <<<"$final_body"');
+  const releaseIdOutputAt = prepare.indexOf('echo "release-id=$release_id"');
+  assert.ok(finalBodyAt > finalFetchAt);
+  assert.ok(finalPolicyCheckAt > finalBodyAt);
+  assert.ok(releaseIdOutputAt > finalPolicyCheckAt);
 });
 
 test("Microsoft Store readiness names the real external publisher-identity prerequisite", async () => {

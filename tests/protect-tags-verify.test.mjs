@@ -92,6 +92,14 @@ test("a ruleset matching the file passes and names every enforced rule", { skip:
   assert.match(stdout, /non_fast_forward/);
 });
 
+test("tag protection defers cryptographic signature verification to the release workflow", () => {
+  const script = readFileSync(SCRIPT, "utf8");
+  assert.match(script, /release workflow verifies the annotated/i);
+  assert.match(script, /tag signature through GitHub's tag API/i);
+  assert.doesNotMatch(script, /plain annotated tags/i);
+  assert.doesNotMatch(script, /Cosign artifact chain/i);
+});
+
 test("a rule removed live is reported as protection weaker than the file claims", {
   skip: JQ_SKIP,
 }, () => {

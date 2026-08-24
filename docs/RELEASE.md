@@ -68,8 +68,10 @@ order:
 
 1. **`resolve-tag`**, resolves and validates the `vX.Y.Z` tag once (from the
    push ref, or the newest tag by semver order on a dispatch) and threads it
-   to the other jobs, so no job ever splices an unvalidated ref into a
-   script.
+   to the other jobs. It rejects lightweight or unsigned tags through GitHub's
+   tag API and requires the tagged commit to be reachable from protected `main`,
+   so no build starts without the reviewed, signed release boundary and no job
+   ever splices an unvalidated ref into a script.
 2. **`prepare-draft-release`**, creates or reuses exactly one draft for the tag.
    It records that draft's immutable GitHub release id and fails closed if the
    tag already has a published release.
@@ -152,7 +154,18 @@ repository Actions values exactly as issued by SignPath:
 The workflow uses the `release-signing` policy slug and waits for approval. Do
 not enable the variable before that policy, artifact configuration, roles, and
 MFA requirements in the [Code signing policy](CODE_SIGNING_POLICY.md) are in
-place. An unsigned `.exe` is never a manual substitute for this gate.
+place. The artifact configuration must accept a GitHub ZIP artifact, enforce the
+CareerRat product name, and require the `version` parameter the workflow passes.
+The approval wait is one hour; a timed-out request fails the Windows release
+instead of publishing an unsigned substitute.
+
+The Foundation application and account acceptance are external identity and
+terms actions for an authorized CodesWhat owner. After approval, configure a
+separate CI submitter and human approver in SignPath, require one approver per
+release, link the CareerRat project to the GitHub.com trusted build system, and
+install the SignPath GitHub App for this repository if SignPath requires it.
+Keep `SIGNPATH_ENABLED` false until SignPath has issued and tested every value
+above. An unsigned `.exe` is never a manual substitute for this gate.
 
 #### Manual fallback: building and verifying locally
 
@@ -165,8 +178,8 @@ place. An unsigned `.exe` is never a manual substitute for this gate.
    - `xcrun stapler validate apps/desktop/dist/*.dmg`
    - `spctl --assess --type open --context context:primary-signature apps/desktop/dist/*.dmg`
 4. Run packaged smoke checks for a fresh workspace and an existing workspace.
-   Fresh workspace should open `/app/onboarding`; existing workspace should open
-   `/app`.
+   Both should open the chat-first shell at `/app`; the fresh workspace should
+   begin the conversational intake flow inside that shell.
 5. Verify the packaged app runs without the source checkout and writes user data
    under the packaged `CAREERRAT_HOME` data root, not inside signed resources.
 6. Confirm no Apple credentials, candidate data, workspace files, private paths,

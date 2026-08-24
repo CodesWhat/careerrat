@@ -3,7 +3,7 @@
 ## Current status
 
 CareerRat has a Windows x64 NSIS build and packaged smoke lane for pull
-requests, pushes, and release tags. The pull request lane is the first required
+requests, pushes, and release tags. The pull request lane provides the first
 real `windows-latest` proof: it installs the generated package, mounts the app,
 exports a PDF, launches the bundled Playwright Chromium, and uninstalls it.
 
