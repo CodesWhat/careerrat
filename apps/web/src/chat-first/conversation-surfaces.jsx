@@ -546,20 +546,26 @@ export function JobContextPanel({ job, summary, files = EMPTY_LIST, note, action
       <div className="chat-first-eyebrow chat-first-context-stack__heading">THIS JOB</div>
       {job ? (
         <section className="chat-first-context-card chat-first-context-card--job">
-          <strong className="chat-first-context-card__title">{job.company}</strong>
-          <span className="chat-first-context-card__meta">{job.role}</span>
+          <header className="chat-first-context-card__header">
+            <div>
+              <strong className="chat-first-context-card__title">{job.company}</strong>
+              <span className="chat-first-context-card__meta">{job.role}</span>
+            </div>
+            <span className="chat-first-context-card__stage">{job.stage}</span>
+          </header>
           <div className="chat-first-context-card__facts">
             <span className="chat-first-context-card__fact chat-first-context-card__fact--fit">
               <small>FIT</small>
               <strong>{job.fit}</strong>
             </span>
-            <span className="chat-first-context-card__fact chat-first-context-card__fact--status">
-              <small>{summary ? summary.title : "STATUS"}</small>
-              <strong>{job.stage}</strong>
-              {summary
-                ? (summary.lines || EMPTY_LIST).map((line) => <span key={line}>{line}</span>)
-                : null}
-            </span>
+            {summary ? (
+              <span className="chat-first-context-card__fact chat-first-context-card__fact--status">
+                <small>{summary.title}</small>
+                {(summary.lines || EMPTY_LIST).map((line, index) =>
+                  index === 0 ? <strong key={line}>{line}</strong> : <span key={line}>{line}</span>
+                )}
+              </span>
+            ) : null}
             {job.compensation ? (
               <span className="chat-first-context-card__fact chat-first-context-card__fact--comp">
                 <small>COMPENSATION</small>
@@ -571,6 +577,12 @@ export function JobContextPanel({ job, summary, files = EMPTY_LIST, note, action
               <span className="chat-first-context-card__fact chat-first-context-card__fact--location">
                 <small>LOCATION</small>
                 <strong>{location}</strong>
+              </span>
+            ) : null}
+            {job.source ? (
+              <span className="chat-first-context-card__fact chat-first-context-card__fact--source">
+                <small>SOURCE</small>
+                <strong>{job.source}</strong>
               </span>
             ) : null}
           </div>

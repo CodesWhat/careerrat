@@ -603,16 +603,19 @@ describe("JobConversation and JobContextPanel", () => {
   });
 
   it("keeps job facts and actions in a dedicated context panel", () => {
+    const css = readFileSync(fileURLToPath(new URL("./chat-first.css", import.meta.url)), "utf8");
     const html = markup(
       <JobContextPanel
         job={{
-          company: "Cyberdyne Systems",
-          role: "Staff ML Engineer",
-          stage: "Interview",
+          company: "Cyberdyne Systems International Autonomous Logistics Division",
+          role: "Staff Machine Learning Infrastructure and Autonomous Systems Engineer",
+          stage: "Hiring manager review in progress",
           fit: 86,
           compensation: "$190,000 - $225,000",
+          compensationNote: "Posted range clears the candidate floor.",
           location: "New York, NY",
           mode: "Hybrid",
+          source: "Ashby · posted Aug 19",
           fitReasons: ["Platform scale matches the role"],
           risks: ["No robotics experience recorded"],
         }}
@@ -639,7 +642,9 @@ describe("JobConversation and JobContextPanel", () => {
     expect(html).toContain("86");
     expect(html).toContain("COMPENSATION");
     expect(html).toContain("$190,000 - $225,000");
+    expect(html).toContain("Posted range clears the candidate floor.");
     expect(html).toContain("New York, NY · Hybrid");
+    expect(html).toContain("Ashby · posted Aug 19");
     expect(html).toContain("Prep plan");
     expect(html).toContain("chat-first-context-card__fact--status");
     expect(html).toContain("<small>Prep plan</small>");
@@ -649,10 +654,25 @@ describe("JobConversation and JobContextPanel", () => {
     expect(html).toContain("Why it fits");
     expect(html).toContain("Watch");
     expect(html).not.toContain("chat-first-context-card--cream");
+    const jobCard = html.match(
+      /<section class="chat-first-context-card chat-first-context-card--job">[\s\S]*?<\/section>/
+    )?.[0];
+    expect(jobCard).toContain("$190,000 - $225,000");
+    expect(jobCard).toContain("New York, NY · Hybrid");
+    expect(jobCard).toContain("Ashby · posted Aug 19");
+    expect(jobCard).toContain("Tue: systems design mock");
+    expect(jobCard).toContain("Why it fits");
+    expect(jobCard).toContain("Watch");
     expect(html).toContain("Interview dossier");
     expect(html).toContain("Open");
     expect(html).toContain("Export PDF");
     expect(html).toContain("Run mock interview");
+    expect(css).toMatch(
+      /\.chat-first-context-card__stage\s*\{[^}]*max-width:\s*42%[^}]*overflow-wrap:\s*anywhere/s
+    );
+    expect(css).toMatch(
+      /\.chat-first-context-card__title,[^{]*\.chat-first-context-card__section li\s*\{[^}]*overflow-wrap:\s*anywhere/s
+    );
   });
 
   it("never lets retired placement hints detach a job summary from the structured card", () => {

@@ -309,6 +309,33 @@ function jobContextLine(value) {
   );
 }
 
+const JOB_MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+function jobDate(value) {
+  const date = new Date(value);
+  if (!value || Number.isNaN(date.getTime())) return null;
+  return `${JOB_MONTHS[date.getUTCMonth()]} ${date.getUTCDate()}`;
+}
+
+function jobSourceLine(source) {
+  const date = jobDate(source?.postedAt || source?.sourcedAt || source?.appliedAt);
+  const timing = source?.postedAt ? "posted" : source?.sourcedAt ? "found" : "applied";
+  return [source?.sourceLabel, date ? `${timing} ${date}` : null].filter(Boolean).join(" · ");
+}
+
 function offerPositionLine(source) {
   const amount = (value, label) => {
     const number = Number(value);
@@ -331,6 +358,12 @@ function jobContext(view, thread, mockSession, actions) {
   const lines = [offerPosition, source?.statusNote, source?.nextAction]
     .map(jobContextLine)
     .filter(Boolean)
+    .filter(
+      (line, index, all) =>
+        all.findIndex(
+          (candidate) => candidate.trim().toLowerCase() === line.trim().toLowerCase()
+        ) === index
+    )
     .slice(0, 3);
   const compensation = [source?.compSummary, source?.comp, source?.base, thread?.comp]
     .map(jobContextLine)
@@ -374,9 +407,10 @@ function jobContext(view, thread, mockSession, actions) {
         stage: titleCase(thread.stage),
         fit: Number.isFinite(Number(thread.fitScore)) ? Number(thread.fitScore) : "Fit pending",
         compensation,
-        compensationNote: source?.compNote || null,
+        compensationNote: source?.compNote || source?.compStateLabel || null,
         location: thread.location || source?.location || null,
         mode: thread.modeLabel || thread.mode || source?.modeLabel || source?.mode || null,
+        source: jobSourceLine(source) || null,
         fitReasons: source?.roleFit?.why || [],
         risks: source?.roleFit?.risks || [],
       }}
