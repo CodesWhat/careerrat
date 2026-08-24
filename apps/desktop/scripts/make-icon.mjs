@@ -1,16 +1,16 @@
 // apps/desktop/scripts/make-icon.mjs — generate the macOS app icon from the
-// CareerRat mascot on the brand cream background.
+// CareerRat rat emoji artwork on the brand cream background.
 //
 //   node apps/desktop/scripts/make-icon.mjs
 //
 // Produces apps/desktop/build/icon.png (1024) and apps/desktop/build/icon.icns.
 // electron-builder.yml points mac.icon at the .icns; main.mjs uses the .png for
-// the dev dock icon. Re-run after changing the logo or brand color.
+// the dev dock icon. Re-run after changing the desktop artwork or brand color.
 //
 // Design: Apple "Big Sur" grid — 1024 canvas, 824 rounded-rect body (corner
 // radius 185, 100px margin), filled with a soft cream gradient, mascot centred
-// with breathing room. The mascot PNG already carries its own die-cut outline
-// and shadow, so it reads as a sticker on paper.
+// with breathing room. The transparent rat artwork stays readable from the
+// smallest Finder size through the full-size Dock preview.
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
@@ -19,15 +19,14 @@ import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = join(HERE, "..", "..", "..");
 const BUILD_DIR = join(HERE, "..", "build");
-const LOGO = join(REPO_ROOT, "assets", "logo.png");
+const ARTWORK = join(HERE, "..", "assets", "rat-emoji.png");
 
 const CANVAS = 1024;
 const BODY = 824; // Big Sur icon body
 const MARGIN = (CANVAS - BODY) / 2; // 100
 const RADIUS = 185; // ~22.5% of body
-const LOGO_BOX = 800; // mascot bounding box, centred (boldest — fills the body edge to edge)
+const ARTWORK_BOX = 820; // emoji bounding box, centred within the icon body
 
 // Cream brand ramp for the existing desktop icon artwork.
 const CREAM_TOP = "#fffaf2"; // --paper-surface
@@ -49,8 +48,8 @@ async function main() {
   mkdirSync(BUILD_DIR, { recursive: true });
 
   const background = await sharp(Buffer.from(bgSvg)).png().toBuffer();
-  const mascot = await sharp(LOGO)
-    .resize(LOGO_BOX, LOGO_BOX, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+  const mascot = await sharp(ARTWORK)
+    .resize(ARTWORK_BOX, ARTWORK_BOX, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
     .toBuffer();
 
   const icon1024 = await sharp(background)
