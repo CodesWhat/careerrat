@@ -1,41 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  injectLiveReload,
-  LIVERELOAD_SNIPPET,
-  mimeFor,
-  resolvePort,
-  safeAssetPath,
-} from "../src/core/tracker/dev-server.mjs";
-
-// ── injectLiveReload ─────────────────────────────────────────────────────────
-
-test("injectLiveReload inserts the client immediately before </body>", () => {
-  const out = injectLiveReload("<html><body><h1>hi</h1></body></html>");
-  assert.ok(out.includes("data-careerrat-livereload"));
-  assert.ok(out.indexOf("data-careerrat-livereload") < out.indexOf("</body>"));
-  assert.ok(out.includes("<h1>hi</h1>"));
-});
-
-test("injectLiveReload targets the LAST </body> when there are several", () => {
-  const html = "<body>a</body>\n<body>b</body>";
-  const out = injectLiveReload(html);
-  // Snippet sits before the final </body>, not the first.
-  assert.equal(out.lastIndexOf(LIVERELOAD_SNIPPET) < out.lastIndexOf("</body>"), true);
-  assert.ok(out.indexOf("</body>") < out.indexOf(LIVERELOAD_SNIPPET));
-});
-
-test("injectLiveReload is case-insensitive about </BODY>", () => {
-  const out = injectLiveReload("<BODY>x</BODY>");
-  assert.ok(out.includes("data-careerrat-livereload"));
-  assert.ok(out.indexOf("data-careerrat-livereload") < out.indexOf("</BODY>"));
-});
-
-test("injectLiveReload appends when there is no body tag", () => {
-  const out = injectLiveReload("just text");
-  assert.ok(out.startsWith("just text"));
-  assert.ok(out.includes("data-careerrat-livereload"));
-});
+import { mimeFor, resolvePort, safeAssetPath } from "../src/core/tracker/dev-server.mjs";
 
 // ── mimeFor ──────────────────────────────────────────────────────────────────
 
@@ -118,13 +83,13 @@ test("safeAssetPath does not treat a sibling dir prefix as inside", () => {
 });
 
 test("safeAssetPath supports a custom static prefix", () => {
-  const r = safeAssetPath("/repo/fonts", "/fonts/GeistVF.woff2", "/fonts/");
+  const r = safeAssetPath("/repo/app", "/app/assets/index.js", "/app/");
   assert.equal(r.ok, true);
-  assert.equal(r.full, "/repo/fonts/GeistVF.woff2");
+  assert.equal(r.full, "/repo/app/assets/index.js");
 });
 
 test("safeAssetPath custom prefix keeps traversal blocked", () => {
-  const r = safeAssetPath("/repo/fonts", "/fonts/../package.json", "/fonts/");
+  const r = safeAssetPath("/repo/app", "/app/../package.json", "/app/");
   assert.equal(r.ok, false);
   assert.equal(r.status, 403);
 });

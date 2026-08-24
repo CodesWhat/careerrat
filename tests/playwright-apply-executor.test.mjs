@@ -17,7 +17,7 @@ const GREENHOUSE_URL = "https://job-boards.greenhouse.io/example/jobs/123";
 // collection locator's evaluateAll(fn) + nth(index), page.waitForEvent
 // ("filechooser"), and the per-element fill/selectOption/setChecked/click/
 // setInputFiles actions. `evaluateAll` is stubbed to hand back canned
-// {index, role, name, required, fileInput, groupLabel} metadata directly
+// {index, role, name, required, fileInput, groupLabel, choiceGroup, checked} metadata directly
 // (matching what a real browser-side collectControls() pass would produce)
 // rather than executing the passed function against real DOM nodes, since
 // that extraction logic needs a real page and is out of scope for this
@@ -48,6 +48,12 @@ function createFakeBrowser({ controls, bodyText = "" } = {}) {
       },
       async click() {
         actions.push({ op: "click", index });
+        if (controls[index]?.role === "radio") {
+          for (const control of controls) {
+            if (control.choiceGroup === controls[index].choiceGroup) control.checked = false;
+          }
+          controls[index].checked = true;
+        }
         const resolvers = filechooserResolvers.splice(0);
         for (const resolve of resolvers) {
           resolve({
@@ -87,6 +93,8 @@ function createFakeBrowser({ controls, bodyText = "" } = {}) {
             required: Boolean(control.required),
             fileInput: Boolean(control.fileInput),
             groupLabel: control.groupLabel ?? null,
+            choiceGroup: control.choiceGroup ?? null,
+            checked: Boolean(control.checked),
           }));
         },
         nth: elementLocator,
@@ -100,6 +108,9 @@ function createFakeBrowser({ controls, bodyText = "" } = {}) {
     },
     async screenshot() {
       return Buffer.from("fake-png-bytes");
+    },
+    async bringToFront() {
+      actions.push({ op: "bringToFront" });
     },
   };
 
@@ -122,6 +133,26 @@ const FORM_CONTROLS = [
   { role: "textbox", name: "First Name", required: true },
   { role: "textbox", name: "Phone Number", required: false },
   { role: "combobox", name: "Work authorization", required: false },
+  { role: "button", name: "Submit application", required: false },
+];
+
+const NATIVE_RADIO_CONTROLS = [
+  {
+    role: "radio",
+    name: "Yes",
+    required: true,
+    groupLabel: "Will you now or in the future require sponsorship?",
+    choiceGroup: "fieldset-1",
+    checked: false,
+  },
+  {
+    role: "radio",
+    name: "No",
+    required: true,
+    groupLabel: "Will you now or in the future require sponsorship?",
+    choiceGroup: "fieldset-1",
+    checked: false,
+  },
   { role: "button", name: "Submit application", required: false },
 ];
 
@@ -211,6 +242,21 @@ class StubElement {
 
   get id() {
     return this._attrs.get("id") || "";
+  }
+
+  get form() {
+    let node = this.parentElement;
+    while (node) {
+      if (node.tagName === "FORM") return node;
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  getRootNode() {
+    let node = this;
+    while (node.parentElement) node = node.parentElement;
+    return node;
   }
 
   getAttribute(name) {
@@ -318,6 +364,39 @@ test("collectControls: fieldset legend names the group (P2 coverage)", () => {
   assert.equal(controls[0].groupLabel, "Resume/CV*");
 });
 
+test("collectControls: unwrapped native radios use form owner plus name identity without crossing identical names in another form", () => {
+  const questionA = new StubElement("p", { id: "question-a" }, { text: "Need sponsorship?" });
+  const yesA = new StubElement("input", { type: "radio", name: "eligibility" }, { required: true });
+  const noA = new StubElement("input", { type: "radio", name: "eligibility" }, { required: true });
+  const choicesA = new StubElement("div", { "aria-labelledby": "question-a" }).append(
+    new StubElement("label", {}, { text: "Yes" }).append(yesA),
+    new StubElement("label", {}, { text: "No" }).append(noA)
+  );
+  const formA = new StubElement("form").append(questionA, choicesA);
+
+  const questionB = new StubElement("p", { id: "question-b" }, { text: "Authorized to work?" });
+  const yesB = new StubElement("input", { type: "radio", name: "eligibility" }, { required: true });
+  const noB = new StubElement("input", { type: "radio", name: "eligibility" }, { required: true });
+  const choicesB = new StubElement("div").append(
+    new StubElement("label", {}, { text: "Yes" }).append(yesB),
+    new StubElement("label", {}, { text: "No" }).append(noB)
+  );
+  const formB = new StubElement("form").append(questionB, choicesB);
+  const root = new StubElement("div", { id: "root" }).append(formA, formB);
+  const stub = createDomStub(root);
+
+  const controls = withDomGlobals(stub, () => collectControls([yesA, noA, yesB, noB]));
+
+  assert.ok(controls[0].choiceGroup);
+  assert.equal(controls[0].choiceGroup, controls[1].choiceGroup);
+  assert.equal(controls[2].choiceGroup, controls[3].choiceGroup);
+  assert.notEqual(controls[0].choiceGroup, controls[2].choiceGroup);
+  assert.deepEqual(
+    controls.map(({ groupLabel }) => groupLabel),
+    ["Need sponsorship?", "Need sponsorship?", "Authorized to work?", "Authorized to work?"]
+  );
+});
+
 test("collectControls: an aria-label on the container names the group (P2 coverage)", () => {
   const attach = new StubElement("button", {}, { text: "Attach" });
   const section = new StubElement("div", { "aria-label": "Cover Letter" }).append(attach);
@@ -397,6 +476,29 @@ test("playwright-ops is importable without throwing (launch stays lazy)", async 
   assert.equal(typeof module.createPlaywrightOps, "function");
   // Constructing ops also doesn't launch anything until openTab is called.
   assert.doesNotThrow(() => module.createPlaywrightOps({ profileDir: "/tmp/unused-profile" }));
+});
+
+test("playwright-ops forwards an explicit Chromium channel to the lazy launcher", async () => {
+  const launches = [];
+  const ops = createPlaywrightOps({
+    profileDir: "/tmp/profile",
+    headless: true,
+    channel: "chromium",
+    launchImpl: async (options) => {
+      launches.push(options);
+      return {
+        async newPage() {
+          return minimalFakePage("about:blank");
+        },
+        async close() {},
+      };
+    },
+  });
+
+  await ops.openTab({ url: "about:blank" });
+  await ops.close();
+
+  assert.deepEqual(launches, [{ profileDir: "/tmp/profile", headless: true, channel: "chromium" }]);
 });
 
 // ---------------------------------------------------------------------------
@@ -507,6 +609,117 @@ test("snapshot normalizes role/name/required and assigns stable-for-this-snapsho
   });
 });
 
+test("snapshot folds a native required radio fieldset into one labeled group with option refs and live state", async () => {
+  const { launchImpl } = createFakeBrowser({ controls: NATIVE_RADIO_CONTROLS });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  let snapshot = await ops.snapshot({ pageId });
+
+  assert.deepEqual(snapshot.refs, {
+    e1: {
+      role: "radio-group",
+      name: "Will you now or in the future require sponsorship?",
+      required: true,
+      options: [
+        { label: "Yes", ref: "e1" },
+        { label: "No", ref: "e2" },
+      ],
+      stateKnown: true,
+      value: "",
+    },
+    e2: { role: "radio", name: "No", required: true, field: false },
+    e3: { role: "button", name: "Submit application", required: false },
+  });
+
+  await ops.clickButton({ pageId, ref: "e2" });
+  snapshot = await ops.snapshot({ pageId });
+  assert.equal(snapshot.refs.e1.value, "No");
+});
+
+test("snapshot refuses to merge one native identity across conflicting visible question scopes", async () => {
+  const controls = [
+    {
+      role: "radio",
+      name: "Yes",
+      required: true,
+      groupLabel: "Need sponsorship?",
+      choiceGroup: "same-form-and-name",
+    },
+    {
+      role: "radio",
+      name: "No",
+      required: true,
+      groupLabel: "Need sponsorship?",
+      choiceGroup: "same-form-and-name",
+    },
+    {
+      role: "radio",
+      name: "Yes",
+      required: true,
+      groupLabel: "Authorized to work?",
+      choiceGroup: "same-form-and-name",
+    },
+    {
+      role: "radio",
+      name: "No",
+      required: true,
+      groupLabel: "Authorized to work?",
+      choiceGroup: "same-form-and-name",
+    },
+  ];
+  const { launchImpl } = createFakeBrowser({ controls });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  const snapshot = await ops.snapshot({ pageId });
+
+  assert.equal(
+    Object.values(snapshot.refs).some(({ role }) => role === "radio-group"),
+    false
+  );
+  assert.deepEqual(
+    Object.values(snapshot.refs).map(({ name }) => name),
+    ["Yes", "No", "Yes", "No"]
+  );
+});
+
+test("snapshot refuses to fold only the labeled subset of one native radio identity", async () => {
+  const controls = [
+    {
+      role: "radio",
+      name: "Yes",
+      required: true,
+      groupLabel: "Need sponsorship?",
+      choiceGroup: "partially-labeled-group",
+    },
+    {
+      role: "radio",
+      name: "No",
+      required: true,
+      groupLabel: "Need sponsorship?",
+      choiceGroup: "partially-labeled-group",
+    },
+    {
+      role: "radio",
+      name: "Maybe",
+      required: true,
+      groupLabel: null,
+      choiceGroup: "partially-labeled-group",
+    },
+  ];
+  const { launchImpl } = createFakeBrowser({ controls });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  const snapshot = await ops.snapshot({ pageId });
+
+  assert.equal(
+    Object.values(snapshot.refs).some(({ role }) => role === "radio-group"),
+    false
+  );
+});
+
 test("fillField and clickButton resolve refs from the latest snapshot", async () => {
   const { launchImpl, actions } = createFakeBrowser({ controls: FORM_CONTROLS });
   const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
@@ -522,6 +735,17 @@ test("fillField and clickButton resolve refs from the latest snapshot", async ()
     { op: "selectOption", index: 2, arg: { label: "Yes" } },
     { op: "click", index: 3 },
   ]);
+});
+
+test("playwright-ops focuses the retained page without creating a second tab", async () => {
+  const { launchImpl, actions, pageOpens } = createFakeBrowser({ controls: FORM_CONTROLS });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  await ops.focusTab({ pageId });
+
+  assert.equal(pageOpens(), 1);
+  assert.deepEqual(actions, [{ op: "bringToFront" }]);
 });
 
 test("an unknown or stale ref fails with a clear error", async () => {
@@ -1271,6 +1495,134 @@ test("configured executor dispatches to the playwright executor for provider pla
 
   assert.equal(result.session.provider, "playwright");
   assert.ok(pageOpens() > 0, "the playwright executor actually opened a fake browser tab");
+});
+
+test("configured executor returns to the exact retained Playwright page for final user review", async () => {
+  const { launchImpl, actions, pageOpens } = createFakeBrowser({ controls: FORM_CONTROLS });
+  const execute = createConfiguredApplyExecutor({
+    repoRoot: "/repo",
+    env: {},
+    loadAutomationImpl: () => ({ data: { session: { provider: "playwright" } } }),
+    launchImpl,
+    candidateConfigGetImpl: () => ({
+      profile: { candidate: { first_name: "Morgan" } },
+      honesty: {},
+      "form-defaults": {},
+    }),
+    loadAnswerMapImpl: async () => new Map(),
+    captureQuestionsImpl: async ({ questions }) => ({
+      questions,
+      excluded: [],
+      demographicSectionPresent: false,
+    }),
+  });
+
+  const input = {
+    applicationId: "app-retained",
+    application: { id: "app-retained" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  };
+  await execute(input);
+  const focused = await execute({ ...input, focusSession: true });
+
+  assert.equal(pageOpens(), 1, "review must not create another tab or browser profile");
+  assert.equal(focused.state, "awaiting-submit");
+  assert.equal(focused.session.focused, true);
+  assert.deepEqual(actions.at(-1), { op: "bringToFront" });
+});
+
+test("fresh packaged auto configuration fills through bundled Playwright and stops before submit", async () => {
+  const { launchImpl, actions, pageOpens } = createFakeBrowser({ controls: FORM_CONTROLS });
+  const execute = createConfiguredApplyExecutor({
+    repoRoot: "/repo",
+    env: { CAREERRAT_PACKAGED_DESKTOP: "1" },
+    loadAutomationImpl: () => ({ data: { session: { provider: "auto" } } }),
+    launchImpl,
+    mayRunImpl: () => ({ allowed: true }),
+    candidateConfigGetImpl: () => ({
+      profile: { candidate: { full_name: "Morgan Hale" } },
+      honesty: {},
+      "form-defaults": { work_authorization: "Yes" },
+    }),
+    loadAnswerMapImpl: async () => new Map(),
+    captureQuestionsImpl: async ({ questions }) => ({
+      questions,
+      excluded: [],
+      demographicSectionPresent: false,
+    }),
+  });
+
+  const result = await execute({
+    applicationId: "app-packaged-fresh",
+    application: { id: "app-packaged-fresh" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  });
+
+  assert.equal(result.available, true);
+  assert.equal(result.verified, false, "the executor must never claim the user submitted");
+  assert.equal(result.state, "awaiting-submit");
+  assert.equal(result.session.provider, "playwright");
+  assert.ok(pageOpens() > 0, "the bundled Playwright path opened the application form");
+  assert.deepEqual(
+    actions.filter((entry) => entry.index === 3),
+    [],
+    "the final submit control must remain untouched"
+  );
+});
+
+test("configured packaged executor resolves both provider and profile from the isolated desktop environment", async () => {
+  const { launchImpl } = createFakeBrowser({ controls: FORM_CONTROLS });
+  const env = {
+    CAREERRAT_HOME: "/private/careerrat-desktop-data",
+    CAREERRAT_PACKAGED_DESKTOP: "1",
+  };
+  const loadCalls = [];
+  const execute = createConfiguredApplyExecutor({
+    repoRoot: "/staged/careerrat",
+    env,
+    loadAutomationImpl: (options) => {
+      loadCalls.push(options);
+      return { data: { session: { provider: "auto", profile_root: "/private/browser" } } };
+    },
+    launchImpl,
+    mayRunImpl: () => ({ allowed: true }),
+    candidateConfigGetImpl: () => ({
+      profile: { candidate: { full_name: "Morgan Hale" } },
+      honesty: {},
+      "form-defaults": {},
+    }),
+    loadAnswerMapImpl: async () => new Map(),
+    captureQuestionsImpl: async ({ questions }) => ({
+      questions,
+      excluded: [],
+      demographicSectionPresent: false,
+    }),
+  });
+
+  const result = await execute({
+    applicationId: "app-packaged-env",
+    application: { id: "app-packaged-env" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  });
+
+  assert.equal(result.state, "awaiting-submit");
+  assert.equal(
+    loadCalls.length,
+    2,
+    "provider selection and Playwright profile use one config source"
+  );
+  assert.equal(
+    loadCalls.every((call) => call.root === "/staged/careerrat"),
+    true
+  );
+  assert.equal(
+    loadCalls.every((call) => call.env === env),
+    true
+  );
 });
 
 test("configured executor fails the extension provider immediately with an honest reason, not null", async () => {

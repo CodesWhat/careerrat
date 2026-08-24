@@ -14,6 +14,7 @@
 //   POST /api/chat/close     { chatId }       -> 204
 //   GET  /api/chat/by-skill  ?skill=<name>    -> 200 live session or explicit missing state
 //   GET  /api/chat/list                       -> 200 [{chatId, skill, state, ...}]
+//   POST /api/chat/decision                   -> 200 durable visible-action state
 //
 // Unlike POST /api/skill/run (skill-run-route.mjs), a chat session outlives
 // any single request — the SSE response here is just ONE listener attached
@@ -28,6 +29,7 @@
 // so the two routes that need an id (`events`, `by-skill`) read it off the
 // query string themselves rather than the dispatcher parsing it.
 
+import { skillChatDecisionSet } from "../core/db/verbs.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB cap — same as skill-run-route.mjs.
@@ -81,6 +83,14 @@ function queryParam(req, name) {
   return url.searchParams.get(name);
 }
 
+function requestedEventCursor(req) {
+  const candidates = [req.headers["last-event-id"], queryParam(req, "after")]
+    .filter((value) => value !== undefined && value !== null && value !== "")
+    .map((value) => Number(value))
+    .filter((value) => Number.isSafeInteger(value) && value >= 0);
+  return candidates.length ? Math.max(...candidates) : undefined;
+}
+
 // `repoRoot`/`env` are accepted (not just `chatRuntime`) to keep this
 // mount function's signature symmetric with mountSkillRunRoute()/
 // mountOnboardRoutes() at the tracker-dev.mjs call site — every route needed
@@ -110,7 +120,7 @@ export function mountChatRoute({ addRoute, repoRoot, chatRuntime, env = process.
 
   addRoute("GET", "/api/chat/events", (req, res) => {
     const chatId = queryParam(req, "id");
-    const lastEventId = req.headers["last-event-id"];
+    const lastEventId = requestedEventCursor(req);
     try {
       chatRuntime.subscribe(chatId, res, { lastEventId });
     } catch (err) {
@@ -182,5 +192,33 @@ export function mountChatRoute({ addRoute, repoRoot, chatRuntime, env = process.
 
   addRoute("GET", "/api/chat/list", (_req, res) => {
     sendJson(res, 200, chatRuntime.listSessions());
+  });
+
+  addRoute("POST", "/api/chat/decision", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+    } catch (err) {
+      sendJson(res, err.status || 400, { ok: false, error: err.message });
+      return;
+    }
+    try {
+      const result = skillChatDecisionSet({
+        repoRoot,
+        env,
+        skill: body?.skill,
+        decisionId: body?.decisionId,
+        action: body?.action,
+        status: body?.status,
+        resultText: body?.resultText,
+      });
+      sendJson(res, 200, result);
+    } catch (err) {
+      sendJson(res, err.code === "NOT_FOUND" ? 404 : 400, {
+        ok: false,
+        code: err.code || "BAD_REQUEST",
+        error: err.message,
+      });
+    }
   });
 }

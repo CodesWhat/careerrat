@@ -129,7 +129,11 @@ test("a tracked one-off question appends to the existing answers artifact and st
   const answerPath = "workspace/tailored/acme-answers.md";
   const full = join(repoRoot, answerPath);
   mkdirSync(dirname(full), { recursive: true });
-  writeFileSync(full, "# Application answers\n", "utf8");
+  writeFileSync(
+    full,
+    "# Application answers\n\n## What is your notice period?*\n\nNEEDS YOU\n",
+    "utf8"
+  );
   appUpsert({
     repoRoot,
     env: {},
@@ -139,6 +143,21 @@ test("a tracked one-off question appends to the existing answers artifact and st
       role: "Accountant",
       status: "reviewed-hold",
       artifacts: { answersSource: answerPath },
+      packetManifest: {
+        applicationId: "app-acme",
+        uploadReady: false,
+        status: "reviewable",
+        gapCount: 1,
+        gaps: [
+          {
+            kind: "answers",
+            code: "ANSWER_CONFIRMATION_REQUIRED",
+            questionId: "q1",
+            message: "Answer “What is your notice period?”.",
+          },
+        ],
+        artifacts: { answersSource: answerPath },
+      },
     },
   });
 
@@ -172,13 +191,527 @@ test("a tracked one-off question appends to the existing answers artifact and st
   });
 
   assert.equal(result.artifactPath, answerPath);
+  assert.equal(result.answers[0].questionId, "q1");
+  assert.equal(result.answers[0].confirmationRequired, true);
   assert.equal(existsSync(full), true);
-  assert.match(readFileSync(full, "utf8"), /What is your notice period\?/);
-  assert.match(readFileSync(full, "utf8"), /My notice period is two weeks\./);
+  const markdown = readFileSync(full, "utf8");
+  assert.match(markdown, /## What is your notice period\?\*\n\nNEEDS YOU/);
+  assert.match(markdown, /careerrat-screening:what is your notice period/);
+  assert.match(markdown, /My notice period is two weeks\./);
   const stored = JSON.parse(
     openDb({ repoRoot, env: {} })
       .prepare("SELECT data FROM applications WHERE id = ?")
       .get("app-acme").data
   );
   assert.equal(stored.artifacts.answers, answerPath);
+});
+
+test("a tracked one-off answer without a matching open packet gap is not confirmable", async () => {
+  const { draftOneOffScreeningAnswers } = await import("../src/core/packet/one-off-answer.mjs");
+  const repoRoot = tempRepo();
+  const answerPath = "workspace/tailored/acme-no-gap-answers.md";
+  const full = join(repoRoot, answerPath);
+  mkdirSync(dirname(full), { recursive: true });
+  writeFileSync(full, "# Application answers\n", "utf8");
+  appUpsert({
+    repoRoot,
+    env: {},
+    row: {
+      id: "app-acme-no-gap",
+      company: "Acme",
+      role: "Accountant",
+      status: "reviewed-hold",
+      artifacts: { answersSource: answerPath },
+      packetManifest: {
+        applicationId: "app-acme-no-gap",
+        uploadReady: false,
+        status: "reviewable",
+        gapCount: 1,
+        gaps: [
+          {
+            kind: "answers",
+            code: "ANSWER_CONFIRMATION_REQUIRED",
+            questionId: "q-location",
+            message: "Answer “Can you work from our New York office?”.",
+          },
+        ],
+        artifacts: { answersSource: answerPath },
+      },
+    },
+  });
+
+  const result = await draftOneOffScreeningAnswers({
+    repoRoot,
+    env: {},
+    applicationId: "app-acme-no-gap",
+    questionText: "What is your notice period?",
+    captureQuestionsImpl: async () => ({
+      questions: [{ id: "q-notice", label: "What is your notice period?" }],
+      excluded: [],
+    }),
+    draftAnswersImpl: async () => ({
+      answers: [
+        {
+          questionId: "q-notice",
+          question: "What is your notice period?",
+          answer: "My notice period is two weeks.",
+          source: "profile",
+          uploadReady: true,
+        },
+      ],
+      ai: { used: false },
+    }),
+    buildContextImpl: () => ({ profile: {}, evidence: { claims: [] } }),
+  });
+
+  assert.equal(result.answers[0].questionId, "q-notice");
+  assert.equal(result.answers[0].confirmationRequired, false);
+});
+
+test("confirmation refuses duplicate-label packet gaps when no exact question id is supplied", async () => {
+  const { confirmOneOffScreeningAnswer } = await import("../src/core/packet/one-off-answer.mjs");
+  const repoRoot = tempRepo();
+  const answerPath = "workspace/tailored/acme-ambiguous-answers.md";
+  const full = join(repoRoot, answerPath);
+  mkdirSync(dirname(full), { recursive: true });
+  writeFileSync(full, "# Application answers\n", "utf8");
+  appUpsert({
+    repoRoot,
+    env: {},
+    row: {
+      id: "app-acme-ambiguous",
+      company: "Acme",
+      role: "Accountant",
+      status: "reviewed-hold",
+      artifacts: { answersSource: answerPath },
+      packetManifest: {
+        applicationId: "app-acme-ambiguous",
+        uploadReady: false,
+        status: "reviewable",
+        gapCount: 2,
+        gaps: [
+          {
+            kind: "answers",
+            code: "ANSWER_CONFIRMATION_REQUIRED",
+            questionId: "q-one",
+            message: "Answer “Confirm your availability”.",
+          },
+          {
+            kind: "answers",
+            code: "ANSWER_CONFIRMATION_REQUIRED",
+            questionId: "q-two",
+            message: "Answer “Confirm your availability”.",
+          },
+        ],
+        artifacts: { answersSource: answerPath },
+      },
+    },
+  });
+
+  await assert.rejects(
+    confirmOneOffScreeningAnswer({
+      repoRoot,
+      env: {},
+      applicationId: "app-acme-ambiguous",
+      question: "Confirm your availability",
+      answer: "I am available in two weeks.",
+    }),
+    (error) => error?.code === "ANSWER_CONFIRMATION_AMBIGUOUS"
+  );
+  assert.equal(readFileSync(full, "utf8"), "# Application answers\n");
+});
+
+test("confirmation refuses an exact gap id paired with a different question without mutating state", async () => {
+  const { confirmOneOffScreeningAnswer } = await import("../src/core/packet/one-off-answer.mjs");
+  const repoRoot = tempRepo();
+  const answerPath = "workspace/tailored/acme-mismatched-answer.md";
+  const full = join(repoRoot, answerPath);
+  mkdirSync(dirname(full), { recursive: true });
+  const originalMarkdown = [
+    "# Application answers",
+    "",
+    "## What is your notice period?",
+    "",
+    "NEEDS YOU",
+    "",
+    "## Can you work from New York?",
+    "",
+    "NEEDS YOU",
+    "",
+  ].join("\n");
+  writeFileSync(full, originalMarkdown, "utf8");
+  const packetManifest = {
+    applicationId: "app-acme-mismatched-answer",
+    uploadReady: false,
+    status: "reviewable",
+    gapCount: 2,
+    gaps: [
+      {
+        kind: "answers",
+        code: "ANSWER_CONFIRMATION_REQUIRED",
+        questionId: "q-notice",
+        message: "Answer “What is your notice period?”.",
+      },
+      {
+        kind: "answers",
+        code: "ANSWER_CONFIRMATION_REQUIRED",
+        questionId: "q-location",
+        message: "Answer “Can you work from New York?”.",
+      },
+    ],
+    artifacts: { answersSource: answerPath },
+  };
+  appUpsert({
+    repoRoot,
+    env: {},
+    row: {
+      id: "app-acme-mismatched-answer",
+      company: "Acme",
+      role: "Accountant",
+      status: "reviewed-hold",
+      artifacts: { answersSource: answerPath },
+      packetManifest,
+    },
+  });
+
+  await assert.rejects(
+    confirmOneOffScreeningAnswer({
+      repoRoot,
+      env: {},
+      applicationId: "app-acme-mismatched-answer",
+      questionId: "q-notice",
+      question: "Can you work from New York?",
+      answer: "Yes, I can work from New York.",
+    }),
+    (error) => error?.code === "ANSWER_CONFIRMATION_MISMATCH"
+  );
+
+  assert.equal(readFileSync(full, "utf8"), originalMarkdown);
+  const stored = JSON.parse(
+    openDb({ repoRoot, env: {} })
+      .prepare("SELECT data FROM applications WHERE id = ?")
+      .get("app-acme-mismatched-answer").data
+  );
+  assert.deepEqual(stored.packetManifest, packetManifest);
+});
+
+test("grouped confirmation reconciles every exact answer gap and preserves unrelated gaps", async () => {
+  const { confirmOneOffScreeningAnswer } = await import("../src/core/packet/one-off-answer.mjs");
+  const repoRoot = tempRepo();
+  const answerPath = "workspace/tailored/acme-grouped-answers.md";
+  const full = join(repoRoot, answerPath);
+  mkdirSync(dirname(full), { recursive: true });
+  writeFileSync(
+    full,
+    [
+      "# Application answers",
+      "",
+      "## What is your notice period?",
+      "",
+      "NEEDS YOU",
+      "",
+      "## Can you work from New York?",
+      "",
+      "NEEDS YOU",
+      "",
+      "## What are your salary expectations?",
+      "",
+      "NEEDS YOU",
+      "",
+    ].join("\n"),
+    "utf8"
+  );
+  const gaps = [
+    {
+      kind: "answers",
+      code: "ANSWER_CONFIRMATION_REQUIRED",
+      questionId: "q-notice",
+      message: "Answer “What is your notice period?”.",
+    },
+    {
+      kind: "answers",
+      code: "ANSWER_CONFIRMATION_REQUIRED",
+      questionId: "q-location",
+      message: "Answer “Can you work from New York?”.",
+    },
+    {
+      kind: "answers",
+      code: "ANSWER_CONFIRMATION_REQUIRED",
+      questionId: "q-comp",
+      message: "Answer “What are your salary expectations?”.",
+    },
+  ];
+  appUpsert({
+    repoRoot,
+    env: {},
+    row: {
+      id: "app-acme-grouped",
+      company: "Acme",
+      role: "Accountant",
+      status: "reviewed-hold",
+      artifacts: { answersSource: answerPath },
+      packetManifest: {
+        applicationId: "app-acme-grouped",
+        generatedAt: "2026-08-24T12:00:00.000Z",
+        uploadReady: false,
+        status: "reviewable",
+        gapCount: gaps.length,
+        gaps,
+        artifacts: { answersSource: answerPath },
+      },
+    },
+  });
+
+  const result = await confirmOneOffScreeningAnswer({
+    repoRoot,
+    env: {},
+    applicationId: "app-acme-grouped",
+    answers: [
+      {
+        questionId: "q-notice",
+        question: "What is your notice period?",
+        answer: "My notice period is two weeks.",
+      },
+      {
+        questionId: "q-location",
+        question: "Can you work from New York?",
+        answer: "Yes, I can work from New York.",
+      },
+    ],
+  });
+
+  assert.equal(result.packetManifest.gapCount, 1);
+  assert.deepEqual(result.packetManifest.gaps, [gaps[2]]);
+  assert.equal(result.answers.length, 2);
+  assert.deepEqual(result.packetManifest.confirmedAnswers, [
+    {
+      questionId: "q-notice",
+      question: "What is your notice period?",
+      answer: "My notice period is two weeks.",
+      confirmedAt: result.packetManifest.confirmedAnswers[0].confirmedAt,
+    },
+    {
+      questionId: "q-location",
+      question: "Can you work from New York?",
+      answer: "Yes, I can work from New York.",
+      confirmedAt: result.packetManifest.confirmedAnswers[1].confirmedAt,
+    },
+  ]);
+  const markdown = readFileSync(full, "utf8");
+  assert.match(markdown, /## What is your notice period\?\n\nMy notice period is two weeks\./);
+  assert.match(markdown, /## Can you work from New York\?\n\nYes, I can work from New York\./);
+  assert.match(markdown, /## What are your salary expectations\?\n\nNEEDS YOU/);
+});
+
+test("confirming a tracked one-off answer reconciles only its packet gap through the packet writer", async () => {
+  const { confirmOneOffScreeningAnswer } = await import("../src/core/packet/one-off-answer.mjs");
+  assert.equal(typeof confirmOneOffScreeningAnswer, "function");
+
+  const repoRoot = tempRepo();
+  const answerPath = "workspace/tailored/acme-answers.md";
+  const full = join(repoRoot, answerPath);
+  mkdirSync(dirname(full), { recursive: true });
+  writeFileSync(full, "# Application answers\n", "utf8");
+  appUpsert({
+    repoRoot,
+    env: {},
+    row: {
+      id: "app-acme-confirm",
+      company: "Acme",
+      role: "Accountant",
+      status: "reviewed-hold",
+      artifacts: { answersSource: answerPath },
+      packetManifest: {
+        applicationId: "app-acme-confirm",
+        generatedAt: "2026-08-24T12:00:00.000Z",
+        uploadReady: false,
+        status: "reviewable",
+        gapCount: 2,
+        gaps: [
+          {
+            kind: "answers",
+            code: "ANSWER_CONFIRMATION_REQUIRED",
+            questionId: "q-notice",
+            message: "Answer “What is your notice period?”.",
+          },
+          {
+            kind: "answers",
+            code: "ANSWER_CONFIRMATION_REQUIRED",
+            questionId: "q-location",
+            message: "Answer “Can you work from our New York office?”.",
+          },
+        ],
+        artifacts: { answersSource: answerPath },
+      },
+    },
+  });
+
+  const result = await confirmOneOffScreeningAnswer({
+    repoRoot,
+    env: {},
+    applicationId: "app-acme-confirm",
+    questionId: "q-notice",
+    question: "What is your notice period?",
+    answer: "My notice period is two weeks.",
+  });
+
+  assert.equal(result.persisted, true);
+  assert.equal(result.packetManifest.gapCount, 1);
+  assert.equal(result.packetManifest.uploadReady, false);
+  assert.equal(result.packetManifest.status, "reviewable");
+  assert.deepEqual(result.packetManifest.gaps, [
+    {
+      kind: "answers",
+      code: "ANSWER_CONFIRMATION_REQUIRED",
+      questionId: "q-location",
+      message: "Answer “Can you work from our New York office?”.",
+    },
+  ]);
+  assert.equal(result.packetManifest.artifacts.answers, answerPath);
+  assert.equal(result.packetManifest.artifacts.answersSource, answerPath);
+
+  const stored = JSON.parse(
+    openDb({ repoRoot, env: {} })
+      .prepare("SELECT data FROM applications WHERE id = ?")
+      .get("app-acme-confirm").data
+  );
+  assert.equal(stored.artifacts.answers, answerPath);
+  assert.equal(stored.artifacts.answersSource, answerPath);
+  assert.equal(typeof stored.artifacts.answersGeneratedAt, "string");
+  assert.deepEqual(stored.packetManifest, result.packetManifest);
+  assert.match(readFileSync(full, "utf8"), /What is your notice period\?/);
+  assert.match(readFileSync(full, "utf8"), /My notice period is two weeks\./);
+});
+
+test("confirming replaces the matching rendered NEEDS YOU answer without disturbing other questions", async () => {
+  const { confirmOneOffScreeningAnswer } = await import("../src/core/packet/one-off-answer.mjs");
+  const repoRoot = tempRepo();
+  const answerPath = "workspace/tailored/acme-rendered-answers.md";
+  const full = join(repoRoot, answerPath);
+  mkdirSync(dirname(full), { recursive: true });
+  writeFileSync(
+    full,
+    [
+      "# Application Answers",
+      "",
+      "## What is your notice period?*",
+      "",
+      "NEEDS YOU",
+      "",
+      "## Can you work from our New York office?*",
+      "",
+      "NEEDS YOU: confirm the required schedule.",
+      "",
+      "<!-- careerrat-screening:what is your notice period -->",
+      "**Q:** What is your notice period?",
+      "",
+      "**A:** My notice period is two weeks.",
+      "<!-- /careerrat-screening:what is your notice period -->",
+      "",
+    ].join("\n"),
+    "utf8"
+  );
+  appUpsert({
+    repoRoot,
+    env: {},
+    row: {
+      id: "app-acme-rendered-confirm",
+      company: "Acme",
+      role: "Accountant",
+      status: "reviewed-hold",
+      artifacts: { answersSource: answerPath },
+      packetManifest: {
+        applicationId: "app-acme-rendered-confirm",
+        generatedAt: "2026-08-24T12:00:00.000Z",
+        uploadReady: false,
+        status: "reviewable",
+        gapCount: 2,
+        gaps: [
+          {
+            kind: "answers",
+            code: "ANSWER_CONFIRMATION_REQUIRED",
+            questionId: "q-notice",
+            message: "Answer “What is your notice period?*”.",
+          },
+          {
+            kind: "answers",
+            code: "ANSWER_CONFIRMATION_REQUIRED",
+            questionId: "q-location",
+            message: "Answer “Can you work from our New York office?*”.",
+          },
+        ],
+        artifacts: { answersSource: answerPath },
+      },
+    },
+  });
+
+  await confirmOneOffScreeningAnswer({
+    repoRoot,
+    env: {},
+    applicationId: "app-acme-rendered-confirm",
+    questionId: "q-notice",
+    question: "What is your notice period?",
+    answer: "My notice period is two weeks.",
+  });
+
+  const markdown = readFileSync(full, "utf8");
+  assert.match(markdown, /## What is your notice period\?\*\n\nMy notice period is two weeks\./);
+  assert.doesNotMatch(markdown, /careerrat-screening:what is your notice period/);
+  assert.match(
+    markdown,
+    /## Can you work from our New York office\?\*\n\nNEEDS YOU: confirm the required schedule\./
+  );
+  assert.equal((markdown.match(/My notice period is two weeks\./g) || []).length, 1);
+});
+
+test("confirming an answer cannot clear a packet gap without a tracked answers artifact", async () => {
+  const { confirmOneOffScreeningAnswer } = await import("../src/core/packet/one-off-answer.mjs");
+  const repoRoot = tempRepo();
+  appUpsert({
+    repoRoot,
+    env: {},
+    row: {
+      id: "app-acme-missing-answers",
+      company: "Acme",
+      role: "Accountant",
+      status: "reviewed-hold",
+      packetManifest: {
+        applicationId: "app-acme-missing-answers",
+        generatedAt: "2026-08-24T12:00:00.000Z",
+        uploadReady: false,
+        status: "reviewable",
+        gapCount: 1,
+        gaps: [
+          {
+            kind: "answers",
+            code: "ANSWER_CONFIRMATION_REQUIRED",
+            questionId: "q-notice",
+            message: "Answer “What is your notice period?”.",
+          },
+        ],
+        artifacts: {},
+      },
+    },
+  });
+
+  await assert.rejects(
+    confirmOneOffScreeningAnswer({
+      repoRoot,
+      env: {},
+      applicationId: "app-acme-missing-answers",
+      questionId: "q-notice",
+      question: "What is your notice period?",
+      answer: "My notice period is two weeks.",
+    }),
+    (error) => error?.code === "BAD_PACKET_ARTIFACT"
+  );
+
+  const stored = JSON.parse(
+    openDb({ repoRoot, env: {} })
+      .prepare("SELECT data FROM applications WHERE id = ?")
+      .get("app-acme-missing-answers").data
+  );
+  assert.equal(stored.packetManifest.gapCount, 1);
+  assert.equal(stored.packetManifest.uploadReady, false);
+  assert.equal(stored.artifacts?.answers, undefined);
 });

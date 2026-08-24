@@ -57,19 +57,16 @@ test("only the public website/docs builds opt into the PostHog ingest proxy", ()
   assert.match(websiteBuild, /--allow-posthog-proxy/);
   assert.match(docsBuild, /--allow-posthog-proxy/);
 
-  // The local-first dashboard (apps/web's demo build and the live local dev
-  // server) must never gain a network egress point to an external analytics
-  // host — connect-src stays 'self' there.
-  const buildDemo = readFileSync(new URL("../scripts/build-demo.mjs", import.meta.url), "utf8");
+  // The local-first app server must never gain a network egress point to an
+  // external analytics host. connect-src stays 'self' there.
   const trackerDev = readFileSync(new URL("../src/cli/tracker-dev.mjs", import.meta.url), "utf8");
-  assert.doesNotMatch(buildDemo, /--allow-posthog-proxy|extraConnectSrc/);
   assert.doesNotMatch(trackerDev, /extraConnectSrc|e\.codeswhat\.com/);
 });
 
-test("Vite theme bootstrap is external and Vercel/static-demo configs enforce headers", () => {
+test("Vite uses no inline theme bootstrap and Vercel enforces headers", () => {
   const appIndex = readFileSync(new URL("../apps/web/index.html", import.meta.url), "utf8");
   assert.doesNotMatch(appIndex, /<script(?![^>]*\bsrc=)[^>]*>/i);
-  assert.match(appIndex, /theme-init\.js/);
+  assert.doesNotMatch(appIndex, /theme-init\.js/);
 
   const vercel = JSON.parse(
     readFileSync(new URL("../apps/website/vercel.json", import.meta.url), "utf8")
@@ -80,8 +77,4 @@ test("Vite theme bootstrap is external and Vercel/static-demo configs enforce he
   assert.equal(headers["X-Content-Type-Options"], "nosniff");
   assert.equal(headers["X-Frame-Options"], "DENY");
   assert.match(headers["Content-Security-Policy"] || "", /frame-ancestors 'none'/);
-
-  const deployDemo = readFileSync(new URL("../scripts/deploy-demo.mjs", import.meta.url), "utf8");
-  assert.match(deployDemo, /securityHeaders/);
-  assert.match(deployDemo, /continue:\s*true/);
 });

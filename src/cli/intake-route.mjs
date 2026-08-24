@@ -10,8 +10,8 @@
 //   GET  /api/intake/list       ?status=&limit=
 //   GET  /api/intake/one        ?id=
 //   POST /api/intake/classify   { id } — re-run classification
-//   POST /api/intake/confirm    { id } — the ONLY place a domain write / skill
-//                                run / chat session may start for an intake item
+//   POST /api/intake/confirm    { id } — the ONLY place a domain write, skill
+//                                run, or workspace intent may start for an item
 //   POST /api/intake/dismiss    { id }
 //
 // Fail-closed 409 no-DB, same as data-route.mjs: intake_items is DB-native
@@ -20,7 +20,7 @@
 // /api/data/* route already surfaces, not a silent fallback.
 //
 // ONE-WRITE-PATH + CONFIRM-FIRST: capture/classify never call a domain verb,
-// runSkillStream, or chatRuntime — see src/core/db/verbs/intake.mjs's own
+// runSkillStream, or workspaceAgentRuntime — see src/core/db/verbs/intake.mjs's own
 // header comment and src/core/intake/dispatch.mjs's header comment. Only
 // POST /api/intake/confirm executes the {lane, action, params} dispatch
 // src/core/intake/dispatch.mjs already resolved at classify time:
@@ -32,13 +32,8 @@
 //            endpoint is a plain JSON responder, so the run's own done/error
 //            transition lands via a later intakeUpdate once it settles).
 //   Lane W — execute a typed intent on the one durable workspace agent.
-//   Lane C — legacy compatibility for intake rows created before Lane W:
-//            chatRuntime.findBySkill(skill): reuse an existing live session
-//            via postMessage(), or startSession() when none exists — the
-//            SAME chatRuntime instance tracker-dev.mjs already constructs for
-//            /api/chat/*, never a second registry.
 //
-// `fetchImpl`, `loadSdk`, `runSkillStream`, and `chatRuntime` are all
+// `fetchImpl`, `loadSdk`, and `runSkillStream` are all
 // dependency-injected (mirroring skill-run-route.mjs/chat-route.mjs/
 // resolve.mjs's own conventions) so every path here is testable without a
 // real network, SDK devDependency, or subprocess.
@@ -302,6 +297,7 @@ async function runIntakeExtractBounded({ savedPath, repoRoot, env, runSkillStrea
       repoRoot,
       env,
       tools: ["Read"],
+      approvedReadPaths: [savedPath],
       outputSchema: schema,
       onEvent: (evt) => {
         if (evt.type !== "assistant") return;
@@ -489,7 +485,7 @@ async function classifyAndPropose({
 
 // ---------------------------------------------------------------------------
 // Confirm-time lane execution — the ONLY code path in this file allowed to
-// call a domain verb, runSkillStream, or chatRuntime. See dispatch.mjs's own
+// call a domain verb, runSkillStream, or workspaceAgentRuntime. See dispatch.mjs's own
 // header comment for the lane definitions.
 // ---------------------------------------------------------------------------
 
@@ -632,81 +628,6 @@ function executeLaneB({ repoRoot, env, id, item, dispatch, runSkillStream }) {
   return running;
 }
 
-function buildChatHandoffText(item) {
-  const entities = item.classification?.entities || {};
-  return [
-    "A new intake item was confirmed and routed to this skill.",
-    "",
-    "Raw paste:",
-    item.rawInput || "(no text captured)",
-    "",
-    `Extracted entities: ${JSON.stringify(entities)}`,
-  ].join("\n");
-}
-
-// mapCloseReasonToIntakePatch — chat-runtime.mjs's onClose() fires with one of
-// six close reasons (see that file's closeSessionInternal); this is the
-// intake-specific outcome each one maps to (M10 decisions memo §5's table).
-// "done" reasons are normal/user-intentional endings; "error" reasons are
-// genuine failures OR (shutdown) a restart this milestone deliberately does
-// NOT try to auto-resume across — an honest "this got interrupted" beats
-// silently mis-marking it done or leaving the item stuck "running" forever.
-function mapCloseReasonToIntakePatch(reason, lastError) {
-  switch (reason) {
-    case "process_exited":
-    case "closed":
-      return { status: "done" };
-    case "idle_timeout":
-      // classifyChatEvent already maps a `result` event to state "idle" before
-      // any idle-sweep eviction can fire, so an idle-timeout almost always
-      // means the last turn already completed — best-effort "done", not error.
-      return { status: "done" };
-    case "error":
-      return { status: "error", error: lastError || "chat session ended in error" };
-    case "aborted":
-      return { status: "error", error: "session aborted" };
-    case "shutdown":
-      return {
-        status: "error",
-        error: "server restarted mid-session; re-open to retry",
-      };
-    default:
-      return { status: "error", error: `chat session closed for unknown reason "${reason}"` };
-  }
-}
-
-// Chat session collision per the decisions memo: reuse an existing live
-// session for the skill via findBySkill and post the intake as a message;
-// only start a new session when none exists. Either way, register an
-// onClose() listener for THIS intake item — even a reused session's eventual
-// close must resolve this item, not just whichever item happened to start it
-// (a live session can carry multiple confirmed intake items across its
-// lifetime, each needing its own done/error outcome when the chat ends).
-async function executeLaneC({ repoRoot, env, id, item, dispatch, chatRuntime }) {
-  const skill = dispatch.params.skill;
-  const handoffText = buildChatHandoffText(item);
-  const liveSession = chatRuntime.findBySkill(skill);
-  let chatId;
-  if (liveSession) {
-    chatRuntime.postMessage(liveSession.chatId, handoffText);
-    chatId = liveSession.chatId;
-  } else {
-    const started = await chatRuntime.startSession({
-      skill,
-      input: {
-        intakeId: id,
-        rawInput: item.rawInput,
-        entities: item.classification?.entities || {},
-      },
-    });
-    chatId = started.chatId;
-  }
-  chatRuntime.onClose(chatId, ({ reason, lastError }) => {
-    intakeUpdate({ repoRoot, env, id, patch: mapCloseReasonToIntakePatch(reason, lastError) });
-  });
-  return intakeUpdate({ repoRoot, env, id, patch: { status: "running", result: { chatId } } }).item;
-}
-
 async function executeLaneW({ repoRoot, env, id, dispatch, workspaceAgentRuntime }) {
   if (typeof workspaceAgentRuntime?.executeIntent !== "function") {
     const error = new Error("the workspace agent is unavailable for this confirmed intake item");
@@ -763,7 +684,6 @@ export function mountIntakeRoutes({
   fetchImpl = fetch,
   loadSdk,
   runSkillStream = defaultRunSkillStream,
-  chatRuntime,
   workspaceAgentRuntime,
   captureTextImpl = captureIntakeText,
 }) {
@@ -1020,6 +940,13 @@ export function mountIntakeRoutes({
       sendJson(res, 404, { ok: false, error: `no intake item with id "${id}"` });
       return;
     }
+    if (existing.dispatch?.lane === "C") {
+      sendJson(res, 409, {
+        ok: false,
+        error: "This intake item uses a retired dispatch. Reclassify it before confirming.",
+      });
+      return;
+    }
 
     let decided;
     try {
@@ -1048,15 +975,6 @@ export function mountIntakeRoutes({
         });
       } else if (dispatch?.lane === "B") {
         finalItem = executeLaneB({ repoRoot, env, id, item: existing, dispatch, runSkillStream });
-      } else if (dispatch?.lane === "C") {
-        finalItem = await executeLaneC({
-          repoRoot,
-          env,
-          id,
-          item: existing,
-          dispatch,
-          chatRuntime,
-        });
       } else if (dispatch?.lane === "W") {
         finalItem = await executeLaneW({
           repoRoot,

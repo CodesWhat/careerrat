@@ -1,29 +1,32 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import test from "node:test";
 import { buildBrowserWindowOptions } from "../apps/desktop/window-options.mjs";
 
-describe("desktop window chrome", () => {
-  it("integrates the macOS title bar into the app content", () => {
-    assert.deepEqual(buildBrowserWindowOptions({ platform: "darwin" }), {
-      width: 1280,
-      height: 860,
-      minWidth: 960,
-      minHeight: 700,
-      title: "CareerRat",
-      backgroundColor: "#fffaf2",
-      titleBarStyle: "hiddenInset",
-      trafficLightPosition: { x: 18, y: 18 },
-    });
-  });
+test("the chat-first desktop workspace opens at its designed size and can go full screen", () => {
+  const options = buildBrowserWindowOptions({ platform: "linux", dark: false });
 
-  it("keeps standard window chrome on non-mac platforms", () => {
-    assert.deepEqual(buildBrowserWindowOptions({ platform: "linux" }), {
-      width: 1280,
-      height: 860,
-      minWidth: 960,
-      minHeight: 700,
-      title: "CareerRat",
-      backgroundColor: "#fffaf2",
-    });
-  });
+  assert.equal(options.width, 1280);
+  assert.equal(options.height, 860);
+  assert.equal(options.minWidth, 1100);
+  assert.equal(options.maxWidth, undefined);
+  assert.equal(options.minHeight, 680);
+  assert.equal(options.maxHeight, undefined);
+  assert.equal(options.resizable, true);
+  assert.equal(options.maximizable, true);
+  assert.equal(options.fullscreenable, true);
+});
+
+test("the resizable macOS window keeps native inset controls", () => {
+  const options = buildBrowserWindowOptions({ platform: "darwin", dark: false });
+
+  assert.equal(options.titleBarStyle, "hiddenInset");
+  assert.deepEqual(options.trafficLightPosition, { x: 18, y: 18 });
+  assert.equal(options.resizable, true);
+});
+
+test("the desktop chrome always matches the fixed chat-first canvas", () => {
+  assert.equal(
+    buildBrowserWindowOptions({ platform: "darwin", dark: true }).backgroundColor,
+    "#edf5fb"
+  );
 });

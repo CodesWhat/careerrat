@@ -1,6 +1,7 @@
 import {
   detectInstalledRuntimes,
   installedRuntimeSignInCommand,
+  installedRuntimeToolExecutionCapability,
   openInstalledRuntimeTerminal,
   probeCustomRuntimeCommand,
   probeInstalledRuntime,
@@ -15,11 +16,9 @@ const MAX_BODY_BYTES = 16 * 1024;
 
 // The W4 onboarding 3d/3f custom-command entry, appended to the fixed
 // registry's own runtimes array so callers (the engine picker) can render it
-// alongside claude/codex/etc without a separate request. It is intentionally
-// excluded from inspect()'s below-autoSelect fallback: a saved custom command
-// only becomes "selected" through an explicit
-// POST /api/settings/ai-runtime/custom/select, matching the design's "ADD →"
-// affordance rather than silently taking over.
+// alongside claude/codex/etc without a separate request. A command can be
+// probed for diagnostics, but it remains unselectable until a real per-call
+// tool boundary exists.
 function customRuntimeEntry(selection) {
   const command = selection.customCommand;
   return {
@@ -32,7 +31,28 @@ function customRuntimeEntry(selection) {
     status: command ? "ready_unverified" : "not_installed",
     ready: Boolean(command),
     action: null,
+    toolExecutionSupported: false,
+    selectable: false,
+    capabilityReason: "Detected, but custom commands cannot safely run CareerRat tools yet.",
     selected: selection.runtimeId === "custom" && !selection.providerFallback,
+  };
+}
+
+function withToolExecutionCapability(runtime, probe) {
+  const declared = installedRuntimeToolExecutionCapability(runtime.id);
+  const supported =
+    probe?.toolExecutionSupported === undefined
+      ? declared.supported
+      : probe.toolExecutionSupported === true;
+  const capabilityReason = supported
+    ? null
+    : probe?.capabilityReason || declared.reason || "Cannot safely run CareerRat tools.";
+  return {
+    ...runtime,
+    ...probe,
+    toolExecutionSupported: supported,
+    selectable: runtime.available === true && probe?.ready === true && supported,
+    capabilityReason,
   };
 }
 
@@ -48,7 +68,7 @@ export function inspectInstalledRuntimeState({
     const probe = runtime.available
       ? probeImpl(runtime, { env })
       : { status: "not_installed", ready: false, action: null };
-    return { ...runtime, ...probe };
+    return withToolExecutionCapability(runtime, probe);
   });
 
   // Landing rule: auto-select only ever fires for an unambiguous exactly-one
@@ -57,8 +77,26 @@ export function inspectInstalledRuntimeState({
   // longer auto-resolved here — selectedId stays null so the caller's own
   // readyCount check lands on the picker screen instead, and the user picks.
   let selectedId = selection.runtimeId;
+  let effectiveSelection = selection;
+  if (selectedId && !selection.providerFallback) {
+    const selectedRuntime = runtimes.find(({ id }) => id === selectedId);
+    if (!selectedRuntime?.selectable) {
+      selectedId = null;
+      effectiveSelection = {
+        runtimeId: null,
+        providerFallback: false,
+        customCommand: null,
+      };
+      writeInstalledRuntimeSelection({
+        repoRoot,
+        env,
+        runtimeId: null,
+        providerFallback: false,
+      });
+    }
+  }
   if (!selectedId && !selection.providerFallback && autoSelect) {
-    const readyRuntimes = runtimes.filter(({ ready }) => ready);
+    const readyRuntimes = runtimes.filter(({ selectable }) => selectable);
     if (readyRuntimes.length === 1) {
       selectedId = readyRuntimes[0].id;
       writeInstalledRuntimeSelection({
@@ -72,13 +110,13 @@ export function inspectInstalledRuntimeState({
 
   return {
     selectedId,
-    providerFallback: selection.providerFallback,
+    providerFallback: effectiveSelection.providerFallback,
     runtimes: [
       ...runtimes.map((runtime) => ({
         ...runtime,
-        selected: runtime.id === selectedId && !selection.providerFallback,
+        selected: runtime.id === selectedId && !effectiveSelection.providerFallback,
       })),
-      customRuntimeEntry(selection),
+      customRuntimeEntry(effectiveSelection),
     ],
   };
 }
@@ -150,6 +188,14 @@ export function mountInstalledRuntimeRoutes({
       sendJson(res, 400, { ok: false, code: "RUNTIME_NOT_AVAILABLE" });
       return;
     }
+    if (!runtime.toolExecutionSupported) {
+      sendJson(res, 409, {
+        ok: false,
+        code: "RUNTIME_CAPABILITY_UNSUPPORTED",
+        error: runtime.capabilityReason,
+      });
+      return;
+    }
     if (!runtime.ready) {
       sendJson(res, 409, {
         ok: false,
@@ -194,8 +240,8 @@ export function mountInstalledRuntimeRoutes({
   });
 
   // POST /api/settings/ai-runtime/custom/test — 3d/3f's "Test" button. Runs
-  // the command once (15s timeout) and reports latency; never persists
-  // anything — see /custom/select below for that.
+  // the command once (15s timeout) and reports latency; never persists it or
+  // grants CareerRat tool execution.
   addRoute("POST", "/api/settings/ai-runtime/custom/test", async (req, res) => {
     let body;
     try {
@@ -213,11 +259,8 @@ export function mountInstalledRuntimeRoutes({
     sendJson(res, 200, result);
   });
 
-  // POST /api/settings/ai-runtime/custom/select — persists the custom
-  // command as the selected runtime (runtimeId "custom"). Does not re-test
-  // it first: the 3d/3f UI is expected to have already run /custom/test, but
-  // a stale/untested command is still allowed to be selected (same trust
-  // level as picking a detected-but-unverified CLI below).
+  // POST /api/settings/ai-runtime/custom/select — retained so old clients get
+  // an explicit capability error instead of a 404. It never persists.
   addRoute("POST", "/api/settings/ai-runtime/custom/select", async (req, res) => {
     let body;
     try {
@@ -231,13 +274,10 @@ export function mountInstalledRuntimeRoutes({
       sendJson(res, 400, { ok: false, error: "command is required" });
       return;
     }
-    writeInstalledRuntimeSelection({
-      repoRoot,
-      env,
-      runtimeId: "custom",
-      providerFallback: false,
-      customCommand: command,
+    sendJson(res, 409, {
+      ok: false,
+      code: "RUNTIME_CAPABILITY_UNSUPPORTED",
+      error: "Custom commands cannot safely run CareerRat tools yet.",
     });
-    sendJson(res, 200, { ok: true, selectedId: "custom", customCommand: command });
   });
 }

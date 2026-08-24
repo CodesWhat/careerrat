@@ -4,9 +4,8 @@
 // BYOK already works today via `ANTHROPIC_API_KEY` in the process
 // environment (see call-ai.mjs's resolveAIRoute()). Before this file, that
 // meant sourcing it into your shell profile every session — fine for a
-// terminal-first user, but the onboarding wizard (src/cli/onboard-route.mjs +
-// src/core/onboarding/onboard-page.mjs) needs a way to let someone paste a
-// key once and have it survive a server restart without editing shell rc
+// terminal-first user, but React onboarding needs a way to let someone paste
+// a key once and have it survive a server restart without editing shell rc
 // files. `.internal/ai.env` is the logical seam: in a legacy repo-root
 // workspace it resolves to repo `.internal/ai.env`; with CAREERRAT_HOME set
 // it resolves to `<home>/internal/ai.env` (no dot) via userPath(). It is a

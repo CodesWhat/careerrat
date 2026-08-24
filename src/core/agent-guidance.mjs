@@ -97,7 +97,6 @@ export function recordDiscoveryCompletion({ root, step, now = new Date(), env = 
 export function buildAgentGuidance({
   missingUser = [],
   missingSystem = [],
-  skillsNotDiscoverable = [],
   modes = { valid: true },
   candidateSetupReadiness = null,
   searchReadiness = {},
@@ -122,15 +121,6 @@ export function buildAgentGuidance({
       command: "careerrat doctor",
       message: "Fix the missing CareerRat scaffold files before running job-search skills.",
       reason: "System files are missing, so the agent cannot reliably route the workflow.",
-    };
-  }
-  if (skillsNotDiscoverable.length > 0) {
-    return {
-      ...base,
-      nextSkill: null,
-      command: "careerrat install-skills",
-      message: "Run careerrat install-skills so the agent can invoke the CareerRat skills.",
-      reason: "Skills exist in the repo but are not discoverable by the current agent surface.",
     };
   }
   if (!modes.valid) {

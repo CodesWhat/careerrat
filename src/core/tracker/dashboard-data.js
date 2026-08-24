@@ -3653,16 +3653,6 @@ function stageGroupLabel(stage) {
   return configured?.label || titleCase(stage);
 }
 
-function stageColor(stage) {
-  return JOB_FUNNEL_STAGES.find((item) => item.id === stage)?.color || "#8d7f73";
-}
-
-function stageIcon(row) {
-  if (row?.terminal) return "x";
-  const stage = typeof row === "string" ? row : row?.stage;
-  return JOB_FUNNEL_STAGES.find((item) => item.id === stage)?.icon || "list";
-}
-
 function firstMessageSummary(comm = {}) {
   return (
     comm.summary ||
@@ -3970,7 +3960,7 @@ function manualReviewAction(row) {
   };
 }
 
-function defaultJobAction(row) {
+function defaultJobAction(row, sourceRecord = {}) {
   if (row.terminal) {
     return {
       state: "archived",
@@ -3986,6 +3976,23 @@ function defaultJobAction(row) {
     };
   }
   if (row.source === "application") {
+    if (row.stage === "reviewed-hold") {
+      const cleared = String(sourceRecord.evaluation?.gate || sourceRecord.gate || "") === "keep";
+      return {
+        state: "review",
+        label: cleared ? "Prepare" : "Review",
+        title: cleared ? `Prepare ${row.company}` : `Review ${row.company}`,
+        summary: cleared
+          ? "This role cleared review and is ready for application preparation. It has not been submitted."
+          : "Application preparation is on hold pending review. It has not been submitted.",
+        meta: `${row.fit} · ${row.stageGroupLabel}`,
+        dueAt: "",
+        dueText: cleared ? "Prepare" : "Review",
+        tone: "secondary",
+        workstream: "review",
+        cta: "Open details",
+      };
+    }
     return {
       state: "watch",
       label: "Wait",
@@ -4074,7 +4081,7 @@ function buildJobAction(row, sourceRecord = {}, communications = [], now = new D
   // follow-up due next week is not yet an action — let it fall through to watch/default.
   if (followAction?.state === "needs-action") return followAction;
   if (needsManualReview(row)) return manualReviewAction(row);
-  return defaultJobAction(row);
+  return defaultJobAction(row, sourceRecord);
 }
 
 // Decay is an add-on state that can attach to ANY non-terminal stage, not just
@@ -4265,9 +4272,13 @@ function jobDetailFromRow(
   const jdPath = artifactPathString(artifacts.jd || artifacts.jobDescription);
   const resumePath = artifactPathString(artifacts.resume);
   const coverLetterPath = artifactPathString(artifacts.coverLetter);
+  const dossierPath = artifactPathString(artifacts.interviewDossier);
   const jdCapturedLabel = formatArtifactDate(artifacts.jdGeneratedAt);
   const resumeGeneratedLabel = formatArtifactDate(artifacts.resumeGeneratedAt);
   const coverLetterGeneratedLabel = formatArtifactDate(artifacts.coverLetterGeneratedAt);
+  const dossierGeneratedLabel = formatArtifactDate(
+    artifacts.interviewDossier?.generatedAt || artifacts.interviewDossierGeneratedAt
+  );
   const artifactList = [
     jdPath
       ? artifactRow(
@@ -4295,6 +4306,15 @@ function jobDetailFromRow(
               ? `Generated ${coverLetterGeneratedLabel}`
               : "Generated document"),
           coverLetterPath
+        )
+      : null,
+    dossierPath
+      ? artifactRow(
+          "Interview dossier",
+          dossierGeneratedLabel
+            ? `Prepared ${dossierGeneratedLabel}`
+            : "Prepared interview dossier",
+          dossierPath
         )
       : null,
   ].filter(Boolean);
@@ -4407,6 +4427,14 @@ function jobDetailFromRow(
     initials: row.initials,
     base: row.comp,
     tc: row.tc,
+    compSummary: row.compSummary,
+    location: row.location,
+    mode: row.mode,
+    modeLabel: row.modeLabel,
+    sourceLabel: row.sourceLabel,
+    postedAt: row.postedAt || "",
+    sourcedAt: row.sourcedAt || "",
+    appliedAt: row.appliedAt || "",
     link: row.link || sourceRecord.link || sourceRecord.url || "",
     warn: row.warn || sourceRecord.warn || "",
     // Re-derive action live from canonical tracker.json fields so the drawer
@@ -4445,6 +4473,7 @@ function jobDetailFromRow(
     // Typed topic blocks (drawer sections). Each is null/empty for rows that don't
     // carry that topic so the section hides; nothing here ever lands on a card.
     interview: buildInterviewBlock(sourceRecord),
+    statusNote: String(sourceRecord.statusNote || "").trim(),
     compNote: String(sourceRecord.compNote || "").trim(),
     roleFit:
       sourceRecord.roleFit &&
@@ -4509,6 +4538,7 @@ function applicationJobRow(app, index, communications = [], now = new Date(), pr
     sourceLabel: source.label,
     sourceIcon: source.icon,
     appliedAt: app.appliedAt || "",
+    postedAt: app.postedAt || "",
     appliedLabel: formatDateShort(app.appliedAt, "Tracked"),
     initials: initials(app.company),
     domain: app.domain || app.companyDomain || "",
@@ -4599,6 +4629,8 @@ function sourcedJobRow(role, index, now = new Date(), profileComp = {}) {
     sourceLabel: source.label,
     sourceIcon: source.icon,
     appliedAt: "",
+    postedAt: role.postedAt || "",
+    sourcedAt: role.sourcedAt || "",
     appliedLabel: "Sourced",
     initials: initials(role.company),
     domain: role.domain || role.companyDomain || "",
@@ -4610,6 +4642,19 @@ function sourcedJobRow(role, index, now = new Date(), profileComp = {}) {
     terminal,
     note: role.note || role.fitBucket || "",
   };
+  const compensationState = String(role?.evaluation?.compensation?.status || "").toLowerCase();
+  const compensationView = compRangeView(row, role, profileComp);
+  row.compStatus =
+    role.compStatus ||
+    (compensationState === "clears-floor"
+      ? "comp ✓"
+      : compensationState === "below-floor"
+        ? "comp below floor"
+        : compensationView.hasMarket &&
+            (compensationView.floorK === null ||
+              Number(compensationView.marketHi) >= Number(compensationView.floorK))
+          ? "comp ✓"
+          : "comp pending");
   applyJobAction(row, role, [], now);
   row.searchText = [
     row.company,
@@ -5270,7 +5315,7 @@ export function buildDashboardViewModel(
 // shape + render the events into the existing pulse timeline. See SPEC.md §2.
 // ---------------------------------------------------------------------------
 
-// Per-type Lucide glyph for the timeline dot (paths match the dashboard-shell markup).
+// Per-type Lucide glyph for activity timeline consumers.
 const ACTIVITY_ICON_PATHS = {
   sourced: '<path d="m8 11 2 2 4-4"/><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
   evaluated:

@@ -91,28 +91,7 @@ test("first-search backend routes stay deterministic and local", () => {
   assertNoForbiddenRuntime(quickStartRoute, "quick-start route");
 });
 
-test("Jobs page manual search uses the deterministic sourcing endpoint", () => {
-  // a85a9e96 rebuilt JobsPage.jsx (structured priority card + SPA de-version)
-  // and extracted the manual-search action into apps/web/src/jobs/jobsSearch.js
-  // (hasDbSourceSetup/runJobsPageSearch) — startSearchRun/purpose now live
-  // there instead of inline on the page. Source state now stays neutral while
-  // loading and a confirmed zero-source state returns to Paul instead of
-  // exposing a Jobs-page repair instruction.
-  const jobsPage = stripJavaScriptComments(source("apps/web/src/jobs/JobsPage.jsx"));
-  assert.match(jobsPage, /\bgetSearchSources\b/);
-  assert.match(jobsPage, /\brunJobsPageSearch\b/);
-  assert.match(jobsPage, /\bhasDbSourceSetup\b/);
-  assert.match(jobsPage, /Search jobs/);
-  assert.match(jobsPage, /Searching…/);
-  assert.match(jobsPage, /Loading Search Sources/);
-  assert.match(jobsPage, /<Navigate to="\/onboarding" replace \/>/);
-  assert.doesNotMatch(
-    jobsPage,
-    /Add tracked companies or a job board in Settings or\s+Onboarding, then reload this page\./
-  );
-  assert.doesNotMatch(jobsPage, /\bstartFirstSearchRun\b/);
-  assertNoForbiddenRuntime(jobsPage, "Jobs page manual search");
-
+test("manual search helper uses the deterministic sourcing endpoint", () => {
   const jobsSearch = stripJavaScriptComments(source("apps/web/src/jobs/jobsSearch.js"));
   assert.match(jobsSearch, /\bstartSearchRun\b/);
   assert.match(jobsSearch, /purpose: "manual-search"/);
@@ -121,52 +100,36 @@ test("Jobs page manual search uses the deterministic sourcing endpoint", () => {
 
   const apiSource = stripJavaScriptComments(source("apps/web/src/lib/api.js"));
   const startSearchRun = functionBlock(apiSource, "export function startSearchRun");
-  const getSearchSources = functionBlock(apiSource, "export function getSearchSources");
   assert.match(startSearchRun, /\/api\/sourcing\/search\/start/);
-  assert.match(getSearchSources, /\/api\/search\/sources/);
   assertNoForbiddenRuntime(startSearchRun, "startSearchRun API helper");
-  assertNoForbiddenRuntime(getSearchSources, "getSearchSources API helper");
+
+  const chatFirstApi = stripJavaScriptComments(source("apps/web/src/chat-first/api.js"));
+  assert.match(
+    chatFirstApi,
+    /export const chatFirstApi = Object\.freeze\(\{[\s\S]*\bstartSearchRun\b/
+  );
+
+  const trackerDev = source("src/cli/tracker-dev.mjs");
+  assert.match(trackerDev, /\bmountSearchRoutes\b/);
+  const searchRoute = stripJavaScriptComments(source("src/cli/search-route.mjs"));
+  assert.match(searchRoute, /addRoute\("GET", "\/api\/search\/sources"/);
 });
 
 test("chat-first onboarding starts the local first search as soon as targeting is ready", () => {
-  // Source preparation is background work now. It begins when the canonical
-  // candidate readiness flips search_ready, even if Paul still has other
-  // interview questions left. CompletionScreen only owns retries and the
-  // optional post-discovery refresh. Neither path may route through the full
-  // chat/skill/browser runtime.
-  const interviewSurface = stripJavaScriptComments(
-    source("apps/web/src/onboarding/InterviewSurface.jsx")
+  const firstRunController = stripJavaScriptComments(
+    source("apps/web/src/chat-first/FirstRunController.jsx")
   );
-  const runFirstSearch = sliceBetween(
-    interviewSurface,
-    "const runFirstSearch = useCallback(",
-    "const reloadAutomationStatus = useCallback",
-    "first-search callback"
+  const refreshOnboard = sliceBetween(
+    firstRunController,
+    "const refreshOnboard = useCallback(",
+    "\n\n  useEffect(",
+    "first-run search kickoff"
   );
-  assert.match(runFirstSearch, /\bstartFirstSearchRun\(\)/);
-  assert.match(runFirstSearch, /\bstartSearchRun\(\)/);
-  assert.match(runFirstSearch, /firstResult\?\.reused === true/);
-  assertNoForbiddenRuntime(runFirstSearch, "onboarding first-search callback");
-
-  const automaticKickoff = sliceBetween(
-    interviewSurface,
-    "if (!state || !transcriptLoaded || sourcingPause) return;",
-    "\n\n  const pauseSourceSetup",
-    "automatic first-search kickoff"
-  );
-  assert.match(automaticKickoff, /readiness\?\.search_ready !== true/);
-  assert.match(automaticKickoff, /\bfirstSearchStatus\(state\)/);
-  assert.match(automaticKickoff, /\brunFirstSearch\(\)/);
-  assertNoForbiddenRuntime(automaticKickoff, "automatic first-search kickoff");
-
-  const completionScreen = functionBlock(interviewSurface, "function CompletionScreen");
-  const firstSearchHandler = functionBlock(
-    completionScreen,
-    "async function handleStartFirstSearch"
-  );
-  assert.match(firstSearchHandler, /\bonStartFirstSearch\(\{ refreshCompleted: true \}\)/);
-  assert.doesNotMatch(firstSearchHandler, /\bgetSourcingRun\b/);
-  assertNoForbiddenRuntime(firstSearchHandler, "onboarding completion screen first-search kickoff");
+  assert.match(refreshOnboard, /readiness\?\.search_ready === true/);
+  assert.match(refreshOnboard, /\bfirstSearchStatus\(next\)/);
+  assert.match(refreshOnboard, /\bstartFirstSearchRun\(\)/);
+  assert.doesNotMatch(refreshOnboard, /\bstartSearchRun\b/);
+  assertNoForbiddenRuntime(refreshOnboard, "first-run search kickoff");
 });
 
 test("DB-backed search readiness comes from source config, not generated YAML", () => {

@@ -1,8 +1,13 @@
 ---
 name: relationship-sourcing
 description: Find likely recruiters, hiring-team members, or warm contacts for tracked companies through the session browser, then capture candidate-reviewed leads into Network. Opt-in, user-initiated, local-only. Capability = relationship_sourcing; platforms = linkedin, wellfound.
-tier_1_inputs: [consent verdict, sourcing-target applications, platform scope]
-tier_2_inputs: [per-platform/per-target browser search results]
+metadata:
+  tier_1_inputs:
+    - consent verdict
+    - sourcing-target applications
+    - platform scope
+  tier_2_inputs:
+    - per-platform/per-target browser search results
 ---
 
 # relationship-sourcing
@@ -191,6 +196,7 @@ write that covers all three mutations together:
    `jobs[id].nextActionDue` → today + 3 days (ISO date).
 3. Append to `jobs[id].conversations[]` (or `jobs[id].activityEvents[]` if no comm
    record exists):
+
    ```json
    { "type": "note", "direction": "internal",
      "summary": "Relationship lead approved: <Name> (<title>, <platform>). Outreach queued to email-comms.",

@@ -6,11 +6,11 @@
 # the house pattern from rulesets.md (drydock 20945202, portwing 20957972): block
 # deletion, update, and non-fast-forward on release tags, no bypass actors.
 #
-# Deliberately NO `required_signatures` rule. The release bot pushes plain
-# annotated tags; GitHub's signature rule can't verify Actions-created tags
-# without real key management, and the Cosign artifact chain (identity-pinned to
-# the release workflow) is already the signature of record. Commit signing stays
-# out of scope — this is additive tag protection only, not a signing mandate.
+# This ruleset protects release-tag immutability. It deliberately does not add a
+# `required_signatures` rule because the release workflow verifies the annotated
+# tag signature through GitHub's tag API before any build begins. These are two
+# separate gates: this script prevents mutation, and the workflow requires a
+# cryptographically signed release boundary.
 #
 # Usage:
 #   bash scripts/protect-tags.sh            create the ruleset if absent, else verify

@@ -197,9 +197,8 @@ export function findDuplicateCompanyRoles({ apps = [], sourced = [] }) {
 }
 
 // Read the live tracker (workspace/tracker.json) and saved job bodies
-// (workspace/jobs) and build the dedupe sets the scanners use. Reads the JSON
-// source of truth via loadTrackerData — the legacy tracker.html scraping path is
-// gone — and degrades to empty sets when a fresh workspace has no tracker yet.
+// (workspace/jobs) and build the dedupe sets the scanners use. Degrades to empty
+// sets when a fresh workspace has no tracker yet.
 export function buildSeenSets(root = ".") {
   const pathCtx = { repoRoot: root };
   const data = loadTrackerDataSafe(userPath(pathCtx, "workspace/tracker.json"));

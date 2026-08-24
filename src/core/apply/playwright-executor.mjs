@@ -25,7 +25,7 @@ export function createPlaywrightApplyExecutor({
 } = {}) {
   let data = {};
   try {
-    data = loadAutomationImpl({ root: repoRoot }).data;
+    data = loadAutomationImpl({ root: repoRoot, env }).data;
   } catch {
     data = {};
   }

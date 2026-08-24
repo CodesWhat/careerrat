@@ -9,31 +9,22 @@
 // a summary — optionally capturing kept JDs and persisting Jobs-visible sourced
 // rows in DB workspaces. No AI model is ever called.
 //
-// M3 of the paid-POC journey (the /search surface) promoted the orchestration
-// below into an exported, importable runSourcedScan() — src/cli/search-route.mjs
-// calls it in-process for POST /api/search/scan — the same promotion pattern
-// tracker-dev.mjs used for createDevServer()/main(). The CLI's flag parsing,
-// output formatting (--summary/--format=tracker/plain JSON), and the
-// --format=tracker relocation-mode inference all still live in main(), gated
-// behind the import.meta.url entry guard at the bottom, so importing this
-// module (tests, the route) never runs the CLI or touches process.argv.
+// src/cli/search-route.mjs calls the exported runSourcedScan() in-process for
+// POST /api/search/scan. CLI flag parsing and output formatting remain behind
+// the import.meta.url entry guard, so imports never touch process.argv.
 //
 // Usage (unchanged):
-//   npm run scan:sourced -- --write --intake --summary --verify
-//   npm run scan:sourced -- --company "<Company>" --write --intake --summary --verify
-//   npm run scan:sourced -- --config <path> --limit 10 --format=tracker
+//   npm run scan:sourced -- --write --summary --verify
+//   npm run scan:sourced -- --company "<Company>" --write --summary --verify
+//   npm run scan:sourced -- --config <path> --limit 10
 //
 // Flags:
 //   --config <path>    Override config/sourced-scan.json's default path
 //   --company <name>   Scan only tracked_companies whose name includes this (case-insensitive)
 //   --write            Capture kept JDs and persist Jobs-visible sourced rows
-//   --intake           Retained for CLI compatibility; no generated digest is written
 //   --verify           Liveness-check every kept offer's URL, drop expired ones
-//   --format=tracker   Print one tracker.html-paste-ready object literal per offer
 //   --summary          Print a human-readable summary instead of raw JSON
 //   --limit <n>        Cap offers.length (0 = no cap)
-//   --timestamped      Use a full timestamp (not just the date) in written filenames
-import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dbExists } from "../src/core/db/connection.mjs";
@@ -42,15 +33,14 @@ import { deepIngestConfirmedForGeneration } from "../src/core/db/verbs/index.mjs
 import { sourceConfigGet, sourceConfigPut } from "../src/core/db/verbs/source-config.mjs";
 import { resolveJobUrl } from "../src/core/intake/resolve.mjs";
 import { checkUrlLiveness } from "../src/core/liveness/job-link-checker.mjs";
-import { userPath } from "../src/core/paths/workspace.mjs";
 import {
   loadLegacyCandidateConfig,
   loadCandidateConfig as loadStoredCandidateConfig,
 } from "../src/core/profile/config-store.mjs";
-import { parseYaml } from "../src/core/profile/yaml.mjs";
 import {
   captureAndPersistOffersIfDb,
   offersWithCapturedJobs,
+  sourcedRowsFromScanOffers,
 } from "../src/core/scoring/sourced-persistence.mjs";
 import {
   buildLocationFilter,
@@ -106,8 +96,14 @@ function loadCandidateConfig(pathCtx, { standaloneConfigMode = false } = {}) {
 
 function toOutputOffer(offer) {
   const { bodyText, ...rest } = offer;
+  const [row] = sourcedRowsFromScanOffers([offer]);
   return {
     ...rest,
+    id: row?.id || rest.id || null,
+    fitScore: row?.fitScore ?? null,
+    fitBucket: row?.fitBucket || "",
+    ratingReason: String(rest.ratingReason || ""),
+    ruleFlags: Array.isArray(rest.ruleFlags) ? rest.ruleFlags : [],
     bodyChars: String(bodyText || "").length,
   };
 }
@@ -316,14 +312,10 @@ export async function runSourcedScan({
   configPath,
   companyFilter = null,
   write = true,
-  intake = true,
   verify = false,
   limit = 0,
-  timestamped = false,
   onProgress,
 } = {}) {
-  void intake;
-  void timestamped;
   const pathCtx = { repoRoot, env };
   const standaloneConfigMode = Boolean(configPath);
   const config = loadScannerConfigForRun({ pathCtx, configPath });
@@ -341,9 +333,6 @@ export async function runSourcedScan({
   const coldFamilies = Object.entries(familyOutcomes)
     .filter(([, s]) => s.cold)
     .map(([fam, s]) => `${fam} (0/${s.total})`);
-  if (coldFamilies.length > 0) {
-    console.log(`Cold-board lanes down-weighted: ${coldFamilies.join(", ")}`);
-  }
 
   const titleFilter = buildTitleFilter(config.title_filter);
   const locationFilter = buildLocationFilter(config.location_filter);
@@ -353,6 +342,7 @@ export async function runSourcedScan({
   const outputOffers = [];
   const savedAt = new Date();
   const companyPresentationCounts = new Map();
+  const seenRunCompanyRoles = new Set();
   const configuredCompanyCap = Number(
     candidateConfig?.targeting?.search_preferences?.presentation_cap_per_company
   );
@@ -392,6 +382,7 @@ export async function runSourcedScan({
       config: candidateConfig,
       now: savedAt.getTime(),
       companyPresentationCounts,
+      seenRunCompanyRoles,
       perCompanyCap,
     });
 
@@ -532,6 +523,7 @@ export async function runSourcedScan({
       (filtered.expired?.length || 0) +
       filtered.overflow.length,
     errors: scanned.errors,
+    coldFamilies,
     offers: outputOffers,
   };
 
@@ -539,52 +531,36 @@ export async function runSourcedScan({
 }
 
 // ---------------------------------------------------------------------------
-// CLI-only below: argument parsing, output formatting, and the
-// --format=tracker relocation-mode inference. None of this runs on import —
-// see the entry guard at the bottom.
+// CLI-only below: argument parsing and output formatting. None of this runs on
+// import; see the entry guard at the bottom.
 // ---------------------------------------------------------------------------
-
-const _profilePath = userPath({ repoRoot: _scriptRoot }, "candidate/profile.yml");
-let _reloTriggers = null; // null = not loaded yet; [] = loaded but empty or absent
-
-function getReloTriggers() {
-  if (_reloTriggers !== null) return _reloTriggers;
-  try {
-    if (existsSync(_profilePath)) {
-      const profile = parseYaml(readFileSync(_profilePath, "utf8"));
-      const relocation = profile?.location?.relocation ?? [];
-      _reloTriggers = relocation
-        .filter((c) => typeof c === "string" && c.trim().length > 0)
-        .map((c) => c.toLowerCase().trim());
-    } else {
-      _reloTriggers = [];
-    }
-  } catch {
-    _reloTriggers = [];
-  }
-  return _reloTriggers;
-}
-
-// 7.3: inferMode reads relo triggers from profile.location.relocation.
-// Falls back to "hybrid" when no relo triggers are configured — no hardcoded metros.
-function inferMode(location = "") {
-  const lower = location.toLowerCase();
-  if (lower.includes("remote")) return "remote";
-
-  const triggers = getReloTriggers();
-  if (triggers.length > 0 && triggers.some((metro) => lower.includes(metro))) return "relo";
-
-  if (/\b(onsite|on-site|in office|in-office)\b/.test(lower)) return "onsite";
-
-  return "hybrid";
-}
 
 function valueAfter(args, flag) {
   const index = args.indexOf(flag);
   return index === -1 ? null : args[index + 1];
 }
 
+const CLI_OPTIONS = new Set([
+  "--config",
+  "--company",
+  "--write",
+  "--verify",
+  "--summary",
+  "--limit",
+]);
+
+function assertKnownOptions(args) {
+  for (const arg of args) {
+    if (arg.startsWith("--") && !CLI_OPTIONS.has(arg)) {
+      throw new Error(`Unknown option: ${arg}`);
+    }
+  }
+}
+
 function printSummary(summary, offers, cfg, limit) {
+  if (summary.coldFamilies.length > 0) {
+    console.log(`Cold-board lanes down-weighted: ${summary.coldFamilies.join(", ")}`);
+  }
   console.log(`Scanned: ${summary.scanned}`);
   console.log(`New after filters/dedupe: ${summary.new}`);
   console.log(`Filtered by title: ${summary.filteredTitle}`);
@@ -604,33 +580,16 @@ function printSummary(summary, offers, cfg, limit) {
   }
 }
 
-function toTrackerObject(offer, cfg) {
-  const safe = (value) => JSON.stringify(value || "");
-  const rating = offer.score == null || !offer.fit ? scoreSourcedOffer(offer, cfg) : offer;
-  const noteParts = [
-    `Found by scanner via ${offer.source}`,
-    `scanner fit ${rating.score}% (${rating.fit}, ${rating.gate || "review"})`,
-    rating.ratingReason,
-    Array.isArray(rating.ruleFlags) && rating.ruleFlags.length > 0
-      ? `flags: ${rating.ruleFlags.join(", ")}`
-      : "",
-    "BODY-READ GATE before tailoring",
-  ].filter(Boolean);
-  return `{co:${safe(offer.company)}, role:${safe(offer.title)}, base:${safe(offer.comp || "verify")}, tc:${safe("+equity/bonus")}, loc:${safe(offer.location || "verify")}, mode:${safe(inferMode(offer.location))}, fitBucket:${safe(rating.fit)}, fitScore:${rating.score}, fitBasis:"triage", channel:"board", link:${safe(offer.url)}, note:${safe(noteParts.join("; "))}}`;
-}
-
 async function main() {
   const args = process.argv.slice(2);
+  assertKnownOptions(args);
   const pathCtx = { repoRoot: _scriptRoot };
   const configPath = valueAfter(args, "--config");
   const companyFilter = valueAfter(args, "--company");
   const write = args.includes("--write");
-  const intake = args.includes("--intake");
   const verify = args.includes("--verify");
-  const trackerFormat = args.includes("--format=tracker");
   const summaryOnly = args.includes("--summary");
   const limit = Number(valueAfter(args, "--limit") || 0);
-  const timestamped = args.includes("--timestamped");
 
   const summary = await runSourcedScan({
     repoRoot: _scriptRoot,
@@ -638,20 +597,14 @@ async function main() {
     configPath,
     companyFilter,
     write,
-    intake,
     verify,
     limit,
-    timestamped,
   });
 
   const candidateConfig = loadCandidateConfig(pathCtx);
 
   if (summaryOnly) {
     printSummary(summary, summary.offers, candidateConfig, limit);
-  } else if (trackerFormat) {
-    for (const offer of summary.offers) {
-      console.log(toTrackerObject(offer, candidateConfig));
-    }
   } else {
     console.log(JSON.stringify(summary, null, 2));
   }

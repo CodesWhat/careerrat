@@ -312,6 +312,26 @@ test("previewWorkspaceIntent: this job resolves to the explicitly open saved job
   });
 });
 
+test("previewWorkspaceIntent: a supervised fill request resolves to the open application", () => {
+  const repoRoot = tempRepo();
+  const context = { pathname: "/jobs", jobId: "app-curri" };
+  const result = previewWorkspaceIntent({
+    text: "Proceed with this application, prepare and fill the form, but do not submit it.",
+    context,
+    repoRoot,
+    env: {},
+  });
+
+  assert.deepEqual(result.action, {
+    label: "Evaluate and prepare this saved job",
+    intent: {
+      type: "job.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobId: "app-curri" },
+    },
+  });
+});
+
 test("previewWorkspaceIntent: never guesses what 'this job' means without an open job", () => {
   const repoRoot = tempRepo();
   const result = previewWorkspaceIntent({
@@ -574,6 +594,24 @@ test("previewWorkspaceIntent: explicit screening questions become typed Ask acti
     type: "screening.answer",
     entity: { type: "application", id: "app-temporal" },
     input: { questionText: "Why are you interested in this role?" },
+  });
+
+  const grouped = previewWorkspaceIntent({
+    text: "Answer these application questions: LinkedIn URL: https://www.linkedin.com/in/riley; Why this role?: Strong fit.",
+    context: { pathname: "/jobs", jobId: "app-temporal" },
+    repoRoot,
+    env: {},
+  });
+  assert.deepEqual(grouped.action, {
+    label: "Draft an evidence-backed answer",
+    intent: {
+      type: "screening.answer",
+      entity: { type: "application", id: "app-temporal" },
+      input: {
+        questionText:
+          "LinkedIn URL: https://www.linkedin.com/in/riley; Why this role?: Strong fit.",
+      },
+    },
   });
 
   assert.equal(
@@ -1153,6 +1191,73 @@ test("previewWorkspaceIntent: a comp-floor phrasing classifies as a settings.app
   });
 });
 
+test("previewWorkspaceIntent: Profile phrasings become confirm-first canonical setting changes", () => {
+  const repoRoot = tempRepo();
+  const cases = [
+    [
+      "set my target roles to Staff Engineer, Platform Lead",
+      "Replace target roles with Staff Engineer, Platform Lead",
+      { kind: "profile", section: "targets", values: ["Staff Engineer", "Platform Lead"] },
+    ],
+    [
+      "set my home market to New York, NY",
+      "Set home market to New York, NY",
+      { kind: "profile", section: "home", value: "New York, NY" },
+    ],
+    [
+      "turn on remote roles",
+      "Turn on remote roles",
+      { kind: "profile", section: "location-mode", field: "remote", value: true },
+    ],
+    [
+      "set my writing style to plain, direct, and concrete",
+      "Set writing style to plain, direct, and concrete",
+      { kind: "profile", section: "writing-style", value: "plain, direct, and concrete" },
+    ],
+    [
+      "set my search cadence to weekly",
+      "Set search cadence to weekly",
+      { kind: "profile", section: "search-cadence", value: "weekly" },
+    ],
+    [
+      "set my minimum fit to 76",
+      "Set minimum fit to 76+",
+      { kind: "profile", section: "fit-floor", value: 76 },
+    ],
+    [
+      "set my dealbreakers to crypto, fully onsite",
+      "Replace dealbreakers with crypto, fully onsite",
+      { kind: "profile", section: "dealbreakers", values: ["crypto", "fully onsite"] },
+    ],
+    [
+      "set my relocation markets to Boston, Seattle",
+      "Replace relocation markets with Boston, Seattle",
+      { kind: "profile", section: "relocation", values: ["Boston", "Seattle"] },
+    ],
+    [
+      "set my positive fit signals to platform ownership, developer tools",
+      "Replace positive fit signals with platform ownership, developer tools",
+      {
+        kind: "profile",
+        section: "keep-signals",
+        values: ["platform ownership", "developer tools"],
+      },
+    ],
+  ];
+
+  for (const [text, label, change] of cases) {
+    const result = previewWorkspaceIntent({ text, repoRoot, env: {} });
+    assert.deepEqual(result.action, {
+      label,
+      intent: {
+        type: "settings.apply",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { change },
+      },
+    });
+  }
+});
+
 test("previewWorkspaceIntent: a comp-floor-to-current-salary phrasing flags compReference instead of a number", () => {
   const repoRoot = tempRepo();
   const result = previewWorkspaceIntent({
@@ -1169,15 +1274,15 @@ test("previewWorkspaceIntent: a comp-floor-to-current-salary phrasing flags comp
   });
 });
 
-test("previewWorkspaceIntent: turning off one-click apply on a named platform classifies as a settings.apply automation change", () => {
+test("previewWorkspaceIntent: turning off apply preparation on a named platform classifies as a settings.apply automation change", () => {
   const repoRoot = tempRepo();
   const result = previewWorkspaceIntent({
-    text: "turn off one-click apply on linkedin",
+    text: "turn off authenticated apply preparation on linkedin",
     repoRoot,
     env: {},
   });
   assert.deepEqual(result.action, {
-    label: "Turn off Authenticated one-click apply on linkedin",
+    label: "Turn off Authenticated apply preparation on linkedin",
     intent: {
       type: "settings.apply",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
@@ -1185,7 +1290,7 @@ test("previewWorkspaceIntent: turning off one-click apply on a named platform cl
         change: {
           kind: "automation",
           op: "platform",
-          capability: "one_click_apply",
+          capability: "authenticated_apply_preparation",
           platform: "linkedin",
           enabled: false,
         },
@@ -1194,7 +1299,7 @@ test("previewWorkspaceIntent: turning off one-click apply on a named platform cl
   });
 });
 
-test("previewWorkspaceIntent: turning on one-click apply is not offered as an Ask action (falls to chat)", () => {
+test("previewWorkspaceIntent: obsolete one-click language is not offered as an Ask action", () => {
   const repoRoot = tempRepo();
   const result = previewWorkspaceIntent({ text: "turn on one-click apply", repoRoot, env: {} });
   assert.equal(result.action, null);

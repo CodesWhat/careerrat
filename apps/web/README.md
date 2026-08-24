@@ -6,8 +6,8 @@ only its built `dist/` output ships (see root `package.json#files`).
 
 ## Dev loop (two processes)
 
-Vite's dev server gives you HMR for the SPA; it proxies `/api` and `/fonts`
-traffic to a separately-running `tracker-dev` instance rather than
+Vite's dev server gives you HMR for the SPA; it proxies `/api` traffic to a
+separately-running `tracker-dev` instance rather than
 re-implementing any of that server's behavior (skill execution, candidate
 file writes, the sqlite data layer, …).
 

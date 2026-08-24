@@ -18,6 +18,7 @@ import { packetManifestSchema } from "../../packet/schemas/packet-schemas.mjs";
 import { validate } from "../../profile/schema-validator.mjs";
 import { classifyStage } from "../../tracker/dashboard.mjs";
 import { buildReevaluationAnalytics } from "../../tracker/outcome-analysis.mjs";
+import { ensureJobThreadInDb } from "./chat-first.mjs";
 import {
   bumpMeta,
   getRow,
@@ -372,6 +373,7 @@ export function appScheduleInterview({ repoRoot, env, id, at, round, note, who }
 
     const updated = { ...app, ...patch };
     putRow(db, "applications", id, updated);
+    ensureJobThreadInDb(db, { applicationId: id, reason: "human-entered" });
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "interview",

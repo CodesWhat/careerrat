@@ -1,8 +1,19 @@
 ---
 name: discover-companies
 description: Continuously discover companies LIKELY to be hiring the candidate's target roles from their company thesis and role context → resolve each to a scannable ATS careers board → legitimacy-screen and dedup → propose adding to CareerRat tracked-company source config, confirm-first. Named focus companies are priority examples, never an allowlist. Upstream of search-jobs; turns a closed company set into a growing one.
-tier_1_inputs: [profile.candidate.domain, targeting role_buckets, targeting company_preferences, targeting keep_signals, targeting excluded_companies, profile.compensation.minimum_base, STEP 0 dedup set, modes verdict]
-tier_2_inputs: [per-company WebSearch/WebFetch bodies, careers-page resolution]
+metadata:
+  tier_1_inputs:
+    - profile.candidate.domain
+    - targeting role_buckets
+    - targeting company_preferences
+    - targeting keep_signals
+    - targeting excluded_companies
+    - profile.compensation.minimum_base
+    - STEP 0 dedup set
+    - modes verdict
+  tier_2_inputs:
+    - per-company WebSearch/WebFetch bodies
+    - careers-page resolution
 ---
 
 # discover-companies
@@ -301,16 +312,19 @@ Newly tracked companies aren't scanned until the next sweep. After adding, offer
 sweep so the new boards are pulled immediately:
 
 ```
-npm run scan:sourced -- --write --intake --summary --verify
+npm run scan:sourced -- --write --verify
 ```
 
 or, to scan only the just-added companies, one targeted rescan each:
 
 ```
-npm run scan:sourced -- --company "<Company>" --write --intake --summary --verify
+npm run scan:sourced -- --company "<Company>" --write --verify
 ```
 
-Then `search-jobs` owns triage, JD save, and queueing as usual. `discover-companies` stops at
+Consume the complete structured JSON result from stdout. Its `offers[]` is not presentation-
+truncated and includes the canonical sourced-row `id`, captured `artifacts.jd`, and scanner triage
+fields needed by `search-jobs`. Then `search-jobs` owns triage, JD save, and queueing as usual.
+`discover-companies` stops at
 growing the tracked-company list.
 
 ---
@@ -401,5 +415,5 @@ NEXT: awaiting confirmation
 | Add a confirmed company | `careerrat companies --add "<name>" --url "<careers_url>" --write` |
 | Add a branded supported board | `careerrat companies --add "<name>" --url "<url>" --provider "<id>" --write` |
 | Remove a tracked company | `careerrat companies --remove "<name>" --write` |
-| Scan the newly added companies | `npm run scan:sourced -- --company "<name>" --write --intake --summary --verify` |
+| Scan the newly added companies | `npm run scan:sourced -- --company "<name>" --write --verify` |
 | Health check after additions | `careerrat doctor` |

@@ -1,12 +1,10 @@
 #!/usr/bin/env node
 // CareerRat tracker CLI — snapshot tracker.json, summarize, check follow-ups, verify.
 //
-// The legacy static-HTML dashboard publish step (workspace/tracker.html +
-// workspace/dashboard-data.js/modes.json/settings.json/library.json) has been
-// retired — the live product is the React SPA at /app (src/cli/tracker-dev.mjs),
-// which reads the sqlite-backed GET /api/data/dashboard view model directly.
-// The default (no-flag) action here still snapshots tracker.json, since many
-// skills rely on `careerrat tracker` as their durable-backup checkpoint.
+// The live product is the React SPA at /app (src/cli/tracker-dev.mjs), which
+// reads the sqlite-backed GET /api/data/dashboard view model directly. This CLI
+// snapshots and summarizes tracker.json because skills use `careerrat tracker`
+// as their durable-backup checkpoint.
 //
 // Usage:
 //   careerrat tracker                 Snapshot workspace/tracker.json, print a summary

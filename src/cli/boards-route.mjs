@@ -74,6 +74,28 @@ function badRequest(message) {
   throw error;
 }
 
+function humanizeCompanySlug(value) {
+  return decodeURIComponent(String(value || ""))
+    .replace(/[-_]+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function resolvedBoardLabel(url, label) {
+  const provided = String(label || "").trim();
+  if (!provided) return undefined;
+
+  const parsed = new URL(url);
+  const hostname = parsed.hostname.replace(/^www\./, "");
+  if (provided.replace(/^www\./, "").toLowerCase() !== hostname.toLowerCase()) return provided;
+
+  const provider = inferProvider({ careers_url: parsed.toString() });
+  if (!provider || !isCompanyProviderSupported(provider)) return provided;
+
+  const companySlug = parsed.pathname.split("/").filter(Boolean)[0];
+  return companySlug ? humanizeCompanySlug(companySlug) : provided;
+}
+
 function readIndex(body, length) {
   const index = Number(body?.index);
   if (!Number.isInteger(index) || index < 0 || index >= length) {
@@ -174,7 +196,7 @@ export function addBoardSource({ repoRoot, env = process.env, url, label } = {})
     };
   }
   const next = addSearchFromUrl(current, normalizedUrl, {
-    label: label ? String(label) : undefined,
+    label: resolvedBoardLabel(canonicalUrl, label),
   });
   const schema = JSON.parse(readFileSync(join(repoRoot, SEARCH_SOURCES_SCHEMA_PATH), "utf8"));
   const { valid, errors } = validateConfig(next, schema);
@@ -441,6 +463,7 @@ export function mountBoardsRoutes({ addRoute, repoRoot, env = process.env }) {
       // save by removing the generator marker before persisting.
       const { enabled_reason: _generatedEnabledReason, ...userOwnedExisting } = existing;
       const updated = { ...userOwnedExisting, label, enabled: body?.enabled !== false };
+      if (existing.source_type === "ats") updated.name = label;
       if (existing.rssUrl != null) updated.rssUrl = target;
       else if (existing.query != null) updated.query = target;
       else updated.url = target;

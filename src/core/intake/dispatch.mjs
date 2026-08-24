@@ -9,7 +9,6 @@
 // Lane B — the existing embedded one-shot runtime (POST /api/skill/run).
 // Lane W — the one durable workspace agent. Confirmed intake becomes a typed
 // intent on workspace-main instead of starting a skill-specific chat.
-// Lane C — retained only for legacy intake rows created before Lane W.
 //
 // "status-update" is the one kind that can ALSO resolve to needs_you: per
 // the decisions memo, an intake item never guesses which application a

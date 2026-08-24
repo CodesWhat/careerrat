@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -59,7 +59,25 @@ test("the tracked repository root contains only entry-point documentation", () =
   );
 });
 
-test("shared runtime fonts live under the asset tree", async () => {
+test("every explicit workflow test path exists", async () => {
+  const workflowsDir = join(root, ".github/workflows");
+  const missing = [];
+
+  for (const entry of await readdir(workflowsDir, { withFileTypes: true })) {
+    if (!entry.isFile() || !/\.ya?ml$/.test(entry.name)) continue;
+    const source = await readFile(join(workflowsDir, entry.name), "utf8");
+    const paths = source.match(
+      /\b(?:tests|apps\/[A-Za-z0-9._/-]+)\/[A-Za-z0-9._/-]+\.test\.(?:mjs|cjs|js|jsx|ts|tsx)\b/g
+    );
+    for (const path of new Set(paths || [])) {
+      if (!existsSync(join(root, path))) missing.push(`${entry.name}: ${path}`);
+    }
+  }
+
+  assert.deepEqual(missing, [], `Workflow test paths must exist:\n${missing.join("\n")}`);
+});
+
+test("document export fonts stay packaged while the app bundles its own fonts", async () => {
   assert.equal(existsSync(join(root, "fonts")), false, "root fonts/ should not exist");
   for (const file of ["Geist-OFL.txt", "GeistMonoVF.woff2", "GeistVF.woff2"]) {
     assert.equal(existsSync(join(root, "assets", "fonts", file)), true, `${file} should ship`);
@@ -67,12 +85,14 @@ test("shared runtime fonts live under the asset tree", async () => {
 
   const trackerDev = await readText("src/cli/tracker-dev.mjs");
   const documentExport = await readText("src/core/documents/export.mjs");
-  const webTokens = await readText("apps/web/src/styles/tokens.css");
+  const webFoundation = await readText("apps/web/src/chat-first/app-foundation.css");
   const pkg = JSON.parse(await readText("package.json"));
-  assert.match(trackerDev, /join\(repoRoot, "assets", "fonts"\)/);
+  const webPkg = JSON.parse(await readText("apps/web/package.json"));
+  assert.doesNotMatch(trackerDev, /FONTS_DIR|serveFont|"\/fonts\//);
   assert.match(documentExport, /join\(repoRoot, "assets", "fonts", file\)/);
-  assert.match(webTokens, /\.\.\/\.\.\/\.\.\/\.\.\/assets\/fonts\/GeistVF\.woff2/);
-  assert.doesNotMatch(webTokens, /url\("\/fonts\//);
+  assert.match(webFoundation, /@fontsource\/figtree\/400\.css/);
+  assert.equal(webPkg.dependencies["@fontsource/figtree"], "^5.3.0");
+  assert.doesNotMatch(webFoundation, /url\("\/fonts\//);
   assert.ok(!pkg.files.includes("fonts"));
 });
 
@@ -184,8 +204,8 @@ test("start and update reconcile stale local app runtimes without killing foreig
 
 test("the trusted-publishing workflow installs dependencies before npm publish", async () => {
   const workflow = await readText(".github/workflows/publish.yml");
-  const installAt = workflow.indexOf("run: npm ci");
-  const publishAt = workflow.indexOf("npm publish --provenance");
+  const installAt = workflow.indexOf("run: corepack npm ci");
+  const publishAt = workflow.indexOf("corepack npm publish --provenance");
 
   assert.notEqual(installAt, -1, "trusted publishing must install the locked dependency graph");
   assert.ok(installAt < publishAt, "npm ci must run before npm publish triggers prepack");
@@ -345,10 +365,15 @@ test("web discovery emits typed proposals that the app can actually persist", as
   assert.match(companies, /"kind":"discovery_complete","step":"discover-companies"/);
 });
 
-test("the app theme bootstrap is rebased exactly once", async () => {
+test("the app ships one fixed light visual mode", async () => {
   const index = await readText("apps/web/index.html");
-  assert.match(index, /<script src="\/theme-init\.js"><\/script>/);
-  assert.doesNotMatch(index, /%BASE_URL%theme-init\.js/);
+  const foundation = await readText("apps/web/src/chat-first/app-foundation.css");
+  const workspace = await readText("apps/web/src/chat-first/chat-first.css");
+  assert.doesNotMatch(index, /theme-init\.js/);
+  assert.equal(existsSync(join(root, "apps/web/public/theme-init.js")), false);
+  assert.doesNotMatch(`${foundation}\n${workspace}`, /\[data-theme=["']?dark/);
+  assert.match(foundation, /--canvas:\s*#edf5fb/);
+  assert.match(foundation, /body\s*\{[^}]*background:\s*var\(--canvas\)/s);
 });
 
 test("local user data roots are excluded from git, docker, and Vercel surfaces", async () => {
@@ -424,7 +449,20 @@ test("npm package allowlist names app files, not broad private-data roots", asyn
   assert.ok(files.includes(".agents/skills/apply-job/SKILL.md"));
   assert.ok(files.includes(".agents/skills/calendar-sync/SKILL.md"));
   assert.ok(files.includes(".agents/skills/relationship-sourcing/SKILL.md"));
-  for (const entry of files.filter((item) => item.startsWith(".agents/skills/"))) {
+  const packagedSkills = files.filter((item) => item.startsWith(".agents/skills/")).sort();
+  const sourceSkills = (await readdir(join(root, ".agents/skills"), { withFileTypes: true }))
+    .filter(
+      (entry) =>
+        entry.isDirectory() && existsSync(join(root, ".agents/skills", entry.name, "SKILL.md"))
+    )
+    .map((entry) => `.agents/skills/${entry.name}/SKILL.md`)
+    .sort();
+  assert.deepEqual(
+    packagedSkills,
+    sourceSkills,
+    "every runtime-neutral source skill must ship in the npm package"
+  );
+  for (const entry of packagedSkills) {
     await assert.doesNotReject(readText(entry), `${entry} should exist before packaging`);
   }
 
@@ -604,12 +642,10 @@ test("scripts reachable from a skill or published npm-run alias are shipped", as
     if (m) aliasToScript[alias] = m[0];
   }
 
-  // Scripts that exist only to build/deploy the demo + marketing site. They are
-  // never invoked from a skill or a user install, so they are intentionally not
-  // shipped. Everything else an agent can reach at runtime MUST ship — npm pack
-  // ships exactly the "files" allowlist, so an unshipped-but-referenced script
-  // breaks in every installed/live copy (the missing-verify-tracker.mjs class of bug).
-  const DEV_ONLY = new Set(["scripts/build-demo.mjs", "scripts/deploy-demo.mjs"]);
+  // Everything an agent can reach at runtime MUST ship. npm pack ships exactly
+  // the "files" allowlist, so an unshipped-but-referenced script breaks every
+  // installed/live copy (the missing-verify-tracker.mjs class of bug).
+  const DEV_ONLY = new Set();
 
   const referenced = new Set();
   // Every script a published npm-run alias points at.

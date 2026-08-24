@@ -27,26 +27,35 @@ on:
     types: [published]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  id-token: write # required for OIDC trusted publishing + provenance
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions: {}
 
 jobs:
   npm-publish:
+    name: publish npm package
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout and exact published-release/DMG verification
+      id-token: write # npm Trusted Publishing OIDC credential and provenance
+    env:
+      REF_TYPE: ${{ github.ref_type }}
+      REF_NAME: ${{ github.ref_name }}
     steps:
       - name: Harden the runner (block all outbound calls except the allowlist)
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: block
-          # checkout, dependency install, and the provenance publish (Trusted
-          # Publishing/OIDC): registry.npmjs.org for the publish itself, plus
-          # fulcio.sigstore.dev and rekor.sigstore.dev for the provenance
-          # attestation's sigstore signing and transparency log. Observed on
-          # run 32488752323 (baseline still forming, 2 runs since the endpoint
-          # set last changed, but the set matches npm's documented
-          # provenance/sigstore flow exactly).
+          # checkout, exact-release/DMG verification, dependency install, and
+          # the provenance publish (Trusted Publishing/OIDC): api.github.com
+          # resolves the release, registry.npmjs.org handles the publish, and
+          # fulcio.sigstore.dev plus rekor.sigstore.dev handle provenance
+          # signing and transparency. The original publish set was observed
+          # on run 32488752323; the release gate adds GitHub's API host.
           allowed-endpoints: >
+            api.github.com:443
             fulcio.sigstore.dev:443
             github.com:443
             registry.npmjs.org:443
@@ -61,14 +70,69 @@ jobs:
           # A publish workflow must not restore a shared dependency cache: a
           # poisoned cache entry could reach the published npm artifact.
           package-manager-cache: false
+      - name: Activate the repository-pinned npm release
+        run: |
+          set -euo pipefail
+          EXPECTED_NPM="$(node -p "require('./package.json').packageManager")"
+          if ! printf '%s' "$EXPECTED_NPM" | grep -Eq '^npm@[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::packageManager must pin an exact npm version, found '$EXPECTED_NPM'."
+            exit 1
+          fi
+          actual_npm="npm@$(corepack npm --version)"
+          if [ "$actual_npm" != "$EXPECTED_NPM" ]; then
+            echo "::error::Corepack activated $actual_npm instead of $EXPECTED_NPM."
+            exit 1
+          fi
+      - name: Assert the release tag matches the package version
+        run: |
+          set -euo pipefail
+          if [ "$REF_TYPE" != "tag" ]; then
+            echo "::error::npm publishing must run from a release tag, not $REF_TYPE/$REF_NAME."
+            exit 1
+          fi
+          pkg_tag="v$(node -p "require('./package.json').version")"
+          if [ "$pkg_tag" != "$REF_NAME" ]; then
+            echo "::error::Release ref $REF_NAME does not match package.json ($pkg_tag)."
+            exit 1
+          fi
+      - name: Verify the exact published release and DMG
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          matches="$(gh api "repos/$REPO/releases" --paginate --slurp | jq -c --arg tag "$REF_NAME" \
+            'add | [.[] | select(.tag_name==$tag)]')"
+          count="$(jq 'length' <<<"$matches")"
+          if [ "$count" -ne 1 ]; then
+            echo "::error::Expected exactly one GitHub release for $REF_NAME, found $count."
+            exit 1
+          fi
+
+          release="$(jq '.[0]' <<<"$matches")"
+          if ! jq -e '.draft == false and .published_at != null' <<<"$release" >/dev/null; then
+            echo "::error::Release $REF_NAME is not published; refusing to publish npm first."
+            exit 1
+          fi
+
+          version="${REF_NAME#v}"
+          matching_dmg=""
+          while IFS= read -r asset; do
+            if [[ "$asset" == *-"$version"-*.dmg || "$asset" == *-"$version".dmg ]]; then
+              matching_dmg="$asset"
+              break
+            fi
+          done < <(jq -r '.assets[].name' <<<"$release")
+          if [ -z "$matching_dmg" ]; then
+            echo "::error::Release $REF_NAME has no .dmg asset matching version $version."
+            exit 1
+          fi
+          echo "Release gate passed with $matching_dmg."
       - name: Install locked dependencies
-        run: npm ci
-      # Trusted Publishing (OIDC) requires npm >= 11.5.1; pin to latest to be safe.
-      - name: Upgrade npm for trusted publishing
-        run: npm install -g npm@latest
+        run: corepack npm ci
       - name: Publish to npm (unscoped, public, trusted publishing)
         run: |
           VERSION="$(node -p "require('./package.json').version")"
           if [[ "$VERSION" == *-* ]]; then TAG=rc; else TAG=latest; fi
           echo "Publishing v$VERSION to dist-tag: $TAG"
-          npm publish --provenance --access public --tag "$TAG"
+          corepack npm publish --provenance --access public --tag "$TAG"

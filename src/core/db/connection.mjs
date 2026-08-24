@@ -10,7 +10,7 @@
 // storage-adapter.mjs's defaultAdapter() singleton pattern) — a process opens
 // each distinct data root's db exactly once, applies its per-connection
 // PRAGMAs, and runs pending migrations, all on first open.
-import { existsSync, mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { dataPath, privateDataRoot } from "../paths/workspace.mjs";
@@ -61,9 +61,13 @@ export function openDb({ repoRoot, env } = {}) {
   if (cached) return cached;
 
   const path = dbFilePath({ repoRoot, env });
-  mkdirSync(dirname(path), { recursive: true });
+  mkdirSync(key, { recursive: true, mode: 0o700 });
+  chmodSync(key, 0o700);
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  chmodSync(dirname(path), 0o700);
 
   const db = new DatabaseSync(path);
+  chmodSync(path, 0o600);
   applyPragmas(db);
   runMigrations(db);
 

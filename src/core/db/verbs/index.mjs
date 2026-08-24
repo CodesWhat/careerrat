@@ -29,8 +29,34 @@ export {
   candidateConfigPatch,
   candidateEvidenceMerge,
   candidateEvidenceRemoveOne,
+  candidateEvidenceReplace,
   candidateSetupInitialize,
 } from "./candidate.mjs";
+export {
+  chatFirstStateFromDb,
+  chatFirstStateGet,
+  deepIngestPromptDismiss,
+  deepIngestThreadOpen,
+  ensureJobThreadInDb,
+  jobThreadMessageAppend,
+  jobThreadSetArchived,
+  jobThreadSetPinned,
+  jobThreadTurn,
+  missionCreate,
+  missionCreateForJobs,
+  missionResume,
+  missionRun,
+  missionSetStatus,
+  missionStepSetStatus,
+  mockInterviewEnd,
+  mockInterviewFeedbackAppend,
+  mockInterviewMessageAppend,
+  mockInterviewStart,
+  mockInterviewStartWithAI,
+  mockInterviewTurn,
+  sourcedDecisionSet,
+  touchDueDismiss,
+} from "./chat-first.mjs";
 export {
   commAppendMessage,
   commCaptureInbound,
@@ -55,10 +81,12 @@ export {
   deepIngestConfirmedForGeneration,
   deepIngestConfirmedItemRemove,
   deepIngestConfirmedItemUpdate,
+  deepIngestConfirmedItemUpsert,
   deepIngestConfirmProposal,
   deepIngestLaneSetState,
   deepIngestProposalDecision,
   deepIngestProposalPut,
+  deepIngestScannedSourcePersist,
   deepIngestSourceCreate,
   deepIngestSourceGet,
   deepIngestSourceList,
@@ -72,7 +100,6 @@ export {
   intakeList,
   intakeOne,
   intakeUpdate,
-  reconcileOrphanedLaneCIntakeItems,
 } from "./intake.mjs";
 export {
   linkedinProposalBatchGet,
@@ -96,6 +123,12 @@ export {
 } from "./public-intel.mjs";
 export { relationshipLeadSetStatus, relationshipLeadUpsertBatch } from "./relationship.mjs";
 export { ExportFailedError, kvGet, kvUpsert, NotFoundError } from "./shared.mjs";
+export {
+  skillChatDecisionSet,
+  skillChatMessageAppend,
+  skillChatThreadRead,
+  skillChatThreadSetTurnState,
+} from "./skill-chat.mjs";
 export { sourceWatermarkUpsert } from "./source.mjs";
 export {
   companyAtsRemove,

@@ -259,8 +259,18 @@ test("POST /api/search/scan: DB mode ignores legacy source files when DB source 
   const server = await bootServer(repoRoot, { fetchImpl: leverFetchStub() });
   try {
     const { status, body } = await postJson(server, "/api/search/scan", {});
-    assert.equal(status, 400);
-    assert.match(body.error, /No search config/);
+    assert.equal(status, 409);
+    assert.equal(body.code, "SOURCE_SETUP_REQUIRED");
+    assert.equal(body.error, "No enabled search sources are configured yet.");
+    assert.deepEqual(body.action, {
+      label: "Set up sources",
+      intent: {
+        type: "ui.navigate",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: { surface: "settings", section: "sources" },
+      },
+    });
+    assert.doesNotMatch(JSON.stringify(body), /\/onboard|write-config|\/jobs/);
   } finally {
     await closeServer(server);
   }

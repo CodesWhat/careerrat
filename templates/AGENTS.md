@@ -127,5 +127,5 @@ captured during onboarding.
 
 ## Public Default
 
-Do not submit applications without explicit user confirmation unless
-`candidate/form-defaults.yml` opts into auto-submit.
+Do not submit applications. Prepare the form, then leave the final submit control
+to the candidate.

@@ -151,6 +151,43 @@ function configuredAnswerEntry(question, plan, { honesty, forbidden } = {}) {
   }
 }
 
+function normalizedQuestion(value) {
+  return cleanText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function preservedApplicationAnswers({ questions, context, honesty, forbidden }) {
+  const saved = Array.isArray(context?.applicationAnswers) ? context.applicationAnswers : [];
+  const byId = new Map(
+    saved
+      .filter((answer) => cleanText(answer?.questionId))
+      .map((answer) => [cleanText(answer.questionId), answer])
+  );
+  const byQuestion = new Map(
+    saved
+      .filter((answer) => normalizedQuestion(answer?.question))
+      .map((answer) => [normalizedQuestion(answer.question), answer])
+  );
+  return questions.flatMap((question) => {
+    const stored =
+      byId.get(String(question.id)) || byQuestion.get(normalizedQuestion(question.label));
+    if (!stored || !cleanText(stored.answer)) return [];
+    return [
+      configuredAnswerEntry(
+        question,
+        {
+          value: stored.answer,
+          source: stored.source || "application-confirmed",
+        },
+        { honesty, forbidden }
+      ),
+    ];
+  });
+}
+
 function normalizeAnswer({ proposal, question, context, allowedEvidenceIds, forbidden }) {
   const answer = cleanText(proposal?.answer);
   const ids = Array.isArray(proposal?.evidenceIds) ? proposal.evidenceIds.map(String) : [];
@@ -320,8 +357,15 @@ export async function draftPacketAnswers({
   // (evidence + honesty + confirmed boundaries) the AI batch does below.
   const honesty = context?.honesty || {};
   const forbidden = forbiddenForContext(context);
-  const { deterministic, aiBatch } = partitionDeterministicAnswers({
+  const preserved = preservedApplicationAnswers({
     questions: answerable,
+    context,
+    honesty,
+    forbidden,
+  });
+  const preservedIds = new Set(preserved.map((answer) => String(answer.questionId)));
+  const { deterministic, aiBatch } = partitionDeterministicAnswers({
+    questions: answerable.filter((question) => !preservedIds.has(String(question.id))),
     formDefaults,
     profile,
     honesty,
@@ -332,7 +376,9 @@ export async function draftPacketAnswers({
       application.sourceUrl ||
       context?.job?.frontmatter?.url,
   });
-  const deterministicMap = new Map(deterministic.map((answer) => [answer.questionId, answer]));
+  const deterministicMap = new Map(
+    [...deterministic, ...preserved].map((answer) => [answer.questionId, answer])
+  );
 
   if (aiBatch.length === 0) {
     const answers = answerable.map((question) => deterministicMap.get(String(question.id)));

@@ -1,26 +1,8 @@
 // Pure helpers for the tracker dev server (src/cli/tracker-dev.mjs). Kept here,
 // free of node:http / node:fs side effects, so the risk-bearing bits — the asset
-// path-traversal guard, MIME mapping, live-reload injection, port parsing — are
+// path-traversal guard, MIME mapping, and port parsing — are
 // unit-testable without booting a server.
 import { extname, join, normalize } from "node:path";
-
-// The live-reload client. Injected into served HTML at request time only — never
-// written to the real workspace/tracker.html artifact, so it never leaks into the
-// committed render. EventSource auto-reconnects; we also retry on error.
-export const LIVERELOAD_SNIPPET = `
-<script data-careerrat-livereload>
-(function () {
-  function connect() {
-    try {
-      var es = new EventSource("/__livereload");
-      es.addEventListener("reload", function () { location.reload(); });
-      es.onerror = function () { es.close(); setTimeout(connect, 1000); };
-    } catch (e) { setTimeout(connect, 1000); }
-  }
-  connect();
-})();
-</script>
-`;
 
 // Content types for the demo logos/branding the dashboard references relatively
 // (../assets/...). Anything else falls back to octet-stream.
@@ -41,14 +23,6 @@ const MIME = {
 
 export function mimeFor(filePath) {
   return MIME[extname(filePath).toLowerCase()] || "application/octet-stream";
-}
-
-// Insert the live-reload client immediately before the closing </body> (or append
-// if there is none). Case-insensitive, last occurrence — robust to attributes.
-export function injectLiveReload(html, snippet = LIVERELOAD_SNIPPET) {
-  const idx = html.toLowerCase().lastIndexOf("</body>");
-  if (idx === -1) return html + snippet;
-  return html.slice(0, idx) + snippet + html.slice(idx);
 }
 
 // Resolve a static "<prefix><rel>" request to an absolute path confined to rootDir.

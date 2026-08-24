@@ -8,8 +8,8 @@
 // driving stays agent-side (snapshot/read each step, zero hardcoded selectors).
 //
 // Provider preference (see AGENTS.md → Browser Automation Contract):
-//   1. auto       — use Orca in an Orca workspace, otherwise the compatible
-//                   extension session.
+//   1. auto       — use Orca in an Orca workspace, bundled Playwright in the
+//                   packaged desktop app, otherwise the compatible extension.
 //   2. extension  — Chrome extension (Claude-in-Chrome / Codex), which holds the
 //                   user's logins + password store.
 //   3. orca       — Orca's supervised embedded browser.
@@ -17,10 +17,62 @@
 //                   platform (the scripts/capture-board-snapshot.mjs model).
 
 import { existsSync, readdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+const requireFromSession = createRequire(import.meta.url);
+
+const DEFAULT_PLAYWRIGHT_TOOLING_DEPENDENCIES = {
+  resolvePackage: () => requireFromSession.resolve("playwright"),
+  loadPackage: () => requireFromSession("playwright"),
+  pathExists: existsSync,
+};
+
 export const PROVIDER_PREFERENCE = ["auto", "extension", "orca", "playwright"];
+
+export function detectPlaywrightTooling(dependencies = {}) {
+  const {
+    resolvePackage = DEFAULT_PLAYWRIGHT_TOOLING_DEPENDENCIES.resolvePackage,
+    loadPackage = DEFAULT_PLAYWRIGHT_TOOLING_DEPENDENCIES.loadPackage,
+    pathExists = DEFAULT_PLAYWRIGHT_TOOLING_DEPENDENCIES.pathExists,
+  } = dependencies;
+
+  try {
+    resolvePackage();
+  } catch {
+    return {
+      packageInstalled: false,
+      browserInstalled: false,
+      ready: false,
+      detail: "Playwright is not installed.",
+    };
+  }
+
+  try {
+    const playwright = loadPackage();
+    const executablePath = playwright?.chromium?.executablePath?.();
+    if (typeof executablePath !== "string" || executablePath.length === 0) {
+      throw new Error("Chromium executable path is unavailable");
+    }
+    const browserInstalled = pathExists(executablePath) === true;
+    return {
+      packageInstalled: true,
+      browserInstalled,
+      ready: browserInstalled,
+      detail: browserInstalled
+        ? "Playwright and Chromium are installed."
+        : "Playwright is installed, but its Chromium executable is missing.",
+    };
+  } catch {
+    return {
+      packageInstalled: true,
+      browserInstalled: false,
+      ready: false,
+      detail: "Playwright is installed, but Chromium readiness could not be verified.",
+    };
+  }
+}
 
 // `automatedApply` marks whether `apply-job`'s scripted/headless apply path
 // (createConfiguredApplyExecutor, src/core/apply/apply-executor-factory.mjs) can
@@ -76,21 +128,22 @@ export function profilePath(platform, { profileRoot } = {}) {
 
 // resolveAutoTarget — the one piece of resolveSession()'s logic that decides what
 // the "auto" meta-provider actually becomes right now: Orca inside an Orca
-// workspace, the extension otherwise. Shared so describeProviders() can report
-// the SAME resolved provider resolveSession() would pick, instead of each
-// re-deriving it (and risking drift).
+// workspace, bundled Playwright in the packaged desktop app, and the extension
+// otherwise. Shared so describeProviders() can report the SAME resolved provider
+// resolveSession() would pick, instead of each re-deriving it (and risking drift).
 function resolveAutoTarget(env) {
-  return env?.ORCA_WORKTREE_ID ? "orca" : "extension";
+  if (env?.ORCA_WORKTREE_ID) return "orca";
+  if (env?.CAREERRAT_PACKAGED_DESKTOP === "1") return "playwright";
+  return "extension";
 }
 
 // describeProviders — the provider list for display (Settings, `automation
 // status`). "auto" is a meta-choice, not a concrete provider, so its advertised
-// `automatedApply` is resolved against what it actually becomes right now (Orca
-// workspace or not) rather than the descriptor's own optimistic `true`. Outside
-// an Orca workspace, "auto" resolves to the extension executor, which genuinely
-// can't drive automatic apply — reporting `true` there is exactly the UI/runtime
-// mismatch this resolves: the same resolved-provider truth backs both the option
-// list here and the session JSON (consent.mjs#automationStatus).
+// `automatedApply` is resolved against what it actually becomes right now (Orca /
+// packaged desktop state) rather than the descriptor's own optimistic `true`.
+// Outside Orca and the packaged desktop app, "auto" resolves to the extension
+// executor, which genuinely can't drive automatic apply. The same resolved-provider
+// truth backs both the option list here and the session JSON.
 export function describeProviders({ env = process.env } = {}) {
   return PROVIDER_PREFERENCE.map((id) => {
     const descriptor = PROVIDERS[id];
@@ -115,7 +168,7 @@ export function describeProviders({ env = process.env } = {}) {
 // the actual provider options rather than one baked-in suggestion.
 export function automaticApplyGap(provider) {
   const descriptor = PROVIDERS[provider];
-  if (!descriptor || descriptor.automatedApply !== false) return null;
+  if (descriptor?.automatedApply !== false) return null;
   return {
     provider,
     label: descriptor.label,

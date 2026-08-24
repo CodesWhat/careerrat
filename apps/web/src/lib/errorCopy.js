@@ -134,7 +134,8 @@ const RULES = [
     action: { label: "Finish setup", to: "/onboarding" },
   },
   {
-    match: ({ raw }) => startsWith(raw, "No search config found"),
+    match: ({ raw, code }) =>
+      code === "SOURCE_SETUP_REQUIRED" || startsWith(raw, "No search config found"),
     message: "No search sources are set up yet.",
     action: { label: "Open Settings", to: "/settings" },
   },
@@ -451,6 +452,32 @@ export function resolveErrorCopy(err) {
   };
 }
 
+export function resolvePersistedErrorCopy(errorRecord, legacyText) {
+  const record =
+    errorRecord && typeof errorRecord === "object" && !Array.isArray(errorRecord)
+      ? errorRecord
+      : {};
+  const nested =
+    record.error && typeof record.error === "object" && !Array.isArray(record.error)
+      ? record.error
+      : {};
+  const raw = [
+    typeof errorRecord === "string" ? errorRecord : null,
+    record.message,
+    nested.message,
+    legacyText,
+  ].find((value) => typeof value === "string" && value.trim());
+  const statusValue = Number(record.status ?? nested.status);
+  const status = Number.isInteger(statusValue) && statusValue > 0 ? statusValue : null;
+  return resolveErrorCopy(
+    new ApiError(status, {
+      error: raw || null,
+      code: record.code || nested.code || null,
+      details: record.details || nested.details || null,
+    })
+  );
+}
+
 // Shared by every catch site across the app that resolves an error through
 // resolveErrorCopy() and wants a call-site-specific fallback instead of the
 // generic bucket's copy when nothing more specific was mapped — ported here
@@ -459,16 +486,4 @@ export function resolveErrorCopy(err) {
 export function errorState(err, fallback) {
   const resolved = resolveErrorCopy(err);
   return resolved.message === GENERIC_ERROR_MESSAGE ? { ...resolved, message: fallback } : resolved;
-}
-
-// Threads a real retry callback through a resolveErrorCopy()/errorState()
-// result — the resolved `action` carries {label, retry: true} with no
-// callback of its own, so every catch site that wants the "Try again" button
-// to actually do something supplies the exact call that just failed. Ported
-// here from JobDrawer.jsx/InterviewSurface.jsx's own withRetryAction() for
-// the same reason as errorState() above.
-export function withRetryAction(resolved, onRetry) {
-  return resolved.action?.retry
-    ? { ...resolved, action: { ...resolved.action, onRetry } }
-    : resolved;
 }

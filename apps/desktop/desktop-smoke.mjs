@@ -40,6 +40,21 @@ export async function verifySmokePdfExport({ outPath, renderPdf, readFile, remov
   }
 }
 
+export async function verifySmokeBrowserAutomation({ profileDir, createOps, removeDir }) {
+  let ops = null;
+  try {
+    ops = createOps({ profileDir, headless: true, channel: "chromium" });
+    await ops.openTab({ url: "about:blank" });
+    return { launched: true };
+  } finally {
+    try {
+      await ops?.close();
+    } finally {
+      await removeDir(profileDir);
+    }
+  }
+}
+
 function hasSpaRoot(html) {
   return /<[^>]+\bid=["']root["'][^>]*>/i.test(html);
 }

@@ -42,7 +42,13 @@ export function parseCompensation(job) {
   const comp = job?.compensation;
   if (!comp) return null;
 
-  const interval = /** @type {keyof typeof INTERVAL_MULTIPLIERS} */ (comp.interval || '1 YEAR');
+  const summaryComponents = Array.isArray(comp.summaryComponents) ? comp.summaryComponents : [];
+  const salaryComponent = summaryComponents.find(
+    (component) => String(component?.compensationType || '').toLowerCase() === 'salary',
+  );
+  const salary = salaryComponent || comp;
+
+  const interval = /** @type {keyof typeof INTERVAL_MULTIPLIERS} */ (salary.interval || '1 YEAR');
   const multiplier = INTERVAL_MULTIPLIERS[interval];
   if (!multiplier) return null;
 
@@ -54,9 +60,10 @@ export function parseCompensation(job) {
     const n = Number(v);
     return Number.isFinite(n) && n >= 0 ? n : null;
   };
-  const minValue = normalizeNum(comp.minValue);
-  const maxValue = normalizeNum(comp.maxValue);
-  const currency = typeof comp.currency === 'string' ? comp.currency.trim() : '';
+  const minValue = normalizeNum(salary.minValue);
+  const maxValue = normalizeNum(salary.maxValue);
+  const currencyValue = salary.currencyCode ?? salary.currency;
+  const currency = typeof currencyValue === 'string' ? currencyValue.trim() : '';
 
   // If neither min nor max is provided, no valid compensation
   if (minValue == null && maxValue == null) return null;

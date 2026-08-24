@@ -397,6 +397,7 @@ test("ISSUE-015: removing an undrafted source cascades its scan stub but protect
     sourceId: removable.id,
     removedProposals: 1,
     removedChunks: 1,
+    artifactPath: null,
   });
   assert.equal(deepIngestStateGet({ repoRoot }).sources.length, 0);
   assert.equal(deepIngestStateGet({ repoRoot }).proposals.length, 0);
@@ -429,6 +430,44 @@ test("ISSUE-015: removing an undrafted source cascades its scan stub but protect
     (err) => err.code === "SOURCE_HAS_DRAFTS"
   );
   assert.equal(deepIngestStateGet({ repoRoot }).sources.length, 1);
+});
+
+test("Deep ingest source writes surface owned artifact replacement and removal metadata", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const { deepIngestSourceCreate, deepIngestSourceRemove } = await loadDeepIngestVerbs();
+
+  const first = deepIngestSourceCreate({
+    repoRoot,
+    input: {
+      id: "deep_src_artifact_lifecycle",
+      targetShape: "evidence",
+      sourceKind: "file",
+      text: "Same source text.",
+      artifactPath: "workspace/deep-ingest/sources/first.md",
+      metadata: { ownedUpload: true },
+    },
+  });
+  assert.equal(first.replacedArtifactPath, null);
+
+  const replacement = deepIngestSourceCreate({
+    repoRoot,
+    input: {
+      id: "deep_src_artifact_lifecycle",
+      targetShape: "evidence",
+      sourceKind: "file",
+      text: "Same source text.",
+      artifactPath: "workspace/deep-ingest/sources/replacement.md",
+      metadata: { ownedUpload: true },
+    },
+  });
+  assert.equal(replacement.replacedArtifactPath, "workspace/deep-ingest/sources/first.md");
+
+  const removed = deepIngestSourceRemove({
+    repoRoot,
+    sourceId: "deep_src_artifact_lifecycle",
+  });
+  assert.equal(removed.artifactPath, "workspace/deep-ingest/sources/replacement.md");
 });
 
 test("proposal decisions enforce expected-version conflicts and keep unconfirmed proposals out of trusted candidate state", async () => {
@@ -1203,6 +1242,47 @@ test("deepIngestConfirmedItemUpdate partially merges edits across all four confi
     assert.match(result.event.title, /updated$/);
     assert.ok(result.event.tags.includes("operation:library:item-update"));
   }
+});
+
+test("deepIngestConfirmedItemUpsert creates and updates a manual writing voice", async () => {
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+  const { deepIngestConfirmedItemUpsert } = await loadDeepIngestVerbs();
+
+  const created = deepIngestConfirmedItemUpsert({
+    repoRoot,
+    lane: "writing_voice",
+    fields: {
+      summary: "Plain, direct, concrete.",
+      doPhrases: ["Lead with the result"],
+      avoidPhrases: ["Excited to apply"],
+    },
+  });
+
+  assert.equal(created.ok, true);
+  assert.equal(created.created, true);
+  assert.match(created.item.id, /^writing_voice_/);
+  assert.equal(created.item.status, "confirmed");
+  assert.equal(created.item.summary, "Plain, direct, concrete.");
+  assert.equal(created.event.title, "Writing preferences added");
+  assert.equal(
+    JSON.parse(
+      db.prepare("SELECT data FROM deep_ingest_lane_states WHERE id = ?").get("writing_voice").data
+    ).status,
+    "completed"
+  );
+
+  const updated = deepIngestConfirmedItemUpsert({
+    repoRoot,
+    lane: "writing_voice",
+    id: created.item.id,
+    fields: { summary: "Short sentences, concrete verbs." },
+  });
+  assert.equal(updated.created, false);
+  assert.equal(updated.item.id, created.item.id);
+  assert.equal(updated.item.summary, "Short sentences, concrete verbs.");
+  assert.deepEqual(updated.item.doPhrases, ["Lead with the result"]);
+  assert.equal(updated.event.title, "Writing preferences updated");
 });
 
 test("deepIngestConfirmedItemUpdate reports unknown lane/id and privacy-block reasons", async () => {

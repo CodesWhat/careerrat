@@ -748,7 +748,10 @@ function renderAnswersMarkdown({ answers = [], questionCapture }) {
   const sections = ["# Application Answers"];
   for (const answer of answers) {
     const question = answer.question || labels.get(String(answer.questionId)) || answer.questionId;
-    sections.push(`## ${question}\n\n${answer.answer || "NEEDS YOU: draft this answer."}`);
+    const response = needsUser(answer.answer)
+      ? "NEEDS YOU: provide or confirm this answer."
+      : answer.answer || "NEEDS YOU: provide or confirm this answer.";
+    sections.push(`## ${question}\n\n${response}`);
   }
   if (answers.length === 0) {
     sections.push("NEEDS YOU: answer any required non-EEO application questions.");
@@ -955,6 +958,7 @@ function manifestFor({
   sourceSplit,
   gaps,
   uploadReady,
+  confirmedAnswers = [],
   deepIngestWarnings = [],
   warnings = [],
 }) {
@@ -994,6 +998,7 @@ function manifestFor({
       gapContextCount: sourceSplit.gapContext.length,
     },
     gaps,
+    ...(confirmedAnswers.length ? { confirmedAnswers } : {}),
     warnings,
     // Advisory-only, separate from gaps[]: gaps[] gates uploadReady
     // (generatePacket requires gaps.length === 0), so privacy-skipped/
@@ -1274,6 +1279,9 @@ export async function generatePacket({
     sourceSplit,
     gaps,
     uploadReady,
+    confirmedAnswers: Array.isArray(appFromContext(packetContext).packetManifest?.confirmedAnswers)
+      ? appFromContext(packetContext).packetManifest.confirmedAnswers
+      : [],
     deepIngestWarnings: Array.isArray(packetContext?.deepIngestDiagnostics)
       ? packetContext.deepIngestDiagnostics
       : [],

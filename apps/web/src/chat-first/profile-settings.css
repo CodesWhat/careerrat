@@ -1,0 +1,727 @@
+.cf-profile,
+.cf-profile *,
+.cf-profile *::before,
+.cf-profile *::after {
+  box-sizing: border-box;
+}
+
+.cf-profile {
+  width: 100%;
+  min-width: 1000px;
+  min-height: 100vh;
+  overflow-y: auto;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font);
+}
+
+.cf-profile button {
+  color: inherit;
+  font: inherit;
+}
+
+.cf-profile__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  padding-left: 92px;
+  -webkit-app-region: drag;
+}
+
+.cf-profile__header button {
+  -webkit-app-region: no-drag;
+}
+
+.cf-profile .cf-profile__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cf-profile__back svg {
+  width: 15px;
+  height: 15px;
+}
+
+.cf-profile__brand {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.cf-profile__tabs {
+  display: flex;
+  gap: 6px;
+  margin-left: 14px;
+}
+
+.cf-profile__tabs button {
+  padding: 6px 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--white);
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cf-profile__tabs button[aria-current="page"] {
+  border: var(--cf-selection-border);
+  color: var(--cf-selection-foreground);
+  outline: var(--cf-selection-outline);
+  background: var(--cf-selection-fill);
+  box-shadow: var(--cf-selection-shadow);
+}
+
+.cf-profile button:focus-visible,
+.cf-profile input:focus-visible,
+.cf-profile textarea:focus-visible,
+.cf-profile select:focus-visible {
+  outline: var(--cf-focus-ring);
+  outline-offset: 2px;
+}
+
+.cf-profile__hint {
+  margin-left: auto;
+  color: var(--slate);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.cf-profile__grid {
+  box-sizing: content-box;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-content: start;
+  gap: 14px;
+  width: 100%;
+  max-width: 1200px;
+  padding: 8px 20px 24px;
+}
+
+.cf-profile__card,
+.cf-settings__card {
+  padding: 16px 18px;
+  border-radius: 20px;
+  background: var(--white);
+}
+
+.cf-profile__section-heading {
+  display: flex;
+  align-items: center;
+  margin-bottom: 9px;
+}
+
+.cf-profile__section-heading > span,
+.cf-settings__eyebrow {
+  color: var(--slate);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+}
+
+.cf-profile .cf-profile__text-action {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--slate);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cf-profile .cf-profile__text-action--text {
+  text-decoration: underline;
+}
+
+.cf-profile__lines {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.cf-profile__lines--strong {
+  font-weight: 600;
+}
+
+.cf-profile__explanation,
+.cf-profile__empty-copy {
+  margin-top: 1px;
+  color: var(--slate);
+  font-weight: 500;
+}
+
+.cf-profile__comp {
+  display: flex;
+  gap: 20px;
+}
+
+.cf-profile__comp > div {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cf-profile__comp strong {
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.cf-profile__comp span {
+  color: var(--slate);
+  font-size: 11.5px;
+}
+
+.cf-profile__card--location {
+  display: flex;
+  flex-direction: column;
+}
+
+.cf-profile__location-summary {
+  font-size: 15px;
+}
+
+.cf-profile__location-scopes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px 12px;
+  margin-top: 9px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.cf-profile__location-boundary {
+  margin-top: 9px;
+  color: var(--slate);
+  font-size: 11.5px;
+}
+
+.cf-profile__confirmation {
+  align-self: flex-start;
+  margin-top: 9px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--lilac);
+  font-size: 10.5px;
+  font-weight: 800;
+}
+
+.cf-profile__confirmation--confirmed {
+  background: var(--lime);
+}
+
+.cf-settings {
+  box-sizing: content-box;
+  display: flex;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 8px 20px 24px;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cf-settings__card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cf-settings__engine-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 2px;
+}
+
+.cf-settings__connected,
+.cf-settings__disconnected {
+  margin-left: auto;
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: var(--lime);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.cf-settings__disconnected {
+  background: var(--lilac);
+}
+
+.cf-settings__card > strong {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.cf-settings__muted,
+.cf-settings__source-copy > span,
+.cf-settings__permission > div > span,
+.cf-settings__data-card > div > span {
+  color: var(--slate);
+  font-size: 12px;
+}
+
+.cf-settings__links {
+  display: flex;
+  gap: 14px;
+  margin-top: 4px;
+}
+
+.cf-settings__links button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--slate);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.cf-settings__permission {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1.5px solid var(--tint-cool-3);
+}
+
+.cf-settings__permission > div {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cf-settings__permission strong {
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.cf-settings__switch {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--line-cool-2);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.cf-settings__switch > span {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--white);
+  transition: left 0.15s;
+}
+
+.cf-settings__switch[aria-checked="true"] {
+  background: var(--ink);
+}
+
+.cf-settings__switch[aria-checked="true"] > span {
+  left: 21px;
+}
+
+.cf-settings__fixed-capability {
+  flex: none;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--tint-cool-2);
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  font-weight: 800;
+}
+
+.cf-settings__note {
+  margin: 6px 0 0;
+  color: var(--slate);
+  font-size: 12px;
+}
+
+.cf-settings__public-sync-status {
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.cf-settings__source-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.cf-settings__source-copy > strong {
+  font-weight: 600;
+}
+
+.cf-settings__data-card {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+
+.cf-settings__data-card > div {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cf-settings__data-card > div > strong {
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.cf-settings__outline-button {
+  padding: 7px 15px;
+  border: 1.5px solid var(--line-warm-2);
+  border-radius: 999px;
+  background: var(--white);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cf-settings__outline-button:hover {
+  background: var(--cream);
+}
+
+.cf-settings-dialog__cover {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--scrim-sheet);
+}
+
+.cf-settings-dialog {
+  width: min(560px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  padding: 18px;
+  border-radius: 24px;
+  background: var(--white);
+  box-shadow: var(--shadow-sheet);
+}
+
+.cf-settings-dialog > header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cf-settings-dialog > header strong {
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.cf-settings-dialog > header button {
+  width: 30px;
+  height: 30px;
+  margin-left: auto;
+  border: 0;
+  border-radius: 50%;
+  background: var(--tint-cool);
+  font-size: 19px;
+  cursor: pointer;
+}
+
+.cf-settings-dialog__intro,
+.cf-settings-dialog__technical p {
+  margin: 10px 0 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.cf-settings-dialog__technical-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  margin-top: 12px;
+  padding: 11px 13px;
+  border-radius: 14px;
+  background: var(--cream);
+  font-size: 13px;
+}
+
+.cf-settings-dialog__technical-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cf-settings-dialog__technical-row strong {
+  font-weight: 800;
+}
+
+.cf-settings-dialog__technical-row > span {
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.cf-settings-dialog__technical-row select {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1.5px solid var(--line-warm-2);
+  border-radius: 12px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+
+.cf-settings-dialog__status {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--tint-cool-2);
+  color: var(--ink-soft);
+  font-size: 10.5px;
+  font-weight: 800;
+}
+
+.cf-settings-dialog__status--ready {
+  background: var(--lime);
+  color: var(--ink);
+}
+
+.cf-settings-dialog__status--missing {
+  background: var(--red-soft);
+  color: var(--ink);
+}
+
+.cf-settings-dialog__technical-row small {
+  color: var(--slate);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.cf-settings-dialog__runtime-list {
+  display: flex;
+  margin-top: 14px;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cf-settings-dialog__empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1.5px dashed var(--line-cool);
+  border-radius: 16px;
+  color: var(--ink-soft);
+  font-size: 12.5px;
+}
+
+.cf-settings-dialog__empty button {
+  padding: 6px 12px;
+  border: 1.5px solid var(--line-warm-2);
+  border-radius: 999px;
+  background: var(--cream);
+  font-size: 11.5px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.cf-settings-dialog__runtime {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1.5px solid var(--line-warm);
+  border-radius: 16px;
+  background: var(--cream);
+}
+
+.cf-settings-dialog__runtime > div {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cf-settings-dialog__runtime > .cf-settings-dialog__runtime-copy {
+  align-items: center;
+  flex-direction: row;
+  gap: 9px;
+}
+
+.cf-settings-dialog__runtime-copy > div {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cf-settings-dialog__runtime .cf-runtime-icon {
+  flex: none;
+  filter: grayscale(1);
+  opacity: 0.58;
+  transition:
+    filter 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.cf-settings-dialog__runtime:hover .cf-runtime-icon,
+.cf-settings-dialog__runtime:focus-within .cf-runtime-icon {
+  filter: grayscale(0);
+  opacity: 1;
+}
+
+.cf-settings-dialog__runtime > div span {
+  color: var(--slate);
+  font-size: 11.5px;
+}
+
+.cf-settings-dialog__runtime button,
+.cf-settings-dialog__current,
+.cf-settings-dialog__actions button {
+  flex: none;
+  padding: 6px 12px;
+  border: 1.5px solid var(--line-warm-2);
+  border-radius: 999px;
+  background: var(--white);
+  font-size: 11.5px;
+  font-weight: 800;
+}
+
+.cf-settings-dialog__runtime button,
+.cf-settings-dialog__actions button {
+  cursor: pointer;
+}
+
+.cf-settings-dialog__current {
+  border: 0;
+  color: inherit;
+  background: transparent;
+}
+
+.cf-settings-dialog__runtime[data-selected="true"] {
+  border: var(--cf-selection-border);
+  color: var(--cf-selection-foreground);
+  outline: var(--cf-selection-outline);
+  background: var(--cf-selection-fill);
+  box-shadow: var(--cf-selection-shadow);
+}
+
+.cf-settings-dialog__runtime[data-selected="true"] .cf-runtime-icon {
+  background: var(--cf-selection-avatar-surface);
+}
+
+.cf-settings-dialog__runtime[data-selected="true"] > div span {
+  color: var(--gray-dim);
+}
+
+.cf-settings-dialog__actions button[type="submit"] {
+  border-color: var(--ink);
+  background: var(--lime);
+}
+
+.cf-settings-dialog__form {
+  display: flex;
+  margin-top: 14px;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cf-settings-dialog__form label {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.cf-settings-dialog__form input,
+.cf-settings-dialog__form textarea,
+.cf-settings-dialog__form select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1.5px solid var(--line-warm-2);
+  border-radius: 13px;
+  background: var(--cream);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.cf-settings-dialog__form textarea {
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.cf-profile-editor {
+  gap: 12px;
+}
+
+.cf-profile-editor__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cf-profile-editor__field > span,
+.cf-profile-editor__check > span {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.cf-profile-editor__check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 30px;
+  cursor: pointer;
+}
+
+.cf-profile-editor__check input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: var(--ink);
+}
+
+.cf-profile-editor__actions > button:first-child {
+  margin-right: auto;
+  border-color: transparent;
+  background: transparent;
+  text-decoration: underline;
+}
+
+.cf-settings-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}

@@ -20,6 +20,7 @@ The `playwright` npm dependency, driven headless and in-process from Node script
 No setup needed — Chromium ships with the package.
 
 Used for:
+
 - `npm run capture:search-sources` / `npm run capture:board` — bulk-scrape a
   board's listing DOM
 - Document and packet PDF export (`careerrat export`)
@@ -34,9 +35,9 @@ forms, reading in-platform DMs, polling ATS status. The agent reads the live DOM
 before each action, never uses hardcoded selectors, and stays confirm-first.
 
 **Automatic provider selection:** Orca's visible supervised browser is used inside an
-Orca workspace; the compatible extension session is selected otherwise. Playwright
-persistent profiles remain an explicit fallback at
-`~/.careerrat/board-profiles/<platform>`. If the selected provider cannot execute a
+Orca workspace; bundled Playwright is selected in the packaged desktop app; the
+compatible extension session is selected otherwise. Playwright keeps persistent profiles
+at `~/.careerrat/board-profiles/<platform>`. If the selected provider cannot execute a
 workflow, CareerRat shows a supervised/manual handoff instead of claiming it ran.
 
 Automatic is the default. Settings shows the effective browser and allows an explicit
@@ -52,7 +53,7 @@ opt-in and default OFF. With no `candidate/automation.yml`, none of them run.
 | `status_polling` | `sync-status` | Read application status from ATS dashboards |
 | `authenticated_search` | `search-jobs` / `setup-searches` | Authenticated board search results |
 | `messaging` | `ingest-messages` | Read LinkedIn / Wellfound DMs |
-| `one_click_apply` | `apply-job` | LinkedIn Easy Apply one-click path |
+| `authenticated_apply_preparation` | `apply-job` | Prepare LinkedIn Easy Apply and stop before final submit |
 | `profile_optimize` | `optimize-linkedin` | Read LinkedIn profile for analysis |
 | `profile_apply` | `optimize-linkedin` | Write approved edits back to the profile |
 | `mail_access` | `ingest-mail`, `apply-job` | Webmail verification codes + Gmail/Outlook ingest |
@@ -90,6 +91,7 @@ careerrat automation session extension --write            # set provider
 ## SPA escalation
 
 When a job link returns an SPA shell (Wellfound, Lever, Ashby), the agent:
+
 - For Lever: fetches the JSON API (`api.lever.co/v0/postings/{company}?mode=json`)
 - For others: escalates to Layer 3, evaluates `document.body.innerText` in the
   session browser

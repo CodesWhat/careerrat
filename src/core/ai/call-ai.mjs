@@ -44,12 +44,21 @@ export function resolveAIRoute(
   env = process.env,
   { repoRoot = null, runtimeInventory = null } = {}
 ) {
+  const desktopCliOnly = env.CAREERRAT_DESKTOP_CLI_ONLY === "1";
   if (repoRoot) {
     const selection = loadInstalledRuntimeSelection({ repoRoot, env });
     const installedRuntimeEnabled =
       selection.runtimeId !== null ||
       env.CAREERRAT_DESKTOP_SHELL === "1" ||
       env.CAREERRAT_INSTALLED_AI === "1";
+    if (desktopCliOnly && (selection.providerFallback || !selection.runtimeId)) {
+      return {
+        type: "none",
+        error:
+          "Select a ready installed AI CLI in Settings. Packaged CareerRat does not use " +
+          "provider or SDK fallback.",
+      };
+    }
     if (installedRuntimeEnabled && !selection.providerFallback) {
       // "custom" isn't in the fixed registry detectInstalledRuntimes() scans
       // (see installed-runtimes.mjs's probeCustomRuntimeCommand /
@@ -76,6 +85,15 @@ export function resolveAIRoute(
         };
       }
     }
+  }
+
+  if (desktopCliOnly) {
+    return {
+      type: "none",
+      error:
+        "Select a ready installed AI CLI in Settings. Packaged CareerRat does not use " +
+        "provider or SDK fallback.",
+    };
   }
 
   const apiKey = String(env.ANTHROPIC_API_KEY || "").trim();

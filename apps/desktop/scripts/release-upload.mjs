@@ -8,6 +8,7 @@ const pkg = JSON.parse(readFileSync(join(desktopRoot, "package.json"), "utf8"));
 const version = pkg.version;
 const tag = `v${version}`;
 const distDir = join(desktopRoot, "dist");
+let expectedReleaseId = String(process.env.CAREERRAT_RELEASE_ID || "").trim();
 
 function fail(message) {
   console.error(message);
@@ -22,6 +23,10 @@ try {
 
 if (!existsSync(distDir)) {
   fail(`No build output found: ${distDir} does not exist. Run \`npm run dist\` first.`);
+}
+
+if (expectedReleaseId && !/^\d+$/.test(expectedReleaseId)) {
+  fail("CAREERRAT_RELEASE_ID must be a numeric GitHub release id.");
 }
 
 const dmgFiles = readdirSync(distDir).filter((name) => name.endsWith(".dmg"));
@@ -65,21 +70,43 @@ for (const dmgFile of matchingDmgs) {
   }
 }
 
-try {
-  execFileSync("gh", ["release", "view", tag], { stdio: "ignore" });
-} catch {
-  fail(
-    `No GitHub release exists for tag ${tag}. Create the draft release first: ` +
-      `\`gh release create ${tag} --draft ...\``
-  );
+function resolveExactDraftRelease() {
+  let pages;
+  try {
+    const output = execFileSync(
+      "gh",
+      ["api", "repos/{owner}/{repo}/releases", "--paginate", "--slurp"],
+      { encoding: "utf8" }
+    );
+    pages = JSON.parse(output);
+  } catch {
+    fail(`Could not revalidate the GitHub release for ${tag}.`);
+  }
+  const releases = Array.isArray(pages[0]) ? pages.flat() : pages;
+  const matches = releases.filter((release) => release.tag_name === tag);
+  if (matches.length !== 1) {
+    fail(`Expected one GitHub release for ${tag}, found ${matches.length}.`);
+  }
+  const [release] = matches;
+  if (release.draft !== true) {
+    fail(`Release ${tag} is no longer a draft; refusing to upload public assets.`);
+  }
+  if (!expectedReleaseId) expectedReleaseId = String(release.id);
+  if (String(release.id) !== expectedReleaseId) {
+    fail(
+      `Release identity changed from ${expectedReleaseId} to ${release.id}; refusing to upload.`
+    );
+  }
+  return release;
 }
 
-try {
-  execFileSync("gh", ["release", "upload", tag, ...filesToUpload, "--clobber"], {
-    stdio: "inherit",
-  });
-} catch {
-  fail(`Failed to upload release assets to ${tag}.`);
+for (const file of filesToUpload) {
+  resolveExactDraftRelease();
+  try {
+    execFileSync("gh", ["release", "upload", tag, file], { stdio: "inherit" });
+  } catch {
+    fail(`Failed to upload ${file} to draft ${tag}.`);
+  }
 }
 
 console.log(`Uploaded to ${tag}:`);

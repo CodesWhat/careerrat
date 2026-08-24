@@ -12,6 +12,17 @@ async function readText(relPath) {
   return readFile(join(root, relPath), "utf8");
 }
 
+test("desktop icon is generated from the tracked rat emoji artwork", async () => {
+  const generator = await readText("apps/desktop/scripts/make-icon.mjs");
+  const artwork = await readFile(join(root, "apps/desktop/assets/rat-emoji.png"));
+
+  assert.match(generator, /assets["'], ["']rat-emoji\.png/);
+  assert.equal(artwork.subarray(1, 4).toString("ascii"), "PNG");
+  assert.equal(artwork.readUInt32BE(16), artwork.readUInt32BE(20));
+  assert.ok(artwork.readUInt32BE(16) >= 1024);
+  assert.equal(artwork[25], 6, "rat emoji artwork must retain an alpha channel");
+});
+
 test("desktop dev launch brands the local Electron.app as CareerRat before starting", async () => {
   const pkg = JSON.parse(await readText("apps/desktop/package.json"));
   const dev = pkg.scripts?.dev || "";

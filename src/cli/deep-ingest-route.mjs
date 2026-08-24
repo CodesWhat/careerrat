@@ -1,14 +1,16 @@
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { requireDb } from "../core/db/connection.mjs";
 import {
   deepIngestConfirmedItemRemove,
   deepIngestConfirmedItemUpdate,
+  deepIngestConfirmedItemUpsert,
   deepIngestConfirmProposal,
   deepIngestLaneSetState,
   deepIngestProposalDecision,
   deepIngestProposalPut,
-  deepIngestSourceCreate,
+  deepIngestScannedSourcePersist,
   deepIngestSourceRemove,
   deepIngestStateGet,
 } from "../core/db/verbs.mjs";
@@ -46,6 +48,53 @@ const DEFAULT_PROPOSAL_BUILDERS = {
   paste: proposeGapsFromSource,
   link: proposeGapsFromSource,
 };
+
+const DEEP_INGEST_UPLOAD_DIR = "workspace/deep-ingest/sources";
+
+function ownedUploadPath({ repoRoot, env, artifactPath }) {
+  const raw = String(artifactPath || "")
+    .trim()
+    .replaceAll("\\", "/");
+  if (
+    !raw.startsWith(`${DEEP_INGEST_UPLOAD_DIR}/`) ||
+    raw === `${DEEP_INGEST_UPLOAD_DIR}/` ||
+    isAbsolute(raw) ||
+    /^[A-Za-z]:\//.test(raw)
+  ) {
+    return null;
+  }
+
+  const uploadRoot = resolve(userPath({ repoRoot, env }, DEEP_INGEST_UPLOAD_DIR));
+  const candidate = resolve(userPath({ repoRoot, env }, raw));
+  const candidateRelative = relative(uploadRoot, candidate);
+  if (!candidateRelative || candidateRelative.startsWith("..") || isAbsolute(candidateRelative)) {
+    return null;
+  }
+
+  try {
+    const realRoot = realpathSync(uploadRoot);
+    const realParent = realpathSync(dirname(candidate));
+    const parentRelative = relative(realRoot, realParent);
+    if (parentRelative.startsWith("..") || isAbsolute(parentRelative)) return null;
+  } catch {
+    // A missing artifact or parent is already clean. The lexical confinement
+    // check above still prevents resolving an arbitrary path.
+  }
+
+  return candidate;
+}
+
+function removeOwnedUploadArtifact({ repoRoot, env, artifactPath }) {
+  const path = ownedUploadPath({ repoRoot, env, artifactPath });
+  if (!path) return false;
+  try {
+    unlinkSync(path);
+    return true;
+  } catch (err) {
+    if (err?.code === "ENOENT") return false;
+    return false;
+  }
+}
 
 function queryParam(req, name) {
   const url = new URL(req.url, "http://127.0.0.1");
@@ -107,7 +156,10 @@ export function mountDeepIngestRoutes({
 
     try {
       const scanned = await scanSource({ input: body, fetchImpl });
-      const data = persistScannedSource({ repoRoot, env, scanned });
+      const data = {
+        ...persistScannedSource({ repoRoot, env, scanned }),
+        state: deepIngestStateGet({ repoRoot, env }),
+      };
       sendJson(res, 200, { ok: true, data });
     } catch (err) {
       respondError(res, err);
@@ -118,11 +170,13 @@ export function mountDeepIngestRoutes({
     try {
       const body = await readJsonBodyCapped(req, DEEP_INGEST_JSON_BODY_MAX_BYTES);
       ensureDb(repoRoot, env);
-      const data = deepIngestSourceRemove({
+      const removed = deepIngestSourceRemove({
         repoRoot,
         env,
         sourceId: body?.sourceId,
       });
+      removeOwnedUploadArtifact({ repoRoot, env, artifactPath: removed.artifactPath });
+      const { artifactPath: _artifactPath, ...data } = removed;
       sendJson(res, 200, { ok: true, data });
     } catch (err) {
       respondError(res, err);
@@ -151,11 +205,12 @@ export function mountDeepIngestRoutes({
     }
 
     const safeName = sanitizeUploadFilename(name);
-    const relPath = `workspace/deep-ingest/sources/${Date.now()}-${safeName}`;
+    const relPath = `${DEEP_INGEST_UPLOAD_DIR}/${Date.now()}-${randomUUID()}-${safeName}`;
     const absPath = userPath({ repoRoot, env }, relPath);
     mkdirSync(dirname(absPath), { recursive: true });
     writeFileSync(absPath, bytes);
 
+    let artifactPersisted = false;
     try {
       const input = {
         targetShape,
@@ -166,9 +221,23 @@ export function mountDeepIngestRoutes({
       };
       normalizeDeepIngestSource(input);
       const scanned = await scanSource({ input, fetchImpl });
-      const data = persistScannedSource({ repoRoot, env, scanned });
+      const persisted = persistScannedSource({ repoRoot, env, scanned, ownedUpload: true });
+      artifactPersisted = true;
+      removeOwnedUploadArtifact({
+        repoRoot,
+        env,
+        artifactPath: persisted.replacedArtifactPath,
+      });
+      const { replacedArtifactPath: _replacedArtifactPath, ...persistedData } = persisted;
+      const data = {
+        ...persistedData,
+        state: deepIngestStateGet({ repoRoot, env }),
+      };
       sendJson(res, 200, { ok: true, data });
     } catch (err) {
+      if (!artifactPersisted) {
+        removeOwnedUploadArtifact({ repoRoot, env, artifactPath: relPath });
+      }
       respondError(res, err);
     }
   });
@@ -266,6 +335,30 @@ export function mountDeepIngestRoutes({
     try {
       const { lane, id, ...fields } = body || {};
       const result = deepIngestConfirmedItemUpdate({ repoRoot, env, lane, id, fields });
+      sendJson(res, 200, { ok: true, data: result });
+    } catch (err) {
+      respondError(res, err);
+    }
+  });
+
+  addRoute("POST", "/api/deep-ingest/confirmed/upsert", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, DEEP_INGEST_JSON_BODY_MAX_BYTES);
+      ensureDb(repoRoot, env);
+    } catch (err) {
+      respondError(res, err);
+      return;
+    }
+
+    try {
+      const result = deepIngestConfirmedItemUpsert({
+        repoRoot,
+        env,
+        lane: body?.lane,
+        id: body?.id,
+        fields: body?.fields,
+      });
       sendJson(res, 200, { ok: true, data: result });
     } catch (err) {
       respondError(res, err);
@@ -408,8 +501,8 @@ function proposalLane(row, targetShape) {
     : laneForTargetShape(targetShape);
 }
 
-function persistScannedSource({ repoRoot, env, scanned }) {
-  const created = deepIngestSourceCreate({
+function persistScannedSource({ repoRoot, env, scanned, ownedUpload = false }) {
+  const persisted = deepIngestScannedSourcePersist({
     repoRoot,
     env,
     input: {
@@ -421,6 +514,7 @@ function persistScannedSource({ repoRoot, env, scanned }) {
       artifactPath: scanned.source.artifactPath,
       metadata: {
         ...(scanned.source.metadata || {}),
+        ownedUpload: ownedUpload === true || undefined,
         files: scanned.files || undefined,
         truncated: scanned.truncated === true,
         reason: scanned.reason || undefined,
@@ -432,34 +526,29 @@ function persistScannedSource({ repoRoot, env, scanned }) {
       textPreview: scanned.chunks?.[0]?.text?.slice(0, 240) || null,
       chunks: scanned.chunks || [],
     },
+    proposalInput: scanned.proposal
+      ? {
+          targetShape: scanned.proposal.targetShape || scanned.source.targetShape,
+          lane: scanned.proposal.lane || laneForTargetShape(scanned.source.targetShape),
+          proposal: scanned.proposal,
+        }
+      : null,
   });
 
-  let proposal = null;
-  if (scanned.proposal) {
-    proposal = deepIngestProposalPut({
-      repoRoot,
-      env,
-      sourceId: created.source.id,
-      targetShape: scanned.proposal.targetShape || scanned.source.targetShape,
-      lane: scanned.proposal.lane || laneForTargetShape(scanned.source.targetShape),
-      proposal: scanned.proposal,
-    });
-  }
-
   return {
-    source: created.source,
+    source: persisted.source,
     outcome: {
       ...scanned.outcome,
-      sourceId: created.source.id,
+      sourceId: persisted.source.id,
       reason: scanned.reason || scanned.outcome?.reason || null,
     },
     chunks: scanned.chunks || [],
-    state: deepIngestStateGet({ repoRoot, env }),
-    ...(proposal ? { proposal } : {}),
+    ...(persisted.proposal ? { proposal: persisted.proposal } : {}),
     ...(scanned.manualFallback ? { manualFallback: scanned.manualFallback } : {}),
     ...(scanned.gap ? { gap: scanned.gap } : {}),
     ...(scanned.deferred ? { deferred: scanned.deferred } : {}),
     ...(scanned.notAvailable ? { notAvailable: scanned.notAvailable } : {}),
     ...(scanned.error ? { error: scanned.error } : {}),
+    replacedArtifactPath: persisted.replacedArtifactPath,
   };
 }

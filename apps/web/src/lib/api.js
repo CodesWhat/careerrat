@@ -4,14 +4,7 @@
 // cross-page cache invalidation need (see the M7 design memo §4). Every
 // Settings read/write funnels through the named functions below rather than
 // a raw fetch() scattered through components. The backend keeps these route
-// names stable while writing SQLite in DB mode and YAML only as a legacy
-// compatibility export.
-import {
-  isStaticPreviewApi,
-  staticPreviewApiFetch,
-  staticPreviewResumeSeed,
-} from "../preview/staticPreviewApi.js";
-
+// names stable while writing the canonical local database.
 export class ApiError extends Error {
   constructor(status, body) {
     super(`request failed with status ${status}`);
@@ -53,8 +46,6 @@ function refreshCapabilityCookie() {
 }
 
 async function apiFetch(path, options = {}, { retried = false } = {}) {
-  if (isStaticPreviewApi()) return staticPreviewApiFetch(path, options);
-
   const res = await fetch(path, {
     ...options,
     headers: {
@@ -85,10 +76,48 @@ async function apiFetch(path, options = {}, { retried = false } = {}) {
   return body;
 }
 
-// Exported (not just used internally below) so the ask bar (app-shell/AskBar.jsx)
-// can commit whatever typed intent POST /api/workspace/preview classified a
-// free-text query into, the same way every typed button action in this file
-// already does — see workspace-agent-route.mjs's own contract.
+async function apiBinaryFetch(path, options = {}, { retried = false } = {}) {
+  const res = await fetch(path, {
+    ...options,
+    headers: {
+      "content-type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let body = {};
+    if (text) {
+      try {
+        body = JSON.parse(text);
+      } catch {
+        body = { raw: text };
+      }
+    }
+    if (!retried && isCapabilityCredentialError(res.status, body)) {
+      await refreshCapabilityCookie();
+      return apiBinaryFetch(path, options, { retried: true });
+    }
+    throw new ApiError(res.status, body);
+  }
+  const blob = await res.blob();
+  const signature = new TextDecoder().decode(await blob.slice(0, 5).arrayBuffer());
+  if (signature !== "%PDF-") {
+    throw new ApiError(502, { error: "dossier export returned invalid PDF bytes" });
+  }
+  const disposition = res.headers.get("content-disposition") || "";
+  const filename = disposition.match(/filename="([^"]+)"/i)?.[1] || "interview-dossier.pdf";
+  const encodedPath = res.headers.get("x-careerrat-artifact-path") || "";
+  let artifactPath = "";
+  try {
+    artifactPath = decodeURIComponent(encodedPath);
+  } catch {
+    artifactPath = "";
+  }
+  return { blob, filename, path: artifactPath };
+}
+
+// Commits a typed workspace intent classified from a free-text query.
 export function runWorkspaceIntent(type, entity, input = {}) {
   return apiFetch("/api/workspace/intent", {
     method: "POST",
@@ -97,21 +126,17 @@ export function runWorkspaceIntent(type, entity, input = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// W3 — the shell-docked ask bar (app-shell/AskBar.jsx). Same
-// src/cli/workspace-agent-route.mjs surface runWorkspaceIntent above already
-// wraps, plus the two routes that had no frontend caller before this build:
-// the free-text agent turn and the classify-only preview.
+// Free-text workspace turns and classify-only previews.
 // ---------------------------------------------------------------------------
 
 // POST /api/workspace/message — runWorkspaceAgentTurn. Committing the ANSWER
 // row: appends `text` to the one durable workspace thread and returns the
 // assistant's reply already appended (see workspace-agent.mjs's own
-// contract) — no separate poll needed to see the reply, though the ask bar
-// still polls getWorkspaceThread while an ACTION intent is in flight.
-export function sendWorkspaceMessage(text) {
+// contract) — no separate poll is needed to see the reply.
+export function sendWorkspaceMessage(text, context) {
   return apiFetch("/api/workspace/message", {
     method: "POST",
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, ...(context ? { context } : {}) }),
   });
 }
 
@@ -123,14 +148,6 @@ export function previewWorkspaceQuery(text, context) {
     method: "POST",
     body: JSON.stringify({ text, ...(context ? { context } : {}) }),
   });
-}
-
-// GET /api/workspace/thread — the same durable thread every workspace route
-// above appends to. The ask bar polls this while an ACTION intent runs in
-// the background (non-streaming — see workspace-agent-route.mjs's own
-// header comment on why this stays a poll rather than SSE).
-export function getWorkspaceThread() {
-  return apiFetch("/api/workspace/thread");
 }
 
 export function getOnboardState() {
@@ -155,8 +172,11 @@ export function finishOnboarding() {
   });
 }
 
-export function getAiSettings() {
-  return apiFetch("/api/settings/ai");
+export function setPublicSyncPreference(enabled) {
+  return apiFetch("/api/onboard/public-sync-preference", {
+    method: "POST",
+    body: JSON.stringify({ enabled }),
+  });
 }
 
 export function getInstalledAiRuntimes() {
@@ -165,6 +185,13 @@ export function getInstalledAiRuntimes() {
 
 export function getAutomationSettings() {
   return apiFetch("/api/settings/automation");
+}
+
+export function setAutomationSessionProvider(provider) {
+  return apiFetch("/api/settings/automation/session", {
+    method: "POST",
+    body: JSON.stringify({ provider }),
+  });
 }
 
 export function probeInstalledAiRuntime(runtimeId) {
@@ -185,58 +212,6 @@ export function selectInstalledAiRuntime({ runtimeId, providerFallback = false }
   return apiFetch("/api/settings/ai-runtime/select", {
     method: "POST",
     body: JSON.stringify({ runtimeId, providerFallback }),
-  });
-}
-
-// W4 onboarding 3d/3f "Custom command" — any text-in/text-out command works.
-// /custom/test never persists anything (the "Test" button); /custom/select
-// persists it as the active runtime (runtimeId "custom").
-export function testCustomAiRuntime(command) {
-  return apiFetch("/api/settings/ai-runtime/custom/test", {
-    method: "POST",
-    body: JSON.stringify({ command }),
-  });
-}
-
-export function selectCustomAiRuntime(command) {
-  return apiFetch("/api/settings/ai-runtime/custom/select", {
-    method: "POST",
-    body: JSON.stringify({ command }),
-  });
-}
-
-// POST /api/hosted-interest — the W4 engine picker's hosted "CareerRat AI"
-// card. REQUEST ACCESS transforms in place into an inline email capture;
-// this call only fires once that email passes the client's own shape check,
-// carrying the address the server records alongside requested_at (see
-// hosted-interest-route.mjs for its own re-check and for where this
-// eventually forwards to EmailOctopus/PostHog once credentials exist). Not
-// an engine selection — nothing here touches the installed-runtime
-// selection file.
-export function requestHostedInterest(email) {
-  return apiFetch("/api/hosted-interest", {
-    method: "POST",
-    body: JSON.stringify({ email }),
-  });
-}
-
-export function getUsageSummary() {
-  return apiFetch("/api/settings/usage");
-}
-
-export function validateAndSaveAiKey(apiKey, { provider = "anthropic" } = {}) {
-  return apiFetch("/api/settings/ai-key/validate", {
-    method: "POST",
-    body: JSON.stringify({ apiKey, provider }),
-  });
-}
-
-// Tests a key that's already saved (as opposed to validateAndSaveAiKey, which
-// checks one just typed), so Settings can offer a "test saved key" action.
-export function checkAiKey({ provider = "anthropic" } = {}) {
-  return apiFetch("/api/settings/ai-key/check", {
-    method: "POST",
-    body: JSON.stringify({ provider }),
   });
 }
 
@@ -284,8 +259,6 @@ export function parseResumeText(text, { save = true } = {}) {
 // On success this unwraps the shared bounded-AI body.data envelope so
 // ResumeStep.applySeed() still receives the original seed object shape.
 export async function extractResumeAi(file) {
-  if (isStaticPreviewApi()) return staticPreviewResumeSeed(file?.name);
-
   const res = await fetch(`/api/onboard/resume-ai?name=${encodeURIComponent(file.name)}`, {
     method: "POST",
     body: file,
@@ -358,10 +331,6 @@ async function parseSseStream(body, { onEvent } = {}) {
 // no streaming route at all and throws immediately below rather than faking
 // an SSE sequence.
 export async function streamResumeAi(file, { onEvent, signal } = {}) {
-  if (isStaticPreviewApi()) {
-    throw new ApiError(501, { error: "resume-ai-stream is unavailable in static preview" });
-  }
-
   const res = await fetch(`/api/onboard/resume-ai-stream?name=${encodeURIComponent(file.name)}`, {
     method: "POST",
     body: file,
@@ -395,10 +364,6 @@ export async function streamResumeAi(file, { onEvent, signal } = {}) {
 // the API's standard error shape. Static preview has no run route at all —
 // same immediate-throw contract as streamResumeAi above.
 export async function runAiWebSearchStream({ onEvent, promptIds, signal } = {}) {
-  if (isStaticPreviewApi()) {
-    throw new ApiError(501, { error: "ai-web-search run is unavailable in static preview" });
-  }
-
   const res = await fetch("/api/search/ai-web-search/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -422,8 +387,6 @@ export async function runAiWebSearchStream({ onEvent, promptIds, signal } = {}) 
 }
 
 export async function extractResumeDocx(file) {
-  if (isStaticPreviewApi()) return staticPreviewResumeSeed(file?.name);
-
   const res = await fetch(`/api/onboard/resume-docx?name=${encodeURIComponent(file.name)}`, {
     method: "POST",
     body: file,
@@ -448,6 +411,13 @@ export function saveEvidenceSeed(claims) {
   });
 }
 
+export function replaceEvidenceClaims(claims) {
+  return apiFetch("/api/onboard/candidate/evidence/replace", {
+    method: "POST",
+    body: JSON.stringify({ claims }),
+  });
+}
+
 // POST /api/onboard/candidate/evidence/remove — delete exactly one evidence
 // claim by id (Library drawer's Delete affordance for evidence-kind cards).
 // Editing an existing claim reuses saveCandidateFile("evidence", {claims}) —
@@ -465,10 +435,6 @@ export function getSourcingRun({ purpose } = {}) {
   if (purpose) params.set("purpose", purpose);
   const query = params.toString();
   return apiFetch(`/api/sourcing/runs/latest${query ? `?${query}` : ""}`);
-}
-
-export function getSearchSources() {
-  return apiFetch("/api/search/sources", { method: "GET" });
 }
 
 // AI search-assistant prompts (src/cli/search-route.mjs) — generate-first:
@@ -504,47 +470,10 @@ export function startSearchRun(payload = {}) {
   });
 }
 
-// Lets a reload mid-discovery pick up where the candidate left off, instead of
-// resetting to the pre-discovery CTA.
-export function getDiscoveryState() {
-  return apiFetch("/api/discovery/state");
-}
-
-export function getRuntimeConfig() {
-  return apiFetch("/api/runtime/config");
-}
-
 export function createCompanyProposals(payload = {}) {
   return apiFetch("/api/discovery/company-proposals", {
     method: "POST",
     body: JSON.stringify(payload),
-  });
-}
-
-export function getCompanyProposals({ status } = {}) {
-  const query = status ? `?status=${encodeURIComponent(status)}` : "";
-  return apiFetch(`/api/discovery/company-proposals${query}`);
-}
-
-export function decideCompanyProposal(payload = {}) {
-  return apiFetch("/api/discovery/company-proposal-decisions", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-export function startDiscoveryQuickStart() {
-  return apiFetch("/api/discovery/quick-start", { method: "POST" });
-}
-
-export function startDiscoveryNext() {
-  return apiFetch("/api/discovery/next", { method: "POST" });
-}
-
-export function completeDiscoveryStep(step) {
-  return apiFetch("/api/discovery/complete", {
-    method: "POST",
-    body: JSON.stringify({ step }),
   });
 }
 
@@ -567,21 +496,6 @@ export async function suggestAssist(kind, input) {
   };
 }
 
-// Not a fetch wrapper — GET /api/logos/img?domain= is meant to be used
-// directly as an <img src>, so the caller gets a URL string to hand to the
-// DOM (which does its own onerror-based fallback to an initials chip on a
-// 404/miss), not a fetch()+JSON round trip.
-export function logoImageUrl(input) {
-  const source = input && typeof input === "object" ? input : { domain: input };
-  const parts = [];
-  const domain = String(source.domain || "").trim();
-  const name = String(source.name || "").trim();
-  if (domain) parts.push(`domain=${encodeURIComponent(domain)}`);
-  if (name) parts.push(`name=${encodeURIComponent(name)}`);
-  parts.push("fallback=initials");
-  return `/api/logos/img?${parts.join("&")}`;
-}
-
 export function addBoard({ url, label }) {
   return apiFetch("/api/boards/add", {
     method: "POST",
@@ -593,47 +507,9 @@ export function getSourceMaintenance() {
   return apiFetch("/api/boards/sources");
 }
 
-export function addSearchQuery({ query, label, provider = "HiringCafe" }) {
-  return apiFetch("/api/boards/search/add", {
-    method: "POST",
-    body: JSON.stringify({ query, label, provider }),
-  });
-}
-
-export function updateSearchSource({ index, label, target, enabled }) {
-  return apiFetch("/api/boards/search/update", {
-    method: "POST",
-    body: JSON.stringify({ index, label, target, enabled }),
-  });
-}
-
-export function removeSearchSource(index) {
-  return apiFetch("/api/boards/search/remove", {
-    method: "POST",
-    body: JSON.stringify({ index }),
-  });
-}
-
-export function saveCompanyBoard({ originalName, name, url, provider, enabled = true }) {
-  return apiFetch("/api/boards/company/save", {
-    method: "POST",
-    body: JSON.stringify({ originalName, name, url, provider, enabled }),
-  });
-}
-
-export function removeCompanyBoard(name) {
-  return apiFetch("/api/boards/company/remove", {
-    method: "POST",
-    body: JSON.stringify({ name }),
-  });
-}
-
 // ---------------------------------------------------------------------------
-// Chat runtime (src/cli/chat-route.mjs) — the Companies step's "Find
-// companies" panel drives discover-companies through this exact
-// surface. GET /api/chat/events is intentionally NOT wrapped here: it's a
-// plain GET SSE stream, consumed directly via useEventSource
-// (../lib/sse.js), same convention as that file's own header comment.
+// First-run chat runtime (src/cli/chat-route.mjs). GET /api/chat/events is a
+// plain GET SSE stream consumed directly via useEventSource (../lib/sse.js).
 // ---------------------------------------------------------------------------
 
 export function startChat(skill, input) {
@@ -650,10 +526,17 @@ export function sendChatMessage(chatId, text) {
   });
 }
 
-export function closeChat(chatId) {
-  return apiFetch("/api/chat/close", {
+export function recordSkillChatDecision(decision) {
+  return apiFetch("/api/chat/decision", {
     method: "POST",
-    body: JSON.stringify({ chatId }),
+    body: JSON.stringify(decision || {}),
+  });
+}
+
+export function completeDiscovery(step) {
+  return apiFetch("/api/discovery/complete", {
+    method: "POST",
+    body: JSON.stringify({ step }),
   });
 }
 
@@ -662,94 +545,7 @@ export function findChatBySkill(skill) {
 }
 
 // ---------------------------------------------------------------------------
-// M9 — Universal Intake (src/cli/intake-route.mjs). Capture + classify never
-// touch domain data (see that route file's own header comment) — only
-// POST /api/intake/confirm may dispatch a verb call / skill run / chat
-// handoff, and every intake verb's own state machine is fail-closed 409 on a
-// legacy (no-DB) workspace, same NO_DATABASE contract as every /api/data/*
-// route. `createIntake`'s response already carries the FULL classify result
-// (kind, entities, trackerMatch, dispatch) — the create call is awaited
-// server-side end to end, not a "submitted, poll for it" shape.
-// ---------------------------------------------------------------------------
-
-// `inputKind` is optional — server-side detectInputKind() infers "url" vs
-// "text" from the raw string when omitted; the docked capture bar never
-// needs to guess this itself.
-export function createIntake({ text, inputKind, requestedAction } = {}) {
-  return apiFetch("/api/intake", {
-    method: "POST",
-    body: JSON.stringify({
-      text,
-      ...(inputKind ? { inputKind } : {}),
-      ...(requestedAction ? { requestedAction } : {}),
-    }),
-  });
-}
-
-export async function uploadIntakeFile(file, { requestedAction } = {}) {
-  const params = new URLSearchParams({ name: file.name });
-  if (requestedAction) params.set("requestedAction", requestedAction);
-  const res = await fetch(`/api/intake/upload?${params.toString()}`, {
-    method: "POST",
-    body: file,
-  });
-  const text = await res.text();
-  let body = {};
-  if (text) {
-    try {
-      body = JSON.parse(text);
-    } catch {
-      body = { raw: text };
-    }
-  }
-  if (!res.ok) throw new ApiError(res.status, body);
-  return body;
-}
-
-export function listIntake({ status, limit } = {}) {
-  const params = new URLSearchParams();
-  if (status) params.set("status", status);
-  if (limit) params.set("limit", String(limit));
-  const qs = params.toString();
-  return apiFetch(`/api/intake/list${qs ? `?${qs}` : ""}`);
-}
-
-// Re-runs classification from scratch on the item's original raw_input —
-// allowed by the server from "captured"/"classifying"/"proposed"/"needs_you"/
-// "error" (see intake-route.mjs's RECLASSIFIABLE_STATUSES); a 409 means the
-// item has already moved past that (confirmed/running/done/dismissed).
-export function reclassifyIntake(id) {
-  return apiFetch("/api/intake/classify", {
-    method: "POST",
-    body: JSON.stringify({ id }),
-  });
-}
-
-// The ONLY call in this file that can result in a domain write / skill run /
-// chat session starting — see intake-route.mjs's own confirm handler. Only
-// legal from status "proposed"; a 409 means someone already decided this item.
-export function confirmIntake(id) {
-  return apiFetch("/api/intake/confirm", {
-    method: "POST",
-    body: JSON.stringify({ id }),
-  });
-}
-
-export function dismissIntake(id) {
-  return apiFetch("/api/intake/dismiss", {
-    method: "POST",
-    body: JSON.stringify({ id }),
-  });
-}
-
-// ---------------------------------------------------------------------------
-// M10 — the DB-served dashboard view model (src/cli/dashboard-route.mjs) and
-// the six drawer writes the Jobs/Calendar/Home surfaces ship (existing
-// src/cli/data-route.mjs verb routes — no new server surface). 409 NO_DATABASE
-// is the same fail-closed contract every /api/data/* route already uses; every
-// caller here is expected to catch ApiError and show the server's own hint
-// (see CaptureBar.jsx's describeCaptureError for the house pattern) rather
-// than inventing a second "no database" message.
+// Chat-first dashboard aggregate and retained typed workspace actions.
 // ---------------------------------------------------------------------------
 
 // GET /api/data/dashboard — one call, the whole server-derived view model
@@ -758,49 +554,6 @@ export function dismissIntake(id) {
 // M10 view renders this payload's fields directly (M10 design doc §2).
 export function getDashboard() {
   return apiFetch("/api/data/dashboard");
-}
-
-// GET /api/data/applications/one?id= — the RAW application row (not the
-// derived jobs.rows[] shape). The drawer's read-modify-write writes
-// (follow-up complete, note edit) need this: appSetFields is a shallow
-// one-level merge (verbs/app.mjs), so patching a nested sub-object
-// (followUp, roleFit) from anything less than the FULL current sub-object
-// silently drops sibling keys not named in the patch.
-export function getApplication(id) {
-  return apiFetch(`/api/data/applications/one?id=${encodeURIComponent(id)}`);
-}
-
-// GET /api/data/communications — the raw list, no server-side
-// ?applicationId= filter exists (data-route.mjs only filters applications by
-// status/company). Callers filter client-side by applicationId — fine at
-// this repo's single-user, hundreds-of-rows scale (M10 design doc §2).
-export function getCommunications() {
-  return apiFetch("/api/data/communications");
-}
-
-// POST /api/data/relationship/lead-status — the relationship domain verb
-// atomically decides the lead, updates its owning application CTA/history,
-// appends Activity, and exports the refreshed dashboard snapshot.
-export function setRelationshipLeadStatus({ id, status, dueAt, note } = {}) {
-  return apiFetch("/api/data/relationship/lead-status", {
-    method: "POST",
-    body: JSON.stringify({
-      id,
-      status,
-      ...(dueAt ? { dueAt } : {}),
-      ...(note ? { note } : {}),
-    }),
-  });
-}
-
-// Merge helper for the appSetFields shallow-merge trap above: read the
-// app's CURRENT sub-object (or {} if absent), overlay `updates`, and hand the
-// FULL merged object back to the caller to send as the patch value — never
-// send a bare partial for an object-typed field.
-export function mergeNestedField(app, field, updates) {
-  const current = app?.[field];
-  const base = current && typeof current === "object" && !Array.isArray(current) ? current : {};
-  return { ...base, ...updates };
 }
 
 // Visible status changes belong to the one durable workspace agent. The
@@ -830,16 +583,7 @@ export function recordExternalApplication({ id, appliedAt } = {}) {
 }
 
 export function applyOnSite({ id } = {}) {
-  return runWorkspaceIntent("job.apply", { type: "application", id });
-}
-
-// POST /api/data/app/fields — appSetFields verb (shallow one-level merge
-// server-side; see mergeNestedField above for the object-field trap).
-export function setAppFields({ id, patch } = {}) {
-  return apiFetch("/api/data/app/fields", {
-    method: "POST",
-    body: JSON.stringify({ id, patch }),
-  });
+  return runWorkspaceIntent("job.prepare-submit", { type: "application", id });
 }
 
 // POST /api/data/app/interview — appScheduleInterview verb. A second call
@@ -854,19 +598,6 @@ export function scheduleInterview({ id, at, round, note } = {}) {
       at,
       round,
       note,
-    }
-  );
-}
-
-// POST /api/data/comm/message — commAppendMessage verb ("add a note to the
-// thread" affordance; `message.direction` is "note" for a plain drawer note).
-export function appendCommMessage({ id, message } = {}) {
-  return runWorkspaceIntent(
-    "communication.add-note",
-    { type: "communication", id },
-    {
-      summary: message?.summary,
-      at: message?.at,
     }
   );
 }
@@ -913,116 +644,10 @@ export function setSourcedStatus({ id, to, note } = {}) {
   );
 }
 
-// GET /api/data/applications — the raw applications[] rows (not the derived
-// dashboard.jobs.rows shape). Used to read back fields dashboard-data.js
-// never maps through to the derived row (e.g. packetGate, stamped by
-// PacketGateCard's setAppFields call) — see useApplicationGates.js.
-export function getApplications() {
-  return apiFetch("/api/data/applications");
-}
-
 // ---------------------------------------------------------------------------
-// Ask research trio (research-company / research-comp / company-health
-// skills) — the same runWorkspaceIntent surface every other typed Ask action
-// above already goes through. Each starts (or resumes) a live workspace chat
-// behind a research_chat artifact. COMPANY_NOT_FOUND/COMPANY_AMBIGUOUS/
-// COMPANY_NOT_TRACKED/RESEARCH_COMP_INPUT_REQUIRED map to plain-language
-// copy in errorCopy.js.
+// Chat-first packet reads and exports. POST /api/packet/export wraps its
+// payload as {ok, data}; GET /api/packet returns the packet object directly.
 // ---------------------------------------------------------------------------
-
-// research.company/research.comp have no row to scope to (the company/role
-// they act on is free text in `input`, resolved server-side against saved
-// jobs), so — same as every other free-text workspace action (search.run,
-// source.discover, company.discover) — they use the workspace thread itself
-// as their entity, not a real row id. Exported so callers outside this file
-// (e.g. DashboardPage.jsx's strategy-review CTA, which hands a hand-built
-// intent to ask-events.js's requestAskAction rather than fetching directly)
-// can build the same intent shape without redeclaring the literal.
-export const WORKSPACE_ENTITY = { type: "workspace", id: "workspace-main" };
-
-// research.record / company.health-record — the confirm-first write bridge
-// for an embedded research-company/research-comp/company-health chat
-// session. CHAT_RUNTIME_TOOLS has no Bash, so those sessions can never shell
-// out to `careerrat research record`/`careerrat health record`; instead the
-// skill emits its finished result as a typed `careerrat:discovery` block
-// (see ChatPanel.jsx's *_result handling) and the confirm control calls one
-// of these two functions, which perform the actual write server-side
-// through the same research-store/company-health guards the CLI path used.
-export function recordResearch({ type, name, slug, markdown } = {}) {
-  return runWorkspaceIntent("research.record", WORKSPACE_ENTITY, {
-    type,
-    name,
-    ...(slug ? { slug } : {}),
-    markdown,
-  });
-}
-
-export function recordCompanyHealth({ targetType, targetId, company, companyHealth } = {}) {
-  return runWorkspaceIntent(
-    "company.health-record",
-    { type: targetType, id: targetId },
-    { ...(company ? { company } : {}), companyHealth }
-  );
-}
-
-// coach-gaps skill (src/core/coaching/plan.mjs) — the Jobs drawer's Coaching
-// panel. runCoachingPlan is the explicit "Coach me on this fit" click;
-// saveCoachingEvidence confirms one gap's evidence-claim draft, routing it
-// through the evidence firewall server-side (coaching.evidence-save)
-// before flipping that gap's status to "closed". Skipping a gap (status
-// "dismissed") is a plain field patch, not a typed intent — see
-// setAppFields below.
-export function runCoachingPlan({ applicationId } = {}) {
-  return runWorkspaceIntent("coaching.plan", { type: "application", id: applicationId });
-}
-
-export function saveCoachingEvidence({ applicationId, gapId, draftClaim } = {}) {
-  return runWorkspaceIntent(
-    "coaching.evidence-save",
-    { type: "application", id: applicationId },
-    { gapId, ...(draftClaim ? { draftClaim } : {}) }
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Packet engine (src/cli/packet-route.mjs) — the Jobs drawer's Evaluate/
-// Documents sections. Every route here already existed and is already
-// mounted; this file only adds thin client wrappers, same convention as
-// every other section above. NOTE the response-shape split: the POST routes
-// (gate/generate/export) wrap their payload as {ok, data}, but GET /api/packet
-// returns its object directly (no {ok,data} envelope) — see packet-route.mjs.
-// ---------------------------------------------------------------------------
-
-// POST /api/packet/gate — evaluatePacketGate. Body is applicationId-keyed;
-// `jobBody`/`jobUrl` are optional overrides (evaluatePacketGate reads the
-// already-captured JD off the application's artifacts.jd by default — see
-// the JD-body capture invariant in AGENTS.md — so a normal call only needs
-// applicationId). The route atomically persists the returned typed evaluation
-// and its list/drawer projections before responding.
-export function runPacketGate({ applicationId, jobBody, jobUrl } = {}) {
-  return apiFetch("/api/packet/gate", {
-    method: "POST",
-    body: JSON.stringify({ applicationId, jobBody, jobUrl }),
-  });
-}
-
-export function capturePacketQuestions({ applicationId, source, manualText, url } = {}) {
-  return apiFetch("/api/packet/questions", {
-    method: "POST",
-    body: JSON.stringify({ applicationId, source, manualText, url }),
-  });
-}
-
-// POST /api/packet/generate — generatePacket. Apply-intent calls capture public
-// questions first or use Ask's paste-and-resume question surface; a request with
-// no captured questions throws
-// BAD_QUESTION_CAPTURE, surfaced as an ordinary ApiError.
-export function generatePacketDocuments({ applicationId, applyIntent, formats } = {}) {
-  return apiFetch("/api/packet/generate", {
-    method: "POST",
-    body: JSON.stringify({ applicationId, applyIntent, formats }),
-  });
-}
 
 // POST /api/packet/export — exportPacketArtifacts. Renders the generated
 // markdown sources to real PDF/DOCX files under workspace/tailored/ and
@@ -1044,15 +669,8 @@ export function getPacket(id) {
 }
 
 // ---------------------------------------------------------------------------
-// Deep ingest workbench (src/cli/deep-ingest-route.mjs) — the six-endpoint
-// surface behind DeepIngestPage.jsx: state, source submit (paste/link JSON)
-// and upload (raw file bytes), a proposal build step, proposal decisions
-// (confirm/save edits/defer/mark not available/reject/reopen/retry), and lane
-// state writes. Every write mutates SQLite source/proposal/lane rows
-// directly (core/db/verbs/deep-ingest.mjs) and returns its own partial shape,
-// so DeepIngestPage always re-reads getDeepIngestState() after a write rather
-// than trying to merge a response into local state — this file stays a thin
-// fetch layer with no derived state of its own.
+// Chat-first deep ingest: state, source submit/upload, proposal build, and
+// proposal decisions. Each write is followed by a canonical state read.
 // ---------------------------------------------------------------------------
 
 // GET /api/deep-ingest/state — buildDeepIngestViewModel()'s full view model
@@ -1075,16 +693,8 @@ export function submitDeepIngestSource(payload = {}) {
   });
 }
 
-export function removeDeepIngestSource(payload = {}) {
-  return apiFetch("/api/deep-ingest/sources/remove", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-// POST /api/deep-ingest/sources/upload — same raw-bytes-as-body convention
-// as extractResumeAi/uploadIntakeFile above: targetShape and the filename
-// travel as query params, the File itself IS the request body.
+// POST /api/deep-ingest/sources/upload uses raw bytes as the body; targetShape
+// and the filename travel as query params.
 export async function uploadDeepIngestFile(file, { targetShape } = {}) {
   const params = new URLSearchParams();
   if (targetShape) params.set("targetShape", targetShape);
@@ -1132,44 +742,15 @@ export function decideDeepIngestProposal(payload = {}) {
   });
 }
 
-// POST /api/deep-ingest/lane-states — direct deepIngestLaneSetState write;
-// `reason` is required when `status` is "deferred" or "not_available".
-export function updateDeepIngestLaneState(payload = {}) {
-  return apiFetch("/api/deep-ingest/lane-states", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-// POST /api/deep-ingest/confirmed/update — { lane, id, ...fields } edits one
-// already-confirmed row in one of the four per-lane reference tables
-// (story_bank/honesty_boundaries/writing_voice/role_signals) — Library
-// drawer's Edit/Save affordance for story/voice/honesty/role_signal cards.
-// Re-runs the privacy guard only server-side, never grounding/quote-matching.
-export function updateDeepIngestConfirmedItem(payload = {}) {
-  return apiFetch("/api/deep-ingest/confirmed/update", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-// POST /api/deep-ingest/confirmed/remove — { lane, id } deletes exactly one
-// row from the matching per-lane reference table — Library drawer's Delete
-// affordance for story/voice/honesty/role_signal cards.
-export function removeDeepIngestConfirmedItem(payload = {}) {
-  return apiFetch("/api/deep-ingest/confirmed/remove", {
+export function upsertDeepIngestConfirmedItem(payload = {}) {
+  return apiFetch("/api/deep-ingest/confirmed/upsert", {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
 // ---------------------------------------------------------------------------
-// Jobs drawer follow-ups (ISSUE-030/ISSUE-035/ISSUE-038) — the JD-artifact
-// viewer, the interview-prep dossier builder/reader, and the AI-drafted
-// communication reply. Every route here already existed and is already
-// mounted (job-artifact-route.mjs, interview-prep-route.mjs,
-// workspace-agent.mjs's communication.draft intent) — same thin-wrapper
-// convention as every other section above.
+// Chat-first job artifacts and interview dossier reads.
 // ---------------------------------------------------------------------------
 
 // GET /api/jobs/job-description?source=application|sourced&id= —
@@ -1186,16 +767,6 @@ export function getJobDescription({ source, id } = {}) {
   );
 }
 
-// POST /api/interview-prep/build — buildInterviewDossier. AI-spend surface,
-// explicit-click only (never auto-fires on mount). Returns {ok, data:
-// {applicationId, dossier: {title, round, path, generatedAt, markdown}, ...}}.
-export function buildInterviewDossier({ applicationId, audience, inviteNotes, jobSignals } = {}) {
-  return apiFetch("/api/interview-prep/build", {
-    method: "POST",
-    body: JSON.stringify({ applicationId, audience, inviteNotes, jobSignals }),
-  });
-}
-
 // GET /api/interview-prep?id= — reads back app.artifacts.interviewDossier.
 // A dossier that has not been built yet is a console-clean 200 with
 // data.state:"missing" and dossier:null; callers render the Build action.
@@ -1203,11 +774,157 @@ export function getInterviewDossier(id) {
   return apiFetch(`/api/interview-prep?id=${encodeURIComponent(id || "")}`);
 }
 
-// POST /api/data/comm/message equivalent for AI drafting — communication.draft
-// verb (workspace-agent.mjs). AI-writes a reply and persists it as
-// comm.draft; ReadyToSendCard already renders any draft this produces, no
-// separate display wiring needed. `instruction` is optional — the agent
-// falls back to a sensible default when omitted.
-export function draftCommunication({ id, instruction } = {}) {
-  return runWorkspaceIntent("communication.draft", { type: "communication", id }, { instruction });
+// ---------------------------------------------------------------------------
+// Chat-first workspace. The aggregate read is included in
+// GET /api/data/dashboard as data.chatFirst so the page, decision queue, and
+// activity pill stay on one snapshot. These writes own only durable
+// conversation, mission, and mock-session state. Application submission is
+// intentionally absent: the final submit always belongs to the user.
+// ---------------------------------------------------------------------------
+
+export function pinJobThread({ applicationId, pinned = true } = {}) {
+  return apiFetch("/api/chat-first/job-thread/pin", {
+    method: "POST",
+    body: JSON.stringify({ applicationId, pinned }),
+  });
+}
+
+export function archiveJobThread({ applicationId, archived = true } = {}) {
+  return apiFetch("/api/chat-first/job-thread/archive", {
+    method: "POST",
+    body: JSON.stringify({ applicationId, archived }),
+  });
+}
+
+export function dismissTouchDue({ id, source } = {}) {
+  return apiFetch("/api/chat-first/touch-due/dismiss", {
+    method: "POST",
+    body: JSON.stringify({ id, source }),
+  });
+}
+
+export function dismissDeepIngestPrompt() {
+  return apiFetch("/api/chat-first/deep-ingest-prompt/dismiss", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export function openDeepIngestThread() {
+  return apiFetch("/api/chat-first/deep-ingest/open", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export function decideChatFirstSourced(payload = {}) {
+  return apiFetch("/api/chat-first/sourced/decision", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function appendJobThreadMessage({
+  applicationId,
+  role,
+  kind,
+  text,
+  metadata,
+  artifacts,
+} = {}) {
+  return apiFetch("/api/chat-first/job-thread/message", {
+    method: "POST",
+    body: JSON.stringify({ applicationId, role, kind, text, metadata, artifacts }),
+  });
+}
+
+export function sendJobThreadTurn({ applicationId, text } = {}) {
+  return apiFetch("/api/chat-first/job-thread/turn", {
+    method: "POST",
+    body: JSON.stringify({ applicationId, text }),
+  });
+}
+
+export function exportInterviewDossierPdf({ applicationId, artifactPath } = {}) {
+  return apiBinaryFetch("/api/chat-first/dossier/pdf", {
+    method: "POST",
+    body: JSON.stringify({ applicationId, artifactPath }),
+  });
+}
+
+export function createChatFirstMission(payload = {}) {
+  return apiFetch("/api/chat-first/missions", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function runChatFirstMission(id) {
+  return apiFetch("/api/chat-first/missions/run", {
+    method: "POST",
+    body: JSON.stringify({ id }),
+  });
+}
+
+export function resumeChatFirstMission(id) {
+  return apiFetch("/api/chat-first/missions/resume", {
+    method: "POST",
+    body: JSON.stringify({ id }),
+  });
+}
+
+export function setChatFirstMissionStatus({ id, status } = {}) {
+  return apiFetch("/api/chat-first/missions/status", {
+    method: "POST",
+    body: JSON.stringify({ id, status }),
+  });
+}
+
+export function setChatFirstMissionStepStatus({ missionId, stepId, status, result, error } = {}) {
+  return apiFetch("/api/chat-first/missions/step", {
+    method: "POST",
+    body: JSON.stringify({ missionId, stepId, status, result, error }),
+  });
+}
+
+export function startMockInterview({ applicationId, questionTotal, title, context } = {}) {
+  return apiFetch("/api/chat-first/mock/start", {
+    method: "POST",
+    body: JSON.stringify({ applicationId, questionTotal, title, context }),
+  });
+}
+
+export function sendMockInterviewMessage({
+  sessionId,
+  role,
+  kind,
+  questionNumber,
+  text,
+  metadata,
+} = {}) {
+  return apiFetch("/api/chat-first/mock/message", {
+    method: "POST",
+    body: JSON.stringify({ sessionId, role, kind, questionNumber, text, metadata }),
+  });
+}
+
+export function sendMockInterviewTurn({ sessionId, text } = {}) {
+  return apiFetch("/api/chat-first/mock/turn", {
+    method: "POST",
+    body: JSON.stringify({ sessionId, text }),
+  });
+}
+
+export function recordMockFeedback({ sessionId, messageId, questionNumber, worked, tighten } = {}) {
+  return apiFetch("/api/chat-first/mock/feedback", {
+    method: "POST",
+    body: JSON.stringify({ sessionId, messageId, questionNumber, worked, tighten }),
+  });
+}
+
+export function endMockInterview({ sessionId, summary } = {}) {
+  return apiFetch("/api/chat-first/mock/end", {
+    method: "POST",
+    body: JSON.stringify({ sessionId, summary }),
+  });
 }

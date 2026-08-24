@@ -30,8 +30,10 @@ export const WORKSPACE_INTENT_ENTITY_TYPES = Object.freeze({
   "job.tailor-request": ["workspace", "intake"],
   "job.generate-documents": ["application"],
   "job.export-documents": ["application"],
+  "job.prepare-submit": ["application"],
   "job.apply": ["application"],
   "screening.answer": ["workspace", "application"],
+  "screening.answer-confirm": ["application"],
   "screening.answer-save": ["candidate"],
   "application.record-external": ["application"],
   "application.record-external-request": ["workspace"],
@@ -363,14 +365,18 @@ function intentText(intent) {
     "interview.prepare-request": "Resolve and prepare this interview",
     "interview.schedule": "Schedule this interview",
     "interview.capture-context": "Capture this interview context",
+    "scheduling.prepare": "Prepare a scheduling reply",
+    "scheduling.prepare-request": "Resolve and prepare a scheduling reply",
     "job.evaluate": "Evaluate this job",
     "job.evaluate-request": "Capture and evaluate this job",
     "job.prepare-request": "Evaluate and prepare this application",
     "job.tailor-request": "Evaluate and tailor documents for this job",
     "job.generate-documents": "Generate tailored application documents",
     "job.export-documents": "Export packaged application documents",
+    "job.prepare-submit": "Prepare this application for your submission",
     "job.apply": "Apply on this site",
     "screening.answer": "Draft an evidence-backed screening answer",
+    "screening.answer-confirm": "Use this reviewed answer for the application",
     "screening.answer-save": "Save this reviewed answer for future applications",
     "application.record-external": "Record that I applied elsewhere",
     "application.record-external-request": "Resolve and record that I applied elsewhere",
@@ -418,10 +424,18 @@ function intentText(intent) {
     "status.record-portal": "Record this portal status",
     "status.apply-transition": "Apply this proposed status update",
     "calendar.record-write": "Record a calendar event you added",
+    "relationship.record-lead": "Save this reviewed relationship lead",
+    "relationship.source-request": "Find relationship leads for this company",
     "issue.report": "Prepare a redacted bug report",
     "issue.record-filed": "Record that I filed the issue",
   };
-  return `${descriptions[intent.type]} (${intent.entity.type}:${intent.entity.id}).`;
+  if (intent.type === "job.apply" && intent.input?.resumeSession === true) {
+    return "Resume supervised application.";
+  }
+  if (intent.type === "job.prepare-submit" && intent.input?.resumeSession === true) {
+    return "Resume supervised preparation.";
+  }
+  return `${descriptions[intent.type]}.`;
 }
 
 export function workspaceIntentAppend({ repoRoot, env = process.env, intent, now, id } = {}) {

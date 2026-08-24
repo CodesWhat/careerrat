@@ -33,6 +33,17 @@ test("completed discovery steps advance guidance without pretending they were sk
   );
 });
 
+test("a missing Claude skill shim does not override runtime-neutral agent guidance", () => {
+  const guidance = buildAgentGuidance({
+    skillsNotDiscoverable: ["research-boards"],
+    searchReadiness: { exists: true, valid: true, enabled: 3, withLastRun: 0 },
+    companyAtsReadiness: { valid: true, configured: false },
+  });
+
+  assert.equal(guidance.nextSkill, "research-boards");
+  assert.match(guidance.message, /Ask your agent to run research-boards next/);
+});
+
 test("discovery completion is durable and idempotent", () => {
   const root = mkdtempSync(join(tmpdir(), "careerrat-agent-guidance-"));
   roots.push(root);

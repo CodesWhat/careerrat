@@ -36,7 +36,7 @@ export function createConfiguredApplyExecutor({
 } = {}) {
   let provider = "extension";
   try {
-    const data = loadAutomationImpl({ root: repoRoot }).data;
+    const data = loadAutomationImpl({ root: repoRoot, env }).data;
     provider = resolveSession({ data, env }).provider;
   } catch {
     return null;
@@ -44,7 +44,7 @@ export function createConfiguredApplyExecutor({
   const createExecutor = EXECUTOR_FACTORIES[provider];
   if (!createExecutor) return null;
 
-  const execute = createExecutor({ repoRoot, env, ...options });
+  const execute = createExecutor({ repoRoot, env, loadAutomationImpl, ...options });
   return async (input) => {
     try {
       return await execute(input);

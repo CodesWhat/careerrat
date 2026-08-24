@@ -8,7 +8,7 @@ locally. AI requests go through the runtime the candidate selects and are subjec
 to that provider's privacy and retention terms.
 
 The active product direction is a conversational local app powered primarily by
-a supported AI CLI you already have installed and authenticated. Development and
+a boundary-verified AI CLI you already have installed and authenticated. Development and
 QA happen web-first for speed, and the same app now ships in the packaged Electron
 runtime. The macOS artifact is signed, notarized, stapled, and Gatekeeper-approved.
 A managed AI service may return later as an optional convenience, but login,
@@ -33,7 +33,7 @@ nurse, a driver, and an engineer each bring their own config.
   liveness-check, and produce a gated intake queue with a coarse triage fit.
   `doctor` and the source CLIs now surface whether broad searches, board discovery,
   company discovery, and the first job sweep have actually run; `careerrat next`
-  and the dashboard's Next agent task card point the agent at the next skill.
+  and the main conversation point the agent at the next useful skill.
 - **Body-read gate** (`evaluate-job`) — a standalone gate that reads the full
   posting and emits a `GATE` / `FIT` / `COMP` / `ACTION` verdict from your config.
   `apply-job` must run or verify it first.
@@ -43,16 +43,15 @@ nurse, a driver, and an engineer each bring their own config.
 - **Communication memory** (`email-comms`) — draft and track recruiter threads,
   follow-ups, scheduling, and negotiation without re-pasting history. Draft-only
   by default; sending requires explicit confirmation.
-- **Tracker & analytics** — a local app backed by canonical SQLite state: stat
-  cards, a funnel, an **Active Pipeline organized by a
-  semantic stage ladder** (Sourced → Applied → Screen → Interview → Final → Offer
-  → Accepted, with your raw status labels preserved), an All-Jobs table,
-  per-job detail view, and follow-up reminders. Plus outcome analysis.
+- **Tracker & analytics**: a local app backed by canonical SQLite state, with a
+  searchable Pipeline organized by the semantic stage ladder (Sourced → Applied
+  → Screen → Interview → Final → Offer → Accepted), durable job conversations,
+  follow-up reminders, and outcome analysis.
 - **Interview prep** (`interview-prep`) — audience-segmented packets (recruiter /
   hiring manager / panel) grounded in your evidence, with do-not-overclaim
   guardrails. Comp/logistics scripts use only your target/minimum figures.
 - **Apply workflow engine** (`apply-job`) — portal form-fill recipes with a
-  manual-submit default; auto-submit is strictly opt-in, and the flow halts on
+  mandatory user-submit gate, and the flow halts on
   CAPTCHAs and unsupported auth prompts. With explicit `mail_access` consent, it
   can read one recent emailed verification code from any webmail provider and continue.
   The agent-led workflow and safety gates are shipped. Native Ask and Apply on site
@@ -74,9 +73,9 @@ nurse, a driver, and an engineer each bring their own config.
   a sample workspace. `restore` recovers
   `tracker.json` from a rolling point-in-time snapshot (confirm-first, backs up
   the current file first).
-- **Live-reload dashboard** (`careerrat tracker-dev`) — a dependency-free watch +
-  live-reload dev server: edit your tracker data or the dashboard itself and the
-  open page refreshes instantly.
+- **Live app server** (`careerrat tracker-dev`): serves the chat-first app and
+  pushes canonical tracker and activity changes into the open workspace as they
+  happen.
 - **Safe config write-back** (`careerrat gate`) — when you state a new gate mid-flow
   ("never that company", "$X floor", "don't claim that tool"), skills persist it to
   the right config file: comment-preserving, schema-validated, atomic, and
@@ -89,11 +88,9 @@ nurse, a driver, and an engineer each bring their own config.
   packets via the bundled headless Chromium (zero new runtime dependency), plus an
   opt-in `.docx` path that auto-detects pandoc/LibreOffice and otherwise falls back
   to a built-in writer (`careerrat export <file.md> --pdf [--docx]`).
-- **Dashboard themes + editorial refresh** — Tokyo Night and Gruvbox theme families
-  (light + dark) alongside the originals, plus a palette-independent editorial pass:
-  tabular figures, eyebrow section labels, a ruled editorial masthead with a
-  borderless metric band (no stat-card boxes), monospace metadata, lighter headings,
-  and crisper less-rounded cards.
+- **Chat-first visual system**: a fixed desktop workspace with a persistent thread
+  rail, centered conversation, contextual side panel, consistent ink selection,
+  compact controls, and shared color, spacing, type, icon, and shape variables.
 - **Per-track learning memory** (`careerrat learnings`) — durable, private lessons per
   role family. The skills that learn from outcomes (interview debriefs, rejection and
   win patterns, strategy reviews) append dated entries; the skills that produce
@@ -101,13 +98,10 @@ nurse, a driver, and an engineer each bring their own config.
   get sharper on each track the more you run it. Entries are checked for unresolved
   placeholders and refused if they would record a private comp input; everything stays
   in a gitignored local directory and never goes outbound.
-- **Paper Command Center dashboard pages** — the live dashboard now has a rounded,
-  SaaS-aligned command surface across the major tabs: Dashboard focus and metrics,
-  Jobs command rail with compact Table/Cards views, active filters, action icons,
-  Sankey funnel, and a slide-in job detail drawer; Calendar week board with
-  previous/next controls, month zoom, and dimmed past days; Network company
-  relationship map; Evidence Library; and a settings drawer for onboarding config,
-  modes, and automation posture.
+- **Durable conversation workspace**: job, recruiter, research, Deep ingest, and
+  mock-interview threads survive navigation and restart. Search, Pipeline, Files,
+  People, and Schedule stay available as focused browse surfaces beside the chat,
+  while resumable missions collapse multi-job work into one progress summary.
 - **Research loop** (`research-company`, `research-comp`, `research-boards`) — opt-in
   company research, comp benchmarking, and board discovery that persist cited,
   privacy-safe findings and feed evaluation and interview prep. A three-tier citation
@@ -130,8 +124,8 @@ nurse, a driver, and an engineer each bring their own config.
 - **Opt-in browser & mail automation** — session-based automation you switch on per
   capability, using your own browser login with no stored credentials: application-status
   sync (`sync-status`), authenticated search, in-platform message ingest
-  (`ingest-messages`), and authenticated one-click apply (LinkedIn Easy Apply, behind the
-  existing submit-safety gate), LinkedIn profile optimization, plus opt-in mail sync and
+  (`ingest-messages`), and authenticated supervised apply preparation (LinkedIn Easy Apply,
+  stopping at the existing user-submit gate), LinkedIn profile optimization, plus opt-in mail sync and
   `mail_access` for generic webmail / Gmail / Outlook. A per-capability, per-platform consent
   switchboard (`careerrat automation`) defaults fully off and stores nothing — nothing runs
   until you read a platform's terms, record consent, and enable it; every session is
@@ -199,14 +193,14 @@ nurse, a driver, and an engineer each bring their own config.
 - **Sourced-role triage & status lanes** — newly sourced roles, gate verdicts, and apply
   outcomes drive clear board states: roles that pass the gate stay as ready-to-pursue, gated
   roles archive off the active board (kept and recoverable), and an application the assistant
-  can't auto-submit (CAPTCHA, account wall, a required exercise) is surfaced as "manual apply
+  can't prepare a submission (CAPTCHA, account wall, a required exercise) is surfaced as "manual apply
   needed" rather than disappearing. A board-top triage banner counts what's waiting and prompts
   you to go through it with your agent.
-- **Dashboard strategy insights** — a local, read-only "what's working" card on the dashboard:
+- **Strategy insights**: local, read-only outcome analysis:
   source performance, role-lane performance, fit-band breakdown, quiet-pipeline rows, longest
   active time-in-stage rows, cadence nudges for due/overdue/no-next-touch follow-up, and one
-  strategy recommendation are computed from `workspace/tracker.json` so the tracker can show where
-  traction is actually coming from without duplicating the Jobs, Network, or Library tabs.
+  strategy recommendation are computed from canonical tracker state so CareerRat can explain where
+  traction is actually coming from without duplicating the Pipeline, People, or Files views.
 - **Deeper outcome learning** — Strategy insights now includes a compact outcome-learning
   layer: 30-day applied/advanced/interview/rejected trend cards, 30/60/90-day history,
   source and role-family learning signals, and a `#strategy-review` handoff that opens
@@ -247,34 +241,33 @@ nurse, a driver, and an engineer each bring their own config.
   or you use the `careerrat data` CLI: one write path, with the activity event, freshness stamp,
   and analytics refresh applied in a single transaction. Existing workspaces migrate only via an
   explicit `careerrat data import`; `tracker.json` remains a generated compatibility export.
-- **App UI** — a bundled single-page app (`/app`) over the local server with guided onboarding,
-  editable settings, AI-assisted proposals, and manual operation when no AI runtime is ready.
-  The existing wizard/forms are durable review and correction surfaces; the active redesign
-  makes conversation the primary first-run intake experience.
+- **App UI**: a bundled chat-first single-page app (`/app`) over the local server
+  with conversational onboarding, editable profile sections, visible skill and
+  research threads, and manual operation when no AI runtime is ready.
 
 - **Repository structure and hygiene** — product packages now live together under `apps/`
   (`web`, `desktop`, `website`, and `docs`), design-only landing-page mockups are retained under
   `.planning/archive/mockups`, shared fonts live under `assets/fonts`, and the monorepo uses one
   root lockfile and one Turbo build graph. Release guards reject the old root directories,
   app-local lockfiles, tracked generated Next wiring, and stale build-output paths.
-- **Universal capture** — a docked capture bar plus an Inbox: paste or drop anything (a job
-  description, a posting URL, a recruiter email, an interview transcript) and the intake
-  pipeline classifies it, matches it against what you're already tracking, and proposes exactly
-  what it will write or run — you confirm before anything happens. Recognized ATS links are
-  handled deterministically with no AI call at all, and ambiguity is surfaced, never guessed.
-- **App dashboard views** — home (focus card, pipeline snapshot, next steps), a Jobs view with
-  glanceable rows and a detail drawer whose actions write through the real domain verbs (status
-  changes, interview scheduling, follow-up completion, notes, communications), a week/month
-  calendar, and an activity feed, all rendered from one server-derived view model.
+- **Universal conversation intake**: paste or drop a résumé, job description,
+  posting URL, recruiter email, interview transcript, or other career material
+  into the conversation. The intake pipeline classifies it, matches it to durable
+  state, and explains any consequential write before it happens.
+- **Workspace browse views**: Search, Pipeline, Files, People, and Schedule expose
+  canonical state beside the conversation. Their actions write through the real
+  domain operations and route tool-heavy work back into a visible thread.
 - **Company logos everywhere** — a server-side logo proxy with a local cache (and optional
   brand-search autocomplete when a key is configured), with an initials fallback so nothing
   breaks offline or keyless.
-- **Desktop app shell** — an Electron wrapper around the same local server, so the whole thing
-  runs as a native window: first run lands in the onboarding wizard, external links open in
-  your OS browser, and quitting cleanly shuts down every agent session.
-- **Installed AI runtime first** — onboarding and Settings detect supported coding CLIs,
-  select an already-authenticated local tool, and run bounded structured calls without
-  copying its credentials or requiring a provider key. External capabilities stay off until
+- **Desktop app shell**: an Electron wrapper around the same local server, so the
+  whole thing runs in a fixed-size native window with full-screen support. First
+  run lands in the onboarding conversation, external links open in the OS
+  browser, and quitting cleanly shuts down every agent session.
+- **Installed AI runtime first** — onboarding and Settings detect the expanded coding-CLI
+  registry, select boundary-verified Claude Code 2.1.241 or newer for packaged skill/chat
+  runs, and show every other detected CLI as unsupported instead of pretending it is ready.
+  Terminal workspace-agent flows still support compatible outer agents. External capabilities stay off until
   a concrete action needs one, then the app explains and requests that specific permission.
   Direct provider keys and managed AI remain explicit fallbacks, and every AI feature still
   degrades to a manual path.
@@ -288,13 +281,13 @@ nurse, a driver, and an engineer each bring their own config.
   text and links.
 - **Calendar busy blocks** — externally-sourced busy windows have a proper owning write
   path, so scheduling can avoid double-booking in database-backed workspaces.
-- **Network and Library in the app** — company relationship records (contacts and
-  conversation history behind a detail drawer) and the full evidence/story/writing-voice
-  bank (uncapped, with type/lane/family filters and search) are now first-class app views.
+- **People and Files in the app**: company relationship records, contacts, and
+  conversation history live in People, while the evidence, story, writing-voice,
+  résumé, posting, and tailored-artifact banks live in Files.
   The retired static tracker has no product route or navigation affordance.
-- **Setup readiness on the home view** — while sourcing runs, the home view shows what's
-  still needed to unlock gating and applying (with per-item hints), and gets out of the way
-  once setup is complete.
+- **Setup readiness in the onboarding conversation**: the side panel shows what
+  is still needed to unlock gating and applying, with focused section editors for
+  corrections, then gets out of the way once setup is complete.
 - **Live chat activity lines** — while CareerRat works on a chat request, each step shows
   as a small activity line (an icon, a plain-language label like "Reading files: resume.pdf"
   or "Searching the web", and a spinner that settles when the step finishes) instead of the
@@ -310,24 +303,21 @@ nurse, a driver, and an engineer each bring their own config.
   a fictional demo candidate through the installed AI CLI, so malformed AI output is caught
   before it reaches a real job seeker mid-search.
 
-## Release status (v0.13.0, updated August 23, 2026)
+## Release status (v0.14.0, updated August 24, 2026)
 
-**v0.13.0 is the current release.** It closes the below-cut remainder from the
-v0.12 whole-app review (#180, fixed by #197), fixes the regressions a fresh full-surface UX
-audit confirmed, led by the ask bar dock being invisible on phone-sized
-viewports (#198), rolls the vendored career-ops providers to the latest
-upstream pin and routes every outbound sweep request through the SSRF guard
-(#199), and adopts the four remaining deferred providers, bringing the
-implemented public inventory to 77 (#200). Since v0.11.0 the repo runs the strict flow:
-feature PRs land on the active dev branch (`dev/v0.13` for this cycle), `main`
+**v0.14.0 is the current release line.** It completes the chat-first desktop
+cutover: durable conversations replace the page-based dashboard, Search,
+Pipeline, Files, People, and Schedule provide focused browse surfaces, and
+missions, Deep ingest, research, and mock interviews remain resumable in their
+own threads. The complete skill catalog ships in the app, and supervised form
+automation stops before final Submit. Since v0.11.0 the repo runs the strict flow:
+feature PRs land on the active dev branch (`dev/v0.14` for this cycle), `main`
 advances only through a promotion merge immediately before each cut, and the tag
 fires the whole pipeline — `desktop-release.yml` builds, signs, notarizes, and
 uploads the DMG, publishing the release then fires `publish.yml` (npm) and the
 tap's own cask updater. `publish.yml` fires on a published GitHub Release, not
 on a tag push, so tagging alone is always safe. `CHANGELOG.md` at the repo root
-is the per-release record. The v0.12 cycle closed with a whole-app review pass:
-26 confirmed findings, the top 15 fixed across four lanes (#181 through #184),
-and the below-cut remainder closed by #197 in v0.13.0.
+is the per-release record.
 
 Version drift now has a guard. `tests/release-consistency.test.mjs` checks that
 `package.json`, `apps/desktop/package.json`, and the newest `CHANGELOG.md`
@@ -890,7 +880,7 @@ and DMG container, staples the ticket, and passes Gatekeeper.
 
 - **Global shell and workspace conversation** — navigation, setup gating, Ask on every route,
   durable history, attachments, cancel/retry, confirmation gates, activity notifications,
-  error recovery, reload/restart behavior, responsive layout, keyboard use, and light/dark themes.
+  error recovery, reload/restart behavior, fixed-window and full-screen layouts, and keyboard use.
 - **Onboarding** — installed-runtime selection; résumé PDF, DOCX, text, no-résumé, retry, and
   resume-later paths; progressive Paul notes; manual checklist escape hatch; completion truth;
   first search; and a clean restart at each checkpoint.
@@ -909,7 +899,7 @@ and DMG container, staples the ticket, and passes Gatekeeper.
 - **Settings** — candidate and targeting edits, runtimes, direct-provider fallback, automation
   consent, source maintenance, validation and recovery, persistence after restart, and honest
   descriptions of what each installed tool can do.
-- **Compatibility and release surfaces** — explicit retired-dashboard behavior, CLI
+- **Release surfaces** — explicit retired-dashboard behavior, CLI
   commands used by the app, docs and website links, npm-pack install smoke, packaged Electron
   navigation/filesystem/runtime ownership, quit/restart, and a clean-device first run.
 - **Failure matrix** — no AI route, runtime crash/timeout/schema failure, offline and partial network,
@@ -928,8 +918,9 @@ setup, first search, evaluation, packet generation, PDF export, local applied-st
 and the live dashboard. The repository cleanup and full automated gates below are part of the
 same release contract:
 
-- **Installed-runtime isolation** — run bounded Codex and Claude tasks without inheriting
-  unrelated global MCP failures; surface the actual CLI/runtime error and a working recovery path.
+- **Installed-runtime isolation** — run bounded Claude Code tasks without inheriting unrelated
+  server credentials or global MCP configuration; reject Codex and other unverified adapters
+  before a tool-bearing spawn, with the actual capability error and recovery path.
 - **Résumé intake matrix** — verify PDF, DOCX, text, retry, restart, and docked-upload recovery;
   failed retries must not create duplicate uploads.
 - **Plain-language permissions** — avoid implementation-mode choices. Ask for browser,

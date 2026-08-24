@@ -51,27 +51,57 @@ Before tagging a release:
 
 ### Desktop Release Pipeline
 
-Pushing a tag `vX.Y.Z` does the whole desktop release with no further human
-action: `.github/workflows/desktop-release.yml` builds the app, signs and
-notarizes the DMG, uploads it to that tag's GitHub release, and flips the
-release from draft to published. Three jobs, in order:
+The public trust rules for both platforms are in the
+[Code signing policy](CODE_SIGNING_POLICY.md). Windows install, privacy, removal,
+and Store-readiness details are in [Windows installation and release status](WINDOWS.md).
+
+Pushing a tag `vX.Y.Z` runs the whole desktop release:
+`.github/workflows/desktop-release.yml` builds the app, signs and notarizes the
+DMG, uploads it to that tag's GitHub release, and flips the release from draft
+to published. macOS is unattended after its one-time setup. An enabled Windows
+signing request waits for the required SignPath approval. The Windows lane
+builds and fully smokes an
+NSIS package too, but attaches it only after a valid SignPath Foundation
+Authenticode signature. Until Windows signing is approved and configured, that
+unsigned installer remains an Actions-only QA artifact. Five jobs enforce the
+order:
 
 1. **`resolve-tag`**, resolves and validates the `vX.Y.Z` tag once (from the
    push ref, or the newest tag by semver order on a dispatch) and threads it
-   to the other jobs, so no job ever splices an unvalidated ref into a
-   script.
-2. **`build-notarize-upload`** (`macos-14`), checks out the tag, refuses to
+   to the other jobs. It rejects lightweight or unsigned tags through GitHub's
+   tag API and requires the tagged commit to be reachable from protected `main`,
+   so no build starts without the reviewed, signed release boundary and no job
+   ever splices an unvalidated ref into a script.
+2. **`prepare-draft-release`**, creates or reuses exactly one draft for the tag.
+   It records that draft's immutable GitHub release id and fails closed if the
+   tag already has a published release.
+3. **`build-notarize-upload`** (`macos-15`, arm64), checks out the tag, refuses to
    build if the tag doesn't match `apps/desktop/package.json`'s version,
-   imports the signing identity into a keychain that outlives
-   electron-builder's own temporary one, then runs
-   `npm run desktop:release` (build, sign, notarize, staple,
-   Gatekeeper-verify, then `gh release upload`), creating the release as a
-   draft first if one doesn't already exist for the tag. Fails fast, before
-   any of that runs, if a required signing secret is missing.
-3. **`publish-release`**, confirms the `.dmg` landed on the release, then
-   `gh release edit "$tag" --draft=false`. This is the step that fires
-   `publish.yml` (npm publish) and `release-assets.yml` (the .dmg detector
-   below, which by now is a no-op since the asset is already there).
+   installs dependencies, and builds and stages the app before any signing
+   material exists. It then checks the required secrets, imports the signing
+   identity into a short-lived keychain, signs and notarizes the app and DMG,
+   and removes the API key, certificate, and keychain. Only after that cleanup
+   does it Gatekeeper-verify, launch the exact signed app for its PDF and
+   bundled-browser smoke, and upload the DMG.
+4. **`build-windows-upload`** (`windows-latest`, x64), checks out the same tag,
+   builds the NSIS installer with publishing forced off, then installs it and
+   runs the packaged app/PDF/bundled-Chromium smoke before uninstalling. The
+   unsigned installer is retained only as a labeled Actions artifact. When
+   SignPath is enabled, the job submits that artifact, requires a valid
+   Foundation Authenticode signer, repeats the installed smoke, writes its
+   SHA-256 file, and only then uploads both to the draft release. Immediately
+   before every macOS or Windows asset upload, the uploader resolves one exact
+   tag match again and requires both the prepared release id and `draft:true`.
+   Uploads do not replace an existing asset.
+5. **`publish-release`**, waits for both platform jobs, confirms the `.dmg`
+   landed, requires the `.exe` too when Windows signing reported success, then
+   publishes it and explicitly dispatches `publish.yml` (npm publish),
+   `release-assets.yml` (the .dmg detector below), and `sbom.yml`. GitHub
+   suppresses workflows triggered by events created with `GITHUB_TOKEN`, but
+   explicitly permits `workflow_dispatch`, so each dispatch is pinned to the
+   validated release tag after the release and DMG are both present. The job
+   waits for all three dispatched runs and fails if any one fails, so a green
+   desktop release means npm, the DMG check, and the SBOM all completed.
 
 The Homebrew cask is not updated from this repo. `CodesWhat/homebrew-tap`
 carries its own `update-careerrat-cask.yml` (cron plus manual dispatch) that
@@ -104,22 +134,52 @@ Settings → Secrets and variables → Actions UI):
 | `APPLE_API_KEY_ID` | The API key's Key ID | App Store Connect → Users and Access → Integrations → Team Keys |
 | `APPLE_API_ISSUER` | The API key's Issuer ID | Same Integrations page, above the key list |
 
-`build-notarize-upload`'s first real step checks all five secrets are set and
-fails with a clear list of what's missing rather than failing deep inside an
-electron-builder or notarytool error.
+After dependency installation and credential-free app staging,
+`build-notarize-upload` checks all five secrets and fails with a clear list of
+what's missing before it materializes any signing file or starts
+electron-builder or notarytool.
+
+Windows signing stays inert until SignPath Foundation approves the project and
+the SignPath organization is configured. After approval, configure these
+repository Actions values exactly as issued by SignPath:
+
+| Setting | Kind | Purpose |
+| --- | --- | --- |
+| `SIGNPATH_ENABLED` | Variable | Set to `true` only after every value below is live |
+| `SIGNPATH_ORGANIZATION_ID` | Variable | Approved SignPath organization id |
+| `SIGNPATH_PROJECT_SLUG` | Variable | Approved CareerRat project slug |
+| `SIGNPATH_ARTIFACT_CONFIGURATION_SLUG` | Variable | Approved NSIS artifact configuration |
+| `SIGNPATH_API_CREDENTIAL` | Secret | Credential used by the pinned SignPath GitHub action |
+
+The workflow uses the `release-signing` policy slug and waits for approval. Do
+not enable the variable before that policy, artifact configuration, roles, and
+MFA requirements in the [Code signing policy](CODE_SIGNING_POLICY.md) are in
+place. The artifact configuration must accept a GitHub ZIP artifact, enforce the
+CareerRat product name, and require the `version` parameter the workflow passes.
+The approval wait is one hour; a timed-out request fails the Windows release
+instead of publishing an unsigned substitute.
+
+The Foundation application and account acceptance are external identity and
+terms actions for an authorized CodesWhat owner. After approval, configure a
+separate CI submitter and human approver in SignPath, require one approver per
+release, link the CareerRat project to the GitHub.com trusted build system, and
+install the SignPath GitHub App for this repository if SignPath requires it.
+Keep `SIGNPATH_ENABLED` false until SignPath has issued and tested every value
+above. An unsigned `.exe` is never a manual substitute for this gate.
 
 #### Manual fallback: building and verifying locally
 
 1. Build the desktop artifact with `npm run desktop:dist`. The command signs and notarizes the app
-   and DMG container, staples the DMG ticket, and fails unless Gatekeeper verification passes.
+   and DMG container, staples the DMG ticket, and fails unless Gatekeeper verification and the
+   exact signed app's packaged smoke both pass.
 2. Confirm the output includes a signed and notarized macOS DMG.
 3. Verify signing and notarization evidence:
    - `codesign -dv --verbose=2 apps/desktop/dist/mac-arm64/CareerRat.app`
    - `xcrun stapler validate apps/desktop/dist/*.dmg`
    - `spctl --assess --type open --context context:primary-signature apps/desktop/dist/*.dmg`
 4. Run packaged smoke checks for a fresh workspace and an existing workspace.
-   Fresh workspace should open `/app/onboarding`; existing workspace should open
-   `/app`.
+   Both should open the chat-first shell at `/app`; the fresh workspace should
+   begin the conversational intake flow inside that shell.
 5. Verify the packaged app runs without the source checkout and writes user data
    under the packaged `CAREERRAT_HOME` data root, not inside signed resources.
 6. Confirm no Apple credentials, candidate data, workspace files, private paths,
@@ -145,12 +205,19 @@ tag="$(git describe --tags --exact-match)"
 1. Create the GitHub release as a **draft** first, from that tag:
    `gh release create "$tag" --draft --title "$tag" --generate-notes`.
 2. Run `npm run desktop:release` from the repo root. It builds, signs,
-   notarizes, staples, verifies (fails closed on Gatekeeper), and uploads the
+   notarizes, staples, verifies (fails closed on Gatekeeper and the exact signed
+   app smoke), and uploads the
    `.dmg` to the draft release via `gh release upload`.
 3. Confirm the upload: `gh release view "$tag" --json assets` should list a
    `.dmg` whose name carries the version.
 4. Only then publish the release: `gh release edit "$tag" --draft=false`.
    This is the step that fires `publish.yml` and pushes to npm.
+
+`publish.yml` independently resolves that exact tag's GitHub Release and
+refuses to publish unless the release is public and already carries a
+version-matching `.dmg`. The same gate applies to a direct tag-pinned
+`workflow_dispatch`, so a manual retry cannot bypass signing and artifact
+publication order.
 
 The `release-assets` workflow checks every published release for a matching
 `.dmg` asset and fails loudly if one is missing. It runs alongside

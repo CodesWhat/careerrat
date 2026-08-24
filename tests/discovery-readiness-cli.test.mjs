@@ -136,6 +136,13 @@ test("doctor gives an agent-led next action for incomplete discovery", () => {
     assert.match(result.stdout, /CareerRat is agent-led/);
     assert.match(result.stdout, /Ask your agent to run research-boards next/);
     assert.match(result.stdout, /then discover-companies before search-jobs/);
+    // GitHub Actions runs from tracked files only, so the ignored Claude shim is
+    // absent there. It remains actionable diagnostics without replacing the
+    // runtime-neutral next-skill handoff or making doctor fail.
+    if (!existsSync(join(ROOT, ".claude/skills"))) {
+      assert.match(result.stdout, /Claude Code skill shim missing/);
+      assert.match(result.stdout, /careerrat install-skills/);
+    }
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

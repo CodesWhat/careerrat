@@ -36,11 +36,11 @@ function loadJson(rel) {
   return JSON.parse(readFileSync(join(root, rel), "utf8"));
 }
 
-const legacyAutomationText = `version: 1
+const automationTextWithoutSetupMode = `version: 1
 consent:
   linkedin: true
 capabilities:
-  one_click_apply:
+  authenticated_apply_preparation:
     enabled: true
     platforms:
       linkedin: true
@@ -62,6 +62,46 @@ test("automation consent: relationship_sourcing supports LinkedIn and Wellfound"
   assert.equal(CAPABILITIES.relationship_sourcing.label, "Relationship sourcing");
   assert.ok(PLATFORMS.includes("linkedin"));
   assert.ok(PLATFORMS.includes("wellfound"));
+});
+
+test("automation consent: supervised apply preparation replaces the removed one-click capability", () => {
+  assert.deepEqual(CAPABILITIES.authenticated_apply_preparation.platforms, ["linkedin"]);
+  assert.equal(
+    CAPABILITIES.authenticated_apply_preparation.label,
+    "Authenticated apply preparation"
+  );
+  assert.equal(Object.hasOwn(CAPABILITIES, "one_click_apply"), false);
+
+  const cfg = defaultAutomation();
+  cfg.setup_mode = "advanced";
+  cfg.capabilities.authenticated_apply_preparation.enabled = true;
+  cfg.capabilities.authenticated_apply_preparation.platforms.linkedin = true;
+  cfg.consent.linkedin = true;
+  assert.equal(
+    mayRun({
+      capability: "authenticated_apply_preparation",
+      platform: "linkedin",
+      data: cfg,
+    }).allowed,
+    true
+  );
+  const removed = mayRun({ capability: "one_click_apply", platform: "linkedin", data: cfg });
+  assert.equal(removed.allowed, false);
+  assert.match(removed.reasons.join(" "), /unknown capability/i);
+});
+
+test("automation schema rejects the removed one-click capability id", () => {
+  const schema = loadJson("config/automation.schema.json");
+  const result = validate(
+    {
+      capabilities: {
+        one_click_apply: { enabled: false, platforms: { linkedin: false } },
+      },
+    },
+    schema
+  );
+  assert.equal(result.valid, false);
+  assert.match(JSON.stringify(result.errors), /one_click_apply.*unexpected property/i);
 });
 
 test("automation consent: calendar_sync supports calendar providers and automation tools", () => {
@@ -181,10 +221,14 @@ test("Basic mode is a hard off switch and its patch revokes every capability, pl
 
 test("Basic mode blocks a malformed stale live matrix even before it is cleared", () => {
   const cfg = defaultAutomation();
-  cfg.capabilities.one_click_apply.enabled = true;
-  cfg.capabilities.one_click_apply.platforms.linkedin = true;
+  cfg.capabilities.authenticated_apply_preparation.enabled = true;
+  cfg.capabilities.authenticated_apply_preparation.platforms.linkedin = true;
   cfg.consent.linkedin = true;
-  const verdict = mayRun({ capability: "one_click_apply", platform: "linkedin", data: cfg });
+  const verdict = mayRun({
+    capability: "authenticated_apply_preparation",
+    platform: "linkedin",
+    data: cfg,
+  });
   assert.equal(verdict.allowed, false);
   assert.match(verdict.reasons.join(" "), /Basic mode/);
 });
@@ -206,6 +250,90 @@ test("automation consent: status exposes automatic browser setup and the effecti
   assert.equal(status.session.options[0].id, "auto");
   assert.equal(typeof status.session.effectiveProvider, "string");
   assert.ok(status.session.presence?.status);
+});
+
+test("automation consent: status reports Playwright package and Chromium readiness independently of provider selection", () => {
+  const status = automationStatus({
+    root: emptyRoot,
+    env: {},
+    playwrightToolingDependencies: {
+      resolvePackage: () => "/modules/playwright/index.js",
+      loadPackage: () => ({
+        chromium: { executablePath: () => "/browsers/chromium/chrome" },
+      }),
+      pathExists: (path) => path === "/browsers/chromium/chrome",
+    },
+  });
+
+  assert.equal(status.session.provider, "auto");
+  assert.equal(status.session.effectiveProvider, "extension");
+  assert.equal(status.session.options.find((option) => option.id === "auto").automatedApply, false);
+  assert.deepEqual(status.session.tooling.playwright, {
+    packageInstalled: true,
+    browserInstalled: true,
+    ready: true,
+    detail: "Playwright and Chromium are installed.",
+  });
+});
+
+test("automation consent: status distinguishes a missing Playwright package from a missing Chromium executable", () => {
+  const missingPackage = automationStatus({
+    root: emptyRoot,
+    playwrightToolingDependencies: {
+      resolvePackage: () => {
+        throw new Error("MODULE_NOT_FOUND");
+      },
+      loadPackage: () => {
+        throw new Error("must not load an unresolved package");
+      },
+      pathExists: () => true,
+    },
+  });
+  assert.deepEqual(missingPackage.session.tooling.playwright, {
+    packageInstalled: false,
+    browserInstalled: false,
+    ready: false,
+    detail: "Playwright is not installed.",
+  });
+
+  const missingBrowser = automationStatus({
+    root: emptyRoot,
+    playwrightToolingDependencies: {
+      resolvePackage: () => "/modules/playwright/index.js",
+      loadPackage: () => ({
+        chromium: { executablePath: () => "/browsers/chromium/chrome" },
+      }),
+      pathExists: () => false,
+    },
+  });
+  assert.deepEqual(missingBrowser.session.tooling.playwright, {
+    packageInstalled: true,
+    browserInstalled: false,
+    ready: false,
+    detail: "Playwright is installed, but its Chromium executable is missing.",
+  });
+});
+
+test("automation consent: Playwright tooling probe never throws when package inspection fails", () => {
+  const status = automationStatus({
+    root: emptyRoot,
+    playwrightToolingDependencies: {
+      resolvePackage: () => "/modules/playwright/index.js",
+      loadPackage: () => {
+        throw new Error("broken package entrypoint");
+      },
+      pathExists: () => {
+        throw new Error("must not inspect an unavailable executable");
+      },
+    },
+  });
+
+  assert.deepEqual(status.session.tooling.playwright, {
+    packageInstalled: true,
+    browserInstalled: false,
+    ready: false,
+    detail: "Playwright is installed, but Chromium readiness could not be verified.",
+  });
 });
 
 // Regression for the "auto" option lying about automatic-apply support outside an
@@ -350,7 +478,7 @@ test("automation writer: can add mail_access paths to legacy automation files", 
     capability: "mail_access",
     platform: "gmail",
     value: true,
-    currentText: legacyAutomationText,
+    currentText: automationTextWithoutSetupMode,
     schema,
   });
   assert.equal(platformPlan.ok, true);
@@ -364,7 +492,7 @@ test("automation writer: can add mail_access paths to legacy automation files", 
     kind: "consent",
     platform: "gmail",
     value: true,
-    currentText: legacyAutomationText,
+    currentText: automationTextWithoutSetupMode,
     schema,
   });
   assert.equal(consentPlan.ok, true);
@@ -380,7 +508,7 @@ test("automation writer: can add relationship_sourcing paths to legacy automatio
     capability: "relationship_sourcing",
     platform: "linkedin",
     value: true,
-    currentText: legacyAutomationText,
+    currentText: automationTextWithoutSetupMode,
     schema,
   });
   assert.equal(platformPlan.ok, true);
@@ -398,7 +526,7 @@ test("automation writer: can add calendar_sync paths to legacy automation files"
     capability: "calendar_sync",
     platform: "google_calendar",
     value: true,
-    currentText: legacyAutomationText,
+    currentText: automationTextWithoutSetupMode,
     schema,
   });
   assert.equal(platformPlan.ok, true);
@@ -413,7 +541,7 @@ test("automation writer: can add calendar_sync paths to legacy automation files"
     kind: "consent",
     platform: "google_calendar",
     value: true,
-    currentText: legacyAutomationText,
+    currentText: automationTextWithoutSetupMode,
     schema,
   });
   assert.equal(consentPlan.ok, true);
@@ -439,17 +567,21 @@ test("resolveEditPath supports kind:mode", () => {
 });
 
 test("planModeEdit rejects a value that isn't basic or advanced", () => {
-  const plan = planModeEdit({ mode: "yolo", currentText: legacyAutomationText });
+  const plan = planModeEdit({ mode: "yolo", currentText: automationTextWithoutSetupMode });
   assert.equal(plan.ok, false);
   assert.match(plan.error, /basic.*advanced|advanced.*basic/);
 });
 
 test("planModeEdit scaffolds setup_mode on a legacy file that predates the field", () => {
-  // legacyAutomationText has no `setup_mode:` key at all — an install from
+  // This input has no `setup_mode:` key at all — an install from
   // before this field existed. The edit must still succeed.
-  assert.doesNotMatch(legacyAutomationText, /setup_mode/);
+  assert.doesNotMatch(automationTextWithoutSetupMode, /setup_mode/);
   const schema = loadJson("config/automation.schema.json");
-  const plan = planModeEdit({ mode: "advanced", currentText: legacyAutomationText, schema });
+  const plan = planModeEdit({
+    mode: "advanced",
+    currentText: automationTextWithoutSetupMode,
+    schema,
+  });
   assert.equal(plan.ok, true);
   assert.equal(plan.valid, true, JSON.stringify(plan.errors));
   assert.equal(plan.changed, true);
@@ -463,7 +595,11 @@ test("planModeEdit scaffolds setup_mode on a legacy file that predates the field
 
 test("planModeEdit is idempotent once already at the target mode", () => {
   const schema = loadJson("config/automation.schema.json");
-  const first = planModeEdit({ mode: "advanced", currentText: legacyAutomationText, schema });
+  const first = planModeEdit({
+    mode: "advanced",
+    currentText: automationTextWithoutSetupMode,
+    schema,
+  });
   const second = planModeEdit({ mode: "advanced", currentText: first.nextText, schema });
   assert.equal(second.changed, false);
   assert.equal(second.nextText, first.nextText);
@@ -471,7 +607,11 @@ test("planModeEdit is idempotent once already at the target mode", () => {
 
 test("planModeEdit can move an advanced file back to basic", () => {
   const schema = loadJson("config/automation.schema.json");
-  const advanced = planModeEdit({ mode: "advanced", currentText: legacyAutomationText, schema });
+  const advanced = planModeEdit({
+    mode: "advanced",
+    currentText: automationTextWithoutSetupMode,
+    schema,
+  });
   const backToBasic = planModeEdit({ mode: "basic", currentText: advanced.nextText, schema });
   assert.equal(backToBasic.ok, true);
   assert.equal(backToBasic.changed, true);

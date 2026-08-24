@@ -25,11 +25,44 @@
         "name": "Demo referral: former platform lead",
         "url": "https://e-corp.com/careers/staff-software-engineer"
       },
+      "evaluation": {
+        "appId": "demo-app-1",
+        "applicationId": "demo-app-1",
+        "gate": "keep",
+        "fitScore": 95,
+        "fitBucket": "high",
+        "fitSummary": "Staff IC role building AI-powered incident triage is a direct match for the Meridian RAG and agentic-workflow work already shipped.",
+        "compensation": {
+          "status": "clears-floor",
+          "currency": "USD",
+          "minBase": 215000,
+          "maxBase": 255000,
+          "source": "job-description",
+          "summary": "Posted band clears the $215K floor with room above the $240K ask."
+        },
+        "action": "generate-packet",
+        "fitReasons": [
+          "Meridian RAG pipeline is a direct precedent for AI-powered incident triage.",
+          "Agentic procurement workflow demonstrates the human-in-the-loop pattern this team wants.",
+          "Pulsar's zero-P1 deploy record backs the platform-reliability bar."
+        ],
+        "fitRisks": [
+          "Two live loops (Cyberdyne, Massive) aren't done yet, so the decision window is tight."
+        ],
+        "confidence": "high",
+        "manual": { "required": false },
+        "ai": { "used": true },
+        "source": { "jd": "workspace/jds/demo/e-corp-staff-software-engineer.md", "captured": true },
+        "evaluatedAt": "2026-04-08T15:32:00.000Z"
+      },
       "artifacts": {
         "jd": "workspace/jobs/demo/e-corp-staff-software-engineer.md",
         "jdPath": "workspace/jds/demo/e-corp-staff-software-engineer.md",
         "jdSummary": "Staff IC role building AI-powered incident triage and agentic approval workflows for E Corp's 340-service financial platform. Remote US.",
         "jdCapturedAt": "2026-04-08T15:20:00.000Z",
+        "resume": "workspace/tailored/demo/e-corp-staff-software-engineer-resume.md",
+        "coverLetter": "workspace/tailored/demo/e-corp-staff-software-engineer-cover-letter.md",
+        "answers": "workspace/tailored/demo/e-corp-staff-software-engineer-answers.md",
         "interviewPacket": {
           "path": "workspace/interview-packets/demo/e-corp-staff-swe.md",
           "generatedAt": "2026-05-18T09:30:00.000Z",
@@ -452,8 +485,41 @@
         "name": "HiringCafe (demo)",
         "url": "https://cyberdyne.com/careers/staff-ml-engineer"
       },
+      "evaluation": {
+        "appId": "demo-app-5",
+        "applicationId": "demo-app-5",
+        "gate": "keep",
+        "fitScore": 86,
+        "fitBucket": "high",
+        "fitSummary": "Model-serving reliability and eval-pipeline ownership map cleanly onto Meridian's eval harness and Pulsar's deploy-reliability record.",
+        "compensation": {
+          "status": "clears-floor",
+          "currency": "USD",
+          "minBase": 215000,
+          "maxBase": 255000,
+          "source": "job-description",
+          "summary": "Posted band clears the $215K floor with room above the $240K ask."
+        },
+        "action": "generate-packet",
+        "fitReasons": [
+          "Meridian's recall + citation-precision eval harness maps onto model-serving eval work.",
+          "Agentic agent's human-in-the-loop write gates speak to the stop-deploy governance question.",
+          "Pulsar's zero-P1 deploy record signals production reliability, not just model novelty."
+        ],
+        "fitRisks": [
+          "Hybrid SF (2 days/week) is a real ask against an Austin-remote base.",
+          "Stop-deploy authority is still unresolved heading into the decision."
+        ],
+        "confidence": "medium",
+        "manual": { "required": false },
+        "ai": { "used": true },
+        "source": { "jd": "workspace/jobs/demo/cyberdyne-staff-ml-engineer.md", "captured": true },
+        "evaluatedAt": "2026-05-15T09:10:00.000Z"
+      },
       "artifacts": {
         "jd": "workspace/jobs/demo/cyberdyne-staff-ml-engineer.md",
+        "resume": "workspace/tailored/demo/cyberdyne-staff-ml-engineer-resume.md",
+        "coverLetter": "workspace/tailored/demo/cyberdyne-staff-ml-engineer-cover-letter.md",
         "interviewDossier": {
           "title": "Cyberdyne Systems — Staff ML Engineer | Interview Dossier",
           "round": "Final onsite (awaiting decision)",
@@ -776,8 +842,41 @@
         "name": "Demo alumni intro",
         "url": "https://massivedynamic.com/careers/staff-engineer"
       },
+      "evaluation": {
+        "appId": "demo-app-9",
+        "applicationId": "demo-app-9",
+        "gate": "keep",
+        "fitScore": 78,
+        "fitBucket": "med",
+        "fitSummary": "AI Platform team's LLM integration layer lines up with Meridian's retrieval work, though the scope skews platform/infra over customer-facing.",
+        "compensation": {
+          "status": "clears-floor",
+          "currency": "USD",
+          "minBase": 215000,
+          "maxBase": 255000,
+          "source": "job-description",
+          "summary": "Posted band clears the $215K floor with room above the $240K ask."
+        },
+        "action": "generate-packet",
+        "fitReasons": [
+          "Meridian's retrieval choices (hybrid search, reranking) map onto the LLM integration layer.",
+          "Pulsar's 3-concurrent-deployment coordination answers the team-lead-without-EM scope.",
+          "Enterprise touchpoints from Pulsar back the quarterly customer-facing expectation."
+        ],
+        "fitRisks": [
+          "Staff scope skews platform/infra — thinner on the FDE/customer-facing angle targeted.",
+          "HM screen pressed hard on platform depth; infra internals need to hold up at panel."
+        ],
+        "confidence": "medium",
+        "manual": { "required": false },
+        "ai": { "used": true },
+        "source": { "jd": "workspace/jobs/demo/massive-dynamic-staff-engineer.md", "captured": true },
+        "evaluatedAt": "2026-06-08T10:15:00.000Z"
+      },
       "artifacts": {
         "jd": "workspace/jobs/demo/massive-dynamic-staff-engineer.md",
+        "resume": "workspace/tailored/demo/massive-dynamic-staff-engineer-resume.md",
+        "coverLetter": "workspace/tailored/demo/massive-dynamic-staff-engineer-cover-letter.md",
         "interviewDossier": {
           "title": "Massive Dynamic — Staff Engineer | Interview Dossier",
           "round": "Panel interview (awaiting decision)",

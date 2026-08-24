@@ -22,28 +22,24 @@
 // only open the SSE response (writeHead 200) on the first real event.
 //
 // mountSkillRunRoute() also registers GET /api/runtime/config (P0-5) — the
-// small read-only route the evaluate-page.mjs client polls on load to learn
+// small read-only route the React workspace polls on load to learn
 // which skills are actually runnable via this runtime, so it can decide
 // whether to enable the Apply/Save/Pass decision buttons (which POST
 // track-outcomes) rather than guessing or hardcoding the allowlist into the
-// static page.
+// active controls.
 
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
-import { resolveAllowedChatSkills } from "../core/ai/chat-runtime.mjs";
+import { resolveDirectChatSkills } from "../core/ai/chat-runtime.mjs";
 import {
   APP_SAFE_RUNTIME_TOOLS,
   DEFAULT_RUNTIME_TOOL_PROFILE,
   RUNTIME_TOOL_PROFILES,
 } from "../core/ai/runtime-tools.mjs";
-import { resolveAllowedSkills } from "../core/ai/skill-runtime.mjs";
+import { resolveDirectSkillRunSkills } from "../core/ai/skill-runtime.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB cap per the P0-4 spec.
 const HEARTBEAT_MS = 15000;
-const DISCOVERY_CHAT_HANDOFF_SKILLS = new Set([
-  "research-boards",
-  "discover-companies",
-  "search-jobs",
-]);
+const DISCOVERY_CHAT_HANDOFF_SKILLS = new Set(["research-boards"]);
 // Exported so other route mounters (src/cli/onboard-route.mjs) reuse the
 // exact same JSON-response and capped-body-read primitives instead of
 // duplicating them — see that file's header comment.
@@ -179,10 +175,9 @@ function validateToolProfileRequest({ toolProfile }) {
 
 export function mountSkillRunRoute({ addRoute, repoRoot, runSkillStream, env = process.env }) {
   addRoute("GET", "/api/runtime/config", (_req, res) => {
-    const skills = resolveAllowedSkills({ repoRoot, env });
+    const skills = resolveDirectSkillRunSkills({ repoRoot, env });
     const route = resolveAIRoute(env, { repoRoot });
-    const chatSkills =
-      route.type === "installed" ? [] : resolveAllowedChatSkills({ repoRoot, env });
+    const chatSkills = resolveDirectChatSkills({ repoRoot, env });
     sendJson(res, 200, {
       skills,
       chatSkills,
@@ -236,7 +231,18 @@ export function mountSkillRunRoute({ addRoute, repoRoot, runSkillStream, env = p
       sendJson(res, 400, { error: "body.skill is required" });
       return;
     }
+    const directSkills = resolveDirectSkillRunSkills({ repoRoot, env });
+    if (!directSkills.includes(skill)) {
+      sendJson(res, 400, {
+        error: `skill "${skill}" is not available through /api/skill/run (allowed: ${directSkills.join(", ") || "none"}); use its dedicated CareerRat workflow`,
+      });
+      return;
+    }
     const input = body?.input;
+    const approvedPath =
+      input && typeof input === "object" && !Array.isArray(input)
+        ? String(input.path || "").trim()
+        : "";
     let toolProfile;
     try {
       toolProfile = validateToolProfileRequest({ toolProfile: body?.toolProfile });
@@ -296,6 +302,7 @@ export function mountSkillRunRoute({ addRoute, repoRoot, runSkillStream, env = p
         onEvent: emit,
         signal: controller.signal,
         toolProfile,
+        approvedReadPaths: approvedPath ? [approvedPath] : [],
       });
     } catch (err) {
       if (!started) {

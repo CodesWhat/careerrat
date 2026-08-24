@@ -5,6 +5,13 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "agent_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "default": "Paul",
+      "description": "Display name used for the local CareerRat agent in chat-first surfaces."
+    },
     "usage_mode": {
       "type": "string",
       "enum": ["lean", "standard", "full"],

@@ -30,6 +30,7 @@ import {
   candidateConfigPatch,
   candidateEvidenceMerge,
   candidateEvidenceRemoveOne,
+  candidateEvidenceReplace,
   candidateSetupInitialize,
   commAppendMessage,
   commCaptureInbound,
@@ -2013,6 +2014,147 @@ test("candidateEvidenceMerge replaces an existing explicit id even when the clai
   assert.equal(config.evidence.claims[0].id, "resume-001");
   assert.equal(config.evidence.claims[0].claim, "Built the production version");
   assert.equal(config.evidence.claims[0].evidence, "Resume v2");
+});
+
+test("candidateEvidenceReplace atomically preserves edited ids and deletes unreferenced omissions", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+  candidateEvidenceMerge({
+    repoRoot,
+    claims: [
+      { id: "resume-001", claim: "Built the first version", evidence: "Resume" },
+      { id: "project-001", claim: "Led the rollout", evidence: "Project notes" },
+      { id: "omit-001", claim: "Old claim", evidence: "Old notes" },
+    ],
+  });
+  appUpsert({
+    repoRoot,
+    row: {
+      id: "app-evidence-ref",
+      company: "Acme",
+      role: "Staff Engineer",
+      status: "drafted",
+      packetManifest: {
+        resume: { blocks: [{ text: "Grounded claim", evidenceIds: ["resume-001"] }] },
+      },
+    },
+  });
+
+  const result = candidateEvidenceReplace({
+    repoRoot,
+    claims: [
+      { id: "resume-001", claim: "Built the production version", evidence: "Resume v2" },
+      { id: "project-001", claim: "Led the rollout", evidence: "Project notes" },
+    ],
+  });
+
+  assert.equal(result.replaced, 2);
+  assert.equal(result.removed, 1);
+  assert.deepEqual(
+    candidateConfigGet({ repoRoot }).evidence.claims.map((claim) => claim.id),
+    ["resume-001", "project-001"]
+  );
+  assert.equal(
+    candidateConfigGet({ repoRoot }).evidence.claims[0].claim,
+    "Built the production version"
+  );
+  const application = JSON.parse(
+    openDb({ repoRoot })
+      .prepare("SELECT data FROM applications WHERE id = ?")
+      .get("app-evidence-ref").data
+  );
+  assert.deepEqual(application.packetManifest.resume.blocks[0].evidenceIds, ["resume-001"]);
+});
+
+test("candidateEvidenceReplace refuses to delete claims cited by application packets or stories", () => {
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+  candidateEvidenceMerge({
+    repoRoot,
+    claims: [
+      { id: "keep-001", claim: "Built the production version", evidence: "Resume" },
+      { id: "packet-001", claim: "Led the rollout", evidence: "Project notes" },
+      { id: "story-001", claim: "Reduced latency", evidence: "Interview notes" },
+    ],
+  });
+  appUpsert({
+    repoRoot,
+    row: {
+      id: "app-evidence-in-use",
+      company: "Acme",
+      role: "Staff Engineer",
+      status: "drafted",
+      packetManifest: {
+        resume: { blocks: [{ text: "Grounded claim", evidenceIds: ["packet-001"] }] },
+      },
+    },
+  });
+  db.prepare("INSERT INTO deep_ingest_story_bank (id, data) VALUES (?, ?)").run(
+    "latency-story",
+    JSON.stringify({
+      id: "latency-story",
+      status: "confirmed",
+      title: "Latency reduction",
+      evidence_ids: ["story-001"],
+    })
+  );
+  const before = candidateConfigGet({ repoRoot }).evidence.claims;
+
+  assert.throws(
+    () =>
+      candidateEvidenceReplace({
+        repoRoot,
+        claims: [{ id: "keep-001", claim: "Built the production version", evidence: "Resume" }],
+      }),
+    (error) => {
+      assert.equal(error.code, "EVIDENCE_IN_USE");
+      assert.deepEqual(error.claimIds, ["packet-001", "story-001"]);
+      assert.deepEqual(error.references, [
+        { claimId: "packet-001", owner: "application:app-evidence-in-use" },
+        { claimId: "story-001", owner: "story:latency-story" },
+      ]);
+      return true;
+    }
+  );
+
+  assert.deepEqual(candidateConfigGet({ repoRoot }).evidence.claims, before);
+});
+
+test("candidateEvidenceReplace rolls the entire replacement back when a later write fails", () => {
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+  candidateEvidenceMerge({
+    repoRoot,
+    claims: [
+      { id: "resume-001", claim: "Original one", evidence: "Resume" },
+      { id: "resume-002", claim: "Original two", evidence: "Resume" },
+    ],
+  });
+  db.exec(`CREATE TRIGGER fail_evidence_replace
+    BEFORE INSERT ON candidate_evidence_claims
+    WHEN NEW.id = 'fail-write'
+    BEGIN
+      SELECT RAISE(ABORT, 'injected replacement failure');
+    END`);
+
+  assert.throws(
+    () =>
+      candidateEvidenceReplace({
+        repoRoot,
+        claims: [
+          { id: "resume-001", claim: "Edited one", evidence: "Resume v2" },
+          { id: "fail-write", claim: "Must fail", evidence: "Notes" },
+        ],
+      }),
+    /injected replacement failure/
+  );
+  assert.deepEqual(candidateConfigGet({ repoRoot }).evidence.claims, [
+    { id: "resume-001", claim: "Original one", evidence: "Resume" },
+    { id: "resume-002", claim: "Original two", evidence: "Resume" },
+  ]);
 });
 
 test("candidateEvidenceRemoveOne removes only the requested claim and rejects missing or unknown ids", () => {

@@ -9,9 +9,8 @@
 // those rows, and YAML is materialized only by write-config as compatibility
 // output. The deterministic resume parser still handles plain-text/markdown
 // resumes without a model, while BYOK AI routes are optional assists. The
-// companion byte-static page is src/core/onboarding/onboard-page.mjs, mounted
-// at GET /onboard by tracker-dev.mjs. M8 adds exactly one AI-touching
-// route here (POST /api/onboard/resume-ai, for the PDF/image case
+// React onboarding lives under /app. M8 adds exactly one AI-touching route
+// here (POST /api/onboard/resume-ai, for the PDF/image case
 // resume-parser.mjs can't handle) rather than a separate file, since it's the
 // same résumé-intake concern as the existing POST /api/onboard/resume. The
 // route returns the shared bounded-AI envelope, while the web API wrapper
@@ -71,9 +70,11 @@ import {
   candidateConfigPatch,
   candidateEvidenceMerge,
   candidateEvidenceRemoveOne,
+  candidateEvidenceReplace,
   candidateSetupInitialize,
   publicSyncPreferenceGet,
   publicSyncPreferenceSet,
+  skillChatThreadRead,
   sourceConfigGet,
   sourceConfigPut,
 } from "../core/db/verbs.mjs";
@@ -253,8 +254,8 @@ function hasUsableResumeExtraction(extracted) {
   return candidateFacts || claimFacts || sectionFacts;
 }
 
-// Detect resume text that is actually binary (a PDF/DOCX read client-side as
-// text, per onboard-page.mjs's FileReader.readAsText hint). Two tells: literal
+// Detect resume text that is actually binary (a PDF/DOCX decoded as text).
+// Two tells: literal
 // NUL bytes (never legitimate in text), or a high ratio of U+FFFD replacement
 // characters (what a lossy UTF-8 decode of binary data produces). 1% is a
 // deliberately low bar — real resumes have essentially zero replacement
@@ -411,11 +412,13 @@ export function normalizeOnboardingDraft(raw = {}) {
     ? Math.max(0, Math.min(ONBOARDING_DRAFT_MAX_STEP, Math.trunc(numericStep)))
     : 0;
   const draftSeeds = isPlainObject(raw?.draftSeeds) ? raw.draftSeeds : {};
+  const chatCursor = normalizeOnboardingChatCursor(raw?.chatCursor);
   return {
     stepIndex,
     completedIndexes: normalizeOnboardingCompletedIndexes(raw?.completedIndexes),
     draftSeeds,
     transcript: normalizeOnboardingTranscript(raw?.transcript),
+    ...(chatCursor ? { chatCursor } : {}),
     updatedAt: typeof raw?.updatedAt === "string" && raw.updatedAt.trim() ? raw.updatedAt : null,
     finishedAt:
       typeof raw?.finishedAt === "string" && raw.finishedAt.trim() ? raw.finishedAt : null,
@@ -442,6 +445,14 @@ function cloneJsonValue(value, fallback = null) {
   }
 }
 
+function normalizeOnboardingChatCursor(value) {
+  if (!isPlainObject(value)) return null;
+  const chatId = typeof value.chatId === "string" ? value.chatId.trim().slice(0, 500) : "";
+  const eventId = Number(value.eventId);
+  if (!chatId || !Number.isSafeInteger(eventId) || eventId < 0) return null;
+  return { chatId, eventId };
+}
+
 function normalizeOnboardingTranscript(value) {
   if (!Array.isArray(value)) return [];
   return value.slice(-200).flatMap((message) => {
@@ -450,6 +461,16 @@ function normalizeOnboardingTranscript(value) {
       role: message.role,
       text: typeof message.text === "string" ? message.text.slice(0, 20000) : "",
     };
+    if (typeof message.id === "string" && message.id.trim()) {
+      normalized.id = message.id.trim().slice(0, 1000);
+    }
+    if (message.role === "assistant") {
+      const cursor = normalizeOnboardingChatCursor(message);
+      if (cursor) {
+        normalized.chatId = cursor.chatId;
+        normalized.eventId = cursor.eventId;
+      }
+    }
     if (message.role === "assistant" && Array.isArray(message.blocks)) {
       normalized.blocks = message.blocks.slice(0, 20).flatMap((block) => {
         if (!isPlainObject(block) || !ONBOARDING_BLOCK_KINDS.has(block.kind)) return [];
@@ -487,14 +508,46 @@ function normalizeOnboardingCompletedIndexes(values = []) {
   ).sort((a, b) => a - b);
 }
 
+function sameOnboardingTranscriptTurn(draftMessage, canonicalMessage) {
+  if (draftMessage?.role !== canonicalMessage?.role) return false;
+  if (draftMessage?.text === canonicalMessage?.text) return true;
+  return (
+    canonicalMessage?.role === "assistant" &&
+    typeof canonicalMessage.text === "string" &&
+    typeof draftMessage?.text === "string" &&
+    canonicalMessage.text.includes(draftMessage.text)
+  );
+}
+
+function reconcileOnboardingTranscript(draftMessages, canonicalMessages) {
+  const draft = normalizeOnboardingTranscript(draftMessages);
+  const canonical = normalizeOnboardingTranscript(canonicalMessages);
+  if (!canonical.length) return draft;
+  const reconciled = canonical.map((message, index) =>
+    sameOnboardingTranscriptTurn(draft[index], message) ? draft[index] : message
+  );
+  if (draft.length > canonical.length) reconciled.push(...draft.slice(canonical.length));
+  return reconciled;
+}
+
 export function readOnboardingDraft(pathCtx) {
   const draftPath = userPath(pathCtx, ONBOARDING_DRAFT_PATH);
-  if (!existsSync(draftPath)) return normalizeOnboardingDraft();
-  try {
-    return normalizeOnboardingDraft(JSON.parse(readFileSync(draftPath, "utf8")));
-  } catch {
-    return normalizeOnboardingDraft();
+  let draft = normalizeOnboardingDraft();
+  if (existsSync(draftPath)) {
+    try {
+      draft = normalizeOnboardingDraft(JSON.parse(readFileSync(draftPath, "utf8")));
+    } catch {
+      draft = normalizeOnboardingDraft();
+    }
   }
+  if (!dbExists(pathCtx)) return draft;
+  const canonical = skillChatThreadRead({ ...pathCtx, skill: "ingest-profile" }).messages.filter(
+    (message) => message.visibility !== "internal"
+  );
+  return normalizeOnboardingDraft({
+    ...draft,
+    transcript: reconcileOnboardingTranscript(draft.transcript, canonical),
+  });
 }
 
 function writeOnboardingDraft(pathCtx, draft) {
@@ -939,6 +992,12 @@ function writeDbCompatibilityBundle(repoRoot, pathCtx, config) {
   return { written, sources };
 }
 
+function prepareDbSearchSources(pathCtx, config) {
+  const sources = buildDbSearchSources(pathCtx, config);
+  sourceConfigPut({ ...pathCtx, name: "search-sources", data: sources });
+  return sources;
+}
+
 function sendCandidateError(res, err) {
   sendJson(res, err?.code === "NO_DATABASE" ? 409 : 400, {
     ok: false,
@@ -999,13 +1058,12 @@ export function prepareQuickStartSourcing({ repoRoot, env = process.env } = {}) 
     };
   }
 
-  const { written, sources } = writeDbCompatibilityBundle(repoRoot, pathCtx, config);
+  const sources = prepareDbSearchSources(pathCtx, config);
   const searchCount = Array.isArray(sources?.searches) ? sources.searches.length : 0;
   return {
     status: 200,
     body: {
       ok: true,
-      written,
       readiness: setup.readiness,
       missing: setup.missing,
       locks: {
@@ -2030,6 +2088,7 @@ export function mountOnboardRoutes({
         // model this server is normally configured for.
         env: correction ? env : { ...env, ANTHROPIC_MODEL: fastModel },
         tools: ["Read"],
+        approvedReadPaths: [savedPath],
         outputSchema: schema,
         onEvent: (evt) => {
           if (onProgress) {
@@ -2152,6 +2211,35 @@ export function mountOnboardRoutes({
       sendJson(res, 200, { ok: true });
     });
   }
+
+  // -------------------------------------------------------------------------
+  // POST /api/onboard/candidate/evidence/replace — replace one whole evidence
+  // section atomically while preserving every supplied durable claim id.
+  // -------------------------------------------------------------------------
+  addRoute("POST", "/api/onboard/candidate/evidence/replace", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+    } catch (err) {
+      sendJson(res, err.status || 400, { error: err.message });
+      return;
+    }
+    const posted = Array.isArray(body?.claims) ? body.claims : null;
+    if (!posted) {
+      sendJson(res, 400, { ok: false, error: "body.claims must be an array" });
+      return;
+    }
+    if (!dbExists(pathCtx)) {
+      sendJson(res, 409, { ok: false, error: "SQLite candidate setup is required" });
+      return;
+    }
+    try {
+      const result = candidateEvidenceReplace({ ...pathCtx, claims: posted });
+      sendJson(res, 200, { ok: true, ...result });
+    } catch (err) {
+      sendCandidateError(res, err);
+    }
+  });
 
   // -------------------------------------------------------------------------
   // POST /api/onboard/candidate/evidence/remove — { id } delete exactly one

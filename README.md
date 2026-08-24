@@ -25,6 +25,7 @@
 - [Quick Start](#quick-start)
 - [Why CareerRat](#why-careerrat)
 - [Features](#features)
+- [Code signing policy](docs/CODE_SIGNING_POLICY.md)
 - [Roadmap](#roadmap)
 - [Community & Support](#community--support)
 
@@ -32,15 +33,25 @@
 
 ## Quick Start
 
-Both paths need an AI coding CLI. Either one works:
+Choose the AI CLI for the way you run CareerRat:
 
-- Claude Code: `npm install -g @anthropic-ai/claude-code` ([claude.com/claude-code](https://claude.com/claude-code))
-- Codex: `npm install -g @openai/codex` ([github.com/openai/codex](https://github.com/openai/codex))
+- The packaged desktop app currently requires **Claude Code 2.1.241 or newer**
+  for in-app skill and chat execution. It detects Codex and other CLIs, but
+  leaves them disabled until they provide an equivalent enforceable per-call
+  tool, path, and network boundary.
+- The terminal workspace-agent flow supports Claude Code or Codex:
+  `npm install -g @anthropic-ai/claude-code` or
+  `npm install -g @openai/codex`.
 
 **On an Apple Silicon Mac**: download the signed, notarized app from the
 [latest release](https://github.com/CodesWhat/careerrat/releases/latest), or
-`brew install --cask codeswhat/tap/careerrat`. You still need one AI CLI
-installed.
+`brew install --cask codeswhat/tap/careerrat`. Install and sign in to Claude
+Code 2.1.241 or newer before first run.
+
+**On Windows x64**: the installer is built and installed in Windows CI. A
+public installer will appear only after SignPath Foundation approval and a
+valid Authenticode signature. Current status, install behavior, and Microsoft
+Store prerequisites are in [Windows installation and release status](docs/WINDOWS.md).
 
 **On any other platform**, or if you'd rather use the terminal: install with
 npm (requires **Node.js 24 or newer**, check with `node -v`), then run it:
@@ -103,7 +114,7 @@ The local app comes up with `careerrat start`. To run it on its own:
 
 ```bash
 careerrat tracker        # snapshot tracker.json for recovery
-careerrat tracker-dev    # serve http://localhost:7777 with live reload
+careerrat tracker-dev    # serve http://localhost:7777 with live data updates
 ```
 
 **Useful flags on `start`:** `--no-agent` (workspace + local app only),
@@ -139,6 +150,8 @@ that host them. The packaged desktop app also checks GitHub once a day for a
 newer release and shows an in-app notice, nothing more; it never downloads or
 installs anything on its own, and you can turn that off in Settings. See
 [privacy](https://careerrat.com/docs/advanced/privacy) for the details.
+Release trust and the pending Windows signing process are documented in the
+[Code signing policy](docs/CODE_SIGNING_POLICY.md).
 
 Most job tools match keywords, then spray a hundred applications and hope one
 sticks. CareerRat won't write a single line of a cover letter until it has read
@@ -211,8 +224,8 @@ grouped by what you're actually trying to do:
 - **Screening answers**: drafts one-off application-question answers grounded
   in your profile and evidence, and remembers your standard disclosures so
   you're never asked twice.
-- **Filling and submitting**: fills the portal form for you, including
-  LinkedIn's one-click Easy Apply, and defaults to letting you hit submit.
+- **Supervised form preparation**: fills supported portal fields, including
+  LinkedIn Easy Apply, then stops for you to review and submit.
 - **LinkedIn tune-up**: diffs your profile against what you're targeting and
   proposes honest rewrites, headline through Featured, with a preview before
   anything gets written back.
@@ -242,8 +255,9 @@ grouped by what you're actually trying to do:
 - **Live comp coaching**: scripts and rehearses the actual negotiation with you
   while you're in the room, then debriefs after and folds the lesson back in.
 
-**Dashboard**: stat cards, funnel, active pipeline from sourced through offer,
-table / board / calendar views, Tokyo Night and Gruvbox themes, light or dark.
+**Desktop workspace**: one persistent conversation with durable job and research
+threads, resumable missions, Deep ingest, mock interviews, and focused Search,
+Pipeline, Files, People, and Schedule views beside the chat.
 
 <hr>
 

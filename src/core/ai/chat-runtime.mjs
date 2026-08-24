@@ -46,8 +46,14 @@
 // injected so these tests never spawn a real CLI subprocess.
 
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
-import { candidateArtifactExists, candidateConfigGet } from "../db/verbs.mjs";
+import { dbExists } from "../db/connection.mjs";
+import {
+  candidateArtifactExists,
+  candidateConfigGet,
+  skillChatMessageAppend,
+  skillChatThreadRead,
+  skillChatThreadSetTurnState,
+} from "../db/verbs.mjs";
 import { computeSetupProgress } from "../onboarding/setup-progress.mjs";
 import { resolveAIRoute } from "./call-ai.mjs";
 import {
@@ -58,7 +64,11 @@ import {
   supportsInstalledRuntimeStreaming,
 } from "./installed-runtimes.mjs";
 import { createRuntimeToolPolicy } from "./runtime-tool-policy.mjs";
-import { resolveChatRuntimeTools } from "./runtime-tools.mjs";
+import {
+  installedSkillRuntimePosture,
+  resolveChatRuntimeTools,
+  resolveInstalledSkillRuntimeTools,
+} from "./runtime-tools.mjs";
 import {
   buildChildEnv,
   buildPrompt,
@@ -68,6 +78,15 @@ import {
   writeByokUsage,
 } from "./skill-runtime.mjs";
 import { appendUsageEvent } from "./usage-log.mjs";
+
+const DURABLE_CHAT_SKILLS = new Set([
+  "ingest-profile",
+  "research-boards",
+  "research-company",
+  "research-comp",
+  "company-health",
+]);
+const DURABLE_CHAT_PROMPT_CHAR_LIMIT = 64_000;
 
 // Lane A / R6 — the current form-defaults.declined_fields key list, read once
 // per session start (both the SDK path's kickoff message and the installed
@@ -160,18 +179,57 @@ function buildCandidateAwareTurn(text, candidateContext) {
   return `${note}\n\nCandidate's new message:\n${text}`;
 }
 
-// Default-restricted to conversational setup and confirm-first workflow skills:
-// ingest-profile (M2's original interview target), research-boards /
-// discover-companies / search-jobs (the post-onboarding discovery pipeline
-// surfaced by Quick Start), plus M9's Lane C intake targets email-comms and
-// track-outcomes. Widened deliberately, not silently: these skills either ask
-// the user before consequential writes (research-boards/discover-companies) or
-// explicitly stop before tailoring/filling/submitting (search-jobs). The
-// opposite one-shot runtime remains narrower because nobody is present to
-// answer questions there. Same "empty string explicitly locks it down, unset
-// falls back to the default" semantics as CAREERRAT_RUNTIME_SKILLS.
-const DEFAULT_CHAT_SKILLS =
-  "ingest-profile,research-boards,discover-companies,search-jobs,email-comms,track-outcomes,research-company,research-comp,company-health";
+function boundedDurableTranscript(messages) {
+  const candidates = (Array.isArray(messages) ? messages : []).flatMap((message) => {
+    const role = String(message?.role || "").trim();
+    const text = String(message?.text || "").trim();
+    return (role === "user" || role === "assistant") && text ? [{ role, text }] : [];
+  });
+  const bounded = [];
+  let remaining = DURABLE_CHAT_PROMPT_CHAR_LIMIT;
+  for (let index = candidates.length - 1; index >= 0 && remaining > 0; index--) {
+    const message = candidates[index];
+    const text = message.text.length > remaining ? message.text.slice(-remaining) : message.text;
+    bounded.push({ ...message, text });
+    remaining -= text.length;
+  }
+  return bounded.reverse();
+}
+
+function durableConversationNote(transcript) {
+  const turns = boundedDurableTranscript(transcript).map(
+    (message) => `${message.role.toUpperCase()}:\n${message.text}`
+  );
+  if (!turns.length) return "";
+  return (
+    "Durable conversation from before this runtime process restarted:\n" +
+    `${turns.join("\n\n")}\n\n` +
+    "Continue from this exact conversation and canonical candidate state. Do not restart the " +
+    "interview, repeat an answered question, or skip past the latest unanswered assistant question."
+  );
+}
+
+function assistantEventText(event) {
+  if (event?.type !== "assistant") return "";
+  return (Array.isArray(event.data?.message?.content) ? event.data.message.content : [])
+    .filter((block) => block?.type === "text" && typeof block.text === "string")
+    .map((block) => block.text)
+    .join("\n")
+    .trim();
+}
+
+// These are the only generic chats with a visible product surface and a typed
+// save path. search-jobs stays on its dedicated AI-web route; app workflows and
+// model-result skills stay on workspace-agent/core pipelines instead of being
+// advertised as raw chat capabilities.
+const DIRECT_CHAT_SKILLS = Object.freeze([
+  "ingest-profile",
+  "research-boards",
+  "research-company",
+  "research-comp",
+  "company-health",
+]);
+const DEFAULT_CHAT_SKILLS = DIRECT_CHAT_SKILLS.join(",");
 
 export function resolveAllowedChatSkills({ repoRoot, env = process.env } = {}) {
   return resolveSkillAllowlist({
@@ -180,6 +238,11 @@ export function resolveAllowedChatSkills({ repoRoot, env = process.env } = {}) {
     envVar: "CAREERRAT_CHAT_SKILLS",
     defaultValue: DEFAULT_CHAT_SKILLS,
   });
+}
+
+export function resolveDirectChatSkills({ repoRoot, env = process.env } = {}) {
+  const allowed = new Set(resolveAllowedChatSkills({ repoRoot, env }));
+  return DIRECT_CHAT_SKILLS.filter((skill) => allowed.has(skill));
 }
 
 // ---------------------------------------------------------------------------
@@ -194,18 +257,43 @@ export function buildChatKickoffPrompt({
   input,
   declinedFields = [],
   candidateContext = null,
+  durableTranscript = [],
+  continuationInput,
 } = {}) {
   const prompt = buildPrompt({ skill, input, mode: "conversational", declinedFields });
   const note = canonicalCandidateNote(candidateContext);
-  return note ? `${prompt}\n\n${note}` : prompt;
+  const durableNote = durableConversationNote(durableTranscript);
+  const continuation = String(continuationInput || "").trim();
+  return [
+    prompt,
+    note,
+    durableNote,
+    continuation ? `Candidate's new message after restart:\n${continuation}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
-function buildKickoffMessage({ skill, input, declinedFields, candidateContext }) {
+function buildKickoffMessage({
+  skill,
+  input,
+  declinedFields,
+  candidateContext,
+  durableTranscript,
+  continuationInput,
+}) {
   return {
     type: "user",
     message: {
       role: "user",
-      content: buildChatKickoffPrompt({ skill, input, declinedFields, candidateContext }),
+      content: buildChatKickoffPrompt({
+        skill,
+        input,
+        declinedFields,
+        candidateContext,
+        durableTranscript,
+        continuationInput,
+      }),
     },
     parent_tool_use_id: null,
   };
@@ -245,11 +333,17 @@ function buildToolProfileUnsupportedMessage(runtimeName) {
   );
 }
 
-function buildInstalledChatPrompt({ system, transcript, candidateContext }) {
+function buildInstalledChatPrompt({ system, transcript, candidateContext, resumed }) {
   const sections = [];
   if (system) sections.push(`System instructions:\n${String(system).trim()}`);
   const candidateNote = canonicalCandidateNote(candidateContext);
   if (candidateNote) sections.push(candidateNote);
+  if (resumed) {
+    sections.push(
+      "The conversation below is durable history from before this runtime process restarted. " +
+        "Continue it without restarting the interview or repeating an answered question."
+    );
+  }
   const turns = (Array.isArray(transcript) ? transcript : []).map(
     (turn) => `${String(turn?.role || "user").toUpperCase()}:\n${String(turn?.content ?? "")}`
   );
@@ -402,39 +496,34 @@ export function createChatRuntime({
   const sessions = new Map();
   let sweepTimer = null;
 
-  // M10 — chatId -> Set<callback> for onClose() below. A side registry, not a
-  // field on the session record itself, so a caller can register interest in a
-  // session's terminal transition (e.g. intake-route.mjs's Lane C completion
-  // loop) without the runtime's own session bookkeeping knowing anything about
-  // who's listening or why. Cleared per-chatId once closeSessionInternal fires
-  // (a session closes exactly once — see that function's own idempotency
-  // guard — so listeners fire exactly once too, then this entry is dropped).
-  const closeListeners = new Map();
-
   function currentCandidateContext(skill) {
     return resolveCandidateContextImpl({ repoRoot, env, skill });
   }
 
-  // Registers `callback({chatId, reason, lastError})` to run the moment
-  // `chatId` transitions to "closed" (see closeSessionInternal below for the
-  // six possible `reason` values). Safe to call for a session that hasn't
-  // closed yet — the only supported use — there's no dispatch for a chatId
-  // that's already closed (its listener set was already dropped, and a stale
-  // callback would never fire, silently). Multiple callbacks may register for
-  // the same chatId; each fires once.
-  function onClose(chatId, callback) {
-    if (!closeListeners.has(chatId)) closeListeners.set(chatId, new Set());
-    closeListeners.get(chatId).add(callback);
+  function durableChatState(skill) {
+    if (!DURABLE_CHAT_SKILLS.has(skill) || !dbExists({ repoRoot, env })) {
+      return { thread: null, transcript: [] };
+    }
+    const stored = skillChatThreadRead({ repoRoot, env, skill });
+    return {
+      thread: stored.thread,
+      transcript: boundedDurableTranscript(stored.messages),
+    };
   }
 
-  // The message of the most recent `type:"error"` event this session ever
-  // broadcast, or null. Only meaningful when closing for reason "error" (see
-  // pump()'s catch block, the only place that ever records one).
-  function lastErrorMessage(session) {
-    for (let i = session.events.length - 1; i >= 0; i--) {
-      if (session.events[i].type === "error") return session.events[i].data?.message ?? null;
-    }
-    return null;
+  function persistDurableMessage(session, role, text, { kind, visibility } = {}) {
+    if (!session.persistDurably) return;
+    skillChatMessageAppend({
+      repoRoot,
+      env,
+      skill: session.skill,
+      role,
+      text,
+      kind,
+      visibility,
+      runtimeSessionId: session.id,
+    });
+    session.durableMessageCount += 1;
   }
 
   function summarize(session) {
@@ -500,25 +589,6 @@ export function createChatRuntime({
     session.closeReason = reason;
     session.lastActivityAt = now();
 
-    // Fire onClose() listeners right alongside the SSE broadcast below — before
-    // it, so a listener that itself triggers a synchronous intakeUpdate (see
-    // intake-route.mjs's executeLaneC) always observes this session as fully
-    // closed. A throwing listener must never break session teardown for
-    // everyone else (pushQueue close, SSE end, other listeners) — caught and
-    // dropped, not rethrown.
-    const listeners = closeListeners.get(session.id);
-    if (listeners) {
-      closeListeners.delete(session.id);
-      const lastError = reason === "error" ? lastErrorMessage(session) : null;
-      for (const callback of listeners) {
-        try {
-          callback({ chatId: session.id, reason, lastError });
-        } catch {
-          // a listener's own error must never crash the pump/close path
-        }
-      }
-    }
-
     try {
       session.pushQueue?.close();
     } catch {
@@ -546,6 +616,31 @@ export function createChatRuntime({
   // so the two never drift on how a "result" event ends a turn.
   function dispatchEvents(session, events) {
     for (const evt of events) {
+      const assistantText = assistantEventText(evt);
+      if (assistantText) persistDurableMessage(session, "assistant", assistantText);
+      if (evt.type === "error" && evt.data?.message) {
+        persistDurableMessage(session, "assistant", evt.data.message, { kind: "agent_error" });
+        if (session.persistDurably) {
+          skillChatThreadSetTurnState({
+            repoRoot,
+            env,
+            skill: session.skill,
+            turnState: "failed",
+          });
+        }
+      }
+      if (evt.type === "result" && session.persistDurably && session.durableMessageCount > 0) {
+        const failed =
+          evt.data?.ok === false ||
+          evt.data?.is_error === true ||
+          String(evt.data?.subtype || "").startsWith("error");
+        skillChatThreadSetTurnState({
+          repoRoot,
+          env,
+          skill: session.skill,
+          turnState: failed ? "failed" : "awaiting-user",
+        });
+      }
       recordAndBroadcast(session, evt);
       const nextState = classifyChatEvent(evt);
       if (nextState && nextState !== session.state) {
@@ -621,6 +716,7 @@ export function createChatRuntime({
         system: session.systemPrompt,
         transcript: session.transcript,
         candidateContext: currentCandidateContext(session.skill),
+        resumed: session.resumed,
       });
       const sharedRuntimeCallArgs = {
         runtime: route.runtime,
@@ -632,7 +728,7 @@ export function createChatRuntime({
         signal: turnController.signal,
         model:
           String(env.CAREERRAT_INSTALLED_AI_MODEL || env.ANTHROPIC_MODEL || "").trim() || undefined,
-        tools: resolveChatRuntimeTools({ skill: session.skill }),
+        tools: session.runtimeTools,
         // A chat-session turn over CHAT_RUNTIME_TOOLS (WebSearch/WebFetch/
         // Skill, never Read, see runtime-tools.mjs) does live web research,
         // not a bounded one-shot completion. runInstalledRuntime's own
@@ -786,6 +882,15 @@ export function createChatRuntime({
       if (session.abortController.signal.aborted) {
         closeSessionInternal(session, "aborted");
       } else {
+        persistDurableMessage(session, "assistant", err.message, { kind: "agent_error" });
+        if (session.persistDurably) {
+          skillChatThreadSetTurnState({
+            repoRoot,
+            env,
+            skill: session.skill,
+            turnState: "failed",
+          });
+        }
         recordAndBroadcast(session, { type: "error", data: { message: err.message } });
         closeSessionInternal(session, "error");
       }
@@ -848,6 +953,23 @@ export function createChatRuntime({
       err.code = "NO_AI_ROUTE";
       throw err;
     }
+    if (route.type === "installed" && !DIRECT_CHAT_SKILLS.includes(trimmedSkill)) {
+      const err = new Error(
+        `skill "${trimmedSkill}" is not available through installed chat; use its dedicated CareerRat workflow`
+      );
+      err.code = "SKILL_NOT_ALLOWED";
+      err.allowed = [...DIRECT_CHAT_SKILLS];
+      throw err;
+    }
+
+    const durableState = durableChatState(trimmedSkill);
+    const restoredTranscript = durableState.transcript;
+    const resumed = restoredTranscript.length > 0;
+    const awaitingUser =
+      resumed &&
+      (durableState.thread?.turnState
+        ? ["awaiting-user", "failed"].includes(durableState.thread.turnState)
+        : restoredTranscript[restoredTranscript.length - 1]?.role === "assistant");
 
     // route.type === "installed": the user picked a local CLI (codex/gemini/
     // opencode/copilot/qwen/antigravity/custom/claude), not the Agent
@@ -857,7 +979,14 @@ export function createChatRuntime({
     // silently falls through to the Claude Code CLI regardless of what's
     // logged in locally (the bug this fix closes).
     if (route.type === "installed") {
-      return startInstalledSession({ trimmedSkill, input, route });
+      return startInstalledSession({
+        trimmedSkill,
+        input,
+        route,
+        restoredTranscript,
+        resumed,
+        awaitingUser,
+      });
     }
 
     // Validate the SDK devDependency is importable before creating any
@@ -882,12 +1011,17 @@ export function createChatRuntime({
       skill: trimmedSkill,
       route,
       sdkSessionId: null,
-      state: "running",
+      state: awaitingUser ? "idle" : "running",
       closeReason: null,
       query: null,
       pushQueue,
       systemPrompt: null,
       transcript: null,
+      durableTranscript: restoredTranscript,
+      durableMessageCount: restoredTranscript.length,
+      needsKickoff: awaitingUser,
+      persistDurably: DURABLE_CHAT_SKILLS.has(trimmedSkill) && dbExists({ repoRoot, env }),
+      resumed,
       turnAbortController: null,
       events: [],
       nextEventId: 1,
@@ -920,14 +1054,17 @@ export function createChatRuntime({
     });
     session.query = q;
 
-    pushQueue.push(
-      buildKickoffMessage({
-        skill: trimmedSkill,
-        input,
-        declinedFields: resolveDeclinedFieldKeys({ repoRoot, env }),
-        candidateContext: currentCandidateContext(trimmedSkill),
-      })
-    );
+    if (!awaitingUser) {
+      pushQueue.push(
+        buildKickoffMessage({
+          skill: trimmedSkill,
+          input: resumed ? undefined : input,
+          declinedFields: resolveDeclinedFieldKeys({ repoRoot, env }),
+          candidateContext: currentCandidateContext(trimmedSkill),
+          durableTranscript: restoredTranscript,
+        })
+      );
+    }
 
     // Fire-and-forget: pump() never rejects (every error path inside it
     // closes the session instead), so there's nothing to await or attach a
@@ -937,28 +1074,30 @@ export function createChatRuntime({
     return { chatId: id, skill: trimmedSkill, state: session.state };
   }
 
-  // startSession's route.type === "installed" branch. Skips loadSdk/
-  // buildChildEnv/createRuntimeToolPolicy entirely — those are Agent-SDK-
-  // child-process concerns that don't apply to a raw installed-CLI spawn
-  // (see installed-runtimes.mjs's runInstalledRuntime, and skill-runtime.mjs's
-  // own runSkillStream installed branch, which skips the same three for the
-  // same reason). `systemPrompt` is built once here (skillMdPath hint, same
-  // as runSkillStream's installed branch, since there's no native `skills`
-  // SDK option loading the SKILL.md for us) and replayed unchanged by every
-  // runInstalledTurn() call for this session's lifetime; only `transcript`
-  // grows turn over turn.
-  async function startInstalledSession({ trimmedSkill, input, route }) {
-    const runtimeTools = resolveChatRuntimeTools({ skill: trimmedSkill });
-    const skillMdPath = join(repoRoot, ".agents", "skills", trimmedSkill, "SKILL.md");
+  // startSession's route.type === "installed" branch. Skips loadSdk and the
+  // SDK tool policy. The raw CLI spawn applies its own child-environment
+  // allowlist and per-call tool boundary in installed-runtimes.mjs.
+  // `systemPrompt` is built once here and the installed CLI's
+  // scoped Skill tool loads the isolated SKILL.md. Every runInstalledTurn()
+  // replays that prompt; only `transcript` grows turn over turn.
+  async function startInstalledSession({
+    trimmedSkill,
+    input,
+    route,
+    restoredTranscript,
+    resumed,
+    awaitingUser,
+  }) {
+    const runtimeTools = resolveInstalledSkillRuntimeTools({ skill: trimmedSkill });
+    const installedPosture = installedSkillRuntimePosture({ skill: trimmedSkill });
     const systemPrompt =
       `${buildPrompt({
         skill: trimmedSkill,
-        input,
+        input: resumed ? undefined : input,
         mode: "conversational",
-        skillMdPath,
         declinedFields: resolveDeclinedFieldKeys({ repoRoot, env }),
       })}\n\n` +
-      `This app-authorized run is limited to these capabilities: ${runtimeTools.join(", ") || "none"}. Do not exceed that scope.`;
+      `This app-authorized run is limited to these capabilities: ${runtimeTools.join(", ") || "none"}. Do not exceed that scope. ${installedPosture}`;
 
     const abortController = new AbortController();
     const id = randomUUID();
@@ -969,12 +1108,21 @@ export function createChatRuntime({
       skill: trimmedSkill,
       route,
       sdkSessionId: null,
-      state: "running",
+      state: awaitingUser ? "idle" : "running",
       closeReason: null,
       query: null,
       pushQueue: null,
       systemPrompt,
-      transcript: [],
+      runtimeTools,
+      transcript: restoredTranscript.map((message) => ({
+        role: message.role,
+        content: message.text,
+      })),
+      durableTranscript: restoredTranscript,
+      durableMessageCount: restoredTranscript.length,
+      needsKickoff: false,
+      persistDurably: DURABLE_CHAT_SKILLS.has(trimmedSkill) && dbExists({ repoRoot, env }),
+      resumed,
       // Messages submitted while a turn is already in flight (postMessage's
       // "session.state === 'running'" branch below); never touched by the
       // SDK (pushQueue) path. drainPendingInstalledTurn flushes this onto
@@ -1001,7 +1149,7 @@ export function createChatRuntime({
     // Fire-and-forget, same contract as pump()'s own call site above:
     // runInstalledTurn() never rejects (every error path inside it emits an
     // error/result event or closes the session instead).
-    session.pumpDone = runInstalledTurn(session, route);
+    if (!awaitingUser) session.pumpDone = runInstalledTurn(session, route);
 
     return { chatId: id, skill: trimmedSkill, state: session.state };
   }
@@ -1046,6 +1194,9 @@ export function createChatRuntime({
     }
 
     session.lastActivityAt = now();
+    persistDurableMessage(session, "user", trimmed, {
+      visibility: /^\[SYSTEM\]\s/.test(trimmed) ? "internal" : undefined,
+    });
     if (session.route.type === "installed") {
       // For installed sessions session.state is "running" for exactly the
       // span between a turn starting (startInstalledSession / the kick below)
@@ -1073,6 +1224,17 @@ export function createChatRuntime({
       // runInstalledTurn replays it (plus everything before it) as the next
       // one-shot installed-runtime call, kicked off below.
       session.transcript.push({ role: "user", content: trimmed });
+    } else if (session.needsKickoff) {
+      session.pushQueue.push(
+        buildKickoffMessage({
+          skill: session.skill,
+          declinedFields: resolveDeclinedFieldKeys({ repoRoot, env }),
+          candidateContext: currentCandidateContext(session.skill),
+          durableTranscript: session.durableTranscript,
+          continuationInput: trimmed,
+        })
+      );
+      session.needsKickoff = false;
     } else {
       session.pushQueue.push({
         type: "user",
@@ -1269,7 +1431,6 @@ export function createChatRuntime({
     interrupt,
     closeSession,
     subscribe,
-    onClose,
     sweepOnce,
     startSweep,
     stopSweep,

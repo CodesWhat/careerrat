@@ -84,10 +84,10 @@ capabilities:
       linkedin: false
       wellfound: false
 
-  # Phase 4 — authenticated one-click / modal apply (e.g. LinkedIn Easy Apply),
-  # under the SAME submit-safety gate as apply-job (auto_submit default false;
-  # halt on captcha / 2FA / application limit and ask).
-  one_click_apply:
+  # Phase 4 — authenticated form preparation (e.g. LinkedIn Easy Apply).
+  # Fill and advance safely, halt on captcha / 2FA / application limits, and
+  # always stop for the candidate to press the final submit control.
+  authenticated_apply_preparation:
     enabled: false
     platforms:
       linkedin: false

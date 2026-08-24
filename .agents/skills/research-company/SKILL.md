@@ -1,8 +1,15 @@
 ---
 name: research-company
-description: Web-search a company across six domain-neutral axes → compose a cited workspace/research/<slug>.md artifact that feeds interview-prep and evaluate-job FIT context.
-tier_1_inputs: [profile.candidate.domain, targeting.excluded_companies, research-prefs.yml, modes verdict, company name + freshness]
-tier_2_inputs: [per-axis WebSearch/WebFetch bodies]
+description: Web-search a company across six domain-neutral axes → compose a cited workspace/research/company-slug.md artifact that feeds interview-prep and evaluate-job FIT context.
+metadata:
+  tier_1_inputs:
+    - profile.candidate.domain
+    - targeting.excluded_companies
+    - research-prefs.yml
+    - modes verdict
+    - company name + freshness
+  tier_2_inputs:
+    - per-axis WebSearch/WebFetch bodies
 ---
 
 # research-company
@@ -60,9 +67,11 @@ continue normally.
 
 1. Canonicalize the company name as given by the user or inferred from the JD.
 2. Run:
+
    ```
    careerrat research read "<Company>"
    ```
+
    - If the command returns a **non-stale** artifact (within `staleness_days`), show the
      user the artifact summary and offer two choices:
      - **Reuse** — proceed with the existing artifact; stop here.
@@ -85,6 +94,7 @@ Run one `WebSearch` query per axis, capped at `max_searches_per_company` (defaul
 Construct each query from the axis topic + company name + `candidate_domain` context.
 
 Example query shapes (substitute real values — never paste these verbatim):
+
 - Overview: `"<Company>" company overview size funding`
 - Trajectory: `"<Company>" revenue growth headcount 2024 2025`
 - Recent Moves: `"<Company>" layoffs product launch leadership news site:techcrunch.com OR site:reuters.com`
@@ -93,6 +103,7 @@ Example query shapes (substitute real values — never paste these verbatim):
 - Competitive: `"<Company>" competitors market share differentiation`
 
 For each search result:
+
 - If the snippet is rich enough to cite a specific fact, use it directly.
 - If the snippet is thin or ambiguous, `WebFetch` the top URL to read the full page.
 - Record the URL, page title, fetch date (today's ISO date), axis, and confidence
@@ -238,14 +249,17 @@ written below for a one-shot, non-embedded (external-agent) run, where there is 
 web handoff above instead — skip straight to STEP 6.
 
 1. Dry-run to validate and preview:
+
    ```
    careerrat research record "<Company>" --file <path-to-draft>
    ```
+
    Read the output. If `record` refuses (placeholder residue, missing frontmatter field,
    zero sources, `current_base` leak), fix the draft and re-run. Do not proceed to `--write`
    until the dry run passes clean.
 
 2. Commit:
+
    ```
    careerrat research record "<Company>" --file <path-to-draft> --write
    ```
@@ -266,6 +280,7 @@ web handoff above instead — skip straight to STEP 6.
 ## STEP 6 — Confirm and hand off
 
 Tell the user:
+
 - The artifact is saved at `workspace/research/<company-slug>.md`.
 - `interview-prep` will read it automatically when preparing a packet for this company.
 - `evaluate-job` FIT context for this company is now available.
@@ -281,9 +296,11 @@ to apply there", "add them to the exclusion list", "this is a no"):
 
 1. Confirm with the user before writing ("Add `<Company>` to excluded companies?").
 2. On confirmation, run:
+
    ```
    careerrat gate exclude-company "<Company>" --write --confirm
    ```
+
 3. Echo the CLI confirmation. `careerrat gate` writes SQLite in DB mode and legacy YAML only in legacy mode.
 4. The research artifact can remain — it costs nothing and may be useful for competitive
    intel — but note to the user that `evaluate-job` will CUT any posting from this company.

@@ -31,7 +31,7 @@ careerrat start claude    # or: careerrat start codex
 ```
 
 That scaffolds your workspace, installs the skills, opens the local app at
-http://localhost:7777, and hands off to your agent. Then paste a job posting and say
+<http://localhost:7777>, and hands off to your agent. Then paste a job posting and say
 "evaluate this" — or try the bundled sample under `examples/sample-jobs/`.
 
 `start` does the whole arc in one shot:
@@ -39,7 +39,7 @@ http://localhost:7777, and hands off to your agent. Then paste a job posting and
 1. Scaffolds `candidate/` and `workspace/` directories (idempotent).
 2. Installs skills so Claude Code sees `/apply-job`, `/evaluate-job`, etc.
 3. Seeds `workspace/tracker.json` from the demo template (if not yet present).
-4. Boots the live local app at http://localhost:7777 with hot reload.
+4. Boots the live local app at <http://localhost:7777> with event-driven data updates.
 5. Launches your agent with the starter message that asks it to read
    `AGENTS.md`, run `careerrat doctor`, and follow the next unfinished skill.
 
@@ -121,7 +121,7 @@ filling, or submitting.
 
 ```bash
 careerrat tracker        # snapshot tracker.json for recovery
-careerrat tracker-dev    # live-reloading dev server on :7777
+careerrat tracker-dev    # live-updating app server on :7777
 ```
 
 `careerrat start [agent]` runs that dashboard as a separate local process and
