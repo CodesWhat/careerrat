@@ -143,13 +143,17 @@ test("desktop packaging invokes npm through Node instead of the Windows cmd shim
 });
 
 test("PR and push CI build, install-smoke, and retain the Windows installer", async () => {
-  const ci = await text(".github/workflows/ci-verify.yml");
+  const [ci, verifier] = await Promise.all([
+    text(".github/workflows/ci-verify.yml"),
+    text("apps/desktop/scripts/verify-windows.mjs"),
+  ]);
   const job = ci.slice(ci.indexOf("  windows-package-smoke:"));
 
   assert.match(job, /runs-on:\s+windows-latest/);
   assert.match(job, /npm run verify:windows --workspace apps\/desktop/);
   assert.match(job, /actions\/upload-artifact@[0-9a-f]{40}/);
   assert.match(job, /CareerRat-\*-(?:win-)?x64-Setup\.exe/);
+  assert.match(verifier, /`_\?=\$\{installDir\}`/);
 });
 
 test("tag release prepares one draft and requires both macOS and Windows artifacts", async () => {

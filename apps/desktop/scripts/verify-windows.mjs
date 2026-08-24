@@ -62,8 +62,9 @@ try {
 
   const uninstallerName = readdirSync(installDir).find((name) => /^Uninstall .*\.exe$/i.test(name));
   if (!uninstallerName) throw new Error("the NSIS package installed no uninstaller");
-  run(join(installDir, uninstallerName), ["/S"], "silent uninstall");
-  process.stdout.write(`WINDOWS SMOKE OK ${expectedName}\n`);
+  run(join(installDir, uninstallerName), ["/S", `_?=${installDir}`], "silent uninstall");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }
+
+process.stdout.write(`WINDOWS SMOKE OK ${expectedName}\n`);
