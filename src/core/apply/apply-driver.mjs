@@ -85,6 +85,13 @@ function uploadKind(label) {
   return null;
 }
 
+function directUploadKind(label) {
+  const normalized = normalizeLabel(label);
+  if (/^(?:resume(?: cv)?|curriculum vitae|cv)(?: required)?$/.test(normalized)) return "resume";
+  if (/^cover letter(?: required)?$/.test(normalized)) return "coverLetter";
+  return null;
+}
+
 function parsedSnapshotNodes(snapshotResult) {
   const rawText = snapshotResult?.pageText ?? snapshotResult?.snapshot;
   const nodes = [];
@@ -112,10 +119,12 @@ export function uploadTargetsFromSnapshot(snapshotResult = {}) {
   const targets = [];
   const usedKinds = new Set();
   for (const node of parsedSnapshotNodes(snapshotResult)) {
-    if (node.role !== "button" || !/^(attach|upload(?: file)?)$/i.test(node.label)) continue;
+    if (node.role !== "button") continue;
+    const directKind = directUploadKind(node.label);
+    if (!directKind && !/^(attach|upload(?: file)?)$/i.test(node.label)) continue;
     let context = node.parent;
     while (context && !uploadKind(context.label)) context = context.parent;
-    const kind = uploadKind(context?.label || node.label);
+    const kind = directKind || uploadKind(context?.label || node.label);
     if (!kind || usedKinds.has(kind)) continue;
     targets.push({
       ref: node.ref,
@@ -126,6 +135,19 @@ export function uploadTargetsFromSnapshot(snapshotResult = {}) {
     usedKinds.add(kind);
   }
   return targets;
+}
+
+function selectValueFromSnapshot(value, snapshot) {
+  const requested = normalizeLabel(value);
+  if (!requested) return String(value);
+  const options = Object.values(snapshot?.refs || {})
+    .filter((entry) => String(entry?.role || "").toLowerCase() === "option")
+    .map((entry) => String(entry?.name || "").trim())
+    .filter(Boolean);
+  const exact = options.find((label) => normalizeLabel(label) === requested);
+  if (exact) return exact;
+  const prefixed = options.filter((label) => normalizeLabel(label).startsWith(`${requested} `));
+  return prefixed.length === 1 ? prefixed[0] : String(value);
 }
 
 function answerSections(markdown) {
@@ -296,12 +318,17 @@ export function screenshotPath({ repoRoot, env, applicationId, data, format }) {
 // type/value combination has no safe action (e.g. a checkbox step whose value
 // isn't an affirmative yes/true/1) — the caller treats a null action the same
 // as a field that changed out from under it: unresolved, nothing clicked.
-function fieldOpFor(step) {
+function fieldOpFor(step, snapshot) {
   if (step.type === "text") {
     return (ops, pageId) => ops.fillField({ pageId, ref: step.ref, value: String(step.value) });
   }
   if (step.type === "select") {
-    return (ops, pageId) => ops.selectOption({ pageId, ref: step.ref, value: String(step.value) });
+    return (ops, pageId) =>
+      ops.selectOption({
+        pageId,
+        ref: step.ref,
+        value: selectValueFromSnapshot(step.value, snapshot),
+      });
   }
   if (step.type === "checkbox" && /^(yes|true|1)$/i.test(String(step.value))) {
     return (ops, pageId) => ops.toggleField({ pageId, ref: step.ref, checked: true });
@@ -353,7 +380,7 @@ async function fillStep({
     }
     const freshSnapshot = await ops.snapshot({ pageId });
     const freshField = currentField(step, freshSnapshot);
-    const action = freshField ? fieldOpFor({ ...step, ref: freshField.ref }) : null;
+    const action = freshField ? fieldOpFor({ ...step, ref: freshField.ref }, freshSnapshot) : null;
     if (!action) {
       unresolved.push({
         label: step.label,

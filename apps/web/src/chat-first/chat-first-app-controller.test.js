@@ -14,14 +14,17 @@ import {
   mapMockSession,
   mockStartContext,
   openApplicationHandoff,
+  packetExportReceipt,
   resolveNeedDecision,
   resolvePersonAction,
+  selectedSourcedDismissal,
   sourceSweepPresentation,
 } from "./chat-first-app-controller.js";
 
 describe("chat-first app controller", () => {
   it("returns a newly-created mission before its execution reaches the submit gates", async () => {
     let finishRun;
+    const onExecutionStart = vi.fn();
     const api = {
       createChatFirstMission: vi.fn().mockResolvedValue({ data: { mission: { id: "m-live" } } }),
       runChatFirstMission: vi.fn().mockImplementation(
@@ -38,13 +41,40 @@ describe("chat-first app controller", () => {
       selection: ["s1"],
       rows: [{ id: "s1", source: "sourced", company: "Tyrell", role: "Staff", fit: 88 }],
       mode: "prepare-to-submit",
+      onExecutionStart,
     });
 
     expect(result.mission.id).toBe("m-live");
     expect(api.runChatFirstMission).toHaveBeenCalledWith("m-live");
+    expect(onExecutionStart).toHaveBeenCalledWith("m-live");
     expect(result.execution).toBeInstanceOf(Promise);
     finishRun({ data: { mission: { id: "m-live", status: "paused" } } });
     await result.execution;
+  });
+
+  it("resumes a hydrated running mission exactly once per active client execution", async () => {
+    expect(controller.resumeHydratedMission).toBeTypeOf("function");
+    const inFlight = new Set();
+    let finish;
+    const api = {
+      resumeChatFirstMission: vi.fn(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          })
+      ),
+    };
+    const mission = { id: "mission-after-restart", status: "running" };
+
+    const first = controller.resumeHydratedMission({ api, mission, inFlight });
+    const duplicate = controller.resumeHydratedMission({ api, mission, inFlight });
+
+    expect(api.resumeChatFirstMission).toHaveBeenCalledOnce();
+    expect(duplicate).toBeNull();
+    expect(inFlight.has(mission.id)).toBe(true);
+    finish({ data: { mission: { ...mission, status: "paused" } } });
+    await first;
+    expect(inFlight.has(mission.id)).toBe(false);
   });
 
   it("loads every job-scoped file kind into the shared artifact viewer contract", async () => {
@@ -132,22 +162,83 @@ describe("chat-first app controller", () => {
     ]);
     expect(
       mapComposerChips(
-        ["job-2"],
+        ["job-2", "missing-job"],
         [
           { id: "job-1", company: "Tyrell" },
           { id: "job-2", company: "Aperture", role: "Staff Engineer" },
         ]
       )
-    ).toEqual([{ id: "job-2", label: "Aperture" }]);
+    ).toEqual([
+      { id: "job-2", label: "Aperture" },
+      { id: "missing-job", label: "Job context" },
+    ]);
   });
 
   it("runs plain main-chat answers through the durable workspace thread", async () => {
     const api = { sendWorkspaceMessage: vi.fn().mockResolvedValue({ data: { messages: [] } }) };
+    const context = { pathname: "/jobs", jobId: "app-temporal" };
 
-    const result = await commitComposerTurn({ api, text: "What should I do today?" });
+    const result = await commitComposerTurn({
+      api,
+      text: "What should I do today?",
+      context,
+    });
 
-    expect(api.sendWorkspaceMessage).toHaveBeenCalledWith("What should I do today?");
+    expect(api.sendWorkspaceMessage).toHaveBeenCalledWith("What should I do today?", context);
     expect(result.kind).toBe("message");
+  });
+
+  it("turns packet export paths into an observable receipt", () => {
+    expect(
+      packetExportReceipt({
+        data: {
+          userFacing: {
+            resume: [
+              {
+                name: "acme-resume.pdf",
+                path: "workspace/tailored/acme-resume.pdf",
+                downloadsPath: "/Users/riley/Downloads/acme-resume.pdf",
+              },
+            ],
+            coverLetter: [
+              {
+                name: "acme-cover.pdf",
+                path: "workspace/tailored/acme-cover.pdf",
+              },
+            ],
+            answers: [],
+          },
+        },
+      })
+    ).toEqual({
+      title: "Export complete",
+      artifact: {
+        kind: "Export receipt",
+        text: [
+          "Saved 2 files locally.",
+          "",
+          "acme-resume.pdf",
+          "/Users/riley/Downloads/acme-resume.pdf",
+          "",
+          "acme-cover.pdf",
+          "workspace/tailored/acme-cover.pdf",
+        ].join("\n"),
+      },
+    });
+    expect(packetExportReceipt({ data: { userFacing: {} } })).toBeNull();
+  });
+
+  it("only treats sourced search rows as durable Dismiss all decisions", () => {
+    expect(
+      selectedSourcedDismissal(
+        [
+          { id: "source-1", source: "sourced" },
+          { id: "app-1", source: "application" },
+          { id: "source-2", source: "sourced" },
+        ],
+        ["source-1", "app-1", "source-2"]
+      )
+    ).toEqual({ sourcedIds: ["source-1", "source-2"], unsupportedCount: 1 });
   });
 
   it("runs classified actions but converts job.apply into a user-gated mission", async () => {
@@ -167,7 +258,7 @@ describe("chat-first app controller", () => {
 
     expect(api.runWorkspaceIntent).not.toHaveBeenCalled();
     expect(api.createChatFirstMission).toHaveBeenCalledWith({
-      title: "Prepare 1 application",
+      title: "Apply to 1 role",
       mode: "prepare-to-submit",
       requiresUserSubmit: true,
       jobs: [{ type: "application", id: "app-1", company: "", role: "", fit: null }],
@@ -186,7 +277,7 @@ describe("chat-first app controller", () => {
     await createMissionAndRun({ api, selection: ["s1"], rows, mode: "draft" });
 
     expect(api.createChatFirstMission).toHaveBeenCalledWith({
-      title: "Prepare 1 application",
+      title: "Draft 1 packet",
       mode: "draft",
       requiresUserSubmit: true,
       jobs: [{ id: "s1", type: "sourced", company: "Tyrell", role: "Staff", fit: 88 }],
@@ -210,7 +301,10 @@ describe("chat-first app controller", () => {
                 requiresUserSubmit: true,
                 answeredCount: 2,
                 questionCount: 3,
-                packet: [{ id: "resume", name: "resume.pdf", kind: "Resume" }],
+                packet: [
+                  { id: "resume", name: "resume.pdf", kind: "Resume" },
+                  { id: "coverLetter", name: "cover-letter.pdf", kind: "Cover letter" },
+                ],
               },
             },
           ],
@@ -237,7 +331,10 @@ describe("chat-first app controller", () => {
       channel: "Greenhouse",
       answeredCount: 2,
       questionCount: 3,
-      packet: [{ id: "resume", name: "resume.pdf", kind: "Resume" }],
+      packet: [
+        { id: "resume", name: "resume.pdf", kind: "Resume", icon: "📄" },
+        { id: "coverLetter", name: "cover-letter.pdf", kind: "Cover letter", icon: "✉️" },
+      ],
     });
     expect(openApplicationHandoff(gate, open)).toBe(true);
     expect(open).toHaveBeenCalledWith(
@@ -265,6 +362,19 @@ describe("chat-first app controller", () => {
     expect(resolveNeedDecision(sourced, "secondary")).toEqual({
       kind: "sourced-decision",
       payload: { id: "source-1", decision: "skip" },
+    });
+
+    const sourcedGroup = {
+      kind: "sourced-decision-group",
+      sourceIds: ["source-1", "source-2", "source-3"],
+    };
+    expect(resolveNeedDecision(sourcedGroup, "primary")).toEqual({
+      kind: "sourced-batch-apply",
+      ids: ["source-1", "source-2", "source-3"],
+    });
+    expect(resolveNeedDecision(sourcedGroup, "secondary")).toEqual({
+      kind: "review-sourced-batch",
+      ids: ["source-1", "source-2", "source-3"],
     });
 
     const touch = {
@@ -323,6 +433,27 @@ describe("chat-first app controller", () => {
     expect(
       sourceSweepPresentation({ status: "failed", error: { message: "Board access failed" } })
     ).toEqual({ status: "error", summary: "Board access failed" });
+  });
+
+  it("keeps provider and source labels exposed by durable sweep progress", () => {
+    expect(
+      sourceSweepPresentation({
+        id: "manual-labeled",
+        status: "running",
+        progress: {
+          completedSources: 1,
+          totalSources: 3,
+          foundCount: 4,
+          providers: ["Greenhouse", { label: "Lever" }],
+          batch: { kind: "company", label: "Acme careers" },
+        },
+      })
+    ).toEqual({
+      id: "manual-labeled",
+      status: "running",
+      detail: "1 of 3 sources checked · 4 found",
+      providers: ["Greenhouse", "Lever", "Acme careers"],
+    });
   });
 
   it("maps a durable mock session into the prototype conversation contract", () => {

@@ -5,6 +5,7 @@ import {
   createCompanyProposals,
   decideChatFirstSourced,
   decideDeepIngestProposal,
+  dismissDeepIngestPrompt,
   dismissTouchDue,
   endMockInterview,
   exportInterviewDossierPdf,
@@ -29,6 +30,7 @@ import {
   previewWorkspaceQuery,
   probeInstalledAiRuntime,
   removeEvidenceClaim,
+  resumeChatFirstMission,
   runChatFirstMission,
   runWorkspaceIntent,
   saveCandidateFile,
@@ -46,6 +48,7 @@ import {
   startSearchRun,
   submitDeepIngestSource,
   uploadDeepIngestFile,
+  upsertDeepIngestConfirmedItem,
 } from "../lib/api.js";
 
 export const firstRunApi = Object.freeze({
@@ -79,6 +82,7 @@ export const profileSettingsApi = Object.freeze({
   probeInstalledAiRuntime,
   saveCandidateFile,
   selectInstalledAiRuntime,
+  upsertDeepIngestConfirmedItem,
 });
 
 export const chatFirstApi = Object.freeze({
@@ -86,6 +90,7 @@ export const chatFirstApi = Object.freeze({
   createChatFirstMission,
   decideChatFirstSourced,
   decideDeepIngestProposal,
+  dismissDeepIngestPrompt,
   dismissTouchDue,
   endMockInterview,
   exportInterviewDossierPdf,
@@ -98,6 +103,7 @@ export const chatFirstApi = Object.freeze({
   getSourcingRun,
   pinJobThread,
   previewWorkspaceQuery,
+  resumeChatFirstMission,
   runChatFirstMission,
   runWorkspaceIntent,
   sendJobThreadTurn,

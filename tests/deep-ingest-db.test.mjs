@@ -1205,6 +1205,47 @@ test("deepIngestConfirmedItemUpdate partially merges edits across all four confi
   }
 });
 
+test("deepIngestConfirmedItemUpsert creates and updates a manual writing voice", async () => {
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+  const { deepIngestConfirmedItemUpsert } = await loadDeepIngestVerbs();
+
+  const created = deepIngestConfirmedItemUpsert({
+    repoRoot,
+    lane: "writing_voice",
+    fields: {
+      summary: "Plain, direct, concrete.",
+      doPhrases: ["Lead with the result"],
+      avoidPhrases: ["Excited to apply"],
+    },
+  });
+
+  assert.equal(created.ok, true);
+  assert.equal(created.created, true);
+  assert.match(created.item.id, /^writing_voice_/);
+  assert.equal(created.item.status, "confirmed");
+  assert.equal(created.item.summary, "Plain, direct, concrete.");
+  assert.equal(created.event.title, "Writing preferences added");
+  assert.equal(
+    JSON.parse(
+      db.prepare("SELECT data FROM deep_ingest_lane_states WHERE id = ?").get("writing_voice").data
+    ).status,
+    "completed"
+  );
+
+  const updated = deepIngestConfirmedItemUpsert({
+    repoRoot,
+    lane: "writing_voice",
+    id: created.item.id,
+    fields: { summary: "Short sentences, concrete verbs." },
+  });
+  assert.equal(updated.created, false);
+  assert.equal(updated.item.id, created.item.id);
+  assert.equal(updated.item.summary, "Short sentences, concrete verbs.");
+  assert.deepEqual(updated.item.doPhrases, ["Lead with the result"]);
+  assert.equal(updated.event.title, "Writing preferences updated");
+});
+
 test("deepIngestConfirmedItemUpdate reports unknown lane/id and privacy-block reasons", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });

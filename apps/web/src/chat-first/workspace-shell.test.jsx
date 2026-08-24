@@ -71,6 +71,13 @@ describe("TopBar", () => {
     expect(html).toContain("Every step is logged. The full history lives in your local files.");
   });
 
+  it("can hide Activity when a shell state has no real activity feed", () => {
+    const html = markup(<TopBar agentName="Mina" showActivity={false} />);
+
+    expect(html).toContain("Profile &amp; settings");
+    expect(html).not.toContain("Open activity");
+  });
+
   it("keeps a full day of activity inside the fixed desktop window", () => {
     const css = readFileSync(fileURLToPath(new URL("./chat-first.css", import.meta.url)), "utf8");
 
@@ -174,7 +181,7 @@ describe("Composer", () => {
 });
 
 describe("NeedsYouPanel", () => {
-  it("keeps decisions in a dedicated queue and offers deep ingest", () => {
+  it("keeps decisions in a dedicated queue and docks deep ingest at the bottom right", () => {
     const html = markup(
       <NeedsYouPanel
         items={[
@@ -196,7 +203,9 @@ describe("NeedsYouPanel", () => {
             onSecondary: () => {},
           },
         ]}
+        deepIngestPrompt={{ visible: true }}
         onStartIngest={() => {}}
+        onDismissIngest={() => {}}
       />
     );
 
@@ -207,8 +216,19 @@ describe("NeedsYouPanel", () => {
       "Decisions queue here so they never get buried in chat. Expiring ones interrupt."
     );
     expect(html).toContain("GO DEEPER");
+    expect(html).toContain('class="chat-first-deep-dock"');
+    expect(html).toContain('data-icon="pickaxe"');
+    expect(html).toContain('aria-label="Dismiss deep ingest prompt"');
+    expect(html).toContain(">Dismiss</button>");
     expect(html).toContain("Deep ingest your history");
     expect(html).toContain("old resumes, reviews, project docs");
+  });
+
+  it("removes the deep ingest dock after completion or dismissal", () => {
+    const html = markup(<NeedsYouPanel items={[]} deepIngestPrompt={{ visible: false }} />);
+
+    expect(html).not.toContain("GO DEEPER");
+    expect(html).not.toContain("Deep ingest your history");
   });
 });
 
@@ -244,11 +264,46 @@ describe("ChatFirstWorkspace", () => {
     expect(css).toMatch(/\.chat-first-workspace__body\s*\{[^}]*-webkit-app-region:\s*no-drag/s);
   });
 
+  it("caps Lucide icons at their exact handoff sizes", () => {
+    const css = readFileSync(fileURLToPath(new URL("./chat-first.css", import.meta.url)), "utf8");
+
+    expect(css).toMatch(
+      /\.chat-first-activity__trigger svg\[data-icon="activity"\]\s*\{[^}]*width:\s*14px[^}]*height:\s*14px/s
+    );
+    expect(css).toMatch(
+      /\.chat-first-activity__trigger svg\[data-icon="chevron-down"\]\s*\{[^}]*width:\s*13px[^}]*height:\s*13px/s
+    );
+    expect(css).toMatch(
+      /\.chat-first-composer__send svg\s*\{[^}]*width:\s*17px[^}]*height:\s*17px/s
+    );
+    expect(css).toMatch(
+      /\.chat-first-drop-card__icon svg\s*\{[^}]*width:\s*22px[^}]*height:\s*22px/s
+    );
+  });
+
   it("keeps attention pill copy visible over its ink background", () => {
     const css = readFileSync(fileURLToPath(new URL("./chat-first.css", import.meta.url)), "utf8");
 
     expect(css).toMatch(
       /\.chat-first-pill--ink\s*\{[^}]*color:\s*var\(--cf-lime[^}]*background:\s*var\(--cf-ink/s
+    );
+  });
+
+  it("uses the exact handoff geometry for Needs You cards and pills", () => {
+    const css = readFileSync(fileURLToPath(new URL("./chat-first.css", import.meta.url)), "utf8");
+    const reset = css.match(/\.chat-first-workspace button,[^{]*\{([^}]*)\}/s)?.[1] || "";
+
+    expect(reset).not.toMatch(/\bfont:\s*inherit;/);
+    expect(reset).toMatch(/font-family:\s*inherit;[\s\S]*font-size:\s*inherit;/);
+    expect(css).toMatch(/\.chat-first-need-card\s*\{[^}]*padding:\s*13px 15px/s);
+    expect(css).toMatch(/\.chat-first-need-card,[^}]*border-radius:\s*18px/s);
+    expect(css).toMatch(/\.chat-first-needs \.chat-first-pill\s*\{[^}]*padding:\s*6px 14px/s);
+    expect(css).toMatch(/\.chat-first-pill\s*\{[^}]*font-weight:\s*700/s);
+    expect(css).toMatch(/\.chat-first-deep-card__dismiss\s*\{[^}]*font-weight:\s*700/s);
+    expect(css).toMatch(/\.chat-first-pill\s*\{[^}]*border-radius:\s*999px/s);
+    expect(css).not.toMatch(/\.chat-first-pill\s*\{[^}]*min-height:/s);
+    expect(css).toMatch(
+      /\.chat-first-needs \.chat-first-pill--outline\s*\{[^}]*padding:\s*5px 13px[^}]*border-color:\s*#e3e0d6/s
     );
   });
 

@@ -49,7 +49,7 @@ const VIEW = {
   missions: [
     {
       id: "mission-1",
-      title: "Prepare 1 application",
+      title: "Apply to 1 role",
       status: "paused",
       steps: [{ id: "submit-1", label: "Submit E Corp", status: "blocked" }],
     },
@@ -107,8 +107,8 @@ describe("ChatFirstAppView", () => {
         },
       })
     ).toEqual([
-      expect.objectContaining({ id: "resume" }),
-      expect.objectContaining({ id: "coverLetter" }),
+      expect.objectContaining({ id: "resume", icon: "📄" }),
+      expect.objectContaining({ id: "coverLetter", icon: "✉️" }),
     ]);
   });
 
@@ -118,7 +118,7 @@ describe("ChatFirstAppView", () => {
     expect(html).toContain("CareerRat");
     expect(html).toContain("I found six strong roles.");
     expect(html).toContain("Start with Tyrell.");
-    expect(html).toContain("Prepare 1 application");
+    expect(html).toContain("Apply to 1 role");
     expect(html).toContain("E Corp application ready");
     expect(html).toContain("tell Paul what to do");
     expect(html).toContain("1 touch due");
@@ -294,6 +294,40 @@ describe("ChatFirstAppView", () => {
     expect(html).toContain("Job description · confirmed story bank");
     expect(html).not.toContain("Job description, dossier, and confirmed story bank");
     expect(html).toContain('aria-current="page"');
+  });
+
+  it("reopens an active durable mock from its owning job instead of starting another session", async () => {
+    const html = await renderView({
+      view: {
+        ...VIEW,
+        threads: [{ ...VIEW.threads[0], stage: "technical" }],
+      },
+      ui: { ...BASE_UI, activeThread: "app-1", activeApplicationId: "app-1" },
+      mockSession: { id: "mock-existing", applicationId: "app-1" },
+    });
+
+    expect(html).toContain("Continue mock interview");
+    expect(html).not.toContain("Run mock interview");
+  });
+
+  it("offers an explicit resume action for a durable paused mission", async () => {
+    const html = await renderView({
+      view: {
+        ...VIEW,
+        missions: [
+          {
+            ...VIEW.missions[0],
+            steps: [
+              { id: "packet", label: "Draft E Corp packet", status: "completed" },
+              { id: "prepare", label: "Prepare E Corp form", status: "pending" },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(html).toContain(">resume</button>");
+    expect(html).not.toContain(">pause</button>");
   });
 
   it("mounts the submit gate, artifact viewer, and engine-down cover as real overlays", async () => {

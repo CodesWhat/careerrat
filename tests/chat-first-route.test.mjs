@@ -110,16 +110,36 @@ test("chat-first route module mounts the complete durable write surface", async 
     "POST /api/chat-first/missions/status",
     "POST /api/chat-first/missions/step",
     "POST /api/chat-first/missions/run",
+    "POST /api/chat-first/missions/resume",
     "POST /api/chat-first/mock/start",
     "POST /api/chat-first/mock/message",
     "POST /api/chat-first/mock/turn",
     "POST /api/chat-first/mock/feedback",
     "POST /api/chat-first/mock/end",
     "POST /api/chat-first/sourced/decision",
+    "POST /api/chat-first/deep-ingest-prompt/dismiss",
     "POST /api/chat-first/touch-due/dismiss",
   ]) {
     assert.equal(routes.has(key), true, key);
   }
+});
+
+test("deep ingest prompt dismiss route returns the durable updated aggregate", async () => {
+  const repoRoot = tempRepo();
+  const routes = await boot(repoRoot);
+
+  const dismissed = await invoke(routes, "POST", "/api/chat-first/deep-ingest-prompt/dismiss", {});
+
+  assert.equal(dismissed.status, 200);
+  assert.equal(dismissed.body.data.reused, false);
+  assert.equal(dismissed.body.data.prompt.visible, false);
+  assert.equal(dismissed.body.data.prompt.dismissed, true);
+  assert.deepEqual(dismissed.body.data.state.deepIngestPrompt, dismissed.body.data.prompt);
+
+  const replay = await invoke(routes, "POST", "/api/chat-first/deep-ingest-prompt/dismiss", {});
+  assert.equal(replay.status, 200);
+  assert.equal(replay.body.data.reused, true);
+  assert.equal(replay.body.data.prompt.dismissedAt, dismissed.body.data.prompt.dismissedAt);
 });
 
 test("dossier PDF route returns a real no-store attachment from the canonical exporter", async () => {
@@ -249,6 +269,15 @@ test("chat-first routes fail closed without a DB and reject malformed bodies", a
   assert.equal(noDb.status, 409);
   assert.match(noDb.body.error, /no database yet/);
 
+  const noDbPrompt = await invoke(
+    noDbRoutes,
+    "POST",
+    "/api/chat-first/deep-ingest-prompt/dismiss",
+    {}
+  );
+  assert.equal(noDbPrompt.status, 409);
+  assert.match(noDbPrompt.body.error, /no database yet/);
+
   const repoRoot = tempRepo();
   const routes = await boot(repoRoot);
   const invalid = await invoke(routes, "POST", "/api/chat-first/missions", { jobs: [] });
@@ -296,6 +325,51 @@ test("mission routes invoke the existing workspace-intent runtime and stop at du
     calls.some((intent) => intent.type === "job.apply"),
     false
   );
+});
+
+test("mission resume route continues a durable paused run and never invokes job.apply", async () => {
+  const repoRoot = tempRepo();
+  appUpsert({
+    repoRoot,
+    row: {
+      id: "app-resume-http",
+      company: "Restart Route Corp",
+      role: "Staff Engineer",
+      status: "applied",
+      evaluation: { gate: "keep" },
+    },
+  });
+  const calls = [];
+  const routes = await boot(repoRoot, {
+    workspaceAgentRuntime: {
+      executeIntent: async ({ intent }) => {
+        calls.push(intent.type);
+        return {
+          operationResult: { ok: true },
+          ...(intent.type === "job.prepare-submit"
+            ? { messages: [{ metadata: { state: "awaiting-submit" } }] }
+            : {}),
+        };
+      },
+    },
+  });
+  await invoke(routes, "POST", "/api/chat-first/missions", {
+    id: "mission-resume-http",
+    jobs: [{ type: "application", id: "app-resume-http" }],
+  });
+  await invoke(routes, "POST", "/api/chat-first/missions/status", {
+    id: "mission-resume-http",
+    status: "paused",
+  });
+
+  const resumed = await invoke(routes, "POST", "/api/chat-first/missions/resume", {
+    id: "mission-resume-http",
+  });
+
+  assert.equal(resumed.status, 200);
+  assert.equal(resumed.body.data.mission.status, "paused");
+  assert.deepEqual(calls, ["job.generate-documents", "job.prepare-submit"]);
+  assert.equal(calls.includes("job.apply"), false);
 });
 
 test("mock interview HTTP lifecycle returns validated durable session state", async () => {
@@ -485,18 +559,26 @@ test("AI-backed mock start and turn persist role-calibrated question, answer, fe
   assert.equal(calls[1].outputName, "chat_first_mock_feedback");
 });
 
-test("invalid structured mock feedback fails closed while retaining the user's durable answer", async () => {
+test("invalid structured mock feedback retains one durable answer and can be retried", async () => {
   const repoRoot = tempRepo();
   appUpsert({
     repoRoot,
     row: { id: "app-mock-invalid", company: "Initech", role: "Manager", status: "interview" },
   });
   let callCount = 0;
+  let feedbackValid = false;
   const routes = await boot(repoRoot, {
     callAIImpl: async (options) => {
       callCount += 1;
       if (options.outputName === "chat_first_mock_question") {
         return aiReply({ question: "Tell me about a difficult decision." });
+      }
+      if (feedbackValid) {
+        return aiReply({
+          worked: "You named the rollout tradeoff.",
+          tighten: "Add the measurable result.",
+          nextQuestion: "How did you know the rollout worked?",
+        });
       }
       return { content: [{ type: "text", text: "not structured feedback" }] };
     },
@@ -519,4 +601,21 @@ test("invalid structured mock feedback fails closed while retaining the user's d
   assert.equal(session.messages.filter((message) => message.kind === "question").length, 1);
   assert.equal(session.feedback.length, 0);
   assert.equal(callCount, 3);
+
+  feedbackValid = true;
+  const retried = await invoke(routes, "POST", "/api/chat-first/mock/turn", {
+    sessionId: "mock-invalid",
+    text: "This retry must reuse the saved answer.",
+  });
+  assert.equal(retried.status, 200);
+  assert.equal(retried.body.data.reusedAnswer, true);
+  assert.equal(
+    retried.body.data.session.messages.filter((message) => message.kind === "answer").length,
+    1
+  );
+  assert.equal(
+    retried.body.data.session.messages.filter((message) => message.kind === "question").length,
+    2
+  );
+  assert.equal(retried.body.data.session.feedback.length, 1);
 });

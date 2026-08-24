@@ -244,7 +244,7 @@ button.cf-first-run__engine-choice {
 
 .cf-first-run__paul-card {
   padding: 12px 13px;
-  border: 0;
+  border: 2px solid #e6fa8d;
   border-radius: 16px;
   background: #17171a;
   color: #fdfcf7;

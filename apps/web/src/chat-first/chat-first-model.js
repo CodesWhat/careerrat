@@ -10,6 +10,15 @@ function list(value) {
   return Array.isArray(value) ? value : [];
 }
 
+export function artifactEmoji(kind) {
+  const value = String(kind || "").toLowerCase();
+  if (value.includes("cover")) return "✉️";
+  if (value.includes("dossier") || value.includes("interview prep")) return "📕";
+  if (value.includes("story")) return "⭐";
+  if (value.includes("evidence")) return "🧾";
+  return "📄";
+}
+
 function normalizeSearchRow(row, source) {
   return {
     ...row,
@@ -62,6 +71,7 @@ function normalizeFile(file, index) {
       [file?.status, file?.updated, file?.link].filter(Boolean).join(" · ") ||
       "Saved locally",
     text: file?.text || text || null,
+    emoji: file?.emoji || artifactEmoji(file?.kind || file?.type || file?.title),
   };
 }
 
@@ -93,6 +103,7 @@ function jobArtifactFiles(details) {
         name: artifact?.name || path.split("/").at(-1) || fallbackName,
         kind,
         meta: artifact?.note || "Saved locally",
+        emoji: artifact?.emoji || artifactEmoji(kind),
       };
     });
   });
@@ -152,6 +163,13 @@ function pipelineStageKey(row) {
     .replaceAll(" ", "-");
 }
 
+function pipelineOutcomeStageKey(row) {
+  return String(row?.stage || row?.status || row?.stageLabel || row?.stageGroupLabel || "")
+    .trim()
+    .toLowerCase()
+    .replaceAll(" ", "-");
+}
+
 function reachedPipelineMilestone(row, milestone) {
   const stage = pipelineStageKey(row);
   if (milestone === "applied") return true;
@@ -201,9 +219,7 @@ function buildPipeline(applicationRows) {
   const leaks = leakOrder
     .map((id) => {
       const count = applicationRows.filter((row) => {
-        const stage = String(row?.stage || row?.stageLabel || row?.stageGroupLabel || "")
-          .toLowerCase()
-          .replaceAll(" ", "-");
+        const stage = pipelineOutcomeStageKey(row);
         return stage === id || (id === "going-stale" && stage === "stale");
       }).length;
       return { id, label: titleCase(id), count };
@@ -213,13 +229,14 @@ function buildPipeline(applicationRows) {
     applicationCount: applicationRows.length,
     rows,
     leaks,
-    jobs: applicationRows
-      .filter((row) => !row?.terminal)
-      .map((row) => ({
+    jobs: applicationRows.map((row) => {
+      const stageId = pipelineOutcomeStageKey(row);
+      return {
         ...row,
-        stageId: row?.stage || "",
-        stage: row?.stageLabel || row?.stageGroupLabel || titleCase(row?.stage),
-      })),
+        stageId,
+        stage: row?.stageLabel || row?.stageGroupLabel || titleCase(stageId),
+      };
+    }),
   };
 }
 
@@ -295,6 +312,35 @@ function touchNeeds(items) {
   }));
 }
 
+function collapseSourcedDecisions(items) {
+  const needs = list(items);
+  const sourced = needs.filter((item) => item?.kind === "sourced-decision");
+  if (sourced.length < 2) return needs;
+  const sourceIds = [
+    ...new Set(
+      sourced
+        .map((item) => item?.sourceId || item?.owner?.id)
+        .filter(Boolean)
+        .map(String)
+    ),
+  ];
+  if (sourceIds.length < 2) return needs;
+  const firstIndex = needs.findIndex((item) => item?.kind === "sourced-decision");
+  const remaining = needs.filter((item) => item?.kind !== "sourced-decision");
+  remaining.splice(firstIndex, 0, {
+    id: `sourced-batch:${sourceIds.join(":")}`,
+    kind: "sourced-decision-group",
+    sourceIds,
+    items: sourced,
+    title: `${sourceIds.length} qualified jobs are ready`,
+    detail: "Review them together before Paul prepares each application.",
+    primaryLabel: `Apply to ${sourceIds.length} jobs`,
+    secondaryLabel: "Review",
+    tone: "plain",
+  });
+  return remaining;
+}
+
 function flattenPeople(network) {
   const people = [];
   for (const company of list(network?.companies)) {
@@ -311,6 +357,8 @@ function flattenPeople(network) {
         last: company.latestAt || null,
         next: company.nextTouch || null,
         needsTouch: Boolean(company.nextTouch),
+        actionLabel:
+          contact.actionLabel || (!company.applicationId && !company.nextTouch ? "Ask Paul" : null),
       });
     }
   }
@@ -352,14 +400,14 @@ export function buildChatFirstView(dashboardInput, runtimeInput) {
   const canonicalNeeds = hasCanonicalNeeds
     ? list(runtime.needsYou)
     : list(dashboard.allNextSteps).map(normalizeNextStep);
-  const needsYou = [
+  const needsYou = collapseSourcedDecisions([
     ...gates,
     ...canonicalNeeds.filter(
       (item) =>
         !gates.some((gate) => gate.applicationId && gate.applicationId === item.applicationId)
     ),
     ...(hasCanonicalNeeds ? [] : touchNeeds(runtime.touchDue)),
-  ];
+  ]);
 
   return {
     agentName: runtime.agentName || "Paul",
@@ -369,6 +417,7 @@ export function buildChatFirstView(dashboardInput, runtimeInput) {
     threads,
     archivedThreads,
     needsYou,
+    deepIngestPrompt: runtime.deepIngestPrompt || { visible: false },
     missions,
     activeMission:
       missions.find((mission) => mission.status === "running" || mission.status === "paused") ||
@@ -403,6 +452,7 @@ export function createChatFirstState() {
     browse: false,
     pipeView: "funnel",
     selection: [],
+    searchSelectionSeeded: false,
     composerChips: [],
     gateId: null,
     activityOpen: false,
@@ -418,6 +468,13 @@ export function chatFirstReducer(state, action) {
       return { ...state, browse: false };
     case "browser.pipeline-view":
       return { ...state, pipeView: action.view === "list" ? "list" : "funnel" };
+    case "selection.seed-search":
+      if (state.searchSelectionSeeded) return state;
+      return {
+        ...state,
+        selection: highFitSearchIds(action.rows),
+        searchSelectionSeeded: true,
+      };
     case "selection.toggle": {
       const selected = state.selection.includes(action.id);
       return {
@@ -427,6 +484,11 @@ export function chatFirstReducer(state, action) {
           : [...state.selection, action.id],
       };
     }
+    case "selection.replace":
+      return {
+        ...state,
+        selection: [...new Set(list(action.ids).filter(Boolean).map(String))],
+      };
     case "selection.clear":
       return { ...state, selection: [] };
     case "selection.chat":
@@ -439,6 +501,11 @@ export function chatFirstReducer(state, action) {
       };
     case "composer.clear-context":
       return { ...state, composerChips: [] };
+    case "composer.set-context":
+      return {
+        ...state,
+        composerChips: [...new Set(list(action.ids).filter(Boolean).map(String))],
+      };
     case "composer.remove-context":
       return {
         ...state,
@@ -478,4 +545,20 @@ export function chatFirstReducer(state, action) {
     default:
       return state;
   }
+}
+
+export function highFitSearchIds(rows, minimumFit = 80) {
+  const floor = Number.isFinite(Number(minimumFit)) ? Number(minimumFit) : 80;
+  return [
+    ...new Set(
+      list(rows)
+        .filter((row) => {
+          const fit = Number(row?.fitScore ?? row?.fit);
+          return Number.isFinite(fit) && fit >= floor;
+        })
+        .map((row) => row?.id)
+        .filter(Boolean)
+        .map(String)
+    ),
+  ];
 }

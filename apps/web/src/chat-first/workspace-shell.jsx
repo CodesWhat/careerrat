@@ -43,6 +43,7 @@ export function TopBar({
   activityItems = EMPTY_LIST,
   activityOpen = false,
   missionLive = false,
+  showActivity = true,
   onOpenProfile,
   onToggleActivity,
 }) {
@@ -54,46 +55,48 @@ export function TopBar({
           <SettingsIcon />
           Profile &amp; settings
         </button>
-        <div className="chat-first-activity">
-          <button
-            className="chat-first-activity__trigger"
-            type="button"
-            aria-label={activityOpen ? "Close activity" : "Open activity"}
-            aria-expanded={activityOpen}
-            aria-controls="chat-first-activity-menu"
-            onClick={onToggleActivity}
-          >
-            <PulseIcon />
-            {missionLive ? "activity · mission live" : "activity"}
-            <ChevronDownIcon />
-          </button>
-          {activityOpen ? (
-            <div
-              className="chat-first-activity__menu"
-              id="chat-first-activity-menu"
-              role="status"
-              aria-live="polite"
+        {showActivity ? (
+          <div className="chat-first-activity">
+            <button
+              className="chat-first-activity__trigger"
+              type="button"
+              aria-label={activityOpen ? "Close activity" : "Open activity"}
+              aria-expanded={activityOpen}
+              aria-controls="chat-first-activity-menu"
+              onClick={onToggleActivity}
             >
-              <div className="chat-first-eyebrow">{activityHeading(agentName)}</div>
-              <div className="chat-first-activity__rows">
-                {activityItems.map((item) => (
-                  <div className="chat-first-activity__row" key={item.id}>
-                    <time>{item.time}</time>
-                    <span
-                      className={`chat-first-activity__mark chat-first-activity__mark--${item.tone || "done"}`}
-                    >
-                      {item.mark}
-                    </span>
-                    <span>{item.label}</span>
-                  </div>
-                ))}
+              <PulseIcon />
+              {missionLive ? "activity · mission live" : "activity"}
+              <ChevronDownIcon />
+            </button>
+            {activityOpen ? (
+              <div
+                className="chat-first-activity__menu"
+                id="chat-first-activity-menu"
+                role="status"
+                aria-live="polite"
+              >
+                <div className="chat-first-eyebrow">{activityHeading(agentName)}</div>
+                <div className="chat-first-activity__rows">
+                  {activityItems.map((item) => (
+                    <div className="chat-first-activity__row" key={item.id}>
+                      <time>{item.time}</time>
+                      <span
+                        className={`chat-first-activity__mark chat-first-activity__mark--${item.tone || "done"}`}
+                      >
+                        {item.mark}
+                      </span>
+                      <span>{item.label}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="chat-first-activity__footer">
+                  Every step is logged. The full history lives in your local files.
+                </div>
               </div>
-              <div className="chat-first-activity__footer">
-                Every step is logged. The full history lives in your local files.
-              </div>
-            </div>
-          ) : null}
-        </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </header>
   );
@@ -279,62 +282,85 @@ export function Composer({
   );
 }
 
-export function NeedsYouPanel({ items = EMPTY_LIST, onStartIngest }) {
+export function NeedsYouPanel({
+  items = EMPTY_LIST,
+  deepIngestPrompt = { visible: true },
+  onStartIngest,
+  onDismissIngest,
+}) {
   return (
     <aside className="chat-first-needs" aria-label="Needs you">
-      <div className="chat-first-eyebrow chat-first-needs__heading">NEEDS YOU · {items.length}</div>
-      {items.map((item) => (
-        <section
-          className={`chat-first-need-card chat-first-need-card--${item.tone || "plain"}`}
-          key={item.id}
-        >
-          {item.eyebrow ? (
-            <div className="chat-first-eyebrow chat-first-need-card__eyebrow">{item.eyebrow}</div>
-          ) : null}
-          <div className="chat-first-need-card__title">{item.title}</div>
-          {item.detail ? <div className="chat-first-need-card__detail">{item.detail}</div> : null}
-          <div className="chat-first-need-card__actions">
-            {item.primaryLabel ? (
-              <button
-                className={`chat-first-pill chat-first-pill--${item.tone === "attention" ? "ink" : "lime"}`}
-                type="button"
-                onClick={item.onPrimary}
-              >
-                {item.primaryLabel}
-              </button>
-            ) : null}
-            {item.secondaryLabel ? (
-              <button
-                className="chat-first-pill chat-first-pill--outline"
-                type="button"
-                onClick={item.onSecondary}
-              >
-                {item.secondaryLabel}
-              </button>
-            ) : null}
-          </div>
-        </section>
-      ))}
-      <div className="chat-first-dashed-note">
-        Decisions queue here so they never get buried in chat. Expiring ones interrupt.
-      </div>
-      <div className="chat-first-eyebrow chat-first-needs__deeper-heading">GO DEEPER</div>
-      <section className="chat-first-deep-card">
-        <div className="chat-first-deep-card__title">
-          <PickaxeIcon /> Deep ingest your history
+      <div className="chat-first-needs__queue">
+        <div className="chat-first-eyebrow chat-first-needs__heading">
+          NEEDS YOU · {items.length}
         </div>
-        <p>
-          old resumes, reviews, project docs · tailoring and matches sharpen. ~15 min chat, pause
-          anytime.
-        </p>
-        <button
-          className="chat-first-pill chat-first-pill--lime"
-          type="button"
-          onClick={onStartIngest}
-        >
-          Start
-        </button>
-      </section>
+        {items.map((item) => (
+          <section
+            className={`chat-first-need-card chat-first-need-card--${item.tone || "plain"}`}
+            key={item.id}
+          >
+            {item.eyebrow ? (
+              <div className="chat-first-eyebrow chat-first-need-card__eyebrow">{item.eyebrow}</div>
+            ) : null}
+            <div className="chat-first-need-card__title">{item.title}</div>
+            {item.detail ? <div className="chat-first-need-card__detail">{item.detail}</div> : null}
+            <div className="chat-first-need-card__actions">
+              {item.primaryLabel ? (
+                <button
+                  className={`chat-first-pill chat-first-pill--${item.tone === "attention" ? "ink" : "lime"}`}
+                  type="button"
+                  onClick={item.onPrimary}
+                >
+                  {item.primaryLabel}
+                </button>
+              ) : null}
+              {item.secondaryLabel ? (
+                <button
+                  className="chat-first-pill chat-first-pill--outline"
+                  type="button"
+                  onClick={item.onSecondary}
+                >
+                  {item.secondaryLabel}
+                </button>
+              ) : null}
+            </div>
+          </section>
+        ))}
+        <div className="chat-first-dashed-note">
+          Decisions queue here so they never get buried in chat. Expiring ones interrupt.
+        </div>
+      </div>
+      {deepIngestPrompt?.visible !== false ? (
+        <div className="chat-first-deep-dock">
+          <div className="chat-first-deep-dock__heading">
+            <div className="chat-first-eyebrow chat-first-needs__deeper-heading">GO DEEPER</div>
+            <button
+              className="chat-first-deep-card__dismiss"
+              type="button"
+              aria-label="Dismiss deep ingest prompt"
+              onClick={onDismissIngest}
+            >
+              Dismiss
+            </button>
+          </div>
+          <section className="chat-first-deep-card">
+            <div className="chat-first-deep-card__title">
+              <PickaxeIcon /> Deep ingest your history
+            </div>
+            <p>
+              old resumes, reviews, project docs · tailoring and matches sharpen. ~15 min chat,
+              pause anytime.
+            </p>
+            <button
+              className="chat-first-pill chat-first-pill--lime"
+              type="button"
+              onClick={onStartIngest}
+            >
+              Start
+            </button>
+          </section>
+        </div>
+      ) : null}
     </aside>
   );
 }

@@ -133,10 +133,10 @@ export function runWorkspaceIntent(type, entity, input = {}) {
 // row: appends `text` to the one durable workspace thread and returns the
 // assistant's reply already appended (see workspace-agent.mjs's own
 // contract) — no separate poll is needed to see the reply.
-export function sendWorkspaceMessage(text) {
+export function sendWorkspaceMessage(text, context) {
   return apiFetch("/api/workspace/message", {
     method: "POST",
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, ...(context ? { context } : {}) }),
   });
 }
 
@@ -707,6 +707,13 @@ export function decideDeepIngestProposal(payload = {}) {
   });
 }
 
+export function upsertDeepIngestConfirmedItem(payload = {}) {
+  return apiFetch("/api/deep-ingest/confirmed/upsert", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Chat-first job artifacts and interview dossier reads.
 // ---------------------------------------------------------------------------
@@ -761,6 +768,13 @@ export function dismissTouchDue({ id, source } = {}) {
   });
 }
 
+export function dismissDeepIngestPrompt() {
+  return apiFetch("/api/chat-first/deep-ingest-prompt/dismiss", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
 export function decideChatFirstSourced(payload = {}) {
   return apiFetch("/api/chat-first/sourced/decision", {
     method: "POST",
@@ -798,6 +812,13 @@ export function createChatFirstMission(payload = {}) {
 
 export function runChatFirstMission(id) {
   return apiFetch("/api/chat-first/missions/run", {
+    method: "POST",
+    body: JSON.stringify({ id }),
+  });
+}
+
+export function resumeChatFirstMission(id) {
+  return apiFetch("/api/chat-first/missions/resume", {
     method: "POST",
     body: JSON.stringify({ id }),
   });

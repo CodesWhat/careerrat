@@ -4,11 +4,13 @@ import {
   archiveJobThread,
   createChatFirstMission,
   decideChatFirstSourced,
+  dismissDeepIngestPrompt,
   dismissTouchDue,
   endMockInterview,
   exportInterviewDossierPdf,
   pinJobThread,
   recordMockFeedback,
+  resumeChatFirstMission,
   runChatFirstMission,
   sendJobThreadTurn,
   sendMockInterviewMessage,
@@ -16,6 +18,7 @@ import {
   setChatFirstMissionStatus,
   setChatFirstMissionStepStatus,
   startMockInterview,
+  upsertDeepIngestConfirmedItem,
 } from "./api.js";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -88,6 +91,35 @@ describe("chat-first durable actions", () => {
     });
   });
 
+  it("durably dismisses the deep ingest dock", async () => {
+    const fetchMock = okFetch();
+
+    await dismissDeepIngestPrompt();
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/chat-first/deep-ingest-prompt/dismiss", {
+      method: "POST",
+      body: JSON.stringify({}),
+      headers: { "content-type": "application/json" },
+    });
+  });
+
+  it("saves a manually edited confirmed writing style", async () => {
+    const fetchMock = okFetch();
+    const payload = {
+      lane: "writing_voice",
+      id: "voice-1",
+      fields: { summary: "Plain, direct, concrete." },
+    };
+
+    await upsertDeepIngestConfirmedItem(payload);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/deep-ingest/confirmed/upsert", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      headers: { "content-type": "application/json" },
+    });
+  });
+
   it("writes sourced apply, skip, or restore decisions through the canonical route", async () => {
     const fetchMock = okFetch();
     const payload = {
@@ -152,6 +184,7 @@ describe("chat-first durable actions", () => {
 
     await createChatFirstMission(mission);
     await runChatFirstMission("mission-1");
+    await resumeChatFirstMission("mission-1");
     await setChatFirstMissionStatus({ id: "mission-1", status: "paused" });
     await setChatFirstMissionStepStatus({
       missionId: "mission-1",
@@ -164,6 +197,7 @@ describe("chat-first durable actions", () => {
     expect(calls).toEqual([
       ["/api/chat-first/missions", mission],
       ["/api/chat-first/missions/run", { id: "mission-1" }],
+      ["/api/chat-first/missions/resume", { id: "mission-1" }],
       ["/api/chat-first/missions/status", { id: "mission-1", status: "paused" }],
       [
         "/api/chat-first/missions/step",

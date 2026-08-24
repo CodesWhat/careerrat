@@ -13,6 +13,8 @@ import {
   candidateConfigPatch,
   commCaptureInbound,
   commUpsert,
+  DEEP_INGEST_REQUIRED_LANES,
+  deepIngestLaneSetState,
 } from "../src/core/db/verbs.mjs";
 
 const cleanupRoots = [];
@@ -35,6 +37,7 @@ async function chatFirstApi() {
   const api = await import("../src/core/db/verbs.mjs");
   for (const name of [
     "chatFirstStateGet",
+    "deepIngestPromptDismiss",
     "jobThreadMessageAppend",
     "jobThreadSetArchived",
     "jobThreadSetPinned",
@@ -96,6 +99,55 @@ test("migration 012 creates durable chat-first thread, mission, and mock intervi
   ]) {
     assert.equal(tables.has(table), true, `${table} should exist`);
   }
+});
+
+test("deep ingest prompt dismissal is durable and idempotent", async () => {
+  const api = await import("../src/core/db/verbs.mjs");
+  const repoRoot = tempRepo();
+
+  assert.deepEqual(api.chatFirstStateGet({ repoRoot }).deepIngestPrompt, {
+    visible: true,
+    dismissed: false,
+    completed: false,
+    dismissedAt: null,
+  });
+
+  const first = api.deepIngestPromptDismiss({
+    repoRoot,
+    now: new Date("2026-08-23T17:00:00.000Z"),
+  });
+  assert.equal(first.reused, false);
+  assert.deepEqual(first.prompt, {
+    visible: false,
+    dismissed: true,
+    completed: false,
+    dismissedAt: "2026-08-23T17:00:00.000Z",
+  });
+
+  closeAll();
+  assert.deepEqual(api.chatFirstStateGet({ repoRoot }).deepIngestPrompt, first.prompt);
+  const replay = api.deepIngestPromptDismiss({
+    repoRoot,
+    now: new Date("2026-08-24T17:00:00.000Z"),
+  });
+  assert.equal(replay.reused, true);
+  assert.equal(replay.prompt.dismissedAt, "2026-08-23T17:00:00.000Z");
+});
+
+test("deep ingest completion hides an undismissed prompt from canonical lane state", async () => {
+  const api = await import("../src/core/db/verbs.mjs");
+  const repoRoot = tempRepo();
+
+  for (const lane of DEEP_INGEST_REQUIRED_LANES) {
+    deepIngestLaneSetState({ repoRoot, lane, status: "completed" });
+  }
+
+  assert.deepEqual(api.chatFirstStateGet({ repoRoot }).deepIngestPrompt, {
+    visible: false,
+    dismissed: false,
+    completed: true,
+    dismissedAt: null,
+  });
 });
 
 test("an inbound human or scheduled interview earns a durable job thread, while applying alone does not", async () => {
@@ -934,6 +986,47 @@ test("missions durably track run steps and enforce pause, resume, and terminal s
   assert.ok(missionEvents.length >= 7);
 });
 
+test("a mission resumes its durable remaining work after a process restart without submitting", async () => {
+  const api = await import("../src/core/db/verbs.mjs");
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-resume-mission",
+    company: "Restart Corp",
+    evaluation: { gate: "keep" },
+  });
+  api.missionCreateForJobs({
+    repoRoot,
+    id: "mission-restart",
+    mode: "prepare-to-submit",
+    jobs: [{ type: "application", id: "app-resume-mission" }],
+  });
+  closeAll();
+
+  assert.equal(typeof api.missionResume, "function");
+  const calls = [];
+  const resumed = await api.missionResume({
+    repoRoot,
+    id: "mission-restart",
+    executeIntent: async ({ intent }) => {
+      calls.push(intent.type);
+      return {
+        operationResult: { ok: true },
+        ...(intent.type === "job.prepare-submit"
+          ? { messages: [{ metadata: { state: "awaiting-submit" } }] }
+          : {}),
+      };
+    },
+  });
+
+  assert.equal(resumed.mission.status, "paused");
+  assert.deepEqual(calls, ["job.generate-documents", "job.prepare-submit"]);
+  assert.equal(calls.includes("job.apply"), false);
+  assert.equal(
+    resumed.mission.steps.find((step) => step.action === "submit-gate").result.requiresUserSubmit,
+    true
+  );
+});
+
 test("mission validation rejects duplicate steps and impossible transitions before a write", async () => {
   const api = await chatFirstApi();
   const repoRoot = tempRepo();
@@ -1399,6 +1492,20 @@ test("mission execution pauses an expired uncertain operation instead of replayi
       }),
     /lease/
   );
+  assert.equal(calls, 0);
+
+  closeAll();
+  const restartRecovered = await api.missionResume({
+    repoRoot,
+    id: "mission-live-attempt",
+    now: new Date("2026-08-23T10:05:00.000Z"),
+    executeIntent: async () => {
+      calls += 1;
+      return { operationResult: { status: "ready" } };
+    },
+  });
+  assert.equal(restartRecovered.mission.status, "paused");
+  assert.equal(restartRecovered.mission.steps[0].result.reason, "stale-outcome-uncertain");
   assert.equal(calls, 0);
 });
 

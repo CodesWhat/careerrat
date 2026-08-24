@@ -34,6 +34,9 @@
 }
 
 .cf-profile .cf-profile__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 4px 0;
   border: 0;
   background: transparent;
@@ -41,6 +44,11 @@
   font-size: 12.5px;
   font-weight: 700;
   cursor: pointer;
+}
+
+.cf-profile__back svg {
+  width: 15px;
+  height: 15px;
 }
 
 .cf-profile__brand {
@@ -112,14 +120,17 @@
 
 .cf-profile .cf-profile__text-action {
   margin-left: auto;
-  padding: 2px;
+  padding: 0;
   border: 0;
   background: transparent;
   color: #7d8894;
   font-size: 12px;
   font-weight: 700;
-  text-decoration: underline;
   cursor: pointer;
+}
+
+.cf-profile .cf-profile__text-action--text {
+  text-decoration: underline;
 }
 
 .cf-profile__lines {
@@ -603,13 +614,61 @@
   font-weight: 800;
 }
 
-.cf-settings-dialog__form input {
+.cf-settings-dialog__form input,
+.cf-settings-dialog__form textarea,
+.cf-settings-dialog__form select {
   width: 100%;
   padding: 10px 12px;
   border: 1.5px solid #d9d5c9;
   border-radius: 13px;
   background: #faf7ef;
+  color: #17171a;
+  font: inherit;
   font-size: 13px;
+}
+
+.cf-settings-dialog__form textarea {
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.cf-profile-editor {
+  gap: 12px;
+}
+
+.cf-profile-editor__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cf-profile-editor__field > span,
+.cf-profile-editor__check > span {
+  color: #55584a;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.cf-profile-editor__check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 30px;
+  cursor: pointer;
+}
+
+.cf-profile-editor__check input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: #17171a;
+}
+
+.cf-profile-editor__actions > button:first-child {
+  margin-right: auto;
+  border-color: transparent;
+  background: transparent;
+  text-decoration: underline;
 }
 
 .cf-settings-dialog__actions {

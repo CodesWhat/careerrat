@@ -50,7 +50,7 @@ const MESSAGES = [
     id: "m1",
     role: "assistant",
     text: "One question at a time. First: what kind of role are you actually after?",
-    options: [{ id: "staff-ml", label: "Staff SWE · ML infra · remote or hybrid SF" }],
+    options: [{ id: "staff-ml", label: "Staff SWE · ML infra" }],
   },
   { id: "m2", role: "user", text: "Staff SWE, ML infrastructure." },
   {
@@ -74,12 +74,13 @@ const MESSAGES = [
 ];
 
 describe("FirstRunExperience", () => {
-  it("uses only the ink fill to mark the selected first-run rail item", () => {
+  it("uses the handoff ink fill and lime outline without a glow for the selected rail item", () => {
     const css = readFileSync(fileURLToPath(new URL("./first-run.css", import.meta.url)), "utf8");
     const rule = css.match(/\.cf-first-run__paul-card\s*\{([^}]*)\}/)?.[1] || "";
 
     expect(rule).toMatch(/background:\s*#17171a/);
-    expect(rule).not.toMatch(/border:\s*2px\s+solid\s+#e6fa8d/);
+    expect(rule).toMatch(/border:\s*2px\s+solid\s+#e6fa8d/);
+    expect(rule).not.toMatch(/box-shadow/);
   });
 
   it("uses the fixed chat-first top bar and workspace frame during setup", async () => {
@@ -98,6 +99,7 @@ describe("FirstRunExperience", () => {
     expect(html).toContain('class="chat-first-topbar"');
     expect(html).toContain("CareerRat");
     expect(html).toContain("Profile &amp; settings");
+    expect(html).not.toContain("Open activity");
     expect(html).toContain('class="cf-first-run-shell__body"');
     expect(html).toContain('data-stage="engine"');
     expect(onOpenSettings).toHaveBeenCalledOnce();
@@ -324,12 +326,13 @@ describe("FirstRunExperience", () => {
     };
     const onCancel = vi.fn();
     const onSave = vi.fn();
-    const tree = KnowledgeSectionEditor({ item, onCancel, onSave });
+    const tree = KnowledgeSectionEditor({ agentName: "Maya", item, onCancel, onSave });
     const html = renderToStaticMarkup(tree);
 
     expect(html).toContain('role="dialog"');
     expect(html).toContain('aria-modal="true"');
     expect(html).toContain("Edit Roles");
+    expect(html).toContain("WHAT MAYA KNOWS");
     expect(html).toContain("Staff Engineer\nPlatform Lead");
 
     const cancel = findElement(tree, (node) => node.type === "button" && textOf(node) === "Cancel");
@@ -432,8 +435,7 @@ describe("FirstRunExperience", () => {
     const transcript = center.props.children[0];
     const option = findElement(
       transcript,
-      (node) =>
-        node.type === "button" && textOf(node) === "Staff SWE · ML infra · remote or hybrid SF"
+      (node) => node.type === "button" && textOf(node) === "Staff SWE · ML infra"
     );
     option.props.onClick();
     expect(onChooseOption).toHaveBeenCalledWith("m1", "staff-ml");

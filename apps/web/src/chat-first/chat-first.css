@@ -38,7 +38,8 @@
 
 .chat-first-workspace button,
 .chat-first-cover button {
-  font: inherit;
+  font-family: inherit;
+  font-size: inherit;
 }
 
 .chat-first-workspace button:focus-visible,
@@ -103,6 +104,11 @@
   background: #fffdf6;
 }
 
+.chat-first-topbar__profile svg {
+  width: 14px;
+  height: 14px;
+}
+
 .chat-first-activity {
   position: relative;
 }
@@ -119,6 +125,16 @@
   font-weight: 700;
   line-height: 1.35;
   cursor: pointer;
+}
+
+.chat-first-activity__trigger svg[data-icon="activity"] {
+  width: 14px;
+  height: 14px;
+}
+
+.chat-first-activity__trigger svg[data-icon="chevron-down"] {
+  width: 13px;
+  height: 13px;
 }
 
 .chat-first-activity__menu {
@@ -389,6 +405,11 @@
   transform: rotate(-90deg);
 }
 
+.chat-first-rail-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
 .chat-first-browser-launcher__label {
   flex: 1;
   font-size: 13px;
@@ -604,16 +625,12 @@
 }
 
 .chat-first-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 30px;
-  padding: 6px 14px;
+  display: inline-block;
+  padding: 7px 15px;
   border: 0;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 700;
-  line-height: 1.2;
   white-space: nowrap;
   cursor: pointer;
 }
@@ -627,12 +644,14 @@
 }
 
 .chat-first-pill--ink {
+  padding: 5px 13px;
   color: var(--cf-lime, #e6fa8d);
   background: var(--cf-ink, #17171a);
+  font-size: 12px;
 }
 
 .chat-first-pill--outline {
-  padding: 5px 13px;
+  padding: 6px 14px;
   border: 1.5px solid var(--cf-button-border, #d9d5c9);
   background: #ffffff;
 }
@@ -762,6 +781,11 @@
 
 .chat-first-drop-card__icon {
   font-size: 22px;
+}
+
+.chat-first-drop-card__icon svg {
+  width: 22px;
+  height: 22px;
 }
 
 .chat-first-drop-card input[type="file"] {
@@ -1043,6 +1067,11 @@
   cursor: not-allowed;
 }
 
+.chat-first-composer__send svg {
+  width: 17px;
+  height: 17px;
+}
+
 .chat-first-needs,
 .chat-first-context-stack {
   display: flex;
@@ -1052,9 +1081,49 @@
   min-height: 0;
 }
 
+.chat-first-needs {
+  height: 100%;
+}
+
+.chat-first-needs .chat-first-pill {
+  padding: 6px 14px;
+  font-size: 12px;
+}
+
+.chat-first-needs .chat-first-pill--outline {
+  padding: 5px 13px;
+  border-color: #e3e0d6;
+}
+
+.chat-first-needs__queue {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.chat-first-deep-dock {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.chat-first-deep-dock__heading {
+  display: flex;
+  align-items: baseline;
+}
+
 .chat-first-needs__heading,
 .chat-first-context-stack__heading {
   padding: 6px 4px 0;
+}
+
+.chat-first-needs__heading,
+.chat-first-needs__deeper-heading {
+  letter-spacing: 0.09em;
 }
 
 .chat-first-needs__deeper-heading {
@@ -1079,20 +1148,22 @@
 
 .chat-first-need-card__eyebrow {
   color: var(--cf-ink);
+  letter-spacing: 0.07em;
 }
 
 .chat-first-need-card__title {
-  margin-top: 3px;
   font-size: 13.5px;
   font-weight: 700;
-  line-height: 1.4;
+}
+
+.chat-first-need-card__eyebrow + .chat-first-need-card__title {
+  margin-top: 3px;
 }
 
 .chat-first-need-card__detail {
   margin-top: 2px;
   color: var(--cf-muted);
   font-size: 12px;
-  line-height: 1.45;
 }
 
 .chat-first-need-card__actions {
@@ -1114,6 +1185,24 @@
   padding: 13px 15px;
 }
 
+.chat-first-deep-card__dismiss {
+  margin-left: auto;
+  padding: 0;
+  padding-right: 4px;
+  border: 0;
+  color: var(--cf-muted);
+  background: transparent;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.chat-first-deep-card__dismiss:hover {
+  color: var(--cf-ink);
+  background: var(--cf-cream);
+}
+
 .chat-first-deep-card__title {
   display: flex;
   align-items: center;
@@ -1122,11 +1211,16 @@
   font-weight: 700;
 }
 
+.chat-first-deep-card__title svg {
+  flex: none;
+  width: 15px;
+  height: 15px;
+}
+
 .chat-first-deep-card p {
   margin: 3px 0 9px;
   color: var(--cf-muted);
   font-size: 12px;
-  line-height: 1.5;
 }
 
 .chat-first-context-card {
@@ -1316,7 +1410,7 @@
   border: 0;
   color: #7d8894;
   background: transparent;
-  font-size: 18px;
+  font-size: 15px;
   cursor: pointer;
 }
 
@@ -1362,6 +1456,12 @@
 
 .chat-first-gate-row--packet {
   align-items: center;
+}
+
+.chat-first-gate-row--packet > span {
+  display: inline;
+  flex: none;
+  font-size: 16px;
 }
 
 .chat-first-gate-row--packet > strong {
@@ -1455,7 +1555,7 @@
   border-radius: 10px;
   color: #3f4650;
   background: #f2f6f9;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: inherit;
   font-size: 10.5px;
   text-align: left;
 }

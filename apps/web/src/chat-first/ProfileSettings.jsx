@@ -1,4 +1,5 @@
 import "./profile-settings.css";
+import { ArrowLeftIcon } from "./chat-first-icons.jsx";
 import { RuntimeIcon } from "./RuntimeIcon.jsx";
 
 function safeArray(value) {
@@ -16,7 +17,7 @@ function SectionHeading({ label, actionLabel, onAction }) {
       {onAction ? (
         <button
           type="button"
-          className="cf-profile__text-action"
+          className={`cf-profile__text-action${actionLabel ? " cf-profile__text-action--text" : ""}`}
           aria-label={actionLabel || `Edit ${label.toLowerCase()}`}
           onClick={onAction}
         >
@@ -405,6 +406,94 @@ function TechnicalDetails({ agentName, engine, browser = {}, onClose }) {
   );
 }
 
+function ProfileSectionEditor({
+  agentName,
+  editor,
+  values = {},
+  busy,
+  onChange,
+  onSave,
+  onAskAgent,
+  onClose,
+}) {
+  return (
+    <SettingsDialog title={editor?.title || "Edit profile section"} onClose={onClose}>
+      <form
+        className="cf-settings-dialog__form cf-profile-editor"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSave?.();
+        }}
+      >
+        {safeArray(editor?.fields).map((field) => {
+          const inputId = `cf-profile-editor-${field.id}`;
+          if (field.type === "checkbox") {
+            return (
+              <label className="cf-profile-editor__check" htmlFor={inputId} key={field.id}>
+                <input
+                  id={inputId}
+                  type="checkbox"
+                  checked={values[field.id] === true}
+                  onChange={(event) => onChange?.(field.id, event.target.checked)}
+                />
+                <span>{field.label}</span>
+              </label>
+            );
+          }
+          return (
+            <label className="cf-profile-editor__field" htmlFor={inputId} key={field.id}>
+              <span>{field.label}</span>
+              {field.type === "textarea" ? (
+                <textarea
+                  id={inputId}
+                  value={values[field.id] ?? ""}
+                  rows={field.rows || 4}
+                  placeholder={field.placeholder}
+                  onChange={(event) => onChange?.(field.id, event.target.value)}
+                />
+              ) : field.type === "select" ? (
+                <select
+                  id={inputId}
+                  value={values[field.id] ?? ""}
+                  onChange={(event) => onChange?.(field.id, event.target.value)}
+                >
+                  {safeArray(field.options).map((option) => (
+                    <option value={option.value} key={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  id={inputId}
+                  type={field.type || "text"}
+                  value={values[field.id] ?? ""}
+                  min={field.min}
+                  max={field.max}
+                  step={field.step}
+                  placeholder={field.placeholder}
+                  onChange={(event) => onChange?.(field.id, event.target.value)}
+                />
+              )}
+            </label>
+          );
+        })}
+        <div className="cf-settings-dialog__actions cf-profile-editor__actions">
+          <button type="button" disabled={busy} onClick={() => onAskAgent?.(editor?.id)}>
+            Ask {agentName} instead
+          </button>
+          <button type="button" disabled={busy} onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" disabled={busy}>
+            {busy ? "Saving…" : "Save section"}
+          </button>
+        </div>
+      </form>
+    </SettingsDialog>
+  );
+}
+
 export function ProfileSettings({
   agentName = "Paul",
   activeTab = "profile",
@@ -437,13 +526,20 @@ export function ProfileSettings({
   onSubmitSource,
   technicalDetailsOpen = false,
   onCloseTechnicalDetails,
+  profileEditor = null,
+  editorValues = {},
+  editorBusy = false,
+  onEditorChange,
+  onSaveEditor,
+  onAskAgent,
+  onCloseEditor,
 }) {
   const settingsActive = activeTab === "settings" || activeTab === "app";
   return (
     <div className="cf-profile">
       <header className="cf-profile__header">
         <button type="button" className="cf-profile__back" onClick={() => onBack?.()}>
-          ← Back
+          <ArrowLeftIcon /> Back
         </button>
         <strong className="cf-profile__brand">CareerRat</strong>
         <nav className="cf-profile__tabs" aria-label="Profile and settings">
@@ -505,6 +601,18 @@ export function ProfileSettings({
           engine={engine}
           browser={browser}
           onClose={onCloseTechnicalDetails}
+        />
+      ) : null}
+      {profileEditor ? (
+        <ProfileSectionEditor
+          agentName={agentName}
+          editor={profileEditor}
+          values={editorValues}
+          busy={editorBusy}
+          onChange={onEditorChange}
+          onSave={onSaveEditor}
+          onAskAgent={onAskAgent}
+          onClose={onCloseEditor}
         />
       ) : null}
     </div>

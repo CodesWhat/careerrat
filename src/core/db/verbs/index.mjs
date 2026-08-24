@@ -34,6 +34,7 @@ export {
 export {
   chatFirstStateFromDb,
   chatFirstStateGet,
+  deepIngestPromptDismiss,
   ensureJobThreadInDb,
   jobThreadMessageAppend,
   jobThreadSetArchived,
@@ -41,6 +42,7 @@ export {
   jobThreadTurn,
   missionCreate,
   missionCreateForJobs,
+  missionResume,
   missionRun,
   missionSetStatus,
   missionStepSetStatus,
@@ -77,6 +79,7 @@ export {
   deepIngestConfirmedForGeneration,
   deepIngestConfirmedItemRemove,
   deepIngestConfirmedItemUpdate,
+  deepIngestConfirmedItemUpsert,
   deepIngestConfirmProposal,
   deepIngestLaneSetState,
   deepIngestProposalDecision,

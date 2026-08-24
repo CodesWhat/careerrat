@@ -2,7 +2,11 @@ import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { profileSettingsApi } from "./api.js";
 import { ProfileSettings } from "./ProfileSettings.jsx";
-import { buildProfileSettingsModel, permissionPatch } from "./profile-settings-controller.js";
+import {
+  buildProfileSettingsModel,
+  permissionPatch,
+  profileSectionSavePlan,
+} from "./profile-settings-controller.js";
 
 const EMPTY_MODEL = buildProfileSettingsModel();
 
@@ -22,6 +26,9 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   const [sourceDialogBusy, setSourceDialogBusy] = useState(false);
   const [sourceDraft, setSourceDraft] = useState("");
   const [technicalDetailsOpen, setTechnicalDetailsOpen] = useState(false);
+  const [editingSection, setEditingSection] = useState(null);
+  const [editorValues, setEditorValues] = useState({});
+  const [editorBusy, setEditorBusy] = useState(false);
 
   async function load() {
     const [onboard, runtimes, automation, sources] = await Promise.all([
@@ -56,10 +63,53 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
     };
   }, [api]);
 
-  function moveToConversation(section) {
+  function askConversation(section) {
     navigate("/", {
       state: { composerDraft: `I need to update my ${String(section).replaceAll("-", " ")}.` },
     });
+  }
+
+  function editSection(section) {
+    const editor = model.profile?.editors?.[section];
+    if (!editor) return;
+    setEditingSection(section);
+    setEditorValues(
+      Object.fromEntries(
+        editor.fields.map((field) => [
+          field.id,
+          field.type === "checkbox" ? field.checked === true : (field.value ?? ""),
+        ])
+      )
+    );
+  }
+
+  function closeEditor() {
+    if (editorBusy) return;
+    setEditingSection(null);
+    setEditorValues({});
+  }
+
+  async function saveEditor() {
+    const editor = model.profile?.editors?.[editingSection];
+    if (!editor) return;
+    setEditorBusy(true);
+    setError(null);
+    try {
+      for (const write of profileSectionSavePlan(editingSection, editorValues, editor)) {
+        if (write.kind === "deep-ingest") {
+          await api.upsertDeepIngestConfirmedItem(write);
+        } else {
+          await api.saveCandidateFile(write.name, write.patch);
+        }
+      }
+      await load();
+      setEditingSection(null);
+      setEditorValues({});
+    } catch (cause) {
+      setError(cause?.message || "That profile section could not be saved.");
+    } finally {
+      setEditorBusy(false);
+    }
   }
 
   async function changePermission(id, enabled) {
@@ -162,7 +212,7 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
         activeTab={activeTab}
         onBack={() => navigate("/")}
         onTabChange={setActiveTab}
-        onEditSection={moveToConversation}
+        onEditSection={editSection}
         onOpenFiles={() => navigate("/", { state: { browse: "files" } })}
         onPermissionChange={changePermission}
         onChangeEngine={changeEngine}
@@ -186,6 +236,13 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
         onSubmitSource={submitSource}
         technicalDetailsOpen={technicalDetailsOpen}
         onCloseTechnicalDetails={() => setTechnicalDetailsOpen(false)}
+        profileEditor={editingSection ? model.profile?.editors?.[editingSection] : null}
+        editorValues={editorValues}
+        editorBusy={editorBusy}
+        onEditorChange={(id, value) => setEditorValues((current) => ({ ...current, [id]: value }))}
+        onSaveEditor={saveEditor}
+        onAskAgent={(section) => askConversation(section || editingSection)}
+        onCloseEditor={closeEditor}
       />
     </>
   );

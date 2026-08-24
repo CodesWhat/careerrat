@@ -4,6 +4,7 @@ import { requireDb } from "../core/db/connection.mjs";
 import {
   deepIngestConfirmedItemRemove,
   deepIngestConfirmedItemUpdate,
+  deepIngestConfirmedItemUpsert,
   deepIngestConfirmProposal,
   deepIngestLaneSetState,
   deepIngestProposalDecision,
@@ -266,6 +267,30 @@ export function mountDeepIngestRoutes({
     try {
       const { lane, id, ...fields } = body || {};
       const result = deepIngestConfirmedItemUpdate({ repoRoot, env, lane, id, fields });
+      sendJson(res, 200, { ok: true, data: result });
+    } catch (err) {
+      respondError(res, err);
+    }
+  });
+
+  addRoute("POST", "/api/deep-ingest/confirmed/upsert", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, DEEP_INGEST_JSON_BODY_MAX_BYTES);
+      ensureDb(repoRoot, env);
+    } catch (err) {
+      respondError(res, err);
+      return;
+    }
+
+    try {
+      const result = deepIngestConfirmedItemUpsert({
+        repoRoot,
+        env,
+        lane: body?.lane,
+        id: body?.id,
+        fields: body?.fields,
+      });
       sendJson(res, 200, { ok: true, data: result });
     } catch (err) {
       respondError(res, err);

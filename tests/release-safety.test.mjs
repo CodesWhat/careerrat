@@ -69,9 +69,11 @@ test("shared runtime fonts live under the asset tree", async () => {
   const documentExport = await readText("src/core/documents/export.mjs");
   const webFoundation = await readText("apps/web/src/chat-first/app-foundation.css");
   const pkg = JSON.parse(await readText("package.json"));
+  const webPkg = JSON.parse(await readText("apps/web/package.json"));
   assert.match(trackerDev, /join\(repoRoot, "assets", "fonts"\)/);
   assert.match(documentExport, /join\(repoRoot, "assets", "fonts", file\)/);
-  assert.match(webFoundation, /\.\.\/\.\.\/\.\.\/\.\.\/assets\/fonts\/GeistVF\.woff2/);
+  assert.match(webFoundation, /@fontsource\/figtree\/400\.css/);
+  assert.equal(webPkg.dependencies["@fontsource/figtree"], "^5.3.0");
   assert.doesNotMatch(webFoundation, /url\("\/fonts\//);
   assert.ok(!pkg.files.includes("fonts"));
 });

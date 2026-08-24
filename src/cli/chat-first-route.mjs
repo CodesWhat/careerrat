@@ -1,10 +1,12 @@
 import { executeWorkspaceIntent } from "../core/agent/workspace-agent.mjs";
 import {
+  deepIngestPromptDismiss,
   jobThreadMessageAppend,
   jobThreadSetArchived,
   jobThreadSetPinned,
   jobThreadTurn,
   missionCreateForJobs,
+  missionResume,
   missionRun,
   missionSetStatus,
   missionStepSetStatus,
@@ -86,6 +88,24 @@ export function mountChatFirstRoutes({
   const pathCtx = { repoRoot, env };
   const executeIntent =
     executeMissionIntent || workspaceAgentRuntime?.executeIntent || executeWorkspaceIntent;
+  const activeMissionRuns = new Map();
+  async function executeMission(id, { resume = false } = {}) {
+    const missionId = String(id ?? "").trim();
+    if (activeMissionRuns.has(missionId)) return activeMissionRuns.get(missionId);
+    const execution = Promise.resolve().then(() =>
+      (resume ? missionResume : missionRun)({
+        ...pathCtx,
+        id,
+        executeIntent: (attempt) => executeIntent({ repoRoot, env, ...attempt }),
+      })
+    );
+    activeMissionRuns.set(missionId, execution);
+    try {
+      return await execution;
+    } finally {
+      if (activeMissionRuns.get(missionId) === execution) activeMissionRuns.delete(missionId);
+    }
+  }
 
   addRoute("POST", "/api/chat-first/job-thread/pin", (req, res) =>
     withBody(req, res, (body) =>
@@ -184,13 +204,11 @@ export function mountChatFirstRoutes({
   );
 
   addRoute("POST", "/api/chat-first/missions/run", (req, res) =>
-    withBody(req, res, (body) =>
-      missionRun({
-        ...pathCtx,
-        id: body.id,
-        executeIntent: (attempt) => executeIntent({ repoRoot, env, ...attempt }),
-      })
-    )
+    withBody(req, res, (body) => executeMission(body.id))
+  );
+
+  addRoute("POST", "/api/chat-first/missions/resume", (req, res) =>
+    withBody(req, res, (body) => executeMission(body.id, { resume: true }))
   );
 
   addRoute("POST", "/api/chat-first/mock/start", (req, res) =>
@@ -247,6 +265,10 @@ export function mountChatFirstRoutes({
         mode: body.mode,
       })
     )
+  );
+
+  addRoute("POST", "/api/chat-first/deep-ingest-prompt/dismiss", (req, res) =>
+    withBody(req, res, () => deepIngestPromptDismiss(pathCtx))
   );
 
   addRoute("POST", "/api/chat-first/touch-due/dismiss", (req, res) =>

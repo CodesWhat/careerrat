@@ -249,6 +249,12 @@
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .cf-search__spinner {
+    animation: none;
+  }
+}
+
 .cf-search__sweep-copy {
   color: var(--cf-muted);
   font-size: 12px;
@@ -376,6 +382,7 @@
   padding: 9px 14px;
   border-radius: 14px;
   background: #fff;
+  cursor: pointer;
 }
 
 .cf-job-row:hover {
@@ -384,6 +391,11 @@
 
 .cf-job-row--selected {
   background: var(--cf-cream);
+}
+
+.cf-job-row:focus-within {
+  outline: 2px solid var(--cf-ink);
+  outline-offset: 2px;
 }
 
 .cf-job-row__check {
@@ -676,12 +688,26 @@
   background: var(--cf-cream);
 }
 
+.cf-resource__row {
+  grid-template-columns: 18px minmax(180px, 1fr) auto auto auto;
+  gap: 12px;
+}
+
 .cf-resource__row--attention,
 .cf-schedule__row--interview {
   background: var(--cf-lavender-tint);
 }
 
-.cf-resource__thumb,
+.cf-resource__thumb {
+  display: inline;
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  background: transparent;
+  font-size: 18px;
+  line-height: 1;
+}
+
 .cf-person__avatar {
   display: inline-flex;
   width: 34px;
@@ -689,11 +715,6 @@
   align-items: center;
   justify-content: center;
   border-radius: 11px;
-  background: #fff;
-  font-size: 16px;
-}
-
-.cf-person__avatar {
   background: var(--cf-lavender);
   font-size: 11px;
   font-weight: 800;
@@ -827,6 +848,22 @@
 .cf-cart__actions {
   padding: 13px;
   gap: 7px;
+}
+
+.cf-cart__actions .cf-button--ink,
+.cf-cart__actions .cf-button--lime {
+  padding: 9px;
+  font-size: 13px;
+}
+
+.cf-cart__actions .cf-button--outline {
+  padding: 8px;
+  font-size: 13px;
+}
+
+.cf-cart__actions .cf-button--ghost {
+  padding: 6px;
+  font-size: 12px;
 }
 
 .cf-cart__consequence {

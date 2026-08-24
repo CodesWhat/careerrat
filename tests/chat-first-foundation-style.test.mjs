@@ -10,6 +10,10 @@ const workspace = readFileSync(
   new URL("../apps/web/src/chat-first/chat-first.css", import.meta.url),
   "utf8"
 );
+const browser = readFileSync(
+  new URL("../apps/web/src/chat-first/workspace-browser.css", import.meta.url),
+  "utf8"
+);
 
 function cssRule(css, selector) {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -22,7 +26,7 @@ describe("chat-first foundation styles", () => {
   it("keeps the fixed workspace base and controller alert", () => {
     assert.match(cssRule(foundation, "body"), /margin:\s*0/);
     assert.match(cssRule(foundation, "body"), /background:\s*#edf5fb/);
-    assert.match(cssRule(foundation, "body"), /font-family:\s*"Geist Sans"/);
+    assert.match(cssRule(foundation, "body"), /font-family:\s*"Figtree"/);
     assert.match(cssRule(workspace, ".chat-first-workspace"), /height:\s*100dvh/);
     assert.match(cssRule(workspace, ".chat-first-controller-alert"), /position:\s*absolute/);
   });
@@ -32,10 +36,10 @@ describe("chat-first foundation styles", () => {
   });
 
   it("retains the shared button and reduced-motion behavior", () => {
-    assert.match(cssRule(foundation, ".btn"), /display:\s*inline-flex/);
+    assert.match(cssRule(browser, ".cf-button"), /display:\s*inline-flex/);
     assert.match(cssRule(foundation, ".icon-btn"), /width:\s*32px/);
-    assert.match(cssRule(foundation, ".btn__spinner"), /animation:\s*chat-first-spin/);
-    assert.match(foundation, /@media \(prefers-reduced-motion: reduce\)/);
+    assert.match(cssRule(browser, ".cf-search__spinner"), /animation:\s*cf-browser-spin/);
+    assert.match(browser, /@media \(prefers-reduced-motion: reduce\)/);
   });
 
   it("keeps the artifact viewer bounded and Electron-safe", () => {

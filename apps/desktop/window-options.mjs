@@ -1,13 +1,11 @@
 const BASE_WINDOW_OPTIONS = {
   width: 1280,
   height: 860,
-  minWidth: 1280,
-  maxWidth: 1280,
-  minHeight: 860,
-  maxHeight: 860,
-  resizable: false,
-  maximizable: false,
-  fullscreenable: false,
+  minWidth: 1100,
+  minHeight: 680,
+  resizable: true,
+  maximizable: true,
+  fullscreenable: true,
   title: "CareerRat",
   backgroundColor: "#edf5fb",
 };

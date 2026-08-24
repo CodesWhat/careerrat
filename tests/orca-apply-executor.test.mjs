@@ -19,11 +19,17 @@ const FORM_SNAPSHOT = {
     e3: { name: "Work authorization", role: "combobox" },
     e4: { name: "Gender", role: "combobox" },
     e5: { name: "Submit application", role: "button" },
+    e6: { name: "Choose one", role: "option" },
+    e7: { name: "Yes, authorized to work", role: "option" },
+    e8: { name: "No, I need sponsorship", role: "option" },
   },
   snapshot: [
     '- textbox "First Name" [required, ref=e1]',
     '- textbox "Why Example?" [required, ref=e2]',
     '- combobox "Work authorization" [expanded=false, required, ref=e3]',
+    '  - option "Choose one" [selected, ref=e6]',
+    '  - option "Yes, authorized to work" [ref=e7]',
+    '  - option "No, I need sponsorship" [ref=e8]',
     '- combobox "Gender" [expanded=false, ref=e4]',
     '- button "Submit application" [ref=e5]',
   ].join("\n"),
@@ -45,6 +51,19 @@ const UPLOAD_SNAPSHOT = {
     '- group "Cover Letter" [ref=e22]',
     '  - button "Attach" [ref=e23]',
     '- button "Autofill with MyGreenhouse" [ref=e24]',
+  ].join("\n"),
+  browserPageId: "page-123",
+};
+
+const NATIVE_FILE_UPLOAD_SNAPSHOT = {
+  origin: "https://careers.example.test/jobs/staff-ai/apply",
+  refs: {
+    e6: { name: "Resume/CV", role: "button" },
+    e7: { name: "Submit application", role: "button" },
+  },
+  snapshot: [
+    '- button "Resume/CV" [ref=e6]: No file chosen',
+    '- button "Submit application" [ref=e7]',
   ].join("\n"),
   browserPageId: "page-123",
 };
@@ -80,6 +99,12 @@ test("uploadTargetsFromSnapshot maps only explicit resume and cover-letter contr
   assert.deepEqual(uploadTargetsFromSnapshot(UPLOAD_SNAPSHOT), [
     { ref: "e21", kind: "resume", label: "Resume/CV*", required: true },
     { ref: "e23", kind: "coverLetter", label: "Cover Letter", required: false },
+  ]);
+});
+
+test("uploadTargetsFromSnapshot maps a native file input exposed by Orca as its label", () => {
+  assert.deepEqual(uploadTargetsFromSnapshot(NATIVE_FILE_UPLOAD_SNAPSHOT), [
+    { ref: "e6", kind: "resume", label: "Resume/CV", required: false },
   ]);
 });
 
@@ -224,7 +249,16 @@ test("Orca executor fills confirmed values, stops before submit, and verifies on
         "I build reliable systems.",
         "--json",
       ],
-      ["select", "--page", "page-123", "--element", "@e3", "--value", "Yes", "--json"],
+      [
+        "select",
+        "--page",
+        "page-123",
+        "--element",
+        "@e3",
+        "--value",
+        "Yes, authorized to work",
+        "--json",
+      ],
     ]
   );
 

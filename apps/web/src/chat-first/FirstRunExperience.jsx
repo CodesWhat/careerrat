@@ -45,12 +45,7 @@ function engineStatus(engine) {
 export function FirstRunShell({ agentName = "Paul", onOpenSettings, children }) {
   return (
     <div className="chat-first-workspace cf-first-run-shell">
-      <TopBar
-        agentName={agentName}
-        activityItems={[]}
-        onOpenProfile={onOpenSettings}
-        onToggleActivity={() => {}}
-      />
+      <TopBar agentName={agentName} showActivity={false} onOpenProfile={onOpenSettings} />
       <main className="cf-first-run-shell__body">{children}</main>
     </div>
   );
@@ -381,6 +376,7 @@ function EditorField({ itemId, field }) {
 }
 
 export function KnowledgeSectionEditor({
+  agentName = "Paul",
   item,
   submitting = false,
   onCancel,
@@ -399,7 +395,7 @@ export function KnowledgeSectionEditor({
       >
         <header>
           <div>
-            <span>WHAT PAUL KNOWS</span>
+            <span>WHAT {String(agentName).toUpperCase()} KNOWS</span>
             <strong id={titleId}>Edit {item.label || item.id}</strong>
           </div>
           <button
@@ -545,6 +541,7 @@ export function FirstRunChat({
       />
       {editingKnowledgeSection ? (
         <KnowledgeSectionEditor
+          agentName={agentName}
           item={editingKnowledgeSection}
           submitting={knowledgeSaving}
           onCancel={onCancelKnowledgeEdit}

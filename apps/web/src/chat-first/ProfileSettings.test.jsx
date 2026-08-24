@@ -90,7 +90,7 @@ describe("ProfileSettings", () => {
     expect(html).toContain("edit anything here");
   });
 
-  it("routes location-policy edits into the chat-first conversation", async () => {
+  it("opens a whole-section editor instead of an inline approval list", async () => {
     const { ProfileSettings } = await loadProfile();
     const onEditSection = vi.fn();
     const tree = ProfileSettings({
@@ -107,6 +107,55 @@ describe("ProfileSettings", () => {
     edit.props.onClick();
 
     expect(onEditSection).toHaveBeenCalledWith("location-policy");
+  });
+
+  it("renders a whole-section modal with manual save and Ask Paul paths", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const onEditorChange = vi.fn();
+    const onSaveEditor = vi.fn();
+    const onAskAgent = vi.fn();
+    const tree = ProfileSettings({
+      agentName: "Paul",
+      activeTab: "profile",
+      profile: PROFILE,
+      profileEditor: {
+        id: "location-policy",
+        title: "Edit location policy",
+        fields: [
+          { id: "home", label: "Home market", type: "text" },
+          { id: "remote", label: "Remote", type: "checkbox" },
+          { id: "relocation", label: "Relocation markets", type: "textarea", rows: 3 },
+        ],
+      },
+      editorValues: { home: "New York, NY", remote: true, relocation: "Boston, MA" },
+      onEditorChange,
+      onSaveEditor,
+      onAskAgent,
+    });
+    const html = renderToStaticMarkup(tree);
+
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain("Edit location policy");
+    expect(html).toContain("New York, NY");
+    expect(html).toContain("Boston, MA");
+    expect(html).toContain("Save section");
+    expect(html).toContain("Ask Paul instead");
+    expect(html).not.toMatch(/approve|deny/i);
+
+    findElement(
+      tree,
+      (node) => node.type === "input" && node.props?.id === "cf-profile-editor-home"
+    ).props.onChange({ target: { value: "Brooklyn, NY" } });
+    findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "Ask Paul instead"
+    ).props.onClick();
+    const form = findElement(tree, (node) => node.type === "form");
+    form.props.onSubmit({ preventDefault: vi.fn() });
+
+    expect(onEditorChange).toHaveBeenCalledWith("home", "Brooklyn, NY");
+    expect(onAskAgent).toHaveBeenCalledWith("location-policy");
+    expect(onSaveEditor).toHaveBeenCalledOnce();
   });
 
   it("renders settings in plain language and keeps every submit gated", async () => {

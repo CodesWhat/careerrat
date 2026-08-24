@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   deriveEvidenceSeed,
   deriveProfileSeed,
+  deriveTargetingSeed,
   parseResume,
 } from "../src/core/profile/resume-parser.mjs";
 
@@ -199,6 +200,40 @@ test("ISSUE-004: groups Morgan's blank-spaced PDF text into exactly three employ
   assert.match(experience[0], /^Staff Platform Engineer \| Juniper Relay/);
   assert.match(experience[1], /^Senior Software Engineer \| Northstar Ledger/);
   assert.match(experience[2], /^Software Engineer \| HarborSignal/);
+});
+
+test("groups comma-headed jobs with 'to present' dates without treating bullets or dates as roles", () => {
+  const text = `
+# Riley Morgan
+
+## Experience
+
+Staff Software Engineer, Example Systems
+2021 to present
+
+- Led a platform modernization across four product teams, cutting deploy time by 62%.
+- Built a production workflow engine processing 18 million jobs per day.
+
+Senior Backend Engineer, Sample Labs
+2017 to 2021
+
+- Designed event-driven services supporting 99.99% availability.
+`.trim();
+  const parsed = parseResume(text);
+
+  assert.equal(parsed.sections.experience.length, 2);
+  assert.deepEqual(deriveTargetingSeed(parsed).role_buckets[0].titles, [
+    "Staff Software Engineer",
+    "Senior Backend Engineer",
+  ]);
+  assert.deepEqual(
+    deriveEvidenceSeed(parsed).claims.map(({ claim }) => claim),
+    [
+      "Led a platform modernization across four product teams, cutting deploy time by 62%.",
+      "Built a production workflow engine processing 18 million jobs per day.",
+      "Designed event-driven services supporting 99.99% availability.",
+    ]
+  );
 });
 
 test("ISSUE-004: evidence excludes employment metadata and never absorbs the next job header", () => {

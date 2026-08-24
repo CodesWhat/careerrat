@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  artifactEmoji,
   buildChatFirstView,
   chatFirstReducer,
   createChatFirstState,
   filterPipelineJobs,
+  highFitSearchIds,
 } from "./chat-first-model.js";
 
 const dashboard = {
@@ -175,7 +177,20 @@ describe("buildChatFirstView", () => {
         expect.objectContaining({ id: "final", label: "Final", count: 1, pct: 50 }),
         expect.objectContaining({ id: "offer", label: "Offer", count: 1, pct: 50 }),
       ],
-      jobs: [{ id: "app-1", company: "E Corp", role: "Staff Software Engineer" }],
+      jobs: [
+        expect.objectContaining({
+          id: "app-1",
+          company: "E Corp",
+          role: "Staff Software Engineer",
+          stageId: "offer",
+        }),
+        expect.objectContaining({
+          id: "app-2",
+          company: "Initrode",
+          role: "Principal Engineer",
+          stageId: "rejected",
+        }),
+      ],
     });
     expect(view.browser.files).toEqual([
       expect.objectContaining({ id: "file-1", name: "resume.md", kind: "Resume" }),
@@ -274,6 +289,54 @@ describe("buildChatFirstView", () => {
     ]);
   });
 
+  it("collapses sourced decisions into one batch action without hiding other needs", () => {
+    const view = buildChatFirstView(
+      { ...dashboard, allNextSteps: [] },
+      {
+        ...runtime,
+        missions: [],
+        needsYou: [
+          {
+            id: "sourced:one:decision",
+            kind: "sourced-decision",
+            sourceId: "one",
+            title: "Apply to Black Mesa?",
+          },
+          {
+            id: "sourced:two:decision",
+            kind: "sourced-decision",
+            sourceId: "two",
+            title: "Apply to Tyrell?",
+          },
+          {
+            id: "sourced:three:decision",
+            kind: "sourced-decision",
+            sourceId: "three",
+            title: "Apply to Abstergo?",
+          },
+          {
+            id: "touch:communication:comm-1",
+            kind: "touch-due",
+            touchId: "comm-1",
+            title: "Nudge Angela?",
+          },
+        ],
+      }
+    );
+
+    expect(view.needsYou).toEqual([
+      expect.objectContaining({
+        id: "sourced-batch:one:two:three",
+        kind: "sourced-decision-group",
+        sourceIds: ["one", "two", "three"],
+        title: "3 qualified jobs are ready",
+        primaryLabel: "Apply to 3 jobs",
+        secondaryLabel: "Review",
+      }),
+      expect.objectContaining({ id: "touch:communication:comm-1" }),
+    ]);
+  });
+
   it("reserves the red thread dot for durable user actions, not ordinary agent replies", () => {
     const view = buildChatFirstView(
       { ...dashboard, allNextSteps: [] },
@@ -302,10 +365,115 @@ describe("buildChatFirstView", () => {
     expect(view.needsYou).toEqual([]);
     expect(view.browser.search).toEqual([]);
     expect(view.activeMission).toBeNull();
+    expect(view.deepIngestPrompt).toEqual({ visible: false });
+  });
+
+  it("routes an unlinked real contact to Paul instead of showing a dead thread action", () => {
+    const view = buildChatFirstView(
+      {
+        ...dashboard,
+        network: {
+          companies: [
+            { company: "Massive Dynamic", contacts: [{ id: "nina", name: "Nina Sharp" }] },
+          ],
+        },
+      },
+      runtime
+    );
+
+    expect(view.browser.people[0]).toMatchObject({
+      name: "Nina Sharp",
+      applicationId: null,
+      actionLabel: "Ask Paul",
+    });
+  });
+
+  it("keeps terminal leak rows available to the pipeline filters", () => {
+    const view = buildChatFirstView(
+      {
+        ...dashboard,
+        jobs: {
+          ...dashboard.jobs,
+          visibleCount: 4,
+          rows: [
+            { id: "active", company: "Acme", stageLabel: "Applied", terminal: false },
+            {
+              id: "rejected",
+              company: "Beta",
+              stage: "rejected",
+              stageLabel: "Rejected",
+              terminal: true,
+              terminalExitStage: "hiring-manager",
+            },
+            { id: "ghosted", company: "Gamma", stageLabel: "Ghosted", terminal: true },
+            { id: "withdrawn", company: "Delta", stageLabel: "Withdrawn", terminal: true },
+          ],
+        },
+      },
+      { ...runtime, missions: [] }
+    );
+
+    expect(view.browser.pipeline.jobs.map((row) => row.id)).toEqual([
+      "active",
+      "rejected",
+      "ghosted",
+      "withdrawn",
+    ]);
+    expect(filterPipelineJobs(view.browser.pipeline.jobs, "rejected").map((row) => row.id)).toEqual(
+      ["rejected"]
+    );
+    expect(filterPipelineJobs(view.browser.pipeline.jobs, "ghosted").map((row) => row.id)).toEqual([
+      "ghosted",
+    ]);
+    expect(
+      filterPipelineJobs(view.browser.pipeline.jobs, "withdrawn").map((row) => row.id)
+    ).toEqual(["withdrawn"]);
   });
 });
 
 describe("chatFirstReducer", () => {
+  it("seeds high-fit search jobs once and preserves later user changes", () => {
+    expect(
+      highFitSearchIds([
+        { id: "fit-field", fit: 88 },
+        { id: "score-field", fitScore: 91 },
+        { id: "below", fitScore: 79 },
+        { id: "pending", fitScore: null },
+      ])
+    ).toEqual(["fit-field", "score-field"]);
+
+    let state = createChatFirstState();
+    state = chatFirstReducer(state, {
+      type: "selection.seed-search",
+      rows: [
+        { id: "fit-field", fit: 88 },
+        { id: "score-field", fitScore: 91 },
+        { id: "below", fitScore: 79 },
+      ],
+    });
+    expect(state.selection).toEqual(["fit-field", "score-field"]);
+    expect(state.searchSelectionSeeded).toBe(true);
+
+    state = chatFirstReducer(state, { type: "selection.toggle", id: "fit-field" });
+    state = chatFirstReducer(state, { type: "browser.close" });
+    state = chatFirstReducer(state, { type: "browser.open", tab: "search" });
+    state = chatFirstReducer(state, {
+      type: "selection.seed-search",
+      rows: [{ id: "later-refresh", fitScore: 99 }],
+    });
+
+    expect(state.selection).toEqual(["score-field"]);
+  });
+
+  it("replaces the browser selection for a grouped Needs You review", () => {
+    const state = chatFirstReducer(
+      { ...createChatFirstState(), selection: ["old"] },
+      { type: "selection.replace", ids: ["one", "two", "one", null] }
+    );
+
+    expect(state.selection).toEqual(["one", "two"]);
+  });
+
   it("preserves selected jobs across browser close and turns them into composer context", () => {
     let state = createChatFirstState();
     state = chatFirstReducer(state, { type: "browser.open", tab: "search" });
@@ -321,6 +489,18 @@ describe("chatFirstReducer", () => {
     state = chatFirstReducer(state, { type: "composer.remove-context", id: "sourced-1" });
     expect(state.composerChips).toEqual(["hold-1"]);
     expect(state.selection).toEqual(["sourced-1", "hold-1"]);
+  });
+
+  it("can scope Today composer changes to an application without earning a job thread", () => {
+    let state = chatFirstReducer(createChatFirstState(), {
+      type: "composer.set-context",
+      ids: ["app-submit", "app-submit"],
+    });
+    state = chatFirstReducer(state, { type: "thread.open", id: "today" });
+
+    expect(state.activeThread).toBe("today");
+    expect(state.activeApplicationId).toBeNull();
+    expect(state.composerChips).toEqual(["app-submit"]);
   });
 
   it("keeps the handoff state transitions explicit and reversible", () => {
@@ -339,6 +519,16 @@ describe("chatFirstReducer", () => {
     state = chatFirstReducer(state, { type: "mock.close" });
     expect(state.gateId).toBeNull();
     expect(state.activeThread).toBe("app-1");
+  });
+});
+
+describe("artifactEmoji", () => {
+  it("uses the handoff artifact glyphs", () => {
+    expect(artifactEmoji("Resume")).toBe("📄");
+    expect(artifactEmoji("Cover letter")).toBe("✉️");
+    expect(artifactEmoji("Interview dossier")).toBe("📕");
+    expect(artifactEmoji("Story bank")).toBe("⭐");
+    expect(artifactEmoji("Evidence")).toBe("🧾");
   });
 });
 

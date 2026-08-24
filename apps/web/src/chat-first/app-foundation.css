@@ -4,20 +4,6 @@
 @import "@fontsource/figtree/700.css";
 @import "@fontsource/figtree/800.css";
 
-@font-face {
-  font-family: "Geist Sans";
-  src: url("../../../../assets/fonts/GeistVF.woff2") format("woff2");
-  font-weight: 100 900;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Geist Mono";
-  src: url("../../../../assets/fonts/GeistMonoVF.woff2") format("woff2");
-  font-weight: 100 900;
-  font-display: swap;
-}
-
 * {
   box-sizing: border-box;
 }
@@ -32,15 +18,14 @@ body {
   margin: 0;
   background: #edf5fb;
   color: #17171a;
-  font-family: "Geist Sans", system-ui, sans-serif;
+  font-family: "Figtree", system-ui, sans-serif;
   font-size: 14px;
-  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
 
 code,
 .mono {
-  font-family: "Geist Mono", "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+  font-family: inherit;
 }
 
 a {
@@ -56,61 +41,14 @@ button {
   font-size: 11px;
 }
 
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 8px 14px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.btn:disabled {
-  border-color: transparent;
-  background: rgba(107, 96, 88, 0.14);
-  color: rgba(35, 31, 28, 0.38);
-  cursor: not-allowed;
-  opacity: 1;
-}
-
-.btn--primary {
-  background: #e6fa8d;
-  color: #17171a;
-}
-
-.btn--secondary {
-  border-color: #d9d5c9;
-  background: transparent;
-  color: #17171a;
-}
-
-.btn--danger {
-  background: #f04c38;
-  color: #ffffff;
-}
-
-.btn__spinner {
-  display: inline-block;
-  width: 13px;
-  height: 13px;
-  border: 2px solid currentColor;
-  border-top-color: transparent;
-  border-radius: 999px;
-  animation: chat-first-spin 0.86s linear infinite;
-}
-
 .icon-btn {
   display: inline-flex;
   width: 32px;
   height: 32px;
   align-items: center;
   justify-content: center;
-  border: 1px solid transparent;
-  border-radius: 6px;
+  border: 1.5px solid transparent;
+  border-radius: 50%;
   background: transparent;
   color: #7d8894;
   font-size: 16px;
@@ -131,7 +69,7 @@ button {
   grid-template-rows: minmax(0, 1fr);
   place-items: center;
   padding: clamp(12px, 2vw, 24px);
-  background: rgba(23, 23, 26, 0.35);
+  background: rgba(23, 23, 26, 0.55);
 }
 
 .packet-viewer {
@@ -140,8 +78,8 @@ button {
   height: 100%;
   min-height: 0;
   padding: 12px;
-  border: 1px solid rgba(23, 23, 26, 0.14);
-  border-radius: 8px;
+  border: 1.5px solid #e3e0d6;
+  border-radius: 22px;
   background: #ffffff;
   box-shadow: none;
   grid-template-rows: auto minmax(0, 1fr);
@@ -171,8 +109,8 @@ button {
 .packet-viewer__stage {
   min-height: 0;
   overflow: auto;
-  border: 1px solid rgba(23, 23, 26, 0.08);
-  border-radius: 8px;
+  border: 1.5px solid #d9d5c9;
+  border-radius: 14px;
   background: #faf7ef;
 }
 
@@ -202,16 +140,4 @@ button {
   margin: 0;
   font: inherit;
   white-space: pre-wrap;
-}
-
-@keyframes chat-first-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .btn__spinner {
-    animation: none;
-  }
 }

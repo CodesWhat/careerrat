@@ -1153,6 +1153,73 @@ test("previewWorkspaceIntent: a comp-floor phrasing classifies as a settings.app
   });
 });
 
+test("previewWorkspaceIntent: Profile phrasings become confirm-first canonical setting changes", () => {
+  const repoRoot = tempRepo();
+  const cases = [
+    [
+      "set my target roles to Staff Engineer, Platform Lead",
+      "Replace target roles with Staff Engineer, Platform Lead",
+      { kind: "profile", section: "targets", values: ["Staff Engineer", "Platform Lead"] },
+    ],
+    [
+      "set my home market to New York, NY",
+      "Set home market to New York, NY",
+      { kind: "profile", section: "home", value: "New York, NY" },
+    ],
+    [
+      "turn on remote roles",
+      "Turn on remote roles",
+      { kind: "profile", section: "location-mode", field: "remote", value: true },
+    ],
+    [
+      "set my writing style to plain, direct, and concrete",
+      "Set writing style to plain, direct, and concrete",
+      { kind: "profile", section: "writing-style", value: "plain, direct, and concrete" },
+    ],
+    [
+      "set my search cadence to weekly",
+      "Set search cadence to weekly",
+      { kind: "profile", section: "search-cadence", value: "weekly" },
+    ],
+    [
+      "set my minimum fit to 76",
+      "Set minimum fit to 76+",
+      { kind: "profile", section: "fit-floor", value: 76 },
+    ],
+    [
+      "set my dealbreakers to crypto, fully onsite",
+      "Replace dealbreakers with crypto, fully onsite",
+      { kind: "profile", section: "dealbreakers", values: ["crypto", "fully onsite"] },
+    ],
+    [
+      "set my relocation markets to Boston, Seattle",
+      "Replace relocation markets with Boston, Seattle",
+      { kind: "profile", section: "relocation", values: ["Boston", "Seattle"] },
+    ],
+    [
+      "set my positive fit signals to platform ownership, developer tools",
+      "Replace positive fit signals with platform ownership, developer tools",
+      {
+        kind: "profile",
+        section: "keep-signals",
+        values: ["platform ownership", "developer tools"],
+      },
+    ],
+  ];
+
+  for (const [text, label, change] of cases) {
+    const result = previewWorkspaceIntent({ text, repoRoot, env: {} });
+    assert.deepEqual(result.action, {
+      label,
+      intent: {
+        type: "settings.apply",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { change },
+      },
+    });
+  }
+});
+
 test("previewWorkspaceIntent: a comp-floor-to-current-salary phrasing flags compReference instead of a number", () => {
   const repoRoot = tempRepo();
   const result = previewWorkspaceIntent({

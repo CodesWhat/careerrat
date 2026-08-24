@@ -48,6 +48,7 @@ import {
 } from "../db/verbs/comm.mjs";
 import { companyProposalBatchGet } from "../db/verbs/company-discovery.mjs";
 import { companyHealthSet } from "../db/verbs/company-health.mjs";
+import { deepIngestConfirmedItemUpsert, deepIngestStateGet } from "../db/verbs/deep-ingest.mjs";
 import { intakeOne } from "../db/verbs/intake.mjs";
 import {
   linkedinProposalBatchLatest,
@@ -304,6 +305,10 @@ function messageForModel(message) {
   } else if (message.kind === "agent_error") {
     content = `[Previous agent call failed: ${message.error?.code || "AGENT_FAILED"}] ${content}`;
   }
+  const jobContext = message.metadata?.jobContext;
+  if (jobContext) {
+    content += `\n[Selected job context: ${jobContext.company}, ${jobContext.role}, status ${jobContext.status}]`;
+  }
   return {
     role: message.role === "assistant" ? "assistant" : "user",
     content,
@@ -328,6 +333,24 @@ function actionError(message, code) {
   const error = new Error(message);
   error.code = code;
   return error;
+}
+
+function profileSettingList(values, label) {
+  const normalized = [
+    ...new Set(
+      (Array.isArray(values) ? values : [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    ),
+  ];
+  if (
+    !normalized.length ||
+    normalized.length > 20 ||
+    normalized.some((value) => value.length > 160)
+  ) {
+    throw actionError(`${label} need between 1 and 20 short values.`, "SETTINGS_CHANGE_INVALID");
+  }
+  return normalized;
 }
 
 function applicationForIntent({ repoRoot, env, id }) {
@@ -4176,6 +4199,176 @@ export async function executeWorkspaceIntent({
           );
         }
         candidateConfigPatch({ repoRoot, env, name: "automation", patch });
+      } else if (change.kind === "profile") {
+        const section = String(change.section || "");
+        const config = candidateConfigGet({ repoRoot, env });
+        if (section === "targets") {
+          const values = profileSettingList(change.values, "Target roles");
+          const from = (
+            Array.isArray(config.targeting?.role_buckets) ? config.targeting.role_buckets : []
+          ).flatMap((bucket) => (Array.isArray(bucket?.titles) ? bucket.titles : []));
+          candidateConfigPatch({
+            repoRoot,
+            env,
+            name: "targeting",
+            patch: {
+              role_buckets: [{ name: "Primary targets", priority: "primary", titles: values }],
+            },
+          });
+          result = {
+            label: "Target roles",
+            field: "role_buckets",
+            from,
+            to: values,
+            summary: `Target roles set to ${values.join(", ")}.`,
+          };
+        } else if (section === "home") {
+          const value = String(change.value || "").trim();
+          if (!value || value.length > 160) {
+            throw actionError("A short home market is required.", "SETTINGS_CHANGE_INVALID");
+          }
+          const from = config.profile?.location?.home || null;
+          candidateConfigPatch({
+            repoRoot,
+            env,
+            name: "profile",
+            patch: { candidate: { location: value }, location: { home: value } },
+          });
+          result = {
+            label: "Home market",
+            field: "location.home",
+            from,
+            to: value,
+            summary: `Home market set to ${value}.`,
+          };
+        } else if (section === "location-mode") {
+          const field = String(change.field || "");
+          if (!new Set(["remote", "hybrid", "onsite"]).has(field)) {
+            throw actionError("Unknown location mode.", "SETTINGS_CHANGE_INVALID");
+          }
+          if (typeof change.value !== "boolean") {
+            throw actionError("Location mode must be on or off.", "SETTINGS_CHANGE_INVALID");
+          }
+          const from = config.profile?.location?.[field] === true;
+          candidateConfigPatch({
+            repoRoot,
+            env,
+            name: "profile",
+            patch: {
+              location: { [field]: change.value, mode_preferences_confirmed: true },
+            },
+          });
+          result = {
+            label: `${field} roles`,
+            field: `location.${field}`,
+            from,
+            to: change.value,
+            summary: `${change.value ? "Turned on" : "Turned off"} ${field} roles.`,
+          };
+        } else if (section === "writing-style") {
+          const value = String(change.value || "").trim();
+          if (!value || value.length > 800) {
+            throw actionError(
+              "Writing style needs a short description.",
+              "SETTINGS_CHANGE_INVALID"
+            );
+          }
+          const current = deepIngestStateGet({ repoRoot, env }).confirmed.writingVoice[0] || null;
+          const saved = deepIngestConfirmedItemUpsert({
+            repoRoot,
+            env,
+            lane: "writing_voice",
+            id: current?.id,
+            fields: { summary: value },
+          });
+          result = {
+            label: "Writing style",
+            field: "writing_voice.summary",
+            from: current?.summary || null,
+            to: value,
+            summary: "Writing style updated.",
+            operationResult: saved,
+          };
+        } else if (section === "search-cadence") {
+          const value = String(change.value || "").trim();
+          if (!new Set(["daily", "every-3-days", "weekly", "manual"]).has(value)) {
+            throw actionError("Unknown search cadence.", "SETTINGS_CHANGE_INVALID");
+          }
+          const from = config.targeting?.search_preferences?.cadence?.mode || null;
+          candidateConfigPatch({
+            repoRoot,
+            env,
+            name: "targeting",
+            patch: { search_preferences: { cadence: { mode: value } } },
+          });
+          result = {
+            label: "Search cadence",
+            field: "search_preferences.cadence.mode",
+            from,
+            to: value,
+            summary: `Search cadence set to ${value}.`,
+          };
+        } else if (section === "fit-floor") {
+          const value = Number(change.value);
+          if (!Number.isFinite(value) || value < 0 || value > 100) {
+            throw actionError("Minimum fit must be between 0 and 100.", "SETTINGS_CHANGE_INVALID");
+          }
+          const from = config.targeting?.fit_bands?.fit_floor ?? null;
+          candidateConfigPatch({
+            repoRoot,
+            env,
+            name: "targeting",
+            patch: { fit_bands: { fit_floor: value } },
+          });
+          result = {
+            label: "Minimum fit",
+            field: "fit_bands.fit_floor",
+            from,
+            to: value,
+            summary: `Minimum fit set to ${value}+.`,
+          };
+        } else if (section === "dealbreakers" || section === "keep-signals") {
+          const label = section === "dealbreakers" ? "Dealbreakers" : "Positive fit signals";
+          const field = section === "dealbreakers" ? "cut_signals" : "keep_signals";
+          const values = profileSettingList(change.values, label);
+          const from = Array.isArray(config.targeting?.[field]) ? config.targeting[field] : [];
+          candidateConfigPatch({
+            repoRoot,
+            env,
+            name: "targeting",
+            patch: { [field]: values },
+          });
+          result = {
+            label,
+            field,
+            from,
+            to: values,
+            summary: `${label} set to ${values.join(", ")}.`,
+          };
+        } else if (section === "relocation") {
+          const values = profileSettingList(change.values, "Relocation markets");
+          const from = Array.isArray(config.profile?.location?.relocation)
+            ? config.profile.location.relocation
+            : [];
+          candidateConfigPatch({
+            repoRoot,
+            env,
+            name: "profile",
+            patch: { location: { relocation: values } },
+          });
+          result = {
+            label: "Relocation markets",
+            field: "location.relocation",
+            from,
+            to: values,
+            summary: `Relocation markets set to ${values.join(", ")}.`,
+          };
+        } else {
+          throw actionError(
+            `Unsupported profile section "${section}".`,
+            "SETTINGS_CHANGE_UNSUPPORTED"
+          );
+        }
       } else {
         throw actionError(
           `Unsupported setting change kind "${change.kind}".`,
@@ -6827,6 +7020,85 @@ function settingsModeFromText(text) {
   return null;
 }
 
+function splitSettingsList(value) {
+  return [
+    ...new Set(
+      String(value || "")
+        .split(/\s*(?:,|;|\band\b)\s*/i)
+        .map((item) => item.trim())
+        .filter(Boolean)
+    ),
+  ];
+}
+
+function settingsProfileFromText(text) {
+  const value = String(text || "").trim();
+  let match = value.match(
+    /^(?:please\s+)?(?:set|change|update|replace)\s+(?:my\s+)?(?:target roles|job targets|target titles)\s+to\s+(.+?)\s*[.?!]*$/i
+  );
+  if (match) {
+    const values = splitSettingsList(match[1]);
+    return values.length ? { section: "targets", values } : null;
+  }
+  match = value.match(
+    /^(?:please\s+)?(?:set|change|update)\s+(?:my\s+)?(?:home market|home location)\s+to\s+(.+?)\s*[.?!]*$/i
+  );
+  if (match) return { section: "home", value: match[1].trim() };
+  match = value.match(
+    /^(?:please\s+)?turn\s+(on|off)\s+(remote|hybrid|on[ -]?site)\s+roles\s*[.?!]*$/i
+  );
+  if (match) {
+    return {
+      section: "location-mode",
+      field:
+        match[2].toLowerCase().replace(/[ -]/g, "") === "onsite"
+          ? "onsite"
+          : match[2].toLowerCase(),
+      value: match[1].toLowerCase() === "on",
+    };
+  }
+  match = value.match(
+    /^(?:please\s+)?(?:set|change|update)\s+(?:my\s+)?writing style\s+to\s+(.+?)\s*[.?!]*$/i
+  );
+  if (match) return { section: "writing-style", value: match[1].trim() };
+  match = value.match(
+    /^(?:please\s+)?(?:set|change|update)\s+(?:my\s+)?search cadence\s+to\s+(daily|every\s+3\s+days|weekly|manual)\s*[.?!]*$/i
+  );
+  if (match) {
+    const cadence = match[1].toLowerCase();
+    return {
+      section: "search-cadence",
+      value: cadence === "every 3 days" ? "every-3-days" : cadence,
+    };
+  }
+  match = value.match(
+    /^(?:please\s+)?(?:set|change|update)\s+(?:my\s+)?(?:minimum fit|fit floor)\s+to\s+(\d{1,3})\+?\s*[.?!]*$/i
+  );
+  if (match) return { section: "fit-floor", value: Number(match[1]) };
+  match = value.match(
+    /^(?:please\s+)?(?:set|change|update|replace)\s+(?:my\s+)?dealbreakers\s+to\s+(.+?)\s*[.?!]*$/i
+  );
+  if (match) {
+    const values = splitSettingsList(match[1]);
+    return values.length ? { section: "dealbreakers", values } : null;
+  }
+  match = value.match(
+    /^(?:please\s+)?(?:set|change|update|replace)\s+(?:my\s+)?relocation markets\s+to\s+(.+?)\s*[.?!]*$/i
+  );
+  if (match) {
+    const values = splitSettingsList(match[1]);
+    return values.length ? { section: "relocation", values } : null;
+  }
+  match = value.match(
+    /^(?:please\s+)?(?:set|change|update|replace)\s+(?:my\s+)?(?:positive fit signals|keep signals)\s+to\s+(.+?)\s*[.?!]*$/i
+  );
+  if (match) {
+    const values = splitSettingsList(match[1]);
+    return values.length ? { section: "keep-signals", values } : null;
+  }
+  return null;
+}
+
 // Human phrasings for a capability, mapped to the canonical CAPABILITIES key
 // — used by the "turn on/off <capability> [on <platform>]" matcher below.
 const AUTOMATION_CAPABILITY_PHRASES = {
@@ -6935,6 +7207,9 @@ function settingsApplyFromText(text) {
   const mode = settingsModeFromText(value);
   if (mode) return { kind: "mode", field: mode.field, value: mode.value };
 
+  const profile = settingsProfileFromText(value);
+  if (profile) return { kind: "profile", ...profile };
+
   const automation = settingsAutomationFromText(value);
   if (automation) return { kind: "automation", ...automation };
 
@@ -6972,6 +7247,27 @@ function settingsApplyPreviewLabel(change) {
     return change.platform
       ? `${verb} ${capabilityLabel} on ${change.platform}`
       : `${verb} ${capabilityLabel}`;
+  }
+  if (change.kind === "profile") {
+    if (change.section === "targets") {
+      return `Replace target roles with ${change.values.join(", ")}`;
+    }
+    if (change.section === "home") return `Set home market to ${change.value}`;
+    if (change.section === "location-mode") {
+      return `${change.value ? "Turn on" : "Turn off"} ${change.field} roles`;
+    }
+    if (change.section === "writing-style") return `Set writing style to ${change.value}`;
+    if (change.section === "search-cadence") return `Set search cadence to ${change.value}`;
+    if (change.section === "fit-floor") return `Set minimum fit to ${change.value}+`;
+    if (change.section === "dealbreakers") {
+      return `Replace dealbreakers with ${change.values.join(", ")}`;
+    }
+    if (change.section === "relocation") {
+      return `Replace relocation markets with ${change.values.join(", ")}`;
+    }
+    if (change.section === "keep-signals") {
+      return `Replace positive fit signals with ${change.values.join(", ")}`;
+    }
   }
   return "Update this setting";
 }
@@ -7759,6 +8055,28 @@ function openJobId(context) {
   return String(context?.jobId || "").trim() || null;
 }
 
+function canonicalJobContext({ repoRoot, env, context }) {
+  const id = openJobId(context);
+  if (!id) return null;
+  const db = requireDb({ repoRoot, env });
+  for (const [type, table] of [
+    ["application", "applications"],
+    ["sourced", "sourced"],
+  ]) {
+    const stored = db.prepare(`SELECT data FROM ${table} WHERE id = ?`).get(id);
+    if (!stored) continue;
+    const row = JSON.parse(stored.data);
+    return {
+      type,
+      id,
+      company: String(row.company || "Unknown company"),
+      role: String(row.role || row.title || "Unknown role"),
+      status: String(row.status || type),
+    };
+  }
+  return null;
+}
+
 function previewAnswerLabel(text) {
   const compact = text.replace(/\s+/g, " ").trim();
   const preview = compact.length > 140 ? `${compact.slice(0, 139)}…` : compact;
@@ -7789,11 +8107,21 @@ export async function runWorkspaceAgentTurn({
   repoRoot,
   env = process.env,
   text,
+  context,
   callAIImpl = callAI,
   signal,
   now = () => new Date(),
 } = {}) {
-  workspaceMessageAppend({ repoRoot, env, role: "user", kind: "text", text, now });
+  const jobContext = canonicalJobContext({ repoRoot, env, context });
+  workspaceMessageAppend({
+    repoRoot,
+    env,
+    role: "user",
+    kind: "text",
+    text,
+    ...(jobContext ? { metadata: { jobContext } } : {}),
+    now,
+  });
   const history = workspaceThreadRead({ repoRoot, env });
 
   try {

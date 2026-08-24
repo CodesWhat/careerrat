@@ -19,12 +19,16 @@ import {
   mapMockSession,
   mockStartContext,
   openApplicationHandoff,
+  packetExportReceipt,
   resolveNeedDecision,
   resolvePersonAction,
+  resumeHydratedMission,
   scheduleApplicationId,
+  selectedSourcedDismissal,
   sourceSweepPresentation,
 } from "./chat-first-app-controller.js";
 import {
+  artifactEmoji,
   buildChatFirstView,
   chatFirstReducer,
   createChatFirstState,
@@ -103,9 +107,12 @@ function missionForView(view) {
   );
 }
 
-function missionPresentation(mission, onPause) {
+function missionPresentation(mission, { onPause, onResume } = {}) {
   if (!mission) return null;
   const marks = { completed: "✓", running: "◐", blocked: "•", failed: "!", pending: "○" };
+  const hasRemainingWork = list(mission.steps).some((step) =>
+    ["pending", "running"].includes(step?.status)
+  );
   return {
     title: mission.title,
     steps: list(mission.steps).map(
@@ -114,6 +121,7 @@ function missionPresentation(mission, onPause) {
     ),
     footnote: "Packets are built from the full posting. Every submit gates back here.",
     onPause: mission.status === "running" ? onPause : null,
+    onResume: mission.status === "paused" && hasRemainingWork ? onResume : null,
   };
 }
 
@@ -128,6 +136,7 @@ function artifactRows(detail) {
       id: artifact.id || artifact.kind || `artifact-${index + 1}`,
       name: artifact.name || artifact.label || titleCase(artifact.kind, "Saved file"),
       meta: artifact.meta || artifact.status || "Saved locally",
+      icon: artifact.icon || artifactEmoji(artifact.kind || artifact.name),
     }));
   }
   const artifacts = source?.artifacts;
@@ -140,6 +149,7 @@ function artifactRows(detail) {
         id: kind,
         name: artifact.name || titleCase(kind),
         meta: artifact.path || artifact.status || "Saved locally",
+        icon: artifact.icon || artifactEmoji(kind),
       },
     ];
   });
@@ -148,9 +158,11 @@ function artifactRows(detail) {
 export function packetRows(packet) {
   const artifacts = packet?.artifacts || {};
   return [
-    ["resume", "resume.pdf"],
-    ["coverLetter", "cover-letter.pdf"],
-  ].flatMap(([id, name]) => (artifacts[id] ? [{ id, name, artifact: artifacts[id] }] : []));
+    ["resume", "resume.pdf", "📄"],
+    ["coverLetter", "cover-letter.pdf", "✉️"],
+  ].flatMap(([id, name, icon]) =>
+    artifacts[id] ? [{ id, name, icon, artifact: artifacts[id] }] : []
+  );
 }
 
 function errorCopy(error) {
@@ -199,7 +211,7 @@ function offerPositionLine(source) {
   return parts.length ? parts.join(" · ") : null;
 }
 
-function jobContext(view, thread, actions) {
+function jobContext(view, thread, mockSession, actions) {
   if (!thread) return null;
   const detail = view.jobDetails?.[thread.applicationId] || {};
   const source = detail?.data || detail;
@@ -221,6 +233,9 @@ function jobContext(view, thread, actions) {
     /screen|assessment|technical|hiring manager|interview|onsite|final/i.test(
       String(thread.stage || "")
     ) || files.some((file) => /interview dossier/i.test(String(file.kind || file.name || "")));
+  const canContinueMock =
+    Boolean(mockSession?.id) &&
+    (!mockSession.applicationId || mockSession.applicationId === thread.applicationId);
   return (
     <JobContextPanel
       job={{
@@ -248,8 +263,9 @@ function jobContext(view, thread, actions) {
       action={
         canRunMock
           ? {
-              label: "Run mock interview",
-              onAction: () => actions.startMock?.(thread.applicationId),
+              label: canContinueMock ? "Continue mock interview" : "Run mock interview",
+              onAction: () =>
+                (canContinueMock ? actions.openMock : actions.startMock)?.(thread.applicationId),
             }
           : null
       }
@@ -258,7 +274,11 @@ function jobContext(view, thread, actions) {
 }
 
 function composerFor({ view, ui, composerValue, busy, actions }) {
-  const chips = mapComposerChips(ui.composerChips, view.browser.search);
+  const chips = mapComposerChips(ui.composerChips, [
+    ...view.browser.search,
+    ...view.threads,
+    ...view.archivedThreads,
+  ]);
   return (
     <Composer
       agentName={view.agentName}
@@ -385,7 +405,7 @@ export function ChatFirstAppView({
             onDraftPackets={(ids) => actions.runCartMission?.(ids, "draft")}
             onDraftAndApply={(ids) => actions.runCartMission?.(ids, "prepare-to-submit")}
             onChatAbout={actions.chatAboutSelection}
-            onDismissSelection={actions.clearSelection}
+            onDismissSelection={actions.dismissSelection}
           />
         </div>
         {overlays}
@@ -473,7 +493,7 @@ export function ChatFirstAppView({
         />
       </ConversationPanel>
     );
-    context = jobContext(view, activeJob, actions);
+    context = jobContext(view, activeJob, mockSession, actions);
   } else {
     conversation = (
       <ConversationPanel composer={composer}>
@@ -487,9 +507,10 @@ export function ChatFirstAppView({
           messages={view.mainThread?.messages || []}
           onArtifactAction={(artifact) => actions.openThreadArtifact?.(null, artifact)}
           onMessageAction={actions.openActivity}
-          mission={missionPresentation(activeMission, () =>
-            actions.pauseMission?.(activeMission.id)
-          )}
+          mission={missionPresentation(activeMission, {
+            onPause: () => actions.pauseMission?.(activeMission.id),
+            onResume: () => actions.resumeMission?.(activeMission.id),
+          })}
         />
       </ConversationPanel>
     );
@@ -500,7 +521,9 @@ export function ChatFirstAppView({
           onPrimary: () => actions.decideNeed?.(item, "primary"),
           onSecondary: () => actions.decideNeed?.(item, "secondary"),
         }))}
+        deepIngestPrompt={view.deepIngestPrompt}
         onStartIngest={actions.openIngest}
+        onDismissIngest={actions.dismissIngestPrompt}
       />
     );
   }
@@ -556,6 +579,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   const [newSearchIds, setNewSearchIds] = useState([]);
   const [sweepComparison, setSweepComparison] = useState(0);
   const sweepBaselineRef = useRef(null);
+  const missionExecutionRef = useRef(new Set());
   const [deepState, setDeepState] = useState(null);
   const [deepInputMode, setDeepInputMode] = useState(null);
   const [deepInputValue, setDeepInputValue] = useState("");
@@ -608,6 +632,11 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     editDraft: deepEditDraft,
     receipt: deepReceipt,
   };
+
+  useEffect(() => {
+    if (dashboard.loading || ui.searchSelectionSeeded || !baseView.browser.search.length) return;
+    dispatch({ type: "selection.seed-search", rows: baseView.browser.search });
+  }, [baseView.browser.search, dashboard.loading, ui.searchSelectionSeeded]);
 
   useEffect(() => {
     const next = location.state || {};
@@ -704,6 +733,22 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     };
   }, [api]);
 
+  useEffect(() => {
+    const mission = missionForView(view);
+    const execution = resumeHydratedMission({
+      api,
+      mission,
+      inFlight: missionExecutionRef.current,
+    });
+    if (!execution) return;
+    void execution
+      .then(() => dashboard.refetch())
+      .catch((cause) => {
+        setError(errorCopy(cause));
+        if (isEngineFailure(cause)) setEngineDown(true);
+      });
+  }, [api, dashboard.refetch, view]);
+
   async function run(operation) {
     setBusy(true);
     setError(null);
@@ -739,11 +784,14 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         return api.sendJobThreadTurn({ applicationId: activeJob.applicationId, text: clean });
       }
       const contextId = ui.composerChips[0];
-      const preview = await api.previewWorkspaceQuery(
-        clean,
-        contextId ? { pathname: "/", jobId: contextId } : undefined
-      );
-      return commitComposerTurn({ api, text: clean, preview: preview?.data || preview });
+      const context = contextId ? { pathname: "/jobs", jobId: contextId } : undefined;
+      const preview = await api.previewWorkspaceQuery(clean, context);
+      return commitComposerTurn({
+        api,
+        text: clean,
+        preview: preview?.data || preview,
+        context,
+      });
     });
     if (result) setComposerValue("");
     if (ui.activeThread === "ingest" && result?.view) {
@@ -757,10 +805,15 @@ export function ChatFirstApp({ api = chatFirstApi }) {
 
   async function runCartMission(ids, mode) {
     const result = await run(() =>
-      createMissionAndStart({ api, selection: ids, rows: view.browser.search, mode })
+      createMissionAndStart({
+        api,
+        selection: ids,
+        rows: view.browser.search,
+        mode,
+        onExecutionStart: (id) => missionExecutionRef.current.add(id),
+      })
     );
     if (!result) return;
-    dispatch({ type: "selection.clear" });
     dispatch({ type: "browser.close" });
     dispatch({ type: "thread.open", id: "today" });
     void result.execution
@@ -768,7 +821,8 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       .catch((cause) => {
         setError(errorCopy(cause));
         if (isEngineFailure(cause)) setEngineDown(true);
-      });
+      })
+      .finally(() => missionExecutionRef.current.delete(result.mission.id));
   }
 
   async function runSweep() {
@@ -802,6 +856,10 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   }
 
   async function startMock(applicationId) {
+    if (rawMock?.applicationId === applicationId) {
+      dispatch({ type: "mock.open", applicationId });
+      return;
+    }
     const thread = [...view.threads, ...view.archivedThreads].find(
       (candidate) => candidate.applicationId === applicationId
     );
@@ -999,6 +1057,33 @@ export function ChatFirstApp({ api = chatFirstApi }) {
           setError(errorCopy(cause));
           if (isEngineFailure(cause)) setEngineDown(true);
         });
+      return;
+    }
+    if (resolved.kind === "sourced-batch-apply") {
+      await runCartMission(resolved.ids, "prepare-to-submit");
+      return;
+    }
+    if (resolved.kind === "review-sourced-batch") {
+      dispatch({ type: "selection.replace", ids: resolved.ids });
+      dispatch({ type: "browser.open", tab: "search" });
+    }
+  }
+
+  async function dismissSelection(ids) {
+    const plan = selectedSourcedDismissal(view.browser.search, ids);
+    if (plan.sourcedIds.length) {
+      const result = await run(() =>
+        Promise.all(
+          plan.sourcedIds.map((id) => api.decideChatFirstSourced({ id, decision: "skip" }))
+        )
+      );
+      if (!result) return;
+    }
+    dispatch({ type: "selection.clear" });
+    if (plan.unsupportedCount > 0) {
+      setError(
+        `${plan.unsupportedCount} existing application${plan.unsupportedCount === 1 ? " was" : "s were"} removed from this selection without changing pipeline status.`
+      );
     }
   }
 
@@ -1018,6 +1103,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     changePipelineView: (viewName) => dispatch({ type: "browser.pipeline-view", view: viewName }),
     toggleSelection: (id) => dispatch({ type: "selection.toggle", id }),
     clearSelection: () => dispatch({ type: "selection.clear" }),
+    dismissSelection,
     chatAboutSelection: () => dispatch({ type: "selection.chat" }),
     runCartMission,
     runSweep,
@@ -1097,9 +1183,12 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     exportFile: async (id) => {
       const file = view.browser.files.find((candidate) => String(candidate.id) === String(id));
       if (file?.applicationId && file?.packetKind) {
-        await run(() =>
+        const result = await run(() =>
           api.exportPacketDocuments({ applicationId: file.applicationId, formats: ["pdf"] })
         );
+        const receipt = packetExportReceipt(result);
+        if (receipt) setArtifactViewer(receipt);
+        else if (result) setError("The export finished without returning a saved file path.");
       } else if (
         file?.applicationId &&
         /interview dossier/i.test(String(file.kind || file.name || ""))
@@ -1112,7 +1201,16 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     exportJobFile,
     openPerson: (id) => {
       const person = view.browser.people.find((candidate) => candidate.id === id);
-      if (person?.applicationId) openJob(person.applicationId);
+      if (!person) return;
+      if (person.applicationId) {
+        void openJob(person.applicationId);
+        return;
+      }
+      setComposerValue(
+        `Help me with ${person.name || "this contact"}${person.company ? ` at ${person.company}` : ""}.`
+      );
+      dispatch({ type: "browser.close" });
+      dispatch({ type: "thread.open", id: "today" });
     },
     draftNudge: (id) => {
       const person = view.browser.people.find((candidate) => candidate.id === id);
@@ -1129,7 +1227,18 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         .flatMap((group) => group.items)
         .find((event) => event.id === id);
       const applicationId = scheduleApplicationId(item);
-      if (applicationId) openJob(applicationId);
+      if (applicationId) {
+        void openJob(applicationId);
+        return;
+      }
+      if (!item) return;
+      setComposerValue(
+        item.actionLabel === "Get script"
+          ? `Draft the script for ${item.title || "this follow-up"}.`
+          : `Help me with ${item.title || "this scheduled item"}.`
+      );
+      dispatch({ type: "browser.close" });
+      dispatch({ type: "thread.open", id: "today" });
     },
     calendarAction: (label) => {
       if (!calendarAction(label, view.browser.schedule)) {
@@ -1137,6 +1246,10 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       }
     },
     openIngest: () => dispatch({ type: "ingest.open" }),
+    dismissIngestPrompt: async () => {
+      if (typeof api.dismissDeepIngestPrompt !== "function") return;
+      await run(() => api.dismissDeepIngestPrompt());
+    },
     closeIngest: () => dispatch({ type: "ingest.close" }),
     ingestFiles,
     ingestPaste: () => openDeepInput("paste"),
@@ -1152,15 +1265,21 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     deferDeepProposal: (proposal) => decideDeepProposal(proposal, "defer"),
     rejectDeepProposal: (proposal) => decideDeepProposal(proposal, "reject"),
     startMock,
+    openMock: (applicationId) => dispatch({ type: "mock.open", applicationId }),
     endMock,
     pauseMission: (id) => run(() => api.setChatFirstMissionStatus({ id, status: "paused" })),
+    resumeMission: (id) => run(() => api.resumeChatFirstMission(id)),
     decideNeed,
     closeGate: () => dispatch({ type: "gate.close" }),
     viewGateArtifact,
     requestGateChanges: () => {
       setComposerValue(`Change the application packet for ${activeGate?.company || "this job"}.`);
       dispatch({ type: "gate.close" });
-      dispatch({ type: "thread.open", id: activeGate?.applicationId || "today" });
+      dispatch({ type: "thread.open", id: "today" });
+      dispatch({
+        type: "composer.set-context",
+        ids: activeGate?.applicationId ? [activeGate.applicationId] : [],
+      });
     },
     openGateHandoff: () => {
       if (!openApplicationHandoff(activeGate))

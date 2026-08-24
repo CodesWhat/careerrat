@@ -239,7 +239,7 @@ function splitBlocks(lines) {
 }
 
 const EMPLOYMENT_DATE_RANGE_RE =
-  /\b(?:19|20)\d{2}\s*[-–—]\s*(?:(?:19|20)\d{2}|present|current|now)\b/i;
+  /\b(?:19|20)\d{2}\s*(?:[-–—]|to)\s*(?:(?:19|20)\d{2}|present|current|now)\b/i;
 
 function stripMarkdownHeading(line) {
   return String(line || "")
@@ -450,7 +450,7 @@ function joinWrappedLines(lines) {
 // A bare employment date range ("2021 - Present", "2018 – 2021") has digits
 // but is not an accomplishment.
 function isDateRange(line) {
-  return /^\d{4}\s*[-–—]\s*(\d{4}|present|current|now)$/i.test(line);
+  return /^\d{4}\s*(?:[-–—]|to)\s*(\d{4}|present|current|now)$/i.test(line);
 }
 
 function isEmploymentMetadata(line) {

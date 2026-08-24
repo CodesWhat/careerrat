@@ -7,7 +7,7 @@ function list(value) {
 
 const FIRST_ROLE_SUGGESTION = {
   id: "suggest:targets",
-  label: "Staff SWE · ML infra · remote or hybrid SF",
+  label: "Staff SWE · ML infra",
 };
 
 const FIRST_RUN_RUNTIME_PRIORITY = new Map([

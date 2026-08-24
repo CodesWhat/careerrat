@@ -159,7 +159,9 @@ function logConfirmedCandidateActivity(db, { lane, action, count = 1 }) {
   const title =
     action === "confirm"
       ? labels.confirmed
-      : `${labels.singular} ${action === "remove" ? "removed" : "updated"}`;
+      : `${labels.singular} ${
+          action === "remove" ? "removed" : action === "add" ? "added" : "updated"
+        }`;
   const meta = bumpMeta(db);
   const event = logActivityEvent(db, {
     type: "system",
@@ -169,7 +171,9 @@ function logConfirmedCandidateActivity(db, { lane, action, count = 1 }) {
         ? `Confirmed ${count} ${count === 1 ? "item" : "items"} from the deep intake review.`
         : action === "remove"
           ? "Removed a confirmed item from the Evidence Library."
-          : "Saved edits to a confirmed Evidence Library item.",
+          : action === "add"
+            ? "Added a manually confirmed item to the Evidence Library."
+            : "Saved edits to a confirmed Evidence Library item.",
     tags: [
       `operation:${action === "confirm" ? "deep-intake:confirm" : `library:item-${action}`}`,
       `lane:${lane}`,
@@ -863,6 +867,52 @@ export function deepIngestConfirmedItemUpdate({ repoRoot, env, lane, id, fields 
       action: "update",
     });
     return { ok: true, lane: normalizedLane, item: readRow(db, table, rowId), ...activity };
+  });
+}
+
+export function deepIngestConfirmedItemUpsert({ repoRoot, env, lane, id, fields } = {}) {
+  if (!fields || typeof fields !== "object" || Array.isArray(fields)) {
+    throw makeError("deepIngestConfirmedItemUpsert requires fields");
+  }
+
+  const { lane: normalizedLane, table } = confirmedLaneTable(lane);
+  const privacy = validateDeepIngestPrivacy({ proposal: { payload: fields } });
+  if (!privacy.ok) {
+    const err = makeError(
+      "Deep ingest confirmed item update is blocked by the privacy guard",
+      "PRIVACY_BLOCKED"
+    );
+    err.reasons = privacy.blockedFields;
+    throw err;
+  }
+
+  return runDeepIngestVerb({ repoRoot, env }, (db) => {
+    const rowId = String(id || "").trim() || `${normalizedLane}_${randomUUID()}`;
+    const current = readRow(db, table, rowId);
+    const updatedAt = nowIso();
+    const next = {
+      ...(current ? clone(current) : {}),
+      ...clone(fields),
+      id: rowId,
+      lane: normalizedLane,
+      status: "confirmed",
+      confirmedAt: current?.confirmedAt || updatedAt,
+      updatedAt,
+    };
+    putRow(db, table, rowId, next);
+    markLaneCompleted(db, normalizedLane, updatedAt);
+    const created = !current;
+    const activity = logConfirmedCandidateActivity(db, {
+      lane: normalizedLane,
+      action: created ? "add" : "update",
+    });
+    return {
+      ok: true,
+      lane: normalizedLane,
+      created,
+      item: readRow(db, table, rowId),
+      ...activity,
+    };
   });
 }
 

@@ -81,6 +81,23 @@ function baseProps(overrides = {}) {
 }
 
 describe("WorkspaceBrowser", () => {
+  it("uses the exact full-width cart action geometry from the handoff", () => {
+    const css = readFileSync(
+      fileURLToPath(new URL("./workspace-browser.css", import.meta.url)),
+      "utf8"
+    );
+
+    expect(css).toMatch(
+      /\.cf-cart__actions \.cf-button--ink,[^{]*\.cf-cart__actions \.cf-button--lime\s*\{[^}]*padding:\s*9px[^}]*font-size:\s*13px/s
+    );
+    expect(css).toMatch(
+      /\.cf-cart__actions \.cf-button--outline\s*\{[^}]*padding:\s*8px[^}]*font-size:\s*13px/s
+    );
+    expect(css).toMatch(
+      /\.cf-cart__actions \.cf-button--ghost\s*\{[^}]*padding:\s*6px[^}]*font-size:\s*12px/s
+    );
+  });
+
   it("renders the desktop slide-in shell and controlled cart selection", async () => {
     const { WorkspaceBrowser } = await loadBrowser();
     const html = renderToStaticMarkup(<WorkspaceBrowser {...baseProps()} />);
@@ -96,7 +113,8 @@ describe("WorkspaceBrowser", () => {
     expect(html).not.toContain("location ~");
     expect(html).toContain("Draft, then gate each apply");
     expect(html).toContain("each submit gates back to you in Today");
-    expect(html).toContain('aria-checked="true"');
+    expect(html).toContain('type="checkbox"');
+    expect(html).toContain('checked=""');
   });
 
   it("dispatches search and cart actions with the externally-owned ids", async () => {
@@ -138,6 +156,30 @@ describe("WorkspaceBrowser", () => {
     actions.props.children[2].props.onClick();
     expect(onDraftAndApply).toHaveBeenCalledWith(["tyrell", "aperture"]);
     expect(onChatAbout).toHaveBeenCalledWith(["tyrell", "aperture"]);
+  });
+
+  it("makes the whole search row one native keyboard-capable selection target", async () => {
+    const { SearchJobRow } = await loadBrowser();
+    const onToggleSelection = vi.fn();
+    const row = SearchJobRow({
+      job: JOBS[0],
+      selected: false,
+      onToggleSelection,
+    });
+
+    expect(row.type).toBe("label");
+    expect(row.props.onClick).toBeUndefined();
+    expect(row.props.onKeyDown).toBeUndefined();
+    expect(row.props.children[0]).toMatchObject({
+      type: "input",
+      props: {
+        type: "checkbox",
+        checked: false,
+        "aria-label": "Select Tyrell Corp, Staff ML Platform Engineer",
+      },
+    });
+    row.props.children[0].props.onChange();
+    expect(onToggleSelection).toHaveBeenCalledOnce();
   });
 
   it("renders sweep progress from run state and never invents a timer", async () => {
@@ -253,6 +295,32 @@ describe("WorkspaceBrowser", () => {
 
     expect(html).toContain("Aperture Science");
     expect(html).toContain("comp pending");
+  });
+
+  it("only calls an all-sourced cart dismissal Dismiss all", async () => {
+    const { WorkspaceBrowser } = await loadBrowser();
+    const sourced = renderToStaticMarkup(
+      <WorkspaceBrowser
+        {...baseProps({
+          jobs: [{ ...JOBS[0], source: "sourced" }],
+          cartJobs: [{ ...JOBS[0], source: "sourced" }],
+          selection: [JOBS[0].id],
+        })}
+      />
+    );
+    const mixed = renderToStaticMarkup(
+      <WorkspaceBrowser
+        {...baseProps({
+          jobs: [{ ...JOBS[0], source: "application" }],
+          cartJobs: [{ ...JOBS[0], source: "application" }],
+          selection: [JOBS[0].id],
+        })}
+      />
+    );
+
+    expect(sourced).toContain("Dismiss all");
+    expect(mixed).toContain("Clear selection");
+    expect(mixed).not.toContain("Dismiss all");
   });
 
   it("marks real filters as controlled and disables unsupported dropdown stubs", async () => {

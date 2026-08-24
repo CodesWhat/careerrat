@@ -233,7 +233,7 @@ describe("chat-first onboarding controller", () => {
     expect(message.options).toEqual([
       {
         id: "suggest:targets",
-        label: "Staff SWE · ML infra · remote or hybrid SF",
+        label: "Staff SWE · ML infra",
       },
     ]);
     expect(message.allowTypedAnswer).toBe(true);

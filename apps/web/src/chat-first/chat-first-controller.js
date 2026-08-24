@@ -33,8 +33,12 @@ export function buildMissionPayload(selection, rows, mode = "draft") {
   });
   if (jobs.length === 0) throw new Error("Select at least one current job");
   const normalizedMode = mode === "prepare-to-submit" ? "prepare-to-submit" : "draft";
+  const title =
+    normalizedMode === "prepare-to-submit"
+      ? `Apply to ${jobs.length} role${jobs.length === 1 ? "" : "s"}`
+      : `Draft ${jobs.length} packet${jobs.length === 1 ? "" : "s"}`;
   return {
-    title: `Prepare ${jobs.length} application${jobs.length === 1 ? "" : "s"}`,
+    title,
     mode: normalizedMode,
     requiresUserSubmit: true,
     jobs,

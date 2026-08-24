@@ -7,6 +7,7 @@ import {
   recordExternalApplication,
   runAiWebSearchStream,
   scheduleInterview,
+  sendWorkspaceMessage,
   setAppStatus,
   setSourcedStatus,
   streamResumeAi,
@@ -32,6 +33,28 @@ describe("finishOnboarding", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/onboard/finish", {
       method: "POST",
       body: JSON.stringify({}),
+      headers: { "content-type": "application/json" },
+    });
+  });
+});
+
+describe("sendWorkspaceMessage", () => {
+  it("carries the selected job context into the durable agent turn", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true, data: { messages: [] } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const context = { pathname: "/jobs", jobId: "app-temporal" };
+
+    await sendWorkspaceMessage("Change the résumé for this role.", context);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/workspace/message", {
+      method: "POST",
+      body: JSON.stringify({ text: "Change the résumé for this role.", context }),
       headers: { "content-type": "application/json" },
     });
   });

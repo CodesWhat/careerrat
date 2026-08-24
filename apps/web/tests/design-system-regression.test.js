@@ -203,11 +203,24 @@ describe("CareerRat typography", () => {
     });
   });
 
-  it("self-hosts both Geist families from the shared asset tree", () => {
-    const foundationCss = stripCssComments(readFileSync(foundationPath, "utf8"));
+  it("uses Figtree as the only interface family", () => {
+    const offenders = declarations
+      .filter(
+        ({ property, value }) =>
+          property === "font-family" &&
+          value !== "inherit" &&
+          !/^"Figtree"\s*,\s*system-ui\s*,\s*sans-serif$/.test(value)
+      )
+      .map(({ file, line, value }) => `${file}:${line}: font-family: ${value}`);
 
-    expect(foundationCss).toContain('../../../../assets/fonts/GeistVF.woff2');
-    expect(foundationCss).toContain('../../../../assets/fonts/GeistMonoVF.woff2');
+    expect(offenders, offenders.join("\n")).toEqual([]);
+  });
+
+  it("does not impose a global line height over prototype controls and dense cards", () => {
+    const foundationCss = stripCssComments(readFileSync(foundationPath, "utf8"));
+    const bodyRule = foundationCss.match(/body\s*\{([^}]*)\}/)?.[1] || "";
+
+    expect(bodyRule).not.toMatch(/line-height\s*:/);
   });
 
   it("does not reference the retired Fraunces font anywhere in web source", () => {
@@ -218,6 +231,16 @@ describe("CareerRat typography", () => {
 });
 
 describe("CareerRat card edges", () => {
+  it("keeps the full-page artifact preview on the chat-first shape system", () => {
+    const foundationCss = stripCssComments(readFileSync(foundationPath, "utf8"));
+
+    expect(foundationCss).toMatch(/\.icon-btn\s*\{[^}]*border-radius:\s*50%/s);
+    expect(foundationCss).toMatch(/\.packet-viewer\s*\{[^}]*border-radius:\s*22px/s);
+    expect(foundationCss).toMatch(
+      /\.packet-viewer__stage\s*\{[^}]*border:\s*1\.5px solid[^}]*border-radius:\s*14px/s
+    );
+  });
+
   it("does not use two-pixel-or-wider accent border rails", () => {
     const offenders = declarations
       .filter(

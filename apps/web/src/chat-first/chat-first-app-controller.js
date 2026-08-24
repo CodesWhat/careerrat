@@ -1,5 +1,6 @@
 import { safeExternalHttpUrl } from "../lib/safeExternalUrl.js";
 import { buildMissionPayload, resolveComposerCommit } from "./chat-first-controller.js";
+import { artifactEmoji } from "./chat-first-model.js";
 
 function list(value) {
   return Array.isArray(value) ? value : [];
@@ -99,6 +100,33 @@ export function downloadBinaryArtifact(
   return true;
 }
 
+export function packetExportReceipt(response) {
+  const userFacing = response?.data?.userFacing || response?.userFacing || {};
+  const files = ["resume", "coverLetter", "answers"].flatMap((kind) =>
+    list(userFacing[kind]).filter((file) => file && typeof file === "object")
+  );
+  if (!files.length) return null;
+  const blocks = files.map((file, index) => {
+    const name = String(file.name || file.path || `Export ${index + 1}`).trim();
+    const path = String(file.downloadsPath || file.path || "").trim();
+    return [name, ...(path && path !== name ? [path] : [])].join("\n");
+  });
+  return {
+    title: "Export complete",
+    artifact: {
+      kind: "Export receipt",
+      text: `${`Saved ${files.length} ${files.length === 1 ? "file" : "files"} locally.`}\n\n${blocks.join("\n\n")}`,
+    },
+  };
+}
+
+export function selectedSourcedDismissal(rows, ids) {
+  const selected = new Set(list(ids).filter(Boolean).map(String));
+  const chosen = list(rows).filter((row) => row?.id && selected.has(String(row.id)));
+  const sourcedIds = chosen.filter((row) => row?.source === "sourced").map((row) => String(row.id));
+  return { sourcedIds, unsupportedCount: chosen.length - sourcedIds.length };
+}
+
 function normalizedArtifactKind(file) {
   return String(file?.kind || file?.name || "")
     .trim()
@@ -186,10 +214,15 @@ export function mapActivityItems(items) {
 }
 
 export function mapComposerChips(selection, rows) {
-  const selected = new Set(list(selection).map(String));
-  return list(rows)
-    .filter((row) => selected.has(String(row?.id)))
-    .map((row) => ({ id: row.id, label: row.company || row.role || "Selected job" }));
+  const candidates = list(rows);
+  return list(selection).map((rawId) => {
+    const id = String(rawId);
+    const row = candidates.find(
+      (candidate) =>
+        String(candidate?.id || "") === id || String(candidate?.applicationId || "") === id
+    );
+    return { id, label: row?.company || row?.role || "Job context" };
+  });
 }
 
 export async function createMissionAndRun({ api, selection, rows, mode }) {
@@ -201,16 +234,32 @@ export async function createMissionAndRun({ api, selection, rows, mode }) {
   return { kind: "mission", mission: missionFromResponse(result) || mission, payload };
 }
 
-export async function createMissionAndStart({ api, selection, rows, mode }) {
+export async function createMissionAndStart({ api, selection, rows, mode, onExecutionStart }) {
   const payload = buildMissionPayload(selection, rows, mode);
   const created = await api.createChatFirstMission(payload);
   const mission = missionFromResponse(created);
   if (!mission?.id) throw new Error("Mission did not return an id");
+  onExecutionStart?.(mission.id);
   const execution = api.runChatFirstMission(mission.id);
   return { kind: "mission", mission, payload, execution };
 }
 
-export async function commitComposerTurn({ api, text, preview }) {
+export function resumeHydratedMission({ api, mission, inFlight }) {
+  if (
+    mission?.status !== "running" ||
+    !mission.id ||
+    typeof api?.resumeChatFirstMission !== "function" ||
+    inFlight?.has(mission.id)
+  ) {
+    return null;
+  }
+  inFlight?.add(mission.id);
+  return Promise.resolve(api.resumeChatFirstMission(mission.id)).finally(() => {
+    inFlight?.delete(mission.id);
+  });
+}
+
+export async function commitComposerTurn({ api, text, preview, context }) {
   const commit = resolveComposerCommit(preview, text);
   if (commit.kind === "mission") {
     const entity = commit.jobs?.[0] || {};
@@ -234,7 +283,7 @@ export async function commitComposerTurn({ api, text, preview }) {
     return { kind: "intent", response };
   }
   if (!commit.text) throw new Error("Write a message first");
-  const response = await api.sendWorkspaceMessage(commit.text);
+  const response = await api.sendWorkspaceMessage(commit.text, context);
   return { kind: "message", response };
 }
 
@@ -287,7 +336,10 @@ export function findGate(missions, gateId, jobDetails = {}) {
           0,
         expiryLabel: step?.result?.expiryLabel || null,
         deadline: step?.result?.deadline || null,
-        packet: list(step?.result?.packet),
+        packet: list(step?.result?.packet).map((item) => ({
+          ...item,
+          icon: item?.icon || artifactEmoji(item?.kind || item?.id || item?.name),
+        })),
       };
     }
   }
@@ -324,6 +376,14 @@ export function resolveNeedDecision(item, decision = "primary") {
     };
     return payload?.id ? { kind: "sourced-decision", payload } : null;
   }
+  if (kind === "sourced-decision-group") {
+    const ids = [...new Set(list(item?.sourceIds).filter(Boolean).map(String))];
+    if (!ids.length) return null;
+    return {
+      kind: decision === "secondary" ? "review-sourced-batch" : "sourced-batch-apply",
+      ids,
+    };
+  }
   if (kind === "application-next-action") {
     const applicationId = item?.applicationId || item?.owner?.applicationId || item?.owner?.id;
     return applicationId ? { kind: "open-application", applicationId } : null;
@@ -354,6 +414,29 @@ function plural(value, singular, pluralLabel = `${singular}s`) {
   return `${value} ${value === 1 ? singular : pluralLabel}`;
 }
 
+function progressLabel(value) {
+  if (typeof value === "string") return value.trim();
+  if (!value || typeof value !== "object") return "";
+  return String(value.label || value.name || value.provider || "").trim();
+}
+
+function sourceProgressLabels(progress) {
+  return [
+    ...new Set(
+      [
+        ...list(progress?.providers),
+        ...list(progress?.sources),
+        ...list(progress?.sourceLabels),
+        progress?.currentProvider,
+        progress?.currentSource,
+        progress?.batch,
+      ]
+        .map(progressLabel)
+        .filter(Boolean)
+    ),
+  ];
+}
+
 export function sourceSweepPresentation(value) {
   const run = value?.run && typeof value.run === "object" ? value.run : value;
   if (!run || run?.status === "not_started") {
@@ -363,6 +446,7 @@ export function sourceSweepPresentation(value) {
     const completed = Number(run?.progress?.completedSources);
     const total = Number(run?.progress?.totalSources);
     const found = Number(run?.progress?.foundCount);
+    const providers = sourceProgressLabels(run?.progress);
     const parts = [];
     if (Number.isFinite(completed) && Number.isFinite(total) && total > 0) {
       parts.push(`${completed} of ${total} sources checked`);
@@ -372,6 +456,7 @@ export function sourceSweepPresentation(value) {
       ...(run.id ? { id: run.id } : {}),
       status: "running",
       detail: parts.join(" · ") || run?.progress?.lastActivity || "Checking configured sources",
+      ...(providers.length ? { providers } : {}),
     };
   }
   if (run.status === "failed") {
@@ -488,6 +573,7 @@ export function mapMockSession(session) {
     context?.interviewerHint || [interviewer, interviewerRole].filter(Boolean).join(" · ") || null;
   return {
     id: session?.id || null,
+    ...(session?.applicationId ? { applicationId: session.applicationId } : {}),
     title: session?.title || context?.title || "Mock interview",
     company: context?.company || session?.company || null,
     round: context?.round || context?.interviewRound || session?.round || null,

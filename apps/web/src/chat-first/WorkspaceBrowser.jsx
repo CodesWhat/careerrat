@@ -5,7 +5,7 @@ import {
   selectedJobs,
   selectionIds,
 } from "./browser-model.js";
-import { ArrowLeftIcon, RadarIcon, SearchIcon, SpinnerIcon } from "./chat-first-icons.jsx";
+import { RadarIcon, SearchIcon, SpinnerIcon } from "./chat-first-icons.jsx";
 import "./workspace-browser.css";
 
 const TAB_ORDER = ["search", "pipeline", "files", "people", "schedule"];
@@ -157,14 +157,14 @@ function LocationScope({ policy = {} }) {
 
 export function SearchJobRow({ job, selected, onToggleSelection }) {
   const width = fitBarWidth(job?.fit);
+  const label = `Select ${job?.company || "job"}, ${job?.role || "role not provided"}`;
   return (
-    <article className={`cf-job-row${selected ? " cf-job-row--selected" : ""}`}>
+    <label className={`cf-job-row${selected ? " cf-job-row--selected" : ""}`}>
       <input
         className="cf-job-row__check"
         type="checkbox"
         checked={selected}
-        aria-label={`Select ${job?.company || "job"}`}
-        aria-checked={selected}
+        aria-label={label}
         onChange={() => onToggleSelection?.(job?.id)}
       />
       <div className="cf-job-row__identity">
@@ -187,7 +187,7 @@ export function SearchJobRow({ job, selected, onToggleSelection }) {
           <span className="cf-job-row__fit-fill" style={{ width: `${width}%` }} />
         </span>
       </div>
-    </article>
+    </label>
   );
 }
 
@@ -543,6 +543,7 @@ export function SelectionCart({
   const chosen = selectedJobs(jobs, selection);
   const ids = chosen.map((job) => job.id);
   const cart = buildCartView(chosen);
+  const canDismissAll = chosen.every((job) => job?.source === "sourced");
   return (
     <aside className="cf-cart" aria-label="Selected jobs cart">
       <div className="cf-eyebrow cf-cart__title">{cart.title}</div>
@@ -603,7 +604,7 @@ export function SelectionCart({
             className="cf-button cf-button--ghost"
             onClick={() => onDismissSelection?.(ids)}
           >
-            Dismiss all
+            {canDismissAll ? "Dismiss all" : "Clear selection"}
           </button>
         </div>
       ) : null}
@@ -667,7 +668,7 @@ export function WorkspaceBrowser({
         onClick={() => onClose?.()}
         aria-label="Return to threads"
       >
-        <ArrowLeftIcon />
+        <span aria-hidden="true">‹</span>
         <span>THREADS · {expiringCount} EXPIRING</span>
         <span className="cf-browser__needs-dot" aria-hidden="true" />
       </button>

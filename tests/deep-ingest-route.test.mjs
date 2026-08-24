@@ -970,6 +970,28 @@ test("POST /api/deep-ingest/confirmed/update and /remove mutate one confirmed it
   assert.equal(removed.body.data.event.title, "Interview story removed");
 });
 
+test("POST /api/deep-ingest/confirmed/upsert saves a manual writing style", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+  const routes = await mountDirectRoutes(repoRoot);
+
+  const response = await postJsonDirect(routes, "/api/deep-ingest/confirmed/upsert", {
+    lane: "writing_voice",
+    id: null,
+    fields: {
+      summary: "Plain, direct, concrete.",
+      doPhrases: ["Lead with the result"],
+      avoidPhrases: ["Excited to apply"],
+    },
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.ok, true);
+  assert.equal(response.body.data.item.summary, "Plain, direct, concrete.");
+  assert.equal(response.body.data.created, true);
+});
+
 test("POST confirmed-item routes reject missing id/lane payloads", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });

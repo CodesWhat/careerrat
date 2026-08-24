@@ -154,7 +154,12 @@ export function mountWorkspaceAgentRoutes({
   addRoute("POST", "/api/workspace/message", async (req, res) => {
     try {
       const body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
-      const data = await runTurnImpl({ repoRoot, env, text: body?.text });
+      const data = await runTurnImpl({
+        repoRoot,
+        env,
+        text: body?.text,
+        context: body?.context,
+      });
       sendJson(res, 200, { ok: true, data });
     } catch (error) {
       sendError(res, error);

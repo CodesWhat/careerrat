@@ -66,7 +66,7 @@ describe("buildMissionPayload", () => {
     );
 
     expect(payload).toEqual({
-      title: "Prepare 2 applications",
+      title: "Apply to 2 roles",
       mode: "prepare-to-submit",
       requiresUserSubmit: true,
       jobs: [
@@ -86,6 +86,12 @@ describe("buildMissionPayload", () => {
         },
       ],
     });
+  });
+
+  it("uses the handoff mission title for draft-only work", () => {
+    const payload = buildMissionPayload(["sourced-1"], rows, "draft");
+
+    expect(payload.title).toBe("Draft 1 packet");
   });
 
   it("rejects an empty or stale selection instead of creating a fake mission", () => {

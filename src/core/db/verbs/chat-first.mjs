@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 
 import { runBoundedAI } from "../../ai/bounded-ai.mjs";
+import {
+  DEFAULT_DEEP_INGEST_REQUIRED_LANES,
+  evaluateDeepIngestReadiness,
+} from "../../deep-ingest/readiness.mjs";
 import { requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
 import { bumpMeta, getRow, logActivityEvent, NotFoundError, putRow, runVerb } from "./shared.mjs";
@@ -21,6 +25,7 @@ const TERMINAL_STEP_STATUSES = new Set(["completed", "failed", "skipped"]);
 const MISSION_MODES = new Set(["draft", "prepare-to-submit"]);
 const MOCK_ROLES = new Set(["user", "assistant", "system"]);
 const MOCK_KINDS = new Set(["question", "answer", "coaching", "status", "text"]);
+const DEEP_INGEST_PROMPT_PREFERENCE_ID = "deep-ingest-prompt";
 const CLOSED_JOB_STATUSES = new Set([
   "accepted",
   "archived",
@@ -1196,7 +1201,13 @@ function normalizedLeaseMs(value) {
   return leaseMs;
 }
 
-function recoverStaleMissionAttempts({ repoRoot, env, missionId, now } = {}) {
+function recoverStaleMissionAttempts({
+  repoRoot,
+  env,
+  missionId,
+  now,
+  recoverActiveAttempts = false,
+} = {}) {
   return runVerb({ repoRoot, env }, (db) => {
     const mission = missionRequired(db, missionId);
     const steps = missionSteps(db, missionId);
@@ -1207,7 +1218,7 @@ function recoverStaleMissionAttempts({ repoRoot, env, missionId, now } = {}) {
       if (step.status !== "running") continue;
       const attempt = step.currentAttempt;
       const leaseExpiresAt = attempt?.leaseExpiresAt;
-      if (leaseExpiresAt && Date.parse(leaseExpiresAt) > atMs) {
+      if (!recoverActiveAttempts && leaseExpiresAt && Date.parse(leaseExpiresAt) > atMs) {
         throw makeError(`mission step has an active execution lease: ${step.id}`, "CONFLICT");
       }
       const idempotency = attempt?.idempotency || stepIdempotency(step);
@@ -1463,14 +1474,28 @@ function applicationGateState(application) {
 
 // Executes only the safe preparation chain. The submit gate is persisted as a
 // blocked step; job.apply is intentionally absent from this runner.
-export async function missionRun({ repoRoot, env, id, executeIntent, leaseMs, now } = {}) {
+export async function missionRun({
+  repoRoot,
+  env,
+  id,
+  executeIntent,
+  leaseMs,
+  now,
+  recoverActiveAttempts = false,
+} = {}) {
   if (typeof executeIntent !== "function") {
     throw makeError("missionRun requires an executeIntent callback");
   }
   const missionId = cleanId(id, "mission id");
   const stepLeaseMs = normalizedLeaseMs(leaseMs);
   const recovered = committedWrite(() =>
-    recoverStaleMissionAttempts({ repoRoot, env, missionId, now })
+    recoverStaleMissionAttempts({
+      repoRoot,
+      env,
+      missionId,
+      now,
+      recoverActiveAttempts,
+    })
   );
   if (recovered.recoveredStepIds?.length) {
     return { ok: true, mission: recovered.mission };
@@ -1687,6 +1712,29 @@ export async function missionRun({ repoRoot, env, id, executeIntent, leaseMs, no
     ).mission;
   }
   return { ok: true, mission };
+}
+
+export async function missionResume({ repoRoot, env, id, executeIntent, leaseMs, now } = {}) {
+  const missionId = cleanId(id, "mission id");
+  const db = requireDb({ repoRoot, env });
+  const current = hydrateMission(db, missionRequired(db, missionId));
+  if (TERMINAL_MISSION_STATUSES.has(current.status)) {
+    throw makeError(`mission is already ${current.status}: ${missionId}`, "CONFLICT");
+  }
+  if (current.status === "paused") {
+    committedWrite(() =>
+      missionSetStatus({ repoRoot, env, id: missionId, status: "running", now })
+    );
+  }
+  return missionRun({
+    repoRoot,
+    env,
+    id: missionId,
+    executeIntent,
+    leaseMs,
+    now,
+    recoverActiveAttempts: true,
+  });
 }
 
 function mockSessionRequired(db, id) {
@@ -2049,7 +2097,7 @@ export function mockInterviewFeedbackAppend({
   });
 }
 
-function assertMockQuestionIsAnswerable({ repoRoot, env, sessionId } = {}) {
+function mockQuestionTurnState({ repoRoot, env, sessionId } = {}) {
   const db = requireDb({ repoRoot, env });
   const session = hydrateMockSession(db, mockSessionRequired(db, cleanId(sessionId, "sessionId")));
   if (session.status !== "active") {
@@ -2059,34 +2107,158 @@ function assertMockQuestionIsAnswerable({ repoRoot, env, sessionId } = {}) {
   if (!question) {
     throw makeError("mock interview question one has not been generated yet", "CONFLICT");
   }
-  if (
-    session.messages.some(
-      (message) => message.kind === "answer" && message.questionNumber === question.questionNumber
-    )
-  ) {
-    throw makeError(
-      `mock interview question ${question.questionNumber} is already answered`,
-      "CONFLICT"
+  const answer = session.messages.find(
+    (message) => message.kind === "answer" && message.questionNumber === question.questionNumber
+  );
+  const feedback = session.feedback.find(
+    (item) =>
+      item.questionNumber === question.questionNumber && (!answer || item.messageId === answer.id)
+  );
+  return { session, question, answer, feedback };
+}
+
+function mockInterviewTurnCommit({
+  repoRoot,
+  env,
+  sessionId,
+  answerId,
+  questionNumber,
+  worked,
+  tighten,
+  nextQuestion,
+  ai,
+  now,
+} = {}) {
+  const cleanSessionId = cleanId(sessionId, "sessionId");
+  const cleanAnswerId = cleanId(answerId, "answerId");
+  const cleanWorked = cleanText(worked, "worked", { max: 2_000 });
+  const cleanTighten = cleanText(tighten, "tighten", { max: 2_000 });
+  const cleanNextQuestion = cleanText(nextQuestion, "nextQuestion", {
+    max: 4_000,
+    required: false,
+  });
+  const safeAi = jsonClone(ai, "AI metadata");
+  return runVerb({ repoRoot, env }, (db) => {
+    const session = mockSessionRequired(db, cleanSessionId);
+    if (session.status !== "active") {
+      throw makeError(`mock interview session is ${session.status}: ${cleanSessionId}`, "CONFLICT");
+    }
+    const answer = parseRow(
+      db
+        .prepare("SELECT data FROM mock_interview_messages WHERE id = ? AND session_id = ?")
+        .get(cleanAnswerId, cleanSessionId)
     );
-  }
-  return { session, question };
+    if (answer?.kind !== "answer" || answer.questionNumber !== questionNumber) {
+      throw new NotFoundError(`no answer for mock interview question ${questionNumber}`);
+    }
+    const hydrated = hydrateMockSession(db, session);
+    let feedback = hydrated.feedback.find(
+      (item) => item.questionNumber === questionNumber && item.messageId === cleanAnswerId
+    );
+    const at = nextIso(session.updatedAt, now);
+    if (!feedback) {
+      feedback = {
+        id: randomUUID(),
+        sessionId: cleanSessionId,
+        messageId: cleanAnswerId,
+        questionNumber,
+        worked: cleanWorked,
+        tighten: cleanTighten,
+        createdAt: at,
+      };
+      db.prepare(
+        "INSERT INTO mock_interview_feedback (id, session_id, message_id, data) VALUES (?, ?, ?, ?)"
+      ).run(feedback.id, cleanSessionId, cleanAnswerId, JSON.stringify(feedback));
+    }
+    let question = hydrated.messages.find(
+      (message) => message.kind === "question" && message.questionNumber === questionNumber + 1
+    );
+    if (cleanNextQuestion && !question) {
+      const sequence = db
+        .prepare(
+          "SELECT coalesce(max(sequence), 0) + 1 AS next FROM mock_interview_messages WHERE session_id = ?"
+        )
+        .get(cleanSessionId).next;
+      question = {
+        id: randomUUID(),
+        sessionId: cleanSessionId,
+        sequence,
+        role: "assistant",
+        kind: "question",
+        text: cleanNextQuestion,
+        questionNumber: questionNumber + 1,
+        ...(safeAi === undefined ? {} : { metadata: { ai: safeAi } }),
+        createdAt: at,
+      };
+      db.prepare(
+        "INSERT INTO mock_interview_messages (id, session_id, sequence, data) VALUES (?, ?, ?, ?)"
+      ).run(question.id, cleanSessionId, sequence, JSON.stringify(question));
+    }
+    const updated = {
+      ...session,
+      updatedAt: at,
+      currentQuestion: question
+        ? Math.max(session.currentQuestion || 0, questionNumber + 1)
+        : questionNumber,
+    };
+    writeMockSession(db, updated);
+    const application = applicationRequired(db, session.applicationId);
+    const meta = bumpMeta(db, at);
+    const event = logActivityEvent(db, {
+      at,
+      type: "interview",
+      title: `${application.company || session.applicationId}: mock interview feedback saved`,
+      refs: {
+        applicationId: session.applicationId,
+        company: application.company,
+        role: application.role,
+      },
+      skill: "chat-first",
+      operation: "mock-interview:turn-complete",
+    });
+    return {
+      session: hydrateMockSession(db, updated),
+      feedback,
+      question: question || null,
+      meta,
+      event,
+    };
+  });
 }
 
 export async function mockInterviewTurn({ repoRoot, env, sessionId, text, now, call, runAI } = {}) {
-  const answerable = assertMockQuestionIsAnswerable({ repoRoot, env, sessionId });
-  const answer = committedWrite(() =>
-    mockInterviewMessageAppend({
-      repoRoot,
-      env,
-      sessionId,
-      role: "user",
-      kind: "answer",
-      questionNumber: answerable.question.questionNumber,
-      text,
-      now,
-    })
-  );
+  const cleanAnswer = cleanText(text, "text");
+  const turnState = mockQuestionTurnState({ repoRoot, env, sessionId });
+  const answer = turnState.answer
+    ? { session: turnState.session, message: turnState.answer }
+    : committedWrite(() =>
+        mockInterviewMessageAppend({
+          repoRoot,
+          env,
+          sessionId,
+          role: "user",
+          kind: "answer",
+          questionNumber: turnState.question.questionNumber,
+          text: cleanAnswer,
+          now,
+        })
+      );
   const questionNumber = answer.message.questionNumber;
+  const completedQuestion = answer.session.messages.find(
+    (message) => message.kind === "question" && message.questionNumber === questionNumber + 1
+  );
+  if (turnState.feedback && (completedQuestion || questionNumber >= answer.session.questionTotal)) {
+    return {
+      session: answer.session,
+      answer: answer.message,
+      feedback: turnState.feedback,
+      question: completedQuestion || null,
+      reusedAnswer: true,
+      reusedTurn: true,
+      meta: null,
+      event: null,
+    };
+  }
   try {
     const db = requireDb({ repoRoot, env });
     const canonicalContext = canonicalTurnContext(db, answer.session.applicationId, {
@@ -2143,49 +2315,29 @@ export async function mockInterviewTurn({ repoRoot, env, sessionId, text, now, c
       error.status = 422;
       throw error;
     }
-    const feedback = committedWrite(() =>
-      mockInterviewFeedbackAppend({
+    const completed = committedWrite(() =>
+      mockInterviewTurnCommit({
         repoRoot,
         env,
         sessionId: answer.session.id,
-        messageId: answer.message.id,
+        answerId: answer.message.id,
         questionNumber,
         worked,
         tighten,
+        nextQuestion,
+        ai: generated.ai,
         now,
       })
     );
-    let question = null;
-    let session = feedback.session;
-    let meta = feedback.meta;
-    let event = feedback.event;
-    if (nextQuestion) {
-      const appended = committedWrite(() =>
-        mockInterviewMessageAppend({
-          repoRoot,
-          env,
-          sessionId: answer.session.id,
-          role: "assistant",
-          kind: "question",
-          questionNumber: questionNumber + 1,
-          text: nextQuestion,
-          metadata: { ai: generated.ai },
-          now,
-        })
-      );
-      question = appended.message;
-      session = appended.session;
-      meta = appended.meta;
-      event = appended.event;
-    }
     return {
-      session,
+      session: completed.session,
       answer: answer.message,
-      feedback: feedback.feedback,
-      question,
+      feedback: completed.feedback,
+      question: completed.question,
+      reusedAnswer: Boolean(turnState.answer),
       ai: generated.ai,
-      meta,
-      event,
+      meta: completed.meta,
+      event: completed.event,
     };
   } catch (error) {
     error.persistedMessage = durableAIErrorMessage({
@@ -2538,6 +2690,48 @@ function configuredAgentName(db) {
   return name ? name.slice(0, 80) : "Paul";
 }
 
+function deepIngestPromptFromDb(db) {
+  const preference = getRow(db, "chat_first_preferences", DEEP_INGEST_PROMPT_PREFERENCE_ID);
+  const readiness = evaluateDeepIngestReadiness({
+    laneStates: readJsonRows(db, "SELECT data FROM deep_ingest_lane_states ORDER BY lane ASC"),
+    requiredLanes: DEFAULT_DEEP_INGEST_REQUIRED_LANES,
+  });
+  const dismissedAt = String(preference?.dismissedAt || "").trim() || null;
+  return {
+    visible: !readiness.ready && !dismissedAt,
+    dismissed: Boolean(dismissedAt),
+    completed: readiness.ready,
+    dismissedAt,
+  };
+}
+
+export function deepIngestPromptDismiss({ repoRoot, env, now = new Date() } = {}) {
+  const dismissedAt = dateIso(now);
+  const db = requireDb({ repoRoot, env });
+  return withTransaction(db, () => {
+    const current = getRow(db, "chat_first_preferences", DEEP_INGEST_PROMPT_PREFERENCE_ID);
+    if (current?.dismissedAt) {
+      return {
+        ok: true,
+        prompt: deepIngestPromptFromDb(db),
+        state: chatFirstStateFromDb(db, { now }),
+        reused: true,
+      };
+    }
+    putRow(db, "chat_first_preferences", DEEP_INGEST_PROMPT_PREFERENCE_ID, {
+      id: DEEP_INGEST_PROMPT_PREFERENCE_ID,
+      dismissedAt,
+      updatedAt: dismissedAt,
+    });
+    return {
+      ok: true,
+      prompt: deepIngestPromptFromDb(db),
+      state: chatFirstStateFromDb(db, { now }),
+      reused: false,
+    };
+  });
+}
+
 function activeSourcedMissionIds(missions) {
   const ids = new Set();
   for (const mission of missions) {
@@ -2776,6 +2970,7 @@ export function chatFirstStateFromDb(db, { now = new Date() } = {}) {
   ];
   return {
     agentName: configuredAgentName(db),
+    deepIngestPrompt: deepIngestPromptFromDb(db),
     mainThread: workspaceThread ? { ...workspaceThread, messages: workspaceMessages } : null,
     jobThreads,
     missions,

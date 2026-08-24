@@ -1,4 +1,5 @@
 import { UploadIcon } from "./chat-first-icons.jsx";
+import { artifactEmoji } from "./chat-first-model.js";
 import "./chat-first.css";
 
 const EMPTY_LIST = [];
@@ -65,9 +66,11 @@ function artifactSubtitle(artifact) {
 function artifactView(artifact, message, onArtifactAction) {
   const ownAction = artifact?.onAction;
   const canOpen = typeof ownAction === "function" || typeof onArtifactAction === "function";
+  const title = artifactTitle(artifact);
   return {
     ...artifact,
-    title: artifactTitle(artifact),
+    title,
+    icon: artifact?.icon || artifactEmoji(artifact?.kind || title),
     subtitle: artifactSubtitle(artifact),
     actionLabel: artifact?.actionLabel || artifact?.primaryLabel || (canOpen ? "Open" : null),
     onAction: canOpen
@@ -174,6 +177,7 @@ export function MessageTranscript({
                 artifact={artifactView(
                   {
                     id: key,
+                    kind: message.metadata?.kind,
                     title: message.text,
                     icon: message.metadata?.icon,
                     subtitle: message.metadata?.subtitle,
@@ -251,6 +255,11 @@ export function TodayConversation({
               {mission.onPause ? (
                 <button type="button" onClick={mission.onPause}>
                   pause
+                </button>
+              ) : null}
+              {mission.onResume ? (
+                <button type="button" onClick={mission.onResume}>
+                  resume
                 </button>
               ) : null}
             </div>
@@ -882,7 +891,7 @@ export function SubmitGateModal({
             aria-label="Close submit review"
             onClick={onClose}
           >
-            ×
+            ✕
           </button>
         </header>
         <div className="chat-first-gate__body">

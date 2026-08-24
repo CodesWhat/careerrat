@@ -122,6 +122,8 @@ describe("TodayConversation", () => {
     expect(html).toContain("Packet drafted.");
     expect(html).toContain("Tyrell resume");
     expect(html).toContain("Tyrell cover letter");
+    expect(html).toContain("📄");
+    expect(html).toContain("✉️");
     expect(html).toContain("Evidence backed");
     expect(html).toContain("Source sweep could not finish.");
     expect(html).toContain("chat-first-run-receipt--error");
@@ -130,6 +132,30 @@ describe("TodayConversation", () => {
       expect.objectContaining({ id: "done" })
     );
     expect(onMessageAction).toHaveBeenCalledWith(expect.objectContaining({ id: "done" }));
+  });
+
+  it("derives the handoff glyph for durable transcript artifacts", () => {
+    const html = markup(
+      <MessageTranscript
+        messages={[
+          {
+            id: "artifacts",
+            role: "assistant",
+            kind: "action_result",
+            text: "Files ready.",
+            artifacts: [
+              { kind: "interview_dossier", title: "Interview dossier" },
+              { kind: "story_bank", title: "Story bank" },
+              { kind: "evidence", title: "Evidence bank" },
+            ],
+          },
+        ]}
+      />
+    );
+
+    expect(html).toContain("📕");
+    expect(html).toContain("⭐");
+    expect(html).toContain("🧾");
   });
 
   it("renders an arbitrary durable transcript without moving gates into chat", () => {

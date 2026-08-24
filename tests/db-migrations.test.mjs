@@ -54,18 +54,31 @@ test("re-running against a db already at the latest version is a no-op", () => {
   assert.equal(after, before, "no new _migrations rows on a no-op re-run");
 });
 
-test("migration 008-013 preserve ingest, agent, proposal, workspace, then durable skill chat order", () => {
+test("migration 009-014 preserve public intel, agent, proposal, workspace, chat, then preferences order", () => {
   assert.deepEqual(
     ALL_MIGRATIONS.slice(-6).map((migration) => [migration.id, migration.name]),
     [
-      [8, "deep-ingest"],
       [9, "public-intel"],
       [10, "workspace-agent"],
       [11, "linkedin-profile-proposals"],
       [12, "chat-first-workspace"],
       [13, "durable-skill-chat"],
+      [14, "chat-first-preferences"],
     ]
   );
+});
+
+test("migration 014 creates JSON-backed chat-first preferences", () => {
+  const db = freshDb();
+  runMigrations(db);
+
+  const sql = db
+    .prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'chat_first_preferences'"
+    )
+    .get()?.sql;
+  assert.ok(sql, "expected chat_first_preferences table");
+  assert.match(sql, /json_valid\(data\)/);
 });
 
 test("migration 007 creates durable sourcing_runs state table and lookup indexes", () => {
