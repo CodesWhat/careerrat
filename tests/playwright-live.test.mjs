@@ -18,10 +18,12 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { createApplyDriver } from "../src/core/apply/apply-driver.mjs";
 import { createPlaywrightOps } from "../src/core/apply/playwright-ops.mjs";
 import { startFixtureServer } from "./helpers/fixture-server.mjs";
 
 const FIXTURE_DIR = fileURLToPath(new URL("./fixtures/apply-form/", import.meta.url));
+const RADIO_FIXTURE_DIR = fileURLToPath(new URL("./fixtures/apply-radio-form/", import.meta.url));
 
 const LIVE = process.env.CAREERRAT_LIVE_BROWSER === "1";
 
@@ -150,5 +152,151 @@ test("real Chromium end-to-end: openTab -> snapshot -> fill/select/toggle/upload
     await closeServer();
     rmSync(profileDir, { recursive: true, force: true });
     rmSync(resumeDir, { recursive: true, force: true });
+  }
+});
+
+test("real Chromium snapshots and selects a native required radio fieldset without touching Submit", {
+  skip: !LIVE && "set CAREERRAT_LIVE_BROWSER=1 to run this against a real Chromium instance",
+}, async () => {
+  const profileDir = mkdtempSync(join(tmpdir(), "careerrat-live-radio-profile-"));
+  const { url, close: closeServer } = await startFixtureServer(RADIO_FIXTURE_DIR);
+  const ops = createPlaywrightOps({ profileDir, headless: true });
+
+  try {
+    const opened = [];
+    const clicked = [];
+    const driverOps = {
+      ...ops,
+      async openTab(args) {
+        const openedTab = await ops.openTab(args);
+        opened.push(openedTab.pageId);
+        return openedTab;
+      },
+      async clickButton(args) {
+        clicked.push(args.ref);
+        return ops.clickButton(args);
+      },
+    };
+    const execute = createApplyDriver({
+      ops: driverOps,
+      providerLabel: "playwright",
+      repoRoot: "/repo",
+      candidateConfigGetImpl: () => ({
+        profile: {},
+        honesty: {},
+        "form-defaults": { requires_sponsorship: "No" },
+      }),
+      loadAnswerMapImpl: async () => new Map(),
+    });
+
+    const result = await execute({
+      applicationId: "live-native-radio",
+      application: { id: "live-native-radio", link: url },
+      postingUrl: url,
+      questionCapture: { state: "captured" },
+    });
+    const snapshot = await ops.snapshot({ pageId: opened[0] });
+    const groupRef = refByName(snapshot, "Will you now or in the future require sponsorship?");
+    const group = snapshot.refs[groupRef];
+
+    assert.equal(result.state, "awaiting-submit");
+    assert.equal(result.verified, false);
+    assert.equal(result.session.filledCount, 1);
+    assert.deepEqual(result.session.unresolved, []);
+    assert.equal(group.role, "radio-group");
+    assert.equal(group.required, true);
+    assert.equal(group.stateKnown, true);
+    assert.equal(group.value, "No");
+    assert.deepEqual(
+      group.options.map(({ label }) => label),
+      ["Yes", "No"]
+    );
+    const noRef = group.options.find(({ label }) => label === "No").ref;
+    const submitRef = refByName(snapshot, "Submit application");
+    assert.deepEqual(clicked, [noRef]);
+    assert.notEqual(noRef, submitRef);
+    assert.equal(snapshot.origin, `${url}/`);
+  } finally {
+    await ops.close();
+    await closeServer();
+    rmSync(profileDir, { recursive: true, force: true });
+  }
+});
+
+test("real Chromium groups unwrapped native radios by form owner and name without touching either Submit", {
+  skip: !LIVE && "set CAREERRAT_LIVE_BROWSER=1 to run this against a real Chromium instance",
+}, async () => {
+  const profileDir = mkdtempSync(join(tmpdir(), "careerrat-live-radio-owner-profile-"));
+  const { url, close: closeServer } = await startFixtureServer(RADIO_FIXTURE_DIR);
+  const ops = createPlaywrightOps({ profileDir, headless: true });
+
+  try {
+    const opened = [];
+    const clicked = [];
+    const driverOps = {
+      ...ops,
+      async openTab(args) {
+        const openedTab = await ops.openTab(args);
+        opened.push(openedTab.pageId);
+        return openedTab;
+      },
+      async clickButton(args) {
+        clicked.push(args.ref);
+        return ops.clickButton(args);
+      },
+    };
+    const execute = createApplyDriver({
+      ops: driverOps,
+      providerLabel: "playwright",
+      repoRoot: "/repo",
+      candidateConfigGetImpl: () => ({
+        profile: {},
+        honesty: {},
+        "form-defaults": {
+          requires_sponsorship: "No",
+          work_authorization: "Yes",
+        },
+      }),
+      loadAnswerMapImpl: async () => new Map(),
+    });
+
+    const postingUrl = `${url}/unwrapped.html`;
+    const result = await execute({
+      applicationId: "live-native-radio-owner",
+      application: { id: "live-native-radio-owner", link: postingUrl },
+      postingUrl,
+      questionCapture: { state: "captured" },
+    });
+    const snapshot = await ops.snapshot({ pageId: opened[0] });
+    const sponsorshipRef = refByName(
+      snapshot,
+      "Will you now or in the future require sponsorship?"
+    );
+    const authorizationRef = refByName(snapshot, "Are you authorized to work?");
+    const sponsorship = snapshot.refs[sponsorshipRef];
+    const authorization = snapshot.refs[authorizationRef];
+    const submitRefs = Object.entries(snapshot.refs)
+      .filter(([, entry]) => /^Submit /.test(entry.name))
+      .map(([ref]) => ref);
+
+    assert.equal(result.state, "awaiting-submit");
+    assert.equal(result.verified, false);
+    assert.equal(result.session.filledCount, 2);
+    assert.deepEqual(result.session.unresolved, []);
+    assert.equal(sponsorship.value, "No");
+    assert.equal(authorization.value, "Yes");
+    assert.notEqual(sponsorshipRef, authorizationRef);
+    assert.deepEqual(clicked, [
+      sponsorship.options.find(({ label }) => label === "No").ref,
+      authorization.options.find(({ label }) => label === "Yes").ref,
+    ]);
+    assert.equal(
+      clicked.some((ref) => submitRefs.includes(ref)),
+      false
+    );
+  } finally {
+    await ops.close();
+    await closeServer();
+    rmSync(profileDir, { recursive: true, force: true });
   }
 });

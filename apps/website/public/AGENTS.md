@@ -2,7 +2,7 @@
 
 > **For humans:** this file is the AI agent's operating manual, not a setup guide for people.
 > If you're trying to install CareerRat, see the README at
-> https://github.com/CodesWhat/careerrat or the site at careerrat.com instead.
+> <https://github.com/CodesWhat/careerrat> or the site at careerrat.com instead.
 
 > **For AI agents:** you landed in the right place. Read this file, then follow the steps
 > below to set the user up. The full operating contract ships inside the repo.
@@ -18,8 +18,8 @@ telemetry. Free to self-host, MIT licensed, zero runtime dependencies.
 
 - Node.js >= 24
 - A coding-agent CLI on PATH — Claude Code or Codex (CareerRat runs *through* you):
-  - Claude Code: `npm install -g @anthropic-ai/claude-code` (https://claude.com/claude-code)
-  - Codex: `npm install -g @openai/codex` (https://github.com/openai/codex)
+  - Claude Code: `npm install -g @anthropic-ai/claude-code` (<https://claude.com/claude-code>)
+  - Codex: `npm install -g @openai/codex` (<https://github.com/openai/codex>)
 
 ## Install & start
 
@@ -32,7 +32,7 @@ careerrat start claude        # or: careerrat start codex
 
 `start` scaffolds a local `workspace/`, installs the skills (so `/evaluate-job`,
 `/apply-job`, etc. become available), seeds demo data and boots a live dashboard at
-http://localhost:7777, then hands control to you with a starter message. Paste a job
+<http://localhost:7777>, then hands control to you with a starter message. Paste a job
 posting and say "evaluate this", or try the bundled sample under `examples/sample-jobs/`.
 
 ## After it starts — what to do
@@ -46,7 +46,7 @@ dashboard update. To get going:
 2. **Vet a job** — when the user pastes a JD, run `evaluate-job` before anything else.
 3. **Apply** — `apply-job` (it verifies `evaluate-job` first, then `tailor-application`).
 4. **Comms** — recruiter message → `email-comms`; scheduling a call → `schedule-meeting`.
-5. **Track** — outcomes land on the dashboard at http://localhost:7777.
+5. **Track** — outcomes land on the dashboard at <http://localhost:7777>.
 
 After install, **read the repo's own `AGENTS.md`** (the long one). It is the source of
 truth for intent routing, the body-read and submit-safety gates, and tracker write-back.
@@ -62,8 +62,8 @@ This file only gets you to the front door — don't improvise procedures it cove
 
 ## Rules — read before acting for the user
 
-- **NEVER submit a job application without explicit user confirmation**, unless their local
-  config opts into auto-submit. This is the one hard safety gate.
+- **NEVER press a job application's final submit control.** Prepare the form and
+  leave submission to the user. This is the one hard safety gate.
 - **ASK before** sending any outbound message (email, LinkedIn) on the user's behalf.
 - **ALWAYS run the owning skill** instead of improvising — skills are the how-to, AGENTS.md
   is the contract.

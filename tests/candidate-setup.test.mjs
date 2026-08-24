@@ -570,7 +570,6 @@ describe("candidate setup DB readiness and document formats", () => {
 
     const docxAllowed = validate(
       {
-        auto_submit: false,
         document_formats: {
           default_packet_format: "pdf",
           required_export_formats: ["docx"],
@@ -582,7 +581,6 @@ describe("candidate setup DB readiness and document formats", () => {
 
     const unknownRejected = validate(
       {
-        auto_submit: false,
         document_formats: {
           default_packet_format: "pdf",
           required_export_formats: ["pages"],
@@ -599,24 +597,35 @@ describe("candidate setup DB readiness and document formats", () => {
 
     const declined = validate(
       {
-        auto_submit: false,
         declined_fields: { authorization: { declined_at: "2026-08-09T12:00:00Z" } },
       },
       schema
     );
     assert.equal(declined.valid, true, JSON.stringify(declined.errors));
 
-    const cleared = validate(
-      { auto_submit: false, declined_fields: { authorization: null } },
-      schema
-    );
+    const cleared = validate({ declined_fields: { authorization: null } }, schema);
     assert.equal(cleared.valid, true, JSON.stringify(cleared.errors));
 
-    const missingTimestamp = validate(
-      { auto_submit: false, declined_fields: { authorization: {} } },
-      schema
-    );
+    const missingTimestamp = validate({ declined_fields: { authorization: {} } }, schema);
     assert.equal(missingTimestamp.valid, false, "declined_at must be required when present");
+  });
+
+  it("rejects the removed automatic final-submission setting", () => {
+    const repoRoot = buildDbRoot();
+
+    assert.throws(
+      () =>
+        candidateConfigPatch({
+          repoRoot,
+          name: "form-defaults",
+          patch: { auto_submit: false },
+        }),
+      (error) => {
+        assert.equal(error.code, "VALIDATION_FAILED");
+        assert.match(JSON.stringify(error.errors), /auto_submit|unexpected property/i);
+        return true;
+      }
+    );
   });
 
   it("authorizationDeclared — R3 readiness declared-split (declined, false/false via decline, absent)", () => {

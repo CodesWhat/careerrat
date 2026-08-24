@@ -289,6 +289,78 @@ test("resolveAIRoute: explicit Advanced provider fallback retains BYOK", () => {
   }
 });
 
+test("resolveAIRoute: packaged desktop refuses provider fallback without a selected CLI", () => {
+  const root = tempRoot();
+  try {
+    writeInstalledRuntimeSelection({
+      repoRoot: root,
+      env: {},
+      runtimeId: null,
+      providerFallback: true,
+    });
+    const route = resolveAIRoute(
+      {
+        CAREERRAT_DESKTOP_SHELL: "1",
+        CAREERRAT_DESKTOP_CLI_ONLY: "1",
+        ANTHROPIC_API_KEY: "sk-ant-test",
+      },
+      { repoRoot: root, runtimeInventory: [] }
+    );
+    assert.equal(route.type, "none");
+    assert.match(route.error, /select/i);
+    assert.match(route.error, /ready/i);
+    assert.doesNotMatch(route.error, /Advanced provider fallback/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resolveAIRoute: packaged desktop rejects a selected CLI that is no longer installed", () => {
+  const root = tempRoot();
+  try {
+    writeInstalledRuntimeSelection({ repoRoot: root, env: {}, runtimeId: "codex" });
+    const route = resolveAIRoute(
+      { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+      { repoRoot: root, runtimeInventory: [] }
+    );
+    assert.equal(route.type, "none");
+    assert.match(route.error, /codex/i);
+    assert.match(route.error, /unavailable/i);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resolveAIRoute: packaged desktop resolves a selected CLI without repeating readiness probes", () => {
+  const root = tempRoot();
+  try {
+    writeInstalledRuntimeSelection({ repoRoot: root, env: {}, runtimeId: "codex" });
+    let probeCalls = 0;
+    for (let index = 0; index < 3; index += 1) {
+      const route = resolveAIRoute(
+        {
+          CAREERRAT_DESKTOP_SHELL: "1",
+          CAREERRAT_DESKTOP_CLI_ONLY: "1",
+          ANTHROPIC_API_KEY: "sk-ant-test",
+        },
+        {
+          repoRoot: root,
+          runtimeInventory: [{ id: "codex", name: "Codex", path: "/safe/codex", available: true }],
+          probeRuntime: () => {
+            probeCalls += 1;
+            return { status: "ready", ready: true };
+          },
+        }
+      );
+      assert.equal(route.type, "installed");
+      assert.equal(route.runtime.id, "codex");
+    }
+    assert.equal(probeCalls, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("callAI: throws the resolveAIRoute error when no route is configured", async () => {
   await assert.rejects(
     () => callAI({ model: "claude-haiku-4-5", messages: [], maxTokens: 8, env: {} }),

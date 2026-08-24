@@ -1,7 +1,9 @@
 ---
 name: intake-extract
-description: Read a dropped PDF or image file from a Universal Intake upload and transcribe its full legible text verbatim — no summarizing, no classifying, no résumé/candidate-specific assumptions. Backend-only: invoked by the embedded runtime for POST /api/intake/upload's PDF/image branch, never chat-routed or run conversationally.
-tier_1_inputs: [intake file path]
+description: "Read a dropped PDF or image file from a Universal Intake upload and transcribe its full legible text verbatim — no summarizing, no classifying, no résumé/candidate-specific assumptions. Backend-only: invoked by the embedded runtime for POST /api/intake/upload's PDF/image branch, never chat-routed or run conversationally."
+metadata:
+  tier_1_inputs:
+    - intake file path
 ---
 
 # intake-extract

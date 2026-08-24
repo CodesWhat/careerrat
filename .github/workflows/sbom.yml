@@ -19,9 +19,9 @@ name: sbom
 #
 # workflow_dispatch takes no inputs on purpose: checkov CKV_GHA_7 requires
 # them to be empty, matching release-assets.yml and desktop-release.yml's
-# dispatch triggers. A manual run always targets the latest published
-# release, resolved the same way desktop-release.yml's publish-release job
-# resolves releases: by listing `repos/{repo}/releases` and filtering, never
+# dispatch triggers. A tag-pinned dispatch targets that exact release; a
+# manual branch dispatch targets the latest published release, resolved by
+# listing `repos/{repo}/releases` and filtering, never
 # `gh release view <tag>` (drafts aren't addressable by tag, and gh's
 # fallback behavior for that case varies by version).
 #
@@ -41,6 +41,10 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
 
 permissions: {}
 
@@ -69,11 +73,13 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           EVENT_TAG: ${{ github.event.release.tag_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$REF_TYPE" != "tag" ]; then
             release="$(gh api "repos/$REPO/releases" --paginate --slurp | jq -c \
               'add | [.[] | select(.draft==false)] | sort_by(.published_at) | last // empty')"
             if [ -z "$release" ]; then
@@ -81,15 +87,19 @@ jobs:
               exit 1
             fi
           else
-            if [ -z "$EVENT_TAG" ]; then
-              echo "::error::Release event fired with no tag_name in the payload."
+            tag="$EVENT_TAG"
+            if [ "$REF_TYPE" = "tag" ]; then
+              tag="$REF_NAME"
+            fi
+            if [ -z "$tag" ]; then
+              echo "::error::Release workflow has no exact tag to target."
               exit 1
             fi
-            matches="$(gh api "repos/$REPO/releases" --paginate --slurp | jq -c --arg tag "$EVENT_TAG" \
+            matches="$(gh api "repos/$REPO/releases" --paginate --slurp | jq -c --arg tag "$tag" \
               'add | [.[] | select(.tag_name==$tag)]')"
             count="$(jq 'length' <<<"$matches")"
             if [ "$count" -ne 1 ]; then
-              echo "::error::Expected exactly one release for tag $EVENT_TAG, found $count."
+              echo "::error::Expected exactly one release for tag $tag, found $count."
               exit 1
             fi
             release="$(jq '.[0]' <<<"$matches")"
@@ -108,7 +118,7 @@ jobs:
     needs: resolve-release
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # attach the generated SBOM to the resolved release
     # GH_TOKEN is scoped to the one step that talks to GitHub, not the job:
     # the same house lesson desktop-release.yml records for its build job.
     env:

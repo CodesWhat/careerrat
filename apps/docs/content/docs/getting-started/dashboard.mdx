@@ -1,15 +1,16 @@
 ---
-title: The Dashboard
-description: What the local dashboard shows and how to run it.
+title: The CareerRat app
+description: How the chat-first desktop workspace is organized and how to run it.
 ---
 
-The CareerRat dashboard is the local CareerRat app. It reads the same canonical
+The CareerRat app is a chat-first desktop workspace. It reads the same canonical
 SQLite workspace used by the CLI and skills, and its supported actions write
-through the same validated domain operations.
+through the same validated domain operations. There is no separate legacy
+dashboard to keep in sync.
 
-## Running the dashboard
+## Running the app
 
-`careerrat start` boots the live dashboard for you as part of first run. To run
+`careerrat start` boots the live app for you as part of first run. To run
 it on its own:
 
 ```bash
@@ -20,46 +21,46 @@ careerrat tracker        # verify and checkpoint the current tracker state
 `careerrat tracker-dev` serves the app and refreshes it when canonical state
 changes. Use this command, or `careerrat start`, for every live session.
 
-## What the dashboard shows
+## Conversation workspace
 
-**Dashboard tab**
+The main thread is the place to drop a résumé, ask a question, start a search,
+or hand CareerRat a job. The agent works in the center while relevant profile,
+job, evidence, or session context fills the panel beside it. Profile corrections
+open a focused section editor instead of turning the conversation into a wall of
+inline fields.
 
-- Stat cards — total applications, active pipeline, interviews scheduled, offers
-- Funnel (Sankey) — applied → screen → technical → onsite → offer flow
-- Focus card — the role most needing your attention: an upcoming interview with a
-  dossier link, or a follow-up that is due
-- Activity Pulse — a reverse-chronological timeline of what the agent did and
-  what happened (roles sourced, jobs evaluated, artifacts tailored, replies,
-  interviews, offers)
-- Strategy insights — source performance, role-lane performance, cadence nudges,
-  and a strategy-review trigger when outcome thresholds trip
+The thread rail keeps each workflow recoverable:
 
-**Jobs tab**
+- The main thread holds briefs, questions, and active missions.
+- Job conversations keep the posting, evaluation, artifacts, recruiter history,
+  and interview work together.
+- Research skills open visible threads that can be left and resumed later.
+- Deep ingest has its own thread for turning past work into grounded evidence,
+  stories, role signals, and honesty boundaries.
+- Mock interviews stay attached to their job thread, including the transcript and
+  feedback.
+- Closed conversations move to the archive instead of disappearing.
 
-- Active Pipeline rail (Sourced → Applied → Screen → Interview → Final → Offer →
-  Accepted) in compact Table or Cards view
-- All-Jobs table with status, fit, company, role, and follow-up state
-- Slide-in job detail drawer with comp intel, fit reasons/risks, interview notes,
-  artifact links, and the role's own activity timeline
+Multi-job work appears as one resumable mission, such as “Apply to 4 jobs,” with
+its progress in the conversation. A mission can pause, survive restart, and
+continue without creating a long stack of separate approval cards.
 
-**Calendar tab**
+## Browse the workspace
 
-- Week board with interview and follow-up blocks
-- Per-event `.ics` downloads and Google Calendar / Outlook web links
+The left rail opens focused views without replacing the conversation:
 
-**Network tab**
+- **Search** shows sourced roles, fit, location, compensation, and the next gated
+  action.
+- **Pipeline** groups active applications by stage and opens the owning job
+  conversation.
+- **Files** holds résumés, job descriptions, tailored packets, interview dossiers,
+  and other saved artifacts.
+- **People** keeps company and recruiter relationships tied to their history.
+- **Schedule** shows interviews, assessments, follow-ups, and deadlines.
 
-- Company relationship map with any warm contacts sourced by
-  `relationship-sourcing`
-
-**Library tab**
-
-- Full browsable evidence and story bank (53+ cards for a typical candidate)
-
-## Themes
-
-The dashboard ships Tokyo Night and Gruvbox theme families (light + dark) plus
-the original palette. Switch via the settings drawer on the dashboard.
+Settings holds the selected AI runtime, browser automation readiness, source
+configuration, and candidate preferences. The packaged app uses a fixed desktop
+window and supports normal native full screen.
 
 ## What happens when you act
 
@@ -72,4 +73,6 @@ finishes. The assistant only speaks to ask a question or hand you a result.
 
 ![A search step in Ask with its spinner still running next to the "Searching the web" label](./chat-activity-pending.png)
 
-Application submission and external-account changes remain confirmation-gated.
+Application preparation can inspect and fill supported forms, but the final
+Submit action always stays with you. External-account changes remain
+confirmation-gated.

@@ -95,235 +95,6 @@ test("Dashboard adapter excludes reviewed holds from application counts", () => 
   assert.equal(vm.stats.inPlay, 1);
 });
 
-test("Dashboard sourceshell hydrates through the tracked data module", async () => {
-  const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
-
-  assert.match(html, /<title>CareerRat · Application Tracker<\/title>/);
-  assert.match(html, /data-page-panel="dashboard"/);
-  assert.match(html, /data-page-panel="jobs"/);
-  assert.match(html, /new URL\(["']\.\/dashboard-data\.js["'],\s*import\.meta\.url\)/);
-  assert.match(html, /hydrateDashboardFromTracker/);
-  assert.match(html, /data-jobs-funnel-toggle/);
-  assert.match(html, /aria-controls="jobs-sankey-slot"/);
-  assert.match(html, /data-mode-chip="usage"/);
-  assert.match(html, /data-mode-value="application"/);
-  assert.doesNotMatch(html, /Cold apply/);
-  assert.match(html, /funnelCollapsed/);
-});
-
-test("Dashboard source shell exposes the Paper Command Center chrome", async () => {
-  const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
-
-  assert.doesNotMatch(html, /\.page-title::after/);
-  assert.doesNotMatch(html, /hero-blobs|blob-/);
-});
-
-test("Dashboard shell morphs the top nav from square header to floating pill on scroll", async () => {
-  const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
-
-  assert.match(html, /<header class="[^"]*\bis-at-top\b[^"]*"[^>]*data-dashboard-header/);
-  assert.match(html, /<main class="[^"]*"[^>]*data-dashboard-scroll-root/);
-  assert.match(html, /function setupHeaderScrollState\(\)\s*\{/);
-  assert.match(html, /document\.querySelector\('\[data-dashboard-scroll-root\]'\)/);
-  assert.match(html, /header\.classList\.toggle\('is-scrolled',\s*isScrolled\)/);
-  assert.match(html, /header\.classList\.toggle\('is-at-top',\s*!isScrolled\)/);
-  assert.match(html, /setupHeaderScrollState\(\);/);
-});
-
-test("Dashboard shell keeps the Paper Command Center styling in the command deck prototype", async () => {
-  const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
-
-  assert.match(html, /id="settings-drawer"/);
-  assert.match(html, /<span class="mode-status-chip-label">Usage:<\/span>/);
-  assert.match(html, /<span class="mode-status-chip-label">Apply:<\/span>/);
-  assert.doesNotMatch(html, /<span class="mode-status-chip-label">Application<\/span>/);
-});
-
-test("Dashboard shell moves mode chips out of page headers and into the settings drawer", async () => {
-  const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
-
-  for (const page of ["dashboard", "jobs", "sourced", "calendar", "network", "library"]) {
-    const header = html.match(
-      new RegExp(
-        `<section class="[^"]*" data-page-panel="${page}"[\\s\\S]*?<header class="page-hero">[\\s\\S]*?</header>`
-      )
-    )?.[0];
-    assert.ok(header, `expected ${page} page header`);
-    assert.doesNotMatch(
-      header,
-      /class="mode-status-row hero-mode-row"/,
-      `${page} header should not show mode row`
-    );
-    assert.doesNotMatch(
-      header,
-      /data-mode-value="usage"/,
-      `${page} header should not show usage value`
-    );
-    assert.doesNotMatch(
-      header,
-      /data-mode-value="application"/,
-      `${page} header should not show apply value`
-    );
-  }
-
-  assert.match(html, /data-settings-open/);
-  assert.match(html, /aria-controls="settings-drawer"/);
-  assert.match(html, /id="settings-drawer"[\s\S]*aria-label="Settings"/);
-  assert.match(html, /id="settings-drawer"[\s\S]*data-mode-chip="usage"/);
-  assert.match(html, /id="settings-drawer"[\s\S]*data-mode-value="application"/);
-  assert.match(html, /id="settings-drawer"[\s\S]*data-settings-value="candidate"/);
-  assert.match(html, /id="settings-drawer"[\s\S]*data-settings-value="minimumBase"/);
-  assert.match(html, /id="settings-drawer"[\s\S]*Current compensation hidden/);
-  assert.doesNotMatch(html, /current_base/);
-});
-
-test("Dashboard shell settings drawer opens from the nav gear", async () => {
-  const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
-
-  assert.match(html, /<button[^>]+data-settings-open[^>]+aria-label="Open settings"/);
-  assert.match(html, /function openSettingsDrawer\(\)\s*\{/);
-  assert.match(html, /function closeSettingsDrawer\([^)]*\)\s*\{/);
-  assert.match(html, /document\.querySelector\('\[data-settings-open\]'\)/);
-  assert.match(html, /settingsDrawer\.classList\.remove\('translate-x-full'\)/);
-  assert.match(html, /settingsDrawer\.classList\.add\('translate-x-full'\)/);
-  assert.match(html, /settingsDrawer\.focus\(\)/);
-});
-
-test("Dashboard shell prototypes the command deck focus layout with activity dock and drawer", async () => {
-  const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
-
-  assert.match(html, /id="focus-card"/);
-  assert.match(html, /id="focus-card-body"/);
-  assert.match(html, /id="pulse-feed"/);
-  assert.match(html, /id="activity-card"/);
-  assert.match(html, /id="activity-drawer"/);
-  assert.match(html, /aria-controls="activity-drawer"/);
-  assert.match(html, /data-activity-drawer-open/);
-  assert.match(html, /function setupActivityDrawer\(\)/);
-  assert.match(html, /function openActivityDrawer\(\)/);
-  assert.match(html, /function closeActivityDrawer\(/);
-});
-
-test("Dashboard shell exposes the Strategy insights card hooks", async () => {
-  const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
-  const dashboardSection = html.match(
-    /<section class="page-panel page-shell" data-page-panel="dashboard"[\s\S]*?<section class="page-panel page-shell jobs-page-variant--rail"/
-  )?.[0];
-
-  assert.ok(dashboardSection, "expected dashboard page shell");
-  assert.match(dashboardSection, /data-strategy-insights/);
-  assert.match(dashboardSection, />Strategy insights</);
-  assert.match(dashboardSection, /data-strategy-metric="topSource"/);
-  assert.match(dashboardSection, /data-strategy-metric="bestLane"/);
-  assert.match(dashboardSection, /data-strategy-metric="staleCount"/);
-  assert.match(dashboardSection, />Quiet applications</);
-  assert.match(dashboardSection, /data-strategy-recommendation-cta/);
-  assert.match(dashboardSection, /openActionsDrawer\(\)/);
-  assert.doesNotMatch(dashboardSection, /data-strategy-summary-list/);
-  assert.match(dashboardSection, /<details class="strategy-details"/);
-  assert.match(dashboardSection, /class="dashboard-disclosure-summary strategy-details-summary"/);
-  assert.match(dashboardSection, /Strategy details/);
-  assert.match(dashboardSection, /data-strategy-source-list/);
-  assert.match(dashboardSection, /data-strategy-role-list/);
-  assert.match(dashboardSection, /data-strategy-fit-list/);
-  assert.match(dashboardSection, /data-strategy-stale-list/);
-  assert.match(dashboardSection, /data-strategy-stage-list/);
-  assert.match(dashboardSection, /data-strategy-cadence-list/);
-  assert.match(dashboardSection, /data-strategy-trend-list/);
-  assert.match(dashboardSection, /data-strategy-history-list/);
-  assert.match(dashboardSection, /data-strategy-learning-signals/);
-  assert.match(dashboardSection, /data-strategy-review-trigger/);
-  assert.match(dashboardSection, /href="#strategy-review"/);
-  assert.match(html, /function openStrategyReview\(\)/);
-  assert.match(
-    html,
-    /document\.querySelector\('\[data-strategy-insights\] details\.strategy-details'\)/
-  );
-  assert.match(dashboardSection, />Outcome learning</);
-  assert.match(dashboardSection, /data-strategy-recommendation/);
-});
-
-test("Dashboard shell exposes the next agent task card hooks", async () => {
-  const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
-  const dashboardSection = html.match(
-    /<section class="page-panel page-shell" data-page-panel="dashboard"[\s\S]*?<section class="page-panel page-shell jobs-page-variant--rail"/
-  )?.[0];
-
-  assert.ok(dashboardSection, "expected dashboard page shell");
-  assert.match(dashboardSection, /data-agent-guidance/);
-  assert.match(dashboardSection, />Next agent task</);
-  assert.match(dashboardSection, /data-agent-guidance-title/);
-  assert.match(dashboardSection, /data-agent-guidance-message/);
-  assert.match(dashboardSection, /data-agent-guidance-reason/);
-  assert.match(dashboardSection, /data-agent-guidance-cta/);
-});
-
-test("Dashboard shell uses one square disclosure control for collapsible dropdowns", async () => {
-  const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
-
-  assert.match(html, /<summary class="dashboard-disclosure-summary strategy-details-summary">/);
-});
-
-test("Dashboard shell promotes the Jobs command rail as the jobs page baseline", async () => {
-  const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
-
-  assert.match(html, /aria-label="Triage rail"/);
-  assert.match(html, />Triage posture</);
-  assert.match(html, />Batch actions</);
-  assert.match(html, />Next decision</);
-  assert.match(html, /data-jobs-rail-action="high-fit"/);
-  assert.match(html, /data-jobs-rail-action="manual-review"/);
-  assert.match(html, /data-jobs-rail-action="interview-path"/);
-  assert.match(html, /data-jobs-rail-action="stale-applications"/);
-  assert.match(html, /function applyJobsRailAction\(/);
-});
-
-test("Dashboard shell promotes the A Calendar week board with week navigation and month zoom", async () => {
-  const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
-  const calendarSection = html.match(
-    /<section class="page-panel page-shell calendar-page-variant--compare"[\s\S]*?<section class="page-panel page-shell[^"]*" data-page-panel="network"/
-  )?.[0];
-
-  assert.ok(calendarSection, "expected the Calendar workbench page");
-  assert.match(calendarSection, /data-page-panel="calendar"/);
-  assert.match(calendarSection, /data-calendar-workbench/);
-  assert.match(calendarSection, /data-calendar-zoom="week"/);
-  assert.match(calendarSection, /data-calendar-stat="thisWeek"/);
-  assert.match(calendarSection, /data-calendar-stat="interviews"/);
-  assert.match(calendarSection, /data-calendar-stat="dueToday"/);
-  assert.match(calendarSection, /aria-label="Calendar week board"/);
-  assert.match(calendarSection, /data-calendar-prev-week/);
-  assert.match(calendarSection, /data-calendar-next-week/);
-  assert.match(calendarSection, /data-calendar-week-label/);
-  assert.match(calendarSection, /aria-label="Week navigation"/);
-  assert.match(calendarSection, /aria-label="Calendar zoom"/);
-  assert.match(calendarSection, /data-calendar-view="week"/);
-  assert.match(calendarSection, /data-calendar-view="month"/);
-  assert.match(calendarSection, /data-calendar-week-panel/);
-  assert.match(calendarSection, /data-calendar-week-board/);
-  assert.match(calendarSection, /data-calendar-month-panel/);
-  assert.match(calendarSection, /data-calendar-month-title/);
-  assert.match(calendarSection, /data-calendar-month-grid/);
-  assert.match(calendarSection, /data-calendar-today-list/);
-  assert.match(calendarSection, /data-calendar-this-week-stats/);
-  assert.match(calendarSection, /data-calendar-protected-prep/);
-  assert.match(calendarSection, /aria-label="Month command rail"/);
-  assert.match(calendarSection, /data-calendar-view-label/);
-  assert.match(calendarSection, /data-kind="interview"/);
-  assert.match(calendarSection, /data-next-step-item data-detail-id="aperture"/);
-  assert.doesNotMatch(html, /const CALENDAR_WEEKS = \[/);
-  assert.doesNotMatch(html, /iso:\s*'2026-06-15'/);
-  assert.match(html, /data-calendar-day-state="past"/);
-  assert.match(html, /function annotateCalendarPastDays\(/);
-  assert.match(html, /function downloadCalendarIcs\(/);
-  assert.match(html, /data-calendar-download-event/);
-  assert.match(html, /data-calendar-google-link/);
-  assert.match(html, /data-calendar-outlook-link/);
-  assert.match(html, /function setupCalendarWorkbench\(\)/);
-  assert.match(html, /window\.updateCalendarWorkbench/);
-  assert.match(html, /setupCalendarWorkbench\(\);/);
-});
-
 test("Dashboard adapter builds Calendar from tracker dates and actions", () => {
   const tracker = {
     applications: [
@@ -677,77 +448,6 @@ test("normalizeCalendarWrite passes through an explicit manual provenance and de
   assert.equal(byId["cal-write-manual"].provenance, "manual");
   assert.equal(byId["cal-write-legacy"].provenance, "automated");
   assert.equal(byId["cal-write-bogus"].provenance, "automated");
-});
-
-test("Dashboard shell locks Network to the company relationship map baseline", async () => {
-  const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
-  const networkSection = html.match(
-    /<section class="page-panel page-shell network-page-variant--company-map"[\s\S]*?<section class="page-panel page-shell[^"]*" data-page-panel="library"/
-  )?.[0];
-
-  assert.ok(networkSection, "expected a Network company map page");
-  assert.match(networkSection, /data-page-panel="network"/);
-  assert.match(networkSection, /data-network-stat="warmPaths"/);
-  assert.match(networkSection, /data-network-company-grid/);
-  assert.match(networkSection, /class="page-subtitle">Company relationships/);
-  assert.match(networkSection, /aria-label="Company relationship map"/);
-  assert.match(networkSection, />Warm Paths</);
-  assert.match(networkSection, />Companies</);
-  assert.match(networkSection, />Dormant</);
-  assert.match(networkSection, /data-network-stat="companies"/);
-  assert.match(networkSection, /data-network-stat="dormant"/);
-  assert.match(networkSection, /data-network-purpose="company-map"/);
-  assert.match(networkSection, />Company relationship map</);
-  assert.match(html, /data-network-toggle/);
-  assert.match(html, /data-network-body/);
-  assert.match(html, /\.network-signal-row/);
-  assert.match(html, /\.network-reuse-panel\[data-reuse-state="caution"\]/);
-  assert.match(html, /\.network-reuse-panel\[data-reuse-state="closed"\]/);
-  assert.match(html, /\.network-reuse-panel\[data-reuse-state="safe"\]/);
-  assert.match(html, /\.network-contact-node/);
-  assert.match(html, /\.network-contact-pill/);
-  assert.match(html, /\.network-company-head/);
-  assert.doesNotMatch(networkSection, /data-next-step-item/);
-});
-
-test("Dashboard shell promotes Resources into the Evidence Library baseline", async () => {
-  const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
-  const librarySection = html.match(
-    /<section class="page-panel page-shell library-page-variant--evidence"[\s\S]*?<div id="content-pool"/
-  )?.[0];
-
-  assert.match(html, /href="#library" data-page-link="library">Library<\/a>/);
-  assert.doesNotMatch(html, /data-page-link="resources"/);
-  assert.ok(librarySection, "expected the Evidence Library page");
-  assert.match(librarySection, /data-page-panel="library"/);
-  assert.match(librarySection, />Evidence Library</);
-  assert.match(librarySection, /data-library-stat="claims"/);
-  assert.match(librarySection, /data-library-filters/);
-  assert.match(librarySection, /data-library-cards/);
-  assert.match(librarySection, /data-library-deck/);
-  assert.match(librarySection, /data-library-gaps/);
-  assert.match(librarySection, />Claims</);
-  assert.match(librarySection, />Stories</);
-  assert.match(librarySection, />Gaps</);
-  assert.match(librarySection, /data-library-callout/);
-  assert.match(librarySection, /data-library-search/);
-  assert.match(librarySection, />Story &amp; evidence bank</);
-  assert.match(librarySection, /data-library-no-results/);
-  assert.match(librarySection, /data-library-segment="evidence"/);
-  assert.match(librarySection, /data-library-segment="story"/);
-  assert.match(librarySection, /data-library-segment="voice"/);
-  assert.match(librarySection, /data-library-tag="Applied AI"/);
-  assert.match(librarySection, /data-library-tag="Typescript"/);
-  assert.match(librarySection, /data-library-tag="Automation"/);
-  assert.match(librarySection, /data-library-segments/);
-  assert.match(librarySection, /data-library-segment="all"/);
-  assert.match(librarySection, /aria-label="Claim guardrails"/);
-  assert.match(librarySection, /placeholder="Search proof, stories, voice/);
-  assert.doesNotMatch(librarySection, />Current Profile</);
-  assert.doesNotMatch(librarySection, />Base floor</);
-  assert.doesNotMatch(librarySection, />Config Files</);
-  assert.doesNotMatch(librarySection, />Source résumé</);
-  assert.doesNotMatch(librarySection, />Artifacts</);
 });
 
 test("Dashboard adapter builds Network relationship map from live tracker state", () => {
@@ -1357,6 +1057,31 @@ test("Jobs never attaches a communication with another application id to a same-
   );
 });
 
+test("a reviewed-hold application never claims it was submitted", () => {
+  const vm = buildDashboardViewModel({
+    applications: [
+      {
+        id: "curri-hold",
+        company: "Curri",
+        role: "Senior Software Engineer",
+        status: "reviewed-hold",
+        gate: "keep",
+        fitScore: 85,
+        base: "$185,000 - $215,000",
+      },
+    ],
+    sourced: [],
+    communications: [],
+    sources: [],
+  });
+
+  const row = vm.jobs.rows.find((candidate) => candidate.id === "curri-hold");
+  assert.equal(row.stage, "reviewed-hold");
+  assert.equal(row.action.label, "Prepare");
+  assert.match(row.action.summary, /not been submitted/i);
+  assert.doesNotMatch(row.action.summary, /application is submitted/i);
+});
+
 test("Network never hides approved contacts or companies behind arbitrary display caps", () => {
   const applications = Array.from({ length: 7 }, (_, index) => ({
     id: `app-${index}`,
@@ -1462,6 +1187,11 @@ test("Dashboard adapter's artifact list surfaces friendly notes, never raw paths
           resumeNote: "Tailored for the platform team",
           coverLetter: "workspace/tailored/dated-co-cover.md",
           coverLetterGeneratedAt: "2026-06-02T10:00:00.000Z",
+          interviewDossier: {
+            path: "workspace/interview-prep/dated-co.md",
+            generatedAt: "2026-06-03T10:00:00.000Z",
+            markdown: "# Dated Co interview dossier",
+          },
         },
       },
       {
@@ -1490,6 +1220,7 @@ test("Dashboard adapter's artifact list surfaces friendly notes, never raw paths
   const jd = dated.drawer.artifacts.find((a) => a.kind === "Job description");
   const resume = dated.drawer.artifacts.find((a) => a.kind === "Resume");
   const coverLetter = dated.drawer.artifacts.find((a) => a.kind === "Cover letter");
+  const dossier = dated.drawer.artifacts.find((a) => a.kind === "Interview dossier");
   assert.equal(jd.path, "workspace/jobs/dated-co.md");
   assert.notEqual(jd.note, jd.path);
   assert.match(jd.note, /Captured/);
@@ -1498,6 +1229,8 @@ test("Dashboard adapter's artifact list surfaces friendly notes, never raw paths
   assert.equal(coverLetter.path, "workspace/tailored/dated-co-cover.md");
   assert.notEqual(coverLetter.note, coverLetter.path);
   assert.match(coverLetter.note, /Generated/);
+  assert.equal(dossier.path, "workspace/interview-prep/dated-co.md");
+  assert.match(dossier.note, /Prepared/);
 
   const plain = byId.get("no-dates");
   const plainJd = plain.drawer.artifacts.find((a) => a.kind === "Job description");
@@ -1542,45 +1275,6 @@ test("Dashboard artifact lists never turn prose summaries into document paths", 
     artifacts.map((artifact) => artifact.kind),
     ["Job description"]
   );
-});
-
-test("Dashboard shell exposes actionable Jobs filters and drawer next-action section", async () => {
-  const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
-
-  assert.match(html, /data-jobs-filter="action"/);
-  assert.match(html, /data-jobs-rail-action="needs-action"/);
-  assert.match(html, /data-jobs-rail-action="stale-applications"/);
-  assert.match(html, /data-jobs-rail-action="missing-comp"/);
-  assert.match(html, /id="drawer-action-section"/);
-  assert.match(html, /id="drawer-action-label"/);
-  assert.match(html, /id="drawer-action-title"/);
-  assert.match(html, /id="drawer-action-summary"/);
-  assert.match(html, /id="drawer-action-meta"/);
-  assert.match(html, /item\.dataset\.actionState/);
-  assert.match(html, /item\.dataset\.workstream/);
-  assert.doesNotMatch(html, />Next move <span data-sort-indicator="action"/);
-  assert.match(
-    html,
-    /<th><button type="button" data-jobs-sort="company">Company[\s\S]*data-jobs-sort="stage">Status[\s\S]*data-jobs-sort="action">Action/
-  );
-  assert.doesNotMatch(html, /id="drawer-fit-fill"/);
-  assert.doesNotMatch(html, /id="drawer-fit-score">92 fit<\/span>/);
-});
-
-test("Dashboard shell uses a compact Jobs toolbar with removable active filter chips", async () => {
-  const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
-  const toolbarStart = html.indexOf(
-    '<div class="jobs-toolbar" aria-label="Jobs search and filters">'
-  );
-  const toolbarEnd = html.indexOf('<div class="jobs-filter-row"', toolbarStart);
-  const toolbar =
-    toolbarStart >= 0 && toolbarEnd > toolbarStart ? html.slice(toolbarStart, toolbarEnd) : "";
-
-  assert.match(html, /class="jobs-filter-row" data-jobs-active-filters hidden/);
-  assert.match(html, /data-jobs-filter-remove=/);
-  assert.match(html, /aria-label="Remove job filter"/);
-  assert.match(html, /data-jobs-filter-clear hidden>Clear all<\/button>/);
-  assert.doesNotMatch(toolbar, /jobs-search-label|<span>Search<\/span>/);
 });
 
 test("Dashboard adapter builds Strategy insights from outcomes by source role and fit", () => {
@@ -1733,13 +1427,6 @@ test("Dashboard labels portal rows as ATS channel, not source discovery coverage
   assert.equal(portalRow.tooltip.source, "ATS portal");
   assert.equal(vm.strategy.sources[0].label, "Find Jobs surfacing");
   assert.notEqual(vm.strategy.sources[0].label, "Portal");
-});
-
-test("Dashboard shell labels portal filtering as ATS portal channel", async () => {
-  const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
-
-  assert.match(html, /<option value="portal">ATS portal<\/option>/);
-  assert.match(html, /portal:\s*'ATS portal'/);
 });
 
 test("Dashboard adapter builds Strategy time-in-stage and cadence nudges", () => {

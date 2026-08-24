@@ -9,11 +9,11 @@ describe("desktop smoke HTTP surface verification", () => {
     const requested = [];
     const report = await verifySmokeHttpSurface({
       baseUrl: "http://127.0.0.1:61234",
-      route: "/app/onboarding",
+      route: "/app",
       getOk: async (url) => {
         requested.push(url);
         if (url.endsWith("/api/health")) return '{"ok":true}';
-        if (url.endsWith("/app/onboarding")) {
+        if (url.endsWith("/app")) {
           return '<!doctype html><div id="root"></div><script type="module" src="/app/assets/index-abc.js"></script>';
         }
         if (url.endsWith("/app/assets/index-abc.js")) return "console.log('ok');";
@@ -23,11 +23,11 @@ describe("desktop smoke HTTP surface verification", () => {
 
     assert.deepEqual(requested, [
       "http://127.0.0.1:61234/api/health",
-      "http://127.0.0.1:61234/app/onboarding",
+      "http://127.0.0.1:61234/app",
       "http://127.0.0.1:61234/app/assets/index-abc.js",
     ]);
     assert.deepEqual(report, {
-      route: "/app/onboarding",
+      route: "/app",
       assetPaths: ["/app/assets/index-abc.js"],
     });
   });
@@ -95,5 +95,55 @@ describe("desktop smoke PDF renderer verification", () => {
       },
     ]);
     assert.deepEqual(result, { bytes: 15 });
+  });
+});
+
+describe("desktop smoke browser automation verification", () => {
+  it("opens about:blank through the staged Playwright adapter and always cleans up", async () => {
+    assert.equal(typeof desktopSmoke.verifySmokeBrowserAutomation, "function");
+    const calls = [];
+
+    const result = await desktopSmoke.verifySmokeBrowserAutomation({
+      profileDir: "/tmp/careerrat-browser-smoke",
+      createOps: (options) => {
+        calls.push(["create", options]);
+        return {
+          openTab: async (input) => calls.push(["open", input]),
+          close: async () => calls.push(["close"]),
+        };
+      },
+      removeDir: (path) => calls.push(["remove", path]),
+    });
+
+    assert.deepEqual(result, { launched: true });
+    assert.deepEqual(calls, [
+      [
+        "create",
+        { profileDir: "/tmp/careerrat-browser-smoke", headless: true, channel: "chromium" },
+      ],
+      ["open", { url: "about:blank" }],
+      ["close"],
+      ["remove", "/tmp/careerrat-browser-smoke"],
+    ]);
+  });
+
+  it("closes the browser and removes its profile when launch verification fails", async () => {
+    const calls = [];
+
+    await assert.rejects(
+      desktopSmoke.verifySmokeBrowserAutomation({
+        profileDir: "/tmp/careerrat-browser-smoke-failure",
+        createOps: () => ({
+          openTab: async () => {
+            throw new Error("Chromium missing");
+          },
+          close: async () => calls.push("close"),
+        }),
+        removeDir: () => calls.push("remove"),
+      }),
+      /Chromium missing/
+    );
+
+    assert.deepEqual(calls, ["close", "remove"]);
   });
 });

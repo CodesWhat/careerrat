@@ -153,7 +153,6 @@ test("runSourcedScan: DB mode seen sets use DB rows and ignore tracker export ro
     env: {},
     fetchImpl: leverFetchStub(),
     write: false,
-    intake: false,
   });
 
   const keptUrls = new Set(summary.offers.map((offer) => offer.url));

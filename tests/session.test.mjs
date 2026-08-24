@@ -82,6 +82,27 @@ test("automatic session setup falls back to the browser extension outside Orca",
   assert.equal(session.provider, "extension");
 });
 
+test("automatic session setup uses bundled Playwright in a packaged desktop workspace", () => {
+  const session = resolveSession({
+    data: { session: { provider: "auto" } },
+    env: { CAREERRAT_PACKAGED_DESKTOP: "1" },
+  });
+  assert.equal(session.configuredProvider, "auto");
+  assert.equal(session.provider, "playwright");
+  assert.equal(session.descriptor.automatedApply, true);
+});
+
+test("Orca remains the automatic packaged-desktop provider inside an Orca workspace", () => {
+  const session = resolveSession({
+    data: { session: { provider: "auto" } },
+    env: {
+      CAREERRAT_PACKAGED_DESKTOP: "1",
+      ORCA_WORKTREE_ID: "worktree-123",
+    },
+  });
+  assert.equal(session.provider, "orca");
+});
+
 // Regression: describeProviders() used to report the "auto" descriptor's own
 // literal automatedApply (always true), not what "auto" actually resolves to.
 // Outside Orca, "auto" resolves to the extension provider, which cannot drive

@@ -24,7 +24,9 @@ const FIELD_ROLES = new Map([
   ["combobox", "select"],
   ["checkbox", "checkbox"],
   ["radio", "radio"],
+  ["radio-group", "radio"],
 ]);
+const PREPARE_ONLY_ADVANCE_LABELS = new Set(["next", "next step"]);
 
 function normalizeLabel(value) {
   return String(value || "")
@@ -61,6 +63,7 @@ export function renderedFieldsFromSnapshot(snapshotResult = {}) {
   const usedIds = new Set();
   const fields = [];
   for (const [ref, entry] of Object.entries(refs)) {
+    if (entry?.field === false) continue;
     const role = String(entry?.role || "").toLowerCase();
     const type = FIELD_ROLES.get(role);
     const label = String(entry?.name || "").trim();
@@ -72,15 +75,53 @@ export function renderedFieldsFromSnapshot(snapshotResult = {}) {
       type,
       required:
         typeof entry?.required === "boolean" ? entry.required : requiredFromText(rawText, ref),
+      ...(Array.isArray(entry?.options) ? { options: entry.options } : {}),
+      ...(entry?.typeahead === true ? { typeahead: true } : {}),
+      ...(entry?.stateKnown === true ? { stateKnown: true, value: String(entry.value || "") } : {}),
     });
   }
   return fields;
+}
+
+function questionCaptureNeedsRefresh(questionCapture, fields) {
+  if (questionCapture?.state !== "captured") return fields.length > 0;
+  if (fields.length === 0) return false;
+
+  const hasSavedIds =
+    Array.isArray(questionCapture.answerableIds) || Array.isArray(questionCapture.excludedIds);
+  if (hasSavedIds) {
+    const savedIds = new Set(
+      [...(questionCapture.answerableIds || []), ...(questionCapture.excludedIds || [])]
+        .map((id) => String(id || "").trim())
+        .filter(Boolean)
+    );
+    const renderedIds = new Set(
+      fields.map((field) => String(field.id || "").trim()).filter(Boolean)
+    );
+    if (savedIds.size !== renderedIds.size) return true;
+    return [...renderedIds].some((id) => !savedIds.has(id));
+  }
+
+  const hasSavedCounts =
+    Object.hasOwn(questionCapture, "answerableCount") ||
+    Object.hasOwn(questionCapture, "excludedCount");
+  if (!hasSavedCounts) return false;
+  const savedCount =
+    (Number(questionCapture.answerableCount) || 0) + (Number(questionCapture.excludedCount) || 0);
+  return savedCount !== fields.length;
 }
 
 function uploadKind(label) {
   const normalized = normalizeLabel(label);
   if (/\b(resume|curriculum vitae|cv)\b/.test(normalized)) return "resume";
   if (/\bcover letter\b/.test(normalized)) return "coverLetter";
+  return null;
+}
+
+function directUploadKind(label) {
+  const normalized = normalizeLabel(label);
+  if (/^(?:resume(?: cv)?|curriculum vitae|cv)(?: required)?$/.test(normalized)) return "resume";
+  if (/^cover letter(?: required)?$/.test(normalized)) return "coverLetter";
   return null;
 }
 
@@ -111,10 +152,12 @@ export function uploadTargetsFromSnapshot(snapshotResult = {}) {
   const targets = [];
   const usedKinds = new Set();
   for (const node of parsedSnapshotNodes(snapshotResult)) {
-    if (node.role !== "button" || !/^(attach|upload(?: file)?)$/i.test(node.label)) continue;
+    if (node.role !== "button") continue;
+    const directKind = directUploadKind(node.label);
+    if (!directKind && !/^(attach|upload(?: file)?)$/i.test(node.label)) continue;
     let context = node.parent;
     while (context && !uploadKind(context.label)) context = context.parent;
-    const kind = uploadKind(context?.label || node.label);
+    const kind = directKind || uploadKind(context?.label || node.label);
     if (!kind || usedKinds.has(kind)) continue;
     targets.push({
       ref: node.ref,
@@ -125,6 +168,19 @@ export function uploadTargetsFromSnapshot(snapshotResult = {}) {
     usedKinds.add(kind);
   }
   return targets;
+}
+
+function selectValueFromSnapshot(value, snapshot) {
+  const requested = normalizeLabel(value);
+  if (!requested) return String(value);
+  const options = Object.values(snapshot?.refs || {})
+    .filter((entry) => String(entry?.role || "").toLowerCase() === "option")
+    .map((entry) => String(entry?.name || "").trim())
+    .filter(Boolean);
+  const exact = options.find((label) => normalizeLabel(label) === requested);
+  if (exact) return exact;
+  const prefixed = options.filter((label) => normalizeLabel(label).startsWith(`${requested} `));
+  return prefixed.length === 1 ? prefixed[0] : String(value);
 }
 
 function answerSections(markdown) {
@@ -174,6 +230,24 @@ function safePostingUrl(value) {
   } catch {
     return null;
   }
+}
+
+function ashbyApplicationEntryRef(snapshot) {
+  let current;
+  try {
+    current = new URL(String(snapshot?.origin || ""));
+  } catch {
+    return null;
+  }
+  if (current.hostname !== "jobs.ashbyhq.com" || /\/application\/?$/.test(current.pathname)) {
+    return null;
+  }
+  return (
+    Object.entries(snapshot?.refs || {}).find(([, entry]) => {
+      const role = String(entry?.role || "").toLowerCase();
+      return ["tab", "link"].includes(role) && normalizeLabel(entry?.name) === "application";
+    })?.[0] || null
+  );
 }
 
 function fillPlan({ fields, config, application, answers }) {
@@ -295,17 +369,45 @@ export function screenshotPath({ repoRoot, env, applicationId, data, format }) {
 // type/value combination has no safe action (e.g. a checkbox step whose value
 // isn't an affirmative yes/true/1) — the caller treats a null action the same
 // as a field that changed out from under it: unresolved, nothing clicked.
-function fieldOpFor(step) {
+function fieldOpFor(step, snapshot) {
   if (step.type === "text") {
     return (ops, pageId) => ops.fillField({ pageId, ref: step.ref, value: String(step.value) });
   }
   if (step.type === "select") {
-    return (ops, pageId) => ops.selectOption({ pageId, ref: step.ref, value: String(step.value) });
+    return (ops, pageId) =>
+      ops.selectOption({
+        pageId,
+        ref: step.ref,
+        label: step.label,
+        value: selectValueFromSnapshot(step.value, snapshot),
+        typeahead: step.typeahead === true,
+      });
   }
   if (step.type === "checkbox" && /^(yes|true|1)$/i.test(String(step.value))) {
     return (ops, pageId) => ops.toggleField({ pageId, ref: step.ref, checked: true });
   }
+  if (step.type === "radio") {
+    const requested = normalizeLabel(step.value);
+    const option = (Array.isArray(step.options) ? step.options : []).find(
+      (candidate) => normalizeLabel(candidate?.label) === requested
+    );
+    if (option?.ref) {
+      return (ops, pageId) =>
+        typeof ops.chooseButtonOption === "function"
+          ? ops.chooseButtonOption({ pageId, ref: option.ref })
+          : ops.clickButton({ pageId, ref: option.ref });
+    }
+  }
   return null;
+}
+
+function filledChoiceMatches(step, field) {
+  const actual = normalizeLabel(field?.value);
+  const expected = normalizeLabel(step?.value);
+  if (!actual || !expected) return false;
+  if (actual === expected || actual.includes(expected) || expected.includes(actual)) return true;
+  const city = normalizeLabel(String(step?.value || "").split(",")[0]);
+  return Boolean(city && actual.startsWith(`${city} `));
 }
 
 // Fill + upload + guard pass for a single form/modal-step snapshot. Shared by
@@ -330,7 +432,6 @@ async function fillStep({
 
   const initialGuard = submitGuard({
     pageText: snapshot.pageText,
-    formDefaults: config?.["form-defaults"] || {},
   });
   if (initialGuard.blockers.length) {
     return {
@@ -353,7 +454,16 @@ async function fillStep({
     }
     const freshSnapshot = await ops.snapshot({ pageId });
     const freshField = currentField(step, freshSnapshot);
-    const action = freshField ? fieldOpFor({ ...step, ref: freshField.ref }) : null;
+    if (
+      freshField?.stateKnown === true &&
+      ["select", "radio"].includes(step.type) &&
+      filledChoiceMatches(step, freshField)
+    ) {
+      continue;
+    }
+    const action = freshField
+      ? fieldOpFor({ ...step, ...freshField, value: step.value }, freshSnapshot)
+      : null;
     if (!action) {
       unresolved.push({
         label: step.label,
@@ -405,9 +515,39 @@ async function fillStep({
   }
 
   const finalSnapshot = await ops.snapshot({ pageId });
+  const finalFields = renderedFieldsFromSnapshot(finalSnapshot);
+  for (const step of plan) {
+    if (step.action !== "fill" || !["select", "radio"].includes(step.type)) continue;
+    const finalField = finalFields.find(
+      (field) => field.id === step.id && field.type === step.type && field.label === step.label
+    );
+    if (finalField?.stateKnown !== true) continue;
+    if (filledChoiceMatches(step, finalField)) {
+      for (let index = unresolved.length - 1; index >= 0; index -= 1) {
+        if (unresolved[index].label === step.label) unresolved.splice(index, 1);
+      }
+      continue;
+    }
+    if (!unresolved.some((item) => item.label === step.label)) {
+      unresolved.push({
+        label: step.label,
+        required: step.required,
+        reason: "The selected value did not remain in the live form.",
+      });
+    }
+  }
+  for (const field of finalFields) {
+    if (!field.required || field.stateKnown !== true || String(field.value || "").trim()) continue;
+    if (!unresolved.some((item) => item.label === field.label)) {
+      unresolved.push({
+        label: field.label,
+        required: true,
+        reason: "The required field is still blank in the live form.",
+      });
+    }
+  }
   const guard = submitGuard({
     pageText: finalSnapshot.pageText,
-    formDefaults: config?.["form-defaults"] || {},
   });
   return { blocked: false, guard, filledCount, uploadedCount, unresolved, finalSnapshot };
 }
@@ -457,6 +597,12 @@ function easyApplyStepKey(stepIndex) {
 function stepSessionFields(stepIndex, easyApply) {
   if (stepIndex <= 1) return {};
   return { stepIndex, stepKey: easyApply ? easyApplyStepKey(stepIndex) : null };
+}
+
+function isPrepareOnlyAdvance(snapshot, ref) {
+  const label = normalizeLabel(snapshot?.refs?.[ref]?.name);
+  if (!PREPARE_ONLY_ADVANCE_LABELS.has(label)) return false;
+  return !/\b(review|confirm|submit|send)\b/.test(normalizeLabel(snapshot?.pageText));
 }
 
 // Shared by the entry-point confirmation check and the Easy Apply loop's
@@ -512,7 +658,14 @@ export function createApplyDriver({
 } = {}) {
   const sessions = new Map();
 
-  return async function execute({ applicationId, application, postingUrl, questionCapture } = {}) {
+  return async function execute({
+    applicationId,
+    application,
+    postingUrl,
+    questionCapture,
+    prepareOnly = false,
+    focusSession = false,
+  } = {}) {
     const url = safePostingUrl(postingUrl);
     if (!url) {
       return {
@@ -523,10 +676,53 @@ export function createApplyDriver({
       };
     }
 
+    const applicationKey = String(applicationId);
+    if (focusSession === true) {
+      const retainedPageId = sessions.get(applicationKey);
+      if (!retainedPageId) {
+        return {
+          available: false,
+          verified: false,
+          state: "unavailable",
+          reason: "There is no prepared browser session to return to. Prepare the form again.",
+        };
+      }
+      try {
+        if (typeof ops.focusTab !== "function") {
+          throw new Error("This browser provider cannot focus a prepared tab.");
+        }
+        await ops.focusTab({ pageId: retainedPageId });
+        const retainedSnapshot = await ops.snapshot({ pageId: retainedPageId });
+        return {
+          available: true,
+          verified: false,
+          state: "awaiting-submit",
+          reason: "Returned to the prepared application. Review it and press Submit yourself.",
+          currentUrl: retainedSnapshot.origin || url,
+          session: {
+            provider: providerLabel,
+            focused: true,
+            prepareOnly: true,
+            submitMode: "manual",
+          },
+        };
+      } catch (error) {
+        sessions.delete(applicationKey);
+        return {
+          available: false,
+          verified: false,
+          state: "unavailable",
+          reason: `The prepared browser session is no longer available: ${String(
+            error?.message || "browser command failed"
+          ).slice(0, 300)}`,
+        };
+      }
+    }
+
     const easyApply = isEasyApply(url);
     if (easyApply) {
       const permission = mayRunImpl({
-        capability: "one_click_apply",
+        capability: "authenticated_apply_preparation",
         platform: "linkedin",
         root: repoRoot,
       });
@@ -543,13 +739,13 @@ export function createApplyDriver({
       }
     }
 
-    let pageId = sessions.get(String(applicationId));
+    let pageId = sessions.get(applicationKey);
     const reusedPage = Boolean(pageId);
     if (!pageId) {
       const opened = await ops.openTab({ url });
       pageId = String(opened?.pageId || "").trim();
       if (!pageId) throw new Error("The supervised browser did not return a browser page id.");
-      sessions.set(String(applicationId), pageId);
+      sessions.set(applicationKey, pageId);
     }
 
     let snapshot;
@@ -560,14 +756,14 @@ export function createApplyDriver({
       // must not poison every later run for this application: drop the stale
       // entry, open a fresh tab, and retry once.
       if (!reusedPage) throw error;
-      sessions.delete(String(applicationId));
+      sessions.delete(applicationKey);
       const reopened = await ops.openTab({ url });
       pageId = String(reopened?.pageId || "").trim();
       if (!pageId) throw new Error("The supervised browser did not return a browser page id.");
-      sessions.set(String(applicationId), pageId);
+      sessions.set(applicationKey, pageId);
       snapshot = await ops.snapshot({ pageId });
     }
-    const confirmation = confirmationCheck({
+    let confirmation = confirmationCheck({
       pageText: snapshot.pageText,
       currentUrl: snapshot.origin,
     });
@@ -583,6 +779,49 @@ export function createApplyDriver({
         providerLabel,
         confirmation,
       });
+    }
+
+    const ashbyApplicationRef = ashbyApplicationEntryRef(snapshot);
+    if (ashbyApplicationRef) {
+      const detailSnapshot = snapshot;
+      await ops.clickButton({ pageId, ref: ashbyApplicationRef });
+      snapshot = await ops.snapshot({ pageId });
+      const detailHost = safeHostname(detailSnapshot.origin);
+      const applicationHost = safeHostname(snapshot.origin);
+      if (detailHost && applicationHost && detailHost !== applicationHost) {
+        return {
+          available: true,
+          verified: false,
+          state: "blocked",
+          reason: `Opening the Ashby Application tab left the job board: it moved from ${detailHost} to ${applicationHost}.`,
+          currentUrl: snapshot.origin || detailSnapshot.origin || url,
+          session: {
+            provider: providerLabel,
+            filledCount: 0,
+            uploadedCount: 0,
+            unresolved: [],
+            blockers: [],
+            submitMode: "manual",
+          },
+        };
+      }
+      confirmation = confirmationCheck({
+        pageText: snapshot.pageText,
+        currentUrl: snapshot.origin,
+      });
+      if (confirmation.submitted) {
+        return submittedResult({
+          ops,
+          pageId,
+          snapshot,
+          applicationId,
+          repoRoot,
+          env,
+          saveScreenshotImpl,
+          providerLabel,
+          confirmation,
+        });
+      }
     }
 
     const interventionBlockers = browserInterventionBlockers(snapshot);
@@ -615,7 +854,7 @@ export function createApplyDriver({
     // it naturally: findAdvanceButtonRef finds no advance button on its only
     // page, so the loop exits after one iteration exactly like the old
     // single-page path did. `easyApply` (URL-gated, checked above for the
-    // one_click_apply consent gate) only still matters for cosmetic step
+    // authenticated preparation consent gate) only still matters for cosmetic step
     // naming. See stepSessionFields.
     let stepIndex = 0;
     // Sums fillStep's per-call counts across every page in this run:
@@ -666,7 +905,7 @@ export function createApplyDriver({
       }
 
       const fields = renderedFieldsFromSnapshot(snapshot);
-      if (questionCapture?.state !== "captured" && fields.length) {
+      if (questionCaptureNeedsRefresh(questionCapture, fields)) {
         const captured = await captureQuestionsImpl({
           repoRoot,
           env,
@@ -795,12 +1034,32 @@ export function createApplyDriver({
             unresolved,
             blockers: guard.blockers,
             submitMode: guard.mode,
+            ...(prepareOnly === true ? { prepareOnly: true } : {}),
             ...stepSessionFields(stepIndex, easyApply),
           },
         };
       }
 
       const advanceLabel = String(preAdvanceSnapshot.refs?.[advanceRef]?.name || "").trim();
+      if (prepareOnly === true && !isPrepareOnlyAdvance(preAdvanceSnapshot, advanceRef)) {
+        return {
+          available: true,
+          verified: false,
+          state: "awaiting-submit",
+          reason: `Preparation stopped before "${advanceLabel}" because that control could submit the application.`,
+          currentUrl: preAdvanceSnapshot.origin || finalSnapshot.origin || url,
+          session: {
+            provider: providerLabel,
+            filledCount: totalFilledCount,
+            uploadedCount: totalUploadedCount,
+            unresolved,
+            blockers: guard.blockers,
+            submitMode: "manual",
+            prepareOnly: true,
+            ...stepSessionFields(stepIndex, easyApply),
+          },
+        };
+      }
       const fingerprintBefore = snapshotFingerprint(preAdvanceSnapshot);
       await ops.clickButton({ pageId, ref: advanceRef });
       const nextSnapshot = await ops.snapshot({ pageId });

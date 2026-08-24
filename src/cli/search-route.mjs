@@ -16,9 +16,7 @@
 //                              DB source config is not configured yet.
 //   GET  /api/search/results   DB sourced rows in stable database row order.
 //   GET  /api/search/sources   {searches:{enabled,total}, trackedCompanies}
-//                              — the presence/health strip
-//                              src/core/onboarding/search-page.mjs's header
-//                              renders on load.
+//                              — source health for the React search surface.
 //   POST /api/search/prompts/generate
 //                              Generates AI search-assistant prompts from the
 //                              candidate's stored targeting/profile
@@ -152,8 +150,18 @@ export function mountSearchRoutes({
     }
 
     if (!hasConfig) {
-      sendJson(res, 400, {
-        error: "No search config found. Run /onboard write-config first",
+      sendJson(res, 409, {
+        ok: false,
+        code: "SOURCE_SETUP_REQUIRED",
+        error: "No enabled search sources are configured yet.",
+        action: {
+          label: "Set up sources",
+          intent: {
+            type: "ui.navigate",
+            entity: { type: "workspace", id: "workspace-main" },
+            input: { surface: "settings", section: "sources" },
+          },
+        },
       });
       return;
     }

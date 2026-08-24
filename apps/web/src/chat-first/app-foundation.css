@@ -1,0 +1,276 @@
+@import "@fontsource/figtree/400.css";
+@import "@fontsource/figtree/500.css";
+@import "@fontsource/figtree/600.css";
+@import "@fontsource/figtree/700.css";
+@import "@fontsource/figtree/800.css";
+
+:root {
+  /* ink & surface */
+  --ink: #17171a;
+  --ink-soft: #55584a;
+  --ink-warm-deep: #3a3a35;
+  --ink-deepest: #26261f;
+  --paper: #fdfcf7;
+  --white: #ffffff;
+  --canvas: #edf5fb;
+  --cream: #faf7ef;
+  --cream-light: #fffdf6;
+  --cream-edge: #f5f1e5;
+
+  /* accent */
+  --lime: #e6fa8d;
+  --lime-deep: #def780;
+  --lime-bar: #d9ef7a;
+  --sky: #8fd0f8;
+  --lilac: #d9a6f4;
+  --lilac-tint: #f3e8fb;
+  --red: #f04c38;
+
+  /* neutrals */
+  --slate: #7d8894;
+  --gray: #a5a5ab;
+  --gray-dim: #9a9a92;
+  --gray-warm: #c9c9c0;
+  --line-warm: #e3e0d6;
+  --line-warm-2: #d9d5c9;
+  --line-cool: #c9d4dc;
+  --line-cool-2: #d7dee4;
+  --tint-cool: #f2f6f9;
+  --tint-cool-2: #e8edf2;
+  --tint-cool-3: #f0f2f5;
+
+  /* type */
+  --font: "Figtree", system-ui, sans-serif;
+  --fs-hero: 28px;
+  --fs-h1: 24px;
+  --fs-h2: 20px;
+  --fs-h3: 17px;
+  --fs-lg: 16px;
+  --fs-md: 15px;
+  --fs-body: 14px;
+  --fs-sm: 13.5px;
+  --fs-card: 13px;
+  --fs-pill: 12.5px;
+  --fs-meta: 12px;
+  --fs-badge: 11.5px;
+  --fs-tiny: 11px;
+  --fs-eyebrow: 10.5px;
+  --fs-micro: 10px;
+  --ls-eyebrow: 0.07em;
+  --ls-eyebrow-wide: 0.09em;
+  --ls-heading: -0.01em;
+  --lh-body: 1.55;
+  --lh-copy: 1.6;
+  --lh-list: 1.8;
+
+  /* shape */
+  --r-pill: 999px;
+  --r-panel: 22px;
+  --r-modal: 20px;
+  --r-card: 18px;
+  --r-rail: 16px;
+  --r-row: 14px;
+  --r-chip: 10px;
+  --r-chip-sm: 9px;
+  --r-bubble-agent: 4px 18px 18px 18px;
+  --r-bubble-user: 18px 4px 18px 18px;
+  --bw: 1.5px;
+  --bw-strong: 2px;
+
+  /* space */
+  --g-1: 4px;
+  --g-2: 6px;
+  --g-3: 8px;
+  --g-4: 9px;
+  --g-5: 10px;
+  --g-6: 12px;
+  --g-7: 14px;
+  --g-8: 20px;
+  --pad-card: 13px 15px;
+  --pad-card-lg: 16px 18px;
+  --pad-bubble: 12px 15px;
+  --pad-pill: 6px 14px;
+  --pad-badge: 3px 11px;
+  --pad-tab: 6px 15px;
+  --pad-panel: 22px 26px;
+
+  /* elevation */
+  --shadow-popover: 0 14px 40px rgba(20, 20, 10, 0.18);
+  --shadow-modal: 0 24px 60px rgba(20, 20, 10, 0.35);
+  --shadow-sheet: 0 24px 60px rgba(20, 20, 10, 0.3);
+  --shadow-hair: 0 1px 3px rgba(0, 0, 0, 0.25);
+  --scrim-modal: rgba(23, 23, 26, 0.55);
+  --scrim-sheet: rgba(23, 23, 26, 0.45);
+
+  /* local semantic surfaces not present in the handoff's base palette */
+  --cream-bright: #fffdf8;
+  --error-surface: #fff7f5;
+  --ink-cool: #3f4650;
+  --line-neutral: #f0f0ec;
+  --line-soft: #ebe8df;
+  --red-soft: #ffd8d2;
+  --scrim-soft: rgba(23, 23, 26, 0.42);
+  --white-soft: rgba(255, 255, 255, 0.55);
+
+  /* selected means ink fill only; focus remains a separate sky ring */
+  --cf-selection-fill: var(--ink);
+  --cf-selection-foreground: var(--paper);
+  --cf-selection-border: 0;
+  --cf-selection-outline: 0;
+  --cf-selection-shadow: none;
+  --cf-selection-avatar-surface: transparent;
+  --cf-message-agent-surface: var(--tint-cool);
+  --cf-message-agent-foreground: var(--ink);
+  --cf-message-user-surface: var(--tint-cool-2);
+  --cf-message-user-foreground: var(--ink);
+  --cf-focus-ring: 3px solid var(--sky);
+  --cf-focus-ring-compact: 2px solid var(--sky);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+code,
+.mono {
+  font-family: inherit;
+}
+
+a {
+  color: inherit;
+}
+
+button {
+  font: inherit;
+}
+
+.cf-runtime-icon {
+  transform: scale(var(--cf-runtime-scale, 1));
+}
+
+.cf-runtime-icon--monogram {
+  width: var(--cf-runtime-size);
+  height: var(--cf-runtime-size);
+  font-size: var(--cf-runtime-font-size);
+}
+
+.field__hint {
+  color: var(--slate);
+  font-size: 11px;
+}
+
+.icon-btn {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--slate);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  background: var(--cream);
+  color: var(--ink);
+}
+
+.packet-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  place-items: center;
+  padding: clamp(12px, 2vw, 24px);
+  background: var(--scrim-modal);
+}
+
+.packet-viewer {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 12px;
+  border: 1.5px solid var(--line-warm);
+  border-radius: 22px;
+  background: var(--white);
+  box-shadow: none;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  -webkit-app-region: no-drag;
+}
+
+.packet-viewer__toolbar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.packet-viewer__title {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.packet-viewer__close {
+  -webkit-app-region: no-drag;
+}
+
+.packet-viewer__stage {
+  min-height: 0;
+  overflow: auto;
+  border: 1.5px solid var(--line-warm-2);
+  border-radius: 14px;
+  background: var(--cream);
+}
+
+.packet-viewer__object,
+.packet-viewer__object iframe {
+  width: 100%;
+  height: 100%;
+  min-height: 360px;
+  border: 0;
+}
+
+.packet-viewer__markdown {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 34px 30px;
+}
+
+.packet-viewer__markdown :is(h1, h2, h3) {
+  margin-top: 1.4em;
+}
+
+.packet-viewer__markdown :first-child {
+  margin-top: 0;
+}
+
+.packet-viewer__plain {
+  margin: 0;
+  font: inherit;
+  white-space: pre-wrap;
+}

@@ -243,7 +243,7 @@ const ONSITE_RE = /\b(on[ -]?site|in[ -]?office|office[ -]?based)\b/i;
 const GLOBAL_REMOTE_RE = /\b(worldwide|anywhere|global)\b/i;
 const US_REMOTE_RE = /\b(united states|u\.?s\.?a?\.?|us[- ](?:only|based)|north america)\b/i;
 const FOREIGN_REMOTE_RE =
-  /\b(ireland|united kingdom|uk|europe|emea|canada|india|asia|apac|australia|new zealand|singapore|germany|france|spain|portugal|poland|netherlands|sweden|norway|denmark|switzerland|israel|brazil|mexico)\b/i;
+  /\b(de|ireland|united kingdom|uk|europe|emea|canada|india|asia|apac|australia|new zealand|singapore|germany|france|spain|portugal|poland|netherlands|sweden|norway|denmark|switzerland|israel|brazil|mexico)\b/i;
 const NO_SPONSORSHIP_RE =
   /\b(?:no|not|cannot|can't|unable to|do not|does not|won't|will not)\b[^.\n]{0,50}\b(?:visa )?sponsor(?:ship)?\b|\b(?:visa )?sponsorship\b[^.\n]{0,50}\b(?:not available|is unavailable)\b/i;
 const US_STATE_RE =
@@ -264,12 +264,29 @@ const LOCATION_CENTROIDS = [
   ["albany ny", 42.6526, -73.7562],
 ];
 
+const NEW_YORK_CITY_ALIASES = new Set([
+  "nyc",
+  "new york city",
+  "new york city ny",
+  "new york metropolitan area",
+  "new york metro area",
+  "ny metro",
+  "new york ny",
+  "new york new york",
+  "manhattan ny",
+  "brooklyn ny",
+  "queens ny",
+  "bronx ny",
+  "staten island ny",
+]);
+
 function normalizePlace(value) {
-  return String(value || "")
+  const normalized = String(value || "")
     .toLowerCase()
     .replace(/\b(remote|hybrid|on[ -]?site|in[ -]?office)\b/g, " ")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+  return NEW_YORK_CITY_ALIASES.has(normalized) ? "new york city" : normalized;
 }
 
 function coordinatesForPlace(value) {
@@ -316,12 +333,15 @@ function seniorityEligibility(offer, config) {
 
 function homeLooksUs(home) {
   return (
-    US_STATE_RE.test(String(home || "")) || /\bunited states|\busa\b/i.test(String(home || ""))
+    US_STATE_RE.test(String(home || "")) ||
+    /\bunited states|\busa\b/i.test(String(home || "")) ||
+    NEW_YORK_CITY_ALIASES.has(normalizePlace(home))
   );
 }
 
 function placeMatchesAllowed(location, places) {
   const normalized = normalizePlace(location);
+  if (!normalized) return false;
   return places.some((place) => {
     const candidate = normalizePlace(place);
     return candidate && (normalized.includes(candidate) || candidate.includes(normalized));
@@ -378,13 +398,18 @@ function locationEligibility(offer, config) {
     if (hasExplicitModes && profileLocation.remote !== true) {
       return { eligible: false, reason: "remote-not-allowed" };
     }
-    if (GLOBAL_REMOTE_RE.test(location)) return { eligible: true };
     if (homeLooksUs(profileLocation.home)) {
+      const local = commuteEligibility(location, profileLocation);
+      if (local.eligible) return { eligible: true };
       if (FOREIGN_REMOTE_RE.test(location) && !US_REMOTE_RE.test(location)) {
         return { eligible: false, reason: "remote-region-mismatch" };
       }
-      if (!US_REMOTE_RE.test(location)) return { eligible: true, unknown: "remote-region" };
+      if (!US_REMOTE_RE.test(location)) {
+        return { eligible: false, reason: "remote-region-unverified" };
+      }
+      return { eligible: true };
     }
+    if (GLOBAL_REMOTE_RE.test(location)) return { eligible: true };
     return { eligible: true };
   }
 
@@ -593,7 +618,7 @@ function scoreSourcedOfferFromConfig(
     add(5, "home/relo region");
   } else if (reloMetros.some((metro) => location.includes(metro))) {
     add(5, "home/relo region");
-  } else if (/\b(remote|united states|usa|us)\b/.test(location)) {
+  } else if (US_REMOTE_RE.test(location)) {
     add(5, "remote/US location");
   }
 
@@ -747,6 +772,7 @@ export function filterAndDedupeOffers(
     config = {},
     now = Date.now(),
     companyPresentationCounts = new Map(),
+    seenRunCompanyRoles = new Set(),
     perCompanyCap = Infinity,
   }
 ) {
@@ -808,6 +834,7 @@ export function filterAndDedupeOffers(
       continue;
     }
     const key = normalizeCompanyRoleKey(offer.company, offer.title);
+    const runKey = `${key}::${normalizePlace(offer.location)}`;
     const req = extractReqId(offer.url);
     if (seenUrls.has(offer.url) || (req.id && seenReqIds.has(req.id))) {
       duplicates.push({
@@ -817,8 +844,17 @@ export function filterAndDedupeOffers(
       });
       continue;
     }
+    if (seenRunCompanyRoles.has(runKey)) {
+      duplicates.push({
+        ...offer,
+        duplicateReason: "company_role_batch",
+        reqId: req.id,
+      });
+      continue;
+    }
     seenUrls.add(offer.url);
     if (req.id) seenReqIds.add(req.id);
+    seenRunCompanyRoles.add(runKey);
     const possibleDuplicate = seenCompanyRoles.has(key);
     if (possibleDuplicate) possibleDuplicates.push(offer);
     seenCompanyRoles.add(key);

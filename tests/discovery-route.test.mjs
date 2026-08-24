@@ -223,7 +223,7 @@ test("POST /api/discovery/quick-start prepares sources and starts the visible re
   }
 });
 
-test("POST /api/discovery/quick-start resumes at the live discovery step", async () => {
+test("POST /api/discovery/quick-start leaves company discovery on its app-owned proposal path", async () => {
   const { server, chatRuntime } = await bootServer({
     loadAgentGuidance: () => ({
       nextSkill: "discover-companies",
@@ -233,9 +233,9 @@ test("POST /api/discovery/quick-start resumes at the live discovery step", async
   const { status, body } = await postJson(server, "/api/discovery/quick-start");
 
   assert.equal(status, 200);
-  assert.equal(body.guidance.nextSkill, "discover-companies");
-  assert.equal(body.chat.skill, "discover-companies");
-  assert.equal(chatRuntime.starts[0].skill, "discover-companies");
+  assert.equal(body.chat, null);
+  assert.equal(body.locked, true);
+  assert.equal(chatRuntime.starts.length, 0);
 });
 
 test("POST /api/discovery/quick-start exposes an explicit first-search gate after discovery", async () => {
@@ -271,7 +271,7 @@ test("POST /api/discovery/quick-start returns 501 when no AI route can start the
   }
 });
 
-test("POST /api/discovery/next starts the current dashboard-guided discovery skill", async () => {
+test("POST /api/discovery/next never launches unsupported company discovery chat", async () => {
   const { server, chatRuntime } = await bootServer({
     loadAgentGuidance: () => ({
       nextSkill: "discover-companies",
@@ -284,9 +284,31 @@ test("POST /api/discovery/next starts the current dashboard-guided discovery ski
     assert.equal(status, 200);
     assert.equal(body.ok, true);
     assert.equal(body.guidance.nextSkill, "discover-companies");
-    assert.equal(body.chat.skill, "discover-companies");
-    assert.equal(chatRuntime.starts.length, 1);
-    assert.equal(chatRuntime.starts[0].skill, "discover-companies");
+    assert.equal(body.chat, null);
+    assert.equal(body.locked, true);
+    assert.equal(chatRuntime.starts.length, 0);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/discovery/next exposes the dedicated first-search gate without starting chat", async () => {
+  const { server, chatRuntime } = await bootServer({
+    loadAgentGuidance: () => ({
+      nextSkill: "search-jobs",
+      message: "Discovery is complete. Run the first search next.",
+      ctaLabel: "Run first search",
+    }),
+  });
+  try {
+    const { status, body } = await postJson(server, "/api/discovery/next");
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(body.readyForFirstSearch, true);
+    assert.equal(body.guidance.nextSkill, "search-jobs");
+    assert.equal(body.chat, null);
+    assert.equal(body.activeDiscoveryChat, null);
+    assert.equal(chatRuntime.starts.length, 0);
   } finally {
     await closeServer(server);
   }
@@ -345,7 +367,7 @@ test("POST /api/discovery/next refuses non-discovery guidance without starting a
   }
 });
 
-test("POST /api/discovery/next reuses an active chat for the guided skill", async () => {
+test("GET and next ignore an unsupported stale company-discovery chat", async () => {
   const chatRuntime = fakeChatRuntime();
   chatRuntime.setLive("discover-companies", {
     chatId: "existing-company-chat",
@@ -360,12 +382,13 @@ test("POST /api/discovery/next reuses an active chat for the guided skill", asyn
     }),
   });
   try {
-    const { status, body } = await postJson(server, "/api/discovery/next");
-    assert.equal(status, 200);
-    assert.equal(body.ok, true);
-    assert.equal(body.chat.chatId, "existing-company-chat");
-    assert.equal(body.chat.reused, true);
-    assert.equal(body.activeDiscoveryChat.skill, "discover-companies");
+    const next = await postJson(server, "/api/discovery/next");
+    assert.equal(next.status, 200);
+    assert.equal(next.body.chat, null);
+    assert.equal(next.body.activeDiscoveryChat, null);
+    const state = await getJson(server, "/api/discovery/state");
+    assert.equal(state.status, 200);
+    assert.equal(state.body.activeDiscoveryChat, null);
     assert.equal(chatRuntime.starts.length, 0);
   } finally {
     await closeServer(server);
@@ -374,9 +397,9 @@ test("POST /api/discovery/next reuses an active chat for the guided skill", asyn
 
 test("POST /api/discovery/next starts the guided skill instead of reusing a different active discovery chat", async () => {
   const chatRuntime = fakeChatRuntime();
-  chatRuntime.setLive("search-jobs", {
-    chatId: "existing-search-chat",
-    skill: "search-jobs",
+  chatRuntime.setLive("research-company", {
+    chatId: "existing-company-research-chat",
+    skill: "research-company",
     state: "running",
   });
   const { server } = await bootServer({
@@ -402,24 +425,24 @@ test("POST /api/discovery/next starts the guided skill instead of reusing a diff
 
 test("GET /api/discovery/state returns guidance and the active discovery chat without starting work", async () => {
   const chatRuntime = fakeChatRuntime();
-  chatRuntime.setLive("search-jobs", {
-    chatId: "search-chat",
-    skill: "search-jobs",
+  chatRuntime.setLive("research-company", {
+    chatId: "company-research-chat",
+    skill: "research-company",
     state: "running",
   });
   const { server } = await bootServer({
     chatRuntime,
     loadAgentGuidance: () => ({
-      nextSkill: "search-jobs",
-      message: "Ask your agent to run search-jobs next for the first sweep.",
+      nextSkill: "research-company",
+      message: "Research this company.",
     }),
   });
   try {
     const { status, body } = await getJson(server, "/api/discovery/state");
     assert.equal(status, 200);
     assert.equal(body.ok, true);
-    assert.equal(body.guidance.nextSkill, "search-jobs");
-    assert.equal(body.activeDiscoveryChat.chatId, "search-chat");
+    assert.equal(body.guidance.nextSkill, "research-company");
+    assert.equal(body.activeDiscoveryChat.chatId, "company-research-chat");
     assert.deepEqual(body.companyDiscovery, {
       status: "current",
       due: false,

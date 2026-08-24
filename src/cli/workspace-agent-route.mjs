@@ -27,6 +27,8 @@ const CONFLICT_CODES = new Set([
   "EVALUATION_APPLICATION_REQUIRED",
   "BAD_PACKET_ARTIFACT",
   "NEEDS_USER",
+  "ANSWER_CONFIRMATION_NOT_FOUND",
+  "ANSWER_CONFIRMATION_AMBIGUOUS",
   "STATUS_TRANSITION_STALE",
 ]);
 
@@ -154,7 +156,12 @@ export function mountWorkspaceAgentRoutes({
   addRoute("POST", "/api/workspace/message", async (req, res) => {
     try {
       const body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
-      const data = await runTurnImpl({ repoRoot, env, text: body?.text });
+      const data = await runTurnImpl({
+        repoRoot,
+        env,
+        text: body?.text,
+        context: body?.context,
+      });
       sendJson(res, 200, { ok: true, data });
     } catch (error) {
       sendError(res, error);

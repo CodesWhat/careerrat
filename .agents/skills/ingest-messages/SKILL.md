@@ -1,8 +1,13 @@
 ---
 name: ingest-messages
 description: Read in-platform DMs from LinkedIn and Wellfound via the session browser and fold them into tracker communications[] — the browser analog of ingest-mail. Opt-in, user-initiated, local-only. Capability = messaging; platforms = linkedin, wellfound.
-tier_1_inputs: [consent verdict, watermark window, tracker thread match keys]
-tier_2_inputs: [per-thread message bodies]
+metadata:
+  tier_1_inputs:
+    - consent verdict
+    - watermark window
+    - tracker thread match keys
+  tier_2_inputs:
+    - per-thread message bodies
 ---
 
 # ingest-messages
@@ -225,6 +230,7 @@ Find or create the `communications[]` record with fields:
 `id`, `applicationId`, `company`, `role`, `status`, `summary`.
 
 Set `channel` based on platform:
+
 - LinkedIn threads → `channel: "linkedin"`
 - Wellfound threads → `channel: "portal"`
 
@@ -288,6 +294,7 @@ If the user states a new gate mid-flow (e.g., "never follow up with this company
   downstream effects (e.g., a comp floor change, adding a wildcard domain exclusion).
 
 Route each gate type through its owning command:
+
 - Company exclusion → `careerrat gate exclude-company "<Company>" --write --confirm`
 - Comp floor change → `careerrat gate comp-floor <N> --write --confirm`
 - Per-application follow-up pause → `workspace/tracker.json` (that record's

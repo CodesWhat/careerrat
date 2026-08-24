@@ -1,11 +1,12 @@
 name: ci
 
-# Six jobs. Four of them gate a merge. web-build and website-build don't.
+# Seven jobs. Four of them gate a merge. web-build, website-build, and the
+# Windows package smoke don't.
 #
 # structure-guards runs a fast fail-early subset: the checks that protect the
-# things unit tests can't reach. The dashboard client <script> must parse as
-# valid JS, the dashboard CSS must be well-formed, every shipped YAML config
-# must parse, and release versions stay in sync. Its job name
+# things unit tests can't reach. The retired static dashboard must stay gone,
+# the chat-first CSS foundation must retain its structural invariants, every
+# shipped YAML config must parse, and release versions stay in sync. Its job name
 # ("structure-guards") is one of the status-check contexts listed in the "Main
 # branch protection" ruleset's required_status_checks rule.
 #
@@ -17,8 +18,8 @@ name: ci
 # scripts/protect-main.sh's DESIRED block and in the live ruleset, and that
 # script's drift guard now holds the two in sync.
 #
-# web-build and website-build are the jobs below that run without gating. qlty
-# and knip are both in the required-context list, checked against the live
+# web-build, website-build, and windows-package-smoke are the jobs below that
+# run without gating. qlty and knip are both in the required-context list, checked against the live
 # ruleset on 2026-08-20. This header used to name qlty and knip as non-gating
 # too, which was the exact failure it warns about one line down: a comment
 # describing a gate wrongly is the same problem protect-main.sh exists to
@@ -32,6 +33,10 @@ on:
     branches: [main, "dev/**"]
   push:
     branches: [main, "dev/**"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -56,8 +61,8 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: Structure guards (client JS parses, CSS valid, YAML valid, release versions in sync)
-        run: node --test tests/client-script.test.mjs tests/styles.test.mjs tests/yaml.test.mjs tests/release-consistency.test.mjs
+      - name: Structure guards (chat-first shell, CSS foundation, YAML, and release versions)
+        run: node --test tests/static-dashboard-retirement.test.mjs tests/chat-first-foundation-style.test.mjs tests/yaml.test.mjs tests/release-consistency.test.mjs
 
   # Full suite (`npm test`, i.e. `node --test 'tests/**/*.test.mjs'`) — the real gate,
   # not just the structure-guards subset. A handful of integration tests self-skip
@@ -160,6 +165,39 @@ jobs:
         run: npm ci
       - name: Build the marketing site and docs (apps/website, apps/docs)
         run: npm run build --workspace apps/website
+
+  # Builds the real Windows installer on every PR/push and drives it through
+  # silent install, packaged Electron mount, PDF export, bundled Playwright
+  # Chromium launch, and uninstall. It is intentionally unsigned here and
+  # retained only as a short-lived Actions QA artifact.
+  windows-package-smoke:
+    name: windows-package-smoke
+    runs-on: windows-latest
+    steps:
+      - name: Harden the runner (audit Electron and Chromium downloads)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Install dependencies
+        run: npm ci
+      - name: Build the Windows x64 NSIS installer
+        run: npm run dist:windows --workspace apps/desktop
+      - name: Verify install, packaged smoke, and uninstall
+        run: npm run verify:windows --workspace apps/desktop
+      - name: Retain the unsigned installer for QA only
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: careerrat-windows-x64-unsigned-qa
+          path: apps/desktop/dist/CareerRat-*-win-x64-Setup.exe
+          if-no-files-found: error
+          retention-days: 7
 
   # Qlty (shell/Docker/Actions/YAML lint, secret + dependency scanning — see
   # .qlty/qlty.toml; Biome stays out of qlty and lints JS/JSON separately).

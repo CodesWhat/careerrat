@@ -158,6 +158,12 @@ export function buildPacketContext({
   }
 
   const { workspaceDir } = resolveUserPaths({ repoRoot, env });
+  const applicationAnswers = Array.isArray(app.packetManifest?.confirmedAnswers)
+    ? app.packetManifest.confirmedAnswers.map((answer) => ({
+        ...answer,
+        source: "application-confirmed",
+      }))
+    : [];
   let jobBody = cleanText(capturedJobBody);
   let jdPath = capturedJobPath || null;
   if (!jobBody) {
@@ -236,6 +242,7 @@ export function buildPacketContext({
       family: roleFamily,
     }),
     deepIngestDiagnostics: deepIngest.skipped,
+    applicationAnswers,
   };
 }
 

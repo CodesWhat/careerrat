@@ -25,6 +25,8 @@ const routingPolicyText = readRepoFile(artifactPaths.routingPolicy);
 const agentsText = readRepoFile("AGENTS.md");
 const architectureText = readRepoFile("docs/ARCHITECTURE.md");
 const webApiText = readRepoFile("apps/web/src/lib/api.js");
+const chatFirstApiText = readRepoFile("apps/web/src/chat-first/api.js");
+const discoveryRouteText = readRepoFile("src/cli/discovery-route.mjs");
 const decomposition = parseYaml(decompositionText);
 
 const requiredSkills = [
@@ -426,7 +428,7 @@ test("routing policy distinguishes local APIs, DB/CLI owners, bounded AI, chat, 
   assert.match(agents, /POST \/api\/skill\/run/);
 });
 
-test("VER-05 docs and app wrappers keep discovery routing split aligned", () => {
+test("VER-05 docs, chat-first client, and backend routes keep discovery routing split aligned", () => {
   const docs = [
     ["AGENTS.md", agentsText],
     ["docs/ARCHITECTURE.md", architectureText],
@@ -460,35 +462,30 @@ test("VER-05 docs and app wrappers keep discovery routing split aligned", () => 
 
   assertContainsAll(
     webApiText,
-    [
-      "export function createCompanyProposals",
-      'apiFetch("/api/discovery/company-proposals"',
-      "export function getCompanyProposals",
-      "apiFetch(`/api/discovery/company-proposals",
-      "export function decideCompanyProposal",
-      'apiFetch("/api/discovery/company-proposal-decisions"',
-    ],
+    ["export function createCompanyProposals", 'apiFetch("/api/discovery/company-proposals"'],
     "apps/web/src/lib/api.js"
+  );
+  assertContainsAll(
+    chatFirstApiText,
+    ["createCompanyProposals", "export const firstRunApi"],
+    "apps/web/src/chat-first/api.js"
+  );
+  assertContainsAll(
+    discoveryRouteText,
+    [
+      'addRoute("GET", "/api/discovery/company-proposals"',
+      'addRoute("POST", "/api/discovery/company-proposal-decisions"',
+    ],
+    "src/cli/discovery-route.mjs"
   );
 
   const localProposalWrappers = requiredSlice(
     webApiText,
     "export function createCompanyProposals",
-    "export function startDiscoveryQuickStart",
+    "export async function suggestAssist",
     "apps/web/src/lib/api.js local proposal wrappers"
   );
   assert.doesNotMatch(localProposalWrappers, /\/api\/chat|\/api\/skill\/run/);
-
-  // W4 (chat-first onboarding) deleted apps/web/src/onboarding/steps/
-  // CompaniesStep.jsx — its runCompanyProposalCreate local-proposal-creation
-  // helper and the "no ChatPanel/Agent-led discovery escalation" guard that
-  // used to run against it were not ported: the new FilePane.jsx Companies
-  // row editor is a plain ChipInput bound to targeting.tracked_companies
-  // (see apps/web/src/onboarding/FilePane.jsx's CompaniesRowEditor), not a
-  // proposal-review UI, so there is no local-proposal-creation surface left
-  // to guard here. The api.js wrapper check above still covers the one
-  // routing invariant that survives the deletion: the wrappers themselves
-  // stay local, never touching chat/skill-run.
 });
 
 test("all Phase 1 artifacts keep the non-runtime boundary and D-01 through D-14 coverage", () => {

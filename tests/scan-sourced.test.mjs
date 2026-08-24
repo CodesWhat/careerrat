@@ -3,7 +3,7 @@
 // orchestration into an exported, importable runSourcedScan() (see that
 // file's own header comment). Covers:
 //   - runSourcedScan() against a stubbed fetchImpl (no real network) —
-//     summary shape, write/intake side effects, and no cross-call state
+//     summary shape, write side effects, and no cross-call state
 //     leakage between two different repoRoots (the refactor's main risk:
 //     the old code cached candidate config in module-level variables tied to
 //     a single fixed _scriptRoot).
@@ -20,7 +20,7 @@
 // orchestration promotion didn't change behavior.
 
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -120,6 +120,23 @@ function leverFetchStub(title = "Director of IT") {
   };
 }
 
+function manyLeverFetchStub() {
+  return async (url) => {
+    const slug = new URL(String(url)).pathname.split("/").filter(Boolean).at(-1);
+    return new Response(
+      JSON.stringify([
+        {
+          text: `Staff Platform Engineer ${slug}`,
+          hostedUrl: `https://jobs.lever.co/${slug}/req-${slug}`,
+          categories: { location: "Remote - US" },
+          descriptionPlain: "Own platform infrastructure, identity, and automation systems.",
+        },
+      ]),
+      { status: 200 }
+    );
+  };
+}
+
 function rssFetchStub() {
   return async (url) => {
     assert.equal(String(url), "https://example.test/jobs.xml");
@@ -198,7 +215,6 @@ test("runSourcedScan returns the documented summary shape from a stubbed fetch",
       fetchImpl: leverFetchStub(),
       configPath,
       write: false,
-      intake: false,
     });
     assert.equal(summary.scanned, 1);
     assert.equal(summary.new, 1);
@@ -228,7 +244,6 @@ test("write:true captures JD artifacts without writing generated scan-result fil
       fetchImpl: leverFetchStub(),
       configPath,
       write: true,
-      intake: false,
     });
     assert.match(summary.offers[0].artifacts.jd, /^workspace\/jobs\/acme-director-of-it-/);
     const jdText = readFileSync(userPath({ repoRoot }, summary.offers[0].artifacts.jd), "utf8");
@@ -242,25 +257,39 @@ test("write:true captures JD artifacts without writing generated scan-result fil
     );
     assert.ok(
       !existsSync(userPath({ repoRoot }, "workspace/intake")),
-      "intake:false must not write intake"
+      "product scans must not write generated intake digests"
     );
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
 });
 
-test("intake:true does not write generated intake digests from the product scan path", async () => {
+test("structured scan output keeps more than 25 persisted offers and every handoff field", async () => {
   const repoRoot = tempRepo();
   try {
-    const configPath = writeSourcedScanConfig(repoRoot);
-    await runSourcedScan({
-      repoRoot,
-      fetchImpl: leverFetchStub(),
-      configPath,
-      write: false,
-      intake: true,
+    const trackedCompanies = Array.from({ length: 30 }, (_, index) => {
+      const slug = `company-${String(index + 1).padStart(2, "0")}`;
+      return { name: slug, careers_url: `https://jobs.lever.co/${slug}` };
     });
-    assert.equal(existsSync(userPath({ repoRoot }, "workspace/intake")), false);
+    const configPath = writeSourcedScanConfig(repoRoot, {
+      tracked_companies: trackedCompanies,
+    });
+    const summary = await runSourcedScan({
+      repoRoot,
+      fetchImpl: manyLeverFetchStub(),
+      configPath,
+      write: true,
+    });
+
+    assert.equal(summary.offers.length, 30);
+    for (const offer of summary.offers) {
+      assert.match(offer.id, /^sourced-/);
+      assert.equal(typeof offer.fitScore, "number");
+      assert.equal(typeof offer.fitBucket, "string");
+      assert.equal(typeof offer.ratingReason, "string");
+      assert.ok(Array.isArray(offer.ruleFlags));
+      assert.match(offer.artifacts.jd, /^workspace\/jobs\/.+\.md$/);
+    }
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
@@ -284,14 +313,12 @@ test("no cross-call state leakage: two repoRoots with different targeting score 
       fetchImpl: leverFetchStub("Director of IT"),
       configPath: configPathA,
       write: false,
-      intake: false,
     });
     const summaryB = await runSourcedScan({
       repoRoot: repoB,
       fetchImpl: leverFetchStub("Director of IT"),
       configPath: configPathB,
       write: false,
-      intake: false,
     });
 
     // repoA's targeting keep-signal matches the offer title -> high base score.
@@ -315,7 +342,6 @@ test("gracefully returns an empty scan when config/sourced-scan.json doesn't exi
         throw new Error("should never fetch with zero tracked companies");
       },
       write: false,
-      intake: false,
     });
     assert.equal(summary.scanned, 0);
     assert.equal(summary.new, 0);
@@ -338,7 +364,6 @@ test("DB mode scans sourced companies from SQLite without config/sourced-scan.js
       repoRoot,
       fetchImpl: leverFetchStub(),
       write: false,
-      intake: false,
     });
 
     assert.equal(summary.scanned, 1);
@@ -364,7 +389,6 @@ test("DB mode write:true stamps a successful company-board watermark", async () 
       repoRoot,
       fetchImpl: leverFetchStub(),
       write: true,
-      intake: false,
     });
 
     const company = sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.tracked_companies[0];
@@ -401,13 +425,11 @@ test("DB mode scoring uses SQLite targeting when candidate YAML is absent", asyn
       repoRoot: repoA,
       fetchImpl: leverFetchStub("Director of IT"),
       write: false,
-      intake: false,
     });
     const summaryB = await runSourcedScan({
       repoRoot: repoB,
       fetchImpl: leverFetchStub("Director of IT"),
       write: false,
-      intake: false,
     });
 
     assert.equal(existsSync(userPath({ repoRoot: repoA }, "candidate/targeting.yml")), false);
@@ -436,7 +458,6 @@ test("DB mode write:true persists scan offers through sourcedUpsertBatch and exp
       repoRoot,
       fetchImpl: leverFetchStub(),
       write: true,
-      intake: false,
     });
 
     const db = openDb({ repoRoot });
@@ -489,7 +510,6 @@ test("DB mode exposes the first company batch before a later company finishes", 
     const scanPromise = runSourcedScan({
       repoRoot,
       write: true,
-      intake: false,
       fetchImpl: async (url) => {
         if (String(url).includes("/acme")) {
           return leverResponse({
@@ -567,7 +587,6 @@ test("incremental company batches preserve cross-batch dedup and final batch sum
     const summary = await runSourcedScan({
       repoRoot,
       write: true,
-      intake: false,
       fetchImpl: async (url) => {
         if (String(url).includes("/acme")) {
           return new Response(
@@ -655,7 +674,6 @@ test("DB mode write:true stamps search-source watermarks in SQLite without writi
       // network access, same pattern as public-http-fetch.test.mjs.
       resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
       write: true,
-      intake: false,
     });
 
     const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
@@ -707,7 +725,6 @@ test("DB ATS search sources run through Career Ops and hydrate a full JD before 
     const summary = await runSourcedScan({
       repoRoot,
       write: true,
-      intake: false,
       resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
       fetchImpl: async (url) => {
         if (String(url) === `${boardUrl}/list`) {
@@ -804,7 +821,6 @@ test("DB RSS scan replaces a feed preview with the canonical ATS job body before
       fetchImpl,
       resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
       write: true,
-      intake: false,
     });
 
     assert.equal(summary.new, 1);
@@ -855,7 +871,6 @@ test("search-source watermarks advance only after each source finishes", async (
     const scanPromise = runSourcedScan({
       repoRoot,
       write: true,
-      intake: false,
       // The SSRF guard resolves the host before ever calling fetchImpl; mock
       // it to a real public address so this stays a pure unit test with no
       // network access, same pattern as public-http-fetch.test.mjs.
@@ -972,7 +987,6 @@ test("DB mode merges board offers, filters their titles, and stamps board waterm
         throw new Error(`unexpected fetch: ${url}`);
       },
       write: true,
-      intake: false,
     });
 
     assert.equal(summary.scanned, 3);
@@ -1006,7 +1020,6 @@ test("explicit config mode in a DB workspace captures output without mutating DB
       fetchImpl: leverFetchStub(),
       configPath,
       write: true,
-      intake: false,
     });
 
     assert.equal(summary.scanned, 1);
@@ -1070,7 +1083,6 @@ test("explicit config mode does not dedupe against DB sourced rows", async () =>
       fetchImpl: leverFetchStub(),
       configPath,
       write: false,
-      intake: false,
     });
 
     assert.equal(summary.new, 1);
@@ -1094,7 +1106,6 @@ test("explicit config scans without DB do not mutate legacy search-sources.yml",
       fetchImpl: rssFetchStub(),
       configPath,
       write: true,
-      intake: false,
     });
 
     const after = readFileSync(join(repoRoot, "config/search-sources.yml"), "utf8");
@@ -1110,28 +1121,15 @@ test("explicit config scans without DB do not mutate legacy search-sources.yml",
 // zero network (see this file's header comment).
 // ---------------------------------------------------------------------------
 
-test("CLI still runs end-to-end post-refactor: plain JSON, --summary, and --format=tracker", () => {
+test("CLI still runs end-to-end post-refactor in plain JSON and summary modes", () => {
   const scriptPath = join(REPO_ROOT, "scripts/scan-sourced.mjs");
   const noMatchCompany = "zzz-does-not-exist-zzz";
-
-  // _scriptRoot is always the real installed script location (see this
-  // file's header comment), so main() reads the REAL repo's
-  // candidate/targeting.yml — if it has any cold-board role families,
-  // runSourcedScan()'s "Cold-board lanes down-weighted: ..." console.log
-  // lands on stdout ahead of the plain-JSON summary. Strip it rather than
-  // asserting a specific candidate-data state.
-  function stripColdBoardLine(text) {
-    return text
-      .split("\n")
-      .filter((line) => !line.startsWith("Cold-board lanes down-weighted:"))
-      .join("\n");
-  }
 
   const plain = execFileSync(process.execPath, [scriptPath, "--company", noMatchCompany], {
     cwd: REPO_ROOT,
     encoding: "utf8",
   });
-  const parsed = JSON.parse(stripColdBoardLine(plain));
+  const parsed = JSON.parse(plain);
   assert.equal(parsed.scanned, 0);
   assert.equal(parsed.new, 0);
   assert.deepEqual(parsed.offers, []);
@@ -1143,11 +1141,17 @@ test("CLI still runs end-to-end post-refactor: plain JSON, --summary, and --form
   );
   assert.match(summaryOut, /^Scanned: 0/m);
   assert.match(summaryOut, /Top scanner output:/);
+});
 
-  const trackerOut = execFileSync(
-    process.execPath,
-    [scriptPath, "--company", noMatchCompany, "--format=tracker"],
-    { cwd: REPO_ROOT, encoding: "utf8" }
-  );
-  assert.equal(stripColdBoardLine(trackerOut).trim(), "");
+test("CLI rejects removed compatibility flags instead of silently ignoring them", () => {
+  const scriptPath = join(REPO_ROOT, "scripts/scan-sourced.mjs");
+  for (const flag of ["--intake", "--timestamped"]) {
+    const result = spawnSync(
+      process.execPath,
+      [scriptPath, "--company", "zzz-does-not-exist-zzz", flag],
+      { cwd: REPO_ROOT, encoding: "utf8" }
+    );
+    assert.notEqual(result.status, 0, `${flag} must not remain a silent no-op`);
+    assert.match(result.stderr, /unknown option/i);
+  }
 });

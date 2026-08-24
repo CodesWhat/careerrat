@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { ApiError } from "./api.js";
-import { GENERIC_ERROR_MESSAGE, resolveErrorCopy, UserFacingError } from "./errorCopy.js";
+import {
+  GENERIC_ERROR_MESSAGE,
+  resolveErrorCopy,
+  resolvePersistedErrorCopy,
+  UserFacingError,
+} from "./errorCopy.js";
 
 const RULE_CASES = [
   {
@@ -566,6 +571,14 @@ describe("resolveErrorCopy — mapped rules", () => {
 });
 
 describe("resolveErrorCopy — detail preservation", () => {
+  it("keeps persisted transcript detail internal while returning mapped candidate copy", () => {
+    const raw = "No AI key is configured for this workspace";
+    const result = resolvePersistedErrorCopy({ code: "missing_key", message: raw }, raw);
+
+    expect(result.message).toBe("No AI key is connected yet.");
+    expect(result.detail).toBe(raw);
+  });
+
   it("preserves the raw string verbatim for a plain-string body.error", () => {
     const err = new ApiError(409, { error: "a scan is already running" });
     expect(resolveErrorCopy(err).detail).toBe("a scan is already running");

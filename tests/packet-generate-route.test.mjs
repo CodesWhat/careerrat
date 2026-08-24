@@ -531,13 +531,39 @@ test("POST /api/packet/gate: keeps budget-limited evaluation copy readable", asy
       applicationId: "app-packet",
     });
     assert.equal(status, 200);
-    assert.ok(body.data.fitReasons[0].length <= 72);
-    assert.ok(body.data.fitRisks[0].length <= 72);
+    assert.ok(body.data.fitReasons[0].length <= 80);
+    assert.ok(body.data.fitRisks[0].length <= 80);
     assert.ok(body.data.compensation.summary.length <= 130);
     assert.match(body.data.fitReasons[0], /…$/);
     assert.match(body.data.fitRisks[0], /…$/);
     assert.doesNotMatch(body.data.fitRisks[0], /\band…$/i);
     assert.match(body.data.compensation.summary, /…$/);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/gate: preserves complete fit copy within the persisted budget", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  const completeReason =
+    "The remote United States role suits a New York base and remote work preference.";
+  assert.equal(completeReason.length, 79);
+  const server = await bootServer(repoRoot, {
+    packetGateInvoke: async () =>
+      [
+        "```json",
+        JSON.stringify({ ...typedGateVerdict(), fitReasons: [completeReason] }),
+        "```",
+      ].join("\n"),
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-packet",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.data.fitReasons[0], completeReason);
   } finally {
     await closeServer(server);
   }

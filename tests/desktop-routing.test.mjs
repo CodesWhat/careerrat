@@ -1,37 +1,32 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { chooseDesktopRoute, normalizeDesktopRoute } from "../apps/desktop/desktop-routing.mjs";
 
 describe("desktop route selection", () => {
-  it("opens app-first Home for existing candidate setup", () => {
-    assert.equal(chooseDesktopRoute({ hasCandidateSetup: true }), "/app");
+  it("opens the chat-first workspace for every candidate state", () => {
+    assert.equal(chooseDesktopRoute(), "/app");
   });
 
-  it("opens the SPA onboarding wizard for first-run workspaces", () => {
-    assert.equal(chooseDesktopRoute({ hasCandidateSetup: false }), "/app/onboarding");
+  it("normalizes explicit chat-first route overrides", () => {
+    assert.equal(normalizeDesktopRoute("settings"), "/app/settings");
+    assert.equal(normalizeDesktopRoute("/settings"), "/app/settings");
+    assert.equal(normalizeDesktopRoute("/app/settings"), "/app/settings");
   });
 
-  it("can force onboarding for source-dev design launches", () => {
-    assert.equal(
-      chooseDesktopRoute({ hasCandidateSetup: true, forceOnboarding: true }),
-      "/app/onboarding"
-    );
-  });
-
-  it("normalizes dev route overrides into app routes", () => {
-    assert.equal(normalizeDesktopRoute("dashboard-v2"), "/app/dashboard-v2");
-    assert.equal(normalizeDesktopRoute("/dashboard-v2"), "/app/dashboard-v2");
-    assert.equal(normalizeDesktopRoute("/app/dashboard-v2"), "/app/dashboard-v2");
-  });
-
-  it("lets explicit dev route overrides win over forced onboarding", () => {
+  it("lets explicit dev route overrides win over the workspace default", () => {
     assert.equal(
       chooseDesktopRoute({
-        hasCandidateSetup: true,
-        forceOnboarding: true,
-        routeOverride: "dashboard-v2",
+        routeOverride: "settings",
       }),
-      "/app/dashboard-v2"
+      "/app/settings"
     );
+  });
+
+  it("boots the SPA directly without the retired tracker renderer or /onboard remediation", () => {
+    const main = readFileSync("apps/desktop/main.mjs", "utf8");
+    assert.doesNotMatch(main, /\.renderOnce\(/);
+    assert.doesNotMatch(main, /\/onboard\b/);
+    assert.match(main, /chooseDesktopRoute/);
   });
 });

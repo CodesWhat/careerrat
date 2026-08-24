@@ -4,6 +4,19 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-08-24
+
+### Added
+
+- CareerRat now opens into a chat-first desktop workspace. The main conversation stays central, selected work fills the context panel, and Search, Pipeline, Files, People, and Schedule remain one click away without returning to the retired page-based dashboard.
+- Job, recruiter, and research conversations are durable threads that survive navigation and restart. Multi-job work runs as a resumable mission, Deep ingest has its own thread and grounded review flow, and mock interviews stay attached to the job that prompted them.
+- The complete bundled skill catalog now ships with the desktop app and runs through visible conversations, including sourcing, evaluation, tailoring, application preparation, communications, research, interview work, and outcome learning.
+
+### Changed
+
+- Résumé-first onboarding is conversational: drop a résumé or start talking, watch the candidate profile fill in beside the conversation, and open a focused section editor only when something needs correction.
+- Supervised application automation can inspect a form, prepare role-specific artifacts, and fill confirmed fields. It always stops before the final Submit action so the candidate reviews and submits the application.
+
 ## [0.13.0] - 2026-08-23
 
 ### Added

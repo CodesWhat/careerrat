@@ -3,6 +3,7 @@
 // Tracker Write Contract explicitly carves out "pure comms/scheduling writes").
 import { randomUUID } from "node:crypto";
 import { slugifyThreadId } from "../../comms/threads.mjs";
+import { ensureJobThreadInDb } from "./chat-first.mjs";
 import {
   appIdExists,
   bumpMeta,
@@ -176,6 +177,13 @@ export function commCaptureInbound({
     putRow(db, "communications", id, updated, {
       application_id: resolveApplicationId(db, updated),
     });
+    if (linkedApplicationId) {
+      ensureJobThreadInDb(db, {
+        applicationId: linkedApplicationId,
+        reason: "human-entered",
+        now: receivedAt,
+      });
+    }
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "message",
@@ -199,6 +207,17 @@ export function commUpsert({ repoRoot, env, row } = {}) {
   return runVerb({ repoRoot, env }, (db) => {
     const existed = Boolean(getRow(db, "communications", row.id));
     putRow(db, "communications", row.id, row, { application_id: resolveApplicationId(db, row) });
+    if (
+      resolveApplicationId(db, row) &&
+      Array.isArray(row.messages) &&
+      row.messages.some((message) => message?.direction === "inbound")
+    ) {
+      ensureJobThreadInDb(db, {
+        applicationId: row.applicationId,
+        reason: "human-entered",
+        now: row.lastInboundAt,
+      });
+    }
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "message",
@@ -232,6 +251,13 @@ export function commAppendMessage({ repoRoot, env, id, message } = {}) {
     putRow(db, "communications", id, updated, {
       application_id: resolveApplicationId(db, updated),
     });
+    if (message.direction === "inbound" && resolveApplicationId(db, updated)) {
+      ensureJobThreadInDb(db, {
+        applicationId: updated.applicationId,
+        reason: "human-entered",
+        now: message.at,
+      });
+    }
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "message",

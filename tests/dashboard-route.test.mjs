@@ -27,9 +27,15 @@ import { fileURLToPath } from "node:url";
 import { mountDashboardRoutes } from "../src/cli/dashboard-route.mjs";
 import { mountDataRoutes } from "../src/cli/data-route.mjs";
 import { automationStatus } from "../src/core/automation/consent.mjs";
-import { closeAll } from "../src/core/db/connection.mjs";
+import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
 import { candidateConfigPatch } from "../src/core/db/verbs/candidate.mjs";
+import {
+  chatFirstStateFromDb,
+  jobThreadSetPinned,
+  missionCreate,
+  mockInterviewStart,
+} from "../src/core/db/verbs.mjs";
 import { loadModes } from "../src/core/profile/modes.mjs";
 import { loadAgentGuidanceSnapshot } from "../src/core/tracker/agent-guidance-snapshot.mjs";
 import { buildDashboardViewModel } from "../src/core/tracker/dashboard-data.js";
@@ -245,6 +251,7 @@ test("GET /api/data/dashboard: the route's view model deep-equals a direct build
       agentGuidance,
       calendarProviderStatus,
     });
+    direct.chatFirst = chatFirstStateFromDb(openDb({ repoRoot }), { now: FIXED_NOW });
 
     assert.deepEqual(body.data, direct);
     assert.equal(body.data.setup, undefined);
@@ -418,6 +425,49 @@ test("GET /api/data/dashboard: calendar sync providers reflect real automation c
     assert.notEqual(statusByKey.outlook_calendar, "Ready");
     assert.notEqual(statusByKey.apple_calendar, "Ready");
     assert.notEqual(statusByKey.automation_tools, "Ready");
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("GET /api/data/dashboard includes the durable chat-first aggregate without replacing the established dashboard view model", async () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot, {
+    meta: {},
+    applications: [
+      {
+        id: "app-chat-first",
+        company: "Cyberdyne Systems",
+        role: "Staff Platform Engineer",
+        status: "interview",
+      },
+    ],
+    sourced: [],
+    sources: [],
+    communications: [],
+  });
+  jobThreadSetPinned({ repoRoot, applicationId: "app-chat-first" });
+  missionCreate({
+    repoRoot,
+    id: "mission-chat-first",
+    title: "Prepare one application",
+    steps: [{ id: "packet", label: "Draft packet" }],
+  });
+  mockInterviewStart({
+    repoRoot,
+    id: "mock-chat-first",
+    applicationId: "app-chat-first",
+    questionTotal: 4,
+  });
+
+  const server = await bootServer(repoRoot);
+  try {
+    const { status, body } = await getJson(server, "/api/data/dashboard");
+    assert.equal(status, 200);
+    assert.equal(body.data.jobs.rows[0].company, "Cyberdyne Systems");
+    assert.equal(body.data.chatFirst.jobThreads[0].applicationId, "app-chat-first");
+    assert.equal(body.data.chatFirst.missions[0].id, "mission-chat-first");
+    assert.equal(body.data.chatFirst.mockSessions[0].id, "mock-chat-first");
   } finally {
     await closeServer(server);
   }

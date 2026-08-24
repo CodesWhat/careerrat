@@ -3,8 +3,7 @@
   "$id": "https://careerrat.local/schemas/form-defaults.schema.json",
   "title": "CareerRat Form Defaults",
   "type": "object",
-  "required": ["auto_submit"],
-  "additionalProperties": true,
+  "additionalProperties": false,
   "properties": {
     "source": { "type": "string" },
     "work_authorization": { "type": "string" },
@@ -45,7 +44,6 @@
     },
     "confirm_current_role": { "type": "boolean" },
     "confirm_current_disclosure": { "type": "boolean" },
-    "auto_submit": { "type": "boolean" },
     "declined_fields": {
       "description": "Fields the candidate explicitly declined to answer during the conversational interview (e.g. \"authorization\", \"consent\") — never re-asked once recorded here. A null value clears a decline (manual override reopens the normal editor).",
       "type": "object",

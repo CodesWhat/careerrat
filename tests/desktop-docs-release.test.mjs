@@ -44,7 +44,7 @@ test("desktop README teaches the app-first signed and notarized pilot path", asy
   assertIncludes(readme, "apps/desktop/README.md", [
     /Electron desktop/i,
     /\/app\b/,
-    /\/app\/onboarding\b/,
+    /same shell/i,
     /signed and notarized macOS DMG/i,
     /CAREERRAT_HOME/i,
     /internal\/ai\.env/i,
@@ -70,17 +70,19 @@ test("release checklist requires signed notarized desktop pilot evidence", async
   assert.doesNotMatch(release, /notarization (is )?(deferred|off|optional)/i);
 });
 
-test("architecture docs describe the sandboxed local and network runtime profiles", async () => {
+test("architecture docs describe the exact packaged runtime boundaries", async () => {
   const architecture = await readText("docs/ARCHITECTURE.md");
 
   assertIncludes(architecture, "docs/ARCHITECTURE.md", [
-    /app-safe default/i,
-    /Read, Glob, Grep, and Skill/i,
-    /network research/i,
-    /WebSearch, WebFetch, and Skill/i,
-    /unsandboxed tool-heavy execution is disabled/i,
-    /compatibility\/debug\/export/i,
-    /not normal product UX/i,
+    /POST `?\/api\/skill\/run` exposes only `intake-extract` and `resume-extract`/i,
+    /one canonical uploaded file plus its isolated skill/i,
+    /generic chat surface exposes only[\s\S]*`company-health`/i,
+    /Claude Code 2\.1\.241 or newer/i,
+    /guarded CareerRat fetch MCP/i,
+    /Codex and other\s+CLIs fail closed before spawn/i,
+    /allowlisted process\s+environment/i,
+    /provider fallback remains a\s+separate Agent SDK path/i,
+    /only HTML product surface/i,
   ]);
 
   assert.doesNotMatch(architecture, /generated tracker\/static .* normal product/i);

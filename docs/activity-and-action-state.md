@@ -30,6 +30,7 @@ state in `tracker.json` has no effect on what the feed shows.
 Split along one boundary: *did something happen* (log) vs *is something waiting* (action).
 
 ### Log event — durable, append-only history (`workspace/activity.jsonl`)
+
 Written once, never updated. A past-tense fact.
 
 ```jsonc
@@ -50,6 +51,7 @@ The pulse feed is **read-only history**. Rows with `refs.applicationId` get a
 empty unconditionally.
 
 ### Derived action item — computed live, never stored
+
 Recomputed every render from `tracker.json` by `cadence.mjs` (extend the existing
 `computeFollowUps` / `buildNextSteps` path). Memory-only; lives in the view model.
 
@@ -68,12 +70,14 @@ An action exists **iff** its triggering `tracker.json` state exists. There is no
 `done` state — done means the deriving condition is gone, so the item vanishes.
 
 ## Single source of truth
+
 - `tracker.json` = authoritative for **current state** (what's pending).
 - `activity.jsonl` = authoritative for **history** (what happened).
 - One derive function feeds **every** surface: Next Steps card, Focus card, Action
   Queue drawer, Needs-Attention, and the job drawer "Ready to send" panel.
 
 ### Send-path invariant (the thing that makes it self-clear)
+
 When the agent sends a message it does **one** `tracker.json` write:
 `comm.status = waiting`, **`comm.draft = null`** (and `app.followUp.draft = null`
 if that was the source), `lastOutboundAt = now`, append the `outbound-sent`
@@ -82,6 +86,7 @@ the draft field is gone, the Next Steps step, the Ready-to-send panel, and any C
 all disappear at once. No resolve verb. No stale button possible.
 
 ## Durability (fixes the data loss)
+
 - **Raise the cap + env override.** Default retention raised to 2000
   (`CAREERRAT_ACTIVITY_MAX` overrides) so a normal cycle never silently trims —
   `src/core/tracker/activity-log.mjs`.
@@ -93,9 +98,9 @@ all disappear at once. No resolve verb. No stale button possible.
   (from `messages[]` with direction `outbound-sent` / `outbound-draft`) — both
   passes implemented in `src/core/tracker/activity-backfill.mjs`, steps 4 and 5
   of `deriveActivityEvents`.
-- **tracker.json snapshot-on-render.** Every `careerrat tracker` call
+- **tracker.json snapshot-on-checkpoint.** Every `careerrat tracker` call
   snapshots the current `workspace/tracker.json` into
-  `workspace/.snapshots/tracker-<ISO>.json` before writing the new dashboard.
+  `workspace/.snapshots/tracker-<ISO>.json` before printing its summary.
   The newest ~20 are kept (override: `CAREERRAT_TRACKER_SNAPSHOTS`); the copy is
   skipped when content is unchanged since the last snapshot. Recovery: copy any
   snapshot back over `tracker.json`. This is the agent-mutated-file analog of
@@ -116,15 +121,17 @@ all disappear at once. No resolve verb. No stale button possible.
 | 5a | M | Strip live CTAs from the pulse feed: `activityCta()` returns ""; rows get `data-detail-id`; drop `needsUser` tint / `ctaLabel` / `href` | `src/core/tracker/dashboard-data.js` |
 | 5b | M | Gate `comm.draft` **and** `app.followUp.draft` in `jobDetailFromRow` on `comm.status` not in {waiting, closed} | `src/core/tracker/dashboard-data.js` |
 | 6a | S | **Prereq:** `export` `renderNextSteps`; add an **uncapped** `allNextSteps` view-model field (current `nextSteps` is `.slice(0,3)`) | `src/core/tracker/dashboard-data.js` |
-| 6b | M | Replace the hardcoded Aperture/Cyberdyne/Hooli fixtures in the Action Queue drawer with a live slot populated from `allNextSteps` via `renderNextSteps()` | `src/core/tracker/dashboard-shell.html` |
+| 6b | M | Superseded by the React app cutover; action surfaces now consume the live view model in `/app` | `apps/web/src/chat-first/*` |
 | 7 | S | **Migration — must run AFTER #4:** `careerrat activity backfill --write`; audit live `needsUser` events each map to a `tracker.json` condition; null any `comm.draft` where status is `waiting` | `workspace/*` |
 
 ### Implementation notes
+
 1. `renderNextSteps` isn't exported — added as explicit prereq 6a.
 2. `nextSteps` is capped at 3 (`.slice(0,3)`) — the drawer must read a new uncapped `allNextSteps`, not `nextSteps`.
 3. Migration (#7) must run **after** the backfill extension (#4), not before, or it derives nothing.
 
 ## Risks
+
 - Existing `needsUser:true` events lose their visible CTA after 5a. Audit first
   (migration #7): any pending work that lives *only* in the feed must be written
   into `tracker.json` so the derived action reappears.

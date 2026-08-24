@@ -55,10 +55,11 @@ const TYPEAHEAD_SETTLE_DELAY_MS = 700;
 // least-recently-used tab is closed to free real browser resources.
 const MAX_OPEN_PAGES = 8;
 
-async function defaultLaunch({ profileDir, headless }) {
+async function defaultLaunch({ profileDir, headless, channel }) {
   const { chromium } = await import("playwright");
   return chromium.launchPersistentContext(profileDir, {
     headless,
+    ...(channel ? { channel } : {}),
     viewport: { width: 1440, height: 1100 },
   });
 }
@@ -154,7 +155,7 @@ export function collectControls(elements) {
   // candidate labels at the same level — picking the first one found (instead
   // of the nearest one that precedes the control) would mis-tag the second
   // button's group as "Resume/CV" too.
-  function nearestGroupLabel(el) {
+  function nearestGroupLabel(el, { nativeChoice = false } = {}) {
     let node = el.parentElement;
     let depth = 0;
     while (node && depth < 6) {
@@ -162,41 +163,61 @@ export function collectControls(elements) {
         const legend = node.querySelector(":scope > legend");
         if (legend?.innerText?.trim()) return legend.innerText.trim();
       }
-      const ariaLabel = node.getAttribute("aria-label");
-      if (ariaLabel?.trim()) return ariaLabel.trim();
-      const labelledBy = node.getAttribute("aria-labelledby");
-      if (labelledBy) {
-        const text = labelledBy
-          .split(/\s+/)
-          .map((id) => document.getElementById(id)?.innerText || "")
-          .join(" ")
-          .trim();
-        if (text) return text;
+      if (!nativeChoice || node.tagName !== "FORM") {
+        const ariaLabel = node.getAttribute("aria-label");
+        if (ariaLabel?.trim()) return ariaLabel.trim();
+        const labelledBy = node.getAttribute("aria-labelledby");
+        if (labelledBy) {
+          const text = labelledBy
+            .split(/\s+/)
+            .map((id) => document.getElementById(id)?.innerText || "")
+            .join(" ")
+            .trim();
+          if (text) return text;
+        }
       }
       const candidates = node.querySelectorAll(
-        ":scope > legend, :scope > label, :scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6, :scope > [role='heading']"
+        `:scope > legend, :scope > label, :scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6, :scope > [role='heading']${nativeChoice ? ", :scope > p" : ""}`
       );
       let nearest = null;
-      // 0x04 is Node.compareDocumentPosition's FOLLOWING bit (standard,
-      // stable value) — inlined here rather than read off a module-scope
-      // constant. evaluateAll serializes only collectControls's own source
-      // to run in the browser, so a reference to anything declared outside
-      // it (a helper OR a constant, however small) comes back `undefined`
-      // there: this exact mistake, just with a NAMED module-scope constant
-      // instead of a literal, previously threw ReferenceError on every real
-      // ATS page and is the reason this rule gets called out so bluntly.
       for (const candidate of candidates) {
+        if (nativeChoice && candidate.querySelector("input[type='radio']")) {
+          continue;
+        }
         // querySelectorAll returns matches in document order, so the last
         // candidate that still precedes `el` is the nearest preceding one.
-        if (candidate.compareDocumentPosition(el) & 0x04) {
+        if (
+          isVisible(candidate) &&
+          candidate.compareDocumentPosition(el) & DOCUMENT_POSITION_FOLLOWING
+        ) {
           nearest = candidate;
         }
       }
       if (nearest?.innerText?.trim()) return nearest.innerText.trim();
+      if (nativeChoice && node.tagName === "FORM") break;
       node = node.parentElement;
       depth += 1;
     }
     return null;
+  }
+
+  const choiceGroupIds = new Map();
+  let choiceGroupCounter = 0;
+  function choiceGroupId(el, semanticRoot) {
+    const name = String(el.getAttribute("name") || "").trim();
+    const scope = name ? el.form || el.getRootNode() : semanticRoot;
+    if (!scope) return null;
+    const scopeKey = name ? `name:${name}` : "semantic-root";
+    let scopedIds = choiceGroupIds.get(scope);
+    if (!scopedIds) {
+      scopedIds = new Map();
+      choiceGroupIds.set(scope, scopedIds);
+    }
+    if (!scopedIds.has(scopeKey)) {
+      choiceGroupCounter += 1;
+      scopedIds.set(scopeKey, `radio-group-${choiceGroupCounter}`);
+    }
+    return scopedIds.get(scopeKey);
   }
 
   const controls = [];
@@ -208,13 +229,28 @@ export function collectControls(elements) {
     // regardless — that hidden input is often the only reliable upload target.
     if (!isFileInput && !isVisible(el)) return;
     const role = roleOf(el);
+    const isNativeRadio =
+      role === "radio" &&
+      el.tagName === "INPUT" &&
+      (el.getAttribute("type") || "").toLowerCase() === "radio";
+    const choiceRoot = isNativeRadio
+      ? el.closest("fieldset") || el.closest("[role='radiogroup']")
+      : null;
+    const choiceGroup = isNativeRadio ? choiceGroupId(el, choiceRoot) : null;
     controls.push({
       index,
       role,
       name: accessibleName(el),
       required: el.required === true || el.getAttribute("aria-required") === "true",
       fileInput: isFileInput,
-      groupLabel: role === "button" ? nearestGroupLabel(el) : null,
+      groupLabel:
+        role === "button"
+          ? nearestGroupLabel(el)
+          : isNativeRadio
+            ? nearestGroupLabel(el, { nativeChoice: true })
+            : null,
+      choiceGroup,
+      checked: isNativeRadio && el.checked === true,
     });
   });
   return controls;
@@ -300,6 +336,34 @@ function buildUploadTreeLines(controlsWithRef) {
     );
   }
   return lines;
+}
+
+function foldNativeRadioGroups(controlsWithRef, refs) {
+  const groups = new Map();
+  for (const entry of controlsWithRef) {
+    const { control } = entry;
+    if (control.role !== "radio" || !control.choiceGroup) continue;
+    const key = control.choiceGroup;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(entry);
+  }
+
+  for (const entries of groups.values()) {
+    if (entries.length < 2) continue;
+    if (entries.some(({ control }) => !control.groupLabel)) continue;
+    const labels = new Set(entries.map(({ control }) => control.groupLabel));
+    if (labels.size !== 1) continue;
+    const [{ control: firstControl, ref: firstRef }] = entries;
+    refs[firstRef] = {
+      role: "radio-group",
+      name: firstControl.groupLabel,
+      required: entries.some(({ control }) => control.required),
+      options: entries.map(({ control, ref }) => ({ label: control.name, ref })),
+      stateKnown: true,
+      value: entries.find(({ control }) => control.checked)?.control.name || "",
+    };
+    for (const { ref } of entries.slice(1)) refs[ref].field = false;
+  }
 }
 
 // Case/whitespace-insensitive comparison key for matching a target value
@@ -453,6 +517,7 @@ export function createPlaywrightOps({
   launchImpl = defaultLaunch,
   profileDir,
   headless = false,
+  channel,
 } = {}) {
   let contextPromise = null;
   const pages = new Map(); // pageId -> Page, Map iteration order = LRU order (oldest first)
@@ -466,10 +531,12 @@ export function createPlaywrightOps({
       // openTab retries the launch instead of replaying a stale failure (a
       // transient profile lock or crash would otherwise permanently disable
       // this provider until process restart).
-      contextPromise = launchImpl({ profileDir, headless }).catch((error) => {
-        contextPromise = null;
-        throw error;
-      });
+      contextPromise = launchImpl({ profileDir, headless, ...(channel ? { channel } : {}) }).catch(
+        (error) => {
+          contextPromise = null;
+          throw error;
+        }
+      );
     }
     return contextPromise;
   }
@@ -543,6 +610,10 @@ export function createPlaywrightOps({
       return { pageId };
     },
 
+    async focusTab({ pageId }) {
+      await page(pageId).bringToFront();
+    },
+
     async snapshot({ pageId }) {
       const target = page(pageId);
       const container = target.locator(CONTROL_SELECTOR);
@@ -573,6 +644,7 @@ export function createPlaywrightOps({
         });
         refs[ref] = { role: control.role, name: control.name, required: Boolean(control.required) };
       }
+      foldNativeRadioGroups(controlsWithRef, refs);
       latestRefs.set(pageId, refMap);
 
       let bodyText = "";

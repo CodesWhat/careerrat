@@ -103,13 +103,13 @@ Keep additive + optional so existing tracker.json + demo validate clean.
 
 ## 5. `candidate/form-defaults.yml` (+ its schema/example)
 
-Ensure these exist (add if absent): `auto_submit` (boolean, default **false**),
-`expected_base` (number — mirrors profile.compensation.expected_base for the form
+Ensure these exist (add if absent): `expected_base` (number — mirrors
+profile.compensation.expected_base for the form
 field), `current_employer` (string), `current_title` (string), `eeo_default`
 (string), `screening_answers` (map of recurring custom questions to pre-reviewed
 answers), optional `confirm_current_role` / `confirm_current_disclosure` booleans,
-and the applicant URLs (`linkedin`, `github`, `portfolio`). `auto_submit` is the
-opt-in that flips apply-job from confirm-first to fill+submit.
+and the applicant URLs (`linkedin`, `github`, `portfolio`). Final submission is
+always user-controlled and has no configurable override.
 
 ---
 
@@ -123,8 +123,8 @@ These already exist — skills must stop calling them "future work":
 | Snapshot tracker state | `careerrat tracker` |
 | Tracker summary | `careerrat tracker --summary` |
 | Follow-ups due | `careerrat tracker --followups` |
-| Full sourced sweep | `npm run scan:sourced -- --write --intake --summary --verify` |
-| Targeted company sweep | `npm run scan:sourced -- --company "<Company>" --write --intake --summary --verify` |
+| Full sourced sweep | `npm run scan:sourced -- --write --summary --verify` |
+| Targeted company sweep | `npm run scan:sourced -- --company "<Company>" --write --summary --verify` |
 | Incremental delta | `npm run delta:sourced -- --source <provider> --repo-new-only --write` |
 | Tracker integrity | `npm run verify:tracker` |
 | Outcome analysis | `node scripts/analyze-outcomes.mjs --summary` (and no-flag for full JSON) |
@@ -172,6 +172,7 @@ NO candidate config, behavior is unchanged (defaults), so it should still pass.
 ## 8. Example templates (don't break the demo)
 
 The demo persona (Jane Candidate, tech) stays — it's the coherent showcase. But:
+
 - Add `candidate.domain` + `candidate.toolchain` to `profile.example.yml` with a
   comment: "illustrative — replace with your field/toolchain".
 - Add the new comp fields (`expected_base`, OE range, relo) and the new

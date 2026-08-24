@@ -14,7 +14,7 @@ function manualSearchSpies() {
 }
 
 describe("runJobsPageSearch", () => {
-  it("keeps the legacy path for a terminal successful start response", async () => {
+  it("accepts a terminal successful start response", async () => {
     const state = manualSearchSpies();
     const run = { id: "run-complete", status: "completed", summary: { new: 4 } };
     const startResult = { run, requestId: "request-1" };

@@ -26,7 +26,7 @@ const CAPABILITY_LABELS = {
   status_polling: "Status polling",
   authenticated_search: "Authenticated search",
   messaging: "Messaging",
-  one_click_apply: "One-click apply",
+  authenticated_apply_preparation: "Authenticated apply preparation",
   mail_access: "Mail access",
   profile_optimize: "Profile optimization",
   profile_apply: "Profile write-back",

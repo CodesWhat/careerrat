@@ -6,8 +6,8 @@ import { defineConfig } from "vite";
 // serveApp()); base:"/app/" makes every built asset URL resolve correctly
 // under that mount prefix regardless of what serves it.
 //
-// In dev, `vite` runs its own HMR server on its own port and proxies API,
-// asset, and font traffic to a SEPARATELY-running `tracker-dev` instance rather than
+// In dev, `vite` runs its own HMR server on its own port and proxies API and
+// root asset traffic to a SEPARATELY-running `tracker-dev` instance rather than
 // re-implementing any of that server's behavior — see apps/web/README.md for
 // the two-process loop. This covers both SSE shapes already in this codebase
 // (GET EventSource streams and hand-parsed POST streams): Vite's dev proxy
@@ -66,7 +66,6 @@ export default defineConfig({
     proxy: {
       "/api": PROXY,
       "/assets": PROXY,
-      "/fonts": PROXY,
     },
   },
 });

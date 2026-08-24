@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import * as desktopRuntime from "../apps/desktop/desktop-runtime.mjs";
 import {
   choosePreferredPort,
   DEFAULT_PACKAGED_PORT,
@@ -11,6 +12,7 @@ import {
   resolveDesktopRuntimePaths,
 } from "../apps/desktop/desktop-runtime.mjs";
 import { verifyDesktopRelease } from "../apps/desktop/release-verification.mjs";
+import { verifyPackagedSmoke } from "../apps/desktop/scripts/verify-packaged.mjs";
 import { loadLocalAiEnv, writeLocalAiKey } from "../src/core/ai/ai-env.mjs";
 import { closeAll, dbFilePath, openDb } from "../src/core/db/connection.mjs";
 import { ALL_MIGRATIONS } from "../src/core/db/migrations.mjs";
@@ -28,6 +30,28 @@ afterEach(() => {
 });
 
 describe("desktop runtime path resolution", () => {
+  it("loads smoke-only browser automation from the staged runtime in dev and packaged runtime in releases", () => {
+    assert.equal(typeof desktopRuntime.resolveDesktopSmokeEngineRoot, "function");
+
+    const desktopDir = join("checkout", "apps", "desktop");
+    assert.equal(
+      desktopRuntime.resolveDesktopSmokeEngineRoot({
+        isPackaged: false,
+        desktopDir,
+        repoRoot: join("checkout"),
+      }),
+      join(desktopDir, "staging", "careerrat")
+    );
+    assert.equal(
+      desktopRuntime.resolveDesktopSmokeEngineRoot({
+        isPackaged: true,
+        desktopDir,
+        repoRoot: join("CareerRat.app", "Contents", "Resources", "careerrat"),
+      }),
+      join("CareerRat.app", "Contents", "Resources", "careerrat")
+    );
+  });
+
   it("resolves packaged CAREERRAT_HOME under Electron userData and repoRoot under resources", () => {
     const root = tempRoot("careerrat-desktop-runtime-");
     try {
@@ -44,6 +68,27 @@ describe("desktop runtime path resolution", () => {
       assert.equal(runtime.careerratHome, join(userDataPath, "data"));
       assert.equal(runtime.repoRoot, join(resourcesPath, "careerrat"));
       assert.equal(runtime.careerratHome.startsWith(resourcesPath), false);
+    } finally {
+      cleanup(root);
+    }
+  });
+
+  it("uses an explicit packaged smoke home instead of the real Electron profile", () => {
+    const root = tempRoot("careerrat-desktop-smoke-home-");
+    try {
+      const smokeHome = join(root, "isolated-smoke-data");
+      const resourcesPath = join(root, "CareerRat.app", "Contents", "Resources");
+
+      const runtime = resolveDesktopRuntimePaths({
+        isPackaged: true,
+        userDataPath: join(root, "real-user-data"),
+        resourcesPath,
+        appDir: join(root, "checkout", "apps", "desktop"),
+        careerratHomeOverride: smokeHome,
+      });
+
+      assert.equal(runtime.careerratHome, smokeHome);
+      assert.equal(runtime.repoRoot, join(resourcesPath, "careerrat"));
     } finally {
       cleanup(root);
     }
@@ -188,18 +233,18 @@ describe("desktop external URL decisions", () => {
     assert.deepEqual(
       decideExternalOpen({
         baseUrl: "http://127.0.0.1:61234",
-        target: "http://127.0.0.1:61234/app/onboarding",
+        target: "http://127.0.0.1:61234/app/settings",
       }),
       {
         action: "ignore",
         reason: "same-origin",
-        url: "http://127.0.0.1:61234/app/onboarding",
+        url: "http://127.0.0.1:61234/app/settings",
       }
     );
   });
 
   it("keeps every same-origin path in-window, including neighboring /app routes", () => {
-    for (const path of ["/app", "/app/onboarding"]) {
+    for (const path of ["/app", "/app/settings"]) {
       assert.deepEqual(
         decideExternalOpen({
           baseUrl: "http://127.0.0.1:61234",
@@ -328,5 +373,36 @@ describe("desktop release verification", () => {
     assert.match(result.summary, /APPLE_API_KEY|APPLE_ID|APPLE_KEYCHAIN_PROFILE/);
     assert.match(result.summary, /APPLE_API_ISSUER/);
     assert.doesNotMatch(result.summary, /APPLE_API_KEY_ISSUER/);
+  });
+
+  it("requires the exact signed package smoke to report success", () => {
+    const calls = [];
+    const output = verifyPackagedSmoke({
+      appPath: "/tmp/CareerRat.app",
+      dataDir: "/tmp/careerrat-smoke-data",
+      run(command, args, options) {
+        calls.push({ command, args, options });
+        return { status: 0, stdout: "SMOKE OK http://127.0.0.1:7777\n", stderr: "" };
+      },
+    });
+
+    assert.match(output, /SMOKE OK/);
+    assert.deepEqual(calls[0].args, ["--smoke"]);
+    assert.match(calls[0].command, /CareerRat\.app\/Contents\/MacOS\/CareerRat$/);
+    assert.equal(calls[0].options.env.CAREERRAT_HOME, "/tmp/careerrat-smoke-data");
+  });
+
+  it("rejects a packaged process that exits cleanly without completing its smoke", () => {
+    assert.throws(
+      () =>
+        verifyPackagedSmoke({
+          appPath: "/tmp/CareerRat.app",
+          dataDir: "/tmp/careerrat-smoke-data",
+          run() {
+            return { status: 0, stdout: "", stderr: "" };
+          },
+        }),
+      /did not report success/i
+    );
   });
 });

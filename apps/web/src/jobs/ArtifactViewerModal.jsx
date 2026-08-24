@@ -116,6 +116,8 @@ export function ArtifactViewerModal({ title, artifact, onClose }) {
               // biome-ignore lint/security/noDangerouslySetInnerHtml: trusted server-rendered artifact markdown, not user input
               dangerouslySetInnerHTML={{ __html: artifact.html }}
             />
+          ) : artifact.text ? (
+            <pre className="packet-viewer__markdown packet-viewer__plain">{artifact.text}</pre>
           ) : (
             <p className="field__hint">Nothing to preview yet.</p>
           )}

@@ -1,25 +1,19 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
-const mainSource = readFileSync(new URL("../apps/web/src/main.jsx", import.meta.url), "utf8");
-const buildSource = readFileSync(new URL("../scripts/build-demo.mjs", import.meta.url), "utf8");
-const appCss = readFileSync(new URL("../apps/web/src/styles/app.css", import.meta.url), "utf8");
+const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
-test("the fictional static preview is explicitly public and contains no client-side password gate", () => {
-  const shippedSources = `${mainSource}\n${buildSource}\n${appCss}`;
-  assert.doesNotMatch(
-    shippedSources,
-    /PasswordGate|PREVIEW_PASSWORD|preview-unlocked|Enter password|Wrong password/i
-  );
-  assert.match(buildSource, /public V3 (?:design|product) preview/i);
-  assert.match(buildSource, /fictional data/i);
+test("the chat-first product has no retired static-preview build path", () => {
+  assert.equal(existsSync(new URL("../scripts/build-demo.mjs", import.meta.url)), false);
+  assert.equal(existsSync(new URL("../scripts/deploy-demo.mjs", import.meta.url)), false);
+  assert.equal(existsSync(new URL("../scripts/dns-demo-record.sh", import.meta.url)), false);
+  assert.equal(existsSync(new URL("../scripts/rebase-demo-dates.mjs", import.meta.url)), false);
+  assert.equal(Object.hasOwn(packageJson.scripts, "build:demo"), false);
+  assert.equal(Object.hasOwn(packageJson.scripts, "deploy:demo"), false);
 });
 
-test("the demo root is built from the supported React preview, not retired tracker HTML", () => {
-  assert.doesNotMatch(buildSource, /tracker\.html|dashboard-data\.js/);
-  assert.doesNotMatch(buildSource, /allow-tailwind-cdn/);
-  assert.match(buildSource, /VITE_BASE_PATH:\s*"\/"/);
-  assert.match(buildSource, /VITE_ROUTER_BASENAME:\s*"\/"/);
-  assert.match(buildSource, /VITE_STATIC_PREVIEW:\s*"true"/);
+test("no source script can re-enable the removed static-preview environment", () => {
+  const packageSource = JSON.stringify(packageJson);
+  assert.doesNotMatch(packageSource, /VITE_STATIC_PREVIEW|design-v3/);
 });

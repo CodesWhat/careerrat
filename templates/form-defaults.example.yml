@@ -12,4 +12,3 @@ screening_answers: {}
 # Set true only if you want the agent to pause before filling configured
 # current_employer/current_title values on every application.
 confirm_current_role: false
-auto_submit: false

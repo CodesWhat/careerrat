@@ -1,13 +1,11 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, statSync, watch } from "node:fs";
-// CareerRat tracker dev server — promoted (Productization Phase 0, P0-2) from a
-// live-reloading dashboard preview into the embedded app server: /app is the
-// product shell serving the React SPA and its local APIs. The legacy
-// static-HTML dashboard and its compatibility pages have been retired.
+// CareerRat app server: /app is the sole product shell, serving the React SPA
+// and its local APIs.
 //
 // Usage:
-//   careerrat tracker-dev                 Serve http://localhost:7777 with live reload
+//   careerrat tracker-dev                 Serve http://localhost:7777 with live data updates
 //   careerrat tracker-dev --port 8080  Pick a port (or CAREERRAT_DEV_PORT=8080)
 //   careerrat tracker-dev --open       Best-effort open the page in your browser
 //   careerrat tracker-dev --help
@@ -16,23 +14,18 @@ import { existsSync, readFileSync, statSync, watch } from "node:fs";
 // promoted to the app server; `tracker:dev` stays for the dashboard-preview name.)
 //
 // Zero runtime deps: node:http + node:fs.watch + Server-Sent Events. Watches
-//   - workspace/tracker.json        (edit the data → page refreshes + tracker-update SSE)
-//   - workspace/activity.jsonl      (edit the feed → activity-update SSE)
-//   - src/core/tracker/*            (edit the dashboard code → page refreshes)
-// and on a tracker.json/activity.jsonl change re-renders via the canonical
-// `tracker.mjs` CLI in a child process (so the preview can never drift from
-// `careerrat tracker`, and every render picks up fresh modules), then pushes a
-// reload to the open page.
+// workspace/tracker.json and workspace/activity.jsonl, then emits typed SSE
+// events so the React shell reloads canonical data without rebuilding HTML.
 //
-// The pure, risk-bearing helpers (asset traversal guard, MIME, snippet
-// injection, port parsing) live in src/core/tracker/dev-server.mjs and are
-// unit-tested there. This file is the I/O glue (http, watch, child render).
+// The pure, risk-bearing helpers (asset traversal guard, MIME, port parsing)
+// live in src/core/tracker/dev-server.mjs and are unit-tested there. This file
+// is the I/O glue for HTTP and file watching.
 //
-// createDevServer() below is a pure factory — no listen, no initial render, no
+// createDevServer() below is a pure factory — no listen and no fs.watch
 // fs.watch — so tests (and the embedded-runtime work in P0-4, which mounts new
 // routes via the returned `addRoute`) can construct one against an isolated
-// repoRoot and drive it directly. main() is the only caller that also renders,
-// watches, and listens, and only runs when this file is the entry script.
+// repoRoot and drive it directly. main() is the only caller that also watches
+// and listens, and only runs when this file is the entry script.
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -41,20 +34,9 @@ import { loadLocalAiEnv } from "../core/ai/ai-env.mjs";
 import { createChatRuntime } from "../core/ai/chat-runtime.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
 import { createConfiguredApplyExecutor } from "../core/apply/apply-executor-factory.mjs";
-import { reconcileOrphanedLaneCIntakeItems } from "../core/db/verbs.mjs";
-import { CHAT_PAGE_HTML } from "../core/onboarding/chat-page.mjs";
-import { displayPath, resolveUserPaths, userPath } from "../core/paths/workspace.mjs";
-import {
-  buildContentSecurityPolicy,
-  inlineScriptsFromHtml,
-  securityHeaders,
-} from "../core/security/browser-policy.mjs";
-import {
-  LIVERELOAD_SNIPPET,
-  mimeFor,
-  resolvePort,
-  safeAssetPath,
-} from "../core/tracker/dev-server.mjs";
+import { resolveUserPaths } from "../core/paths/workspace.mjs";
+import { securityHeaders } from "../core/security/browser-policy.mjs";
+import { mimeFor, resolvePort, safeAssetPath } from "../core/tracker/dev-server.mjs";
 import {
   createLocalRequestSecurity,
   resolveTrackerBindHost,
@@ -70,6 +52,7 @@ import {
   mountBoardsRoutes,
   setSearchSourceEnabled,
 } from "./boards-route.mjs";
+import { mountChatFirstRoutes } from "./chat-first-route.mjs";
 import { mountChatRoute } from "./chat-route.mjs";
 import { mountDashboardRoutes } from "./dashboard-route.mjs";
 import { mountDataRoutes } from "./data-route.mjs";
@@ -88,16 +71,10 @@ import { mountSkillRunRoute } from "./skill-run-route.mjs";
 import { mountSourcingRoutes } from "./sourcing-route.mjs";
 import { mountTrackOutcomeRoutes } from "./track-outcome-route.mjs";
 import { mountWorkspaceAgentRoutes } from "./workspace-agent-route.mjs";
+import { mountWorkspaceExportRoutes } from "./workspace-export-route.mjs";
 
 const DEFAULT_ROOT = join(fileURLToPath(new URL("../..", import.meta.url)));
-const LOCAL_BROWSER_SECURITY_HEADERS = securityHeaders({
-  csp: buildContentSecurityPolicy({
-    inlineScripts: [
-      ...inlineScriptsFromHtml(CHAT_PAGE_HTML),
-      ...inlineScriptsFromHtml(LIVERELOAD_SNIPPET),
-    ],
-  }),
-});
+const LOCAL_BROWSER_SECURITY_HEADERS = securityHeaders();
 
 // The running package's own version is a property of the CODE, not of whichever
 // workspace/data root a given createDevServer() instance points at — read it
@@ -189,12 +166,8 @@ export function createDevServer({
 
   const pathCtx = { repoRoot };
   const userPaths = resolveUserPaths(pathCtx);
-  const TRACKER_CLI = join(repoRoot, "src/cli/tracker.mjs");
   const WORKSPACE_DIR = userPaths.workspaceDir;
-  const CANDIDATE_DIR = userPaths.candidateDir;
-  const TRACKER_SRC_DIR = join(repoRoot, "src/core/tracker");
   const ASSETS_DIR = join(repoRoot, "assets");
-  const FONTS_DIR = join(repoRoot, "assets", "fonts");
   // M7 — the Vite + React app shell's built output (see apps/web/). Gitignored,
   // built via `npm run app:build` (or the root `prepack` script before
   // npm pack/publish), shipped via package.json#files["apps/web/dist"].
@@ -202,69 +175,11 @@ export function createDevServer({
   const APP_INDEX_HTML = join(APP_DIST_DIR, "index.html");
   const requestSecurity = createLocalRequestSecurity({ env });
 
-  // SSE clients subscribed to reload/tracker-update/activity-update events.
+  // SSE clients subscribed to tracker-update/activity-update events.
   const clients = new Set();
   const watchers = [];
 
-  // -------------------------------------------------------------------------
-  // Render: shell out to the canonical CLI so the dev preview is byte-identical
-  // to `careerrat tracker` and always loads fresh modules.
-
-  let rendering = false;
-  let renderQueued = false;
-
-  function renderOnce() {
-    return new Promise((resolve) => {
-      const child = spawn(process.execPath, [TRACKER_CLI], {
-        cwd: repoRoot,
-        // No-op under plain node (there's no such env var to worry about).
-        // Under an Electron host (see apps/desktop/main.mjs), process.execPath
-        // IS the Electron binary — this makes THIS ONE child run as headless
-        // node instead of booting a second GUI instance. Scoped to this one
-        // spawn's env, not the host process's own env: Chromium's own helper
-        // processes (GPU/network/renderer) inherit the host's env too, and
-        // booting THEM as node instead of Chromium helpers breaks rendering
-        // (see the trap-1 comment in apps/desktop/main.mjs for the incident).
-        env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
-      });
-      let stderr = "";
-      child.stderr.on("data", (d) => (stderr += d));
-      child.on("error", (err) => resolve({ ok: false, error: err.message }));
-      child.on("close", (code) =>
-        resolve(code === 0 ? { ok: true } : { ok: false, error: stderr.trim() || `exit ${code}` })
-      );
-    });
-  }
-
-  // Re-render, coalescing overlapping requests: if a change lands mid-render we
-  // run exactly one more pass afterward rather than piling up child processes.
-  async function rerenderAndReload(reason) {
-    if (rendering) {
-      renderQueued = true;
-      return;
-    }
-    rendering = true;
-    const result = await renderOnce();
-    rendering = false;
-    if (result.ok) {
-      log(
-        `rendered (${reason}) → reloading ${clients.size} client${clients.size === 1 ? "" : "s"}`
-      );
-      broadcastEvent("reload");
-    } else {
-      log(`render failed (${reason}): ${result.error}`);
-    }
-    if (renderQueued) {
-      renderQueued = false;
-      rerenderAndReload("coalesced");
-    }
-  }
-
-  // Named SSE event broadcast. "reload" (post re-render) is what the injected
-  // livereload snippet listens for; "tracker-update"/"activity-update" fire
-  // immediately on the raw watch trigger, independent of render, for API
-  // consumers (e.g. the embedded runtime) that care about data changes rather
-  // than the HTML preview.
+  // Named SSE events fire immediately on canonical data changes.
   function broadcastEvent(name) {
     const payload = stamp();
     for (const res of clients) {
@@ -325,12 +240,8 @@ export function createDevServer({
   // saved search" affordance have no server surface without it.
   mountBoardsRoutes({ addRoute, repoRoot, env });
 
-  // M2 of the paid-POC journey — the conversational (multi-turn) skill
-  // runtime's HTTP surface (src/cli/chat-route.mjs) and its byte-static page
-  // (src/core/onboarding/chat-page.mjs), mounted at GET /chat. This is what
-  // runs ingest-profile's interview from the browser instead of a terminal
-  // session — see chat-runtime.mjs's header comment for the long-lived
-  // query()-with-streaming-input design decision.
+  // Conversational (multi-turn) skill runtime used by the chat-first shell.
+  // The old byte-static /chat page is retired; /app is the only product UI.
   mountChatRoute({ addRoute, repoRoot, chatRuntime, env });
   mountWorkspaceAgentRoutes({
     addRoute,
@@ -340,15 +251,13 @@ export function createDevServer({
     executeIntentImpl: workspaceAgentRuntime.executeIntent,
     captureIntakeImpl: workspaceAgentRuntime.captureIntake,
   });
+  mountChatFirstRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
+  mountWorkspaceExportRoutes({ addRoute, repoRoot, env });
   // App-facing supervised discovery pipeline. Shares the same chatRuntime as
   // /api/chat/* so Quick Start / Continue Discovery can start or reconnect to
-  // exactly one visible research-boards/discover-companies/search-jobs session.
+  // exactly one visible research-boards session. Company discovery stays on
+  // the reviewed app-owned proposal path; search-jobs uses its dedicated route.
   mountDiscoveryRoutes({ addRoute, repoRoot, env, chatRuntime });
-
-  addRoute("GET", "/chat", (_req, res) => {
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
-    res.end(CHAT_PAGE_HTML);
-  });
 
   // M3 of the paid-POC journey — the /search surface over the existing
   // deterministic (non-AI) ATS-board sweep. Its HTTP surface (run/read the
@@ -390,14 +299,12 @@ export function createDevServer({
   // M9 — Universal Intake's HTTP surface (src/cli/intake-route.mjs): the
   // paste/URL drop zone (POST /api/intake), its confirm-first gate
   // (POST /api/intake/confirm), and the read/dismiss/re-classify routes
-  // alongside it. New interactive dispatches go through workspaceAgentRuntime
-  // so buttons preserve workspace-main context; chatRuntime remains only for
-  // legacy Lane-C intake rows created before that contract.
+  // alongside it. Interactive dispatches go through workspaceAgentRuntime so
+  // buttons preserve workspace-main context.
   mountIntakeRoutes({
     addRoute,
     repoRoot,
     env,
-    chatRuntime,
     workspaceAgentRuntime,
     captureTextImpl: async ({ text, inputKind, requestedAction }) => {
       const result = await workspaceAgentRuntime.captureIntake({
@@ -408,21 +315,6 @@ export function createDevServer({
       return result.intake;
     },
   });
-
-  // M10 — boot-time Lane-C orphan reconciliation (see
-  // src/core/db/verbs/intake.mjs's reconcileOrphanedLaneCIntakeItems doc
-  // comment): chat-runtime sessions are in-memory only, so any intake item
-  // left "running" with a Lane C dispatch from a PREVIOUS process lifetime can
-  // never resolve on its own — its onClose() callback would need a session
-  // that no longer exists. Runs once, here, before the server starts
-  // accepting traffic. Best-effort: a workspace with no db yet (NO_DATABASE)
-  // or any other read/write hiccup here must never block server boot — the
-  // very next confirm/reconcile pass still has the same recovery available.
-  try {
-    reconcileOrphanedLaneCIntakeItems({ repoRoot, env });
-  } catch {
-    // best-effort only — see comment above
-  }
 
   // Idle/closed-session eviction — see chatRuntime.sweepOnce()'s own doc
   // comment. Started here (not gated behind main()'s CLI boot) so every
@@ -483,11 +375,6 @@ export function createDevServer({
       return;
     }
 
-    if (url.startsWith("/fonts/")) {
-      serveFont(url, res);
-      return;
-    }
-
     // M7 — the canonical Vite + React app shell. SPA-fallback contract: a
     // request under /app/* that names a real built file (has an extension —
     // hashed assets like /app/assets/index-abc123.js) is served from
@@ -512,7 +399,6 @@ export function createDevServer({
   function buildNotFoundText() {
     return (
       "Not found. Product app route: /app, /app/*.\n" +
-      "Explicit user-selected chat page: /chat.\n" +
       "Local app APIs include /api/health, /api/runtime/config, /api/skill/run, " +
       "/api/onboard/state, " +
       "/api/onboard/resume, /api/onboard/profile, /api/onboard/targeting, " +
@@ -525,7 +411,7 @@ export function createDevServer({
       "/api/sourcing/runs/latest, /api/sourcing/first-run/start, " +
       "/api/sourcing/search/start, " +
       "/api/packet/list, /api/packet?id=:id, " +
-      "/api/data/*, /api/deep-ingest/*, /api/intake*, /assets/*, /fonts/*, and /__livereload."
+      "/api/data/*, /api/deep-ingest/*, /api/intake*, /assets/*, and /__livereload."
     );
   }
 
@@ -549,41 +435,20 @@ export function createDevServer({
     res.end(body);
   }
 
-  function serveFont(url, res) {
-    const resolved = safeAssetPath(FONTS_DIR, url, "/fonts/");
-    if (!resolved.ok) {
-      res.writeHead(resolved.status, { "Content-Type": "text/plain; charset=utf-8" });
-      res.end(resolved.status === 400 ? "Bad request" : "Forbidden");
-      return;
-    }
-    let body;
-    try {
-      if (!statSync(resolved.full).isFile()) throw new Error("not a file");
-      body = readFileSync(resolved.full);
-    } catch {
-      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-      res.end("Font not found");
-      return;
-    }
-    res.writeHead(200, { "Content-Type": mimeFor(resolved.full), "Cache-Control": "no-cache" });
-    res.end(body);
-  }
-
   // M7 — serve apps/web/dist at /app/*, reusing the exact safeAssetPath()
-  // traversal guard serveAsset()/serveFont() already use above, parameterized
+  // traversal guard serveAsset() uses above, parameterized
   // with the "/app/" prefix. A URL segment with a file extension (hashed
   // assets: /app/assets/index-abc123.js) is resolved as a real static file;
   // anything else (client-side routes: /app/settings) falls back to the
   // built index.html — the standard SPA-fallback contract.
   function serveApp(url, res) {
     if (!existsSync(APP_INDEX_HTML)) {
-      res.writeHead(503, { "Content-Type": "text/html; charset=utf-8" });
+      res.writeHead(503, {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-store",
+      });
       res.end(
-        placeholderPage(
-          "App not built",
-          "apps/web hasn't been built yet. Run <code>npm run app:build</code> " +
-            "(or <code>npm run build --workspace apps/web</code>), then reload."
-        )
+        "CareerRat app is not built. Run npm run app:build (or npm run build --workspace apps/web), then reload.\n"
       );
       return;
     }
@@ -633,52 +498,20 @@ export function createDevServer({
     res.end(body);
   }
 
-  function placeholderPage(title, body) {
-    return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head>
-<body style="font:15px system-ui;padding:3rem;color:#333">
-<h1>${title}</h1><p>${body}</p>${LIVERELOAD_SNIPPET}</body></html>`;
-  }
-
   // -------------------------------------------------------------------------
-  // File watching → debounced re-render, plus immediate named SSE events
-
-  let debounce = null;
-  function scheduleRerender(reason) {
-    clearTimeout(debounce);
-    debounce = setTimeout(() => rerenderAndReload(reason), 120);
-  }
+  // File watching → immediate named SSE events
 
   function startWatching() {
-    // Watch the data file by watching its directory and filtering the filename —
-    // editors rename-on-save, which a direct file watch can miss. Ignore our own
-    // tracker.html writes so re-rendering never triggers another re-render.
+    // Watch the data file by watching its directory and filtering the filename;
+    // editors rename-on-save, which a direct file watch can miss.
     if (existsSync(WORKSPACE_DIR)) {
       watchers.push(
         watch(WORKSPACE_DIR, (_event, filename) => {
           if (filename === "tracker.json") {
             broadcastEvent("tracker-update");
-            scheduleRerender(filename);
           } else if (filename === "activity.jsonl") {
             broadcastEvent("activity-update");
-            scheduleRerender(filename);
           }
-        })
-      );
-    }
-    // Watch the dashboard source so editing the UI hot-reloads too.
-    if (existsSync(TRACKER_SRC_DIR)) {
-      watchers.push(
-        watch(TRACKER_SRC_DIR, { recursive: true }, (_event, filename) => {
-          if (/\.(mjs|js|html|css)$/.test(filename || "")) {
-            scheduleRerender(`src/core/tracker/${filename}`);
-          }
-        })
-      );
-    }
-    if (existsSync(CANDIDATE_DIR)) {
-      watchers.push(
-        watch(CANDIDATE_DIR, (_event, filename) => {
-          if (filename === "modes.yml") scheduleRerender("candidate/modes.yml");
         })
       );
     }
@@ -694,7 +527,6 @@ export function createDevServer({
         /* ignore */
       }
     }
-    clearTimeout(debounce);
   }
 
   // End every open SSE connection — used on shutdown and in test teardown.
@@ -713,7 +545,6 @@ export function createDevServer({
     server,
     pathCtx,
     addRoute,
-    renderOnce,
     startWatching,
     stopWatching,
     closeClients,
@@ -735,19 +566,6 @@ async function main() {
   const port = resolvePort(args, process.env);
 
   const dev = createDevServer({ repoRoot: DEFAULT_ROOT });
-  const pathCtx = dev.pathCtx;
-
-  if (existsSync(userPath(pathCtx, "workspace/tracker.json"))) {
-    log("initial debug/export render…");
-    const first = await dev.renderOnce();
-    if (!first.ok) {
-      log(`initial debug/export render failed: ${first.error}`);
-    }
-  } else {
-    log(
-      `No ${displayPath(pathCtx, "workspace/tracker.json")} yet; skipping debug/export render. /app and DB APIs will still serve.`
-    );
-  }
 
   dev.startWatching();
 
@@ -758,9 +576,7 @@ async function main() {
   dev.server.listen(port, host, () => {
     const url = `http://localhost:${port}`;
     log(`serving ${url}`);
-    log(
-      `watching ${displayPath(pathCtx, "workspace/tracker.json")}, ${displayPath(pathCtx, "candidate/modes.yml")}, and src/core/tracker/.`
-    );
+    log("watching workspace/tracker.json and workspace/activity.jsonl for app data updates.");
     log("Ctrl-C to stop.");
     if (wantOpen) openBrowser(url);
   });
@@ -809,15 +625,12 @@ function printHelp() {
   process.stdout.write(`careerrat tracker-dev: the embedded /app server (React product shell + local APIs)
 
 Usage:
-  careerrat tracker-dev                 Serve http://localhost:7777 with live reload
+  careerrat tracker-dev                 Serve http://localhost:7777 with live data updates
   careerrat tracker-dev --port 8080  Pick a port (or set CAREERRAT_DEV_PORT)
   careerrat tracker-dev --open       Open the page in your browser on start
 
 Routes:
   GET  /app, /app/*                     Canonical Vite + React product shell (M7): build via \`npm run app:build\`
-
-Explicit user-selected chat page:
-  GET  /chat                            Conversational ingest-profile interview, turn-by-turn (M2)
 
 Local app APIs:
   GET  /api/health                      { ok, version }
@@ -857,6 +670,10 @@ Local app APIs:
   GET  /api/data/communications         Communication thread rows
   GET  /api/data/activity               Activity events, newest-first (?limit=)
   GET  /api/data/dashboard              Server-derived dashboard view model (M10, 409 if no db yet)
+  GET  /api/data/export-everything      Consistent private workspace ZIP export
+  POST /api/chat-first/job-thread/*     Pin, archive, or append to durable job conversations
+  POST /api/chat-first/missions/*       Create, run, pause, or advance durable missions
+  POST /api/chat-first/mock/*           Start, record, coach, or end mock interview sessions
   POST /api/data/app/status             appSetStatus verb
   POST /api/data/app/fields             appSetFields verb
   POST /api/data/app/interview          appScheduleInterview verb
@@ -871,12 +688,11 @@ Local app APIs:
   POST /api/intake/classify             Re-run classification on an intake item
   POST /api/intake/confirm              Confirm-first gate: executes the item's resolved dispatch lane
   POST /api/intake/dismiss              Dismiss an intake item (never deletes the row)
-  GET  /assets/*, /fonts/*              Static assets
-  GET  /__livereload                    Server-Sent Events: reload, tracker-update, activity-update
+  GET  /assets/*                        Static favicon and brand assets
+  GET  /__livereload                    Server-Sent Events: tracker-update, activity-update
 
-Watches workspace/tracker.json, workspace/activity.jsonl, candidate/modes.yml, and
-src/core/tracker/*.mjs; re-renders via the canonical tracker CLI and pushes a reload
-over Server-Sent Events. Zero deps.
+Watches workspace/tracker.json and workspace/activity.jsonl, then emits typed data
+events over Server-Sent Events. Zero deps.
 `);
 }
 

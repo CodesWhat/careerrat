@@ -177,25 +177,42 @@ test("GET /app/assets/main-abc123.js serves the real hashed asset with a JS cont
   }
 });
 
-test("GET /app serves a 503 placeholder (never a raw 404) when apps/web/dist doesn't exist yet", async () => {
+test("GET /app serves a semantic plain-text 503 when apps/web/dist doesn't exist yet", async () => {
   const repoRoot = tempRepo();
   const dev = await bootServer(repoRoot);
   try {
     const res = await fetch(`${baseUrl(dev)}/app`);
     assert.equal(res.status, 503);
+    assert.match(res.headers.get("content-type") || "", /text\/plain/);
     const body = await res.text();
     assert.match(body, /app:build/);
+    assert.doesNotMatch(body, /<html|<style|style=/i);
   } finally {
     teardown(dev, repoRoot);
   }
 });
 
-test("legacy routes are unaffected: GET /api/health still 200 alongside /app", async () => {
-  // Was "... and GET /onboard still 200 ..." — GET /onboard was itself
-  // intentionally removed by a85a9e96 ("retire the static-HTML dashboard and
-  // /evaluate, /answer, /packet, /search, /onboard, /tracker compat pages ...
-  // Electron only loads /app"), so its 200 check is dead alongside it. What's
-  // left worth guarding is that mounting /app didn't disturb /api/health.
+test("the app server keeps root favicon assets but does not expose the retired /fonts tree", async () => {
+  const repoRoot = tempRepo();
+  writeFakeDist(repoRoot);
+  mkdirSync(join(repoRoot, "assets/fonts"), { recursive: true });
+  writeFileSync(join(repoRoot, "assets/favicon.ico"), "favicon");
+  writeFileSync(join(repoRoot, "assets/fonts/GeistVF.woff2"), "retired-root-font");
+  const dev = await bootServer(repoRoot);
+  try {
+    const favicon = await fetch(`${baseUrl(dev)}/assets/favicon.ico`);
+    assert.equal(favicon.status, 200);
+    assert.equal(await favicon.text(), "favicon");
+
+    const font = await fetch(`${baseUrl(dev)}/fonts/GeistVF.woff2`);
+    assert.equal(font.status, 404);
+    assert.match(await font.text(), /Product app route: \/app/);
+  } finally {
+    teardown(dev, repoRoot);
+  }
+});
+
+test("GET /api/health remains available alongside /app", async () => {
   const repoRoot = tempRepo();
   writeFakeDist(repoRoot);
   const dev = await bootServer(repoRoot);

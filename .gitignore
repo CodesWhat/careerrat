@@ -50,10 +50,8 @@ venv/
 # Playwright MCP scratch (browser artifacts, snapshots)
 .playwright-mcp/
 
-# Agent worktrees / local agent state (the .claude/skills symlink stays tracked)
-.claude/worktrees/
-# Staged release tarballs and verification output
-.claude/skills-release-out/
+# Agent worktrees / local agent state
+.claude/
 
 # Browser-automation / Playwright / verification screenshots are SCRATCH by
 # default. They belong under workspace/captures/ (ignored below) and must never

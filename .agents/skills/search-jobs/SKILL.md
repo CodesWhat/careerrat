@@ -1,8 +1,16 @@
 ---
 name: search-jobs
 description: Run the top-of-funnel sourced sweep — scan configured sources, dedupe, check liveness, coarse-triage every new entry with fitScore/fitBucket/fitBasis, save JD bodies, write watermarks, and optionally hand top sourced roles to evaluate-job. Does not tailor, fill, or submit.
-tier_1_inputs: [targeting excluded_companies/keep/cut, profile.compensation.comp_floors, modes verdict, source watermarks, sourced-row fit flags]
-tier_2_inputs: [per-source scan results, per-role JD bodies]
+metadata:
+  tier_1_inputs:
+    - targeting excluded_companies/keep/cut
+    - profile.compensation.comp_floors
+    - modes verdict
+    - source watermarks
+    - sourced-row fit flags
+  tier_2_inputs:
+    - per-source scan results
+    - per-role JD bodies
 ---
 
 # search-jobs
@@ -84,25 +92,21 @@ that lean usage mode caused the downshift. If it returns `run`, proceed normally
 Run the full sourced sweep against all enabled sources since their `lastRunAt` watermarks:
 
 ```
-npm run scan:sourced -- --write --intake --summary --verify
+npm run scan:sourced -- --write --verify
 ```
 
 This dedupes against existing tracker sourced entries and `workspace/jobs/`, checks liveness,
 captures JD artifacts, and writes sourced rows through the canonical write path. In DB mode,
 `--write` uses DB verbs and exports the generated tracker files; agents must not hand-edit
-canonical tracker state or source YAML. In legacy mode, it writes scan snapshots, JD artifacts,
-intake, and source watermarks; any sourced-row tracker mutation still follows the Tracker Write
-Contract.
-
-It also writes:
-
-- `workspace/scan-results/sourced-<date>.json` — raw scan snapshot
-- `workspace/intake/sourced-<date>.md` — intake markdown
+canonical tracker state or source YAML. Consume the complete structured JSON result from stdout,
+especially `offers[]`: it is not presentation-truncated and carries each canonical sourced-row
+`id`, `artifacts.jd`, `fitScore`, `fitBucket`, `ruleFlags`, and `ratingReason`. The scanner does not
+generate a parallel Markdown intake queue.
 
 For a targeted rescan of a single company:
 
 ```
-npm run scan:sourced -- --company "<Company>" --write --intake --summary --verify
+npm run scan:sourced -- --company "<Company>" --write --verify
 ```
 
 Print the run summary: sources scanned, new entries, filtered, duplicates, expired, errors.
@@ -189,7 +193,7 @@ npm run delta:sourced -- --source <provider> --repo-new-only --write --baseline-
 
 ## STEP 3 — Coarse triage on every new sourced entry
 
-The scanner (STEP 1's `npm run scan:sourced`) already scored every sourced entry — `scoreSourcedOfferFromConfig` ran against `candidate/targeting.yml` and `profile.yml#compensation.minimum_base` before the intake file was ever written, and its `fitScore`/`fitBucket`/`ruleFlags`/`ratingReason` are already sitting in the intake row (the Fit, Rule Signals, and Flags columns). **Read the stored triage fields from the intake row — do not recompute `fitScore`/`fitBucket`/`ratingReason` or re-derive the scanner's own flags** (`comp-below-floor`, `excluded-company`, `comp-unposted`, `top-of-band-only`, `family-cold`) from scratch; carry them forward as-is.
+The scanner (STEP 1's `npm run scan:sourced`) already scored every sourced entry. `scoreSourcedOfferFromConfig` ran against `candidate/targeting.yml` and `profile.yml#compensation.minimum_base`, and its `fitScore`/`fitBucket`/`ruleFlags`/`ratingReason` are present in the returned offer and persisted sourced row. **Read those stored triage fields; do not recompute them or re-derive the scanner's own flags** (`comp-below-floor`, `excluded-company`, `comp-unposted`, `top-of-band-only`, `family-cold`) from scratch.
 
 For each sourced entry, still add the flags below that the scanner has no way to compute — it never reads the tracker, application limits, or learnings at scan time:
 
@@ -199,10 +203,10 @@ For each sourced entry, still add the flags below that the scanner has no way to
 Emit per-entry, starting from the stored fields and adding only the agent-derived flags:
 
 ```
-fitScore: <read from the intake row's Fit column — recompute only if the row predates a scanner change>
-fitBucket: high | med | stretch        # read from the intake row; high ≥ 85, med ≥ 65, stretch < 65 (targeting.fit_bands; default 85/65)
+fitScore: <read from the scanner result or persisted sourced row>
+fitBucket: high | med | stretch        # high ≥ 85, med ≥ 65, stretch < 65 (targeting.fit_bands; default 85/65)
 fitBasis: "triage"                     # marks as pre-read estimate; evaluate-job overwrites with "evaluated"
-ruleFlags: [<the stored flags from the intake row, plus any agent-derived flags below>]
+ruleFlags: [<the scanner's stored flags, plus any agent-derived flags below>]
 ratingReason: "<the stored one-line reason, extended with any agent-derived signal>"
 ```
 

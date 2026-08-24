@@ -1,8 +1,13 @@
 ---
 name: sync-status
 description: Read application status from ATS dashboards via the session browser, normalize each raw label to the canonical tracker vocabulary, and hand real transitions to track-outcomes — which remains the only writer of workspace/tracker.json. Opt-in, user-initiated, read-only at the portal.
-tier_1_inputs: [consent verdict, applications-to-poll list, platform scope]
-tier_2_inputs: [per-platform portal page state]
+metadata:
+  tier_1_inputs:
+    - consent verdict
+    - applications-to-poll list
+    - platform scope
+  tier_2_inputs:
+    - per-platform portal page state
 ---
 
 # sync-status

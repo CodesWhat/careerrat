@@ -254,6 +254,7 @@ describe("setupDisclosureRows", () => {
           company_preferences: {
             confirmed: true,
             industries: ["fintech"],
+            business_models: ["fintech"],
             sizes: ["large corporations"],
             examples: ["Anthropic", "OpenAI"],
           },
@@ -279,7 +280,7 @@ describe("setupDisclosureRows", () => {
       {
         key: "companies",
         label: "Company focus",
-        value: "fintech · large corporations · Examples: Anthropic, OpenAI · Broad discovery on",
+        value: "fintech · large corporations · Examples: Anthropic, OpenAI",
       },
       {
         key: "evidence",
@@ -301,7 +302,7 @@ describe("setupDisclosureRows", () => {
     ]);
   });
 
-  it("shows that broad company discovery remains on when no focus examples were named", () => {
+  it("does not invent a broad-discovery state when no focus examples were named", () => {
     const state = {
       files: [{ name: "targeting", exists: true }],
       data: { targeting: { company_preferences: { confirmed: true } } },
@@ -309,10 +310,20 @@ describe("setupDisclosureRows", () => {
     const rows = setupDisclosureRows({
       state,
     });
-    expect(rows.find((row) => row.key === "companies").value).toBe(
-      "No narrow focus · Broad discovery on"
-    );
+    expect(rows.find((row) => row.key === "companies").value).toBe("No narrow focus");
     expect(companiesDetailLine({ state })).toBe("Broad discovery · no narrow focus");
+  });
+
+  it("does not infer broad discovery from tracked company sources", () => {
+    const state = {
+      data: {
+        targeting: { tracked_companies: ["Acme"] },
+      },
+    };
+
+    expect(setupDisclosureRows({ state }).find((row) => row.key === "companies").value).toBe(
+      "Tracked sources: Acme"
+    );
   });
 
   it("uses honest fallback copy for values that were declined or not provided", () => {

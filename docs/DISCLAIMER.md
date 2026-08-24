@@ -15,12 +15,10 @@ generates drafts and fills forms on your behalf; you must review and approve
 each submission. The tool is not a party to any application and accepts no
 liability for its accuracy, completeness, or consequences.
 
-**Opt-in auto-submit.** By default CareerRat halts before final submission and
-waits for your explicit confirmation. If you enable `auto_submit` in
-`candidate/form-defaults.yml`, CareerRat may submit a form without per-submission
-confirmation. Before enabling that option, review every field in that file and
-confirm the pre-filled answers are accurate and complete — you are solely
-responsible for the content of submissions made in auto-submit mode.
+**User-controlled submission.** CareerRat may prepare application materials and
+fill supported form fields, but it halts before final submission. You review the
+prepared form and press its submit control yourself. There is no setting that
+allows CareerRat to press the final submit control.
 
 ## Terms of Service Compliance
 

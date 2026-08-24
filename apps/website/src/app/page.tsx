@@ -55,8 +55,8 @@ export default function Home() {
               CareerRat is a free Mac app you talk to. Tell it what you want,
               and it rates the postings actually worth chasing, applies with
               honest artifacts drawn from your own evidence, and tracks every
-              outcome. It thinks with the AI you already use, like Claude or
-              Codex.
+              outcome. The app runs through boundary-verified Claude Code;
+              Codex and other CLIs can drive the terminal workspace flow.
             </p>
             <div className="hero-actions reveal reveal-delay-3">
               <TrackedCtaLink
@@ -92,7 +92,7 @@ export default function Home() {
               Apple Silicon Macs, signed and notarized.
             </div>
             <div className="hero-cli-note receipt reveal reveal-delay-4">
-              Works with Claude Code · Codex · Gemini CLI · OpenCode · more
+              In-app: Claude Code 2.1.241+ · Other CLIs: terminal workflow
             </div>
           </div>
           <div className="hero-visual reveal reveal-delay-2">
@@ -367,17 +367,19 @@ export default function Home() {
               <div>
                 <div className="section-label">Bring your own AI</div>
                 <h2 className="section-h2" id="ai-h2">
-                  Works with your favorite AI.
+                  Bring the AI you already use.
                 </h2>
                 <p className="section-sub">
                   CareerRat doesn&apos;t sell an AI plan and doesn&apos;t lock
-                  you to one provider. It thinks with the AI subscription you
-                  already pay for: Claude Code, OpenAI Codex, Gemini CLI, or
-                  OpenCode. Pick one the first time you open the app, swap
-                  anytime in Settings.
+                  you to one provider. Packaged skill and chat runs currently
+                  use Claude Code 2.1.241 or newer, the adapter with a verified
+                  per-call boundary. CareerRat still detects Codex, Gemini CLI,
+                  OpenCode, and more, but keeps in-app selection disabled until
+                  they can enforce the same boundary. Those CLIs remain usable
+                  through the terminal workspace flow.
                 </p>
                 <div className="ai-chip-group">
-                  <div className="ai-chip-group-title">Supported engines</div>
+                  <div className="ai-chip-group-title">Runtime support</div>
                   <div className="ai-chips" role="list">
                     <span className="ai-chip" role="listitem">
                       <svg
@@ -392,7 +394,7 @@ export default function Home() {
                           fill="#D97757"
                         />
                       </svg>
-                      Claude Code
+                      In-app · Claude Code
                     </span>
                     <span className="ai-chip" role="listitem">
                       <svg
@@ -425,7 +427,7 @@ export default function Home() {
                           </linearGradient>
                         </defs>
                       </svg>
-                      OpenAI Codex
+                      Terminal · OpenAI Codex
                     </span>
                     <span className="ai-chip" role="listitem">
                       <svg
@@ -445,7 +447,7 @@ export default function Home() {
                           strokeWidth="1.9"
                         />
                       </svg>
-                      other supported CLIs
+                      Detected · other CLIs
                     </span>
                   </div>
                 </div>
@@ -461,7 +463,7 @@ export default function Home() {
                   </div>
                   <div className="engine-card-value">Claude Code</div>
                   <div className="engine-card-note">
-                    Detected on first launch. Swap engines anytime.
+                    Boundary verified for in-app skills and chat.
                   </div>
                 </div>
                 <p
@@ -609,8 +611,7 @@ export default function Home() {
                   <div className="prereq-label">You&apos;ll need one AI</div>
                   <ul className="prereq-list">
                     <li>
-                      CareerRat thinks with an AI helper you install once.
-                      Either one works:
+                      Choose by how you run CareerRat:
                       <ul className="prereq-sublist">
                         <li>
                           <strong style={{ color: "var(--ink)" }}>
@@ -628,7 +629,7 @@ export default function Home() {
                         </li>
                         <li style={{ marginTop: "4px" }}>
                           <strong style={{ color: "var(--ink)" }}>
-                            Codex
+                            Codex, terminal workflow only
                           </strong>{" "}
                           <code className="inline-code">
                             npm install -g @openai/codex
@@ -813,6 +814,13 @@ export default function Home() {
                   rel="noopener noreferrer"
                 >
                   License
+                </a>
+                <a
+                  href="https://github.com/CodesWhat/careerrat/blob/main/docs/CODE_SIGNING_POLICY.md"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Code signing policy
                 </a>
               </div>
             </div>

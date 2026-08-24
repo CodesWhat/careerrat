@@ -30,7 +30,6 @@ export function summarizeDispatch(dispatch) {
     return `update ${target} status to "${dispatch.params.to}"`;
   }
   if (dispatch.action === "run_skill") return `run ${dispatch.params.skill}`;
-  if (dispatch.action === "chat_skill") return `hand off to ${dispatch.params.skill}`;
   if (
     dispatch.action === "workspace_intent" &&
     dispatch.params.intentType === "communication.capture-inbound"

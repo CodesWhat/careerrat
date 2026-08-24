@@ -1,5 +1,4 @@
-// Demo-only fictional-corp logos for the seeded evil-corp fixtures. Referenced
-// by path (relative to the generated workspace/tracker.html) — the real files
+// Demo-only fictional-corp logos for the seeded evil-corp fixtures. The files
 // live in assets/logos/, normalized to a uniform 256x256 white-padded square PNG.
 // Keyed by lowercased company name; only the demo seed matches. Real workspaces
 // resolve logos the standard way (see AGENTS.md "Company logos"): an explicit
@@ -56,8 +55,8 @@ const DEMO_LOGOS = {
 // null when the company isn't a known fictional-corp fixture. The logo route
 // serves this ahead of logo.dev so the seeded roster shows its franchise mark
 // instead of a wrong real-company guess (e.g. "Buy n Large" → Disney). The map's
-// `src` is a web path relative to the rendered page; the real files live in
-// <repoRoot>/assets/logos/, so we resolve by basename off this module's location.
+// `src` retains the bundled asset filename; resolve by basename from this
+// module's location so the logo API can serve the real file.
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 export function demoLogoFilePath(company) {

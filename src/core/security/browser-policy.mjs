@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-export const STATIC_EDGE_CONTENT_SECURITY_POLICY =
+const STATIC_EDGE_CONTENT_SECURITY_POLICY =
   "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'";
 
 // The shared house PostHog ingest proxy (cookieless, memory-persisted analytics
@@ -10,7 +10,7 @@ export const STATIC_EDGE_CONTENT_SECURITY_POLICY =
 // tracker-dev) never opts in, so its connect-src stays 'self'.
 export const POSTHOG_INGEST_PROXY = "https://e.codeswhat.com";
 
-export function inlineScriptsFromHtml(html) {
+function inlineScriptsFromHtml(html) {
   const scripts = [];
   const pattern = /<script\b(?![^>]*\bsrc\s*=)[^>]*>([\s\S]*?)<\/script>/gi;
   for (const match of String(html || "").matchAll(pattern)) scripts.push(match[1]);

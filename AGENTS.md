@@ -179,15 +179,14 @@ tracker before telling the user to open the dashboard.
 - If port 7777 is in use, verify whether it is already CareerRat. If it is not,
   start with another port, for example `careerrat tracker-dev --port 7778`, and
   tell the user the actual URL.
-- After changing `workspace/tracker.json`, `candidate/`, dashboard source, or
-  other tracker-visible data, keep the dev server running so the open page hot
-  reloads. Run `careerrat tracker` when a recovery snapshot and summary are
-  needed; it no longer publishes a second dashboard.
-- **Live reload is event-driven, not a poll.** `careerrat tracker-dev` watches
-  `workspace/tracker.json` (and `activity.jsonl`, `candidate/modes.yml`,
-  `src/core/tracker/*`) with `fs.watch`, refreshes its canonical view model, and
-  pushes a Server-Sent-Events `reload` to the open page. A write to the source
-  of truth reaches the screen within ~120ms — there is no refresh timer.
+- After changing tracker-visible data, keep the app server running so the open
+  React shell receives the update. Run `careerrat tracker` when a recovery
+  snapshot and summary are needed; it no longer publishes a second dashboard.
+- **Live data updates are event-driven, not a poll.** `careerrat tracker-dev`
+  watches `workspace/tracker.json` and `workspace/activity.jsonl` with
+  `fs.watch`, then pushes typed `tracker-update` or `activity-update`
+  Server-Sent Events. The React shell reloads canonical data from those events;
+  the server does not run a child renderer or rebuild HTML.
 - **There is one dashboard.** The old static tracker page is retired. For every
   live session, point the user at `careerrat tracker-dev`
   (`http://localhost:7777`).
@@ -528,8 +527,9 @@ Rules for intake:
 
 - If the user says "apply", "apply to this", "submit", "fill this application",
   or gives a JD URL with application intent: use `apply-job`. LinkedIn Easy Apply
-  postings can use the opt-in authenticated one-click path in `apply-job` (STEP 7b);
-  requires `careerrat automation status` to show `one_click_apply` allowed for `linkedin`.
+  postings can use opt-in authenticated form preparation in `apply-job` (STEP 7b);
+  this requires `careerrat automation status` to show
+  `authenticated_apply_preparation` allowed for `linkedin`.
 - If the user says "find jobs", "search", "source", "scan", "refresh",
   "HiringCafe", or asks for a queue: use `search-jobs`.
 - If the user says "research this company", "tell me about", "what do you know
@@ -723,7 +723,7 @@ Canonical candidate config (DB tables in DB mode; compatibility YAML under
 | `profile.yml` | `domain`, `toolchain`, `location.*`, `compensation.*` (minimum/target/expected base, OE range, relo; **`current_base` is private**) | nearly all skills |
 | `honesty.yml` | `education` policy, `tools.confirmed` / `tools.do_not_claim`, `claims.do_not_fabricate` | tailor-application, apply-job, email-comms, interview-prep, evaluate-job, optimize-linkedin |
 | `application-limits` / `application-limits.yml` | per-company caps/cooldowns, reevaluation thresholds | apply-job (step-zero), evaluate-job (ACTION), search-jobs (deprioritize), track-outcomes (thresholds) |
-| `form-defaults.yml` | `auto_submit`, applicant facts, `expected_base` | apply-job |
+| `form-defaults.yml` | applicant facts, reusable answers, `expected_base` | apply-job |
 | `modes.yml` | optional `usage_mode`, `application_mode`, `agent_voice`, and `company_health` (firing policy); absent means `standard` / `balanced` / `standard` / defaults | search-jobs, evaluate-job, research-company, research-comp, research-boards, interview-prep, configure, doctor, email-comms, reevaluate-strategy, company-health |
 | `writing-style.md` (+ `workspace/writing-samples/`) | voice/calibration | tailor-application, email-comms, interview-prep |
 | `research-prefs.yml` | `research_axes`, `staleness_days`, `max_searches_per_company`; works if absent (field-agnostic defaults apply) | research-company |
@@ -1182,7 +1182,7 @@ asking the user to re-provide conversation history.
 ## Browser Automation Contract
 
 Authenticated, logged-in browser automation (status polling, authenticated search,
-in-platform messaging, one-click apply, LinkedIn profile optimize/apply,
+in-platform messaging, supervised application preparation, LinkedIn profile optimize/apply,
 session webmail access, relationship sourcing, and calendar provider sync) is
 **opt-in and defaults OFF**. No
 `candidate/automation.yml` means **nothing is automated** — that is the safe,
@@ -1289,9 +1289,9 @@ LinkedIn/Indeed/Glassdoor search URL becomes a `source_type:"browser"`, `auth:tr
 source is enabled and `authenticated_search` is `allowed` for that platform; `messaging` — **shipped as the
 `ingest-messages` skill** (the browser analog of `ingest-mail`: reads LinkedIn/Wellfound DMs
 into `communications[]` under the strongest consent gate, with reply drafts going to
-`email-comms`); and `one_click_apply` — **shipped as the authenticated one-click apply path (LinkedIn Easy Apply)
-in `apply-job` STEP 7b**, under the same `auto_submit`/submit-safety gate (fill the modal, stop
-before the final Submit unless `auto_submit:true`, halt on captcha/2FA/limit). All four M12 phases
+`email-comms`); and `authenticated_apply_preparation` — **shipped as supervised LinkedIn Easy Apply
+preparation in `apply-job` STEP 7b** (fill and advance the modal, always stop before the final
+Submit, and halt on captcha/2FA/limit). All four M12 phases
 are now shipped. `doctor` reports the configured/live automation state.
 
 **M13 — LinkedIn profile optimizer (Phase 5).** Two further capabilities on the `linkedin`
@@ -1411,8 +1411,18 @@ token burn. Split each skill's inputs into two tiers and load lazily:
 Skills that delegate declare the split in frontmatter so the boundary is explicit:
 
 ```yaml
-tier_1_inputs: [modes.yml, automation consent, targeting.excluded_companies, profile.compensation.comp_floors, watermark]
-tier_2_inputs: [evidence.yml, writing-style.md, tracker.json bodies, fetched JD/web bodies]
+metadata:
+  tier_1_inputs:
+    - modes.yml
+    - automation consent
+    - targeting.excluded_companies
+    - profile.compensation.comp_floors
+    - watermark
+  tier_2_inputs:
+    - evidence.yml
+    - writing-style.md
+    - tracker.json bodies
+    - fetched JD/web bodies
 ```
 
 Each delegating skill's STEP 0 separates "load to decide" from "load to do" so the
@@ -1455,5 +1465,5 @@ credential going out with no truthful correction.
 
 ## Public Default
 
-Do not submit applications without explicit user confirmation unless the local
-candidate config opts into auto-submit.
+Do not submit applications. Prepare the form, then leave the final submit control
+to the candidate.

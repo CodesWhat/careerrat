@@ -8,36 +8,14 @@ import {
 } from "../lib/api.js";
 import { errorState } from "../lib/errorCopy.js";
 
-export function hasDbSourceSetup(sourceSetup) {
-  if (!sourceSetup || typeof sourceSetup !== "object") return false;
-  if (sourceSetup.deterministicSources && typeof sourceSetup.deterministicSources === "object") {
-    return Number(sourceSetup.deterministicSources.attempted || 0) > 0;
-  }
-  if (sourceSetup.ready === true) return true;
-
-  const enabledSearches =
-    Number(sourceSetup.searches?.enabled || 0) ||
-    Number(sourceSetup.enabledSearches || 0) ||
-    Number(sourceSetup.enabled || 0);
-  const trackedCompanies =
-    Number(sourceSetup.trackedCompanies || 0) ||
-    Number(sourceSetup.tracked_companies || 0) ||
-    Number(sourceSetup.companies || 0);
-
-  return enabledSearches > 0 || trackedCompanies > 0;
-}
-
 function unwrapRun(value) {
   if (!value || typeof value !== "object") return null;
   if (value.run && typeof value.run === "object") return value.run;
   return value;
 }
 
-// setSearchError (JobsPage.jsx's manualSearchError) is a plain string
-// rendered through InlineAlert's `message` prop alone — no action/detail
-// slot wired up at that call site — so this stays message-only, translated
-// through resolveErrorCopy() rather than the raw server string, with the
-// existing fallback wording preserved for the unmapped case.
+// The chat-first sweep status accepts one user-facing string, so errors stay
+// message-only after translation through resolveErrorCopy().
 function describeJobsPageSearchError(error) {
   return errorState(error, "Search could not start. Review Search setup, then try again.").message;
 }
@@ -169,8 +147,7 @@ export async function runJobsPageSearch({
   }
 }
 
-// Same one-line, message-only treatment as describeJobsPageSearchError above
-// — setError (JobsPage.jsx's aiSearchError) is a plain string too.
+// Keep AI sweep failures in the same message-only shape.
 function describeAiWebSearchError(error) {
   return errorState(error, "AI web search could not start. Review saved prompts, then try again.")
     .message;

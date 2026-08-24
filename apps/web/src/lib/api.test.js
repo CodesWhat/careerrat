@@ -1,13 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyOnSite,
+  completeDiscovery,
   finishOnboarding,
   markCommSent,
+  openDeepIngestThread,
   promoteSourced,
   recordExternalApplication,
+  recordSkillChatDecision,
+  replaceEvidenceClaims,
   runAiWebSearchStream,
   scheduleInterview,
+  sendWorkspaceMessage,
   setAppStatus,
+  setAutomationSessionProvider,
+  setPublicSyncPreference,
   setSourcedStatus,
   streamResumeAi,
 } from "./api.js";
@@ -32,6 +39,168 @@ describe("finishOnboarding", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/onboard/finish", {
       method: "POST",
       body: JSON.stringify({}),
+      headers: { "content-type": "application/json" },
+    });
+  });
+});
+
+describe("setPublicSyncPreference", () => {
+  it("writes the existing onboarding preference endpoint", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            ok: true,
+            publicSyncPreference: { enabled: false, source: "user", updatedAt: null },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await setPublicSyncPreference(false);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/onboard/public-sync-preference", {
+      method: "POST",
+      body: JSON.stringify({ enabled: false }),
+      headers: { "content-type": "application/json" },
+    });
+  });
+});
+
+describe("setAutomationSessionProvider", () => {
+  it("writes the dedicated automation settings endpoint", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await setAutomationSessionProvider("playwright");
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/settings/automation/session", {
+      method: "POST",
+      body: JSON.stringify({ provider: "playwright" }),
+      headers: { "content-type": "application/json" },
+    });
+  });
+});
+
+describe("replaceEvidenceClaims", () => {
+  it("sends the whole edited evidence bank to the atomic replacement route", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true, total: 1 }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const claims = [{ id: "seed-001", claim: "Edited claim", evidence: "Resume" }];
+
+    await replaceEvidenceClaims(claims);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/onboard/candidate/evidence/replace", {
+      method: "POST",
+      body: JSON.stringify({ claims }),
+      headers: { "content-type": "application/json" },
+    });
+  });
+});
+
+describe("openDeepIngestThread", () => {
+  it("uses the durable create-or-open endpoint", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true, data: { thread: { id: "ingest" } } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await openDeepIngestThread();
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/chat-first/deep-ingest/open", {
+      method: "POST",
+      body: JSON.stringify({}),
+      headers: { "content-type": "application/json" },
+    });
+  });
+});
+
+describe("sendWorkspaceMessage", () => {
+  it("carries the selected job context into the durable agent turn", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true, data: { messages: [] } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const context = { pathname: "/jobs", jobId: "app-temporal" };
+
+    await sendWorkspaceMessage("Change the résumé for this role.", context);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/workspace/message", {
+      method: "POST",
+      body: JSON.stringify({ text: "Change the résumé for this role.", context }),
+      headers: { "content-type": "application/json" },
+    });
+  });
+});
+
+describe("recordSkillChatDecision", () => {
+  it("records only visible skill-thread decision state on the chat owner route", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await recordSkillChatDecision({
+      skill: "research-company",
+      decisionId: "discovery:company:acme",
+      action: "save",
+      resultText: "Saved research for Acme.",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/chat/decision", {
+      method: "POST",
+      body: JSON.stringify({
+        skill: "research-company",
+        decisionId: "discovery:company:acme",
+        action: "save",
+        resultText: "Saved research for Acme.",
+      }),
+      headers: { "content-type": "application/json" },
+    });
+  });
+});
+
+describe("completeDiscovery", () => {
+  it("uses the canonical durable discovery completion route", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true, completion: { added: true } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await completeDiscovery("research-boards");
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/discovery/complete", {
+      method: "POST",
+      body: JSON.stringify({ step: "research-boards" }),
       headers: { "content-type": "application/json" },
     });
   });
@@ -258,7 +427,7 @@ describe("chat-first workflow actions", () => {
         "/api/workspace/intent",
         {
           intent: {
-            type: "job.apply",
+            type: "job.prepare-submit",
             entity: { type: "application", id: "app-3" },
             input: {},
           },

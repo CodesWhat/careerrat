@@ -1,6 +1,6 @@
 ---
 name: apply-job
-description: End-to-end job application workflow — gates on app limits and evaluate-job verdict, tailors artifacts, builds the render, fills the ATS form (including LinkedIn Easy Apply one-click path), verifies submission, and updates the tracker.
+description: End-to-end job application workflow — gates on app limits and evaluate-job verdict, tailors artifacts, builds the render, fills the ATS form (including supervised LinkedIn Easy Apply preparation), hands final submission to the user, verifies the result, and updates the tracker.
 ---
 
 # apply-job
@@ -15,7 +15,7 @@ a JD URL with clear application intent.
 | File | Purpose |
 | --- | --- |
 | `application-limits` config (`candidate/application-limits.yml` only in legacy/export mode) | Per-company caps and cooldowns (step-zero gate) |
-| `candidate/form-defaults.yml` | `auto_submit`, `expected_base` (primary salary form value), applicant contact facts |
+| `candidate/form-defaults.yml` | `expected_base` (primary salary form value), applicant contact facts |
 | `candidate/targeting.yml` | `excluded_companies`, `cut_signals`, `fit_bands`, `role_buckets[].priority` (OE bucket policy) |
 | `candidate/profile.yml` | `compensation.expected_base` (fallback when `form-defaults.yml#expected_base` absent), `compensation.oe_min_base`, `compensation.oe_max_base`, `candidate.toolchain`, contact facts |
 | `candidate/honesty.yml` | `tools.confirmed`, `claims.do_not_fabricate`, education policy |
@@ -147,14 +147,19 @@ After building, eyeball the output: page count reasonable, fonts render, no non-
 
 ---
 
-## STEP 6 — Auto-submit gate
+## STEP 6 — Manual submission gate
 
-Read `candidate/form-defaults.yml#auto_submit` (default: `false`).
+Fill the form completely, then stop at the final submit control. Show a summary of
+what will be submitted and return or focus the retained supervised browser page.
+The user must click the final Submit control themselves. The agent never clicks it,
+even after an explicit confirmation in chat, and never treats an executor's claim
+of submission as permission to mark the application Applied.
 
-- `auto_submit: false` (default): fill the form completely, then **stop and confirm** with the user before clicking the final submit button. Show a summary of what will be submitted.
-- `auto_submit: true`: proceed to fill and submit without an extra pause.
-
-Regardless of `auto_submit`: **immediately halt** (do not submit) if the page shows a captcha or Cloudflare human-check, an application-limit blocker, a required manual exercise (assessment, coding exercise, Ashby/Workday exercise, etc.), a required account creation or password reset, an ATS spam-rejection, or any auth prompt that is not a supported emailed verification-code flow. When halting on one of these blockers:
+**Immediately halt** if the page shows a captcha or Cloudflare human-check, an
+application-limit blocker, a required manual exercise (assessment, coding exercise,
+Ashby/Workday exercise, etc.), a required account creation or password reset, an ATS
+spam-rejection, or any auth prompt that is not a supported emailed verification-code
+flow. When halting on one of these blockers:
 
 - **DB workspace:**
   1. Write the blocked state immediately:
@@ -175,14 +180,14 @@ Regardless of `auto_submit`: **immediately halt** (do not submit) if the page sh
      2. Append the block-reason note:
 
         ```
-        careerrat data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO>","body":"Auto-submit blocked: <blocker type> — manual apply required at <url>"}'
+        careerrat data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO>","body":"Application preparation blocked: <blocker type> — manual apply required at <url>"}'
         ```
 
   3. Report what was found and ask the user how to proceed.
   4. **Re-entry point:** when the user clears the blocker and returns, resume at STEP 7 (Fill) — the tail of the form is the re-entry point, not the beginning of the workflow. Re-read the current page state via the session browser before continuing.
 - **Legacy workspace (no DB):**
   1. Write the blocked state to the application's tracker row immediately — set `status: "manual-apply"` (NOT "blocked") and add a `note` with the specific blocker type, any visible context text, and the apply URL so the human can finish (e.g. `"manual-apply: Cloudflare human-check — <url>"`, `"manual-apply: Ashby take-home exercise required — <url>"`, `"manual-apply: Workday account creation required — <url>"`, `"manual-apply: ATS spam-flag — contact recruiter directly — <url>"`). `manual-apply` means the human must finish applying; it is ACTIVE and stays visible on the dashboard, never archived.
-  2. **Comm-thread write-back (blocker case):** in the same `tracker.json` write as step 1, check whether a backing comm thread exists — `jobs[id].comm` where `comm.status` is `needs-reply`, `drafted`, or `comm-due` and `comm.nextAction` or `comm.messages[]` references this application or posting. If one exists: do NOT flip `comm.status` to `waiting` (the human still needs to act), but append a `note`-direction entry to `comm.messages[]` recording the block reason and the manual-apply URL (e.g. `{ direction: "note", at: "<ISO>", body: "Auto-submit blocked: Cloudflare — manual apply required at <url>" }`), rewrite `comm.nextAction` to describe the manual step (e.g. `"Complete application manually — Cloudflare block at <url>"`), and update `comm.nextActionDue` forward by one day so the due date does not show as overdue while the human clears the blocker. Write app row + comm update atomically — no partial writes.
+  2. **Comm-thread write-back (blocker case):** in the same `tracker.json` write as step 1, check whether a backing comm thread exists — `jobs[id].comm` where `comm.status` is `needs-reply`, `drafted`, or `comm-due` and `comm.nextAction` or `comm.messages[]` references this application or posting. If one exists: do NOT flip `comm.status` to `waiting` (the human still needs to act), but append a `note`-direction entry to `comm.messages[]` recording the block reason and the manual-apply URL (e.g. `{ direction: "note", at: "<ISO>", body: "Application preparation blocked: Cloudflare — manual apply required at <url>" }`), rewrite `comm.nextAction` to describe the manual step (e.g. `"Complete application manually — Cloudflare block at <url>"`), and update `comm.nextActionDue` forward by one day so the due date does not show as overdue while the human clears the blocker. Write app row + comm update atomically — no partial writes.
   3. Report what was found and ask the user how to proceed.
   4. **Re-entry point:** when the user clears the blocker and returns, resume at STEP 7 (Fill) — the tail of the form is the re-entry point, not the beginning of the workflow. Re-read the current page state via the session browser before continuing.
 
@@ -227,7 +232,7 @@ If the posting is a LinkedIn Easy Apply (`isEasyApply(url)` returns true, or `ho
 
 ---
 
-## STEP 7b — Authenticated one-click apply (LinkedIn Easy Apply)
+## STEP 7b — Authenticated supervised apply (LinkedIn Easy Apply)
 
 Enter this step when `isEasyApply(url)` returns true OR `hostnameToPortal(url) === "linkedin"` and the user explicitly asked to apply via LinkedIn. Standard ATS postings proceed through STEP 7 unchanged.
 
@@ -239,14 +244,14 @@ Run:
 careerrat automation status --json
 ```
 
-Inspect `capabilities.one_click_apply`. The applicable platform is `linkedin`. `allowed: true` means all three conditions are simultaneously true: the `one_click_apply` capability global switch is on, LinkedIn's per-capability switch is on, and LinkedIn's one-time ToS consent is recorded. This is the three-part AND from `mayRun()` in `src/core/automation/consent.mjs` — never re-derive it in prose.
+Inspect `capabilities.authenticated_apply_preparation`. The applicable platform is `linkedin`. `allowed: true` means all three conditions are simultaneously true: the `authenticated_apply_preparation` capability global switch is on, LinkedIn's per-capability switch is on, and LinkedIn's one-time ToS consent is recorded. This is the three-part AND from `mayRun()` in `src/core/automation/consent.mjs` — never re-derive it in prose.
 
-If `capabilities.one_click_apply` does not show `allowed: true` for `linkedin`, explain exactly how to opt in, then **stop** — do not open a browser:
+If `capabilities.authenticated_apply_preparation` does not show `allowed: true` for `linkedin`, explain exactly how to opt in, then **stop** — do not open a browser:
 
 1. Read LinkedIn's terms of service yourself to confirm that automated Easy Apply is permitted under your account's usage.
 2. Record consent: `careerrat automation consent linkedin --write`
-3. Enable the capability global switch: `careerrat automation enable one_click_apply --write`
-4. Enable for LinkedIn: `careerrat automation enable one_click_apply linkedin --write`
+3. Enable the capability global switch: `careerrat automation enable authenticated_apply_preparation --write`
+4. Enable for LinkedIn: `careerrat automation enable authenticated_apply_preparation linkedin --write`
 5. Verify: `careerrat automation status --json`
 
 State clearly: this capability is OFF by default; enabling it is a deliberate choice. The user must read LinkedIn's ToS themselves before recording consent — CareerRat records the decision, it does not make it. This step is always user-initiated and must never run on a schedule or unattended.
@@ -281,10 +286,15 @@ If you encounter a login wall, captcha, platform 2FA / two-step-verification pro
 
 3. **Submit-safety gate — honor STEP 6 exactly.**
 
-   - `auto_submit: false` (default): after filling the entire modal through the Review page, **stop at the final submit button** (visible text like "Submit application" or "Submit") and confirm with the user — show a summary of every field that will be submitted — before clicking.
-   - `auto_submit: true`: click the final submit button without an extra pause.
+   After filling the entire modal through the Review page, stop at the final
+   submit button (visible text like "Submit application" or "Submit"). Show a
+   summary, return focus to the retained page, and leave the click to the user.
+   Never click the final control from the skill, browser executor, or a later
+   agent turn.
 
-   Regardless of `auto_submit`: **immediately halt** (do not click Submit) on captcha, platform 2FA / two-step-verification prompt, an application-limit blocker, or a required exercise that cannot be completed in the modal. On halt:
+   **Immediately halt** on captcha, platform 2FA / two-step-verification prompt,
+   an application-limit blocker, or a required exercise that cannot be completed
+   in the modal. On halt:
    - **DB workspace (same composition as STEP 6's DB branch):**
 
      ```
@@ -300,7 +310,11 @@ If you encounter a login wall, captcha, platform 2FA / two-step-verification pro
 
 ### Verify
 
-Continue into **STEP 8**. The LinkedIn Easy Apply success signal is the "Your application was sent" / "Application sent" confirmation modal that appears after the final submit click. Screenshot it. Never trust its absence — if the confirmation modal does not appear, do not mark the application as submitted. Report what the page shows and ask the user.
+After the user clicks Submit, continue into **STEP 8**. The LinkedIn Easy Apply
+success signal is the "Your application was sent" / "Application sent"
+confirmation modal. Screenshot it. Never trust its absence. If the confirmation
+modal does not appear, do not mark the application as submitted. Report what the
+page shows and ask the user.
 
 ### Tracker
 
@@ -310,7 +324,9 @@ After STEP 8 confirms submission, continue into **STEP 9** with `channel: "Linke
 
 ## STEP 8 — Verify
 
-After submitting, confirm the application advanced past the submit step:
+After the user reports clicking Submit, read the retained supervised browser page
+and confirm the application advanced past the submit step. Never open the posting
+in a new profile for this verification, and never click Submit as part of checking:
 
 1. Read the current URL and page text. Check both the URL path (segments: `/confirmation`, `/thank-you`, `/submitted`, `/complete`, `/success`) AND the visible page text ("Application received", "We got your application", "Thanks for applying", or similar) — a match on either constitutes a confirmation signal. `confirmationCheck(pageText, currentUrl)` in `src/core/apply/form-fill.mjs` encodes this logic; mirror that dual-signal check when evaluating manually.
 2. **Verification-code protocol (M17):** if the page shows an emailed verification-code prompt (detected by `submitGuard`/BLOCKER_SIGNALS in `form-fill.mjs` — phrases such as "verification code", "enter the code", "check your email"), handle it through the narrow mail-access path:

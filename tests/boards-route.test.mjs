@@ -212,6 +212,60 @@ test("POST /api/boards/add: a LinkedIn URL persists an auth:true, enabled:false 
   }
 });
 
+test("POST /api/boards/add: an ATS hostname label resolves to the company slug", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const server = await bootServer(repoRoot);
+  try {
+    const { status, body } = await postJson(server, "/api/boards/add", {
+      url: "https://jobs.ashbyhq.com/curri",
+      label: "jobs.ashbyhq.com",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.searches.length, 1);
+    assert.equal(body.searches[0].provider, "ashby");
+    assert.equal(body.searches[0].label, "Curri");
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("source maintenance keeps the ATS company name aligned with its edited label", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "ashby",
+          source_type: "ats",
+          label: "jobs.ashbyhq.com",
+          name: "jobs.ashbyhq.com",
+          url: "https://jobs.ashbyhq.com/curri",
+          enabled: true,
+        },
+      ],
+    },
+  });
+  const server = await bootServer(repoRoot);
+  try {
+    const { status } = await postJson(server, "/api/boards/search/update", {
+      index: 0,
+      label: "Curri",
+      target: "https://jobs.ashbyhq.com/curri",
+      enabled: true,
+    });
+    assert.equal(status, 200);
+    const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches[0];
+    assert.equal(stored.label, "Curri");
+    assert.equal(stored.name, "Curri");
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/boards/add: appends onto an existing config rather than overwriting it", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });

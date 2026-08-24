@@ -1,8 +1,15 @@
 ---
 name: reevaluate-strategy
 description: Learn from accumulated outcomes — read the funnel, rejections, interview transcripts, and wins, then recommend concrete tuning to targeting signals, comp anchoring, fit calibration, channel mix, and writing-style. Triggered by outcome thresholds or an explicit review request.
-tier_1_inputs: [targeting.reevaluation thresholds, modes verdict, byStatus/byRoleFamily summary counts]
-tier_2_inputs: [full tracker.json, rejection-reason notes, interview transcripts/conversations]
+metadata:
+  tier_1_inputs:
+    - targeting.reevaluation thresholds
+    - modes verdict
+    - byStatus/byRoleFamily summary counts
+  tier_2_inputs:
+    - full tracker.json
+    - rejection-reason notes
+    - interview transcripts/conversations
 ---
 
 # reevaluate-strategy
@@ -18,6 +25,7 @@ Use this skill when the user asks why they're getting filtered, to review their 
 ## STEP 0 — GATE CHECK (trigger confirmation)
 
 **Trigger sources.** This skill is entered either:
+
 - Explicitly by the user ("why am I getting filtered", "review my strategy", "re-rank prospects", "what should I change").
 - Via handoff from `track-outcomes` STEP 6, which reads the persisted reevaluation gate at `tracker.json#analytics.reevaluation` (refreshed by `careerrat analytics --write` as part of the Tracker Write Contract) and hands off here when `reevaluation.due` is true — passing `reevaluation.dueReasons` (the tripped threshold names and counts).
 
@@ -28,6 +36,7 @@ Pre-flight: `analytics.mjs` reads `workspace/tracker.json` (the source of truth)
 Run: `careerrat analytics refresh --json` (dry-run read; use `-- --write` if you also want to persist the refresh to `tracker.json#analytics`).
 
 The output (from `buildReevaluationAnalytics` in `src/core/tracker/outcome-analysis.mjs`) includes:
+
 - `byStatus` — counts keyed by `status` value (e.g. `rejected`, `offer`, `awaiting`, `interview`).
 - `rejected.total` / `rejected.byFamily` — cumulative rejected counts, total and per family slug (slugs derived from `role_families` → `role_buckets` → neutral title slug).
 - `advanced.total` / `advanced.byFamily` — cumulative interview/offer counts, total and per family slug.
@@ -38,6 +47,7 @@ The output (from `buildReevaluationAnalytics` in `src/core/tracker/outcome-analy
 (`npm run analyze:outcomes` — `buildOutcomeSummary` — is the descriptive funnel breakdown used in STEP 1. Its `byRoleFamily` is total apps per family, NOT rejected-per-family, and it does not compute the trip. Never read the gate from it.)
 
 **Branch:**
+
 - If `reevaluation.due` is false AND the user did NOT explicitly request a review: report current counts, state "below threshold — no action needed," and exit.
 - If `reevaluation.due` is true OR user explicitly requested: continue to STEP 1.
 
@@ -98,6 +108,7 @@ careerrat learnings read "<role title or family>" --family
 (Pass the family slug with `--family`, or pass a role title without it and the CLI will resolve the slug. If the family has no file yet the CLI prints a note to stderr and exits 0 — a missing file is normal and not an error.)
 
 From `conversations[].notes` across all rejected applications, identify recurring qualitative themes:
+
 - Positioning mismatch or framing gap.
 - Suspected overclaims (honesty.yml do_not_claim items mentioned as gaps).
 - Comp rejection (offer-stage or below-floor `warn` flag set).
@@ -210,6 +221,7 @@ If comp re-anchor accepted, use `careerrat gate comp-target <N> --write --confir
 **Legacy workspaces:** edit `workspace/tracker.json` directly for any accepted re-rank changes (update `priority` or `status` fields on the affected rows).
 
 **CTA clear (same write — no ghost CTAs):** For every row whose `status` changes to `deprioritized` or any terminal/inactive state (e.g. `withdrawn`, `dropped`, `closed`), in the **same** write also:
+
 - Set `followUp.due` → `null` and `followUp.draft` → `null` (if the keys exist).
 - Set `comm.nextActionDue` → `null` and `comm.draft` → `null` (if the keys exist).
 - Rewrite `comm.nextAction` → `""` or remove the key.
@@ -232,10 +244,13 @@ For each affected role-family, compose the entry body as markdown using this tem
 The `## <ISO-DATE> — <label>` heading is produced by the CLI (`--title` / `--date`); the body passed is the bullet block above only. Write the body to a temp file, then:
 
 1. Dry-run (lints for placeholders and comp leaks):
+
    ```
    careerrat learnings append "<role title or family>" --title "<short pattern label>" --body-file <path-to-temp-file>
    ```
+
 2. Commit on success:
+
    ```
    careerrat learnings append "<role title or family>" --title "<short pattern label>" --body-file <path-to-temp-file> --write
    ```
@@ -296,6 +311,7 @@ careerrat activity append --type system --actor agent \
 State what changed, why, and which specific evidence drove each change (cite the N and the stage or note that motivated it). Keep it auditable.
 
 Rules:
+
 - Do NOT re-score the whole board silently — every mutation must be traceable to this session's evidence.
 - Learn from wins as strongly as rejections — double down on what is converting.
 - Hand drafting (follow-ups, withdrawals, recruiter outreach triggered by this review) to `email-comms`. This skill decides *what to change*, not the outreach itself.

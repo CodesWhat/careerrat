@@ -106,7 +106,6 @@ export const CANDIDATE_DEFAULTS = Object.freeze({
       required_export_formats: [],
     },
     confirm_current_role: false,
-    auto_submit: false,
   },
   modes: {
     usage_mode: "standard",

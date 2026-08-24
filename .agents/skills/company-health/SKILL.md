@@ -1,8 +1,15 @@
 ---
 name: company-health
 description: Role-scoped company-health/sentiment signal — web-search layoff risk, hiring momentum, financials, sentiment, and leadership stability for the candidate's target function, score a healthy|watch|risky rating with provenance, persist it to the tracker, and cross-cut the fit score only where it hits a stated candidate need.
-tier_1_inputs: [modes.company_health, targeting.role_buckets, targeting.priorities/must_haves, profile.candidate.domain, tracker row status + cached companyHealth freshness]
-tier_2_inputs: [per-dimension WebSearch/WebFetch bodies]
+metadata:
+  tier_1_inputs:
+    - modes.company_health
+    - targeting.role_buckets
+    - targeting.priorities/must_haves
+    - profile.candidate.domain
+    - tracker row status + cached companyHealth freshness
+  tier_2_inputs:
+    - per-dimension WebSearch/WebFetch bodies
 ---
 
 # company-health
@@ -124,6 +131,7 @@ Record each finding with its source + date for the evidence trail (STEP 5).
 `needs-more-info`) with a one-line note. `functionHit:true` on layoffs is a hard poor.
 
 **4b — Overall role-scoped rating.** Roll up to one of:
+
 - **`healthy`** — no function-scoped risk signals; financials/hiring/sentiment hold up.
 - **`watch`** — mixed signals, or company-wide risk that hasn't reached `<function>` yet.
 - **`risky`** — a function-scoped hit (layoff in your org, freeze on your reqs, cost-center
@@ -184,9 +192,11 @@ PERSISTED onto `workspace/tracker.json`; the renderer only reads it. Mirror the
    ```
 
    - **DB workspace:** write it through the dedicated verb, not `set-fields`/`upsert-batch` — this is the required write path, and the only one that validates the shape (rating/provenance enums, `asOf` format, `fitDelta` sign) and guards against a `current_base` leak before it touches the row:
+
      ```
      careerrat health record <applicationOrSourcedId> --file <rating.json> --write
      ```
+
      `<applicationOrSourcedId>` resolves against `applications[]` first, then `sourced[]` — works for either row without knowing which table it's in. Drop `--write` first to dry-run: it validates the payload and previews the target row without committing anything.
    - **Legacy workspace (no DB):** open `workspace/tracker.json` and set the object above directly on the matching row.
 2. Bump `meta.lastUpdatedAt` (the freshness stamp every writing skill bumps).
@@ -194,14 +204,18 @@ PERSISTED onto `workspace/tracker.json`; the renderer only reads it. Mirror the
    - **Legacy workspace (no DB):** stamp it by hand in the same write as step 1.
 3. Verify + snapshot (the dashboard handoff):
    - **DB workspace:** step 1's call already persisted and auto-exported `workspace/tracker.json` + `workspace/activity.jsonl`. Run:
+
      ```
      careerrat data verify
      careerrat tracker --verify
      ```
+
    - **Legacy workspace (no DB):**
+
      ```
      careerrat tracker --verify
      ```
+
    Fix and re-run until it passes clean. Render must never write `tracker.json`.
 
 ### Conversational web handoff
@@ -241,6 +255,7 @@ runs. STEP 5's numbered steps above stay exactly as written for a one-shot, non-
   same `companyHealthSet` verb, so the Activity Pulse event is already logged once the user
   confirms the save — no separate step.
 - **Legacy workspace (no DB):**
+
   ```
   careerrat activity append --type research --actor agent \
     --title "Company health: <Company> — <rating>" \
@@ -253,6 +268,7 @@ runs. STEP 5's numbered steps above stay exactly as written for a one-shot, non-
 ## STEP 7 — Hand off
 
 Tell the user, in the configured voice register:
+
 - The role-scoped rating + the as-of date + provenance.
 - The one signal that drove it (e.g. "Eng RIF 3 weeks ago — your exact org").
 - Whether it touched the fit score, and which need it cross-cut (or "standalone — didn't move

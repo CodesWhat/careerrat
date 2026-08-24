@@ -7,7 +7,7 @@ reach for.
 
 > This is the lightweight **substrate map**. The opt-in, consent-gated,
 > authenticated automation model (status polling, authenticated search, in-platform
-> messaging, one-click apply, profile optimization, webmail access) is specified by the
+> messaging, supervised apply preparation, profile optimization, webmail access) is specified by the
 > **Browser Automation Contract** in
 > `AGENTS.md` and configured by `candidate/automation.yml` (see *Opt-in authenticated
 > automation* below) — this doc describes the layers that contract builds on.
@@ -15,15 +15,18 @@ reach for.
 ## The three layers
 
 ### Layer 1 — Static fetch (`WebFetch`)
+
 Plain-HTML postings and boards: Greenhouse (`boards.greenhouse.io`), plain ATS
 URLs, the pages behind RSS items. Cheapest path; always try it first when you
 only need the posting text. If the body comes back empty or is an SPA shell,
 escalate to Layer 3.
 
 ### Layer 2 — Headless capture & export (bundled Playwright Chromium)
+
 The `playwright` npm dependency, driven **headless and in-process from Node
 scripts** — no agent in the loop, no setup (Chromium ships with the package).
 Used by:
+
 - `npm run capture:search-sources` / `npm run capture:board` — bulk-scrape a
   board's listing DOM into the workspace.
 - Document & packet PDF export (`careerrat export`, interview packets, tailored
@@ -34,8 +37,9 @@ not need to reason turn-by-turn. (For *authenticated* capture, M12 promotes the
 persistent-profile variant of this model.)
 
 ### Layer 3 — Interactive, agent-driven automation (the "session browser")
-For anything the agent drives step-by-step — rendering a JS page to read it, or
-filling and submitting an application. The agent **drives the live DOM**: it reads
+
+For anything the agent drives step-by-step, such as rendering a JS page to read it
+or filling an application up to the user-submit handoff. The agent **drives the live DOM**: it reads
 the page (snapshot / read DOM) **before each action**, never relies on hardcoded
 selectors, and stays confirm-first per the Public Default in `AGENTS.md`.
 
@@ -47,10 +51,10 @@ tracked path. See the **Browser Automation Contract** (Local-only + safety) in `
 
 **Write skill prose tool-agnostically** — say "use the session browser," not a
 specific vendor tool or MCP namespace. `auto` is the default: it uses Orca's visible,
-supervised browser inside an Orca workspace and the compatible extension session
-otherwise. Playwright persistent profiles remain an explicit fallback. If the selected
-provider cannot execute the concrete workflow, CareerRat exposes a supervised/manual
-handoff instead of claiming the browser ran.
+supervised browser inside an Orca workspace, bundled Playwright in the packaged desktop
+app, and the compatible extension session otherwise. If the selected provider cannot
+execute the concrete workflow, CareerRat exposes a supervised/manual handoff instead of
+claiming the browser ran.
 
 Capabilities the agent uses at this layer (each maps to whichever provider is active):
 
@@ -70,7 +74,7 @@ Capabilities the agent uses at this layer (each maps to whichever provider is ac
 | Read a JS-rendered / SPA JD body | 3 | evaluate `document.body.innerText` in the session browser (or the Lever JSON API, below) |
 | Bulk-scrape a board into the workspace | 2 | `npm run capture:search-sources` / `capture:board` |
 | Export a résumé / packet to PDF | 2 | `careerrat export` (bundled Playwright) |
-| Fill / submit an application form | 3 | session browser, modal-first uploads, confirm-first submit |
+| Fill an application form up to submit | 3 | session browser, modal-first uploads, user-controlled submit |
 | Drive a portal that needs the user's login | 3 | automatically selected session browser, with a supervised handoff when no provider is ready |
 | Read one emailed verification code or opted-in webmail recruiting messages | 3 | session browser gated by `mail_access`; generic `webmail` for one-code reads, Gmail/Outlook for one-code reads and webmail ingest |
 
@@ -78,15 +82,15 @@ Capabilities the agent uses at this layer (each maps to whichever provider is ac
 
 Reading public posting bodies (above) needs no permission. But **logged-in** Layer-3
 uses — polling your ATS dashboards for application status, scraping authenticated
-search results, reading in-platform DMs, one-click apply, profile optimization, and
+search results, reading in-platform DMs, supervised apply preparation, profile optimization, and
 webmail access — are gated. They are
 **opt-in and default OFF**: with no `candidate/automation.yml`, none of them run.
 
 The authenticated capabilities are live behind the switchboard: `status_polling`
 (**`sync-status`** skill), `authenticated_search` (wired into `search-jobs` /
-`setup-searches`), `messaging` (**`ingest-messages`** skill), and `one_click_apply`
-(**authenticated one-click apply, LinkedIn Easy Apply** — shipped as the opt-in
-branch in `apply-job` STEP 7b, under the same submit-safety gate),
+`setup-searches`), `messaging` (**`ingest-messages`** skill), and
+`authenticated_apply_preparation` (**supervised LinkedIn Easy Apply preparation**,
+which always stops at the user-submit gate),
 `profile_optimize` / `profile_apply` (**`optimize-linkedin`**), and `mail_access`
 (generic `webmail` for one recent verification-code message; Gmail/Outlook for
 verification-code reads and opted-in `ingest-mail` webmail reads).
@@ -98,8 +102,8 @@ switch, that platform's per-capability switch, and that platform's one-time ToS
 consent. Query it with `mayRun()` in `src/core/automation/consent.mjs`; never hardcode
 the policy in skill prose.
 
-Toggle it through the CLI (dry-run by default, `--write` to commit; comment-preserving
-+ schema-validated):
+Toggle it through the CLI (dry-run by default, `--write` to commit;
+comment-preserving and schema-validated):
 
 ```
 careerrat automation status                          # the live matrix
@@ -124,9 +128,10 @@ mail login wall, mail 2FA prompt, captcha, or unexpected interstitial.
 
 Which provider drives the live session is itself a setting. `auto` is the
 **recommended default** and selects a browser CareerRat can detect without asking the
-candidate to understand their CLI or extension setup. Explicit overrides are `extension`,
-`orca` (a supervised embedded browser available inside Orca workspaces), or
-`playwright` (the fallback: a one-time interactive login per platform, persistent
+candidate to understand their CLI or extension setup. It selects Orca inside an Orca
+workspace, bundled Playwright in the packaged desktop app, and the compatible extension
+otherwise. Explicit overrides are `extension`, `orca` (a supervised embedded browser
+available inside Orca workspaces), or `playwright` (a one-time interactive login per platform, persistent
 profile at `~/.careerrat/board-profiles/<platform>`). It's a *how-it-runs* choice and
 never affects `mayRun()` — provider does not gate whether a capability is allowed.
 Change it the same safe way as the toggles (dry-run by default, schema-validated,
@@ -151,6 +156,7 @@ agent-in-the-loop handoff instead of claiming a script ran the browser.
 When a liveness check returns `spa_shell` (Wellfound, Lever, Ashby, and other
 single-page boards), do not delete the link as dead — escalate per the result's
 structured `escalationHint`:
+
 - **`lever-json`** → fetch the result's `escalationUrl`
   (`https://api.lever.co/v0/postings/{company}?mode=json`; server-rendered JSON,
   no browser needed).

@@ -617,6 +617,161 @@ test("generatePacket reports one plain-language action per required unresolved a
   assert.match(result.manifest.warnings[0].message, /skills omitted/i);
 });
 
+test("generatePacket keeps an unknown required yes-no answer reviewable when its NEEDS YOU copy names the choices", async () => {
+  const { generatePacket } = await loadGenerateModule();
+  const result = await generatePacket({
+    applyIntent: true,
+    context: PACKET_CONTEXT,
+    questionCapture: {
+      source: "rendered",
+      questions: [
+        {
+          id: "rendered-travel",
+          label: "Would you be willing to travel?",
+          type: "radio",
+          required: true,
+          options: ["Yes", "No"],
+        },
+      ],
+      excluded: [],
+    },
+    draftResumeProposal: RESUME_DRAFT,
+    draftCoverLetterBlocks: async () => ({
+      blocks: [{ text: "Evidence-backed cover letter block.", evidenceIds: ["ev-ai-001"] }],
+      uploadReady: true,
+      manual: { required: false },
+      gaps: [],
+    }),
+    draftPacketAnswers: async () => ({
+      answers: [
+        {
+          questionId: "rendered-travel",
+          question: "Would you be willing to travel?",
+          answer: "NEEDS YOU: choose [Yes/No] based on your availability.",
+          evidenceIds: [],
+          required: true,
+          uploadReady: false,
+          gap: "Choose Yes or No based on your availability.",
+        },
+      ],
+      uploadReady: false,
+      gaps: [{ questionId: "rendered-travel", reason: "personal travel availability" }],
+    }),
+  });
+
+  assert.equal(result.status, "reviewable");
+  assert.equal(result.uploadReady, false);
+  assert.deepEqual(
+    result.manifest.questions.map(({ id }) => id),
+    ["rendered-travel"]
+  );
+  assert.equal(result.gaps[0].code, "ANSWER_CONFIRMATION_REQUIRED");
+  assert.match(result.gaps[0].message, /willing to travel/i);
+  assert.match(result.sources.answers, /NEEDS YOU/i);
+});
+
+test("generatePacket preserves confirmed application answers and gates only a newly captured unknown", async () => {
+  const { generatePacket } = await loadGenerateModule();
+  const confirmedAnswers = [
+    {
+      questionId: "q-linkedin",
+      question: "LinkedIn URL*",
+      answer: "https://www.linkedin.com/in/alexrivera",
+      confirmedAt: "2026-08-24T12:01:00.000Z",
+    },
+    {
+      questionId: "q-motivation",
+      question: "Why Acme AI?*",
+      answer: "I want to build reliable customer workflows at Acme AI.",
+      confirmedAt: "2026-08-24T12:02:00.000Z",
+    },
+    {
+      questionId: "q-founder",
+      question: "Who inspired Acme AI's founding?*",
+      answer: "Morgan.",
+      confirmedAt: "2026-08-24T12:03:00.000Z",
+    },
+  ];
+  const context = {
+    ...PACKET_CONTEXT,
+    application: {
+      ...PACKET_CONTEXT.application,
+      packetManifest: { confirmedAnswers },
+    },
+    applicationAnswers: confirmedAnswers.map((answer) => ({
+      ...answer,
+      source: "application-confirmed",
+    })),
+  };
+  const seenQuestionIds = [];
+  const result = await generatePacket({
+    applyIntent: true,
+    context,
+    questionCapture: {
+      source: "rendered",
+      questions: [
+        { id: "q-linkedin", label: "LinkedIn URL*", type: "text", required: true },
+        { id: "q-motivation", label: "Why Acme AI?*", type: "text", required: true },
+        {
+          id: "q-founder",
+          label: "Who inspired Acme AI's founding?*",
+          type: "text",
+          required: true,
+        },
+        {
+          id: "q-travel",
+          label: "Would you be willing to travel?",
+          type: "radio",
+          required: true,
+          options: ["Yes", "No"],
+        },
+      ],
+      excluded: [],
+    },
+    draftResumeProposal: RESUME_DRAFT,
+    draftCoverLetterBlocks: async () => ({
+      blocks: [{ text: "Evidence-backed cover letter block.", evidenceIds: ["ev-ai-001"] }],
+      uploadReady: true,
+      manual: { required: false },
+      gaps: [],
+    }),
+    packetAnswersCall: async (options) => {
+      const prompt = options.messages.at(-1).content;
+      const questions = JSON.parse(prompt.split("Questions:\n")[1].split("\n\nContext:")[0]);
+      seenQuestionIds.push(...questions.map(({ id }) => id));
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              answers: [
+                {
+                  questionId: "q-travel",
+                  answer: "NEEDS YOU: choose Yes or No based on your availability.",
+                  evidenceIds: [],
+                  gap: "personal travel availability",
+                },
+              ],
+            }),
+          },
+        ],
+        model: "claude-test",
+      };
+    },
+  });
+
+  assert.deepEqual(seenQuestionIds, ["q-travel"]);
+  assert.equal(result.uploadReady, false);
+  assert.equal(result.manual.required, true);
+  assert.deepEqual(
+    result.gaps.map(({ code, questionId }) => ({ code, questionId })),
+    [{ code: "ANSWER_CONFIRMATION_REQUIRED", questionId: "q-travel" }]
+  );
+  assert.deepEqual(result.manifest.confirmedAnswers, confirmedAnswers);
+  assert.match(result.sources.answers, /I want to build reliable customer workflows at Acme AI\./);
+  assert.match(result.sources.answers, /Morgan\./);
+});
+
 test("cover-letter and answer grounding accept prompt-selected story ids and reject unknown or artifact-absent stories", async () => {
   const { validatePacketEvidenceIds } = await loadGenerateModule();
 

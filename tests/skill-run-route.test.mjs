@@ -12,6 +12,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { mountSkillRunRoute } from "../src/cli/skill-run-route.mjs";
 import {
   APP_SAFE_RUNTIME_TOOLS,
@@ -19,9 +20,11 @@ import {
 } from "../src/core/ai/runtime-tools.mjs";
 import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
 
+const realRoot = fileURLToPath(new URL("..", import.meta.url));
+
 // A minimal addRoute-based harness mirroring tracker-dev.mjs's own routing
 // table (method+path -> handler), without pulling in the whole dev server.
-function bootRouteServer(runSkillStream, { repoRoot = "/fake/repo", env = {} } = {}) {
+function bootRouteServer(runSkillStream, { repoRoot = realRoot, env = {} } = {}) {
   const routes = new Map();
   function addRoute(method, path, handler) {
     routes.set(`${method} ${path}`, handler);
@@ -87,14 +90,19 @@ async function readSseBody(res, { stopWhen } = {}) {
 
 test("GET /api/runtime/config: returns one-shot, chat, AI-route, and discovery capabilities without starting a skill run", async () => {
   const repoRoot = tempRepoWithSkills([
+    "intake-extract",
+    "resume-extract",
     "evaluate-job",
     "answer-question",
     "tailor-application",
-    "resume-extract",
     "ingest-profile",
     "research-boards",
     "discover-companies",
     "search-jobs",
+    "research-company",
+    "research-comp",
+    "company-health",
+    "email-comms",
   ]);
   let called = false;
   const server = await bootRouteServer(
@@ -104,8 +112,10 @@ test("GET /api/runtime/config: returns one-shot, chat, AI-route, and discovery c
     {
       repoRoot,
       env: {
-        CAREERRAT_RUNTIME_SKILLS: "evaluate-job,answer-question,search-jobs",
-        CAREERRAT_CHAT_SKILLS: "ingest-profile,research-boards,discover-companies,search-jobs",
+        CAREERRAT_RUNTIME_SKILLS:
+          "evaluate-job,answer-question,search-jobs,intake-extract,resume-extract",
+        CAREERRAT_CHAT_SKILLS:
+          "ingest-profile,research-boards,discover-companies,research-company,research-comp,company-health,search-jobs,email-comms",
         ANTHROPIC_API_KEY: "sk-ant-test",
       },
     }
@@ -117,8 +127,14 @@ test("GET /api/runtime/config: returns one-shot, chat, AI-route, and discovery c
     assert.match(res.headers.get("cache-control") || "", /no-store/);
     const body = await res.json();
     assert.deepEqual(body, {
-      skills: ["evaluate-job", "answer-question", "search-jobs"],
-      chatSkills: ["ingest-profile", "research-boards", "discover-companies", "search-jobs"],
+      skills: ["intake-extract", "resume-extract"],
+      chatSkills: [
+        "ingest-profile",
+        "research-boards",
+        "research-company",
+        "research-comp",
+        "company-health",
+      ],
       ai: { available: true, route: "byok" },
       runtime: {
         defaultToolProfile: DEFAULT_RUNTIME_TOOL_PROFILE,
@@ -144,11 +160,11 @@ test("GET /api/runtime/config: returns one-shot, chat, AI-route, and discovery c
 });
 
 test("GET /api/runtime/config: reports no AI route and no discovery chat handoff when discovery chat skills are unavailable", async () => {
-  const repoRoot = tempRepoWithSkills(["evaluate-job", "ingest-profile"]);
+  const repoRoot = tempRepoWithSkills(["resume-extract", "evaluate-job", "ingest-profile"]);
   const server = await bootRouteServer(async () => {}, {
     repoRoot,
     env: {
-      CAREERRAT_RUNTIME_SKILLS: "evaluate-job",
+      CAREERRAT_RUNTIME_SKILLS: "evaluate-job,resume-extract",
       CAREERRAT_CHAT_SKILLS: "ingest-profile",
     },
   });
@@ -157,7 +173,7 @@ test("GET /api/runtime/config: reports no AI route and no discovery chat handoff
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.deepEqual(body, {
-      skills: ["evaluate-job"],
+      skills: ["resume-extract"],
       chatSkills: ["ingest-profile"],
       ai: { available: false, route: "none" },
       runtime: {
@@ -204,6 +220,55 @@ test("GET /api/runtime/config: reports unsandboxed tool-heavy execution as unava
       },
     });
     assert.doesNotMatch(JSON.stringify(body), /sk-ant-secret|apple-secret|ANTHROPIC_API_KEY/);
+  } finally {
+    await closeServer(server);
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("POST /api/skill/run: dispatches only exact-read skills and rejects workspace workflows", async () => {
+  const repoRoot = tempRepoWithSkills(["intake-extract", "resume-extract", "evaluate-job"]);
+  const calls = [];
+  const env = {
+    ANTHROPIC_API_KEY: "sk-ant-hermetic",
+    CAREERRAT_RUNTIME_SKILLS: "intake-extract,resume-extract,evaluate-job",
+  };
+  const server = await bootRouteServer(
+    async ({ skill, approvedReadPaths, onEvent }) => {
+      calls.push({ skill, approvedReadPaths });
+      onEvent({ type: "result", data: { ok: true, skill } });
+    },
+    { repoRoot, env }
+  );
+
+  try {
+    for (const skill of ["intake-extract", "resume-extract"]) {
+      const res = await fetch(`${baseUrl(server)}/api/skill/run`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ skill, input: { path: `/fixture/${skill}.pdf` } }),
+      });
+      assert.equal(res.status, 200);
+      assert.match(await readSseBody(res), new RegExp(`\\"skill\\":\\"${skill}\\"`));
+    }
+
+    const rejected = await fetch(`${baseUrl(server)}/api/skill/run`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ skill: "evaluate-job", input: { qa: true } }),
+    });
+    assert.equal(rejected.status, 400);
+    assert.match((await rejected.json()).error, /not available through \/api\/skill\/run/i);
+    assert.deepEqual(calls, [
+      {
+        skill: "intake-extract",
+        approvedReadPaths: ["/fixture/intake-extract.pdf"],
+      },
+      {
+        skill: "resume-extract",
+        approvedReadPaths: ["/fixture/resume-extract.pdf"],
+      },
+    ]);
   } finally {
     await closeServer(server);
     rmSync(repoRoot, { recursive: true, force: true });
@@ -298,7 +363,7 @@ test("POST /api/skill/run: rejects tool-heavy profile requests before streaming 
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        skill: "evaluate-job",
+        skill: "resume-extract",
         input: "hi",
         toolProfile: "tool-heavy",
       }),
@@ -314,7 +379,7 @@ test("POST /api/skill/run: rejects tool-heavy profile requests before streaming 
   }
 });
 
-test("POST /api/skill/run: rejects classified tool-heavy requests while no sandbox exists", async () => {
+test("POST /api/skill/run: rejects app workflows before they reach the generic runtime", async () => {
   let called = false;
   const server = await bootRouteServer(async () => {
     called = true;
@@ -331,7 +396,7 @@ test("POST /api/skill/run: rejects classified tool-heavy requests while no sandb
     });
     assert.equal(res.status, 400);
     const body = await res.json();
-    assert.match(body.error, /unsupported.*tool-heavy|tool-heavy.*disabled/i);
+    assert.match(body.error, /not available through \/api\/skill\/run/i);
     assert.equal(called, false);
   } finally {
     await closeServer(server);
@@ -354,7 +419,7 @@ test("POST /api/skill/run: 400 when runSkillStream rejects SKILL_NOT_ALLOWED bef
     const res = await fetch(`${baseUrl(server)}/api/skill/run`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ skill: "not-allowed", input: "hi" }),
+      body: JSON.stringify({ skill: "resume-extract", input: "hi" }),
     });
     assert.equal(res.status, 400);
     const body = await res.json();
@@ -374,7 +439,7 @@ test("POST /api/skill/run: 400 when runSkillStream rejects NO_AI_ROUTE before st
     const res = await fetch(`${baseUrl(server)}/api/skill/run`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ skill: "evaluate-job", input: "hi" }),
+      body: JSON.stringify({ skill: "resume-extract", input: "hi" }),
     });
     assert.equal(res.status, 400);
     await res.json();
@@ -393,7 +458,7 @@ test("POST /api/skill/run: 501 when runSkillStream rejects SDK_NOT_INSTALLED bef
     const res = await fetch(`${baseUrl(server)}/api/skill/run`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ skill: "evaluate-job", input: "hi" }),
+      body: JSON.stringify({ skill: "resume-extract", input: "hi" }),
     });
     assert.equal(res.status, 501);
     const body = await res.json();
@@ -411,7 +476,7 @@ test("POST /api/skill/run: an unrecognized error code before streaming is a 500"
     const res = await fetch(`${baseUrl(server)}/api/skill/run`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ skill: "evaluate-job", input: "hi" }),
+      body: JSON.stringify({ skill: "resume-extract", input: "hi" }),
     });
     assert.equal(res.status, 500);
     await res.json();
@@ -436,14 +501,14 @@ test("POST /api/skill/run: streams mapped events as SSE and passes skill/input t
     const res = await fetch(`${baseUrl(server)}/api/skill/run`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ skill: "evaluate-job", input: "https://example.test/job/1" }),
+      body: JSON.stringify({ skill: "resume-extract", input: "/fixture/resume.pdf" }),
     });
     assert.equal(res.status, 200);
     assert.match(res.headers.get("content-type") || "", /text\/event-stream/);
     const text = await readSseBody(res);
     assert.match(text, /event: system\ndata: \{"subtype":"init"\}/);
     assert.match(text, /event: result\ndata: \{"ok":true,"durationMs":42\}/);
-    assert.deepEqual(received, { skill: "evaluate-job", input: "https://example.test/job/1" });
+    assert.deepEqual(received, { skill: "resume-extract", input: "/fixture/resume.pdf" });
   } finally {
     await closeServer(server);
   }
@@ -458,7 +523,7 @@ test("POST /api/skill/run: a failure after streaming already started is reported
     const res = await fetch(`${baseUrl(server)}/api/skill/run`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ skill: "evaluate-job", input: "hi" }),
+      body: JSON.stringify({ skill: "resume-extract", input: "hi" }),
     });
     assert.equal(res.status, 200); // headers already committed before the throw
     const text = await readSseBody(res);
@@ -495,7 +560,7 @@ test("POST /api/skill/run: aborts the underlying runSkillStream signal when the 
     const res = await fetch(`${baseUrl(server)}/api/skill/run`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ skill: "evaluate-job", input: "hi" }),
+      body: JSON.stringify({ skill: "resume-extract", input: "hi" }),
       signal: controller.signal,
     });
     // Start reading, then abort the client request — this is what tears down

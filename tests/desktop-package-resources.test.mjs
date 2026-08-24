@@ -24,8 +24,11 @@ test("desktop dist builds the SPA before staging the packaged runtime", async ()
   assert.ok(buildAt < stageAt, "apps/web build must run before staging copies apps/web/dist");
 });
 
-test("desktop staging validates web dist and mirrors agent skills for Claude-style discovery", async () => {
-  const stageScript = await readText("apps/desktop/scripts/stage.mjs");
+test("desktop staging validates web dist and ships one canonical skill tree", async () => {
+  const [stageScript, builder] = await Promise.all([
+    readText("apps/desktop/scripts/stage.mjs"),
+    readText("apps/desktop/electron-builder.yml"),
+  ]);
 
   assert.match(
     stageScript,
@@ -33,10 +36,106 @@ test("desktop staging validates web dist and mirrors agent skills for Claude-sty
     "stage must fail fast when the SPA dist is missing"
   );
   assert.match(stageScript, /\.agents\/skills/, "stage must copy the canonical agent skills");
+  assert.doesNotMatch(stageScript, /\.claude\/skills/, "stage must not duplicate the skill tree");
+  assert.doesNotMatch(builder, /\.claude\/\*\*/, "the packaged app must not ship a dead mirror");
+});
+
+test("desktop staging bundles Playwright and its matching Chromium inside the signed runtime", async () => {
+  const [stageScript, main, packageText] = await Promise.all([
+    readText("apps/desktop/scripts/stage.mjs"),
+    readText("apps/desktop/main.mjs"),
+    readText("apps/desktop/runtime-dependencies/package.json"),
+  ]);
+  const pkg = JSON.parse(packageText);
+  const version = pkg.dependencies?.playwright;
+
+  assert.match(version || "", /^\d+\.\d+\.\d+$/, "the desktop runtime must pin Playwright");
   assert.match(
     stageScript,
-    /\.claude\/skills/,
-    "stage must mirror skills to .claude/skills for Claude-compatible lookup"
+    /runtime-dependencies/,
+    "staging must install from the isolated runtime manifest and lock"
+  );
+  assert.match(
+    stageScript,
+    /playwright\/cli\.js/,
+    "staging must run the installed Playwright CLI from its isolated runtime"
+  );
+  assert.match(stageScript, /["']install["'][\s\S]*["']chromium["'][\s\S]*["']--no-shell["']/);
+  assert.match(
+    stageScript,
+    /\.local-browsers["']?,\s*["']\.links["']/,
+    "staging must remove Playwright's build-machine path registry"
+  );
+  assert.match(
+    stageScript,
+    /PLAYWRIGHT_BROWSERS_PATH:\s*["']0["']/,
+    "Chromium must live under staged node_modules so electron-builder copies it"
+  );
+
+  const browserPathAt = main.indexOf('process.env.PLAYWRIGHT_BROWSERS_PATH = "0"');
+  const packagedMarkerAt = main.indexOf('process.env.CAREERRAT_PACKAGED_DESKTOP = "1"');
+  const firstEngineImportAt = main.indexOf('loadEngineModule("src/cli/tracker-dev.mjs")');
+  assert.ok(browserPathAt >= 0, "packaged startup must select the bundled browser location");
+  assert.ok(packagedMarkerAt >= 0, "packaged startup must identify its bundled browser runtime");
+  assert.ok(
+    firstEngineImportAt > browserPathAt,
+    "the bundled browser location must be selected before staged engine modules load"
+  );
+  assert.ok(
+    firstEngineImportAt > packagedMarkerAt,
+    "the packaged marker must be set before staged session resolution loads"
+  );
+  assert.match(
+    main,
+    /loadSmokeEngineModule\(\s*"src\/core\/apply\/playwright-ops\.mjs"\s*\)/,
+    "every smoke must load the staged Playwright adapter"
+  );
+  assert.match(
+    main,
+    /verifySmokeBrowserAutomation/,
+    "packaged smoke must launch the bundled Chromium, not only check files"
+  );
+
+  const builder = await readText("apps/desktop/electron-builder.yml");
+  assert.match(
+    builder,
+    /!playwright-core\/\.local-browsers\/\.links\/\*\*/,
+    "packaging must defensively exclude Playwright's build-machine path registry"
+  );
+});
+
+test("desktop smoke builds and stages its exact Playwright runtime before Electron starts", async () => {
+  const pkg = JSON.parse(await readText("apps/desktop/package.json"));
+  const smoke = pkg.scripts?.smoke || "";
+  const buildAt = smoke.indexOf("app:build");
+  const stageAt = smoke.indexOf("run stage");
+  const electronAt = smoke.indexOf("electron . --smoke");
+
+  assert.ok(buildAt >= 0, "desktop smoke must build the SPA required by staging");
+  assert.ok(stageAt > buildAt, "desktop smoke must stage after building the SPA");
+  assert.ok(electronAt > stageAt, "desktop smoke must launch only after staging is complete");
+});
+
+test("desktop staging retains the documentation required by cold-start doctor", async () => {
+  const [stageScript, doctor, packageText] = await Promise.all([
+    readText("apps/desktop/scripts/stage.mjs"),
+    readText("src/cli/doctor.mjs"),
+    readText("package.json"),
+  ]);
+  const pkg = JSON.parse(packageText);
+
+  for (const path of ["docs/DATA_CONTRACT.md", "docs/ROADMAP.md"]) {
+    assert.match(
+      doctor,
+      new RegExp(escapeRegExp(path)),
+      `${path} must remain a doctor prerequisite`
+    );
+    assert.ok(pkg.files.includes(path), `${path} must remain in the npm package allowlist`);
+  }
+  assert.doesNotMatch(
+    stageScript,
+    /EXCLUDE_PREFIXES\s*=\s*\[[^\]]*["']docs\//s,
+    "desktop staging must not remove doctor prerequisites from the packaged runtime"
   );
 });
 
@@ -97,7 +196,7 @@ test("ISSUE-028: desktop boots Electron's private PDF renderer before the staged
   );
 });
 
-test("electron-builder embeds the full staged runtime, including hidden skill dirs and SDK node_modules", async () => {
+test("electron-builder embeds the full staged runtime, including its canonical skills and locked node_modules", async () => {
   const config = await readText("apps/desktop/electron-builder.yml");
 
   assert.match(
@@ -105,7 +204,7 @@ test("electron-builder embeds the full staged runtime, including hidden skill di
     /from:\s+staging\/careerrat[\s\S]*filter:/,
     "main staged runtime must use explicit filters"
   );
-  for (const pattern of ["**/*", ".agents/**", ".claude/**", "apps/web/dist/**"]) {
+  for (const pattern of ["**/*", ".agents/**", "apps/web/dist/**"]) {
     assert.match(
       config,
       new RegExp(`-\\s+["']?${escapeRegExp(pattern)}["']?`),
@@ -116,6 +215,11 @@ test("electron-builder embeds the full staged runtime, including hidden skill di
     config,
     /from:\s+staging\/careerrat\/node_modules[\s\S]*to:\s+careerrat\/node_modules/,
     "node_modules must be copied as its own FileSet because electron-builder filters root node_modules directories"
+  );
+  assert.match(
+    config,
+    /-\s+["']?playwright-core\/\.local-browsers\/\*\*["']?/,
+    "the node_modules FileSet must explicitly include Playwright's hidden hermetic browser directory"
   );
 });
 
@@ -153,16 +257,18 @@ test("electron-builder macOS pilot config requires signing, entitlements, and no
 
   const pkg = JSON.parse(pkgText);
   const localDist = pkg.scripts?.["dist:local"] || "";
+  const macPackage = pkg.scripts?.["package:mac"] || "";
   const releaseDist = pkg.scripts?.dist || "";
   const releaseDmg = pkg.scripts?.["release:dmg"] || "";
   const stageAt = localDist.indexOf("stage");
-  const builderAt = localDist.indexOf("electron-builder");
+  const builderAt = localDist.indexOf("package:mac");
   assert.ok(stageAt >= 0, "desktop local dist must stage before packaging");
   assert.ok(builderAt > stageAt, "electron-builder must run after staging completes");
+  assert.match(macPackage, /electron-builder --mac dmg/);
   assert.match(
     releaseDist,
-    /dist:local[\s\S]*release:dmg[\s\S]*verify:release/,
-    "desktop release dist must notarize the DMG container before release verification"
+    /dist:local[\s\S]*release:dmg[\s\S]*verify:release[\s\S]*verify:packaged/,
+    "desktop release dist must verify and launch the signed package after DMG notarization"
   );
   assert.match(releaseDmg, /release-dmg\.mjs/, "desktop release must own a DMG notarization step");
 
