@@ -4427,6 +4427,14 @@ function jobDetailFromRow(
     initials: row.initials,
     base: row.comp,
     tc: row.tc,
+    compSummary: row.compSummary,
+    location: row.location,
+    mode: row.mode,
+    modeLabel: row.modeLabel,
+    sourceLabel: row.sourceLabel,
+    postedAt: row.postedAt || "",
+    sourcedAt: row.sourcedAt || "",
+    appliedAt: row.appliedAt || "",
     link: row.link || sourceRecord.link || sourceRecord.url || "",
     warn: row.warn || sourceRecord.warn || "",
     // Re-derive action live from canonical tracker.json fields so the drawer
@@ -4465,6 +4473,7 @@ function jobDetailFromRow(
     // Typed topic blocks (drawer sections). Each is null/empty for rows that don't
     // carry that topic so the section hides; nothing here ever lands on a card.
     interview: buildInterviewBlock(sourceRecord),
+    statusNote: String(sourceRecord.statusNote || "").trim(),
     compNote: String(sourceRecord.compNote || "").trim(),
     roleFit:
       sourceRecord.roleFit &&

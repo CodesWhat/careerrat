@@ -1068,6 +1068,16 @@ test("a reviewed-hold application never claims it was submitted", () => {
         gate: "keep",
         fitScore: 85,
         base: "$185,000 - $215,000",
+        compNote: "Posted base clears the candidate floor.",
+        location: "Remote - United States",
+        mode: "remote",
+        channel: "Ashby",
+        postedAt: "2026-08-19T12:00:00.000Z",
+        statusNote: "Ready for application preparation. Not submitted.",
+        roleFit: {
+          why: ["React and TypeScript evidence matches"],
+          risks: ["No logistics background recorded"],
+        },
       },
     ],
     sourced: [],
@@ -1080,6 +1090,31 @@ test("a reviewed-hold application never claims it was submitted", () => {
   assert.equal(row.action.label, "Prepare");
   assert.match(row.action.summary, /not been submitted/i);
   assert.doesNotMatch(row.action.summary, /application is submitted/i);
+  assert.deepEqual(
+    {
+      compensation: row.drawer.compSummary,
+      compensationNote: row.drawer.compNote,
+      location: row.drawer.location,
+      mode: row.drawer.modeLabel,
+      source: row.drawer.sourceLabel,
+      postedAt: row.drawer.postedAt,
+      status: row.drawer.statusNote,
+      fit: row.drawer.roleFit,
+    },
+    {
+      compensation: "$185,000 - $215,000",
+      compensationNote: "Posted base clears the candidate floor.",
+      location: "Remote - United States",
+      mode: "Remote",
+      source: "Ashby",
+      postedAt: "2026-08-19T12:00:00.000Z",
+      status: "Ready for application preparation. Not submitted.",
+      fit: {
+        why: ["React and TypeScript evidence matches"],
+        risks: ["No logistics background recorded"],
+      },
+    }
+  );
 });
 
 test("Network never hides approved contacts or companies behind arbitrary display caps", () => {

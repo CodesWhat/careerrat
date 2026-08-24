@@ -454,7 +454,12 @@ describe("ChatFirstAppView", () => {
           "app-1": {
             base: "$185,000 - $215,000",
             compNote: "Clears the stated minimum by $25,000.",
+            sourceLabel: "Ashby",
+            postedAt: "2026-08-19T12:00:00.000Z",
             statusNote: "Ready for application preparation. Not submitted.",
+            nextAction: {
+              summary: "Ready for application preparation. Not submitted.",
+            },
             roleFit: {
               why: ["React and TypeScript evidence matches"],
               risks: ["No logistics background recorded"],
@@ -476,9 +481,44 @@ describe("ChatFirstAppView", () => {
     expect(html).toContain("Clears the stated minimum by $25,000.");
     expect(html).toContain("Remote - United States");
     expect(html).not.toContain("Remote - United States · Remote");
+    expect(html).toContain("Ashby · posted Aug 19");
     expect(html).toContain("Ready for application preparation. Not submitted.");
+    const jobCard = html.match(
+      /<section class="chat-first-context-card chat-first-context-card--job">[\s\S]*?<\/section>/
+    )?.[0];
+    expect(jobCard).toContain("$185,000 - $215,000");
+    expect(jobCard).toContain("Clears the stated minimum by $25,000.");
+    expect(jobCard).toContain("Remote - United States");
+    expect(jobCard).toContain("Ashby · posted Aug 19");
+    expect(jobCard).toContain("Ready for application preparation. Not submitted.");
+    expect(jobCard).toContain("React and TypeScript evidence matches");
+    expect(jobCard).toContain("No logistics background recorded");
+    expect(jobCard.match(/Ready for application preparation\. Not submitted\./g)).toHaveLength(1);
+    expect(html).not.toContain("Current position");
     expect(html).not.toContain("chat-first-context-card--cream");
     expect(html).not.toContain("Run mock interview");
+  });
+
+  it("labels each canonical job date by what happened", async () => {
+    for (const [field, expected] of [
+      ["sourcedAt", "Ashby · found Aug 20"],
+      ["appliedAt", "Ashby · applied Aug 21"],
+    ]) {
+      const html = await renderView({
+        view: {
+          ...VIEW,
+          jobDetails: {
+            "app-1": {
+              sourceLabel: "Ashby",
+              [field]: field === "sourcedAt" ? "2026-08-20T12:00:00.000Z" : "2026-08-21",
+            },
+          },
+        },
+        ui: { ...BASE_UI, activeThread: "app-1", activeApplicationId: "app-1" },
+      });
+
+      expect(html).toContain(expected);
+    }
   });
 
   it("offers a first-class mock interview from a reviewed saved job", async () => {
