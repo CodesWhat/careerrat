@@ -160,9 +160,24 @@ jobs:
             gh release create "$TAG" --repo "$REPO" --draft --title "$TAG" --generate-notes \
               --notes "$policy_note"
           fi
-          final_matches="$(gh api "repos/$REPO/releases" --paginate --slurp | jq -c --arg tag "$TAG" \
-            'add | [.[] | select(.tag_name==$tag)]')"
-          if [ "$(jq 'length' <<<"$final_matches")" -ne 1 ] || \
+          final_matches='[]'
+          final_count=0
+          for attempt in {1..8}; do
+            final_matches="$(gh api "repos/$REPO/releases" --paginate --slurp | jq -c --arg tag "$TAG" \
+              'add | [.[] | select(.tag_name==$tag)]')"
+            final_count="$(jq 'length' <<<"$final_matches")"
+            if [ "$final_count" -gt 1 ]; then
+              echo "::error::Found $final_count releases for tag $TAG after preparation; refusing to choose one."
+              exit 1
+            fi
+            if [ "$final_count" -eq 1 ]; then
+              break
+            fi
+            if [ "$attempt" -lt 8 ]; then
+              sleep 2
+            fi
+          done
+          if [ "$final_count" -ne 1 ] || \
             [ "$(jq -r '.[0].draft' <<<"$final_matches")" != "true" ]; then
             echo "::error::Release $TAG is not one exact draft after preparation."
             exit 1
