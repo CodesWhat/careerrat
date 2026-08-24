@@ -161,10 +161,10 @@ function normalizeVerdict(verdict, { applicationId, ai, source }) {
     compensation,
     action: String(verdict?.action || (safeGate === "keep" ? "generate-packet" : "manual")),
     fitReasons: (Array.isArray(verdict?.fitReasons) ? verdict.fitReasons : [])
-      .map((value) => boundedDisplayText(value, 72))
+      .map((value) => boundedDisplayText(value, 80))
       .slice(0, 3),
     fitRisks: (Array.isArray(verdict?.fitRisks) ? verdict.fitRisks : [])
-      .map((value) => boundedDisplayText(value, 72))
+      .map((value) => boundedDisplayText(value, 80))
       .slice(0, 3),
     confidence: String(verdict?.confidence || "medium").toLowerCase(),
     manual: { required: safeGate === "review" },

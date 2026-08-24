@@ -5,13 +5,15 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { npmInvocation } from "./npm-invocation.mjs";
+
 const desktopRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = join(desktopRoot, "../..");
 const require = createRequire(import.meta.url);
 const builderCli = require.resolve("electron-builder/cli.js");
-const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+const appBuild = npmInvocation(["--prefix", repoRoot, "run", "app:build"]);
 
-execFileSync(npmCommand, ["--prefix", repoRoot, "run", "app:build"], {
+execFileSync(appBuild.file, appBuild.args, {
   cwd: repoRoot,
   stdio: "inherit",
 });

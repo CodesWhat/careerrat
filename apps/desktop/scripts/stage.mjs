@@ -37,6 +37,8 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, write
 import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { npmInvocation } from "./npm-invocation.mjs";
 import { compileSingleStarGlob } from "../../../src/core/fs/single-star-glob.mjs";
 
 const desktopDir = join(fileURLToPath(new URL(".", import.meta.url)), "..");
@@ -162,13 +164,18 @@ function assertWebDistBuilt() {
 // `npm ci`, not a fresh resolver run. The committed isolated lock makes the
 // staged dependency tree reproducible on both macOS arm64 and Windows x64.
 function installRuntimeDependencies() {
-  const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
+  const runtimeInstall = npmInvocation([
+    "ci",
+    "--prefix",
+    stagingRoot,
+    "--omit=dev",
+    "--ignore-scripts",
+  ]);
   log(`npm ci from the committed desktop runtime lock into ${stagingRoot} …`);
-  execFileSync(
-    npmCmd,
-    ["ci", "--prefix", stagingRoot, "--omit=dev", "--ignore-scripts"],
-    { cwd: stagingRoot, stdio: "inherit" }
-  );
+  execFileSync(runtimeInstall.file, runtimeInstall.args, {
+    cwd: stagingRoot,
+    stdio: "inherit",
+  });
 }
 
 function assertNoProprietarySdk() {

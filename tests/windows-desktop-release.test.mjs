@@ -3,6 +3,8 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { npmInvocation } from "../apps/desktop/scripts/npm-invocation.mjs";
+
 async function text(path) {
   return readFile(new URL(`../${path}`, import.meta.url), "utf8");
 }
@@ -114,6 +116,30 @@ test("Windows cross-build stages Playwright's Windows browser on every host", as
   );
 
   assert.match(stageCall, /PLAYWRIGHT_HOST_PLATFORM_OVERRIDE:\s*"win64"/);
+});
+
+test("desktop packaging invokes npm through Node instead of the Windows cmd shim", async () => {
+  const invocation = npmInvocation(["ci", "--prefix", "C:\\Career Rat"], {
+    env: {
+      npm_execpath: "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+    },
+    execPath: "C:\\Program Files\\nodejs\\node.exe",
+  });
+
+  assert.equal(invocation.file, "C:\\Program Files\\nodejs\\node.exe");
+  assert.deepEqual(invocation.args, [
+    "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+    "ci",
+    "--prefix",
+    "C:\\Career Rat",
+  ]);
+
+  const [packager, stage] = await Promise.all([
+    text("apps/desktop/scripts/windows-package.mjs"),
+    text("apps/desktop/scripts/stage.mjs"),
+  ]);
+  assert.doesNotMatch(packager, /execFileSync\(npmCommand/);
+  assert.doesNotMatch(stage, /execFileSync\(\s*npmCmd/);
 });
 
 test("PR and push CI build, install-smoke, and retain the Windows installer", async () => {
