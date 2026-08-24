@@ -1831,9 +1831,13 @@ test("mock start retries the same empty active session after AI failure and turn
   session = api.chatFirstStateGet({ repoRoot }).mockSessions.find((row) => row.id === "mock-retry");
   assert.equal(session.messages.filter((message) => message.kind === "question").length, 1);
   const serialized = request.messages[0].content;
-  assert.match(serialized, /Hiring manager/);
-  assert.equal(serialized.includes("do-not-send-this"), false);
-  assert.equal(serialized.includes("calendly.com"), false);
+  const requestedContext = JSON.parse(serialized).canonicalContext.session.requestedContext;
+  assert.deepEqual(requestedContext, {
+    interviewer: "Hiring manager",
+    round: null,
+    audience: null,
+    focusAreas: [],
+  });
 });
 
 test("mock start resumes the newest empty active session without an explicit session id", async () => {
