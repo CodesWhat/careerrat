@@ -229,7 +229,8 @@ jobs:
           # tmaproduction.blob.core.windows.net (qlty's own release + config
           # delivery), nodejs.org (Node toolchain), registry.npmjs.org (npm
           # ci), release-assets.githubusercontent.com (GitHub release asset
-          # downloads), tuf-repo-cdn.sigstore.dev (sigstore verification).
+          # downloads), radarlint-releases.s3.amazonaws.com (Radarlint),
+          # tuf-repo-cdn.sigstore.dev (sigstore verification).
           allowed-endpoints: >
             api.github.com:443
             api.segment.io:443
@@ -244,6 +245,7 @@ jobs:
             proxy.golang.org:443
             pypi.org:443
             qlty-releases.s3.amazonaws.com:443
+            radarlint-releases.s3.amazonaws.com:443
             registry.npmjs.org:443
             release-assets.githubusercontent.com:443
             sum.golang.org:443
