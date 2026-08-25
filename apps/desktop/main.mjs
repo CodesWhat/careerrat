@@ -38,6 +38,7 @@ import {
   normalizeDesktopRoute,
   rendererRouteFromDesktopRoute,
 } from "./desktop-routing.mjs";
+import { configureCareerRatAppIdentity } from "./desktop-identity.mjs";
 import { buildCareerRatMenuTemplate, runMenuUpdateCheck } from "./menu-template.mjs";
 import {
   choosePreferredPort,
@@ -82,12 +83,10 @@ import { buildBrowserWindowOptions } from "./window-options.mjs";
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const isSmoke = process.argv.includes("--smoke");
 
-// Runtime name. The dev launcher brands Electron.app's Info.plist so the macOS
-// dock/Cmd-Tab identity is CareerRat; this keeps Electron's own runtime app name
-// aligned for menus, about panel, notifications, and window metadata. Must run
-// before app is ready, i.e. before any default menu is built.
-app.setName("CareerRat");
-app.setAboutPanelOptions({ applicationName: "CareerRat" });
+// The dev launcher brands Electron.app's Info.plist so macOS owns the right
+// Dock/Cmd-Tab identity. Runtime configuration aligns menus, About, window
+// metadata, and the Windows taskbar/notification identity before app readiness.
+configureCareerRatAppIdentity({ app, platform: process.platform });
 
 // Google's OAuth consent screen rejects UAs it doesn't recognize with
 // disallowed_useragent. Electron's default fallback UA tacks our own

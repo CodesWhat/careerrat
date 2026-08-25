@@ -158,6 +158,7 @@ export async function fetchPublicHttpText(
     maxBytes = DEFAULT_PUBLIC_FETCH_MAX_BYTES,
     maxRedirects = DEFAULT_MAX_REDIRECTS,
     readErrorBody = true,
+    signal,
   } = {}
 ) {
   let target;
@@ -171,7 +172,7 @@ export async function fetchPublicHttpText(
     try {
       target = await resolvePublicHttpTarget(rawUrl, {
         resolveHost,
-        signal: initialController.signal,
+        signal: combineAbortSignals(initialController.signal, signal),
       });
     } finally {
       clearTimeout(initialTimeout);
@@ -183,6 +184,7 @@ export async function fetchPublicHttpText(
     const currentUrl = target.url;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const requestSignal = combineAbortSignals(controller.signal, signal);
     const dispatcher = dispatcherFactory({
       hostname: target.hostname,
       addresses: target.addresses,
@@ -193,7 +195,7 @@ export async function fetchPublicHttpText(
       // dispatcher. Fetch therefore cannot perform a second, attacker-controlled
       // lookup between validation and connection (DNS rebinding / TOCTOU).
       const response = await fetchImpl(currentUrl, {
-        signal: controller.signal,
+        signal: requestSignal,
         redirect: "manual",
         dispatcher,
       });
@@ -211,7 +213,7 @@ export async function fetchPublicHttpText(
         // redirect's DNS lookup by the same deadline as the hop that produced it.
         const next = await resolvePublicHttpTarget(redirectUrl, {
           resolveHost,
-          signal: controller.signal,
+          signal: requestSignal,
         });
         if (!next.ok) {
           return failure("unsafe_redirect", `unsafe redirect target: ${next.reason}`, {
@@ -288,6 +290,13 @@ export async function fetchPublicHttpText(
   }
 
   return failure("too_many_redirects", "too many redirects", { url: rawUrl });
+}
+
+function combineAbortSignals(...signals) {
+  const active = signals.filter(Boolean);
+  if (active.length === 0) return undefined;
+  if (active.length === 1) return active[0];
+  return AbortSignal.any(active);
 }
 
 // Guarded fetch for callers that need the raw Response (status/headers/body

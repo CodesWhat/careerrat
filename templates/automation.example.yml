@@ -41,6 +41,9 @@ consent:
   workday: false
   ashby: false
   lever: false
+  workable: false
+  smartrecruiters: false
+  external_ats: false
   glassdoor: false
   gmail: false
   outlook: false
@@ -84,13 +87,19 @@ capabilities:
       linkedin: false
       wellfound: false
 
-  # Phase 4 — authenticated form preparation (e.g. LinkedIn Easy Apply).
+  # Phase 4 — authenticated form preparation across supported ATS forms.
   # Fill and advance safely, halt on captcha / 2FA / application limits, and
   # always stop for the candidate to press the final submit control.
   authenticated_apply_preparation:
     enabled: false
     platforms:
+      greenhouse: false
+      lever: false
+      ashby: false
+      workable: false
+      smartrecruiters: false
       linkedin: false
+      external_ats: false
 
   # Phase 5 (M13) — LinkedIn profile optimizer. TWO separately-gated capabilities:
   # reading + suggesting profile rewrites is a different switch from writing them

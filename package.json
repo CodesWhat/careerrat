@@ -1,6 +1,6 @@
 {
   "name": "careerrat",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "private": false,
   "packageManager": "npm@11.19.0",
   "publishConfig": {
@@ -154,6 +154,7 @@
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.233",
     "@biomejs/biome": "2.5.8",
+    "fast-check": "^4.9.0",
     "knip": "6.32.2",
     "lefthook": "2.1.10",
     "playwright": "1.62.1",
@@ -173,6 +174,7 @@
     "sharp": "^0.35.0"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^1.4.0",
     "htmlparser2": "^12.0.0",
     "jszip": "^3.10.1",
     "mammoth": "^1.12.0",

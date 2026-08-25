@@ -18,6 +18,7 @@ directories:
 files:
   - main.mjs
   - atomic-write.mjs
+  - desktop-identity.mjs
   - menu-template.mjs
   - desktop-runtime.mjs
   - desktop-routing.mjs
@@ -49,6 +50,7 @@ extraResources:
       - "!**/.DS_Store"
 mac:
   icon: build/icon.icns
+  executableName: CareerRat
   target:
     - target: dmg
       arch:
@@ -62,6 +64,7 @@ mac:
   notarize: true
 win:
   icon: build/icon.ico
+  executableName: CareerRat
   target:
     - target: nsis
       arch:

@@ -180,6 +180,21 @@ async function loadSchemaModule() {
   return import("../src/core/packet/schemas/packet-schemas.mjs");
 }
 
+test("packet gate quality accepts ordinary wait instructions but rejects self-correction residue", async () => {
+  const { validatePacketGateVerdictQuality } = await loadSchemaModule();
+
+  assert.deepEqual(
+    validatePacketGateVerdictQuality({ action: "Wait for the recruiter response." }),
+    []
+  );
+  assert.deepEqual(
+    validatePacketGateVerdictQuality({
+      fitReasons: ["Has production Python experience at scale shock? Wait typo."],
+    }).map((error) => error.path),
+    ["fitReasons[0]"]
+  );
+});
+
 test("packetCoverLetterProposalSchema requires generated prose blocks with evidence ids before scaffold assembly", async () => {
   const { packetCoverLetterProposalSchema } = await loadSchemaModule();
   const { draftCoverLetterBlocks } = await loadGenerateModule();

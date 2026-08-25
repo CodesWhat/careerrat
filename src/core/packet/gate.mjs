@@ -1,12 +1,16 @@
 import { BOUNDED_AI_CODES, runBoundedAI } from "../ai/bounded-ai.mjs";
-import { matchSignals } from "../evaluate/gate.mjs";
+import { matchesExcluded, matchSignals } from "../evaluate/gate.mjs";
 import {
   buildPacketContext,
   capturePacketJobBody,
   hasReadableJobBody,
   packetPromptFromContext,
 } from "./context.mjs";
-import { packetGateAiVerdictSchema, validatePacketGateRequest } from "./schemas/packet-schemas.mjs";
+import {
+  packetGateAiVerdictSchema,
+  validatePacketGateRequest,
+  validatePacketGateVerdictQuality,
+} from "./schemas/packet-schemas.mjs";
 
 const LABELS = Object.freeze({
   skill: "packet-engine",
@@ -83,29 +87,7 @@ function reviewData({ applicationId, code, reason, ai = { used: false }, source 
 // silently overridden by the LLM's own KEEP/CUT/REVIEW judgment. Mirrors
 // evaluate/gate.mjs's evaluateGate() checks (a)/(b) — the same deterministic
 // hard-cut semantics the app already uses for the primary evaluate-job body
-// gate — reusing its exported matchSignals() for cut_signals. The word-
-// boundary company matcher below is evaluateGate's matchesExcluded, kept
-// local since that helper isn't exported.
-function normalizeForMatch(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ");
-}
-
-function companyMatchesExcluded(company, excludedCompanies) {
-  const companyNorm = normalizeForMatch(company);
-  if (!companyNorm) return null;
-  for (const entry of Array.isArray(excludedCompanies) ? excludedCompanies : []) {
-    const entryNorm = normalizeForMatch(entry);
-    if (!entryNorm) continue;
-    const escaped = entryNorm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    if (new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`).test(companyNorm)) {
-      return entry;
-    }
-  }
-  return null;
-}
+// gate, reusing its exported matchers for cut signals and exclusions.
 
 function forcedCutData({ applicationId, reason, source }) {
   return {
@@ -240,7 +222,11 @@ export async function evaluatePacketGate({
     const excludedCompanies = Array.isArray(context.targeting?.excluded_companies)
       ? context.targeting.excluded_companies
       : [];
-    const matchedExcludedCompany = companyMatchesExcluded(context.app.company, excludedCompanies);
+    const matchedExcludedCompany = matchesExcluded({
+      company: context.app.company,
+      title: context.app.role,
+      excludedCompanies,
+    });
     if (matchedExcludedCompany) {
       return {
         status: 200,
@@ -309,6 +295,7 @@ export async function evaluatePacketGate({
         action: "Review this application before generating a packet.",
       },
       maxRetries: 1,
+      validateData: validatePacketGateVerdictQuality,
       ...(typeof invoke === "function"
         ? {
             invoke: async ({ attempt, correction, labels }) =>
@@ -328,6 +315,23 @@ export async function evaluatePacketGate({
     });
 
     if (aiResult.body?.ok) {
+      const qualityErrors = validatePacketGateVerdictQuality(aiResult.body.data);
+      if (qualityErrors.length > 0) {
+        return {
+          status: 200,
+          body: {
+            ok: true,
+            data: reviewData({
+              applicationId: request.applicationId,
+              code: "PACKET_GATE_COPY_INVALID",
+              reason:
+                "The evaluation copy contained drafting residue and needs manual review before use.",
+              ai: aiResult.body.ai,
+              source,
+            }),
+          },
+        };
+      }
       return {
         status: 200,
         body: {

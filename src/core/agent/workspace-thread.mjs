@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 
+import { parseChatAnswerMode, stripChatConfirmationBlocks } from "../ai/chat-answer-mode.mjs";
 import { requireDb } from "../db/connection.mjs";
 import { withTransaction } from "../db/transaction.mjs";
+import { collapseUnansweredOnboardingPrompts } from "../onboarding/transcript-cleanup.mjs";
 
 export const WORKSPACE_THREAD_ID = "workspace-main";
 
@@ -150,25 +152,52 @@ function readMessages(db) {
     .map((row) => JSON.parse(row.data));
 }
 
+export function workspaceMessagesForDisplay(messages) {
+  const rows = Array.isArray(messages) ? messages : [];
+  const onboarding = collapseUnansweredOnboardingPrompts(
+    rows.filter((message) => message?.metadata?.source === "onboarding")
+  );
+  const visibleOnboardingIds = new Set(onboarding.map((message) => message.id));
+  return rows.filter(
+    (message) => message?.metadata?.source !== "onboarding" || visibleOnboardingIds.has(message.id)
+  );
+}
+
 export function workspaceThreadOpen({ repoRoot, env = process.env, now } = {}) {
   const db = requireDb({ repoRoot, env });
   const at = dateIso(now);
   const thread = withTransaction(db, () => ensureThread(db, at));
-  return { ok: true, thread, messages: readMessages(db) };
+  return { ok: true, thread, messages: workspaceMessagesForDisplay(readMessages(db)) };
 }
 
 export function workspaceThreadRead({ repoRoot, env = process.env } = {}) {
   const db = requireDb({ repoRoot, env });
   const thread = readThreadRow(db);
   if (!thread) return { ok: true, thread: null, messages: [] };
-  return { ok: true, thread, messages: readMessages(db) };
+  return { ok: true, thread, messages: workspaceMessagesForDisplay(readMessages(db)) };
 }
 
 function normalizeOnboardingMessages(transcript) {
-  const candidates = (Array.isArray(transcript) ? transcript : []).flatMap((message) => {
+  const candidates = collapseUnansweredOnboardingPrompts(transcript).flatMap((message) => {
     const role = String(message?.role || "").trim();
-    const text = String(message?.text || "").trim();
-    return (role === "user" || role === "assistant") && text ? [{ role, text }] : [];
+    const rawText = String(message?.text || "").trim();
+    if ((role !== "user" && role !== "assistant") || !rawText) return [];
+    if (role === "user") return [{ role, text: rawText }];
+    const parsed = parseChatAnswerMode(stripChatConfirmationBlocks(rawText));
+    const answerMode =
+      parsed.answerMode ||
+      (message?.answerMode === "yes-no" || message?.metadata?.answerMode === "yes-no"
+        ? "yes-no"
+        : null);
+    return parsed.text
+      ? [
+          {
+            role,
+            text: parsed.text,
+            ...(answerMode ? { metadata: { answerMode } } : {}),
+          },
+        ]
+      : [];
   });
   const bounded = [];
   let remaining = ONBOARDING_TRANSCRIPT_CHAR_LIMIT;
@@ -218,12 +247,14 @@ export function workspaceOnboardingHandoff({
       return {
         ok: true,
         reused: true,
+        repaired: false,
         thread,
         messages: existingImported,
         finishedAt: thread.onboardingHandoff.finishedAt,
       };
     }
 
+    const repaired = Boolean(thread.onboardingHandoff);
     const preserved = currentMessages.filter(
       (message) => message.metadata?.source !== "onboarding"
     );
@@ -236,7 +267,11 @@ export function workspaceOnboardingHandoff({
         kind: "text",
         text: message.text,
         createdAt: completedAt,
-        metadata: { source: "onboarding", handoffHash: transcriptHash },
+        metadata: {
+          ...(message.metadata || {}),
+          source: "onboarding",
+          handoffHash: transcriptHash,
+        },
       })
     );
     const ordered = [...imported, ...preserved].map((message, index) => ({
@@ -269,6 +304,7 @@ export function workspaceOnboardingHandoff({
     return {
       ok: true,
       reused: false,
+      repaired,
       thread: updatedThread,
       messages: imported,
       finishedAt: completedAt,

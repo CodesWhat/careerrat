@@ -5,13 +5,43 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, test } from "node:test";
 
-import { mountInstalledRuntimeRoutes } from "../src/cli/installed-runtime-route.mjs";
+import {
+  inspectInstalledRuntimeState,
+  mountInstalledRuntimeRoutes,
+} from "../src/cli/installed-runtime-route.mjs";
+import { INSTALLED_RUNTIME_DEFINITIONS } from "../src/core/ai/installed-runtimes.mjs";
 import {
   loadInstalledRuntimeSelection,
   writeInstalledRuntimeSelection,
 } from "../src/core/ai/runtime-selection.mjs";
 
 const roots = new Set();
+const VERIFIED_CAPABILITIES = Object.freeze({
+  completion: true,
+  structuredOutput: true,
+  appWorkflows: true,
+  exactRead: true,
+  publicWeb: true,
+  liveActivity: true,
+  resumable: true,
+});
+
+function readyProbe() {
+  return {
+    status: "ready",
+    ready: true,
+    action: null,
+    capabilities: VERIFIED_CAPABILITIES,
+  };
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 function root() {
   const value = mkdtempSync(join(tmpdir(), "careerrat-runtime-route-"));
@@ -30,6 +60,7 @@ function boot({
   env = { CAREERRAT_DESKTOP_SHELL: "1" },
   startSignInImpl,
   probeCustomImpl,
+  onProbe,
 }) {
   const repoRoot = root();
   const routes = new Map();
@@ -38,7 +69,10 @@ function boot({
     repoRoot,
     env,
     detectImpl: () => inventory,
-    probeImpl: (runtime) => probes[runtime.id],
+    probeImpl: (runtime) => {
+      onProbe?.(runtime.id);
+      return probes[runtime.id];
+    },
     startSignInImpl,
     probeCustomImpl,
   });
@@ -93,12 +127,12 @@ const INVENTORY = [
   },
 ];
 
-test("inventory auto-selects the sole ready completion CLI even when it has no task tools", async () => {
+test("inventory auto-selects the sole verified full-workflow CLI", async () => {
   const server = boot({
     inventory: INVENTORY,
     probes: {
       claude: { status: "authentication_required", ready: false, action: "start_sign_in" },
-      codex: { status: "ready", ready: true, action: null },
+      codex: readyProbe(),
     },
   });
   const response = await request(server, "GET", "/api/settings/ai-runtimes");
@@ -119,11 +153,11 @@ test("inventory auto-selects the sole ready completion CLI even when it has no t
       { id: "custom", status: "not_installed", ready: false, selected: false },
     ]
   );
-  assert.deepEqual(loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }), {
-    runtimeId: "codex",
-    providerFallback: false,
-    customCommand: null,
-  });
+  const selected = loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env });
+  assert.equal(selected.runtimeId, "codex");
+  assert.equal(selected.providerFallback, false);
+  assert.deepEqual(selected.verification?.capabilities, VERIFIED_CAPABILITIES);
+  assert.equal(selected.verification?.path, "/opt/homebrew/bin/codex");
   assert.equal(JSON.stringify(response.body).includes("morgan@example.com"), false);
   // The registry's installUrl passes through the route untouched — the
   // onboarding not-found row's "INSTALL GUIDE" link depends on this.
@@ -137,8 +171,8 @@ test("inventory leaves selection open when both a full runtime and completion ru
   const server = boot({
     inventory: INVENTORY,
     probes: {
-      claude: { status: "ready", ready: true, action: null },
-      codex: { status: "ready", ready: true, action: null },
+      claude: readyProbe(),
+      codex: readyProbe(),
     },
   });
   const response = await request(server, "GET", "/api/settings/ai-runtimes");
@@ -158,15 +192,16 @@ test("inventory leaves selection open when both a full runtime and completion ru
     runtimeId: null,
     providerFallback: false,
     customCommand: null,
+    verification: null,
   });
 });
 
-test("completion runtimes stay selectable without claiming task tools", async () => {
+test("full-workflow runtimes stay selectable with capability-backed claims", async () => {
   const server = boot({
     inventory: INVENTORY,
     probes: {
-      claude: { status: "ready", ready: true, action: null },
-      codex: { status: "ready", ready: true, action: null },
+      claude: readyProbe(),
+      codex: readyProbe(),
     },
   });
 
@@ -177,7 +212,7 @@ test("completion runtimes stay selectable without claiming task tools", async ()
   assert.equal(claude.selectable, true);
   assert.equal(codex.selectable, true);
   assert.equal(custom.selectable, false);
-  assert.match(codex.capabilityReason, /chat and drafting/i);
+  assert.equal(codex.capabilityReason, null);
 
   const selectCodex = await request(server, "POST", "/api/settings/ai-runtime/select", {
     runtimeId: "codex",
@@ -186,12 +221,187 @@ test("completion runtimes stay selectable without claiming task tools", async ()
   assert.equal(selectCodex.body.selectedId, "codex");
 });
 
+test("backend support and workflow capability rules follow the installed definition registry", async () => {
+  const supportDefinition = INSTALLED_RUNTIME_DEFINITIONS.find(({ id }) => id === "hermes");
+  const capabilityDefinition = INSTALLED_RUNTIME_DEFINITIONS.find(({ id }) => id === "codex");
+  const previousSupported = supportDefinition.supported;
+  const previousAccepted = supportDefinition.acceptedCapabilities;
+  const previousCapabilities = capabilityDefinition.capabilities;
+  const previousAcceptedCapabilities = capabilityDefinition.acceptedCapabilities;
+  supportDefinition.supported = true;
+  supportDefinition.acceptedCapabilities = supportDefinition.capabilities;
+  capabilityDefinition.capabilities = Object.freeze({
+    ...previousCapabilities,
+    workspaceEvidence: true,
+  });
+  capabilityDefinition.acceptedCapabilities = Object.freeze({
+    ...previousAcceptedCapabilities,
+    workspaceEvidence: true,
+  });
+
+  try {
+    const server = boot({
+      inventory: [
+        ...INVENTORY,
+        {
+          id: "hermes",
+          name: "Hermes Agent",
+          commandShape: "hermes acp",
+          path: "/Users/morgan/.local/bin/hermes",
+          available: true,
+          warning: null,
+        },
+      ],
+      probes: {
+        claude: { status: "authentication_required", ready: false, action: "start_sign_in" },
+        codex: { status: "authentication_required", ready: false, action: "start_sign_in" },
+        hermes: readyProbe(),
+      },
+    });
+
+    const response = await request(server, "GET", "/api/settings/ai-runtimes");
+    const hermes = response.body.runtimes.find(({ id }) => id === "hermes");
+    assert.equal(hermes.supported, true);
+    assert.equal(hermes.selectable, true);
+
+    const completeServer = boot({
+      inventory: INVENTORY,
+      probes: {
+        claude: { status: "authentication_required", ready: false, action: "start_sign_in" },
+        codex: {
+          ...readyProbe(),
+          capabilities: {
+            ...VERIFIED_CAPABILITIES,
+            workspaceEvidence: true,
+            providerDiagnostic: true,
+          },
+        },
+      },
+    });
+    const completeInventory = await request(completeServer, "GET", "/api/settings/ai-runtimes");
+    const completeCodex = completeInventory.body.runtimes.find(({ id }) => id === "codex");
+    assert.equal(completeCodex.selectable, true);
+    assert.equal(completeCodex.capabilities.workspaceEvidence, true);
+    assert.equal("providerDiagnostic" in completeCodex.capabilities, false);
+
+    const incompleteServer = boot({
+      inventory: INVENTORY,
+      probes: {
+        claude: { status: "authentication_required", ready: false, action: "start_sign_in" },
+        codex: readyProbe(),
+      },
+    });
+    const incompleteInventory = await request(incompleteServer, "GET", "/api/settings/ai-runtimes");
+    const incompleteCodex = incompleteInventory.body.runtimes.find(({ id }) => id === "codex");
+    assert.equal(incompleteCodex.selectable, false);
+  } finally {
+    if (previousSupported === undefined) delete supportDefinition.supported;
+    else supportDefinition.supported = previousSupported;
+    supportDefinition.acceptedCapabilities = previousAccepted;
+    capabilityDefinition.capabilities = previousCapabilities;
+    capabilityDefinition.acceptedCapabilities = previousAcceptedCapabilities;
+  }
+});
+
+test("selection rejects a ready supported runtime missing any full-workflow capability", async () => {
+  for (const missingCapability of Object.keys(VERIFIED_CAPABILITIES)) {
+    const server = boot({
+      inventory: INVENTORY,
+      probes: {
+        claude: { status: "authentication_required", ready: false, action: "start_sign_in" },
+        codex: {
+          ...readyProbe(),
+          capabilities: {
+            ...VERIFIED_CAPABILITIES,
+            [missingCapability]: false,
+          },
+        },
+      },
+    });
+
+    const response = await request(server, "POST", "/api/settings/ai-runtime/select", {
+      runtimeId: "codex",
+    });
+
+    assert.equal(response.status, 409, `${missingCapability} must be required for selection`);
+    assert.equal(response.body.code, "RUNTIME_CAPABILITY_UNSUPPORTED");
+    assert.equal(
+      loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }).runtimeId,
+      null
+    );
+  }
+});
+
+test("an unaccepted adapter remains diagnostic-only even after a successful full-capability probe", async () => {
+  const probed = [];
+  const server = boot({
+    inventory: [
+      ...INVENTORY,
+      {
+        id: "hermes",
+        name: "Hermes Agent",
+        commandShape: "hermes acp",
+        path: "/Users/morgan/.local/bin/hermes",
+        available: true,
+        warning: null,
+      },
+    ],
+    probes: {
+      claude: { status: "authentication_required", ready: false, action: "start_sign_in" },
+      codex: { status: "authentication_required", ready: false, action: "start_sign_in" },
+      hermes: readyProbe(),
+    },
+    startSignInImpl: () => {
+      throw new Error("unsupported runtime sign-in must not start");
+    },
+    onProbe: (runtimeId) => probed.push(runtimeId),
+  });
+
+  const inventory = await request(server, "GET", "/api/settings/ai-runtimes");
+  const hermes = inventory.body.runtimes.find(({ id }) => id === "hermes");
+  assert.equal(hermes.supported, false);
+  assert.equal(hermes.status, "detected_unverified");
+  assert.equal(hermes.ready, false);
+  assert.equal(hermes.selectable, false);
+  assert.deepEqual(probed.sort(), ["claude", "codex"]);
+  assert.equal(inventory.body.selectedId, null);
+
+  const selection = await request(server, "POST", "/api/settings/ai-runtime/select", {
+    runtimeId: "hermes",
+  });
+  assert.equal(selection.status, 409);
+  assert.equal(selection.body.code, "RUNTIME_NOT_SUPPORTED");
+
+  const signIn = await request(server, "POST", "/api/settings/ai-runtime/sign-in", {
+    runtimeId: "hermes",
+  });
+  assert.equal(signIn.status, 409);
+  assert.equal(signIn.body.code, "RUNTIME_NOT_SUPPORTED");
+});
+
+test("a ready-looking probe without explicit capability evidence remains unselectable", async () => {
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {
+      claude: { status: "authentication_required", ready: false, action: "start_sign_in" },
+      codex: { status: "ready", ready: true, action: null },
+    },
+  });
+
+  const inventory = await request(server, "GET", "/api/settings/ai-runtimes");
+  const codex = inventory.body.runtimes.find(({ id }) => id === "codex");
+  assert.equal(codex.ready, true);
+  assert.equal(codex.selectable, false);
+  assert.equal(codex.capabilities.completion, false);
+  assert.equal(inventory.body.selectedId, null);
+});
+
 test("inventory preserves a stale selection when the runtime remains completion-ready", async () => {
   const server = boot({
     inventory: INVENTORY,
     probes: {
       claude: { status: "signed_out", ready: false, action: "start_sign_in" },
-      codex: { status: "ready", ready: true, action: null },
+      codex: readyProbe(),
     },
   });
   writeInstalledRuntimeSelection({
@@ -205,11 +415,9 @@ test("inventory preserves a stale selection when the runtime remains completion-
   assert.equal(response.status, 200);
   assert.equal(response.body.selectedId, "codex");
   assert.equal(response.body.runtimes.find(({ id }) => id === "codex").selected, true);
-  assert.deepEqual(loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }), {
-    runtimeId: "codex",
-    providerFallback: false,
-    customCommand: null,
-  });
+  const selection = loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env });
+  assert.equal(selection.runtimeId, "codex");
+  assert.deepEqual(selection.verification?.capabilities, VERIFIED_CAPABILITIES);
 });
 
 test("custom commands can be tested but remain unselectable", async () => {
@@ -233,7 +441,7 @@ test("runtime probe returns the requested runtime's current readiness", async ()
     inventory: INVENTORY,
     probes: {
       claude: { status: "authentication_required", ready: false, action: "start_sign_in" },
-      codex: { status: "ready", ready: true, action: null },
+      codex: readyProbe(),
     },
   });
 
@@ -264,23 +472,29 @@ test("runtime probe rejects an unknown runtime id", async () => {
   assert.deepEqual(response.body, { ok: false, code: "RUNTIME_UNKNOWN" });
 });
 
-test("ready Codex is selectable for chat and drafting without claiming task tools", async () => {
+test("ready Codex is selectable for the full CareerRat workflow", async () => {
   const server = boot({
     inventory: INVENTORY,
     probes: {
       claude: { status: "authentication_required", ready: false, action: "start_sign_in" },
-      codex: { status: "ready", ready: true, action: null },
+      codex: readyProbe(),
     },
   });
 
   const inventory = await request(server, "GET", "/api/settings/ai-runtimes");
   const codex = inventory.body.runtimes.find(({ id }) => id === "codex");
   assert.equal(codex.selectable, true);
-  assert.equal(codex.capabilityTier, "chat_drafting");
+  assert.equal(codex.capabilityTier, "task_tools");
   assert.deepEqual(codex.capabilities, {
     completion: true,
-    taskTools: false,
-    research: false,
+    structuredOutput: true,
+    appWorkflows: true,
+    exactRead: true,
+    publicWeb: true,
+    liveActivity: true,
+    resumable: true,
+    taskTools: true,
+    research: true,
   });
   assert.equal(inventory.body.selectedId, "codex");
 
@@ -300,7 +514,15 @@ test("a Codex probe below the completion boundary stays visible but unselectable
         status: "unsupported_capability",
         ready: false,
         action: null,
-        completionSupported: false,
+        capabilities: {
+          completion: false,
+          structuredOutput: false,
+          appWorkflows: false,
+          exactRead: false,
+          publicWeb: false,
+          liveActivity: false,
+          resumable: false,
+        },
         capabilityReason: "Update Codex.",
       },
     },
@@ -310,6 +532,12 @@ test("a Codex probe below the completion boundary stays visible but unselectable
   assert.equal(codex.selectable, false);
   assert.deepEqual(codex.capabilities, {
     completion: false,
+    structuredOutput: false,
+    appWorkflows: false,
+    exactRead: false,
+    publicWeb: false,
+    liveActivity: false,
+    resumable: false,
     taskTools: false,
     research: false,
   });
@@ -322,7 +550,7 @@ test("sign-in starts the allowlisted CLI flow without opening a terminal window"
     inventory: INVENTORY,
     probes: {
       claude: { status: "authentication_required", ready: false, action: "start_sign_in" },
-      codex: { status: "ready", ready: true, action: null },
+      codex: readyProbe(),
     },
     startSignInImpl: (runtime) => {
       started.push(runtime);
@@ -361,7 +589,7 @@ test("selection rejects an unavailable or unauthenticated runtime with an action
     inventory: INVENTORY,
     probes: {
       claude: { status: "authentication_required", ready: false, action: "start_sign_in" },
-      codex: { status: "ready", ready: true, action: null },
+      codex: readyProbe(),
     },
   });
   const signedOut = await request(server, "POST", "/api/settings/ai-runtime/select", {
@@ -382,8 +610,8 @@ test("Advanced provider fallback is explicit, durable, and reversible", async ()
   const server = boot({
     inventory: INVENTORY,
     probes: {
-      claude: { status: "ready", ready: true, action: null },
-      codex: { status: "ready", ready: true, action: null },
+      claude: readyProbe(),
+      codex: readyProbe(),
     },
   });
   const provider = await request(server, "POST", "/api/settings/ai-runtime/select", {
@@ -395,17 +623,105 @@ test("Advanced provider fallback is explicit, durable, and reversible", async ()
     runtimeId: null,
     providerFallback: true,
     customCommand: null,
+    verification: null,
   });
 
   const local = await request(server, "POST", "/api/settings/ai-runtime/select", {
     runtimeId: "claude",
   });
   assert.equal(local.status, 200);
-  assert.deepEqual(loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }), {
+  const localSelection = loadInstalledRuntimeSelection({
+    repoRoot: server.repoRoot,
+    env: server.env,
+  });
+  assert.equal(localSelection.runtimeId, "claude");
+  assert.deepEqual(localSelection.verification?.capabilities, VERIFIED_CAPABILITIES);
+});
+
+test("runtime inspection does not replace an explicit selection made while probes are pending", async () => {
+  const repoRoot = root();
+  const env = { CAREERRAT_DESKTOP_SHELL: "1" };
+  const probesStarted = deferred();
+  const releaseProbes = deferred();
+  let probeCount = 0;
+
+  writeInstalledRuntimeSelection({
+    repoRoot,
+    env,
+    runtimeId: "codex",
+    providerFallback: false,
+  });
+  const inspection = inspectInstalledRuntimeState({
+    repoRoot,
+    env,
+    detectImpl: () => INVENTORY,
+    probeImpl: async () => {
+      probeCount += 1;
+      if (probeCount === 2) probesStarted.resolve();
+      await releaseProbes.promise;
+      return readyProbe();
+    },
+  });
+
+  await probesStarted.promise;
+  writeInstalledRuntimeSelection({
+    repoRoot,
+    env,
     runtimeId: "claude",
     providerFallback: false,
-    customCommand: null,
   });
+  releaseProbes.resolve();
+
+  const state = await inspection;
+  assert.equal(state.selectedId, "claude");
+  assert.equal(state.providerFallback, false);
+  assert.equal(
+    state.runtimes.find(({ id }) => id === "claude").selected,
+    true,
+    "the inspection response must reflect the newer explicit choice"
+  );
+  assert.equal(loadInstalledRuntimeSelection({ repoRoot, env }).runtimeId, "claude");
+});
+
+test("runtime auto-selection does not replace provider fallback enabled while probes are pending", async () => {
+  const repoRoot = root();
+  const env = { CAREERRAT_DESKTOP_SHELL: "1" };
+  const probesStarted = deferred();
+  const releaseProbes = deferred();
+  let probeCount = 0;
+
+  const inspection = inspectInstalledRuntimeState({
+    repoRoot,
+    env,
+    detectImpl: () => INVENTORY,
+    probeImpl: async (runtime) => {
+      probeCount += 1;
+      if (probeCount === 2) probesStarted.resolve();
+      await releaseProbes.promise;
+      return runtime.id === "codex"
+        ? readyProbe()
+        : { status: "authentication_required", ready: false, action: "start_sign_in" };
+    },
+  });
+
+  await probesStarted.promise;
+  writeInstalledRuntimeSelection({
+    repoRoot,
+    env,
+    runtimeId: null,
+    providerFallback: true,
+  });
+  releaseProbes.resolve();
+
+  const state = await inspection;
+  assert.equal(state.selectedId, null);
+  assert.equal(state.providerFallback, true);
+  assert.equal(
+    state.runtimes.some(({ selected }) => selected),
+    false,
+    "provider fallback must remain the active choice"
+  );
+  assert.equal(loadInstalledRuntimeSelection({ repoRoot, env }).providerFallback, true);
 });
 
 test("packaged desktop rejects and heals provider fallback before the renderer can use it", async () => {
@@ -435,6 +751,7 @@ test("packaged desktop rejects and heals provider fallback before the renderer c
     runtimeId: null,
     providerFallback: false,
     customCommand: null,
+    verification: null,
   });
 
   const selection = await request(server, "POST", "/api/settings/ai-runtime/select", {
@@ -465,6 +782,7 @@ test("custom/test runs the probe once and never persists anything", async () => 
     runtimeId: null,
     providerFallback: false,
     customCommand: null,
+    verification: null,
   });
 });
 
@@ -483,6 +801,7 @@ test("custom/test surfaces a probe failure without persisting anything", async (
     runtimeId: null,
     providerFallback: false,
     customCommand: null,
+    verification: null,
   });
 });
 

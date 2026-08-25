@@ -61,7 +61,15 @@ export const CAPABILITIES = {
     phase: 4,
     label: "Authenticated apply preparation",
     summary: "fill the modal and stop at the user-submit gate",
-    platforms: ["linkedin"],
+    platforms: [
+      "greenhouse",
+      "lever",
+      "ashby",
+      "workable",
+      "smartrecruiters",
+      "linkedin",
+      "external_ats",
+    ],
   },
   profile_optimize: {
     phase: 5,

@@ -251,6 +251,15 @@ function bodyWithTimezone(body, timezone) {
   return `${value}\n\nAll times are in ${timezone}.`;
 }
 
+function conflictFreeReply({ slots, contactName, timezone }, profile) {
+  const labels = slots.map((slot) => withoutEmDash(slot.label)).filter(Boolean);
+  const availability =
+    labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(", ")} or ${labels.at(-1)}`;
+  const greeting = contactName ? `Hi ${contactName},` : "Hello,";
+  const signoff = profile.preferredName ? `Best,\n${profile.preferredName}` : "Best,";
+  return bodyWithTimezone(`${greeting}\n\nI'm available ${availability}.\n\n${signoff}`, timezone);
+}
+
 function normalizePlan(data, { referenceMs, busyBlocks, profile }) {
   const timezone = clean(data?.timezone, 80);
   const rawSlots = Array.isArray(data?.slots) ? data.slots : [];
@@ -260,9 +269,19 @@ function normalizePlan(data, { referenceMs, busyBlocks, profile }) {
   const conflicting = slots.filter((slot) =>
     overlapsBusy(slot, busyBlocks, profile.availability.bufferMinutes)
   );
+  const conflictIndexes = new Set(conflicting.map((slot) => slot.originalIndex));
+  const availableSlots = slots.filter((slot) => !conflictIndexes.has(slot.originalIndex));
   const selectedSlotIndex = Number.isInteger(data?.selectedSlotIndex)
-    ? slots.findIndex((slot) => slot.originalIndex === data.selectedSlotIndex)
+    ? availableSlots.findIndex((slot) => slot.originalIndex === data.selectedSlotIndex)
     : null;
+  const baseBody = bodyWithTimezone(
+    withoutEmDash(
+      String(data?.body || "")
+        .trim()
+        .slice(0, 4_000)
+    ),
+    timezone
+  );
   return {
     state: ["needs_availability", "draft_ready", "tentative_hold"].includes(data?.state)
       ? data.state
@@ -271,21 +290,24 @@ function normalizePlan(data, { referenceMs, busyBlocks, profile }) {
     timezoneAssumed: data?.timezoneAssumed === true,
     timezoneNote: clean(data?.timezoneNote, 200),
     subject: withoutEmDash(clean(data?.subject, 200)),
-    body: bodyWithTimezone(
-      withoutEmDash(
-        String(data?.body || "")
-          .trim()
-          .slice(0, 4_000)
-      ),
-      timezone
-    ),
+    body:
+      conflicting.length > 0 && availableSlots.length > 0
+        ? conflictFreeReply(
+            {
+              slots: availableSlots,
+              contactName: clean(data?.contactName, 120),
+              timezone,
+            },
+            profile
+          )
+        : baseBody,
     round: ROUND_VALUES.includes(data?.round) ? data.round : "interview",
     contactName: clean(data?.contactName, 120),
     durationMinutes: Number.isFinite(Number(data?.durationMinutes))
       ? Math.max(5, Math.min(240, Number(data.durationMinutes)))
       : profile.availability.defaultMeetingMinutes,
     selectedSlotIndex: selectedSlotIndex >= 0 ? selectedSlotIndex : null,
-    slots: slots.map(({ originalIndex: _originalIndex, ...slot }) => slot),
+    slots: availableSlots.map(({ originalIndex: _originalIndex, ...slot }) => slot),
     missing: (Array.isArray(data?.missing) ? data.missing : [])
       .map((value) => clean(value, 120))
       .filter(Boolean)
@@ -443,7 +465,7 @@ export async function planSchedulingReply({
     busyBlocks: safeBusy,
     profile: safeCandidate,
   });
-  if (plan.conflictingCount > 0) {
+  if (plan.conflictingCount > 0 && plan.slots.length === 0) {
     return {
       status: "needs_user",
       missing: ["conflict-free availability"],

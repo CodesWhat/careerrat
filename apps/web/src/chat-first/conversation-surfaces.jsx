@@ -1,8 +1,10 @@
+import { isPlainYesNoQuestion } from "../../../../src/core/ai/chat-answer-mode.mjs";
 import { resolvePersistedErrorCopy } from "../lib/errorCopy.js";
 import { cleanAgentCopy } from "./agent-copy.js";
 import { UploadIcon } from "./chat-first-icons.jsx";
 import { artifactEmoji } from "./chat-first-model.js";
 import { skillChatCompletionFor, skillChatDiscoveryPresentation } from "./skill-chat-model.js";
+import { SourceReviewSummaryCard } from "./source-review.jsx";
 import "./chat-first.css";
 
 const EMPTY_LIST = [];
@@ -97,17 +99,75 @@ function artifactView(artifact, message, onArtifactAction) {
 function AttachedArtifacts({ message, onArtifactAction }) {
   const artifacts = Array.isArray(message?.artifacts) ? message.artifacts : EMPTY_LIST;
   if (!artifacts.length) return null;
-  return artifacts.map((artifact, index) => (
-    <div
-      className="chat-first-indented-card"
-      key={artifact?.id || `${message.id}:artifact-${index + 1}`}
-    >
-      <ArtifactCard artifact={artifactView(artifact, message, onArtifactAction)} />
-    </div>
-  ));
+  return artifacts.map((artifact, index) => {
+    const key = artifact?.id || `${message.id}:artifact-${index + 1}`;
+    if (artifact?.kind === "source_review") {
+      return (
+        <div className="chat-first-indented-card" key={key}>
+          <SourceReviewSummaryCard
+            artifact={artifact}
+            onOpen={() => {
+              if (typeof artifact.onAction === "function") artifact.onAction(artifact, message);
+              else onArtifactAction?.(artifact, message);
+            }}
+          />
+        </div>
+      );
+    }
+    return (
+      <div className="chat-first-indented-card" key={key}>
+        <ArtifactCard artifact={artifactView(artifact, message, onArtifactAction)} />
+      </div>
+    );
+  });
+}
+
+function rejectionReasonCopy(category, reason) {
+  const normalized = String(reason || "").toLowerCase();
+  if (category === "title") {
+    return normalized.includes("blocker")
+      ? "blocked by your role settings"
+      : "outside your target roles";
+  }
+  return (
+    {
+      seniority: "outside your target level",
+      location: "outside your location settings",
+      age: "posted outside your recency window",
+      salary: "below your compensation floor",
+      eligibility: "didn't match your work-authorization settings",
+      duplicate: "already in your search",
+      invalid: "missing required job details",
+      expired: "no longer available",
+      overflow: "held back by the per-company result limit",
+    }[category] || "didn't match your search settings"
+  );
+}
+
+function searchRejectionRows(artifact) {
+  if (artifact?.kind !== "search_run") return EMPTY_LIST;
+  const samples = artifact?.summary?.rejectionSamples;
+  if (!samples || typeof samples !== "object") return EMPTY_LIST;
+  return Object.entries(samples)
+    .flatMap(([category, rows]) =>
+      (Array.isArray(rows) ? rows : []).map((sample) => ({
+        id: `${category}:${sample?.company || ""}:${sample?.title || ""}:${sample?.location || ""}`,
+        label: [
+          [sample?.title, sample?.company ? `at ${sample.company}` : null]
+            .filter(Boolean)
+            .join(" "),
+          sample?.location,
+        ]
+          .filter(Boolean)
+          .join(", "),
+        reason: rejectionReasonCopy(category, sample?.reason),
+      }))
+    )
+    .slice(0, 4);
 }
 
 function ArtifactCard({ artifact }) {
+  const rejectionRows = searchRejectionRows(artifact);
   return (
     <article className="chat-first-artifact-card">
       <span className="chat-first-artifact-card__icon" aria-hidden="true">
@@ -136,8 +196,84 @@ function ArtifactCard({ artifact }) {
           {action.label}
         </button>
       ))}
+      {rejectionRows.length ? (
+        <details className="chat-first-artifact-card__details">
+          <summary>Why some jobs were filtered</summary>
+          <ul>
+            {rejectionRows.map((row) => (
+              <li key={row.id}>
+                <strong>{row.label}</strong>: {row.reason}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
     </article>
   );
+}
+
+function artifactIdentity(artifact) {
+  return [
+    artifact?.kind || "artifact",
+    artifact?.batchId || artifact?.id || artifact?.runId || artifact?.title || "",
+  ].join(":");
+}
+
+function transcriptOrder(message, fallbackIndex) {
+  const sequence = Number(message?.sequence);
+  if (Number.isFinite(sequence)) return sequence;
+  const createdAt = Date.parse(message?.createdAt || "");
+  return Number.isFinite(createdAt) ? createdAt : fallbackIndex;
+}
+
+function keepLaterArtifact(index, key, candidate) {
+  const current = index.get(key);
+  if (!current || candidate.order > current.order) index.set(key, candidate);
+}
+
+function compactTranscriptMessages(messages) {
+  const latestSearchByPurpose = new Map();
+  const latestAttachedArtifact = new Map();
+
+  messages.forEach((message, messageIndex) => {
+    const artifacts = Array.isArray(message?.artifacts) ? message.artifacts : EMPTY_LIST;
+    artifacts.forEach((artifact, artifactIndex) => {
+      const candidate = {
+        messageIndex,
+        artifactIndex,
+        order: transcriptOrder(message, messageIndex),
+      };
+      if (artifact?.kind === "search_run") {
+        keepLaterArtifact(latestSearchByPurpose, artifact.purpose || "manual-search", candidate);
+      } else if (artifacts.some((candidate) => candidate?.kind === "search_run")) {
+        keepLaterArtifact(latestAttachedArtifact, artifactIdentity(artifact), candidate);
+      }
+    });
+  });
+
+  return messages.flatMap((message, messageIndex) => {
+    if (message?.intent?.type === "search.run") return EMPTY_LIST;
+
+    const artifacts = Array.isArray(message?.artifacts) ? message.artifacts : EMPTY_LIST;
+    if (!artifacts.some((artifact) => artifact?.kind === "search_run")) return [message];
+
+    const visibleArtifacts = artifacts.filter((artifact, artifactIndex) => {
+      const latest =
+        artifact?.kind === "search_run"
+          ? latestSearchByPurpose.get(artifact.purpose || "manual-search")
+          : latestAttachedArtifact.get(artifactIdentity(artifact));
+      return latest?.messageIndex === messageIndex && latest?.artifactIndex === artifactIndex;
+    });
+    if (!visibleArtifacts.length) return EMPTY_LIST;
+
+    return [
+      {
+        ...message,
+        artifacts: visibleArtifacts,
+        metadata: { ...message.metadata, compactArtifactOnly: true },
+      },
+    ];
+  });
 }
 
 export function MessageTranscript({
@@ -147,21 +283,35 @@ export function MessageTranscript({
   onMessageAction,
   onIntentAction,
   intentBusy = false,
+  onAnswer,
+  answerBusy = false,
 }) {
-  const latestActionStateIndex = messages.reduce((latestIndex, message, index) => {
+  const displayMessages = compactTranscriptMessages(messages);
+  const latestActionStateIndex = displayMessages.reduce((latestIndex, message, index) => {
     return ["action_result", "action_error", "agent_error"].includes(message?.kind)
       ? index
       : latestIndex;
   }, -1);
-  const latestActionState = messages[latestActionStateIndex];
+  const latestActionState = displayMessages[latestActionStateIndex];
   const latestActions = (latestActionState?.metadata?.nextActions || EMPTY_LIST).filter(
     (action) => action?.intent?.type && action?.intent?.entity
   );
   const latestActionableIndex = latestActions.length ? latestActionStateIndex : -1;
+  const latestDialogueIndex = displayMessages.reduce((latestIndex, message, index) => {
+    return message?.role === "user" || message?.role === "assistant" ? index : latestIndex;
+  }, -1);
+  const latestDialogue = displayMessages[latestDialogueIndex];
+  const binaryQuestionIndex =
+    latestDialogue?.role === "assistant" &&
+    latestDialogue?.kind === "text" &&
+    (latestDialogue?.metadata?.answerMode === "yes-no" ||
+      isPlainYesNoQuestion(latestDialogue?.text))
+      ? latestDialogueIndex
+      : -1;
 
   return (
     <div className="chat-first-conversation-flow">
-      {messages.map((message, index) => {
+      {displayMessages.map((message, index) => {
         if (!message || message.kind === "gate" || message.kind === "decision") return null;
         const key = message.id || `message-${index + 1}`;
         const isError = message.kind === "action_error" || message.kind === "agent_error";
@@ -172,7 +322,9 @@ export function MessageTranscript({
           message.kind === "status" ||
           message.role === "system";
         let content;
-        if (isReceipt) {
+        if (message.metadata?.compactArtifactOnly) {
+          content = null;
+        } else if (isReceipt) {
           const action = message.onAction || onMessageAction;
           const errorState = isError
             ? resolvePersistedErrorCopy(message.error, message.text)
@@ -183,11 +335,7 @@ export function MessageTranscript({
                 mark: message.metadata?.mark || (isError ? "!" : undefined),
                 label: errorState?.message || message.text || "Action updated",
                 tone: isError ? "error" : undefined,
-                actionLabel:
-                  message.metadata?.actionLabel ||
-                  (typeof onMessageAction === "function" && message.kind === "action_result"
-                    ? "activity"
-                    : undefined),
+                actionLabel: message.metadata?.actionLabel,
                 onAction:
                   typeof action === "function"
                     ? () => {
@@ -230,6 +378,23 @@ export function MessageTranscript({
           <div className="chat-first-transcript-entry" key={key}>
             {content}
             <AttachedArtifacts message={message} onArtifactAction={onArtifactAction} />
+            {index === binaryQuestionIndex && typeof onAnswer === "function" ? (
+              <fieldset className="chat-first-inline-actions chat-first-binary-actions">
+                <legend className="sr-only">Suggested answers</legend>
+                {["Yes", "No"].map((answer) => (
+                  <button
+                    className="chat-first-pill chat-first-pill--outline"
+                    type="button"
+                    key={answer}
+                    disabled={answerBusy}
+                    onClick={() => onAnswer(answer)}
+                  >
+                    {answer}
+                  </button>
+                ))}
+                <span>or just type it</span>
+              </fieldset>
+            ) : null}
             {index === latestActionableIndex && typeof onIntentAction === "function" ? (
               <div className="chat-first-inline-actions">
                 {latestActions.map((action, actionIndex) => (
@@ -262,6 +427,8 @@ export function SkillChatConversation({
   busy = false,
   onDecision,
   onComplete,
+  onReviewSources,
+  onAnswer,
 }) {
   const completion = skillChatCompletionFor(messages);
   const decorated = messages.map((message) => ({
@@ -269,6 +436,13 @@ export function SkillChatConversation({
     artifacts: (message.artifacts || EMPTY_LIST).map((artifact) => {
       const presentation = skillChatDiscoveryPresentation(artifact);
       const decided = artifact.decision?.status === "completed";
+      if (artifact.kind === "source_review") {
+        return {
+          ...artifact,
+          ...presentation,
+          onAction: () => onReviewSources?.(artifact),
+        };
+      }
       if (artifact.kind === "discovery_complete") {
         return {
           ...artifact,
@@ -308,7 +482,12 @@ export function SkillChatConversation({
       <div className="chat-first-conversation-eyebrow">
         {String(thread?.title || "Research").toUpperCase()}
       </div>
-      <MessageTranscript messages={decorated} agentName={agentName} />
+      <MessageTranscript
+        messages={decorated}
+        agentName={agentName}
+        onAnswer={onAnswer}
+        answerBusy={busy}
+      />
       {thread?.state === "running" ? (
         <RunReceipt receipt={{ mark: "◐", label: `${agentName} is researching…` }} />
       ) : null}
@@ -360,6 +539,8 @@ export function TodayConversation({
   onMessageAction,
   onIntentAction,
   intentBusy = false,
+  onAnswer,
+  answerBusy = false,
 }) {
   return (
     <div className="chat-first-conversation-flow">
@@ -374,6 +555,8 @@ export function TodayConversation({
           onMessageAction={onMessageAction}
           onIntentAction={onIntentAction}
           intentBusy={intentBusy}
+          onAnswer={onAnswer}
+          answerBusy={answerBusy}
         />
       ) : null}
       {artifacts.map((artifact) => (
@@ -431,6 +614,8 @@ export function JobConversation({
   onMessageAction,
   onIntentAction,
   intentBusy = false,
+  onAnswer,
+  answerBusy = false,
 }) {
   return (
     <div className="chat-first-conversation-flow">
@@ -476,6 +661,8 @@ export function JobConversation({
           onMessageAction={onMessageAction}
           onIntentAction={onIntentAction}
           intentBusy={intentBusy}
+          onAnswer={onAnswer}
+          answerBusy={answerBusy}
         />
       ) : null}
     </div>
@@ -507,6 +694,8 @@ export function CanonicalJobConversation({
   onMessageAction,
   onIntentAction,
   intentBusy = false,
+  onAnswer,
+  answerBusy = false,
 }) {
   const draft = communication?.draft;
   const actions = draft
@@ -533,6 +722,8 @@ export function CanonicalJobConversation({
       onMessageAction={onMessageAction}
       onIntentAction={onIntentAction}
       intentBusy={intentBusy}
+      onAnswer={onAnswer}
+      answerBusy={answerBusy}
     />
   );
 }

@@ -112,6 +112,26 @@ describe("WorkspaceBrowser", () => {
     expect(css).toMatch(/\.cf-cart__actions--collapsed \.cf-button--lime\s*\{[^}]*flex:\s*1/s);
   });
 
+  it("does not apply the light hover surface to selected job rows", () => {
+    const css = readFileSync(
+      fileURLToPath(new URL("./workspace-browser.css", import.meta.url)),
+      "utf8"
+    );
+
+    expect(css).toMatch(/\.cf-job-row:not\(\.cf-job-row--selected\):hover\s*\{/);
+    expect(css).not.toMatch(/\.cf-job-row:hover\s*\{/);
+  });
+
+  it("keeps browser filters on the handoff pill radius", () => {
+    const css = readFileSync(
+      fileURLToPath(new URL("./workspace-browser.css", import.meta.url)),
+      "utf8"
+    );
+    const filterRule = css.match(/\.cf-browser \.cf-filter\s*\{([^}]*)\}/)?.[1] || "";
+
+    expect(filterRule).toMatch(/border-radius:\s*var\(--r-pill\)/);
+  });
+
   it("renders the desktop slide-in shell and controlled cart selection", async () => {
     const { WorkspaceBrowser } = await loadBrowser();
     const html = renderToStaticMarkup(<WorkspaceBrowser {...baseProps()} />);
@@ -184,6 +204,16 @@ describe("WorkspaceBrowser", () => {
     expect(actionMarkup).not.toContain("Chat about these 2");
   });
 
+  it("offers one provider-neutral job search action", async () => {
+    const { SearchToolbar } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <SearchToolbar sourceSweep={{ status: "idle", summary: "Ready to search" }} />
+    );
+
+    expect(html).toContain("Search for jobs");
+    expect(html).not.toContain("Sweep boards");
+  });
+
   it("makes the whole search row one native keyboard-capable selection target", async () => {
     const { SearchJobRow } = await loadBrowser();
     const onToggleSelection = vi.fn();
@@ -208,15 +238,44 @@ describe("WorkspaceBrowser", () => {
     expect(onToggleSelection).toHaveBeenCalledOnce();
   });
 
-  it("renders sweep progress from run state and never invents a timer", async () => {
+  it("identifies a partial job description on its own search card", async () => {
+    const { SearchJobRow } = await loadBrowser();
+    const partial = renderToStaticMarkup(
+      <SearchJobRow job={{ ...JOBS[0], descriptionPartial: true }} selected={false} />
+    );
+    const complete = renderToStaticMarkup(
+      <SearchJobRow job={{ ...JOBS[0], descriptionPartial: false }} selected={false} />
+    );
+
+    expect(partial).toContain("Partial description");
+    expect(partial).toContain("CareerRat only captured part of this job description.");
+    expect(partial).not.toContain("bodyPartial");
+    expect(complete).not.toContain("Partial description");
+  });
+
+  it("renders coordinated lane progress from typed state and never invents a timer", async () => {
     const { WorkspaceBrowser } = await loadBrowser();
     const html = renderToStaticMarkup(
       <WorkspaceBrowser
         {...baseProps({
           sourceSweep: {
             status: "running",
-            providers: ["Greenhouse", "Lever", "Ashby", "HN"],
-            detail: "reading postings against your rules",
+            detail: "Searching configured sources and the web",
+            lanes: {
+              deterministic: {
+                label: "Configured sources",
+                configured: true,
+                executable: true,
+                status: "running",
+              },
+              aiWeb: {
+                label: "AI web search",
+                configured: true,
+                executable: true,
+                consented: true,
+                status: "running",
+              },
+            },
           },
         })}
       />
@@ -226,9 +285,12 @@ describe("WorkspaceBrowser", () => {
       "utf8"
     );
 
-    expect(html).toContain("Sweeping Greenhouse · Lever · Ashby · HN…");
-    expect(html).toContain("reading postings against your rules");
-    expect(html).not.toContain("Sweep boards now");
+    expect(html).toContain("Searching for jobs…");
+    expect(html).toContain("Searching configured sources and the web");
+    expect(html).toContain('role="status" aria-label="Search lane status"');
+    expect(html).toContain("Configured sources: running");
+    expect(html).toContain("AI web search: running");
+    expect(html).not.toContain("Sweep boards");
     expect(source).not.toContain("setTimeout");
   });
 

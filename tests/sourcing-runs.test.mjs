@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { closeAll } from "../src/core/db/connection.mjs";
+import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import {
   sourcingRunComplete,
   sourcingRunFail,
@@ -211,4 +211,101 @@ test("failed first-search starts are displayable until retryFailed creates new r
   const latest = sourcingRunLatest({ repoRoot, purpose: "first-search" });
   assert.equal(latest.run.id, retry.run.id);
   assert.equal(latest.run.metadata.retryOf, failed.run.id);
+});
+
+test("completed first-search reuse is scoped to the same input fingerprint", () => {
+  const repoRoot = tempRepo();
+  const first = sourcingRunStart({
+    repoRoot,
+    purpose: "first-search",
+    inputFingerprint: "inputs-v1",
+  });
+  sourcingRunComplete({
+    repoRoot,
+    id: first.run.id,
+    summary: { scanned: 1, new: 0, errors: [], offers: [] },
+  });
+
+  const sameInputs = sourcingRunStart({
+    repoRoot,
+    purpose: "first-search",
+    inputFingerprint: "inputs-v1",
+  });
+  assert.equal(sameInputs.reused, true);
+  assert.equal(sameInputs.run.id, first.run.id);
+
+  const changedInputs = sourcingRunStart({
+    repoRoot,
+    purpose: "first-search",
+    inputFingerprint: "inputs-v2",
+  });
+  assert.equal(changedInputs.reused, false);
+  assert.equal(changedInputs.run.status, "running");
+  assert.notEqual(changedInputs.run.id, first.run.id);
+  assert.equal(changedInputs.run.metadata.inputFingerprint, "inputs-v2");
+});
+
+test("equivalent concurrent starts coalesce while changed inputs supersede the old run", () => {
+  const repoRoot = tempRepo();
+  const first = sourcingRunStart({
+    repoRoot,
+    purpose: "first-search",
+    inputFingerprint: "inputs-v1",
+  });
+
+  const equivalent = sourcingRunStart({
+    repoRoot,
+    purpose: "first-search",
+    inputFingerprint: "inputs-v1",
+  });
+  assert.equal(equivalent.reused, true);
+  assert.equal(equivalent.run.id, first.run.id);
+
+  const changed = sourcingRunStart({
+    repoRoot,
+    purpose: "first-search",
+    inputFingerprint: "inputs-v2",
+  });
+  assert.equal(changed.reused, false);
+  assert.notEqual(changed.run.id, first.run.id);
+
+  const oldRow = JSON.parse(
+    openDb({ repoRoot }).prepare("SELECT data FROM sourcing_runs WHERE id = ?").get(first.run.id)
+      .data
+  );
+  assert.equal(oldRow.status, "failed");
+  assert.equal(oldRow.error.code, "SOURCING_RUN_SUPERSEDED");
+});
+
+test("stale running rows are failed and recovered instead of reused forever", () => {
+  const repoRoot = tempRepo();
+  const first = sourcingRunStart({
+    repoRoot,
+    purpose: "first-search",
+    inputFingerprint: "inputs-v1",
+  });
+  const db = openDb({ repoRoot });
+  const stale = JSON.parse(
+    db.prepare("SELECT data FROM sourcing_runs WHERE id = ?").get(first.run.id).data
+  );
+  stale.updated_at = "2000-01-01T00:00:00.000Z";
+  db.prepare("UPDATE sourcing_runs SET data = ? WHERE id = ?").run(
+    JSON.stringify(stale),
+    first.run.id
+  );
+
+  const recovered = sourcingRunStart({
+    repoRoot,
+    purpose: "first-search",
+    inputFingerprint: "inputs-v1",
+  });
+  assert.equal(recovered.reused, false);
+  assert.notEqual(recovered.run.id, first.run.id);
+  assert.equal(recovered.run.metadata.recoveredFrom, first.run.id);
+
+  const failedStale = JSON.parse(
+    db.prepare("SELECT data FROM sourcing_runs WHERE id = ?").get(first.run.id).data
+  );
+  assert.equal(failedStale.status, "failed");
+  assert.equal(failedStale.error.code, "SOURCING_RUN_LEASE_EXPIRED");
 });

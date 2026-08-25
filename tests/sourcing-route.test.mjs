@@ -17,6 +17,7 @@ import {
   candidateSetupInitialize,
   sourceConfigPut,
 } from "../src/core/db/verbs.mjs";
+import { startFirstSearchRun } from "../src/core/onboarding/first-search-run.mjs";
 import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
 
 const cleanupRoots = [];
@@ -281,7 +282,7 @@ test("POST /api/sourcing/first-run/start reuses running and completed first-sear
   const repoRoot = tempRepo();
   markSearchReady(repoRoot);
   seedDeterministicSources(repoRoot);
-  const running = sourcingRunStart({ repoRoot, purpose: "first-search" });
+  const running = await startFirstSearchRun({ repoRoot, env: {} });
   const server = await bootServer(repoRoot, { fetchImpl: publicFetchStub() });
   try {
     const runningReuse = await postJson(server, "/api/sourcing/first-run/start", {});
@@ -503,6 +504,30 @@ test("the sourcing route does not duplicate a sweep owned by the workspace runti
     assert.equal(result.status, 202);
     assert.equal(result.body.run.id, "manual-search-runtime-owned");
     assert.equal(directBackgroundCalls, 0);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("a rejected detached background sweep durably fails its run", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot);
+  seedDeterministicSources(repoRoot);
+  const server = await bootServer(repoRoot, {
+    runSearchInBackgroundImpl: async () => {
+      const error = new Error("provider process crashed");
+      error.code = "PROVIDER_PROCESS_CRASHED";
+      throw error;
+    },
+  });
+  try {
+    const started = await postJson(server, "/api/sourcing/first-run/start", {});
+    assert.equal(started.status, 202);
+    const latest = await waitForLatestStatus(server, "failed");
+    assert.equal(latest.body.run.status, "failed");
+    assert.equal(latest.body.run.id, started.body.run.id);
+    assert.equal(latest.body.run.error.code, "PROVIDER_PROCESS_CRASHED");
+    assert.match(latest.body.run.error.message, /provider process crashed/);
   } finally {
     await closeServer(server);
   }

@@ -95,6 +95,7 @@ function createFakeBrowser({ controls, bodyText = "" } = {}) {
             groupLabel: control.groupLabel ?? null,
             choiceGroup: control.choiceGroup ?? null,
             checked: Boolean(control.checked),
+            ...(control.advanceSafe === true ? { advanceSafe: true } : {}),
           }));
         },
         nth: elementLocator,
@@ -446,6 +447,100 @@ test("collectControls: input[type=submit] names itself from the value attribute,
   const controls = withDomGlobals(stub, () => collectControls([submitInput]));
 
   assert.equal(controls[0].name, "Submit application");
+});
+
+test("collectControls marks Next safe only when its own form has structured remaining progress", () => {
+  const progress = new StubElement("div", {
+    role: "progressbar",
+    "aria-label": "Application progress",
+    "aria-valuenow": "1",
+    "aria-valuemax": "3",
+  });
+  const next = new StubElement("button", { type: "button" }, { text: "Next" });
+  const form = new StubElement("form").append(progress, next);
+  const unrelatedProgress = new StubElement("div", {
+    role: "progressbar",
+    "aria-valuenow": "1",
+    "aria-valuemax": "8",
+  });
+  const unrelatedNext = new StubElement("button", {}, { text: "Next" });
+  const unrelatedForm = new StubElement("form").append(unrelatedNext);
+  const root = new StubElement("div", { id: "root" }).append(
+    form,
+    unrelatedProgress,
+    unrelatedForm
+  );
+  const stub = createDomStub(root);
+
+  const controls = withDomGlobals(stub, () => collectControls([next, unrelatedNext]));
+
+  assert.equal(controls[0].advanceSafe, true);
+  assert.equal(controls[1].advanceSafe, undefined);
+});
+
+test("collectControls does not treat upload progress as proof that Next is non-final", () => {
+  const uploadProgress = new StubElement("div", {
+    role: "progressbar",
+    "aria-label": "Resume upload progress",
+    "aria-valuenow": "75",
+    "aria-valuemax": "100",
+  });
+  const next = new StubElement("button", { type: "button" }, { text: "Next" });
+  const root = new StubElement("form").append(uploadProgress, next);
+  const stub = createDomStub(root);
+
+  const controls = withDomGlobals(stub, () => collectControls([next]));
+
+  assert.equal(controls[0].advanceSafe, undefined);
+});
+
+test("collectControls never marks a submit-backed Next control safe", () => {
+  const progress = new StubElement("div", {
+    role: "progressbar",
+    "aria-label": "Application progress",
+    "aria-valuenow": "1",
+    "aria-valuemax": "3",
+  });
+  const next = new StubElement("button", { type: "submit" }, { text: "Next" });
+  const root = new StubElement("form").append(progress, next);
+  const stub = createDomStub(root);
+
+  const controls = withDomGlobals(stub, () => collectControls([next]));
+
+  assert.equal(controls[0].advanceSafe, undefined);
+});
+
+test("collectControls binds wizard proof only to the exact non-submit advance control", () => {
+  const progress = new StubElement("div", {
+    role: "progressbar",
+    "aria-label": "Application progress",
+    "aria-valuenow": "1",
+    "aria-valuemax": "3",
+  });
+  const leave = new StubElement("button", { type: "submit" }, { text: "Continue browsing jobs" });
+  const next = new StubElement("button", { type: "button" }, { text: "Next" });
+  const root = new StubElement("form").append(progress, leave, next);
+  const stub = createDomStub(root);
+
+  const controls = withDomGlobals(stub, () => collectControls([leave, next]));
+
+  assert.equal(controls[0].advanceSafe, undefined);
+  assert.equal(controls[1].advanceSafe, true);
+});
+
+test("collectControls does not mark a final structured step safe", () => {
+  const progress = new StubElement("div", {
+    role: "progressbar",
+    "aria-valuenow": "3",
+    "aria-valuemax": "3",
+  });
+  const next = new StubElement("button", {}, { text: "Next" });
+  const root = new StubElement("form").append(progress, next);
+  const stub = createDomStub(root);
+
+  const controls = withDomGlobals(stub, () => collectControls([next]));
+
+  assert.equal(controls[0].advanceSafe, undefined);
 });
 
 test("collectControls: a hidden file input is enumerated, a hidden text input is not (P2 coverage)", () => {
@@ -1476,6 +1571,7 @@ test("configured executor dispatches to the playwright executor for provider pla
     env: {},
     loadAutomationImpl: () => ({ data: { session: { provider: "playwright" } } }),
     launchImpl,
+    mayRunImpl: () => ({ allowed: true }),
     candidateConfigGetImpl: () => ({ profile: {}, honesty: {}, "form-defaults": {} }),
     loadAnswerMapImpl: async () => new Map(),
     captureQuestionsImpl: async ({ questions }) => ({
@@ -1504,6 +1600,7 @@ test("configured executor returns to the exact retained Playwright page for fina
     env: {},
     loadAutomationImpl: () => ({ data: { session: { provider: "playwright" } } }),
     launchImpl,
+    mayRunImpl: () => ({ allowed: true }),
     candidateConfigGetImpl: () => ({
       profile: { candidate: { first_name: "Morgan" } },
       honesty: {},
@@ -1650,6 +1747,7 @@ test("configured executor still dispatches provider orca to the orca executor", 
     repoRoot: "/repo",
     env: {},
     loadAutomationImpl: () => ({ data: { session: { provider: "orca" } } }),
+    mayRunImpl: () => ({ allowed: true }),
     runOrcaImpl: async () => {
       throw new Error("Orca is not running");
     },

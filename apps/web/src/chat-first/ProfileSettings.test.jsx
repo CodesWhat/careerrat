@@ -59,8 +59,9 @@ const PERMISSIONS = [
   },
   {
     id: "email",
-    name: "Send email replies",
-    description: "off = drafts only",
+    name: "Read job-search email",
+    description: "reads recruiting updates and verification codes from connected mail",
+    providerScope: "Turning this on records consent for Gmail, Outlook, and webmail.",
     enabled: false,
     mutable: true,
   },
@@ -209,6 +210,8 @@ describe("ProfileSettings", () => {
     expect(html).toContain('role="switch"');
     expect(html).toContain('aria-checked="false"');
     expect(html).toContain("Always on");
+    expect(html).toContain("Read job-search email");
+    expect(html).toContain("Turning this on records consent for Gmail, Outlook, and webmail.");
     expect(html).toContain("Share public company and board metadata");
     expect(html).toContain(
       "company domains, career pages, ATS board links, providers, and scan confidence"
@@ -316,12 +319,13 @@ describe("ProfileSettings", () => {
           {
             id: "claude",
             name: "Claude Code",
+            supported: true,
             available: true,
             ready: false,
             status: "authentication_required",
             action: "start_sign_in",
           },
-          { id: "codex", name: "Codex", available: false, ready: false },
+          { id: "codex", name: "Codex", supported: true, available: false, ready: false },
         ],
       },
       browser: {
@@ -404,7 +408,7 @@ describe("ProfileSettings", () => {
     expect(onBrowserProviderChange).toHaveBeenCalledWith("playwright");
   });
 
-  it("keeps unsupported detected CLIs visible without a Use action", async () => {
+  it("keeps supported engines visible when they need setup without a Use action", async () => {
     const { ProfileSettings } = await loadProfile();
     const onSelectEngine = vi.fn();
     const tree = ProfileSettings({
@@ -418,6 +422,7 @@ describe("ProfileSettings", () => {
           {
             id: "claude",
             name: "Claude Code",
+            supported: true,
             available: true,
             ready: true,
             selectable: true,
@@ -425,6 +430,7 @@ describe("ProfileSettings", () => {
           {
             id: "codex",
             name: "Codex",
+            supported: true,
             available: true,
             ready: true,
             selectable: false,
@@ -455,6 +461,7 @@ describe("ProfileSettings", () => {
           {
             id: "claude",
             name: "Claude Code",
+            supported: true,
             available: true,
             ready: false,
             selectable: false,
@@ -479,7 +486,7 @@ describe("ProfileSettings", () => {
     expect(onRetryEngine).toHaveBeenCalledWith("claude");
   });
 
-  it("presents every provider by its verified capability level in settings", async () => {
+  it("presents supported engines with one Ready contract in settings", async () => {
     const { ProfileSettings } = await loadProfile();
     const html = renderToStaticMarkup(
       <ProfileSettings
@@ -493,44 +500,30 @@ describe("ProfileSettings", () => {
             {
               id: "claude",
               name: "Claude Code",
+              supported: true,
               available: true,
               ready: true,
               selectable: true,
-              toolExecutionSupported: true,
+              capabilityTier: "task_tools",
+              capabilities: { completion: true, taskTools: true, research: true },
             },
             {
               id: "codex",
               name: "Codex",
+              supported: true,
               available: true,
               ready: true,
               selectable: true,
-              tier: "chat",
-              capabilities: ["isolated_completion"],
+              capabilityTier: "chat_drafting",
+              capabilities: { completion: true, taskTools: false, research: false },
             },
             {
-              id: "gemini",
-              name: "Gemini CLI",
-              available: true,
-              ready: false,
-              selectable: false,
-              status: "authentication_required",
-              action: "start_sign_in",
-            },
-            {
-              id: "opencode",
-              name: "OpenCode",
+              id: "hermes",
+              name: "Hermes Agent",
+              supported: false,
               available: true,
               ready: true,
               selectable: false,
-              status: "detected_not_verified",
-            },
-            {
-              id: "goose",
-              name: "Goose",
-              available: false,
-              ready: false,
-              selectable: false,
-              status: "not_found",
             },
           ],
         }}
@@ -538,12 +531,9 @@ describe("ProfileSettings", () => {
       />
     );
 
-    expect(html).toContain("Ready for task tools and research");
-    expect(html).toContain("Ready for chat and drafting");
-    expect(html).toContain("Auth required");
-    expect(html).toContain("Detected not verified");
-    expect(html).toContain("Unavailable");
-    expect(html).not.toMatch(/secure tool runs unavailable/i);
+    expect((html.match(/<span>Ready<\/span>/g) || []).length).toBe(2);
+    expect(html).not.toMatch(/task tools|chat and drafting|capabilities not verified/i);
+    expect(html).not.toContain("Hermes Agent");
   });
 
   it("keeps an empty engine picker actionable", async () => {

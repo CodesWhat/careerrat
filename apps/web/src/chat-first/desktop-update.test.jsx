@@ -127,4 +127,40 @@ describe("desktop update bridge", () => {
 
     delete globalThis.careerratDesktopUpdate;
   });
+
+  it("applies the authoritative toggle response and accepts later check updates", async () => {
+    vi.resetModules();
+    globalThis.careerratDesktopUpdate = {
+      getState: vi.fn().mockResolvedValue(null),
+      onUpdate: vi.fn((callback) => {
+        callback({ enabled: true });
+        return () => {};
+      }),
+      setEnabled: vi.fn().mockResolvedValue({
+        enabled: true,
+        error: "Update checks are required by this installation.",
+      }),
+      checkNow: vi.fn().mockResolvedValue({ enabled: false, manualResult: "current" }),
+      skipVersion: vi.fn(),
+      openRelease: vi.fn(),
+    };
+    const module = await loadDesktopUpdate();
+    let captured;
+    function Consumer() {
+      captured = module.useDesktopUpdate();
+      return null;
+    }
+    renderToStaticMarkup(<Consumer />);
+
+    await captured.setEnabled(false);
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.enabled).toBe(true);
+    expect(captured.status).toBe("Update checks are required by this installation.");
+
+    await captured.checkNow();
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.enabled).toBe(false);
+
+    delete globalThis.careerratDesktopUpdate;
+  });
 });

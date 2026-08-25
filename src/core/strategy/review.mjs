@@ -261,7 +261,47 @@ const strategyReviewProposalSchema = {
           title: { type: "string", maxLength: 140 },
           rationale: { type: "string", maxLength: 300 },
           evidenceCount: { type: "integer", minimum: 0 },
-          proposal: { type: "object" },
+          proposal: {
+            type: "object",
+            required: [
+              "ids",
+              "id",
+              "toStatus",
+              "priority",
+              "signal",
+              "amount",
+              "company",
+              "patch",
+              "family",
+              "title",
+              "body",
+              "text",
+            ],
+            additionalProperties: false,
+            properties: {
+              ids: { type: "array", maxItems: MAX_RERANK_ROWS, items: { type: "string" } },
+              id: { type: ["string", "null"] },
+              toStatus: { type: ["string", "null"] },
+              priority: { type: ["string", "number", "null"] },
+              signal: { type: ["string", "null"] },
+              amount: { type: ["number", "null"] },
+              company: { type: ["string", "null"] },
+              patch: {
+                type: ["object", "null"],
+                required: ["high_min", "med_min", "fit_floor"],
+                additionalProperties: false,
+                properties: {
+                  high_min: { type: ["number", "null"] },
+                  med_min: { type: ["number", "null"] },
+                  fit_floor: { type: ["number", "null"] },
+                },
+              },
+              family: { type: ["string", "null"] },
+              title: { type: ["string", "null"] },
+              body: { type: ["string", "null"] },
+              text: { type: ["string", "null"] },
+            },
+          },
         },
       },
     },
@@ -279,7 +319,8 @@ function promptFor(context) {
     "- evidenceCount must honestly reflect how many data points (rows, rejections, entries) actually support the recommendation — do not inflate it.",
     "- Prefer recommendations with evidenceCount >= 3; a lower count is fine but must be clearly a small-sample, directional call in the rationale.",
     "- Return at most 8 recommendations, ranked most important first.",
-    "- proposal shape by type: rerank {id, toStatus?, priority?}; keep-signal/cut-signal {signal}; comp-target/comp-floor {amount}; exclude-company {company}; fit-bands {patch}; learning {family, title, body}; writing-style/other {text}.",
+    "- Every proposal includes every schema field. Use null, or [] for ids, when a field does not apply.",
+    "- proposal values by type: rerank uses ids/id plus toStatus and/or priority; keep-signal/cut-signal uses signal; comp-target/comp-floor uses amount; exclude-company uses company; fit-bands uses patch; learning uses family/title/body; writing-style/other uses text.",
     "",
     "Context:",
     JSON.stringify(context),
@@ -305,6 +346,44 @@ function manualDraftResult({ context, reason, code = null }) {
       surfaceSummary: rec || null,
     },
   };
+}
+
+function compactStrategyProposal(type, proposal) {
+  const value = proposal && typeof proposal === "object" ? proposal : {};
+  if (type === "rerank") {
+    return {
+      ...(Array.isArray(value.ids) && value.ids.length ? { ids: value.ids } : {}),
+      ...(value.id ? { id: value.id } : {}),
+      ...(value.toStatus ? { toStatus: value.toStatus } : {}),
+      ...(value.priority !== null && value.priority !== undefined
+        ? { priority: value.priority }
+        : {}),
+    };
+  }
+  if (type === "keep-signal" || type === "cut-signal") {
+    return value.signal ? { signal: value.signal } : {};
+  }
+  if (type === "comp-target" || type === "comp-floor") {
+    return Number.isFinite(value.amount) ? { amount: value.amount } : {};
+  }
+  if (type === "exclude-company") {
+    return value.company ? { company: value.company } : {};
+  }
+  if (type === "fit-bands") {
+    const patch = Object.fromEntries(
+      Object.entries(value.patch && typeof value.patch === "object" ? value.patch : {}).filter(
+        ([key, entry]) =>
+          ["high_min", "med_min", "fit_floor"].includes(key) && Number.isFinite(entry)
+      )
+    );
+    return Object.keys(patch).length ? { patch } : {};
+  }
+  if (type === "learning") {
+    return Object.fromEntries(
+      ["family", "title", "body"].filter((key) => value[key]).map((key) => [key, value[key]])
+    );
+  }
+  return value.text ? { text: value.text } : {};
 }
 
 function freshDraftResult({ context, lastReview }) {
@@ -365,14 +444,17 @@ export async function draftStrategyReview({
   const data = aiResult.body.data || {};
   const recommendations = (Array.isArray(data.recommendations) ? data.recommendations : [])
     .slice(0, MAX_RECOMMENDATIONS)
-    .map((rec, index) => ({
-      id: cleanText(rec.id, 80) || `rec-${index + 1}`,
-      type: RECOMMENDATION_TYPES.includes(rec.type) ? rec.type : "other",
-      title: cleanText(rec.title, 140),
-      rationale: cleanText(rec.rationale, 300),
-      evidenceCount: Number.isFinite(rec.evidenceCount) ? Math.max(0, rec.evidenceCount) : 0,
-      proposal: rec.proposal && typeof rec.proposal === "object" ? rec.proposal : {},
-    }));
+    .map((rec, index) => {
+      const type = RECOMMENDATION_TYPES.includes(rec.type) ? rec.type : "other";
+      return {
+        id: cleanText(rec.id, 80) || `rec-${index + 1}`,
+        type,
+        title: cleanText(rec.title, 140),
+        rationale: cleanText(rec.rationale, 300),
+        evidenceCount: Number.isFinite(rec.evidenceCount) ? Math.max(0, rec.evidenceCount) : 0,
+        proposal: compactStrategyProposal(type, rec.proposal),
+      };
+    });
   const findings = (Array.isArray(data.findings) ? data.findings : [])
     .slice(0, MAX_RECOMMENDATIONS)
     .map((finding, index) => ({

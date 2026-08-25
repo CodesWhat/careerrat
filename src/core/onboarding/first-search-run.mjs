@@ -1,8 +1,11 @@
+import { createHash } from "node:crypto";
 import { runSourcedScan } from "../../../scripts/scan-sourced.mjs";
 import { candidateConfigGet, hasSearchLocation } from "../db/verbs/candidate.mjs";
 import { companyBoardResolutionGet } from "../db/verbs/company-discovery.mjs";
 import { companyAtsUpsert, sourceConfigGet, sourceConfigPut } from "../db/verbs/source-config.mjs";
 import {
+  assertSourcingRunActiveInDb,
+  sourcingRunAssertActive,
   sourcingRunComplete,
   sourcingRunFail,
   sourcingRunLatest,
@@ -65,6 +68,63 @@ const STATUS_LABELS = Object.freeze({
 function clone(value) {
   if (value == null) return value;
   return JSON.parse(JSON.stringify(value));
+}
+
+function stableValue(value, { sourceConfig = false } = {}) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => stableValue(entry, { sourceConfig }));
+  }
+  if (!value || typeof value !== "object") return value;
+  const entries = [];
+  for (const key of Object.keys(value).sort()) {
+    if (sourceConfig && key === "lastRunAt") continue;
+    const normalized = stableValue(value[key], { sourceConfig });
+    if (
+      sourceConfig &&
+      key === "recency" &&
+      normalized &&
+      typeof normalized === "object" &&
+      !Array.isArray(normalized) &&
+      Object.keys(normalized).length === 0
+    ) {
+      continue;
+    }
+    entries.push([key, normalized]);
+  }
+  return Object.fromEntries(entries);
+}
+
+function searchProfileInputs(profile = {}) {
+  return {
+    authorization: clone(profile.authorization || {}),
+    candidate: { domain: String(profile.candidate?.domain || "") },
+    compensation: clone(profile.compensation || {}),
+    location: clone(profile.location || {}),
+  };
+}
+
+function searchTargetingInputs(targeting = {}) {
+  const searchPreferences = clone(targeting.search_preferences || {});
+  delete searchPreferences.ai_prompts;
+  delete searchPreferences.ai_prompts_input_fingerprint;
+  delete searchPreferences.cadence;
+  return {
+    ...clone(targeting),
+    search_preferences: searchPreferences,
+  };
+}
+
+function buildSourcingRunFingerprint({ purpose, mode, config, searchSources, sourcedScan } = {}) {
+  const input = stableValue({
+    version: 1,
+    purpose: String(purpose || ""),
+    mode: String(mode || purpose || ""),
+    targeting: searchTargetingInputs(config?.targeting),
+    profile: searchProfileInputs(config?.profile),
+    searchSources: stableValue(searchSources || {}, { sourceConfig: true }),
+    sourcedScan: stableValue(sourcedScan || {}, { sourceConfig: true }),
+  });
+  return createHash("sha256").update(JSON.stringify(input)).digest("hex");
 }
 
 function makeError(message, code, extra = {}) {
@@ -236,19 +296,27 @@ const LEGACY_WELLFOUND_URL_RE = new RegExp(
   `/role/(?:r/|l/[^/]+/)?${LEGACY_HARDCODED_QUERY_SLUG}(?:/|$)`
 );
 
-function isLegacyHardcodedAggregatorEntry(entry = {}) {
+function isLegacyHardcodedAggregatorEntry(entry = {}, generatedEntries = []) {
   if (entry.provider === "RemoteVibeCodingJobs") {
-    return String(entry.query || "").trim() === LEGACY_HARDCODED_AGGREGATOR_QUERY;
+    if (String(entry.query || "").trim() !== LEGACY_HARDCODED_AGGREGATOR_QUERY) return false;
+    const generated = generatedEntries.find(
+      (candidate) => candidate?.provider === "RemoteVibeCodingJobs"
+    );
+    return String(generated?.query || "").trim() !== LEGACY_HARDCODED_AGGREGATOR_QUERY;
   }
   if (entry.provider === "Wellfound") {
-    return LEGACY_WELLFOUND_URL_RE.test(String(entry.url || ""));
+    const url = String(entry.url || "");
+    if (!LEGACY_WELLFOUND_URL_RE.test(url)) return false;
+    return !generatedEntries.some(
+      (candidate) => candidate?.provider === "Wellfound" && String(candidate.url || "") === url
+    );
   }
   return false;
 }
 
 function mergeSearchSources(existing = {}, generated = {}) {
   const reconciledExistingSearches = asArray(existing.searches).filter(
-    (entry) => !isLegacyHardcodedAggregatorEntry(entry)
+    (entry) => !isLegacyHardcodedAggregatorEntry(entry, asArray(generated.searches))
   );
   return {
     ...generated,
@@ -556,6 +624,7 @@ function normalizeRunSummary(summary = {}, deterministicSources) {
     ),
     reconciled: Number(summary.reconciled || 0),
     reasonCounts: clone(summary.reasonCounts || {}),
+    rejectionSamples: clone(summary.rejectionSamples || {}),
     errorCount: errors.length,
     errors: clone(errors),
     offerCount: Array.isArray(summary.offers) ? summary.offers.length : 0,
@@ -580,6 +649,7 @@ async function startSearchRun({
   env,
   fetchImpl = fetch,
   purpose,
+  mode,
   retryFailed = false,
   trigger,
 } = {}) {
@@ -620,11 +690,19 @@ async function startSearchRun({
     config,
   });
   const deterministicSources = prepared.deterministicSources;
+  const inputFingerprint = buildSourcingRunFingerprint({
+    purpose,
+    mode,
+    config,
+    searchSources: prepared.searchSources,
+    sourcedScan: prepared.sourcedScan,
+  });
   const start = sourcingRunStart({
     ...pathCtx,
     purpose,
     retryFailed,
     trigger,
+    inputFingerprint,
     metadata: {
       deterministicSources,
       companyBoardResolution: prepared.companyBoardResolution,
@@ -814,6 +892,7 @@ export async function startFirstSearchRun({
     env,
     fetchImpl,
     purpose: "first-search",
+    mode: "onboarding",
     retryFailed,
     trigger: retryFailed ? "first-search-retry" : "search-ready",
   });
@@ -829,6 +908,7 @@ export async function startManualSearchRun({
     env,
     fetchImpl,
     purpose: "manual-search",
+    mode: "manual",
     retryFailed: false,
     trigger: "manual-search",
   });
@@ -874,6 +954,8 @@ export async function runFirstSearchInBackground({
       fetchImpl,
       write: true,
       verify: true,
+      assertActive: () => sourcingRunAssertActive({ ...pathCtx, id: runId }),
+      writeGuard: (db) => assertSourcingRunActiveInDb(db, runId),
       onProgress: ({ batch: _batch, ...progress }) => {
         lastProgress = progress;
         recordProgress(progress);
@@ -929,8 +1011,23 @@ export function latestSourcingRunForUi({
   purpose = "first-search",
 } = {}) {
   const latest = sourcingRunLatest({ repoRoot, env, purpose });
+  let inputsChanged = false;
+  if (latest.run) {
+    const config = candidateConfigGet({ repoRoot, env });
+    const searchSources = sourceConfigGet({ repoRoot, env, name: "search-sources" }).data;
+    const sourcedScan = sourceConfigGet({ repoRoot, env, name: "sourced-scan" }).data;
+    const currentFingerprint = buildSourcingRunFingerprint({
+      purpose,
+      mode: purpose === "first-search" ? "onboarding" : "manual",
+      config,
+      searchSources,
+      sourcedScan,
+    });
+    inputsChanged = latest.run.metadata?.inputFingerprint !== currentFingerprint;
+  }
   return {
     ...latest,
+    inputsChanged,
     run: latest.run ? mapSourcingRunForUi(latest.run) : null,
   };
 }

@@ -62,21 +62,24 @@ imported. It points at Electron's per-user data directory:
 `app.getPath("userData")/data`. Candidate setup, workspace state, SQLite data,
 and `internal/ai.env` live there, outside the signed resources tree.
 
-The packaged app detects the expanded AI CLI registry in Finder-safe install
-locations. Claude Code 2.1.241 or newer is selectable for full in-app task tools
-and research through its verified per-call tool, path, and network boundary.
-Codex 0.149.1 or newer is selectable for isolated in-app chat and drafting with
-its user config, rules, shell, apps, browser, computer use, plugins, and other
-native agent features disabled for the call. Codex task-tool and research runs
-fail closed. Other detected CLIs remain visible as detected but unverified and
-can still drive CareerRat as outer agents through the terminal workflow.
+CareerRat owns the workflows and threads, so durable product state stays
+provider-neutral. Claude Code 2.1.241 or newer and OpenAI Codex 0.149.1 or newer
+are the two supported product runtime choices. Both run the same CareerRat-owned
+workflows, skills, and durable state. A runtime is
+selectable only after Finder-safe detection confirms its availability,
+authentication, and complete readiness check. Both adapters run fixed,
+isolated invocations with an allowlisted process environment and only the
+CareerRat capability requested for that call, including guarded public-web
+research and one staged approved-file read when needed. Other detected CLIs are
+diagnostic-only until they pass the same acceptance matrix.
+
 CareerRat stores only the selected runtime id; it never copies or persists the
-CLI's credentials. The signed artifact contains no Agent SDK and does not
-silently use a direct-provider fallback. Source development can exercise
-provider fallback as a separate test-only path. Provider credentials written through
-`src/core/ai/ai-env.mjs` live in `internal/ai.env` with local-only file
-permissions; no provider or Apple credential is stored in the app bundle or
-tracked source.
+CLI's credentials, and the app never silently switches engines. The signed
+artifact contains no Agent SDK or direct-provider fallback. Source development
+can exercise provider fallback as a separate test-only path. Provider
+credentials written through `src/core/ai/ai-env.mjs` live in `internal/ai.env`
+with local-only file permissions; no provider or Apple credential is stored in
+the app bundle or tracked source.
 
 ## Signing and notarization
 

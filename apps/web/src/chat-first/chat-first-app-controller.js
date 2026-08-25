@@ -686,7 +686,7 @@ export function mapMockSession(session) {
       questionNumber: itemNumber,
       question: item.text,
       answer: itemAnswer?.text || null,
-      worked: itemFeedback?.worked || null,
+      worked: itemFeedback?.worked ?? null,
       tighten: itemFeedback?.tighten || null,
     };
   });
@@ -706,12 +706,12 @@ export function mapMockSession(session) {
     questionReady: Boolean(question?.text),
     question: question?.text || null,
     userAnswer: answer?.text || null,
-    worked: feedback?.worked || null,
+    worked: feedback?.worked ?? null,
     tighten: feedback?.tighten || null,
     previousFeedback: previous
       ? {
           questionNumber: Number(previous.questionNumber),
-          worked: previous.worked || null,
+          worked: previous.worked ?? null,
           tighten: previous.tighten || null,
         }
       : null,

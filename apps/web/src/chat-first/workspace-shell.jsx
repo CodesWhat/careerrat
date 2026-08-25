@@ -452,7 +452,13 @@ export function NeedsYouPanel({
           </div>
           <section className="chat-first-deep-card">
             <div className="chat-first-deep-card__title">
-              <PickaxeIcon /> Deep ingest your history
+              <span
+                className={`chat-first-thread-card__icon-badge chat-first-thread-card__icon-badge--${iconBadgeTone("ingest")} chat-first-deep-card__icon-badge`}
+                aria-hidden="true"
+              >
+                <PickaxeIcon />
+              </span>
+              Deep ingest your history
             </div>
             <p>
               old resumes, reviews, project docs · tailoring and matches sharpen. ~15 min chat,

@@ -64,14 +64,12 @@ run the installer as the current user, and choose an install directory. The
 installer creates Start menu and desktop shortcuts and does not need an
 administrator account.
 
-Claude Code 2.1.241 or newer runs full in-app task tools and research. Codex
-0.149.1 or newer runs isolated in-app chat and drafting with its native agent
-features disabled for the call. Codex task-tool and research work fails closed.
-The expanded CLI registry remains visible, but other engines are not selectable
-until their boundaries are verified. Every engine remains usable as an outer
-workspace agent through CareerRat's terminal flow. The packaged runtime does
-not ship the proprietary Claude Agent SDK and does not copy the selected CLI's
-credentials. Missing capability produces a clear in-app error instead of a
+CareerRat owns its workflows and threads, so their state remains
+provider-neutral on Windows. Claude Code 2.1.241 or newer and OpenAI Codex
+0.149.1 or newer are the supported engines for the complete CareerRat product.
+An engine becomes `Ready` only after local availability, authentication, and the
+complete readiness check pass. The packaged runtime does not copy the selected
+CLI's credentials. A failed check produces a clear in-app error instead of a
 silent provider switch.
 
 Candidate data, documents, and settings are stored below

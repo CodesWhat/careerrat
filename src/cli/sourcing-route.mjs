@@ -1,4 +1,5 @@
 import { WORKSPACE_THREAD_ID } from "../core/agent/workspace-thread.mjs";
+import { sourcingRunFail } from "../core/db/verbs/sourcing-runs.mjs";
 import {
   latestSourcingRunForUi,
   runFirstSearchInBackground,
@@ -48,7 +49,22 @@ function startBackground({
   if (result?.reused === true || result?.run?.status !== "running") return;
   void runSearchInBackgroundImpl({ repoRoot, env, fetchImpl, runId: result.run.id })
     .then((run) => workspaceAgentRuntime?.recordSearchCompletion?.({ run }))
-    .catch(() => {});
+    .catch((error) => {
+      try {
+        const failed = sourcingRunFail({
+          repoRoot,
+          env,
+          id: result.run.id,
+          error: {
+            code: error?.code || "SOURCING_SCAN_FAILED",
+            message: error?.message || "Sourcing scan failed.",
+          },
+        }).run;
+        return workspaceAgentRuntime?.recordSearchCompletion?.({ run: failed });
+      } catch {
+        return undefined;
+      }
+    });
 }
 
 async function startThroughWorkspace({ workspaceAgentRuntime, purpose, retryFailed }) {

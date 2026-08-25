@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { closeAll } from "../src/core/db/connection.mjs";
+import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import {
   candidateArtifactPut,
   candidateConfigPatch,
@@ -11,6 +11,7 @@ import {
   companyBoardResolutionUpsert,
   sourceConfigGet,
   sourceConfigPut,
+  sourcingRunComplete,
   sourcingRunLatest,
   sourcingRunStart,
 } from "../src/core/db/verbs.mjs";
@@ -23,6 +24,7 @@ import {
 } from "../src/core/onboarding/first-search-run.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { buildWellfoundUrl } from "../src/core/providers/wellfound.mjs";
+import { saveSearchPrompts } from "../src/core/search/search-prompts.mjs";
 
 const cleanupRoots = [];
 
@@ -695,6 +697,137 @@ test("failed first-search can retry as fresh work after deterministic source set
   assert.equal(retry.run.metadata.retryOf, failed.run.id);
 });
 
+test("first-search completion is reused only while targeting and source inputs are unchanged", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot);
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      title_filter: {},
+      location_filter: null,
+      searches: [
+        {
+          label: "Stable RSS",
+          source_type: "rss",
+          rssUrl: "https://example.test/jobs.xml",
+          enabled: true,
+        },
+      ],
+      tracked_companies: [],
+      source_catalog: {},
+    },
+  });
+
+  const first = await startFirstSearchRun({ repoRoot, env: {} });
+  const afterFirstPreparation = {
+    searchSources: sourceConfigGet({ repoRoot, name: "search-sources" }).data,
+    sourcedScan: sourceConfigGet({ repoRoot, name: "sourced-scan" }).data,
+  };
+  sourcingRunComplete({
+    repoRoot,
+    id: first.run.id,
+    summary: { scanned: 1, new: 0, errors: [], offers: [] },
+  });
+
+  const unchanged = await startFirstSearchRun({ repoRoot, env: {} });
+  assert.deepEqual(
+    {
+      searchSources: sourceConfigGet({ repoRoot, name: "search-sources" }).data,
+      sourcedScan: sourceConfigGet({ repoRoot, name: "sourced-scan" }).data,
+    },
+    afterFirstPreparation,
+    "equivalent preparation must leave source inputs unchanged"
+  );
+  assert.equal(unchanged.reused, true);
+  assert.equal(unchanged.run.id, first.run.id);
+  assert.equal(
+    latestSourcingRunForUi({ repoRoot, env: {}, purpose: "first-search" }).inputsChanged,
+    false
+  );
+
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [{ text: "Find matching engineering roles" }],
+    defaultSource: "generated",
+  });
+  assert.equal(
+    latestSourcingRunForUi({ repoRoot, env: {}, purpose: "first-search" }).inputsChanged,
+    false,
+    "AI prompt cache writes are not deterministic sourcing inputs"
+  );
+
+  const watermarkedSources = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      ...watermarkedSources,
+      searches: watermarkedSources.searches.map((source, index) =>
+        index === 0
+          ? {
+              ...source,
+              recency: { ...(source.recency || {}), lastRunAt: "2026-08-25T12:00:00.000Z" },
+            }
+          : source
+      ),
+    },
+  });
+  const watermarkOnly = await startFirstSearchRun({ repoRoot, env: {} });
+  assert.equal(watermarkOnly.reused, true);
+  assert.equal(watermarkOnly.run.id, first.run.id);
+
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "AI builder", titles: ["Senior AI Engineer"] }],
+    },
+  });
+  assert.equal(
+    latestSourcingRunForUi({ repoRoot, env: {}, purpose: "first-search" }).inputsChanged,
+    true
+  );
+  const changedTargeting = await startFirstSearchRun({ repoRoot, env: {} });
+  assert.equal(changedTargeting.reused, false);
+  assert.notEqual(changedTargeting.run.id, first.run.id);
+  assert.notEqual(
+    changedTargeting.run.metadata.inputFingerprint,
+    first.run.metadata.inputFingerprint
+  );
+
+  sourcingRunComplete({
+    repoRoot,
+    id: changedTargeting.run.id,
+    summary: { scanned: 1, new: 0, errors: [], offers: [] },
+  });
+  const currentSearchSources = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      ...currentSearchSources,
+      searches: [
+        ...currentSearchSources.searches,
+        {
+          label: "New RSS",
+          source_type: "rss",
+          rssUrl: "https://new.example.test/jobs.xml",
+          enabled: true,
+        },
+      ],
+    },
+  });
+
+  const changedSources = await startFirstSearchRun({ repoRoot, env: {} });
+  assert.equal(changedSources.reused, false);
+  assert.notEqual(changedSources.run.id, changedTargeting.run.id);
+  assert.notEqual(
+    changedSources.run.metadata.inputFingerprint,
+    changedTargeting.run.metadata.inputFingerprint
+  );
+});
+
 test("zero-result scans with attempted deterministic sources complete with zero-result summary", async () => {
   const repoRoot = tempRepo();
   markSearchReady(repoRoot, { domain: "operations" });
@@ -740,6 +873,57 @@ test("zero-result scans with attempted deterministic sources complete with zero-
   assert.equal(latest.run.summary.new, 0);
   assert.equal(latest.run.summary.zeroResults, true);
   assert.equal(latest.run.summary.deterministicSources.attempted, 2);
+});
+
+test("completed search runs preserve bounded rejection evidence", async () => {
+  const repoRoot = tempRepo();
+  sourceConfigPut({
+    repoRoot,
+    name: "sourced-scan",
+    data: {
+      title_filter: { positive: [], negative: ["Sales"] },
+      location_filter: null,
+      tracked_companies: [{ name: "Acme", careers_url: "https://jobs.lever.co/acme" }],
+    },
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: { title_filter: {}, location_filter: null, searches: [] },
+  });
+  const started = sourcingRunStart({ repoRoot, purpose: "first-search" });
+
+  await runFirstSearchInBackground({
+    repoRoot,
+    env: {},
+    runId: started.run.id,
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify([
+          {
+            text: "Sales Engineer",
+            hostedUrl: "https://jobs.lever.co/acme/sales-engineer",
+            categories: { location: "Remote - US" },
+            descriptionBodyPlain: "Customer-facing sales role.",
+          },
+        ]),
+        { status: 200 }
+      ),
+  });
+
+  const latest = sourcingRunLatest({ repoRoot, purpose: "first-search" });
+  assert.equal(latest.run.status, "completed");
+  assert.equal(latest.run.summary.reasonCounts.titleBlocker, 1);
+  assert.deepEqual(latest.run.summary.rejectionSamples.title, [
+    {
+      company: "Acme",
+      title: "Sales Engineer",
+      location: "Remote - US",
+      reason: "title-negative-blocker",
+      kind: "blocker",
+      provider: "lever",
+    },
+  ]);
 });
 
 test("background first search publishes a growing found count before completion", async () => {
@@ -819,4 +1003,78 @@ test("background first search publishes a growing found count before completion"
     betaResponse.resolve(new Response("[]", { status: 200 }));
     await background?.catch(() => {});
   }
+});
+
+test("a superseded background search cannot write stale watermarks, offers, or completion", async () => {
+  const repoRoot = tempRepo();
+  const oldResponse = deferred();
+  const oldRequested = deferred();
+  sourceConfigPut({
+    repoRoot,
+    name: "sourced-scan",
+    data: {
+      title_filter: { positive: [], negative: [] },
+      location_filter: null,
+      tracked_companies: [{ name: "Acme", careers_url: "https://jobs.lever.co/acme" }],
+    },
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: { title_filter: {}, location_filter: null, searches: [] },
+  });
+  const first = sourcingRunStart({
+    repoRoot,
+    purpose: "first-search",
+    inputFingerprint: "inputs-v1",
+  });
+  const background = runFirstSearchInBackground({
+    repoRoot,
+    env: {},
+    runId: first.run.id,
+    fetchImpl: async () => {
+      oldRequested.resolve();
+      return oldResponse.promise;
+    },
+  });
+
+  await oldRequested.promise;
+  const current = sourceConfigGet({ repoRoot, name: "sourced-scan" }).data;
+  sourceConfigPut({
+    repoRoot,
+    name: "sourced-scan",
+    data: {
+      ...current,
+      tracked_companies: [
+        ...current.tracked_companies,
+        { name: "Beta", careers_url: "https://jobs.lever.co/beta" },
+      ],
+    },
+  });
+  const replacement = sourcingRunStart({
+    repoRoot,
+    purpose: "first-search",
+    inputFingerprint: "inputs-v2",
+  });
+  oldResponse.resolve(
+    leverResponse({
+      title: "Applied AI Engineer",
+      url: "https://jobs.lever.co/acme/applied-ai",
+    })
+  );
+
+  await assert.rejects(background, { code: "SOURCING_RUN_SUPERSEDED" });
+  const after = sourceConfigGet({ repoRoot, name: "sourced-scan" }).data;
+  assert.deepEqual(
+    after.tracked_companies.map(({ name }) => name),
+    ["Acme", "Beta"]
+  );
+  assert.equal(after.tracked_companies[0].lastRunAt, undefined);
+  assert.equal(
+    openDb({ repoRoot }).prepare("SELECT COUNT(*) AS count FROM sourced").get().count,
+    0
+  );
+  const latest = sourcingRunLatest({ repoRoot, purpose: "first-search" }).run;
+  assert.equal(latest.id, replacement.run.id);
+  assert.equal(latest.status, "running");
 });

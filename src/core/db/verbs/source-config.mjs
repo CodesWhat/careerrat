@@ -103,6 +103,22 @@ export function sourceConfigPut({ repoRoot, env, name, data } = {}) {
   });
 }
 
+export function sourceConfigMutate({ repoRoot, env, name, mutate, guard } = {}) {
+  if (typeof mutate !== "function") {
+    const err = new Error("sourceConfigMutate requires a mutation function");
+    err.code = "BAD_REQUEST";
+    throw err;
+  }
+  const db = requireDb({ repoRoot, env });
+  return withTransaction(db, () => {
+    if (typeof guard === "function") guard(db);
+    const current = readSourceConfig(db, name).data;
+    const next = mutate(clone(current));
+    putSourceConfig(db, name, next);
+    return { ok: true, ...readSourceConfig(db, name) };
+  });
+}
+
 // Pure-on-the-passed-db half of companyAtsUpsert (no transaction of its own)
 // — the same "InDb" split refreshAnalyticsInDb uses, so a caller that already
 // holds an open transaction (public-intel.mjs's publicIntelReviewDecision)

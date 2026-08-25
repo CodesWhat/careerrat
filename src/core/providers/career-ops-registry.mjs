@@ -184,13 +184,21 @@ function timeoutFor(value) {
 // request the guard blocks throws a specific error naming the URL and the
 // reason — never a silent empty result — so a provider (or its caller) sees
 // exactly why a scan came back short instead of just quietly missing rows.
-async function request(fetchImpl, url, options = {}, consume, resolveHost, dispatcherFactory) {
+async function request(
+  fetchImpl,
+  url,
+  options = {},
+  consume,
+  resolveHost,
+  dispatcherFactory,
+  parentSignal
+) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutFor(options.timeoutMs));
   let close = null;
   try {
     const init = {
-      signal: controller.signal,
+      signal: combineAbortSignals(controller.signal, parentSignal, options.signal),
       redirect: options.redirect || "follow",
       headers: requestHeaders(options.headers),
     };
@@ -248,7 +256,7 @@ export function createContext(fetchImpl, options = {}) {
     sinceMs: options.sinceMs,
     includeUndated: options.includeUndated,
     syntheticEntries: options.syntheticEntries,
-    sleep: options.sleep || ((ms) => delay(ms)),
+    sleep: options.sleep || ((ms) => delay(ms, undefined, { signal: options.signal })),
     fetchJson(url, requestOptions = {}) {
       return request(
         fetchImpl,
@@ -259,7 +267,8 @@ export function createContext(fetchImpl, options = {}) {
           return JSON.parse(text);
         },
         resolveHost,
-        dispatcherFactory
+        dispatcherFactory,
+        options.signal
       );
     },
     fetchText(url, requestOptions = {}) {
@@ -269,7 +278,8 @@ export function createContext(fetchImpl, options = {}) {
         requestOptions,
         (response) => response.text(),
         resolveHost,
-        dispatcherFactory
+        dispatcherFactory,
+        options.signal
       );
     },
     fetchResponse(url, requestOptions = {}) {
@@ -286,10 +296,18 @@ export function createContext(fetchImpl, options = {}) {
           });
         },
         resolveHost,
-        dispatcherFactory
+        dispatcherFactory,
+        options.signal
       );
     },
   };
+}
+
+function combineAbortSignals(...signals) {
+  const active = signals.filter(Boolean);
+  if (active.length === 0) return undefined;
+  if (active.length === 1) return active[0];
+  return AbortSignal.any(active);
 }
 
 function normalizedDate(value) {
@@ -319,6 +337,8 @@ function formatSalaryRange(salary) {
 
 function normalizeOffer(job = {}, providerId) {
   const bodyText = String(job.bodyText || job.description || "").trim();
+  const bodyPartial =
+    bodyText.length === 0 || job.bodyPartial === true || job.descriptionPartial === true;
   const postedAt = normalizedDate(job.postedAt);
   return {
     title: String(job.title || "").trim(),
@@ -327,7 +347,7 @@ function normalizeOffer(job = {}, providerId) {
     location: String(job.location || "").trim(),
     comp: String(job.comp || formatSalaryRange(job.salary) || "").trim(),
     bodyText,
-    bodyPartial: bodyText.length === 0,
+    bodyPartial,
     ...(postedAt ? { postedAt } : {}),
     provider: providerId,
   };

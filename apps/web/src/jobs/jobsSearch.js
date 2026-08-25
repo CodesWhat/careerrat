@@ -14,6 +14,266 @@ function unwrapRun(value) {
   return value;
 }
 
+const SEARCH_LANES = Object.freeze({
+  deterministic: { label: "Configured sources" },
+  aiWeb: { label: "AI web search" },
+});
+
+export function jobSearchCapabilities({ sourceStatus, ai } = {}) {
+  const enabledSearches = Number(sourceStatus?.searches?.enabled || 0);
+  const enabledCompanies = Number(sourceStatus?.enabledTrackedCompanies || 0);
+  const deterministicAttempts = Number(sourceStatus?.deterministicSources?.attempted || 0);
+  return {
+    deterministic: {
+      configured: enabledSearches > 0 || enabledCompanies > 0,
+      executable: deterministicAttempts > 0,
+      consented: true,
+    },
+    aiWeb: {
+      configured: ai?.configured === true,
+      executable: ai?.executable === true,
+      consented: ai?.consented === true,
+    },
+  };
+}
+
+function skippedReason(capability) {
+  if (!capability.configured) return "not-configured";
+  if (!capability.consented) return "not-consented";
+  return "unavailable";
+}
+
+function initialLaneState(id, capability = {}) {
+  const configured = capability.configured === true;
+  const executable = capability.executable === true;
+  const consented = capability.consented !== false;
+  const runnable = configured && executable && consented;
+  return {
+    label: SEARCH_LANES[id].label,
+    configured,
+    executable,
+    consented,
+    status: runnable ? "running" : "skipped",
+    ...(!runnable ? { reason: skippedReason({ configured, executable, consented }) } : {}),
+  };
+}
+
+function laneError(result, fallback) {
+  if (typeof result?.error === "string" && result.error) return result.error;
+  if (result?.error?.message) return result.error.message;
+  return fallback;
+}
+
+function resultNewCount(result) {
+  const value = result?.data?.new ?? result?.run?.summary?.new ?? result?.summary?.new;
+  const count = Number(value);
+  return Number.isFinite(count) ? count : 0;
+}
+
+function resultCount(result, key) {
+  const value = result?.data?.[key] ?? result?.run?.summary?.[key] ?? result?.summary?.[key];
+  const count = Number(value);
+  return Number.isFinite(count) && count > 0 ? count : 0;
+}
+
+function normalizedIdentityPart(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function normalizedOfferUrl(value) {
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    url.hostname = url.hostname.toLowerCase();
+    if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/, "");
+    return url.href;
+  } catch {
+    return String(value || "")
+      .trim()
+      .toLowerCase();
+  }
+}
+
+function offerIdentityKeys(offer) {
+  const url = String(offer?.url || offer?.link || "").trim();
+  const reqId = String(offer?.reqId || offer?.scanner?.reqId || "")
+    .trim()
+    .toLowerCase();
+  const keys = [];
+  if (url) keys.push(`url:${normalizedOfferUrl(url)}`);
+  if (reqId) keys.push(`req:${reqId}`);
+  if (keys.length) return keys;
+
+  const company = normalizedIdentityPart(offer?.company);
+  const role = normalizedIdentityPart(offer?.role || offer?.title);
+  const location = normalizedIdentityPart(offer?.location || offer?.loc);
+  return company && role && location
+    ? [`company-role-location:${company}::${role}::${location}`]
+    : [];
+}
+
+function resultNewOffers(result) {
+  const value = result?.data?.offers ?? result?.run?.summary?.offers ?? result?.summary?.offers;
+  return Array.isArray(value) ? value : null;
+}
+
+function reconciledNewCount(outcomes) {
+  const seenIdentities = new Set();
+  let identified = 0;
+  let withoutIdentity = 0;
+  for (const outcome of outcomes) {
+    const count = resultNewCount(outcome.result);
+    const offers = resultNewOffers(outcome.result);
+    if (!offers) {
+      withoutIdentity += count;
+      continue;
+    }
+    const countedOffers = offers.slice(0, count);
+    withoutIdentity += Math.max(0, count - countedOffers.length);
+    for (const offer of countedOffers) {
+      const identities = offerIdentityKeys(offer);
+      if (!identities.length) {
+        withoutIdentity += 1;
+        continue;
+      }
+      if (identities.some((identity) => seenIdentities.has(identity))) continue;
+      for (const identity of identities) seenIdentities.add(identity);
+      identified += 1;
+    }
+  }
+  return identified + withoutIdentity;
+}
+
+export async function runCoordinatedJobSearch({
+  capabilities = {},
+  runDeterministic,
+  runAiWeb,
+  refetch,
+  setSearchState,
+  signal,
+} = {}) {
+  let lanes = {
+    deterministic: initialLaneState("deterministic", capabilities.deterministic),
+    aiWeb: initialLaneState("aiWeb", capabilities.aiWeb),
+  };
+  const runners = { deterministic: runDeterministic, aiWeb: runAiWeb };
+  const runnable = Object.keys(lanes).filter(
+    (id) => lanes[id].status === "running" && typeof runners[id] === "function"
+  );
+
+  function publish(state) {
+    setSearchState?.({ ...state, lanes: { ...lanes } });
+  }
+
+  function updateLane(id, patch = {}) {
+    lanes = { ...lanes, [id]: { ...lanes[id], ...patch } };
+    publish({
+      status: "running",
+      detail: `${runnable.map((laneId) => SEARCH_LANES[laneId].label).join(" and ")} running`,
+    });
+  }
+
+  if (!runnable.length) {
+    const state = {
+      status: "error",
+      summary: "No configured search lane is available. Review source and AI settings.",
+    };
+    publish(state);
+    return { ok: false, skipped: true, lanes };
+  }
+
+  publish({
+    status: "running",
+    detail: `${runnable.map((id) => SEARCH_LANES[id].label).join(" and ")} running`,
+  });
+
+  const outcomes = await Promise.all(
+    runnable.map(async (id) => {
+      try {
+        const result = await runners[id]({
+          signal,
+          onLaneState: (patch) => updateLane(id, patch),
+        });
+        if (signal?.aborted || result?.aborted) return { id, result, aborted: true };
+        if (result?.ok === false) {
+          return {
+            id,
+            result,
+            error: laneError(result, `${SEARCH_LANES[id].label} failed.`),
+          };
+        }
+        return { id, result, ok: true };
+      } catch (error) {
+        if (signal?.aborted || error?.name === "AbortError") return { id, aborted: true };
+        return { id, error: error?.message || `${SEARCH_LANES[id].label} failed.` };
+      }
+    })
+  );
+
+  if (signal?.aborted || outcomes.every((outcome) => outcome.aborted)) {
+    for (const id of runnable) {
+      lanes = {
+        ...lanes,
+        [id]: { ...lanes[id], status: "skipped", reason: "cancelled" },
+      };
+    }
+    publish({ status: "idle", summary: "Search cancelled." });
+    return { ok: false, aborted: true };
+  }
+
+  for (const outcome of outcomes) {
+    lanes = {
+      ...lanes,
+      [outcome.id]: outcome.ok
+        ? { ...lanes[outcome.id], status: "succeeded", result: outcome.result }
+        : {
+            ...lanes[outcome.id],
+            status: outcome.aborted ? "skipped" : "failed",
+            ...(outcome.aborted
+              ? { reason: "cancelled" }
+              : { error: outcome.error || `${SEARCH_LANES[outcome.id].label} failed.` }),
+          },
+    };
+  }
+
+  await refetch?.();
+  const succeeded = outcomes.filter((outcome) => outcome.ok);
+  const failed = outcomes.filter((outcome) => outcome.error);
+  const newCount = reconciledNewCount(succeeded);
+  const unreadableCount = succeeded.reduce(
+    (sum, outcome) => sum + resultCount(outcome.result, "unreadable"),
+    0
+  );
+  const partialDescriptionCount = succeeded.reduce(
+    (sum, outcome) => sum + resultCount(outcome.result, "partial"),
+    0
+  );
+  const finishedCopy = `${succeeded.length} search lane${succeeded.length === 1 ? "" : "s"} finished`;
+  const failedCopy = failed.length ? ` · ${failed.length} failed` : "";
+  const newCopy = newCount ? ` · ${newCount} new` : "";
+  const unreadableCopy = unreadableCount ? ` · ${unreadableCount} couldn't be added` : "";
+  const partialDescriptionCopy = partialDescriptionCount
+    ? ` · ${partialDescriptionCount} ${partialDescriptionCount === 1 ? "has" : "have"} a partial description`
+    : "";
+  const ok = succeeded.length > 0;
+  const state = {
+    status: ok ? "complete" : "error",
+    summary: `${finishedCopy}${failedCopy}${newCopy}${unreadableCopy}${partialDescriptionCopy}`,
+  };
+  publish(state);
+  return {
+    ok,
+    partial: ok && failed.length > 0,
+    lanes,
+    results: Object.fromEntries(outcomes.map((outcome) => [outcome.id, outcome.result])),
+  };
+}
+
 // The chat-first sweep status accepts one user-facing string, so errors stay
 // message-only after translation through resolveErrorCopy().
 function describeJobsPageSearchError(error) {
@@ -163,33 +423,15 @@ const AI_SEARCH_PREP_ERROR =
 
 // There is no per-prompt/Regenerate UI anymore (Scott, 2026-07-20: the old
 // "AI prompts (N)" button + modal meant nothing to a non-technical job
-// seeker), so nothing ever tells this lane "the prompts are stale" — it has
-// to know on its own, the same way a cache does: no stored prompts at all is
-// always stale, and stored prompts older than the candidate's targeting are
-// stale too since they'd be searching for the wrong thing.
-function promptsAreStale(prompts, targetingUpdatedAt) {
+// seeker), so nothing ever tells this lane "the prompts are stale". The
+// server fingerprints only the candidate inputs that prompt generation reads
+// and stores that fingerprint with the generated set. This avoids timestamp
+// races because the prompts themselves live inside targeting.
+function promptsAreStale(prompts, inputFingerprint, savedInputFingerprint) {
   const list = Array.isArray(prompts) ? prompts : [];
   if (!list.length) return true;
-  if (!targetingUpdatedAt) return false;
-  const targetingTime = Date.parse(targetingUpdatedAt);
-  if (!Number.isFinite(targetingTime)) return false;
-  const newestPromptTime = list.reduce((latest, prompt) => {
-    const time = Date.parse(prompt?.updatedAt || "");
-    return Number.isFinite(time) && time > latest ? time : latest;
-  }, Number.NEGATIVE_INFINITY);
-  return !Number.isFinite(newestPromptTime) || newestPromptTime < targetingTime;
-}
-
-// No route exposes the candidate_targeting singleton row's own `updated_at`
-// column yet (readTargeting()/candidateConfigGet() in
-// src/core/db/verbs/candidate.mjs return the doc's fields, not its DB
-// timestamp) — this stays a seam rather than a hardcoded "always fresh"
-// assumption, so promptsAreStale() picks up a real value the moment a route
-// exposes one, with no call site here needing to change. Until then the "no
-// stored prompts at all" branch above is the only staleness trigger that
-// fires.
-async function getTargetingUpdatedAt() {
-  return null;
+  if (!inputFingerprint || !savedInputFingerprint) return true;
+  return inputFingerprint !== savedInputFingerprint;
 }
 
 // Invisible AI-search prep: makes sure there ARE saved search prompts, and
@@ -201,7 +443,6 @@ async function ensureFreshSearchPrompts({
   getSearchPrompts: getSearchPromptsFn,
   generateSearchPrompts: generateSearchPromptsFn,
   saveSearchPrompts: saveSearchPromptsFn,
-  getTargetingUpdatedAt: getTargetingUpdatedAtFn,
   setActivity,
 }) {
   let stored;
@@ -212,9 +453,10 @@ async function ensureFreshSearchPrompts({
   }
 
   const prompts = stored?.data?.prompts;
-  const targetingUpdatedAt = await getTargetingUpdatedAtFn().catch(() => null);
 
-  if (!promptsAreStale(prompts, targetingUpdatedAt)) {
+  if (
+    !promptsAreStale(prompts, stored?.data?.inputFingerprint, stored?.data?.savedInputFingerprint)
+  ) {
     return { ok: true, prompts };
   }
 
@@ -264,7 +506,6 @@ export async function runAiWebSearchLane({
   getSearchPrompts: getSearchPromptsFn = getSearchPrompts,
   generateSearchPrompts: generateSearchPromptsFn = generateSearchPrompts,
   saveSearchPrompts: saveSearchPromptsFn = saveSearchPrompts,
-  getTargetingUpdatedAt: getTargetingUpdatedAtFn = getTargetingUpdatedAt,
   promptIds,
   refetch,
   signal,
@@ -287,7 +528,6 @@ export async function runAiWebSearchLane({
     getSearchPrompts: getSearchPromptsFn,
     generateSearchPrompts: generateSearchPromptsFn,
     saveSearchPrompts: saveSearchPromptsFn,
-    getTargetingUpdatedAt: getTargetingUpdatedAtFn,
     setActivity,
   });
 

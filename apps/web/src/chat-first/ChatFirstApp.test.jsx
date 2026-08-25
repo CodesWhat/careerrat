@@ -1,8 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { normalizeSourceReviewArtifact } from "../../../../src/core/discovery/source-review-artifact.mjs";
 import { ApiError } from "../lib/api.js";
 
-vi.mock("../jobs/ArtifactViewerModal.jsx", () => ({
+vi.mock("../jobs/ArtifactViewerModal.jsx", async (importOriginal) => ({
+  ...(await importOriginal()),
   ArtifactViewerModal: ({ artifact, title }) => (artifact ? <div>{`viewer:${title}`}</div> : null),
 }));
 
@@ -97,6 +99,60 @@ async function renderView(props = {}) {
 }
 
 describe("ChatFirstAppView", () => {
+  it("preflights source and AI capability before coordinating one user search", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    expect(module.runChatFirstJobSearch).toBeTypeOf("function");
+    const controller = new AbortController();
+    const sourceStatus = {
+      searches: { enabled: 2 },
+      enabledTrackedCompanies: 1,
+      deterministicSources: { attempted: 3 },
+    };
+    const runtimeStatus = { ai: { available: true, route: "installed" } };
+    const api = {
+      getSearchSourceStatus: vi.fn(async () => sourceStatus),
+      getRuntimeConfig: vi.fn(async () => runtimeStatus),
+      getInstalledAiRuntimes: vi.fn(() => {
+        throw new Error("a search must not re-probe installed runtimes");
+      }),
+      startSearchRun: vi.fn(),
+      getSourcingRun: vi.fn(),
+    };
+    const runDeterministicLane = vi.fn(async () => ({ ok: true }));
+    const runAiLane = vi.fn(async () => ({ ok: true }));
+    const runCoordinator = vi.fn(async (options) => {
+      expect(options.capabilities).toEqual({
+        deterministic: { configured: true, executable: true, consented: true },
+        aiWeb: { configured: true, executable: true, consented: true },
+      });
+      await options.runDeterministic({ signal: controller.signal, onLaneState: vi.fn() });
+      await options.runAiWeb({ signal: controller.signal, onLaneState: vi.fn() });
+      return { ok: true };
+    });
+
+    await module.runChatFirstJobSearch({
+      api,
+      refetch: vi.fn(),
+      setSearchState: vi.fn(),
+      signal: controller.signal,
+      runCoordinator,
+      runDeterministicLane,
+      runAiLane,
+    });
+
+    expect(api.getSearchSourceStatus).toHaveBeenCalledOnce();
+    expect(api.getRuntimeConfig).toHaveBeenCalledOnce();
+    expect(api.getInstalledAiRuntimes).not.toHaveBeenCalled();
+    expect(runDeterministicLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        startSearchRun: api.startSearchRun,
+        getSourcingRun: api.getSourcingRun,
+        signal: controller.signal,
+      })
+    );
+    expect(runAiLane).toHaveBeenCalledWith(expect.objectContaining({ signal: controller.signal }));
+  });
+
   it("routes new-shell navigation intents without sending retired href actions to the API", async () => {
     const { dispatchChatFirstMessageIntent } = await import("./ChatFirstApp.jsx");
     const openJob = vi.fn();
@@ -337,7 +393,50 @@ describe("ChatFirstAppView", () => {
     expect(html).toContain("chat-first-browser-launcher--attention");
   });
 
-  it("owns durable Today receipt and artifact actions", async () => {
+  it("routes a binary answer button through the same composer submit action", async () => {
+    const { ChatFirstAppView } = await import("./ChatFirstApp.jsx");
+    const submitComposer = vi.fn();
+    const tree = ChatFirstAppView({
+      view: {
+        ...VIEW,
+        mainThread: {
+          messages: [
+            {
+              id: "binary-question",
+              role: "assistant",
+              kind: "text",
+              text: "Should I keep this company in your search?",
+              metadata: { answerMode: "yes-no" },
+            },
+          ],
+        },
+      },
+      ui: BASE_UI,
+      composerValue: "",
+      sourceSweep: {},
+      actions: { submitComposer },
+    });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) {
+        node.forEach(visit);
+        return;
+      }
+      if (typeof node.type === "function") {
+        visit(node.type(node.props));
+        return;
+      }
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+
+    buttons.find((button) => button.props.children === "Yes").props.onClick();
+    expect(submitComposer).toHaveBeenCalledWith("Yes");
+  });
+
+  it("keeps durable Today artifacts actionable without repeating an activity link", async () => {
     const { ChatFirstAppView } = await import("./ChatFirstApp.jsx");
     const openActivity = vi.fn();
     const openThreadArtifact = vi.fn();
@@ -378,14 +477,48 @@ describe("ChatFirstAppView", () => {
     }
     visit(tree);
 
-    buttons.find((button) => button.props.children === "activity").props.onClick();
+    expect(buttons.find((button) => button.props.children === "activity")).toBeUndefined();
     buttons.find((button) => button.props.children === "Open").props.onClick();
 
-    expect(openActivity).toHaveBeenCalledOnce();
+    expect(openActivity).not.toHaveBeenCalled();
     expect(openThreadArtifact).toHaveBeenCalledWith(
       null,
       expect.objectContaining({ id: "resume" })
     );
+  });
+
+  it("mounts an opened company proposal artifact as an in-app review surface", async () => {
+    const onIntent = vi.fn();
+    const onClose = vi.fn();
+    const html = await renderView({
+      companyProposalReview: {
+        kind: "company_proposals",
+        title: "Company discovery: 1 to review",
+        batchId: "batch-acme",
+        version: 4,
+        proposals: [
+          {
+            proposalId: "proposal-acme",
+            company: { name: "Acme AI", domain: "acme.example" },
+            roleSeen: "Staff Applied AI Engineer",
+            why: "Matches the candidate's applied AI focus.",
+            jobBoardUrl: "https://boards.greenhouse.io/acme",
+            atsProvider: "greenhouse",
+            classification: "supported_ats",
+            proposedAction: "approve-supported-ats",
+            version: 3,
+          },
+        ],
+      },
+      actions: { decideCompanyProposal: onIntent, closeCompanyProposalReview: onClose },
+    });
+
+    expect(html).toContain('aria-label="Company discovery: 1 to review"');
+    expect(html).toContain("Acme AI");
+    expect(html).toContain(">Track<");
+    expect(html).toContain(">Skip<");
+    expect(onIntent).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("routes the latest typed transcript action to the app controller", async () => {
@@ -580,6 +713,18 @@ describe("ChatFirstAppView", () => {
     expect(html).toContain("Run mock interview");
   });
 
+  it("offers a mock interview when a promoted job is ready to apply", async () => {
+    const html = await renderView({
+      view: {
+        ...VIEW,
+        threads: [{ ...VIEW.threads[0], stage: "Ready to apply" }],
+      },
+      ui: { ...BASE_UI, activeThread: "app-1", activeApplicationId: "app-1" },
+    });
+
+    expect(html).toContain("Run mock interview");
+  });
+
   it("renders a visible research thread with streamed activity, typed save/discard controls, and durable results", async () => {
     const html = await renderView({
       view: {
@@ -633,6 +778,67 @@ describe("ChatFirstAppView", () => {
     expect(html).toContain("Discard");
     expect(html).toContain("Saved research for Acme to your workspace.");
     expect(html).toContain("Research runs stay in this thread");
+  });
+
+  it("opens board candidates in one dedicated source-review overlay", async () => {
+    const sourceReview = normalizeSourceReviewArtifact({
+      kind: "source_review",
+      candidates: [
+        {
+          label: "LandEarly",
+          url: "https://www.landearly.com/remote-jobs/platform-engineer",
+          sourceType: "url-query",
+          why: "Dated US platform roles",
+          status: "proposed",
+          confidence: "high",
+        },
+        {
+          label: "Anywhere Devs",
+          url: "https://anywheredevs.com/",
+          sourceType: "browser",
+          why: "No specific listings were visible",
+          status: "rejected",
+          rejectionReason: "no visible dated listing",
+        },
+      ],
+    });
+    const html = await renderView({
+      view: {
+        ...VIEW,
+        skillChats: [
+          {
+            id: "skill:research-boards",
+            skill: "research-boards",
+            title: "Job board discovery",
+            state: "idle",
+          },
+        ],
+      },
+      ui: { ...BASE_UI, activeThread: "skill:research-boards" },
+      activeSkillChat: {
+        id: "skill:research-boards",
+        skill: "research-boards",
+        title: "Job board discovery",
+        state: "idle",
+        messages: [
+          {
+            id: "review",
+            role: "assistant",
+            kind: "text",
+            text: "I found 1 useful source. Nothing has been added yet.",
+            artifacts: [sourceReview],
+          },
+        ],
+      },
+      sourceReview,
+    });
+
+    expect(html).toContain("1 source found");
+    expect(html).toContain("Review sources");
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain("1 source to review");
+    expect(html).toContain("Anywhere Devs");
+    expect(html).toContain("no visible dated listing");
   });
 
   it("disables the composer while a selected research thread is reopening", async () => {

@@ -1,6 +1,6 @@
 import "./profile-settings.css";
 import { ArrowLeftIcon } from "./chat-first-icons.jsx";
-import { runtimePresentation } from "./first-run-controller.js";
+import { runtimeIsSupported, runtimePresentation } from "./first-run-controller.js";
 import { RuntimeIcon } from "./RuntimeIcon.jsx";
 
 function safeArray(value) {
@@ -183,6 +183,9 @@ function SettingsView({
             <div>
               <strong>{permission.name}</strong>
               <span>{permission.description || ""}</span>
+              {permission.providerScope ? (
+                <span className="cf-settings__permission-scope">{permission.providerScope}</span>
+              ) : null}
             </div>
             {permission.mutable === false ? (
               <span className="cf-settings__fixed-capability">
@@ -351,7 +354,7 @@ function EnginePicker({
   onRetry,
   onRefresh,
 }) {
-  const choices = safeArray(engine?.choices);
+  const choices = safeArray(engine?.choices).filter(runtimeIsSupported);
   return (
     <SettingsDialog title="Choose an AI engine" onClose={onClose}>
       <p className="cf-settings-dialog__intro">

@@ -67,26 +67,32 @@ export function BrowserTabs({
 
 export function SearchToolbar({ sourceSweep = {}, onRunSweep, onOpenSourceHealth }) {
   const running = sourceSweep?.status === "running";
-  const providers = safeArray(sourceSweep?.providers);
-  const providerCopy = providers.length > 0 ? providers.join(" · ") : "configured boards";
+  const lanes = Object.values(sourceSweep?.lanes || {}).filter(
+    (lane) => lane && typeof lane === "object"
+  );
   return (
-    <div className="cf-search__sweep" aria-live="polite">
+    <div className="cf-search__sweep" aria-live="polite" aria-busy={running}>
       {running ? (
         <span className="cf-search__sweep-running">
           <SpinnerIcon className="cf-search__spinner" />
-          Sweeping {providerCopy}…
+          Searching for jobs…
         </span>
       ) : (
         <button type="button" className="cf-button cf-button--lime" onClick={() => onRunSweep?.()}>
           <RadarIcon />
-          Sweep boards now
+          Search for jobs
         </button>
       )}
       <span className="cf-search__sweep-copy">
         {running
-          ? sourceSweep?.detail || "reading postings against your rules"
-          : sourceSweep?.summary || "No sweep yet"}
+          ? sourceSweep?.detail || "Searching for jobs that match your preferences"
+          : sourceSweep?.summary || "Ready to search"}
       </span>
+      {lanes.length ? (
+        <span className="cf-search__lane-status" role="status" aria-label="Search lane status">
+          {lanes.map((lane) => `${lane.label}: ${lane.status}`).join(" · ")}
+        </span>
+      ) : null}
       <button
         type="button"
         className="cf-link cf-search__source-health"
@@ -225,6 +231,14 @@ export function SearchJobRow({ job, selected, onToggleSelection }) {
       <div className="cf-job-row__identity">
         <div className="cf-job-row__company">
           {job?.isNew ? <span className="cf-new-badge">NEW</span> : null}
+          {job?.descriptionPartial ? (
+            <span
+              className="cf-capture-badge"
+              title="CareerRat only captured part of this job description."
+            >
+              Partial description
+            </span>
+          ) : null}
           {job?.company || "Unknown company"}
         </div>
         <div className="cf-job-row__role">{job?.role || "Role not provided"}</div>

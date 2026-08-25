@@ -30,8 +30,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { dbExists } from "../src/core/db/connection.mjs";
 import { buildDbSeenSets } from "../src/core/db/scan-context.mjs";
 import { deepIngestConfirmedForGeneration } from "../src/core/db/verbs/index.mjs";
-import { sourceConfigGet, sourceConfigPut } from "../src/core/db/verbs/source-config.mjs";
-import { resolveJobUrl } from "../src/core/intake/resolve.mjs";
+import { sourceConfigGet, sourceConfigMutate } from "../src/core/db/verbs/source-config.mjs";
+import { hydrateJobOffer } from "../src/core/intake/resolve.mjs";
 import { checkUrlLiveness } from "../src/core/liveness/job-link-checker.mjs";
 import {
   loadLegacyCandidateConfig,
@@ -137,47 +137,71 @@ function isFetchableSearchSource(source) {
   return ["ats", "board"].includes(source.source_type) && isBoardProviderSupported(source.provider);
 }
 
-function stampSearchSourceWatermark(config, sourceIndex, savedAt) {
-  const key = searchListKey(config);
-  if (!key || !isFetchableSearchSource(config[key]?.[sourceIndex])) {
-    return { config, stamped: false };
+function sameSearchSource(left, right) {
+  for (const field of ["id", "rssUrl", "url", "searchUrl"]) {
+    if (left?.[field] && right?.[field] && left[field] === right[field]) return true;
   }
-  const lastRunAt = savedAt.toISOString();
-  const searches = config[key].map((source, index) =>
-    index === sourceIndex
-      ? { ...source, recency: { ...(source.recency || {}), lastRunAt } }
-      : source
+  return (
+    String(left?.label || "")
+      .trim()
+      .toLowerCase() ===
+      String(right?.label || "")
+        .trim()
+        .toLowerCase() &&
+    String(left?.provider || "")
+      .trim()
+      .toLowerCase() ===
+      String(right?.provider || "")
+        .trim()
+        .toLowerCase()
   );
-  return { config: { ...config, [key]: searches }, stamped: true };
 }
 
-function persistSearchSourceWatermark({ pathCtx, searchSources, sourceIndex, savedAt }) {
-  if (!searchSources) return null;
-  const { config, stamped } = stampSearchSourceWatermark(searchSources, sourceIndex, savedAt);
-  if (!stamped) return null;
-  if (dbExists(pathCtx)) {
-    return sourceConfigPut({ ...pathCtx, name: "search-sources", data: config });
-  }
-  return null;
+function persistSearchSourceWatermark({ pathCtx, source, savedAt, guard }) {
+  if (!source || !dbExists(pathCtx)) return null;
+  return sourceConfigMutate({
+    ...pathCtx,
+    name: "search-sources",
+    guard,
+    mutate(current) {
+      const key = searchListKey(current);
+      if (!key) return current;
+      return {
+        ...current,
+        [key]: current[key].map((entry) =>
+          sameSearchSource(entry, source) && isFetchableSearchSource(entry)
+            ? {
+                ...entry,
+                recency: { ...(entry.recency || {}), lastRunAt: savedAt.toISOString() },
+              }
+            : entry
+        ),
+      };
+    },
+  });
 }
 
-function persistCompanySourceWatermark({ pathCtx, companyName, savedAt }) {
+function persistCompanySourceWatermark({ pathCtx, companyName, savedAt, guard }) {
   if (!dbExists(pathCtx)) return null;
-  const current = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
   const target = String(companyName || "")
     .trim()
     .toLowerCase();
-  const companies = (current.tracked_companies || []).map((company) =>
-    String(company?.name || "")
-      .trim()
-      .toLowerCase() === target
-      ? { ...company, lastRunAt: savedAt.toISOString() }
-      : company
-  );
-  return sourceConfigPut({
+  return sourceConfigMutate({
     ...pathCtx,
     name: "sourced-scan",
-    data: { ...current, tracked_companies: companies },
+    guard,
+    mutate(current) {
+      return {
+        ...current,
+        tracked_companies: (current.tracked_companies || []).map((company) =>
+          String(company?.name || "")
+            .trim()
+            .toLowerCase() === target
+            ? { ...company, lastRunAt: savedAt.toISOString() }
+            : company
+        ),
+      };
+    },
   });
 }
 
@@ -217,30 +241,7 @@ function singleSearchSourceConfig(searchSources, source) {
   return { ...searchSources, [key]: [source] };
 }
 
-function emptyFilteredResult() {
-  return {
-    kept: [],
-    filteredTitle: [],
-    filteredSeniority: [],
-    filteredLocation: [],
-    filteredAge: [],
-    filteredSalary: [],
-    filteredEligibility: [],
-    duplicates: [],
-    possibleDuplicates: [],
-    invalid: [],
-    expired: [],
-    overflow: [],
-  };
-}
-
-function appendFilteredResult(target, result) {
-  for (const key of Object.keys(target)) {
-    if (Array.isArray(result[key])) target[key].push(...result[key]);
-  }
-}
-
-function captureOffersForOutput({ repoRoot, env, offers, savedAt }) {
+function captureOffersForOutput({ repoRoot, env, offers, savedAt, guard }) {
   if (dbExists({ repoRoot, env })) {
     return (
       captureAndPersistOffersIfDb({
@@ -248,31 +249,83 @@ function captureOffersForOutput({ repoRoot, env, offers, savedAt }) {
         env,
         offers,
         savedAt,
+        guard,
+        dedupeCanonical: true,
       })?.offers || []
     );
   }
   return offersWithCapturedJobs({ repoRoot, env, offers, savedAt });
 }
 
-async function hydratePartialOffer(offer, { fetchImpl, resolveHost } = {}) {
-  if (offer?.bodyPartial !== true || !offer?.url) return offer;
-  try {
-    const resolved = await resolveJobUrl(offer.url, { fetchImpl, resolveHost });
-    const bodyText = String(resolved?.bodyText || "").trim();
-    if (resolved?.bodyFetchStatus !== "resolved" || bodyText.length < 40) return offer;
-    const canonicalUrl = resolved.url || offer.url;
-    return {
-      ...offer,
-      url: canonicalUrl,
-      location: resolved.location || offer.location,
-      comp: resolved.comp || offer.comp,
-      bodyText,
-      bodyPartial: false,
-      ...(canonicalUrl !== offer.url ? { capturedUrl: offer.url } : {}),
-    };
-  } catch {
-    return offer;
+const REJECTION_SAMPLE_LIMIT = 3;
+
+function boundedDiagnosticText(value, maxLength) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
+function rejectionSample(entry, fallbackReason) {
+  const sample = {
+    company: boundedDiagnosticText(entry?.company, 100),
+    title: boundedDiagnosticText(entry?.title, 160),
+    location: boundedDiagnosticText(entry?.location, 120),
+    reason: boundedDiagnosticText(
+      entry?.qualificationReason ||
+        entry?.duplicateReason ||
+        entry?.reason ||
+        entry?.liveness?.reason ||
+        fallbackReason,
+      80
+    ),
+  };
+  if (entry?.qualificationKind) {
+    sample.kind = boundedDiagnosticText(entry.qualificationKind, 24);
   }
+  if (typeof entry?.provider === "string" && entry.provider.trim()) {
+    sample.provider = boundedDiagnosticText(entry.provider, 60);
+  }
+  return sample;
+}
+
+function buildRejectionSamples(filtered) {
+  const sample = (rows, fallbackReason) =>
+    rows.slice(0, REJECTION_SAMPLE_LIMIT).map((entry) => rejectionSample(entry, fallbackReason));
+  return {
+    title: sample(filtered.filteredTitle, "title-rejected"),
+    seniority: sample(filtered.filteredSeniority, "seniority-rejected"),
+    location: sample(filtered.filteredLocation, "location-rejected"),
+    age: sample(filtered.filteredAge, "age-rejected"),
+    salary: sample(filtered.filteredSalary, "salary-rejected"),
+    eligibility: sample(filtered.filteredEligibility, "eligibility-rejected"),
+    duplicate: sample(filtered.duplicates, "duplicate"),
+    invalid: sample(filtered.invalid, "invalid"),
+    expired: sample(filtered.expired || [], "expired"),
+    overflow: sample(filtered.overflow, "overflow"),
+  };
+}
+
+async function hydratePartialOffer(offer, { fetchImpl, resolveHost } = {}) {
+  return hydrateJobOffer(offer, { fetchImpl, resolveHost });
+}
+
+const PARTIAL_HYDRATION_CONCURRENCY = 4;
+
+async function mapWithConcurrency(items, mapper, concurrency) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(items.length, Math.max(1, concurrency));
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await mapper(items[index], index);
+      }
+    })
+  );
+  return results;
 }
 
 export function buildSeenSetsForRun(pathCtx) {
@@ -315,7 +368,14 @@ export async function runSourcedScan({
   verify = false,
   limit = 0,
   onProgress,
+  assertActive,
+  writeGuard,
+  hydrateOfferImpl = hydratePartialOffer,
 } = {}) {
+  const ensureActive = () => {
+    if (typeof assertActive === "function") assertActive();
+  };
+  ensureActive();
   const pathCtx = { repoRoot, env };
   const standaloneConfigMode = Boolean(configPath);
   const config = loadScannerConfigForRun({ pathCtx, configPath });
@@ -338,11 +398,7 @@ export async function runSourcedScan({
   const locationFilter = buildLocationFilter(config.location_filter);
 
   const scanned = { offers: [], errors: [] };
-  const filtered = emptyFilteredResult();
-  const outputOffers = [];
   const savedAt = new Date();
-  const companyPresentationCounts = new Map();
-  const seenRunCompanyRoles = new Set();
   const configuredCompanyCap = Number(
     candidateConfig?.targeting?.search_preferences?.presentation_cap_per_company
   );
@@ -360,6 +416,8 @@ export async function runSourcedScan({
   const sourceTasks = searchSourceTasks(searchSources);
   const totalSources = companies.length + sourceTasks.length;
   let completedSources = 0;
+  const successfulCompanySources = [];
+  const successfulSearchSources = [];
   const remainingTasksBySource = new Map();
   const failedSourceIndexes = new Set();
   for (const task of sourceTasks) {
@@ -372,64 +430,12 @@ export async function runSourcedScan({
   async function acceptBatch(result, batch) {
     scanned.offers.push(...result.offers);
     scanned.errors.push(...result.errors);
-
-    let batchFiltered = filterAndDedupeOffers(result.offers, {
-      seenUrls,
-      seenReqIds,
-      seenCompanyRoles,
-      titleFilter,
-      locationFilter,
-      config: candidateConfig,
-      now: savedAt.getTime(),
-      companyPresentationCounts,
-      seenRunCompanyRoles,
-      perCompanyCap,
-    });
-
-    if (batchFiltered.kept.some((offer) => offer?.bodyPartial === true)) {
-      batchFiltered = {
-        ...batchFiltered,
-        kept: await Promise.all(
-          batchFiltered.kept.map((offer) => hydratePartialOffer(offer, { fetchImpl, resolveHost }))
-        ),
-      };
-    }
-
-    if (verify && batchFiltered.kept.length > 0) {
-      const checked = [];
-      const dropped = [];
-      for (const offer of batchFiltered.kept) {
-        const live = await checkUrlLiveness(offer.url, { fetchImpl });
-        if (live.result === "expired") dropped.push({ ...offer, liveness: live });
-        else checked.push({ ...offer, liveness: live });
-      }
-      batchFiltered = { ...batchFiltered, kept: checked, expired: dropped };
-    }
-
-    const remainingLimit = limit > 0 ? Math.max(0, limit - outputOffers.length) : Infinity;
-    const keptForOutput = batchFiltered.kept.slice(0, remainingLimit);
-    const limitedOverflow = batchFiltered.kept.slice(remainingLimit).map((offer) => ({
-      ...offer,
-      qualificationReason: "run-presentation-limit",
-    }));
-    batchFiltered = {
-      ...batchFiltered,
-      kept: keptForOutput,
-      overflow: [...batchFiltered.overflow, ...limitedOverflow],
-    };
-    appendFilteredResult(filtered, batchFiltered);
-    const offersForOutput = write
-      ? standaloneConfigMode
-        ? offersWithCapturedJobs({ repoRoot, env, offers: keptForOutput, savedAt })
-        : captureOffersForOutput({ repoRoot, env, offers: keptForOutput, savedAt })
-      : keptForOutput;
-    outputOffers.push(...offersForOutput.map((offer) => toOutputOffer(offer)));
     completedSources += 1;
 
     if (typeof onProgress === "function") {
       await onProgress({
-        foundCount: filtered.kept.length,
-        offerCount: outputOffers.length,
+        foundCount: scanned.offers.length,
+        offerCount: scanned.offers.length,
         scannedCount: scanned.offers.length,
         errorCount: scanned.errors.length,
         completedSources,
@@ -440,25 +446,28 @@ export async function runSourcedScan({
   }
 
   for (const company of companies) {
+    ensureActive();
     const result = await scanCompanies(
       { ...config, tracked_companies: [company] },
       { fetchImpl, resolveHost, companyFilter: null }
     );
+    ensureActive();
     await acceptBatch(result, { kind: "company", label: company.name });
     if (write && !standaloneConfigMode && result.errors.length === 0) {
-      persistCompanySourceWatermark({ pathCtx, companyName: company.name, savedAt });
+      successfulCompanySources.push(company.name);
     }
   }
 
-  // Also scan RSS-bearing and board-wide sources. Processing singleton configs
-  // turns each completed fetch into an independently visible Jobs batch while
-  // retaining the former company -> RSS -> board ordering for exact dedup parity.
+  // Also scan RSS-bearing and board-wide sources. Record successful sources
+  // now, then advance their watermarks only after the run result is durable.
   for (const task of sourceTasks) {
+    ensureActive();
     const singleton = singleSearchSourceConfig(searchSources, task.source);
     const result =
       task.kind === "rss"
         ? await scanSearchSources(singleton, { fetchImpl, resolveHost })
         : await scanBoards(singleton, { fetchImpl, resolveHost });
+    ensureActive();
     await acceptBatch(result, {
       kind: task.kind,
       label: task.source.label || task.source.provider || task.kind,
@@ -473,52 +482,144 @@ export async function runSourcedScan({
       remaining === 0 &&
       !failedSourceIndexes.has(task.sourceIndex)
     ) {
+      successfulSearchSources.push(task.source);
+    }
+  }
+
+  let filtered = filterAndDedupeOffers(scanned.offers, {
+    seenUrls,
+    seenReqIds,
+    seenCompanyRoles,
+    titleFilter,
+    locationFilter,
+    config: candidateConfig,
+    now: savedAt.getTime(),
+    companyPresentationCounts: new Map(),
+    seenRunCompanyRoles: new Set(),
+    perCompanyCap,
+  });
+
+  const outputLimit = limit > 0 ? limit : Infinity;
+  const limitedOffers = filtered.kept.slice(0, outputLimit);
+  const limitedOverflow = filtered.kept.slice(outputLimit).map((offer) => ({
+    ...offer,
+    qualificationReason: "run-presentation-limit",
+  }));
+  filtered = {
+    ...filtered,
+    kept: limitedOffers,
+    overflow: [...filtered.overflow, ...limitedOverflow],
+  };
+
+  if (filtered.kept.some((offer) => offer?.bodyPartial === true)) {
+    filtered = {
+      ...filtered,
+      kept: await mapWithConcurrency(
+        filtered.kept,
+        (offer) => {
+          ensureActive();
+          return hydrateOfferImpl(offer, { fetchImpl, resolveHost });
+        },
+        PARTIAL_HYDRATION_CONCURRENCY
+      ),
+    };
+    ensureActive();
+  }
+
+  if (verify && filtered.kept.length > 0) {
+    const checked = [];
+    const dropped = [];
+    for (const offer of filtered.kept) {
+      ensureActive();
+      const live = await checkUrlLiveness(offer.url, { fetchImpl });
+      ensureActive();
+      if (live.result === "expired") dropped.push({ ...offer, liveness: live });
+      else checked.push({ ...offer, liveness: live });
+    }
+    filtered = { ...filtered, kept: checked, expired: dropped };
+  }
+
+  if (write) ensureActive();
+  const persistedOffers = write
+    ? standaloneConfigMode
+      ? offersWithCapturedJobs({ repoRoot, env, offers: filtered.kept, savedAt })
+      : captureOffersForOutput({
+          repoRoot,
+          env,
+          offers: filtered.kept,
+          savedAt,
+          guard: writeGuard,
+        })
+    : filtered.kept;
+
+  if (write && !standaloneConfigMode) {
+    ensureActive();
+    for (const companyName of successfulCompanySources) {
+      persistCompanySourceWatermark({
+        pathCtx,
+        companyName,
+        savedAt,
+        guard: writeGuard,
+      });
+    }
+    for (const source of successfulSearchSources) {
       const persisted = persistSearchSourceWatermark({
         pathCtx,
-        searchSources,
-        sourceIndex: task.sourceIndex,
+        source,
         savedAt,
+        guard: writeGuard,
       });
       if (persisted?.data) searchSources = persisted.data;
     }
   }
 
+  const outputOffers = persistedOffers.map((offer) => toOutputOffer(offer));
+  const persistenceDuplicates = Math.max(0, filtered.kept.length - outputOffers.length);
+  const duplicateCount = filtered.duplicates.length + persistenceDuplicates;
+  const titleBlockerCount = filtered.filteredTitle.filter(
+    (offer) => offer.qualificationKind === "blocker"
+  ).length;
+  const titleRelevanceCount = filtered.filteredTitle.length - titleBlockerCount;
+
   const summary = {
     scanned: scanned.offers.length,
-    new: filtered.kept.length,
+    new: outputOffers.length,
     qualified: filtered.kept.length + filtered.overflow.length,
-    presented: filtered.kept.length,
+    presented: outputOffers.length,
     filteredTitle: filtered.filteredTitle.length,
     filteredSeniority: filtered.filteredSeniority.length,
     filteredLocation: filtered.filteredLocation.length,
     filteredAge: filtered.filteredAge.length,
     filteredSalary: filtered.filteredSalary.length,
     filteredEligibility: filtered.filteredEligibility.length,
-    duplicates: filtered.duplicates.length,
+    duplicates: duplicateCount,
     invalid: filtered.invalid.length,
     expired: filtered.expired?.length || 0,
     overflow: filtered.overflow.length,
     reasonCounts: {
       title: filtered.filteredTitle.length,
+      titleBlocker: titleBlockerCount,
+      titleRelevance: titleRelevanceCount,
       seniority: filtered.filteredSeniority.length,
       location: filtered.filteredLocation.length,
       age: filtered.filteredAge.length,
       salary: filtered.filteredSalary.length,
       eligibility: filtered.filteredEligibility.length,
-      duplicate: filtered.duplicates.length,
+      duplicate: duplicateCount,
       invalid: filtered.invalid.length,
       expired: filtered.expired?.length || 0,
       overflow: filtered.overflow.length,
     },
+    rejectionSamples: buildRejectionSamples(filtered),
     reconciled:
-      filtered.kept.length +
+      outputOffers.length +
       filtered.filteredTitle.length +
       filtered.filteredSeniority.length +
       filtered.filteredLocation.length +
       filtered.filteredAge.length +
       filtered.filteredSalary.length +
       filtered.filteredEligibility.length +
-      filtered.duplicates.length +
+      duplicateCount +
       filtered.invalid.length +
       (filtered.expired?.length || 0) +
       filtered.overflow.length,

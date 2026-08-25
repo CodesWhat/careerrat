@@ -1,3 +1,9 @@
+import {
+  hasPersistedSourceReviewTable,
+  normalizeSourceReviewArtifact,
+  parsePersistedSourceReviewTable,
+  parseSourceReviewOutput,
+} from "../../../../src/core/discovery/source-review-artifact.mjs";
 import { resolveErrorCopy } from "../lib/errorCopy.js";
 
 const DISCOVERY_FENCE = /```careerrat:discovery\s*\r?\n([\s\S]*?)\r?\n```/g;
@@ -40,6 +46,7 @@ function safeObject(value, max = 200_000) {
 
 function normalizeDiscovery(value) {
   const kind = cleanString(value?.kind, 80);
+  if (kind === "source_review") return normalizeSourceReviewArtifact(value);
   if (kind === "source_proposal") {
     const label = cleanString(value.label, 240);
     const url = publicHttpUrl(value.url);
@@ -87,6 +94,7 @@ function normalizeDiscovery(value) {
 }
 
 function discoveryIdentity(item) {
+  if (item.kind === "source_review") return item.id;
   if (item.kind === "source_proposal") return item.url;
   if (item.kind === "company_research_result") return item.slug;
   if (item.kind === "comp_benchmark_result") return item.stem;
@@ -104,17 +112,24 @@ function skillChatDiscoveryId(skill, item) {
 
 export function parseSkillChatText(value, skill) {
   const text = String(value || "");
+  if (
+    skill === "research-boards" &&
+    /```careerrat:discovery[\s\S]*?"kind"\s*:\s*"source_review"/.test(text)
+  ) {
+    const parsed = parseSourceReviewOutput(text);
+    return { text: parsed.text, discoveries: parsed.artifacts };
+  }
   const discoveries = [];
-  const visibleText = text.replace(DISCOVERY_FENCE, (block, raw) => {
+  const visibleText = text.replace(DISCOVERY_FENCE, (_block, raw) => {
     let parsed;
     try {
       parsed = JSON.parse(raw);
     } catch {
-      return block;
+      return "";
     }
     const discovery = normalizeDiscovery(parsed);
     if (!discovery || (discovery.kind === "discovery_complete" && skill !== "research-boards")) {
-      return block;
+      return "";
     }
     const item = { ...discovery, id: skillChatDiscoveryId(skill, discovery) };
     if (!discoveries.some((candidate) => candidate.id === item.id)) discoveries.push(item);
@@ -195,6 +210,24 @@ function parseRaw(raw) {
   }
 }
 
+function assistantMessageIdentity(message) {
+  if (message?.role !== "assistant" || message?.kind !== "text") return null;
+  return JSON.stringify({
+    text: String(message.text || ""),
+    artifactIds: list(message.artifacts).map((artifact) =>
+      String(artifact?.id || `${artifact?.kind || "artifact"}:${discoveryIdentity(artifact)}`)
+    ),
+  });
+}
+
+function currentAssistantTurn(messages) {
+  const items = list(messages);
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (items[index]?.role === "user") return items.slice(index + 1);
+  }
+  return items;
+}
+
 export function reduceSkillChatEvent(state, { chatId, type, raw, eventId } = {}) {
   const nextId = Number(eventId);
   if (
@@ -212,13 +245,19 @@ export function reduceSkillChatEvent(state, { chatId, type, raw, eventId } = {})
   let message = null;
   if (type === "assistant") {
     const parsed = parseSkillChatText(assistantText(data), state?.skill);
-    if (parsed.text || parsed.discoveries.length) {
+    const runtimeArtifacts = list(data?.artifacts).flatMap((artifact) => {
+      const review = normalizeSourceReviewArtifact(artifact);
+      return review ? [review] : [];
+    });
+    const discoveries = runtimeArtifacts.length ? runtimeArtifacts : parsed.discoveries;
+    if (parsed.text || discoveries.length) {
       message = {
         id: eventMessageId(chatId, nextId),
         role: "assistant",
         kind: "text",
         text: parsed.text,
-        artifacts: parsed.discoveries,
+        artifacts: discoveries,
+        ...(data?.answerMode === "yes-no" ? { metadata: { answerMode: "yes-no" } } : {}),
       };
     }
   } else if (type === "tool_use") {
@@ -238,13 +277,23 @@ export function reduceSkillChatEvent(state, { chatId, type, raw, eventId } = {})
     };
   }
 
-  if (!message || list(state?.messages).some((candidate) => candidate.id === message.id)) {
+  const identity = assistantMessageIdentity(message);
+  const messages = list(state?.messages);
+  if (
+    !message ||
+    messages.some((candidate) => candidate.id === message.id) ||
+    (identity !== null &&
+      currentAssistantTurn(messages).some(
+        (candidate) => assistantMessageIdentity(candidate) === identity
+      ))
+  ) {
     return next;
   }
-  return { ...next, messages: [...list(state?.messages), message] };
+  return { ...next, messages: [...messages, message] };
 }
 
 function discoveryTitle(item) {
+  if (item.kind === "source_review") return `${item.proposalCount} sources found`;
   if (item.kind === "source_proposal") return item.label;
   if (item.kind === "company_research_result") return `${item.company} research`;
   if (item.kind === "comp_benchmark_result") return `${item.role} comp benchmark`;
@@ -254,6 +303,9 @@ function discoveryTitle(item) {
 }
 
 function discoverySubtitle(item) {
+  if (item.kind === "source_review") {
+    return `${item.highConfidenceCount} strong matches · ${item.borderlineCount} need a closer look`;
+  }
   if (item.kind === "source_proposal") {
     return [item.confidence === "high" ? "high confidence" : "review carefully", item.why]
       .filter(Boolean)
@@ -271,12 +323,29 @@ export function skillChatDiscoveryPresentation(item) {
 
 export function skillChatCompletionFor(messages) {
   const artifacts = list(messages).flatMap((message) => list(message?.artifacts));
-  const item = artifacts.find(
-    (artifact) => artifact?.kind === "discovery_complete" && artifact?.step === "research-boards"
-  );
+  const review = [...artifacts].reverse().find((artifact) => artifact?.kind === "source_review");
+  const item =
+    review?.completion ||
+    artifacts.find(
+      (artifact) => artifact?.kind === "discovery_complete" && artifact?.step === "research-boards"
+    );
   if (!item) return null;
-  const proposals = artifacts.filter((artifact) => artifact?.kind === "source_proposal");
-  const pendingCount = proposals.filter(
+  const proposals = new Map();
+  for (const artifact of artifacts) {
+    if (artifact?.kind === "source_review") {
+      for (const candidate of list(artifact.candidates)) {
+        if (candidate?.status !== "proposed") continue;
+        proposals.set(candidate.id, candidate);
+      }
+      continue;
+    }
+    if (artifact?.kind !== "source_proposal") continue;
+    const id = artifact.id || artifact.url;
+    if (!id) continue;
+    const existing = proposals.get(id);
+    if (!existing || artifact?.decision?.status === "completed") proposals.set(id, artifact);
+  }
+  const pendingCount = [...proposals.values()].filter(
     (artifact) => artifact?.decision?.status !== "completed"
   ).length;
   return {
@@ -302,19 +371,47 @@ export function hydrateSkillChatMessages(thread) {
         },
       ];
     }
-    const parsed = parseSkillChatText(message.text, thread?.skill);
+    const persistedTable =
+      thread?.skill === "research-boards" && hasPersistedSourceReviewTable(message.text)
+        ? parsePersistedSourceReviewTable(message.text)
+        : null;
+    const parsed = persistedTable
+      ? { text: persistedTable.text, discoveries: persistedTable.artifacts }
+      : parseSkillChatText(message.text, thread?.skill);
+    const persistedArtifacts = list(message?.artifacts).flatMap((artifact) => {
+      const review = normalizeSourceReviewArtifact(artifact);
+      return review ? [review] : [];
+    });
+    const discoveries = persistedArtifacts.length ? persistedArtifacts : parsed.discoveries;
     return [
       {
         ...message,
         id: message?.id || `${thread?.id || "skill"}-message-${index + 1}`,
         kind: "text",
         text: parsed.text,
-        artifacts: parsed.discoveries.map((item) => ({
-          ...item,
-          title: discoveryTitle(item),
-          subtitle: discoverySubtitle(item),
-          decision: decisions.get(item.id) || null,
-        })),
+        artifacts: discoveries.map((item) => {
+          const candidates =
+            item.kind === "source_review"
+              ? item.candidates.map((candidate) => ({
+                  ...candidate,
+                  decision: decisions.get(candidate.id) || null,
+                }))
+              : undefined;
+          return {
+            ...item,
+            ...(candidates ? { candidates } : {}),
+            completion:
+              item.kind === "source_review"
+                ? {
+                    ...item.completion,
+                    decision: decisions.get(item.completion.id) || null,
+                  }
+                : item.completion,
+            title: discoveryTitle(item),
+            subtitle: discoverySubtitle(item),
+            decision: decisions.get(item.id) || null,
+          };
+        }),
       },
     ];
   });

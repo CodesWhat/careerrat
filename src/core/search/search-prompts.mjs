@@ -12,6 +12,7 @@
 // reading the live candidateConfigGet() docs, and any field the candidate
 // hasn't filled in is simply absent from the context rather than defaulted.
 
+import { createHash } from "node:crypto";
 import { BOUNDED_AI_CODES, makeBoundedAIEnvelope, runBoundedAI } from "../ai/bounded-ai.mjs";
 import { buildDbSeenSets } from "../db/scan-context.mjs";
 import { candidateConfigGet, candidateConfigPatch } from "../db/verbs.mjs";
@@ -273,6 +274,16 @@ export function buildSearchPromptContext({
   return context;
 }
 
+export function buildSearchPromptInputFingerprint({
+  repoRoot,
+  env,
+  config,
+  includeSearchLimits = false,
+} = {}) {
+  const context = buildSearchPromptContext({ repoRoot, env, config, includeSearchLimits });
+  return createHash("sha256").update(JSON.stringify(context)).digest("hex");
+}
+
 function promptInstructions({ context, minPrompts, maxPrompts }) {
   return [
     "Generate plain-English prompts a job seeker could paste directly into an AI search assistant (e.g. ChatGPT, Claude, Perplexity) to find matching job openings.",
@@ -411,20 +422,33 @@ export function saveSearchPrompts({
   now = new Date(),
 } = {}) {
   const normalized = normalizeStoredPrompts(prompts, { defaultSource, now });
+  const inputFingerprint = buildSearchPromptInputFingerprint({ repoRoot, env });
   const result = candidateConfigPatch({
     repoRoot,
     env,
     name: "targeting",
-    patch: { search_preferences: { ai_prompts: normalized } },
+    patch: {
+      search_preferences: {
+        ai_prompts: normalized,
+        ai_prompts_input_fingerprint: inputFingerprint,
+      },
+    },
   });
   return {
     ok: true,
     prompts: result.data?.search_preferences?.ai_prompts || normalized,
+    inputFingerprint,
   };
 }
 
 export function getSearchPrompts({ repoRoot, env } = {}) {
   const config = candidateConfigGet({ repoRoot, env });
   const prompts = config.targeting?.search_preferences?.ai_prompts;
-  return { ok: true, prompts: Array.isArray(prompts) ? prompts : [] };
+  return {
+    ok: true,
+    prompts: Array.isArray(prompts) ? prompts : [],
+    inputFingerprint: buildSearchPromptInputFingerprint({ repoRoot, env, config }),
+    savedInputFingerprint:
+      config.targeting?.search_preferences?.ai_prompts_input_fingerprint || null,
+  };
 }

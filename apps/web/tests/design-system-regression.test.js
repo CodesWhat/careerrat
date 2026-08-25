@@ -200,6 +200,7 @@ describe("CareerRat chat-first palette", () => {
         "--gray": "#a5a5ab",
         "--gray-dim": "#9a9a92",
         "--gray-warm": "#c9c9c0",
+        "--gray-selected": "#474a4f",
         "--line-warm": "#e3e0d6",
         "--line-warm-2": "#d9d5c9",
         "--line-cool": "#c9d4dc",
@@ -248,8 +249,10 @@ describe("CareerRat selection and focus states", () => {
     ["chat-first/profile-settings.css", '.cf-settings-dialog__runtime[data-selected="true"]'],
   ];
 
-  it("uses one ink-only selection contract across every selectable surface", () => {
-    expect(foundationProperties.get("--cf-selection-fill")).toBe("var(--ink)");
+  it("uses one neutral dark-gray selection contract across every selectable surface", () => {
+    expect(foundationProperties.get("--gray-selected")).toBe("#474a4f");
+    expect(foundationProperties.get("--cf-selection-fill")).toBe("var(--gray-selected)");
+    expect(foundationProperties.get("--cf-selection-fill")).not.toMatch(/ink|black/i);
     expect(foundationProperties.get("--cf-selection-foreground")).toBe("var(--paper)");
     expect(foundationProperties.get("--cf-selection-border")).toBe("0");
     expect(foundationProperties.get("--cf-selection-outline")).toBe("0");
@@ -274,6 +277,48 @@ describe("CareerRat selection and focus states", () => {
         /box-shadow:\s*var\(--cf-selection-shadow\)/
       );
       expect(body, `${file} ${selector}`).not.toMatch(/lime|lilac|sky|color-mix|#[0-9a-f]/i);
+    }
+  });
+
+  it("uses the neutral selection fill for switches and native checked controls", () => {
+    const switchBody = ruleBody(
+      resolve(sourceRoot, "chat-first/profile-settings.css"),
+      '.cf-settings__switch[aria-checked="true"]'
+    );
+    expect(switchBody).toMatch(/background:\s*var\(--cf-selection-fill\)/);
+
+    for (const [file, selector] of [
+      ["chat-first/first-run.css", ".cf-first-run__editor-checkbox input"],
+      ["chat-first/profile-settings.css", ".cf-profile-editor__check input"],
+    ]) {
+      const body = ruleBody(resolve(sourceRoot, file), selector);
+      expect(body, `${file} ${selector}`).toMatch(
+        /accent-color:\s*var\(--cf-selection-fill\)/
+      );
+      expect(body, `${file} ${selector}`).not.toMatch(/var\(--ink\)|black/i);
+    }
+  });
+
+  it("keeps secondary copy readable on the neutral selected surface", () => {
+    for (const [file, selector] of [
+      ["chat-first/first-run.css", ".cf-first-run__rail-subtitle"],
+      [
+        "chat-first/chat-first.css",
+        ".chat-first-thread-card.is-active .chat-first-thread-card__subtitle",
+      ],
+      [
+        "chat-first/workspace-browser.css",
+        ".cf-job-row--selected :is(.cf-job-row__role, .cf-job-row__meta, .cf-job-row__stage)",
+      ],
+      [
+        "chat-first/profile-settings.css",
+        '.cf-settings-dialog__runtime[data-selected="true"] > div span',
+      ],
+    ]) {
+      const body = ruleBody(resolve(sourceRoot, file), selector);
+      expect(body, `${file} ${selector}`).toMatch(
+        /color:\s*var\(--cf-selection-foreground\)/
+      );
     }
   });
 
@@ -315,7 +360,7 @@ describe("CareerRat selection and focus states", () => {
       return [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
         .filter(
           (match) =>
-            /is-active|--active|--selected|aria-(?:selected|current|pressed)|data-selected/.test(
+            /is-active|--active|--selected|aria-(?:checked|selected|current|pressed)|data-selected/.test(
               match[1]
             ) &&
             !/:not\([^)]*(?:active|selected)/.test(match[1]) &&

@@ -8,7 +8,7 @@
 // country_eligibility filter and visa_filter all read that field, and without
 // it every Greenhouse board passed those filters blind.
 
-import { htmlToText } from './_html-to-text.mjs';
+import { htmlToText, htmlToTextCapture } from './_html-to-text.mjs';
 
 const ALLOWED_GREENHOUSE_HOSTS = new Set([
   'boards-api.greenhouse.io',
@@ -198,7 +198,7 @@ export default {
         const offices = officeMap.get(j.id);
         if (offices && offices.size > 0) location = [location, ...offices].join(' · ');
       }
-      const description = contentToText(j.content);
+      const { text: description, truncated: descriptionPartial } = htmlToTextCapture(j.content);
       return {
         title: j.title || '',
         url: j.absolute_url,
@@ -207,7 +207,9 @@ export default {
         // Omitted entirely when the board ships no body — same shape as
         // cryptocurrencyjobs/remotli, so "no signal" stays distinguishable
         // from an empty string downstream.
-        ...(description ? { description } : {}),
+        ...(description
+          ? { description, ...(descriptionPartial ? { descriptionPartial: true } : {}) }
+          : {}),
         postedAt: toEpochMs(j.first_published),
       };
     });

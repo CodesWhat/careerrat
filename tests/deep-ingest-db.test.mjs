@@ -607,6 +607,32 @@ test("confirmed generic evidence edits write trusted claims and complete the lan
     },
   });
 
+  assert.throws(
+    () =>
+      deepIngestConfirmProposal({
+        repoRoot,
+        proposalId: proposal.id,
+        expectedVersion: proposal.version,
+        edits: {
+          items: [
+            {
+              id: "generic-evidence-claim",
+              title: "Built source-grounded review workflows.",
+              summary: "Local candidate setup now uses proposal-first review.",
+              sourceId: source.id,
+              chunkId: "chunk-generic-evidence-1",
+              supportingQuote: "Built source-grounded review workflows",
+              links: "https://example.com/not-an-array",
+            },
+          ],
+        },
+      }),
+    (error) =>
+      error?.code === "EVIDENCE_GUARD_REJECTED" &&
+      error.errors?.some(({ message }) => /links/.test(message))
+  );
+  assert.equal(candidateConfigGet({ repoRoot }).evidence.claims.length, beforeClaims);
+
   const confirmed = deepIngestConfirmProposal({
     repoRoot,
     proposalId: proposal.id,

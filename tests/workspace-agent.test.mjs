@@ -29,7 +29,11 @@ import {
 import { CAPABILITY_KEYS } from "../src/core/automation/consent.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { ALL_MIGRATIONS } from "../src/core/db/migrations.mjs";
-import { appRegisterPacketQuestionCapture, appUpsert } from "../src/core/db/verbs/app.mjs";
+import {
+  appPersistEvaluation,
+  appRegisterPacketQuestionCapture,
+  appUpsert,
+} from "../src/core/db/verbs/app.mjs";
 import { calendarBusyUpsert } from "../src/core/db/verbs/calendar.mjs";
 import {
   candidateConfigGet,
@@ -283,6 +287,7 @@ test("onboarding handoff prepends Paul context once without disturbing work alre
 
   const first = workspaceOnboardingHandoff(input);
   assert.equal(first.reused, false);
+  assert.equal(first.repaired, false);
   assert.deepEqual(
     workspaceThreadRead({ repoRoot, env: {} }).messages.map((message) => ({
       id: message.id,
@@ -338,6 +343,7 @@ test("onboarding handoff prepends Paul context once without disturbing work alre
     now: new Date("2026-08-14T20:02:00.000Z"),
   });
   assert.equal(changed.reused, false);
+  assert.equal(changed.repaired, true);
   const changedMessages = workspaceThreadRead({ repoRoot, env: {} }).messages;
   assert.deepEqual(
     changedMessages.map((message) => message.text),
@@ -352,6 +358,125 @@ test("onboarding handoff prepends Paul context once without disturbing work alre
   assert.equal(
     changedMessages.filter((message) => message.id === "existing-search-intent").length,
     1
+  );
+});
+
+test("onboarding handoff strips UI control fences and restores clear binary answer metadata", () => {
+  const repoRoot = tempRepo();
+  const rawUpdate = [
+    "```careerrat:confirm",
+    '{"kind":"candidate_patch","summary":"Search focus","payload":{"doc":"profile","patch":{"candidate":{"domain":"developer infrastructure"}}}}',
+    "```",
+    "What company values matter most to you?",
+  ].join("\n");
+
+  workspaceOnboardingHandoff({
+    repoRoot,
+    env: {},
+    transcript: [
+      { role: "assistant", text: rawUpdate },
+      { role: "assistant", text: "Do you need employer sponsorship now or in the future?" },
+    ],
+    handoffText: "Setup is complete.",
+    finishedAt: "2026-08-25T16:03:41.495Z",
+    now: new Date("2026-08-25T16:03:41.495Z"),
+  });
+
+  const messages = workspaceThreadRead({ repoRoot, env: {} }).messages;
+  assert.equal(messages[0].text, "What company values matter most to you?");
+  assert.doesNotMatch(messages[0].text, /careerrat:confirm|candidate_patch/);
+  assert.equal(messages[1].metadata.answerMode, "yes-no");
+});
+
+test("onboarding handoff preserves explicit binary metadata when text alone cannot infer it", () => {
+  const repoRoot = tempRepo();
+  workspaceOnboardingHandoff({
+    repoRoot,
+    env: {},
+    transcript: [
+      {
+        role: "assistant",
+        text: "I need to confirm sponsorship. Reply yes or no.",
+        answerMode: "yes-no",
+        metadata: { answerMode: "yes-no" },
+      },
+    ],
+    handoffText: "Setup is complete.",
+    finishedAt: "2026-08-25T16:03:41.495Z",
+    now: new Date("2026-08-25T16:03:41.495Z"),
+  });
+
+  const messages = workspaceThreadRead({ repoRoot, env: {} }).messages;
+  assert.equal(messages[0].text, "I need to confirm sponsorship. Reply yes or no.");
+  assert.equal(messages[0].metadata.answerMode, "yes-no");
+});
+
+test("onboarding handoff excludes internal system instructions from workspace history", () => {
+  const repoRoot = tempRepo();
+  workspaceOnboardingHandoff({
+    repoRoot,
+    env: {},
+    transcript: [
+      { role: "assistant", text: "Which roles are you targeting?" },
+      {
+        role: "user",
+        text: "[SYSTEM] Candidate details saved. Continue with the next gap.",
+        visibility: "internal",
+      },
+      { role: "user", text: "Staff platform engineering roles." },
+    ],
+    handoffText: "Setup is complete.",
+    finishedAt: "2026-08-25T16:03:41.495Z",
+    now: new Date("2026-08-25T16:03:41.495Z"),
+  });
+
+  assert.deepEqual(
+    workspaceThreadRead({ repoRoot, env: {} }).messages.map((message) => message.text),
+    ["Which roles are you targeting?", "Staff platform engineering roles.", "Setup is complete."]
+  );
+});
+
+test("completed workspace hides duplicate unanswered onboarding prompts around a resume receipt", async () => {
+  const repoRoot = tempRepo();
+  const firstPrompt =
+    "Which work arrangements would you accept: remote, hybrid, on-site, or relocation?";
+  const repeatedPrompt =
+    "I have your home base as Brooklyn. Which arrangements would you accept: remote, hybrid, on-site, or relocation?";
+
+  workspaceMessageAppend({
+    repoRoot,
+    env: {},
+    role: "assistant",
+    text: firstPrompt,
+    metadata: { source: "onboarding", handoffHash: "historical" },
+  });
+  workspaceMessageAppend({
+    repoRoot,
+    env: {},
+    role: "user",
+    text: "Dropped resume: jordan-resume.md",
+    metadata: { source: "onboarding", handoffHash: "historical" },
+  });
+  workspaceMessageAppend({
+    repoRoot,
+    env: {},
+    role: "assistant",
+    text: repeatedPrompt,
+    metadata: { source: "onboarding", handoffHash: "historical" },
+  });
+
+  assert.deepEqual(
+    workspaceThreadRead({ repoRoot, env: {} }).messages.map((message) => message.text),
+    ["Dropped resume: jordan-resume.md", repeatedPrompt]
+  );
+  assert.deepEqual(
+    workspaceThreadOpen({ repoRoot, env: {} }).messages.map((message) => message.text),
+    ["Dropped resume: jordan-resume.md", repeatedPrompt]
+  );
+  const { chatFirstStateGet } = await import("../src/core/db/verbs.mjs");
+  assert.deepEqual(
+    chatFirstStateGet({ repoRoot, env: {} }).mainThread.messages.map((message) => message.text),
+    ["Dropped resume: jordan-resume.md", repeatedPrompt]
   );
 });
 
@@ -1963,6 +2088,7 @@ test('resolveReferencedCompany still resolves an exact whole-name match like "AT
 test("a confirmed Ask action adds one board URL and keeps the receipt in workspace-main", async () => {
   const repoRoot = tempRepo();
   const calls = [];
+  const searchCalls = [];
   const sourceUrl = "https://remoteok.com/remote-dev-jobs?order_by=date";
 
   const result = await executeWorkspaceIntent({
@@ -1988,6 +2114,13 @@ test("a confirmed Ask action adds one board URL and keeps the receipt in workspa
         },
       };
     },
+    startManualSearchImpl: async (input) => {
+      searchCalls.push(input);
+      return {
+        ok: true,
+        run: { id: "manual-search-new-board", purpose: "manual-search", status: "running" },
+      };
+    },
     now: () => new Date("2026-08-09T14:02:45.000Z"),
   });
 
@@ -2000,6 +2133,8 @@ test("a confirmed Ask action adds one board URL and keeps the receipt in workspa
     ]
   );
   assert.match(result.messages.at(-1).text, /Added remoteok\.com to your search sources/i);
+  assert.match(result.messages.at(-1).text, /searching it now/i);
+  assert.deepEqual(searchCalls, [{ repoRoot, env: {}, fetchImpl: undefined }]);
   assert.deepEqual(result.messages.at(-1).artifacts, [
     {
       kind: "search_source",
@@ -2013,7 +2148,20 @@ test("a confirmed Ask action adds one board URL and keeps the receipt in workspa
       enabled: true,
       auth: false,
     },
+    {
+      kind: "search_run",
+      title: "Job search: Searching",
+      purpose: "manual-search",
+      runId: "manual-search-new-board",
+      status: "running",
+      reused: false,
+      parked: false,
+      sources: null,
+      summary: null,
+      error: null,
+    },
   ]);
+  assert.equal(result.messages.at(-1).metadata.state, "running");
   assert.deepEqual(result.messages.at(-1).metadata.nextActions, [
     {
       label: "Search jobs",
@@ -4203,6 +4351,7 @@ test("company.discover with a real db-backed cadence reopens the same-context pe
 test("a confirmed company decision stays in the workspace thread and hands off to search", async () => {
   const repoRoot = tempRepo();
   const decisions = [];
+  const searches = [];
   const result = await executeWorkspaceIntent({
     repoRoot,
     env: {},
@@ -4246,6 +4395,19 @@ test("a confirmed company decision stays in the workspace thread and hands off t
         counts: { seeds: 1, proposals: 1, rejected: 0 },
       },
     }),
+    startManualSearchImpl: async (input) => {
+      searches.push(input);
+      return {
+        ok: true,
+        reused: false,
+        run: {
+          id: "manual-search-expanded-sources",
+          purpose: "manual-search",
+          status: "running",
+        },
+        sources: { deterministicSources: { attempted: 2 } },
+      };
+    },
   });
 
   assert.deepEqual(decisions[0].body, {
@@ -4257,9 +4419,12 @@ test("a confirmed company decision stays in the workspace thread and hands off t
   });
   const message = result.messages.at(-1);
   assert.match(message.text, /Tracking Acme AI/i);
-  assert.equal(message.metadata.state, "complete");
-  assert.equal(message.metadata.nextActions[0].intent.type, "search.run");
+  assert.match(message.text, /searching.*expanded sources/i);
+  assert.equal(message.metadata.state, "running");
+  assert.equal(message.metadata.nextActions[0].intent.type, "ui.navigate");
   assert.equal(message.artifacts[0].proposals.length, 0);
+  assert.equal(message.artifacts[1].kind, "search_run");
+  assert.deepEqual(searches, [{ repoRoot, env: {}, fetchImpl: undefined }]);
 });
 
 test("completed search results return to the same agent without replaying fetched job bodies", async () => {
@@ -4297,6 +4462,31 @@ test("completed search results return to the same agent without replaying fetche
       filtered: 50,
       reconciled: 55,
       reasonCounts: { "title-mismatch": 43, "location-outside-radius": 1 },
+      duplicates: 2,
+      invalid: 1,
+      partial: 1,
+      unreadable: 1,
+      captureFailures: [
+        {
+          company: "Blocked Board",
+          title: "Staff Engineer",
+          url: "https://example.test/private-job-url",
+          reason: "The board needs a browser session.",
+          bodyText: "private body must not be replayed",
+        },
+      ],
+      rejectionSamples: {
+        title: [
+          {
+            company: "Acme",
+            title: "Sales Engineer",
+            location: "Remote - US",
+            reason: "Matched blocked title term: Sales",
+            kind: "blocker",
+            provider: "lever",
+          },
+        ],
+      },
       errorCount: 0,
       errors: [],
       offerCount: 55,
@@ -4316,6 +4506,29 @@ test("completed search results return to the same agent without replaying fetche
     filtered: 50,
     reconciled: 55,
     reasonCounts: { "title-mismatch": 43, "location-outside-radius": 1 },
+    duplicates: 2,
+    invalid: 1,
+    partial: 1,
+    unreadable: 1,
+    captureFailures: [
+      {
+        company: "Blocked Board",
+        title: "Staff Engineer",
+        reason: "The board needs a browser session.",
+      },
+    ],
+    rejectionSamples: {
+      title: [
+        {
+          company: "Acme",
+          title: "Sales Engineer",
+          location: "Remote - US",
+          reason: "Matched blocked title term: Sales",
+          kind: "blocker",
+          provider: "lever",
+        },
+      ],
+    },
     errorCount: 0,
     errors: [],
     offerCount: 55,
@@ -4341,6 +4554,7 @@ test("completed search results return to the same agent without replaying fetche
   assert.match(modelHistory, /location-outside-radius/);
   assert.ok(modelCalls[0].messages.some((message) => message.content.includes('"presented":5')));
   assert.doesNotMatch(modelHistory, /full fetched job description intentionally not replayed/);
+  assert.doesNotMatch(modelHistory, /private-job-url|private body must not be replayed/);
 });
 
 test("a failed action is recorded in the same conversation with an actionable recovery", async () => {
@@ -4403,6 +4617,10 @@ test("free-form turns call the selected AI seam with the complete durable conver
   assert.equal(calls.length, 2);
   assert.equal(calls[0].root, repoRoot);
   assert.match(calls[0].system, /one durable career-search workspace agent/i);
+  assert.match(calls[0].system, /natural, conversational plain English/i);
+  assert.match(calls[0].system, /short, direct sentences/i);
+  assert.match(calls[0].system, /robotic headings/i);
+  assert.match(calls[0].system, /tool narration/i);
   assert.deepEqual(calls[0].messages, [
     { role: "user", content: "Remember that I prefer hybrid roles." },
   ]);
@@ -4420,6 +4638,33 @@ test("free-form turns call the selected AI seam with the complete durable conver
       { role: "assistant", kind: "text", text: "Second answer." },
     ]
   );
+});
+
+test("free-form turns persist the model-declared yes-no answer mode without its control fence", async () => {
+  const repoRoot = tempRepo();
+  const result = await runWorkspaceAgentTurn({
+    repoRoot,
+    env: {},
+    text: "Check whether you need my permission.",
+    callAIImpl: async () => ({
+      content: [
+        {
+          type: "text",
+          text: [
+            "Should I use your signed-in browser for this?",
+            "```careerrat:answer",
+            '{"mode":"yes-no"}',
+            "```",
+          ].join("\n"),
+        },
+      ],
+    }),
+  });
+
+  const message = result.messages.at(-1);
+  assert.equal(message.text, "Should I use your signed-in browser for this?");
+  assert.equal(message.metadata.answerMode, "yes-no");
+  assert.doesNotMatch(message.text, /careerrat:answer/);
 });
 
 test("free-form turns persist and replay only canonical selected-job context", async () => {
@@ -6300,6 +6545,113 @@ test("Apply on site stops on CUT before packet generation or browser execution",
   assert.equal(readApplication(repoRoot, "app-temporal").status, "reviewed-hold");
 });
 
+test("Apply on site proceeds on REVIEW only after the user invokes the explicit approval action", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  let packetCalls = 0;
+  let executorCalls = 0;
+  const dependencies = preparedApplyDeps({
+    evaluateJobImpl: async ({ body }) => {
+      const evaluation = {
+        applicationId: body.applicationId,
+        gate: "review",
+        fitScore: 76,
+        fitRisks: ["Confirm customer-facing scope"],
+        manual: { required: true },
+        evaluatedAt: "2026-08-25T12:00:00.000Z",
+      };
+      appPersistEvaluation({
+        repoRoot,
+        id: body.applicationId,
+        evaluation,
+        projection: { evaluation, fitScore: 76, fitBucket: "med" },
+      });
+      return { status: 200, body: { ok: true, data: evaluation } };
+    },
+    generateDocumentsImpl: async () => {
+      packetCalls += 1;
+      return preparedApplyDeps().generateDocumentsImpl();
+    },
+    applyJobImpl: async () => {
+      executorCalls += 1;
+      return {
+        available: true,
+        verified: false,
+        state: "awaiting-submit",
+        reason: "Review the form.",
+        session: { provider: "orca", filledCount: 3, unresolved: [], blockers: [] },
+      };
+    },
+  });
+
+  const held = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.apply",
+      entity: { type: "application", id: "app-temporal" },
+    },
+    ...dependencies,
+  });
+  assert.equal(packetCalls, 0);
+  assert.equal(executorCalls, 0);
+  const approval = held.messages
+    .at(-1)
+    .metadata.nextActions.find((action) => action.intent?.input?.reviewApproved === true);
+  assert.equal(approval.label, "Approve review and prepare");
+  assert.equal(approval.intent.input.approvedEvaluationAt, "2026-08-25T12:00:00.000Z");
+
+  const approved = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: approval.intent,
+    ...dependencies,
+  });
+  assert.equal(packetCalls, 1);
+  assert.equal(executorCalls, 1);
+  assert.equal(approved.messages.at(-1).metadata.state, "awaiting-submit");
+});
+
+test("Apply on site refuses an approval action after a newer REVIEW evaluation replaces it", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    evaluation: {
+      gate: "review",
+      fitScore: 76,
+      evaluatedAt: "2026-08-25T12:00:00.000Z",
+    },
+  });
+  let packetCalls = 0;
+  let executorCalls = 0;
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.apply",
+      entity: { type: "application", id: "app-temporal" },
+      input: {
+        reviewApproved: true,
+        approvedEvaluationAt: "2026-08-24T12:00:00.000Z",
+      },
+    },
+    generateDocumentsImpl: async () => {
+      packetCalls += 1;
+      return preparedApplyDeps().generateDocumentsImpl();
+    },
+    applyJobImpl: async () => {
+      executorCalls += 1;
+      return { verified: false, state: "awaiting-submit" };
+    },
+  });
+
+  assert.equal(packetCalls, 0);
+  assert.equal(executorCalls, 0);
+  assert.equal(readApplication(repoRoot, "app-temporal").reviewApproval, undefined);
+  assert.equal(result.messages.at(-1).metadata.state, "review");
+  assert.match(result.messages.at(-1).text, /changed since that approval action was created/i);
+});
+
 test("Apply on site rebuilds the packet after the live browser discovers rendered questions", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot);
@@ -6507,6 +6859,51 @@ test("job.apply refuses a resumeSession request when the persisted packet still 
   assert.equal(applyCalls, 0);
   assert.equal(result.messages.at(-1).metadata.state, "blocked");
   assert.match(result.messages.at(-1).text, /packet/i);
+});
+
+test("job.apply resumeSession accepts a persisted REVIEW only with explicit approval", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    evaluation: {
+      gate: "review",
+      fitScore: 76,
+      evaluatedAt: "2026-08-25T12:00:00.000Z",
+    },
+    packetManifest: {
+      applicationId: "app-temporal",
+      generatedAt: "2026-08-09T00:00:00.000Z",
+      uploadReady: true,
+      gaps: [],
+      artifacts: {},
+    },
+  });
+  let applyCalls = 0;
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.apply",
+      entity: { type: "application", id: "app-temporal" },
+      input: {
+        resumeSession: true,
+        reviewApproved: true,
+        approvedEvaluationAt: "2026-08-25T12:00:00.000Z",
+      },
+    },
+    applyJobImpl: async () => {
+      applyCalls += 1;
+      return { verified: false, state: "awaiting-submit", session: { provider: "orca" } };
+    },
+  });
+
+  assert.equal(applyCalls, 1);
+  assert.equal(result.messages.at(-1).metadata.state, "awaiting-submit");
+  assert.equal(result.messages.at(-1).metadata.nextActions[0].intent.input.reviewApproved, true);
+  assert.equal(
+    result.messages.at(-1).metadata.nextActions[0].intent.input.approvedEvaluationAt,
+    "2026-08-25T12:00:00.000Z"
+  );
 });
 
 test("job.apply's resumeSession proceeds straight to the executor once the persisted gate and packet both corroborate", async () => {
@@ -7108,6 +7505,72 @@ test("settings.apply Profile changes persist targets, location, writing style, a
     .map((row) => JSON.parse(row.data));
   assert.equal(voices.length, 1);
   assert.equal(voices[0].summary, "Plain, direct, concrete.");
+});
+
+test("settings.apply appends target roles without replacing existing buckets or duplicate titles", async () => {
+  const repoRoot = tempRepo();
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        {
+          name: "Primary targets",
+          priority: "primary",
+          titles: ["Staff Software Engineer", "Staff Frontend Engineer"],
+        },
+        {
+          name: "Secondary targets",
+          priority: "secondary",
+          titles: ["Staff Full Stack Engineer"],
+        },
+      ],
+    },
+  });
+
+  const applied = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        change: {
+          kind: "profile",
+          section: "targets",
+          op: "append",
+          values: [
+            "Senior Software Engineer",
+            "Staff Frontend Engineer",
+            "Senior Full Stack Engineer",
+          ],
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).targeting.role_buckets, [
+    {
+      name: "Primary targets",
+      priority: "primary",
+      titles: [
+        "Staff Software Engineer",
+        "Staff Frontend Engineer",
+        "Senior Software Engineer",
+        "Senior Full Stack Engineer",
+      ],
+    },
+    {
+      name: "Secondary targets",
+      priority: "secondary",
+      titles: ["Staff Full Stack Engineer"],
+    },
+  ]);
+  assert.equal(
+    settingsArtifact(applied).summary,
+    "Added target roles Senior Software Engineer, Senior Full Stack Engineer."
+  );
 });
 
 test("settings.apply Profile branch rejects malformed direct REST payloads", async () => {

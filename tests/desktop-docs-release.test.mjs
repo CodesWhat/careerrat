@@ -52,6 +52,7 @@ test("desktop README teaches the app-first signed and notarized pilot path", asy
   ]);
 
   assert.doesNotMatch(readme, /automatic updates? (are )?(enabled|available|installed)/i);
+  assert.doesNotMatch(readme, /equal, complete CareerRat engines/i);
 });
 
 test("release checklist requires signed notarized desktop pilot evidence", async () => {
@@ -78,16 +79,15 @@ test("architecture docs describe the exact packaged runtime boundaries", async (
     /one canonical uploaded file plus its isolated skill/i,
     /generic chat surface exposes only[\s\S]*`company-health`/i,
     /Claude Code 2\.1\.241\s+or newer/i,
-    /guarded CareerRat fetch\s+MCP/i,
-    /Codex 0\.149\.1\s+or newer supports isolated\s+in-app chat and drafting/i,
-    /Codex still fails closed before any task-tool or research spawn/i,
+    /guarded CareerRat public\s+web MCP/i,
+    /OpenAI Codex 0\.149\.1 or newer[\s\S]{0,100}complete CareerRat product/i,
     /allowlisted process\s+environment/i,
-    /packaged app has no provider fallback/i,
-    /separately selected Agent SDK\s+test path outside the packaged product/i,
+    /app never silently switches engines/i,
     /only HTML product surface/i,
   ]);
 
   assert.doesNotMatch(architecture, /generated tracker\/static .* normal product/i);
+  assert.doesNotMatch(architecture, /Hermes Agent|Gemini CLI|OpenCode|GitHub Copilot/i);
 });
 
 async function readText(relPath) {

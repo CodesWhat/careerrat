@@ -14,6 +14,7 @@ import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
 import {
   activityAppend,
   analyticsRefresh,
+  appApproveReview,
   appCaptureInterviewIntake,
   appPersistEvaluation,
   appRegisterArtifact,
@@ -392,6 +393,116 @@ test("appPersistEvaluation: a re-evaluation does not regress a post-apply status
     "gate keep; fit 88",
     "top-level note is left alone once the app is past the gate"
   );
+});
+
+test("appPersistEvaluation invalidates an explicit REVIEW approval when the evaluation changes", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+  const firstEvaluation = {
+    applicationId: "app-eval-review-hold",
+    gate: "review",
+    fitScore: 55,
+    fitBucket: "stretch",
+    evaluatedAt: "2030-01-02T12:00:00.000Z",
+  };
+  appPersistEvaluation({
+    repoRoot,
+    id: "app-eval-review-hold",
+    evaluation: firstEvaluation,
+    projection: { evaluation: firstEvaluation, fitScore: 55, fitBucket: "stretch" },
+  });
+  appApproveReview({
+    repoRoot,
+    id: "app-eval-review-hold",
+    expectedEvaluatedAt: firstEvaluation.evaluatedAt,
+    at: "2030-01-02T12:01:00.000Z",
+  });
+
+  const approved = JSON.parse(
+    db.prepare("SELECT data FROM applications WHERE id = ?").get("app-eval-review-hold").data
+  );
+  assert.deepEqual(approved.reviewApproval, {
+    evaluatedAt: firstEvaluation.evaluatedAt,
+    approvedAt: "2030-01-02T12:01:00.000Z",
+  });
+
+  const secondEvaluation = {
+    ...firstEvaluation,
+    fitScore: 62,
+    evaluatedAt: "2030-01-03T12:00:00.000Z",
+  };
+  appPersistEvaluation({
+    repoRoot,
+    id: "app-eval-review-hold",
+    evaluation: secondEvaluation,
+    projection: { evaluation: secondEvaluation, fitScore: 62, fitBucket: "stretch" },
+  });
+
+  const reevaluated = JSON.parse(
+    db.prepare("SELECT data FROM applications WHERE id = ?").get("app-eval-review-hold").data
+  );
+  assert.equal(reevaluated.reviewApproval, null);
+});
+
+test("appApproveReview rejects approval for a superseded REVIEW evaluation", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const evaluation = {
+    applicationId: "app-eval-review-hold",
+    gate: "review",
+    fitScore: 61,
+    evaluatedAt: "2030-01-03T12:00:00.000Z",
+  };
+  appPersistEvaluation({
+    repoRoot,
+    id: "app-eval-review-hold",
+    evaluation,
+    projection: { evaluation, fitScore: 61, fitBucket: "stretch" },
+  });
+
+  assert.throws(
+    () =>
+      appApproveReview({
+        repoRoot,
+        id: "app-eval-review-hold",
+        expectedEvaluatedAt: "2030-01-02T12:00:00.000Z",
+      }),
+    (error) => error?.code === "REVIEW_APPROVAL_STALE"
+  );
+});
+
+test("appSetFields rejects evaluation and gate fields so generic patches cannot forge a KEEP", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+  const before = JSON.parse(
+    db.prepare("SELECT data FROM applications WHERE id = ?").get("app-eval-review-hold").data
+  );
+
+  assert.throws(
+    () =>
+      appSetFields({
+        repoRoot,
+        id: "app-eval-review-hold",
+        patch: { evaluation: { gate: "keep", fitScore: 100 } },
+      }),
+    (error) => error?.code === "APP_FIELDS_FORBIDDEN" && /evaluation/.test(error.message)
+  );
+  assert.throws(
+    () =>
+      appSetFields({
+        repoRoot,
+        id: "app-eval-review-hold",
+        patch: { gateVerdict: "KEEP" },
+      }),
+    (error) => error?.code === "APP_FIELDS_FORBIDDEN" && /gateVerdict/.test(error.message)
+  );
+
+  const after = JSON.parse(
+    db.prepare("SELECT data FROM applications WHERE id = ?").get("app-eval-review-hold").data
+  );
+  assert.deepEqual(after, before);
 });
 
 test("chat-first interview intake atomically captures provenance and schedules a real invite", () => {
@@ -1679,6 +1790,40 @@ test("candidate profile reads normalize missing remote scope to home-country", (
   assert.equal(candidateConfigGet({ repoRoot }).profile.location.remote_scope, "home-country");
 });
 
+test("candidate profile patches distinguish a resume home market from explicit work modes", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      candidate: { location: "Brooklyn, NY" },
+      location: { home: "Brooklyn, NY" },
+    },
+  });
+  assert.equal(
+    candidateConfigGet({ repoRoot }).profile.location.mode_preferences_confirmed,
+    undefined,
+    "resume extraction may save the home market but must not choose work modes"
+  );
+
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: false,
+      },
+    },
+  });
+  assert.equal(candidateConfigGet({ repoRoot }).profile.location.mode_preferences_confirmed, true);
+});
+
 test("candidate setup recomputes quick-start readiness from SQLite setup facts", () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
@@ -2074,7 +2219,6 @@ test("application activity names outcomes instead of internal mutation verbs", (
     repoRoot,
     id: "app-non-interview",
     patch: {
-      gateVerdict: "KEEP",
       roleFit: { why: ["Strong platform fit"], risks: [] },
       compNote: "$190k-$220k base",
     },

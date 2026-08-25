@@ -1,6 +1,8 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { capDescriptionText } from './_html-to-text.mjs';
+
 import { sleep } from './_http.mjs';
 
 // Meituan careers provider — posts to the public zhaopin.meituan.com JSON API
@@ -76,20 +78,22 @@ export function parseMeituanResponse(json, companyName) {
     const title = p.name || '';
     const id = p.jobUnionId;
     if (!title || !id) continue;
-    jobs.push({
-      title,
-      url: DETAIL + encodeURIComponent(id),
-      company: companyName,
-      location: names(p.cityList),
-      // Meituan posts carry full-text JDs (duty + requirements), much longer
-      // than other boards' summaries — cap to keep scan payloads sane.
-      description: [
+    const { text: description, truncated: descriptionPartial } = capDescriptionText(
+      [
         names(p.department) && `部门: ${names(p.department)}`,
         p.jobFamily && `序列: ${p.jobFamily}`,
         p.workYear && `经验: ${p.workYear}`,
         p.jobDuty,
         p.jobRequirement,
-      ].filter(Boolean).join('\n').slice(0, 4000),
+      ].filter(Boolean).join('\n')
+    );
+    jobs.push({
+      title,
+      url: DETAIL + encodeURIComponent(id),
+      company: companyName,
+      location: names(p.cityList),
+      description,
+      ...(descriptionPartial ? { descriptionPartial: true } : {}),
       postedAt: toEpochMs(p.refreshTime ?? p.firstPostTime),
     });
   }

@@ -1,3 +1,5 @@
+import { CAREERRAT_APP_NAME } from "./desktop-identity.mjs";
+
 const BASE_WINDOW_OPTIONS = {
   width: 1280,
   height: 860,
@@ -6,7 +8,7 @@ const BASE_WINDOW_OPTIONS = {
   resizable: true,
   maximizable: true,
   fullscreenable: true,
-  title: "CareerRat",
+  title: CAREERRAT_APP_NAME,
   backgroundColor: "#edf5fb",
 };
 

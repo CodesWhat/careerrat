@@ -18,6 +18,9 @@ Every job-conversation turn follows the same runtime-neutral cycle:
 3. Call the configured local AI runtime once.
 4. Persist the assistant reply or a durable error receipt.
 
+CareerRat owns these workflows and threads. Their state stays provider-neutral,
+even when the selected execution engine changes between turns.
+
 The context pack includes candidate constraints and evidence, current application
 and communication facts, a rolling thread checkpoint with an exact sequence
 boundary, messages after that checkpoint, unresolved mission gates, and bounded
@@ -27,13 +30,10 @@ does not explain the current decision, conversation, or due action.
 ## Returning to a conversation
 
 CareerRat rehydrates a returning agent from its own durable state, so
-conversation identity is runtime-neutral. Claude Code 2.1.241 or newer runs
-full in-app task tools and research through its verified boundary. Codex
-0.149.1 or newer runs isolated in-app chat and drafting with its native agent
-features disabled for each call. Codex remains unavailable for task-tool and
-research runs. Gemini and the other registry entries are detected but not
-selectable until their own completion boundaries are verified. Every provider
-can still drive the workspace through the terminal agent flow.
+conversation identity is runtime-neutral. Claude Code and OpenAI Codex are the
+supported engines for the complete CareerRat workflow. Each local install must
+pass availability, authentication, and the complete readiness check before it
+becomes selectable. A failed check stops clearly without switching providers.
 
 Vendor-specific exact-session resume handles may be added later as optional
 acceleration metadata. They cannot become the source of truth because retention,

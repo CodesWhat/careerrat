@@ -90,7 +90,7 @@ read -r -d '' DESIRED <<'JSON' || true
     } },
     { "type": "required_status_checks", "parameters": {
         "do_not_enforce_on_create": false,
-        "strict_required_status_checks_policy": false,
+        "strict_required_status_checks_policy": true,
         "required_status_checks": [
           { "context": "structure-guards" },
           { "context": "gitleaks" },

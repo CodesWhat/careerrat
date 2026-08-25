@@ -26,7 +26,21 @@ const FIELD_ROLES = new Map([
   ["radio", "radio"],
   ["radio-group", "radio"],
 ]);
-const PREPARE_ONLY_ADVANCE_LABELS = new Set(["next", "next step"]);
+const APPLICATION_ENTRY_LABELS = new Set([
+  "apply",
+  "apply now",
+  "apply for this job",
+  "apply for this position",
+]);
+const PLATFORM_LABELS = {
+  ashby: "Ashby",
+  external_ats: "this application site",
+  greenhouse: "Greenhouse",
+  lever: "Lever",
+  linkedin: "LinkedIn",
+  smartrecruiters: "SmartRecruiters",
+  workable: "Workable",
+};
 
 function normalizeLabel(value) {
   return String(value || "")
@@ -250,6 +264,40 @@ function ashbyApplicationEntryRef(snapshot) {
   );
 }
 
+function applicationEntry(snapshot) {
+  const ashbyRef = ashbyApplicationEntryRef(snapshot);
+  if (ashbyRef) return { ref: ashbyRef, sameOrigin: true, targetUrl: null };
+  if (renderedFieldsFromSnapshot(snapshot).length || uploadTargetsFromSnapshot(snapshot).length) {
+    return null;
+  }
+  const match = Object.entries(snapshot?.refs || {}).find(([, entry]) => {
+    const role = String(entry?.role || "").toLowerCase();
+    const label = normalizeLabel(entry?.name);
+    return role === "link" && APPLICATION_ENTRY_LABELS.has(label) && safePostingUrl(entry?.href);
+  });
+  if (!match) return null;
+  return { ref: match[0], sameOrigin: false, targetUrl: safePostingUrl(match[1].href) };
+}
+
+function hasApplicationFormControls(snapshot) {
+  if (renderedFieldsFromSnapshot(snapshot).length || uploadTargetsFromSnapshot(snapshot).length) {
+    return true;
+  }
+  return Object.values(snapshot?.refs || {}).some((entry) => {
+    const role = String(entry?.role || "").toLowerCase();
+    return role === "button" && /\bsubmit(?: application)?\b/.test(normalizeLabel(entry?.name));
+  });
+}
+
+function applicationPermissionReason(platform) {
+  const label = PLATFORM_LABELS[platform] || "this application site";
+  return `Application preparation for ${label} is off. Turn it on in Settings before CareerRat opens the form.`;
+}
+
+function applicationPlatformForUrl(url) {
+  return isEasyApply(url) ? "linkedin" : hostnameToPortal(url) || "external_ats";
+}
+
 function fillPlan({ fields, config, application, answers }) {
   const portal = hostnameToPortal(application?.link || application?.url || application?.sourceUrl);
   const planned = buildFillPlan({
@@ -366,9 +414,8 @@ export function screenshotPath({ repoRoot, env, applicationId, data, format }) {
 }
 
 // Mirrors of the ops action for a fill-plan step. Returns null when the step's
-// type/value combination has no safe action (e.g. a checkbox step whose value
-// isn't an affirmative yes/true/1) — the caller treats a null action the same
-// as a field that changed out from under it: unresolved, nothing clicked.
+// type/value combination has no safe action. The caller treats a null action
+// the same as a field that changed out from under it: unresolved, nothing clicked.
 function fieldOpFor(step, snapshot) {
   if (step.type === "text") {
     return (ops, pageId) => ops.fillField({ pageId, ref: step.ref, value: String(step.value) });
@@ -383,8 +430,14 @@ function fieldOpFor(step, snapshot) {
         typeahead: step.typeahead === true,
       });
   }
-  if (step.type === "checkbox" && /^(yes|true|1)$/i.test(String(step.value))) {
-    return (ops, pageId) => ops.toggleField({ pageId, ref: step.ref, checked: true });
+  if (step.type === "checkbox") {
+    const value = String(step.value).trim();
+    if (/^(yes|true|1)$/i.test(value)) {
+      return (ops, pageId) => ops.toggleField({ pageId, ref: step.ref, checked: true });
+    }
+    if (/^(no|false|0)$/i.test(value)) {
+      return (ops, pageId) => ops.toggleField({ pageId, ref: step.ref, checked: false });
+    }
   }
   if (step.type === "radio") {
     const requested = normalizeLabel(step.value);
@@ -563,18 +616,51 @@ function snapshotFingerprint(snapshot) {
   return `${Object.keys(refs).length}:${labels.join("|")}`;
 }
 
-// Parses just the hostname out of a snapshot's origin, defensively: origin
-// can be undefined, empty, or not a URL at all (a stub ops implementation in
-// tests, a browser surfacing something unexpected), and new URL() throws on
-// any of those. Returns null rather than throwing so the cross-origin check
-// below can fall through to the existing fingerprint-based behavior instead
-// of blocking, or letting a throw escape the loop, on a parse failure it
-// cannot interpret. Hostname, not the full origin string: path and query
-// change constantly within one legitimate flow, so comparing anything wider
-// than the host would block every normal advance, not just a wrong one.
-function safeHostname(origin) {
+function advanceIsProvenNonFinal(snapshot, ref) {
+  const entry = snapshot?.refs?.[ref];
+  return String(entry?.role || "").toLowerCase() === "button" && entry?.advanceSafe === true;
+}
+
+function findProvenNonFinalAdvanceButtonRef(snapshot) {
+  const refs = snapshot?.refs && typeof snapshot.refs === "object" ? snapshot.refs : {};
+  for (const [ref, entry] of Object.entries(refs)) {
+    if (String(entry?.role || "").toLowerCase() !== "button") continue;
+    if (entry?.advanceSafe === true) return ref;
+  }
+  return null;
+}
+
+function newlyRequiredFields(previousSnapshot, freshSnapshot) {
+  const previousCounts = new Map();
+  for (const field of renderedFieldsFromSnapshot(previousSnapshot)) {
+    const key = `${field.type}\u0000${normalizeLabel(field.label)}`;
+    previousCounts.set(key, (previousCounts.get(key) || 0) + 1);
+  }
+  const introduced = [];
+  for (const field of renderedFieldsFromSnapshot(freshSnapshot)) {
+    const key = `${field.type}\u0000${normalizeLabel(field.label)}`;
+    const remaining = previousCounts.get(key) || 0;
+    if (remaining > 0) {
+      previousCounts.set(key, remaining - 1);
+      if (field.required && field.stateKnown === true && !String(field.value || "").trim()) {
+        introduced.push(field);
+      }
+      continue;
+    }
+    if (field.required) introduced.push(field);
+  }
+  return introduced;
+}
+
+// Parses a snapshot's full HTTP(S) origin defensively. Scheme and port are
+// part of the boundary: an HTTPS downgrade or unexpected port is not the same
+// application origin even when the hostname is unchanged. Paths and queries
+// are excluded by URL.origin so normal steps on one origin still advance.
+function safeHttpOrigin(origin) {
   try {
-    return new URL(String(origin || "")).hostname || null;
+    const parsed = new URL(String(origin || ""));
+    if (!["http:", "https:"].includes(parsed.protocol)) return null;
+    return parsed.origin;
   } catch {
     return null;
   }
@@ -599,12 +685,6 @@ function stepSessionFields(stepIndex, easyApply) {
   return { stepIndex, stepKey: easyApply ? easyApplyStepKey(stepIndex) : null };
 }
 
-function isPrepareOnlyAdvance(snapshot, ref) {
-  const label = normalizeLabel(snapshot?.refs?.[ref]?.name);
-  if (!PREPARE_ONLY_ADVANCE_LABELS.has(label)) return false;
-  return !/\b(review|confirm|submit|send)\b/.test(normalizeLabel(snapshot?.pageText));
-}
-
 // Shared by the entry-point confirmation check and the Easy Apply loop's
 // post-advance confirmation check (an advance click can land on a
 // confirmation page directly) — same screenshot + verified response either way.
@@ -618,7 +698,23 @@ async function submittedResult({
   saveScreenshotImpl,
   providerLabel,
   confirmation,
+  prepareOnly = false,
 }) {
+  if (prepareOnly === true) {
+    return {
+      available: true,
+      verified: false,
+      state: "awaiting-submit",
+      reason:
+        "This page looks submitted, but prepare-only mode does not verify or record applications. Review the page, then use I applied.",
+      currentUrl: snapshot.origin,
+      session: {
+        provider: providerLabel,
+        prepareOnly: true,
+        submitMode: "manual",
+      },
+    };
+  }
   const screenshot = await ops.screenshot({ pageId });
   const path = saveScreenshotImpl({
     repoRoot,
@@ -657,8 +753,9 @@ export function createApplyDriver({
   maxFormSteps = 10,
 } = {}) {
   const sessions = new Map();
+  const inFlight = new Map();
 
-  return async function execute({
+  async function executeOne({
     applicationId,
     application,
     postingUrl,
@@ -720,23 +817,22 @@ export function createApplyDriver({
     }
 
     const easyApply = isEasyApply(url);
-    if (easyApply) {
-      const permission = mayRunImpl({
-        capability: "authenticated_apply_preparation",
-        platform: "linkedin",
-        root: repoRoot,
-      });
-      if (!permission.allowed) {
-        const blockers = Array.isArray(permission.reasons) ? permission.reasons : [];
-        return {
-          available: true,
-          verified: false,
-          state: "blocked",
-          reason: blockers.join("; ") || "LinkedIn Easy Apply permission is off.",
-          currentUrl: url,
-          session: { provider: providerLabel, blockers },
-        };
-      }
+    const applicationPlatform = applicationPlatformForUrl(url);
+    const permission = mayRunImpl({
+      capability: "authenticated_apply_preparation",
+      platform: applicationPlatform,
+      root: repoRoot,
+    });
+    if (!permission.allowed) {
+      const reason = applicationPermissionReason(applicationPlatform);
+      return {
+        available: true,
+        verified: false,
+        state: "blocked",
+        reason,
+        currentUrl: url,
+        session: { provider: providerLabel, blockers: [reason] },
+      };
     }
 
     let pageId = sessions.get(applicationKey);
@@ -778,22 +874,71 @@ export function createApplyDriver({
         saveScreenshotImpl,
         providerLabel,
         confirmation,
+        prepareOnly,
       });
     }
 
-    const ashbyApplicationRef = ashbyApplicationEntryRef(snapshot);
-    if (ashbyApplicationRef) {
+    const entry = applicationEntry(snapshot);
+    if (entry) {
       const detailSnapshot = snapshot;
-      await ops.clickButton({ pageId, ref: ashbyApplicationRef });
+      const targetOrigin = safeHttpOrigin(entry.targetUrl);
+      const targetPlatform = entry.targetUrl ? applicationPlatformForUrl(entry.targetUrl) : null;
+      if (targetPlatform) {
+        const targetPermission = mayRunImpl({
+          capability: "authenticated_apply_preparation",
+          platform: targetPlatform,
+          root: repoRoot,
+        });
+        if (!targetPermission.allowed) {
+          const reason = applicationPermissionReason(targetPlatform);
+          return {
+            available: true,
+            verified: false,
+            state: "blocked",
+            reason,
+            currentUrl: detailSnapshot.origin || url,
+            session: { provider: providerLabel, blockers: [reason] },
+          };
+        }
+      }
+      const clicked = await ops.clickButton({ pageId, ref: entry.ref });
+      const clickedPageId = String(clicked?.pageId || clicked?.browserPageId || "").trim();
+      if (clickedPageId && clickedPageId !== pageId) {
+        pageId = clickedPageId;
+        sessions.set(applicationKey, pageId);
+      }
       snapshot = await ops.snapshot({ pageId });
-      const detailHost = safeHostname(detailSnapshot.origin);
-      const applicationHost = safeHostname(snapshot.origin);
-      if (detailHost && applicationHost && detailHost !== applicationHost) {
+      const detailOrigin = safeHttpOrigin(detailSnapshot.origin);
+      const applicationOrigin = safeHttpOrigin(snapshot.origin);
+      if (!applicationOrigin) {
         return {
           available: true,
           verified: false,
           state: "blocked",
-          reason: `Opening the Ashby Application tab left the job board: it moved from ${detailHost} to ${applicationHost}.`,
+          reason:
+            "CareerRat followed Apply, but couldn't verify where the form opened. Check the browser, then resume preparation.",
+          currentUrl: snapshot.origin || detailSnapshot.origin || url,
+          session: {
+            provider: providerLabel,
+            filledCount: 0,
+            uploadedCount: 0,
+            unresolved: [],
+            blockers: ["application destination not verified"],
+            submitMode: "manual",
+          },
+        };
+      }
+      if (
+        entry.sameOrigin &&
+        detailOrigin &&
+        applicationOrigin &&
+        detailOrigin !== applicationOrigin
+      ) {
+        return {
+          available: true,
+          verified: false,
+          state: "blocked",
+          reason: `Opening the Ashby Application tab left the job board: it moved from ${detailOrigin} to ${applicationOrigin}.`,
           currentUrl: snapshot.origin || detailSnapshot.origin || url,
           session: {
             provider: providerLabel,
@@ -801,6 +946,24 @@ export function createApplyDriver({
             uploadedCount: 0,
             unresolved: [],
             blockers: [],
+            submitMode: "manual",
+          },
+        };
+      }
+      if (!entry.sameOrigin && applicationOrigin !== targetOrigin) {
+        const reason = `CareerRat followed Apply to an unexpected application site (${applicationOrigin} instead of ${targetOrigin}). It stopped before filling the form.`;
+        return {
+          available: true,
+          verified: false,
+          state: "blocked",
+          reason,
+          currentUrl: snapshot.origin || detailSnapshot.origin || url,
+          session: {
+            provider: providerLabel,
+            filledCount: 0,
+            uploadedCount: 0,
+            unresolved: [],
+            blockers: [reason],
             submitMode: "manual",
           },
         };
@@ -820,6 +983,7 @@ export function createApplyDriver({
           saveScreenshotImpl,
           providerLabel,
           confirmation,
+          prepareOnly,
         });
       }
     }
@@ -1018,8 +1182,31 @@ export function createApplyDriver({
       // control (only a disqualified Submit-flavored one, or none at all)
       // stops here awaiting-submit, same as a genuinely single-page form.
       const preAdvanceSnapshot = await ops.snapshot({ pageId });
-      const advanceRef = findAdvanceButtonRef(preAdvanceSnapshot);
+      const advanceRef =
+        prepareOnly === true
+          ? findProvenNonFinalAdvanceButtonRef(preAdvanceSnapshot) ||
+            findAdvanceButtonRef(preAdvanceSnapshot)
+          : findAdvanceButtonRef(preAdvanceSnapshot);
       if (!advanceRef) {
+        if (!easyApply && !hasApplicationFormControls(preAdvanceSnapshot)) {
+          return {
+            available: true,
+            verified: false,
+            state: "blocked",
+            reason:
+              "CareerRat opened the job listing but couldn't find the application form. Use the site's Apply button, then resume preparation.",
+            currentUrl: preAdvanceSnapshot.origin || finalSnapshot.origin || url,
+            session: {
+              provider: providerLabel,
+              filledCount: totalFilledCount,
+              uploadedCount: totalUploadedCount,
+              unresolved,
+              blockers: ["application form not found"],
+              submitMode: "manual",
+              ...stepSessionFields(stepIndex, easyApply),
+            },
+          };
+        }
         return {
           available: true,
           verified: false,
@@ -1040,8 +1227,36 @@ export function createApplyDriver({
         };
       }
 
+      const freshRequiredFields = newlyRequiredFields(snapshot, preAdvanceSnapshot);
+      if (freshRequiredFields.length) {
+        const unresolvedFreshFields = freshRequiredFields.map((field) => ({
+          label: field.label,
+          required: true,
+          reason: "This required field appeared after the fill pass.",
+        }));
+        return {
+          available: true,
+          verified: false,
+          state: "blocked",
+          reason: `Stopped on required fields the form added before advancing: ${freshRequiredFields
+            .map((field) => field.label)
+            .join(", ")}.`,
+          currentUrl: preAdvanceSnapshot.origin || finalSnapshot.origin || url,
+          session: {
+            provider: providerLabel,
+            filledCount: totalFilledCount,
+            uploadedCount: totalUploadedCount,
+            unresolved: unresolvedFreshFields,
+            blockers: [],
+            submitMode: guard.mode,
+            ...(prepareOnly === true ? { prepareOnly: true } : {}),
+            ...stepSessionFields(stepIndex, easyApply),
+          },
+        };
+      }
+
       const advanceLabel = String(preAdvanceSnapshot.refs?.[advanceRef]?.name || "").trim();
-      if (prepareOnly === true && !isPrepareOnlyAdvance(preAdvanceSnapshot, advanceRef)) {
+      if (prepareOnly === true && !advanceIsProvenNonFinal(preAdvanceSnapshot, advanceRef)) {
         return {
           available: true,
           verified: false,
@@ -1082,6 +1297,7 @@ export function createApplyDriver({
           saveScreenshotImpl,
           providerLabel,
           confirmation: postAdvanceConfirmation,
+          prepareOnly,
         });
       }
 
@@ -1092,28 +1308,28 @@ export function createApplyDriver({
       // fingerprint check below only proves the page changed, and a
       // navigation off the application changes the fingerprint too, so it
       // cannot tell a real advance from a wrong destination. This check
-      // can: if the click moved the browser to a different hostname, stop
-      // before ever filling anything there, naming both hosts so the human
+      // can: if the click moved the browser to a different HTTP(S) origin,
+      // stop before ever filling anything there, naming both origins so the human
       // can see where it went and decide. Ordered after the confirmation
       // check on purpose: a legitimate submit-and-confirm can land on a
-      // different host too (an embedded Greenhouse form completing on
+      // different origin too (an embedded Greenhouse form completing on
       // boards.greenhouse.io, for one), and confirmationCheck already handles
       // that path with a screenshot and a verified response, so it gets first
       // look. This check is the fallback for every other cross-origin
       // landing, and it deliberately over-blocks: a legitimate same-
-      // application handoff to a new host reads the same as a wrong one from
+      // application handoff to a new origin reads the same as a wrong one from
       // here, so it stops either way and leaves the rest to the human, same
       // bias as browserInterventionBlockers' own SSO handling. A false
       // positive costs one manual step; a false negative is automated
       // form-filling on a page nobody vetted, which is the worse outcome.
-      const beforeHost = safeHostname(preAdvanceSnapshot.origin);
-      const afterHost = safeHostname(nextSnapshot.origin);
-      if (beforeHost && afterHost && beforeHost !== afterHost) {
+      const beforeOrigin = safeHttpOrigin(preAdvanceSnapshot.origin);
+      const afterOrigin = safeHttpOrigin(nextSnapshot.origin);
+      if (beforeOrigin && afterOrigin && beforeOrigin !== afterOrigin) {
         return {
           available: true,
           verified: false,
           state: "blocked",
-          reason: `Clicking "${advanceLabel}" left the application: it moved from ${beforeHost} to ${afterHost}.`,
+          reason: `Clicking "${advanceLabel}" left the application: it moved from ${beforeOrigin} to ${afterOrigin}.`,
           currentUrl: nextSnapshot.origin || preAdvanceSnapshot.origin || url,
           session: {
             provider: providerLabel,
@@ -1160,5 +1376,19 @@ export function createApplyDriver({
 
       snapshot = nextSnapshot;
     }
+  }
+
+  return function execute(request = {}) {
+    const applicationKey = String(request?.applicationId || "").trim();
+    if (!applicationKey) return executeOne(request);
+    const running = inFlight.get(applicationKey);
+    if (running) return running;
+
+    let shared;
+    shared = executeOne(request).finally(() => {
+      if (inFlight.get(applicationKey) === shared) inFlight.delete(applicationKey);
+    });
+    inFlight.set(applicationKey, shared);
+    return shared;
   };
 }

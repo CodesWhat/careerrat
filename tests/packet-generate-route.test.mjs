@@ -440,6 +440,33 @@ test("POST /api/packet/gate: an excluded-company posting forces CUT without an A
   }
 });
 
+test("POST /api/packet/gate: the shared exclusion matcher also hard-cuts an excluded title", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: { excluded_companies: ["Applied   AI Engineer"] },
+  });
+  const server = await bootServer(repoRoot, {
+    packetGateInvoke: async () => {
+      throw new Error("excluded-title gate must not call the AI");
+    },
+  });
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-packet",
+      jobBody:
+        "Own agentic workflow prototypes with customers and ship deployed AI workflow tools.",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.data?.gate, "cut");
+    assert.equal(body.data?.ai?.used, false);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/packet/gate: a cut_signal match in the JD forces REVIEW without an AI call", async () => {
   const repoRoot = tempRepo();
   seedPacketReadyApp(repoRoot);
@@ -564,6 +591,69 @@ test("POST /api/packet/gate: preserves complete fit copy within the persisted bu
     });
     assert.equal(status, 200);
     assert.equal(body.data.fitReasons[0], completeReason);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/gate: accepts an ordinary wait instruction without a correction retry", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  const attempts = [];
+  const action = "Wait for the recruiter response.";
+  const server = await bootServer(repoRoot, {
+    packetGateInvoke: async ({ attempt }) => {
+      attempts.push(attempt);
+      return `\`\`\`json\n${JSON.stringify({ ...typedGateVerdict(), action })}\n\`\`\``;
+    },
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-packet",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);
+    assert.deepEqual(attempts, [0]);
+    assert.equal(body.data.action, action);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/gate: retries drafting residue and never persists the rejected evaluation copy", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  const attempts = [];
+  const badReason =
+    "Has production Python and backend platform experience at scale shock? Wait typo.";
+  const correctedReason = "Has production Python and backend platform experience at scale.";
+  const server = await bootServer(repoRoot, {
+    packetGateInvoke: async ({ attempt, correction }) => {
+      attempts.push({ attempt, correction });
+      const verdict = {
+        ...typedGateVerdict(),
+        fitReasons: [attempt === 0 ? badReason : correctedReason],
+      };
+      return `\`\`\`json\n${JSON.stringify(verdict)}\n\`\`\``;
+    },
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-packet",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(attempts.length, 2, "drafting residue must trigger the bounded correction retry");
+    assert.match(attempts[1].correction || "", /fitReasons\[0\].*final user-facing copy/i);
+    assert.deepEqual(body.data.fitReasons, [correctedReason]);
+    assert.equal(body.data.ai.retried, true);
+
+    const app = readApp(repoRoot, "app-packet");
+    assert.deepEqual(app.evaluation.fitReasons, [correctedReason]);
+    assert.deepEqual(app.roleFit.why, [correctedReason]);
+    assert.doesNotMatch(JSON.stringify(app), /scale shock|wait typo/i);
   } finally {
     await closeServer(server);
   }

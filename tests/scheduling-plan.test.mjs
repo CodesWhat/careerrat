@@ -197,6 +197,63 @@ test("scheduling plan drops busy conflicts with the configured buffer", async ()
   assert.match(result.message, /busy calendar/i);
 });
 
+test("scheduling plan keeps conflict-free slots when only part of a proposal overlaps", async () => {
+  const result = await planSchedulingReply({
+    communication,
+    application,
+    profile,
+    calendarBusy: [
+      {
+        provider: "google_calendar",
+        startIso: "2030-08-13T18:45:00.000Z",
+        endIso: "2030-08-13T19:15:00.000Z",
+        label: "Busy",
+      },
+    ],
+    instruction: "Offer Tuesday or Wednesday afternoon.",
+    now: new Date("2030-08-10T12:00:00.000Z"),
+    runBoundedAI: async () => ({
+      body: {
+        ok: true,
+        data: {
+          state: "draft_ready",
+          timezone: "America/New_York",
+          timezoneAssumed: false,
+          timezoneNote: "",
+          subject: "Re: Interview availability",
+          body: "Hi Avery, Tuesday at 3:00 PM or Wednesday at 2:00 PM ET works. Best, Sam",
+          round: "recruiter screen",
+          contactName: "Avery",
+          durationMinutes: 30,
+          selectedSlotIndex: null,
+          slots: [
+            {
+              startIso: "2030-08-13T19:00:00.000Z",
+              endIso: "2030-08-13T19:30:00.000Z",
+              label: "Tue Aug 13, 3:00 PM ET",
+            },
+            {
+              startIso: "2030-08-14T18:00:00.000Z",
+              endIso: "2030-08-14T18:30:00.000Z",
+              label: "Wed Aug 14, 2:00 PM ET",
+            },
+          ],
+          missing: [],
+        },
+        ai: { used: true },
+      },
+    }),
+  });
+
+  assert.equal(result.status, "ready");
+  assert.deepEqual(
+    result.plan.slots.map((slot) => slot.label),
+    ["Wed Aug 14, 2:00 PM ET"]
+  );
+  assert.match(result.plan.body, /Wed Aug 14, 2:00 PM ET/);
+  assert.doesNotMatch(result.plan.body, /Tuesday at 3:00 PM|Tue Aug 13/);
+});
+
 test("scheduling plan requires confirmation before using an inferred timezone", async () => {
   const result = await planSchedulingReply({
     communication,

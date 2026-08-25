@@ -1,6 +1,8 @@
 import { closeSync, openSync, readSync } from "node:fs";
 
+import { PLAIN_ENGLISH_AGENT_VOICE } from "../ai/agent-voice.mjs";
 import { callAI, resolveAIRoute } from "../ai/call-ai.mjs";
+import { CHAT_ANSWER_MODE_GUIDANCE, parseChatAnswerMode } from "../ai/chat-answer-mode.mjs";
 import { TRACK_OUTCOME_STATUSES } from "../ai/track-outcome-bounded.mjs";
 import { hostnameToPortal } from "../apply/form-fill.mjs";
 import { buildQuestionsRequest } from "../apply/form-questions.mjs";
@@ -26,6 +28,7 @@ import { requireDb } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
 import { activityAppend } from "../db/verbs/activity.mjs";
 import {
+  appApproveReview,
   appCaptureInterviewIntake,
   appScheduleInterview,
   appSetFields,
@@ -252,7 +255,9 @@ function buildWorkspaceAgentSystemPrompt({ repoRoot, env = process.env } = {}) {
     "Use the complete conversation supplied with this turn and the canonical candidate snapshot below.",
     "Never invent candidate facts, job facts, completed actions, or evidence. If information is missing, say so plainly.",
     "Do not claim a product action ran merely because the user asked; deterministic app actions report their own completion in this conversation.",
-    "Answer directly in clear plain text. Do not expose internal database ids unless the user asks for them.",
+    PLAIN_ENGLISH_AGENT_VOICE,
+    "Do not expose internal database ids unless the user asks for them.",
+    CHAT_ANSWER_MODE_GUIDANCE,
     `Canonical candidate snapshot (current_base, email, and phone intentionally omitted):\n${JSON.stringify(snapshot)}`,
   ].join("\n\n");
 }
@@ -1564,7 +1569,26 @@ async function evaluateApplicationRequest({
   };
 }
 
-function evaluationNextActions(gate, applicationId, fitRisks = []) {
+function persistedEvaluationResult(application, applicationId) {
+  const evaluation = application?.evaluation || {};
+  const gate = String(evaluation.gate || "review").toLowerCase();
+  const gateLabel = gate.charAt(0).toUpperCase() + gate.slice(1);
+  return {
+    application,
+    evaluation,
+    gate,
+    gateLabel,
+    text: `Evaluated ${applicationLabel(application)}: ${gateLabel}${evaluation.fitScore == null ? "" : ` (${evaluation.fitScore}/100 fit)`}.`,
+    artifact: {
+      kind: "job_evaluation",
+      title: `${applicationLabel(application)}: ${gateLabel}`,
+      applicationId,
+      evaluation,
+    },
+  };
+}
+
+function evaluationNextActions(gate, applicationId, fitRisks = [], evaluatedAt = null) {
   if (gate === "keep") {
     return [
       {
@@ -1584,6 +1608,16 @@ function evaluationNextActions(gate, applicationId, fitRisks = []) {
       entityId: applicationId,
     }),
   ];
+  if (gate === "review") {
+    actions.push({
+      label: "Approve review and prepare",
+      intent: {
+        type: "job.apply",
+        entity: { type: "application", id: applicationId },
+        input: { reviewApproved: true, approvedEvaluationAt: evaluatedAt },
+      },
+    });
+  }
   // Coaching only ever offers on a review verdict with named gaps — never on
   // cut (nothing to coach toward) — matching coaching.plan's own trigger
   // contract in src/core/coaching/plan.mjs, not re-derived here.
@@ -1597,6 +1631,24 @@ function evaluationNextActions(gate, applicationId, fitRisks = []) {
     });
   }
   return actions;
+}
+
+function reviewApprovalMatches(application, input) {
+  const currentEvaluatedAt = String(application?.evaluation?.evaluatedAt || "").trim();
+  const approvedEvaluationAt = String(input?.approvedEvaluationAt || "").trim();
+  return (
+    input?.reviewApproved === true &&
+    String(application?.evaluation?.gate || "").toLowerCase() === "review" &&
+    Boolean(currentEvaluatedAt) &&
+    approvedEvaluationAt === currentEvaluatedAt
+  );
+}
+
+function carriedReviewApproval(input) {
+  const approvedEvaluationAt = String(input?.approvedEvaluationAt || "").trim();
+  return input?.reviewApproved === true && approvedEvaluationAt
+    ? { reviewApproved: true, approvedEvaluationAt }
+    : {};
 }
 
 function navigationAction(
@@ -1645,7 +1697,11 @@ function blockingPacketGaps(gaps) {
 // just never the safety checks themselves.
 function applicationApplySafetyBlockReason(application) {
   const gate = String(application?.evaluation?.gate || "").toLowerCase();
-  if (gate !== "keep") {
+  const reviewApproved =
+    gate === "review" &&
+    Boolean(application?.evaluation?.evaluatedAt) &&
+    application.reviewApproval?.evaluatedAt === application.evaluation.evaluatedAt;
+  if (gate !== "keep" && !reviewApproved) {
     return "This application does not have a passing gate verdict on record.";
   }
   const manifest = application?.packetManifest;
@@ -2027,6 +2083,10 @@ function compactSearchSummary(summary) {
     "presented",
     "filtered",
     "reconciled",
+    "duplicates",
+    "invalid",
+    "partial",
+    "unreadable",
     "errorCount",
     "offerCount",
   ];
@@ -2036,6 +2096,30 @@ function compactSearchSummary(summary) {
   }
   if (summary.reasonCounts && typeof summary.reasonCounts === "object") {
     compact.reasonCounts = JSON.parse(JSON.stringify(summary.reasonCounts));
+  }
+  if (summary.rejectionSamples && typeof summary.rejectionSamples === "object") {
+    compact.rejectionSamples = Object.fromEntries(
+      Object.entries(summary.rejectionSamples)
+        .slice(0, 20)
+        .map(([reason, samples]) => [
+          String(reason).slice(0, 120),
+          (Array.isArray(samples) ? samples : []).slice(0, 3).map((sample) => ({
+            ...(sample?.company ? { company: String(sample.company).slice(0, 160) } : {}),
+            ...(sample?.title ? { title: String(sample.title).slice(0, 240) } : {}),
+            ...(sample?.location ? { location: String(sample.location).slice(0, 240) } : {}),
+            ...(sample?.reason ? { reason: String(sample.reason).slice(0, 500) } : {}),
+            ...(sample?.kind ? { kind: String(sample.kind).slice(0, 80) } : {}),
+            ...(sample?.provider ? { provider: String(sample.provider).slice(0, 120) } : {}),
+          })),
+        ])
+    );
+  }
+  if (Array.isArray(summary.captureFailures)) {
+    compact.captureFailures = summary.captureFailures.slice(0, 10).map((failure) => ({
+      ...(failure?.company ? { company: String(failure.company).slice(0, 160) } : {}),
+      ...(failure?.title ? { title: String(failure.title).slice(0, 240) } : {}),
+      ...(failure?.reason ? { reason: String(failure.reason).slice(0, 500) } : {}),
+    }));
   }
   if (Array.isArray(summary.errors)) {
     compact.errors = summary.errors.slice(0, 20).map((error) => ({
@@ -2105,6 +2189,52 @@ function searchRunArtifact({ run, sources = null, reused = false, parked = false
     summary: compactSearchSummary(run?.summary),
     error: compactSearchError(run?.error),
   };
+}
+
+async function startExpandedSourceSearch({
+  repoRoot,
+  env,
+  searchFetchImpl,
+  startManualSearchImpl,
+  onSearchStarted,
+}) {
+  try {
+    const operation = await startManualSearchImpl({
+      repoRoot,
+      env,
+      fetchImpl: searchFetchImpl,
+    });
+    const run = operation?.run || {
+      purpose: "manual-search",
+      status: "failed",
+      error: { message: "The expanded job search did not return a run state." },
+    };
+    const normalizedRun = { ...run, purpose: run.purpose || "manual-search" };
+    const artifact = searchRunArtifact({
+      run: normalizedRun,
+      sources: operation?.sources || null,
+      reused: operation?.reused === true,
+      parked: operation?.parked === true,
+    });
+    onSearchStarted?.({ operation, run: normalizedRun });
+    return {
+      operation,
+      artifact,
+      started: new Set(["running", "completed"]).has(artifact.status),
+    };
+  } catch (error) {
+    return {
+      operation: null,
+      artifact: searchRunArtifact({
+        run: {
+          purpose: "manual-search",
+          status: "failed",
+          error: { message: error?.message || "The expanded job search could not start." },
+        },
+      }),
+      started: false,
+    };
+  }
 }
 
 function searchResultText(run) {
@@ -2995,7 +3125,8 @@ export async function executeWorkspaceIntent({
             nextActions: evaluationNextActions(
               evaluated.gate,
               captured.applicationId,
-              evaluated.evaluation.fitRisks
+              evaluated.evaluation.fitRisks,
+              evaluated.evaluation.evaluatedAt
             ),
           },
           now,
@@ -3106,7 +3237,8 @@ export async function executeWorkspaceIntent({
           nextActions: evaluationNextActions(
             evaluated.gate,
             normalized.entity.id,
-            evaluated.evaluation.fitRisks
+            evaluated.evaluation.fitRisks,
+            evaluated.evaluation.evaluatedAt
           ),
         },
         now,
@@ -3257,6 +3389,16 @@ export async function executeWorkspaceIntent({
       const added = operation?.added !== false;
       const enabled = source.enabled !== false;
       const authPending = source.auth === true && !enabled;
+      const expandedSearch =
+        added && enabled && source.auth !== true
+          ? await startExpandedSourceSearch({
+              repoRoot,
+              env,
+              searchFetchImpl,
+              startManualSearchImpl,
+              onSearchStarted,
+            })
+          : null;
       return appendActionResult({
         repoRoot,
         env,
@@ -3266,7 +3408,9 @@ export async function executeWorkspaceIntent({
           ? `Added ${label} to your search sources.${
               authPending
                 ? " It stays off until you enable browser access for this provider."
-                : " It is enabled for future searches."
+                : expandedSearch?.started
+                  ? " It is enabled, and CareerRat is searching it now."
+                  : " It is enabled for future searches."
             }`
           : `${label} is already in your search sources. Nothing changed.`,
         artifacts: [
@@ -3282,9 +3426,10 @@ export async function executeWorkspaceIntent({
             enabled,
             auth: source.auth === true,
           },
-        ],
+          expandedSearch?.artifact,
+        ].filter(Boolean),
         metadata: {
-          state: added ? "added" : "existing",
+          state: expandedSearch?.started ? "running" : added ? "added" : "existing",
           nextActions: [
             navigationAction("Search jobs", { surface: "search" }),
             navigationAction("Manage sources", { surface: "settings", section: "sources" }),
@@ -4494,23 +4639,52 @@ export async function executeWorkspaceIntent({
         const config = candidateConfigGet({ repoRoot, env });
         if (section === "targets") {
           const values = profileSettingList(change.values, "Target roles");
-          const from = (
-            Array.isArray(config.targeting?.role_buckets) ? config.targeting.role_buckets : []
-          ).flatMap((bucket) => (Array.isArray(bucket?.titles) ? bucket.titles : []));
+          const op = String(change.op || "replace");
+          if (!new Set(["replace", "append"]).has(op)) {
+            throw actionError("Unknown target-role change.", "SETTINGS_CHANGE_INVALID");
+          }
+          const currentBuckets = Array.isArray(config.targeting?.role_buckets)
+            ? config.targeting.role_buckets
+            : [];
+          const from = currentBuckets.flatMap((bucket) =>
+            Array.isArray(bucket?.titles) ? bucket.titles : []
+          );
+          let roleBuckets;
+          let added = values;
+          if (op === "append") {
+            const seen = new Set(from.map((title) => String(title).trim().toLowerCase()));
+            added = values.filter((title) => !seen.has(title.toLowerCase()));
+            roleBuckets = currentBuckets.map((bucket) => ({
+              ...bucket,
+              titles: Array.isArray(bucket?.titles) ? [...bucket.titles] : [],
+            }));
+            if (!roleBuckets.length) {
+              roleBuckets.push({ name: "Primary targets", priority: "primary", titles: [] });
+            }
+            const primaryIndex = roleBuckets.findIndex((bucket) => bucket.priority === "primary");
+            roleBuckets[primaryIndex === -1 ? 0 : primaryIndex].titles.push(...added);
+          } else {
+            roleBuckets = [{ name: "Primary targets", priority: "primary", titles: values }];
+          }
           candidateConfigPatch({
             repoRoot,
             env,
             name: "targeting",
-            patch: {
-              role_buckets: [{ name: "Primary targets", priority: "primary", titles: values }],
-            },
+            patch: { role_buckets: roleBuckets },
           });
+          const to = roleBuckets.flatMap((bucket) => bucket.titles);
           result = {
             label: "Target roles",
             field: "role_buckets",
             from,
-            to: values,
-            summary: `Target roles set to ${values.join(", ")}.`,
+            to,
+            changed: op === "append" ? added.length > 0 : undefined,
+            summary:
+              op === "append"
+                ? added.length
+                  ? `Added target roles ${added.join(", ")}.`
+                  : "Already saved. Nothing changed."
+                : `Target roles set to ${values.join(", ")}.`,
           };
         } else if (section === "home") {
           const value = String(change.value || "").trim();
@@ -4844,6 +5018,20 @@ export async function executeWorkspaceIntent({
         action === "approve-supported-ats" ? `Tracking ${name}.` : `Skipped ${name}.`;
       const returnToCurrentSearch =
         batch.trigger?.kind === "search-run" || String(input.searchRunId || "").trim();
+      const approvedSourceAdded = (batch.proposals || []).some(
+        (proposal) => proposal?.decision?.action === "approve-supported-ats"
+      );
+      const expandedSearch =
+        !remaining && approvedSourceAdded
+          ? await startExpandedSourceSearch({
+              repoRoot,
+              env,
+              searchFetchImpl,
+              startManualSearchImpl,
+              onSearchStarted,
+            })
+          : null;
+      const expandedSearchStarted = expandedSearch?.started === true;
       return appendActionResult({
         repoRoot,
         env,
@@ -4851,17 +5039,23 @@ export async function executeWorkspaceIntent({
         intentMessage,
         text: remaining
           ? `${decisionText} ${remaining} compan${remaining === 1 ? "y still needs" : "ies still need"} review.`
-          : `${decisionText} All company proposals are reviewed.`,
-        artifacts: [artifact],
+          : expandedSearchStarted
+            ? `${decisionText} All company proposals are reviewed. Searching the expanded sources now.`
+            : expandedSearch?.artifact
+              ? `${decisionText} All company proposals are reviewed. The expanded search could not start.`
+              : `${decisionText} All company proposals are reviewed.`,
+        artifacts: [artifact, expandedSearch?.artifact].filter(Boolean),
         metadata: {
-          state: remaining ? "needs-review" : "complete",
+          state: remaining ? "needs-review" : expandedSearchStarted ? "running" : "complete",
           proposalCount: remaining,
           decision: action,
           ...(remaining
             ? {}
             : {
                 nextActions: [
-                  returnToCurrentSearch ? currentSearchAction() : searchExpandedCompaniesAction(),
+                  expandedSearchStarted || returnToCurrentSearch
+                    ? currentSearchAction()
+                    : searchExpandedCompaniesAction(),
                 ],
               }),
         },
@@ -6386,13 +6580,49 @@ export async function executeWorkspaceIntent({
     let questionCapture = null;
 
     if (!resumeApplicationSession) {
-      const evaluated = await evaluateApplicationRequest({
-        repoRoot,
-        env,
-        applicationId: normalized.entity.id,
-        evaluateJobImpl,
-      });
-      if (evaluated.gate !== "keep") {
+      let evaluated;
+      if (input.reviewApproved === true) {
+        evaluated = persistedEvaluationResult(application, normalized.entity.id);
+        if (!reviewApprovalMatches(application, input)) {
+          return appendActionResult({
+            repoRoot,
+            env,
+            normalized,
+            intentMessage,
+            text: `The job evaluation changed since that approval action was created. Review the current verdict before CareerRat prepares the application.`,
+            artifacts: [evaluated.artifact],
+            metadata: {
+              state: evaluated.gate,
+              applicationId: normalized.entity.id,
+              fitScore: evaluated.evaluation.fitScore ?? null,
+              manualRequired: Boolean(evaluated.evaluation.manual?.required),
+              submissionVerified: false,
+              nextActions: evaluationNextActions(
+                evaluated.gate,
+                normalized.entity.id,
+                evaluated.evaluation.fitRisks,
+                evaluated.evaluation.evaluatedAt
+              ),
+            },
+            now,
+          });
+        }
+        appApproveReview({
+          repoRoot,
+          env,
+          id: normalized.entity.id,
+          expectedEvaluatedAt: input.approvedEvaluationAt,
+        });
+        application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
+      } else {
+        evaluated = await evaluateApplicationRequest({
+          repoRoot,
+          env,
+          applicationId: normalized.entity.id,
+          evaluateJobImpl,
+        });
+      }
+      if (evaluated.gate !== "keep" && input.reviewApproved !== true) {
         return appendActionResult({
           repoRoot,
           env,
@@ -6409,7 +6639,8 @@ export async function executeWorkspaceIntent({
             nextActions: evaluationNextActions(
               evaluated.gate,
               normalized.entity.id,
-              evaluated.evaluation.fitRisks
+              evaluated.evaluation.fitRisks,
+              evaluated.evaluation.evaluatedAt
             ),
           },
           now,
@@ -6481,6 +6712,38 @@ export async function executeWorkspaceIntent({
       application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
       questionCapture = questionCaptureFromApplication(application) || questionCapture;
     } else {
+      if (input.reviewApproved === true) {
+        const evaluated = persistedEvaluationResult(application, normalized.entity.id);
+        if (!reviewApprovalMatches(application, input)) {
+          return appendActionResult({
+            repoRoot,
+            env,
+            normalized,
+            intentMessage,
+            text: `The job evaluation changed since that approval action was created. Review the current verdict before CareerRat opens the application form.`,
+            artifacts: [evaluated.artifact],
+            metadata: {
+              state: evaluated.gate,
+              applicationId: normalized.entity.id,
+              submissionVerified: false,
+              nextActions: evaluationNextActions(
+                evaluated.gate,
+                normalized.entity.id,
+                evaluated.evaluation.fitRisks,
+                evaluated.evaluation.evaluatedAt
+              ),
+            },
+            now,
+          });
+        }
+        appApproveReview({
+          repoRoot,
+          env,
+          id: normalized.entity.id,
+          expectedEvaluatedAt: input.approvedEvaluationAt,
+        });
+        application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
+      }
       questionCapture = await prepareApplicationQuestions({
         repoRoot,
         env,
@@ -6544,7 +6807,10 @@ export async function executeWorkspaceIntent({
                 intent: {
                   type: "job.prepare-submit",
                   entity: { type: "application", id: normalized.entity.id },
-                  input: { resumeSession: true },
+                  input: {
+                    resumeSession: true,
+                    ...carriedReviewApproval(input),
+                  },
                 },
               },
             ],
@@ -6704,7 +6970,10 @@ export async function executeWorkspaceIntent({
                 intent: {
                   type: "job.prepare-submit",
                   entity: { type: "application", id: normalized.entity.id },
-                  input: { resumeSession: true },
+                  input: {
+                    resumeSession: true,
+                    ...carriedReviewApproval(input),
+                  },
                 },
               },
             ],
@@ -6805,7 +7074,11 @@ export async function executeWorkspaceIntent({
               intent: {
                 type: "job.prepare-submit",
                 entity: { type: "application", id: normalized.entity.id },
-                input: { resumeSession: true, focusSession: true },
+                input: {
+                  resumeSession: true,
+                  focusSession: true,
+                  ...carriedReviewApproval(input),
+                },
               },
             },
             {
@@ -7497,6 +7770,13 @@ function splitSettingsList(value) {
 function settingsProfileFromText(text) {
   const value = String(text || "").trim();
   let match = value.match(
+    /^(?:please\s+)?(?:add|include)\s+(.+?)\s+(?:to|in)\s+(?:my\s+)?(?:target roles|job targets|target titles)(?:\s*,?\s*(?:while\s+)?keeping\s+.+?)?\s*[.?!]*$/i
+  );
+  if (match) {
+    const values = splitSettingsList(match[1]);
+    return values.length ? { section: "targets", op: "append", values } : null;
+  }
+  match = value.match(
     /^(?:please\s+)?(?:set|change|update|replace)\s+(?:my\s+)?(?:target roles|job targets|target titles)\s+to\s+(.+?)\s*[.?!]*$/i
   );
   if (match) {
@@ -7713,7 +7993,9 @@ function settingsApplyPreviewLabel(change) {
   }
   if (change.kind === "profile") {
     if (change.section === "targets") {
-      return `Replace target roles with ${change.values.join(", ")}`;
+      return change.op === "append"
+        ? `Add target roles ${change.values.join(", ")}`
+        : `Replace target roles with ${change.values.join(", ")}`;
     }
     if (change.section === "home") return `Set home market to ${change.value}`;
     if (change.section === "location-mode") {
@@ -8328,7 +8610,8 @@ const ACTION_PREVIEW_RULES = [
     test: (text, context) =>
       Boolean(openJobId(context)) &&
       /\b(rate|evaluate|review|assess)\b/i.test(text) &&
-      /\b(?:this|the)\s+(?:job|role|posting)\b/i.test(text),
+      (/\bevaluate\b/i.test(text) ||
+        /\b(?:this|the|saved|current|exact)\s+(?:job|role|posting)\b/i.test(text)),
     label: "Evaluate this saved job",
     intent: (_text, context) => ({
       type: "job.evaluate-request",
@@ -8622,7 +8905,8 @@ export async function runWorkspaceAgentTurn({
       operation: "workspace:chat-turn",
       signal,
     });
-    const reply = responseText(response);
+    const parsedReply = parseChatAnswerMode(responseText(response));
+    const reply = parsedReply.text;
     if (!reply) {
       const error = new Error("The selected AI runtime returned an empty response.");
       error.code = "EMPTY_AI_RESPONSE";
@@ -8635,6 +8919,7 @@ export async function runWorkspaceAgentTurn({
       kind: "text",
       text: reply,
       metadata: {
+        ...(parsedReply.answerMode ? { answerMode: parsedReply.answerMode } : {}),
         model: response?.model || null,
         usage: response?.usage || null,
         engine: response?.engine || null,

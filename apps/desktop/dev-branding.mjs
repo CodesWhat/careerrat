@@ -2,16 +2,17 @@ import { chmodSync, copyFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import {
+  CAREERRAT_APP_NAME,
+  CAREERRAT_DEV_APP_ID,
+} from "./desktop-identity.mjs";
 
-const APP_NAME = "CareerRat";
-const DEV_BUNDLE_IDENTIFIER = "com.codeswhat.careerrat.dev";
 const ELECTRON_EXECUTABLE = "Electron";
-const APP_EXECUTABLE = "CareerRat";
 
 export function buildInfoPlistBrandCommands({
-  appName = APP_NAME,
-  bundleIdentifier = DEV_BUNDLE_IDENTIFIER,
-  executableName = APP_EXECUTABLE,
+  appName = CAREERRAT_APP_NAME,
+  bundleIdentifier = CAREERRAT_DEV_APP_ID,
+  executableName = CAREERRAT_APP_NAME,
   iconFile = "electron.icns",
 } = {}) {
   return [
@@ -31,9 +32,9 @@ function resolveDevBrandingPaths({ desktopDir = defaultDesktopDir() } = {}) {
     electronApp,
     plist: join(electronApp, "Contents/Info.plist"),
     sourceExecutable: join(macOsDir, ELECTRON_EXECUTABLE),
-    targetExecutable: join(macOsDir, APP_EXECUTABLE),
+    targetExecutable: join(macOsDir, CAREERRAT_APP_NAME),
     electronPathFile: join(repoRoot, "node_modules/electron/path.txt"),
-    electronPathEntry: `Electron.app/Contents/MacOS/${APP_EXECUTABLE}`,
+    electronPathEntry: `Electron.app/Contents/MacOS/${CAREERRAT_APP_NAME}`,
     sourceIcon: join(desktopDir, "build/icon.icns"),
     targetIcon: join(electronApp, "Contents/Resources/electron.icns"),
   };

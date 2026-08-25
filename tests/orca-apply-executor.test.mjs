@@ -12,6 +12,8 @@ import {
 } from "../src/core/apply/orca-executor.mjs";
 import { createOrcaOps } from "../src/core/apply/orca-ops.mjs";
 
+const allowApply = () => ({ allowed: true, reasons: [] });
+
 const FORM_SNAPSHOT = {
   origin: "https://careers.example.test/jobs/staff-ai/apply",
   refs: {
@@ -49,6 +51,143 @@ test("Orca focusTab switches to the retained supervised page", async () => {
   await ops.focusTab({ pageId: "page-123" });
 
   assert.deepEqual(commands, [["tab", "switch", "--page", "page-123", "--json"]]);
+});
+
+test("Orca snapshot marks one Next control safe only from structured form progress", async () => {
+  const commands = [];
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      commands.push(args);
+      if (args[0] === "snapshot") {
+        return {
+          origin: "https://example.test/apply",
+          refs: { e1: { name: "Next", role: "button" } },
+          snapshot: '- button "Next" [ref=e1]',
+        };
+      }
+      if (args[0] === "eval") return { result: JSON.stringify(["Next"]) };
+      return {};
+    },
+  });
+
+  const snapshot = await ops.snapshot({ pageId: "page-123" });
+
+  assert.equal(snapshot.refs.e1.advanceSafe, true);
+  assert.equal(
+    commands.some((args) => args[0] === "eval"),
+    true
+  );
+});
+
+test("Orca snapshot does not assign label-based progress proof to duplicate Next controls", async () => {
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      if (args[0] === "snapshot") {
+        return {
+          origin: "https://example.test/apply",
+          refs: {
+            e1: { name: "Next", role: "button" },
+            e2: { name: "Next", role: "button" },
+          },
+          snapshot: ['- button "Next" [ref=e1]', '- button "Next" [ref=e2]'].join("\n"),
+        };
+      }
+      if (args[0] === "eval") return { result: JSON.stringify(["Next", "Next"]) };
+      return {};
+    },
+  });
+
+  const snapshot = await ops.snapshot({ pageId: "page-123" });
+
+  assert.equal(snapshot.refs.e1.advanceSafe, undefined);
+  assert.equal(snapshot.refs.e2.advanceSafe, undefined);
+});
+
+test("Orca snapshot binds progress proof only to an exact advance label", async () => {
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      if (args[0] === "snapshot") {
+        return {
+          origin: "https://example.test/apply",
+          refs: {
+            e1: { name: "Continue browsing jobs", role: "button" },
+            e2: { name: "Next", role: "button" },
+          },
+          snapshot: ['- button "Continue browsing jobs" [ref=e1]', '- button "Next" [ref=e2]'].join(
+            "\n"
+          ),
+        };
+      }
+      if (args[0] === "eval") {
+        return { result: JSON.stringify(["Continue browsing jobs", "Next"]) };
+      }
+      return {};
+    },
+  });
+
+  const snapshot = await ops.snapshot({ pageId: "page-123" });
+
+  assert.equal(snapshot.refs.e1.advanceSafe, undefined);
+  assert.equal(snapshot.refs.e2.advanceSafe, true);
+});
+
+test("Orca select verification reads the acted-on ref when labels are duplicated", async () => {
+  const commands = [];
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      commands.push(args);
+      if (args[0] === "snapshot") {
+        return {
+          origin: "https://example.test/apply",
+          refs: {
+            e1: { name: "State", role: "combobox" },
+            e2: { name: "State", role: "combobox" },
+          },
+          snapshot: [
+            '- combobox "State" [ref=e1]: California',
+            '- combobox "State" [ref=e2]: New York',
+          ].join("\n"),
+        };
+      }
+      return {};
+    },
+  });
+
+  await ops.selectOption({
+    pageId: "page-123",
+    ref: "e2",
+    label: "State",
+    value: "New York",
+  });
+
+  assert.deepEqual(commands[0], [
+    "select",
+    "--page",
+    "page-123",
+    "--element",
+    "@e2",
+    "--value",
+    "New York",
+    "--json",
+  ]);
+});
+
+test("Orca toggleField honors both checked and unchecked states", async () => {
+  const commands = [];
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      commands.push(args);
+      return {};
+    },
+  });
+
+  await ops.toggleField({ pageId: "page-123", ref: "e1", checked: true });
+  await ops.toggleField({ pageId: "page-123", ref: "e1", checked: false });
+
+  assert.deepEqual(commands, [
+    ["check", "--page", "page-123", "--element", "@e1", "--json"],
+    ["uncheck", "--page", "page-123", "--element", "@e1", "--json"],
+  ]);
 });
 
 test("Orca DOM probes keep selectors out of constructed JavaScript", async () => {
@@ -206,6 +345,7 @@ test("Orca executor captures Ashby custom controls by their visible required lab
   const execute = createOrcaApplyExecutor({
     repoRoot: "/repo",
     env: {},
+    mayRunImpl: allowApply,
     runOrcaImpl: async (args) => {
       if (args[0] === "tab") return { browserPageId: "page-ashby" };
       if (args[0] === "snapshot") return ASHBY_CUSTOM_CONTROLS_SNAPSHOT;
@@ -258,6 +398,7 @@ test("Orca executor fills Ashby required custom controls and blocks on required 
   const execute = createOrcaApplyExecutor({
     repoRoot: "/repo",
     env: {},
+    mayRunImpl: allowApply,
     runOrcaImpl: async (args) => {
       commands.push(args);
       if (args[0] === "tab") return { browserPageId: "page-ashby" };
@@ -391,6 +532,7 @@ test("Orca executor opens one supervised tab and captures rendered questions bef
   const execute = createOrcaApplyExecutor({
     repoRoot: "/repo",
     env: {},
+    mayRunImpl: allowApply,
     runOrcaImpl,
     captureQuestionsImpl: async (input) => {
       captures.push(input);
@@ -471,6 +613,7 @@ test("Orca executor fills confirmed values, stops before submit, and verifies on
   const execute = createOrcaApplyExecutor({
     repoRoot: "/repo",
     env: {},
+    mayRunImpl: allowApply,
     runOrcaImpl,
     candidateConfigGetImpl: () => ({
       profile: { candidate: { full_name: "Morgan Hale" } },
@@ -572,6 +715,7 @@ test("Orca executor uploads generated PDFs through explicit live controls", asyn
     const execute = createOrcaApplyExecutor({
       repoRoot,
       env: {},
+      mayRunImpl: allowApply,
       runOrcaImpl,
       candidateConfigGetImpl: () => ({ profile: {}, honesty: {}, "form-defaults": {} }),
       loadAnswerMapImpl: () => new Map(),
@@ -651,7 +795,10 @@ test("Orca executor refuses LinkedIn Easy Apply until supervised preparation con
   assert.equal(result.available, true);
   assert.equal(result.verified, false);
   assert.equal(result.state, "blocked");
-  assert.match(result.reason, /authenticated_apply_preparation on LinkedIn is off/);
+  assert.equal(
+    result.reason,
+    "Application preparation for LinkedIn is off. Turn it on in Settings before CareerRat opens the form."
+  );
   assert.deepEqual(commands, []);
 });
 
@@ -665,6 +812,7 @@ test("Orca executor stops before account creation or password entry", async () =
   const execute = createOrcaApplyExecutor({
     repoRoot: "/repo",
     env: {},
+    mayRunImpl: allowApply,
     runOrcaImpl: async (args) => {
       commands.push(args);
       if (args[0] === "tab") return { browserPageId: "page-123" };
@@ -717,6 +865,7 @@ test("configured executor connects explicit Orca or automatic Orca detection", a
   const execute = createConfiguredApplyExecutor({
     repoRoot: "/repo",
     env: {},
+    mayRunImpl: allowApply,
     loadAutomationImpl: () => ({ data: { session: { provider: "orca" } } }),
     runOrcaImpl: async () => {
       throw new Error("Orca is not running");
@@ -734,6 +883,7 @@ test("configured executor connects explicit Orca or automatic Orca detection", a
   const automatic = createConfiguredApplyExecutor({
     repoRoot: "/repo",
     env: { ORCA_WORKTREE_ID: "worktree-123" },
+    mayRunImpl: allowApply,
     loadAutomationImpl: () => ({ data: { session: { provider: "auto" } } }),
     runOrcaImpl: async () => {
       throw new Error("automatic Orca attempted");
@@ -746,4 +896,29 @@ test("configured executor connects explicit Orca or automatic Orca detection", a
     postingUrl: FORM_SNAPSHOT.origin,
   });
   assert.match(automaticResult.reason, /automatic Orca attempted/);
+});
+
+test("configured executor never exposes browser CLI commands in user-facing failures", async () => {
+  const execute = createConfiguredApplyExecutor({
+    repoRoot: "/repo",
+    env: {},
+    mayRunImpl: allowApply,
+    loadAutomationImpl: () => ({ data: { session: { provider: "orca" } } }),
+    runOrcaImpl: async () => {
+      throw new Error("Command failed: orca click --page browser-page-123 --element @e9 --json");
+    },
+  });
+
+  const result = await execute({
+    applicationId: "app-private-command",
+    application: {},
+    postingUrl: FORM_SNAPSHOT.origin,
+  });
+
+  assert.equal(result.state, "unavailable");
+  assert.equal(
+    result.reason,
+    "The Orca supervised browser couldn't open the application. Check Browser automation in Settings and try again."
+  );
+  assert.doesNotMatch(result.reason, /orca click|--page|@e9|Command failed/i);
 });

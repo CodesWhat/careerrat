@@ -1,8 +1,9 @@
 import {
   detectInstalledRuntimes,
+  hasCompleteCareerRatCapabilities,
   installedRuntimeCapabilities,
   installedRuntimeSignInCommand,
-  installedRuntimeToolExecutionCapability,
+  isSupportedInstalledRuntime,
   probeCustomRuntimeCommand,
   probeInstalledRuntime,
   startInstalledRuntimeSignIn,
@@ -25,6 +26,7 @@ function customRuntimeEntry(selection) {
   return {
     id: "custom",
     name: "Custom command",
+    supported: false,
     commandShape: command || null,
     path: command || null,
     available: Boolean(command),
@@ -32,8 +34,17 @@ function customRuntimeEntry(selection) {
     status: command ? "ready_unverified" : "not_installed",
     ready: Boolean(command),
     action: null,
-    toolExecutionSupported: false,
-    capabilities: { completion: false, taskTools: false, research: false },
+    capabilities: {
+      completion: false,
+      structuredOutput: false,
+      appWorkflows: false,
+      exactRead: false,
+      publicWeb: false,
+      liveActivity: false,
+      resumable: false,
+      taskTools: false,
+      research: false,
+    },
     capabilityTier: command ? "detected_unverified" : "unavailable",
     selectable: false,
     capabilityReason: "Detected, but custom commands cannot safely run CareerRat tools yet.",
@@ -41,51 +52,63 @@ function customRuntimeEntry(selection) {
   };
 }
 
-function withToolExecutionCapability(runtime, probe) {
-  const declared = installedRuntimeToolExecutionCapability(runtime.id);
-  const supported =
-    probe?.toolExecutionSupported === undefined
-      ? declared.supported
-      : probe.toolExecutionSupported === true;
-  const declaredCapabilities = installedRuntimeCapabilities(runtime.id, {
+function withProbeReadiness(runtime, probe) {
+  const capabilityState = installedRuntimeCapabilities(runtime.id, {
     available: runtime.available === true,
-    completion: probe?.completionSupported === false ? false : undefined,
-    taskTools: supported,
+    capabilityEvidence: probe?.capabilities,
   });
-  const capabilityReason = supported
-    ? null
-    : probe?.capabilityReason ||
-      (declaredCapabilities.capabilities.completion
-        ? "Ready for chat and drafting. Task tools and research are not verified for this CLI yet."
-        : declared.reason || "Cannot safely run CareerRat tools.");
+  const supported = isSupportedInstalledRuntime(runtime.id);
+  const complete = hasCompleteCareerRatCapabilities(capabilityState.capabilities, runtime.id);
+  const capabilityReason = !supported
+    ? "Detected for diagnostics. This runtime has not passed complete CareerRat acceptance yet."
+    : complete
+      ? null
+      : probe?.capabilityReason || "Update or reconnect this runtime before using CareerRat.";
   return {
     ...runtime,
     ...probe,
-    toolExecutionSupported: supported,
-    capabilities: declaredCapabilities.capabilities,
-    capabilityTier: declaredCapabilities.capabilityTier,
-    selectable:
-      runtime.available === true &&
-      probe?.ready === true &&
-      declaredCapabilities.capabilities.completion === true,
+    supported,
+    capabilities: capabilityState.capabilities,
+    capabilitiesVerified: probe?.capabilities !== null && typeof probe?.capabilities === "object",
+    capabilityTier: capabilityState.capabilityTier,
+    selectable: supported && runtime.available === true && probe?.ready === true && complete,
     capabilityReason,
   };
 }
 
-export function inspectInstalledRuntimeState({
+function runtimeVerification(runtime) {
+  if (!runtime?.path || runtime.capabilities?.completion !== true) return null;
+  return {
+    path: runtime.path,
+    capabilities: runtime.capabilities,
+    checkedAt: new Date().toISOString(),
+  };
+}
+
+function sameRuntimeSelectionIdentity(left, right) {
+  return left?.runtimeId === right?.runtimeId && left?.providerFallback === right?.providerFallback;
+}
+
+export async function inspectInstalledRuntimeState({
   repoRoot,
   env = process.env,
   detectImpl = detectInstalledRuntimes,
   probeImpl = probeInstalledRuntime,
   autoSelect = true,
 } = {}) {
+  const runtimes = await Promise.all(
+    detectImpl({ env }).map(async (runtime) => {
+      const supported = isSupportedInstalledRuntime(runtime.id);
+      const probe =
+        runtime.available && supported
+          ? await probeImpl(runtime, { env, cwd: repoRoot })
+          : runtime.available
+            ? { status: "detected_unverified", ready: false, action: null, capabilities: null }
+            : { status: "not_installed", ready: false, action: null, capabilities: null };
+      return withProbeReadiness(runtime, probe);
+    })
+  );
   const selection = loadInstalledRuntimeSelection({ repoRoot, env });
-  const runtimes = detectImpl({ env }).map((runtime) => {
-    const probe = runtime.available
-      ? probeImpl(runtime, { env })
-      : { status: "not_installed", ready: false, action: null };
-    return withToolExecutionCapability(runtime, probe);
-  });
 
   // Landing rule: auto-select only ever fires for an unambiguous exactly-one
   // ready CLI (the OnboardingPage.jsx gate/picker/interview state machine
@@ -94,6 +117,21 @@ export function inspectInstalledRuntimeState({
   // readyCount check lands on the picker screen instead, and the user picks.
   let selectedId = selection.runtimeId;
   let effectiveSelection = selection;
+  let expectedSelection = selection;
+  const persistInspectedSelection = (nextSelection) => {
+    const currentSelection = loadInstalledRuntimeSelection({ repoRoot, env });
+    if (!sameRuntimeSelectionIdentity(currentSelection, expectedSelection)) {
+      expectedSelection = currentSelection;
+      effectiveSelection = currentSelection;
+      selectedId = currentSelection.runtimeId;
+      return false;
+    }
+    writeInstalledRuntimeSelection({ repoRoot, env, ...nextSelection });
+    expectedSelection = loadInstalledRuntimeSelection({ repoRoot, env });
+    effectiveSelection = expectedSelection;
+    selectedId = expectedSelection.runtimeId;
+    return true;
+  };
   const providerFallbackAllowed = env.CAREERRAT_DESKTOP_CLI_ONLY !== "1";
   if (selection.providerFallback && !providerFallbackAllowed) {
     selectedId = null;
@@ -102,9 +140,7 @@ export function inspectInstalledRuntimeState({
       providerFallback: false,
       customCommand: null,
     };
-    writeInstalledRuntimeSelection({
-      repoRoot,
-      env,
+    persistInspectedSelection({
       runtimeId: null,
       providerFallback: false,
     });
@@ -118,9 +154,7 @@ export function inspectInstalledRuntimeState({
         providerFallback: false,
         customCommand: null,
       };
-      writeInstalledRuntimeSelection({
-        repoRoot,
-        env,
+      persistInspectedSelection({
         runtimeId: null,
         providerFallback: false,
       });
@@ -130,11 +164,21 @@ export function inspectInstalledRuntimeState({
     const readyRuntimes = runtimes.filter(({ selectable }) => selectable);
     if (readyRuntimes.length === 1) {
       selectedId = readyRuntimes[0].id;
-      writeInstalledRuntimeSelection({
-        repoRoot,
-        env,
+      persistInspectedSelection({
         runtimeId: selectedId,
         providerFallback: false,
+        verification: runtimeVerification(readyRuntimes[0]),
+      });
+    }
+  }
+
+  if (selectedId && !effectiveSelection.providerFallback) {
+    const selectedRuntime = runtimes.find(({ id }) => id === selectedId);
+    if (selectedRuntime?.selectable) {
+      persistInspectedSelection({
+        runtimeId: selectedId,
+        providerFallback: false,
+        verification: runtimeVerification(selectedRuntime),
       });
     }
   }
@@ -171,8 +215,8 @@ export function mountInstalledRuntimeRoutes({
       autoSelect,
     });
 
-  addRoute("GET", "/api/settings/ai-runtimes", (_req, res) => {
-    sendJson(res, 200, inspect(true));
+  addRoute("GET", "/api/settings/ai-runtimes", async (_req, res) => {
+    sendJson(res, 200, await inspect(true));
   });
 
   addRoute("POST", "/api/settings/ai-runtime/probe", async (req, res) => {
@@ -184,7 +228,7 @@ export function mountInstalledRuntimeRoutes({
       return;
     }
     const runtimeId = String(body?.runtimeId || "").trim();
-    const state = inspect(false);
+    const state = await inspect(false);
     const runtime = state.runtimes.find(({ id }) => id === runtimeId);
     if (!runtime) {
       sendJson(res, 400, { ok: false, code: "RUNTIME_UNKNOWN" });
@@ -227,13 +271,29 @@ export function mountInstalledRuntimeRoutes({
     }
 
     const runtimeId = String(body?.runtimeId || "").trim();
-    const state = inspect(false);
+    const state = await inspect(false);
     const runtime = state.runtimes.find(({ id }) => id === runtimeId);
     if (!runtime?.available) {
       sendJson(res, 400, { ok: false, code: "RUNTIME_NOT_AVAILABLE" });
       return;
     }
-    if (!runtime.capabilities?.completion) {
+    if (!runtime.supported) {
+      sendJson(res, 409, {
+        ok: false,
+        code: "RUNTIME_NOT_SUPPORTED",
+        error: runtime.capabilityReason,
+      });
+      return;
+    }
+    if (!runtime.ready && runtime.action === "start_sign_in") {
+      sendJson(res, 409, {
+        ok: false,
+        code: "RUNTIME_AUTH_REQUIRED",
+        action: "start_sign_in",
+      });
+      return;
+    }
+    if (!hasCompleteCareerRatCapabilities(runtime.capabilities, runtime.id)) {
       sendJson(res, 409, {
         ok: false,
         code: "RUNTIME_CAPABILITY_UNSUPPORTED",
@@ -255,6 +315,7 @@ export function mountInstalledRuntimeRoutes({
       env,
       runtimeId,
       providerFallback: false,
+      verification: runtimeVerification(runtime),
     });
     sendJson(res, 200, { ok: true, selectedId: runtimeId, providerFallback: false });
   });
@@ -271,6 +332,10 @@ export function mountInstalledRuntimeRoutes({
     const runtime = detectImpl({ env }).find(({ id }) => id === runtimeId);
     if (!runtime?.available) {
       sendJson(res, 400, { ok: false, code: "RUNTIME_NOT_AVAILABLE" });
+      return;
+    }
+    if (!isSupportedInstalledRuntime(runtimeId)) {
+      sendJson(res, 409, { ok: false, code: "RUNTIME_NOT_SUPPORTED" });
       return;
     }
     try {

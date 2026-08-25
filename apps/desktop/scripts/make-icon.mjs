@@ -2,7 +2,7 @@
 //
 //   node apps/desktop/scripts/make-icon.mjs
 //
-// Option 08: a tight lower-left Career / Rat. stack on the sky square.
+// Option 08: a large centered Career / Rat. stack on the sky square.
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -33,10 +33,10 @@ const INK = "#17171a";
 const fontData = readFileSync(FONT_PATH).toString("base64");
 
 function iconSvg() {
-  const left = Math.round(MARGIN + BODY * 0.09);
-  const firstBaseline = Math.round(MARGIN + BODY * 0.66);
-  const secondBaseline = Math.round(MARGIN + BODY * 0.865);
-  const fontSize = Math.round(BODY * 0.25);
+  const opticalCenter = Math.round(CANVAS / 2 - BODY * 0.01);
+  const firstBaseline = Math.round(CANVAS * 0.487);
+  const secondBaseline = Math.round(CANVAS * 0.705);
+  const fontSize = Math.round(BODY * 0.33);
 
   return Buffer.from(`
     <svg xmlns="http://www.w3.org/2000/svg" width="${CANVAS}" height="${CANVAS}" viewBox="0 0 ${CANVAS} ${CANVAS}">
@@ -49,8 +49,8 @@ function iconSvg() {
         text { font-family: "FigtreeIcon", Figtree, Arial, sans-serif; font-weight: 800; letter-spacing: -0.07em; }
       </style>
       <rect x="${MARGIN}" y="${MARGIN}" width="${BODY}" height="${BODY}" rx="${RADIUS}" fill="${SKY}" />
-      <text x="${left}" y="${firstBaseline}" font-size="${fontSize}" fill="${INK}">Career</text>
-      <text x="${left}" y="${secondBaseline}" font-size="${fontSize}" fill="${INK}">Rat.</text>
+      <text x="${opticalCenter}" y="${firstBaseline}" text-anchor="middle" font-size="${fontSize}" fill="${INK}">Career</text>
+      <text x="${opticalCenter}" y="${secondBaseline}" text-anchor="middle" font-size="${fontSize}" fill="${INK}">Rat.</text>
     </svg>
   `);
 }

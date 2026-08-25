@@ -218,6 +218,7 @@ async function runNativePreferred({
   root,
   env,
   signal,
+  validateData,
 }) {
   const nativeCall = call || callAI;
   let attempt = 0;
@@ -245,7 +246,7 @@ async function runNativePreferred({
     );
     const unwrapped = unwrapInvocationResult(response);
     if (unwrapped.model) responseModel = unwrapped.model;
-    const parsed = parseStructuredJson(unwrapped.text, schema);
+    const parsed = parseStructuredJson(unwrapped.text, schema, validateData);
     if (parsed.ok) {
       return makeBoundedAIEnvelope({
         ok: true,
@@ -308,6 +309,7 @@ export async function runBoundedAI({
   root,
   env,
   signal,
+  validateData,
   structuredRunner = runStructuredOneshot,
 } = {}) {
   let normalizedLabels;
@@ -339,12 +341,14 @@ export async function runBoundedAI({
         root,
         env,
         signal,
+        validateData,
       });
     }
 
     const outcome = await structuredRunner({
       schema,
       maxRetries,
+      validateData,
       invoke: async ({ attempt, correction }) => {
         const invocation = await invoke({ attempt, correction, labels: normalizedLabels });
         const unwrapped = unwrapInvocationResult(invocation);

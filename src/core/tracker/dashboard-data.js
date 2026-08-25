@@ -4698,6 +4698,7 @@ function sourcedJobRow(role, index, now = new Date(), profileComp = {}) {
     warn: role.warn || "",
     healthBadge: buildHealthBadge(role.companyHealth),
     avatarClass: AVATAR_CLASSES[(index + 3) % AVATAR_CLASSES.length],
+    descriptionPartial: role?.scanner?.bodyPartial === true || role?.bodyPartial === true,
     terminal,
     note: role.note || role.fitBucket || "",
   };

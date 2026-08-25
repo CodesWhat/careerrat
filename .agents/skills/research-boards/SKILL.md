@@ -127,63 +127,55 @@ SOURCE, not a posting:
 - The page returns a 4xx/5xx or a redirect loop.
 
 A board with mixed signals (one strong positive + one mild negative) is a
-`LEGITIMACY: borderline` — include it in the proposed table marked `(borderline)` with
-a brief reason; let the user decide.
+`LEGITIMACY: borderline`. Keep its evidence and let the user decide in the review surface.
 
-Record verdict for every board screened: `added` | `rejected: <reason>` | `borderline`.
+Record every screened board as either `proposed` or `rejected`. A proposed board also has
+confidence `high` or `borderline`; a rejected board has a concise rejection reason.
 
 ---
 
-## STEP 3 — Present proposed-boards table
+## STEP 3 — Return one structured source review
 
-Present the results before writing anything:
-
-```
-## Boards reviewed: <N total screened>
-
-| # | Board | URL | Source type | Why relevant | Status |
-|---|---|---|---|---|---|
-| 1 | <name> | <url> | url-query / rss / browser | <one phrase> | NEW |
-| 2 | <name> | <url> | browser | <one phrase> | NEW (borderline: <reason>) |
-| 3 | <name> | <url> | rss | <one phrase> | REJECTED: <reason> |
-```
+The reviewed candidates are data, not chat formatting. Return exactly one validated batch
+artifact containing every screened board. Do not produce a Markdown table, numbered list,
+accounting ledger, per-board protocol block, or raw JSON outside the fence.
 
 - `url-query` — the board supports URL-based query-string filtering (suitable for `--add-url` with a search URL)
 - `rss` — the board exposes an RSS/Atom feed
 - `browser` — JS-rendered; requires browser fetch
 
-For boards that are RSS or have a filterable search URL, include the specific URL with
-embedded filters (domain / role family keyword pre-applied) in the "Why relevant" column
-when you can determine it from the fetch.
+For boards that are RSS or have a filterable search URL, use the specific URL with embedded
+filters (domain / role family keyword pre-applied) as the candidate URL when you can determine it.
 
 Do not add anything to source config yet.
 
-### Conversational web handoff
+### Structured artifact contract
 
-In conversational chat, the table is followed by typed proposal blocks that the app renders as
-real Add source / Skip controls. Emit one exact fenced block for every NEW high-confidence or
-borderline board, using the canonical URL the user should review and save:
-
-```careerrat:discovery
-{"kind":"source_proposal","label":"<board>","url":"https://<canonical-board-or-filter-url>","why":"<one short evidence-based reason>","confidence":"high"}
-```
-
-Use `"confidence":"borderline"` for medium/borderline rows. Do not ask the user to type board
-names or claim that a prose reply wrote config. After every proposal block (or immediately after
-the table when there are zero proposals), emit the step marker:
+Emit one and only one `careerrat:discovery` fence. `candidates` includes passing and rejected
+boards so the durable review retains the complete screen:
 
 ```careerrat:discovery
-{"kind":"discovery_complete","step":"research-boards"}
+{"kind":"source_review","candidates":[{"label":"<board>","url":"https://<canonical-board-or-filter-url>","sourceType":"url-query|rss|browser","why":"<one short evidence-based reason>","status":"proposed|rejected","confidence":"high|borderline","rejectionReason":"<required only when rejected>"}]}
 ```
 
-The app withholds the next-step button until every proposal is added or skipped. In a one-shot CLI
-session, keep using STEP 4's CLI confirmation and write procedure instead.
+For `status:"proposed"`, include `confidence` and omit `rejectionReason`. For
+`status:"rejected"`, include `rejectionReason` and omit `confidence`. `sourceType` is exactly one
+of `url-query`, `rss`, or `browser`; the pipe-separated value above documents the allowed choices,
+not a literal value to return. Every URL must be public HTTP(S), every reason must be evidence-based,
+and duplicate URLs invalidate the batch. The app validates the entire artifact, derives counts,
+persists it with the thread, renders one compact summary card, and opens the complete proposal and
+rejection detail in the Review sources surface. Invalid batches fail closed to a readable retry.
+
+Do not add prose before or after the fence. The app owns the visible summary copy and never exposes
+the protocol. It also owns the completion marker and withholds completion until every proposed
+source is added or skipped. In a one-shot CLI session, this same artifact is the primary result;
+keep using STEP 4's CLI confirmation and write procedure for confirmed writes.
 
 ---
 
 ## STEP 3.5 — Classify by confidence tier
 
-Before presenting the table, classify each passing board into one of two tiers:
+Before returning the artifact, classify each passing board into one of two tiers:
 
 **HIGH-CONFIDENCE** — a board meets ALL of the following:
 
@@ -206,12 +198,11 @@ This tier drives the STEP 4 auto-add logic below.
 **External-agent / one-shot CLI runs only.** In conversational chat, this skill runs as an
 embedded session under the `chat` tool profile (`CHAT_RUNTIME_TOOLS`), which has no Bash —
 there is no shell to run `careerrat searches --add-url` from. The STEP 3 Conversational web
-handoff already IS the write mechanism: each `source_proposal` block renders a real Add
-source / Skip control, and clicking it calls the confirm-first write server-side through the
+handoff already IS the write mechanism: the `source_review` batch renders one compact card,
+and its review surface provides Add source / Skip controls. Clicking one calls the confirm-first write server-side through the
 exact same `addSearchFromUrl`/source-config guards this step's CLI path uses. Skip this
 step's CLI commands, the `careerrat doctor` check, and the optional audit-note/Activity-Pulse
-CLI calls entirely in chat mode — go straight to the **Required output block** below, using
-its chat-mode wording. Do not run or narrate running `careerrat searches --add-url`, and do
+CLI calls entirely in chat mode. Do not run or narrate running `careerrat searches --add-url`, and do
 not tell the user a board was added — a chat turn ends before any click on the STEP 3
 controls, so the model never observes whether the user actually added or skipped a proposal.
 Claiming a write here without having run one violates the skill's Honesty Firewall. This
@@ -223,15 +214,14 @@ user has explicitly opted in during this session by saying something like "auto-
 high-confidence boards" or "yes, add high-confidence ones without asking."
 
 **Without opt-in (default):** Wait for explicit user confirmation before writing any
-source, regardless of tier. Present the proposed-boards table from STEP 3 and ask which
-boards the user wants added.
+source, regardless of tier. Return the STEP 3 artifact and let the user decide in its review surface.
 
 **With opt-in (user has stated "auto-add high-confidence boards" or equivalent):**
 
 - HIGH-CONFIDENCE boards: add immediately without per-board confirmation. Report each
   addition as it happens.
-- BORDERLINE / MEDIUM boards: always confirm-first, even with auto-add opted in. Present
-  them as a separate group and wait for explicit approval.
+- BORDERLINE / MEDIUM boards: always confirm-first, even with auto-add opted in. Keep them
+  visible as a separate tier in the review surface and wait for explicit approval.
 
 For each board being added (auto or confirmed), use the existing searches CLI:
 
@@ -335,28 +325,13 @@ explicitly skipped employer ATS discovery, record it with
 
 ---
 
-## Required output block
+## Required output
 
-Emit at the end of every run (before or after confirmation):
-
-```
-BOARDS FOUND: <N screened>
-PROPOSED (new): <N> (<N> high-confidence, <N> borderline/medium)
-REJECTED: <N> (reasons: <comma-list of distinct rejection categories>)
-AUTO-ADDED: <comma-list of labels auto-added, or "none (opt-in not active)">
-CONFIRMED-ADDED: <comma-list of labels added after explicit confirmation, or "awaiting confirmation">
-REGISTRY-UPDATED: <yes | no>
-```
-
-**In conversational chat**, the model's turn ends the moment the STEP 3 proposal blocks are
-emitted — it never sees whether the user later clicks Add source or Skip. Use only these
-values in chat mode, regardless of how confident the proposals looked:
-
-```text
-AUTO-ADDED: none (chat handoff — writes happen via the Add source/Skip controls, not this turn)
-CONFIRMED-ADDED: awaiting confirmation
-REGISTRY-UPDATED: no (pending — chat handoff)
-```
+The STEP 3 `source_review` artifact is the complete required output. Do not append counts,
+write-state bookkeeping, confirmation status, a registry ledger, or a next-step paragraph.
+The app derives those states from the validated artifact and real user decisions. In one-shot
+CLI mode, report actual confirmed writes only after the CLI command succeeds; never mix an
+unobserved future decision into the research result.
 
 ---
 

@@ -7,7 +7,7 @@
 // regex match on `<safe-slug>.recruitee.com` rather than a static
 // allowlist.
 
-import { htmlToText } from './_html-to-text.mjs';
+import { htmlToTextCapture } from './_html-to-text.mjs';
 
 const RECRUITEE_HOST_RE = /^[a-z0-9][a-z0-9-]*\.recruitee\.com$/;
 
@@ -90,7 +90,8 @@ export function parseRecruiteeResponse(json, companyName) {
     const country = j.country || '';
     const remote = j.remote ? 'Remote' : '';
     const location = j.location || [city, country, remote].filter(Boolean).join(', ');
-    const description = htmlToText(j.description);
+    const { text: description, truncated: descriptionPartial } =
+      htmlToTextCapture(j.description);
 
     // Resolve offer URL. Recruitee tenants commonly publish postings on their
     // own custom domain (e.g. careers.hostaway.com), so the per-offer URL is
@@ -116,7 +117,9 @@ export function parseRecruiteeResponse(json, companyName) {
       url,
       location,
       company: companyName,
-      ...(description ? { description } : {}),
+      ...(description
+        ? { description, ...(descriptionPartial ? { descriptionPartial: true } : {}) }
+        : {}),
     };
   });
 }

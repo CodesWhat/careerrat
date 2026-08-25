@@ -88,5 +88,9 @@ The agent reads it first, then routes every paste or instruction
 through it. See [Agent Contract](/advanced/agent-contract) for the full routing
 table.
 
-`CLAUDE.md` points Claude Code at the same rules. Other AGENTS.md-aware runtimes
-(Codex, etc.) read `AGENTS.md` natively.
+`CLAUDE.md` points terminal Claude Code at the same rules, while
+AGENTS.md-aware terminal agents read the canonical router directly. In the app,
+the direct adapters and shared ACP adapter execute requests assembled from the
+same `.agents/skills/` tree. CareerRat keeps durable threads, context, and
+workflow write-back provider-neutral; adapters own fixed invocation,
+capability checks, normalized activity, cancellation, and errors.

@@ -73,10 +73,11 @@ async function setEnabled(enabled) {
   setState({ enabled: Boolean(enabled), saving: true, error: null });
   try {
     const next = await bridge.setEnabled(Boolean(enabled));
-    mergeBridgeState(next);
+    if (next && typeof next === "object") setState(next);
   } catch {
     setState({ enabled: previous, error: "Could not save that update setting." });
   } finally {
+    userChangedPreference = false;
     setState({ saving: false });
   }
 }

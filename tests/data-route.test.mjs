@@ -397,6 +397,26 @@ test("POST /api/data/app/fields: 400 without body.patch, 200 + merged fields oth
   }
 });
 
+test("POST /api/data/app/fields: cannot forge an evaluation gate", async () => {
+  const repoRoot = tempRepo();
+  seedDb(repoRoot);
+  const server = await bootServer(repoRoot);
+  try {
+    const forged = await postJson(server, "/api/data/app/fields", {
+      id: "app-1",
+      patch: { evaluation: { gate: "keep", fitScore: 100 } },
+    });
+    assert.equal(forged.status, 400);
+    assert.match(forged.body.error, /evaluation/);
+
+    const db = openDb({ repoRoot });
+    const row = db.prepare("SELECT data FROM applications WHERE id = ?").get("app-1");
+    assert.equal(JSON.parse(row.data).evaluation, undefined);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/data/sourced/promote: 404 for an unknown sourced id, 200 for a known one", async () => {
   const repoRoot = tempRepo();
   seedDb(repoRoot);
@@ -522,6 +542,28 @@ test("POST /api/data/comm/send: sent-clears-draft, 404 for an unknown comm id", 
     const comm = JSON.parse(row.data);
     assert.equal(comm.status, "waiting");
     assert.equal(comm.draft, null);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/data/comm/send: public callers cannot self-assert verified delivery", async () => {
+  const repoRoot = tempRepo();
+  seedDb(repoRoot);
+  const server = await bootServer(repoRoot);
+  try {
+    const result = await postJson(server, "/api/data/comm/send", {
+      id: "comm-1",
+      verification: "verified",
+      deliveryEvidence: "caller-supplied-proof",
+    });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.data.verification, "user_report");
+
+    const db = openDb({ repoRoot });
+    const row = db.prepare("SELECT data FROM communications WHERE id = ?").get("comm-1");
+    const message = JSON.parse(row.data).messages.at(-1);
+    assert.equal(message.deliveryEvidence, undefined);
   } finally {
     await closeServer(server);
   }

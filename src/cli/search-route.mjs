@@ -43,6 +43,7 @@
 // the same way `runSkillStream` is in skill-run-route.mjs, so tests can drive
 // a scan against a stub network instead of hitting real ATS APIs.
 
+import { createHash } from "node:crypto";
 import { runSourcedScan } from "../../scripts/scan-sourced.mjs";
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
 import { readDbScannerRows } from "../core/db/scan-context.mjs";
@@ -59,6 +60,7 @@ import {
 } from "../core/onboarding/first-search-run.mjs";
 import { runAiWebSearch as defaultRunAiWebSearch } from "../core/search/ai-web-search.mjs";
 import {
+  buildSearchPromptInputFingerprint,
   generateSearchPrompts,
   getSearchPrompts,
   saveSearchPrompts,
@@ -299,7 +301,14 @@ export function mountSearchRoutes({
   addRoute("GET", "/api/search/prompts", (_req, res) => {
     try {
       const result = getSearchPrompts({ repoRoot, env });
-      sendJson(res, 200, { ok: true, data: { prompts: result.prompts } });
+      sendJson(res, 200, {
+        ok: true,
+        data: {
+          prompts: result.prompts,
+          inputFingerprint: result.inputFingerprint,
+          savedInputFingerprint: result.savedInputFingerprint,
+        },
+      });
     } catch (err) {
       sendSearchPromptsError(res, err);
     }
@@ -427,10 +436,25 @@ export function mountSearchRoutes({
 
     let durableRun;
     try {
+      const candidateInputFingerprint = buildSearchPromptInputFingerprint({
+        repoRoot,
+        env,
+        includeSearchLimits: true,
+      });
+      const inputFingerprint = createHash("sha256")
+        .update(
+          JSON.stringify({
+            version: 1,
+            candidateInputFingerprint,
+            prompts: requested.map((prompt) => ({ id: prompt.id, text: prompt.text })),
+          })
+        )
+        .digest("hex");
       const started = sourcingRunStart({
         repoRoot,
         env,
         purpose: "ai-web-search",
+        inputFingerprint,
         metadata: {
           promptIds: requested.map((prompt) => prompt.id),
           prompts: requested.map((prompt) => ({ id: prompt.id, text: prompt.text })),
@@ -533,6 +557,7 @@ export function mountSearchRoutes({
       const result = await runAiWebSearch({
         repoRoot,
         env,
+        fetchImpl,
         promptIds,
         onProgress: (event) => {
           emit(event);
@@ -555,6 +580,11 @@ export function mountSearchRoutes({
         },
         signal: controller.signal,
       });
+      if (controller.signal.aborted) {
+        const err = new Error("AI web search was cancelled.");
+        err.code = "AI_WEB_SEARCH_ABORTED";
+        throw err;
+      }
       const failedPromptIds = Array.isArray(result?.failedPromptIds) ? result.failedPromptIds : [];
       const allSelectedPromptsFailed =
         Number(result?.searched || 0) > 0 && failedPromptIds.length >= Number(result.searched);

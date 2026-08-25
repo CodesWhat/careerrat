@@ -8,7 +8,10 @@ import { after, test } from "node:test";
 import { mountJobArtifactRoutes } from "../src/cli/job-artifact-route.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { appUpsert, sourcedUpsertBatch } from "../src/core/db/verbs.mjs";
-import { readJobDescriptionArtifact } from "../src/core/jobs/job-description.mjs";
+import {
+  hydrateJobDescriptionCompleteness,
+  readJobDescriptionArtifact,
+} from "../src/core/jobs/job-description.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 
 const cleanupRoots = [];
@@ -46,6 +49,76 @@ partial: false
 
 Build production agentic workflows with customers and own deployment outcomes.
 `;
+
+function sourcedCapture(id, jd, scanner) {
+  return {
+    id,
+    company: "Capture Co",
+    role: "Platform Engineer",
+    status: "sourced",
+    artifacts: jd ? { jd } : {},
+    ...(scanner ? { scanner } : {}),
+  };
+}
+
+test("dashboard hydration reads exact partial and complete values from old sourced artifacts", () => {
+  const repoRoot = tempRepo();
+  const partialPath = "workspace/jobs/old-partial.md";
+  const completePath = "workspace/jobs/old-complete.md";
+  writeArtifact(repoRoot, partialPath, "---\npartial: true\n---\n\nVisible excerpt only.\n");
+  writeArtifact(repoRoot, completePath, "---\npartial: false\n---\n\nComplete description.\n");
+  const trackerData = {
+    sourced: [
+      sourcedCapture("old-partial", partialPath),
+      sourcedCapture("old-complete", completePath),
+    ],
+  };
+
+  const hydrated = hydrateJobDescriptionCompleteness({ repoRoot, env: {}, trackerData });
+
+  assert.equal(hydrated.sourced[0].scanner.bodyPartial, true);
+  assert.equal(hydrated.sourced[1].scanner.bodyPartial, false);
+  assert.equal(trackerData.sourced[0].scanner, undefined);
+});
+
+test("dashboard hydration never overwrites an explicit stored partial value", () => {
+  const repoRoot = tempRepo();
+  const partialPath = "workspace/jobs/explicit-complete.md";
+  const completePath = "workspace/jobs/explicit-partial.md";
+  writeArtifact(repoRoot, partialPath, "---\npartial: true\n---\n\nExcerpt.\n");
+  writeArtifact(repoRoot, completePath, "---\npartial: false\n---\n\nComplete.\n");
+  const trackerData = {
+    sourced: [
+      sourcedCapture("stored-complete", partialPath, { bodyPartial: false, bodyChars: 9 }),
+      sourcedCapture("stored-partial", completePath, { bodyPartial: true, bodyChars: 10 }),
+    ],
+  };
+
+  const hydrated = hydrateJobDescriptionCompleteness({ repoRoot, env: {}, trackerData });
+
+  assert.equal(hydrated.sourced[0].scanner.bodyPartial, false);
+  assert.equal(hydrated.sourced[1].scanner.bodyPartial, true);
+});
+
+test("dashboard hydration skips missing, outside, and malformed artifacts without reading guesses", () => {
+  const repoRoot = tempRepo();
+  const malformedPath = "workspace/jobs/malformed.md";
+  const outsidePath = "workspace/jobs/../../outside.md";
+  writeArtifact(repoRoot, malformedPath, "---\npartial: [\n---\n\nBroken metadata.\n");
+  writeFileSync(join(repoRoot, "outside.md"), "---\npartial: true\n---\n");
+  const trackerData = {
+    sourced: [
+      sourcedCapture("no-capture", null),
+      sourcedCapture("missing", "workspace/jobs/missing.md"),
+      sourcedCapture("outside", outsidePath),
+      sourcedCapture("malformed", malformedPath),
+    ],
+  };
+
+  const hydrated = hydrateJobDescriptionCompleteness({ repoRoot, env: {}, trackerData });
+
+  for (const row of hydrated.sourced) assert.equal(row.scanner?.bodyPartial, undefined);
+});
 
 test("reads a captured application JD as user metadata plus a safe first-class preview", () => {
   const repoRoot = tempRepo();

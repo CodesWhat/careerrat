@@ -13,6 +13,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { isPlainYesNoQuestion } from "../src/core/ai/chat-answer-mode.mjs";
 import {
   buildChatKickoffPrompt,
   classifyChatEvent,
@@ -21,10 +22,7 @@ import {
   resolveCandidateChatContext,
   resolveDirectChatSkills,
 } from "../src/core/ai/chat-runtime.mjs";
-import {
-  CHAT_SESSION_RUNTIME_TIMEOUT_MS,
-  RUNTIME_TOOL_PROFILE_UNSUPPORTED,
-} from "../src/core/ai/installed-runtimes.mjs";
+import { CHAT_SESSION_RUNTIME_TIMEOUT_MS } from "../src/core/ai/installed-runtimes.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 import { APP_SAFE_RUNTIME_TOOLS, CHAT_RUNTIME_TOOLS } from "../src/core/ai/runtime-tools.mjs";
 import { readUsageEvents } from "../src/core/ai/usage-log.mjs";
@@ -36,6 +34,24 @@ import {
   candidateSetupInitialize,
   skillChatThreadRead,
 } from "../src/core/db/verbs.mjs";
+
+const VERIFIED_CAPABILITIES = Object.freeze({
+  completion: true,
+  structuredOutput: true,
+  appWorkflows: true,
+  exactRead: true,
+  publicWeb: true,
+  liveActivity: true,
+  resumable: true,
+});
+
+function runtimeVerification(path) {
+  return {
+    path,
+    capabilities: VERIFIED_CAPABILITIES,
+    checkedAt: "2026-08-25T12:00:00.000Z",
+  };
+}
 
 // Forces resolveAIRoute() to resolve route.type === "installed" deterministically
 // without depending on any real CLI actually being on this machine's PATH.
@@ -56,7 +72,12 @@ function selectFakeCodexRuntime({ repoRoot, env }) {
   chmodSync(codexPath, 0o755);
   env.PATH = "";
   env.CAREERRAT_RUNTIME_EXTRA_PATHS = binDir;
-  writeInstalledRuntimeSelection({ repoRoot, env, runtimeId: "codex" });
+  writeInstalledRuntimeSelection({
+    repoRoot,
+    env,
+    runtimeId: "codex",
+    verification: runtimeVerification(codexPath),
+  });
   return binDir;
 }
 
@@ -72,6 +93,7 @@ function selectInstalledRuntime({ repoRoot, env }) {
     repoRoot,
     env,
     runtimeId: "codex",
+    verification: runtimeVerification(codexPath),
   });
 }
 
@@ -87,7 +109,12 @@ function selectFakeClaudeRuntime({ repoRoot, env }) {
   chmodSync(claudePath, 0o755);
   env.PATH = "";
   env.CAREERRAT_RUNTIME_EXTRA_PATHS = binDir;
-  writeInstalledRuntimeSelection({ repoRoot, env, runtimeId: "claude" });
+  writeInstalledRuntimeSelection({
+    repoRoot,
+    env,
+    runtimeId: "claude",
+    verification: runtimeVerification(claudePath),
+  });
   return binDir;
 }
 
@@ -382,6 +409,8 @@ test("classifyChatEvent: every other event type/subtype (including plain system 
 test("buildChatKickoffPrompt: asks ONE question at a time and drops the one-shot headless framing", () => {
   const prompt = buildChatKickoffPrompt({ skill: "ingest-profile" });
   assert.match(prompt, /ONE question/);
+  assert.match(prompt, /careerrat:answer/);
+  assert.match(prompt, /genuinely answerable with Yes or No/i);
   assert.match(prompt, /ingest-profile/);
   assert.doesNotMatch(prompt, /non-interactive, headless/);
 });
@@ -399,6 +428,38 @@ test("buildChatKickoffPrompt: an 8-of-8 candidate gets a deterministic completio
   assert.match(prompt, /do not claim it is noted or saved/i);
   assert.match(prompt, /ask no new setup questions/i);
   assert.match(prompt, /optional enrichment belongs after onboarding/i);
+});
+
+test("buildChatKickoffPrompt: prioritizes explicit work-mode confirmation over optional enrichment", () => {
+  const prompt = buildChatKickoffPrompt({
+    skill: "ingest-profile",
+    input: "The metrics on my résumé are accurate.",
+    candidateContext: {
+      profile: {
+        location: {
+          home: "Brooklyn, NY",
+          remote: true,
+          remote_scope: "home-country",
+          hybrid: false,
+          onsite: false,
+        },
+      },
+      setupProgress: {
+        items: [
+          { key: "quickFacts", done: false },
+          { key: "authorization", done: true },
+        ],
+        completedCount: 7,
+        total: 8,
+        complete: false,
+      },
+    },
+  });
+
+  assert.match(prompt, /highest-priority missing setup item/i);
+  assert.match(prompt, /remote, hybrid, on-site, or relocation/i);
+  assert.match(prompt, /do not infer those preferences from the résumé/i);
+  assert.match(prompt, /before any optional enrichment/i);
 });
 
 test("buildChatKickoffPrompt: routes notice period to its real profile schema path", () => {
@@ -671,6 +732,57 @@ test("createChatRuntime: 3 turns drive 3 idle transitions and write 3 byok usage
   }
 });
 
+test("createChatRuntime: broadcasts a typed yes-no mode and strips its control fence", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
+  candidateSetupInitialize({ repoRoot, env });
+  try {
+    const reply = [
+      "Do you require employment sponsorship?",
+      "```careerrat:answer",
+      '{"mode":"yes-no"}',
+      "```",
+    ].join("\n");
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => fakeStreamingSdk([turnMessagesWithReply(reply)]),
+    });
+    try {
+      const { chatId } = await chatRuntime.startSession({ skill: "ingest-profile" });
+      const events = subscribeCollect(chatRuntime, chatId);
+      await waitForPredicate(() => events.some((event) => event.type === "assistant"));
+
+      const assistant = events.find((event) => event.type === "assistant");
+      assert.equal(assistant.data.answerMode, "yes-no");
+      assert.equal(
+        assistant.data.message.content[0].text,
+        "Do you require employment sponsorship?"
+      );
+      const stored = skillChatThreadRead({ repoRoot, env, skill: "ingest-profile" }).messages[0];
+      assert.equal(stored.text, "Do you require employment sponsorship?");
+      assert.deepEqual(stored.metadata, { answerMode: "yes-no" });
+    } finally {
+      chatRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("binary fallback rejects compound questions whose clauses can have different answers", () => {
+  assert.equal(
+    isPlainYesNoQuestion(
+      "Are you authorized to work in the US and will you need employment sponsorship?"
+    ),
+    false
+  );
+  assert.equal(
+    isPlainYesNoQuestion("Do you want remote work and are you open to relocating?"),
+    false
+  );
+});
+
 test("createChatRuntime: a replacement process waits on the durable unanswered assistant question and resumes with full history", async () => {
   const repoRoot = tempRepoWithSkill("ingest-profile");
   const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
@@ -758,6 +870,150 @@ test("createChatRuntime: visible research chats persist their typed handoff and 
     } finally {
       replacementRuntime.shutdown();
     }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime: board research persists one validated review artifact instead of model tables or ledgers", async () => {
+  const repoRoot = tempRepoWithSkill("research-boards");
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
+  candidateSetupInitialize({ repoRoot, env });
+  const candidates = [
+    ["LandEarly", "https://www.landearly.com/remote-jobs/platform-engineer", "url-query", "high"],
+    ["4 Day Week", "https://4dayweek.io/platform-engineering-jobs", "url-query", "high"],
+    [
+      "TrulyRemote Dev",
+      "https://trulyremote.dev/remote-backend-engineer-jobs",
+      "url-query",
+      "high",
+    ],
+    [
+      "Built In",
+      "https://builtin.com/jobs/remote/dev-engineering/search/platform-engineer",
+      "url-query",
+      "high",
+    ],
+    [
+      "RemotePilot",
+      "https://remotepilot.dev/categories/backend-engineering/",
+      "url-query",
+      "borderline",
+    ],
+    ["DevJobsList", "https://www.devjobslist.com/", "browser", "borderline"],
+  ].map(([label, url, sourceType, confidence]) => ({
+    label,
+    url,
+    sourceType,
+    why: `${label} has dated relevant listings`,
+    status: "proposed",
+    confidence,
+  }));
+  candidates.push({
+    label: "Anywhere Devs",
+    url: "https://anywheredevs.com/",
+    sourceType: "browser",
+    why: "The landing page exposes no specific listings",
+    status: "rejected",
+    rejectionReason: "no visible dated listing",
+  });
+  const reply = [
+    "| # | Board | Status |",
+    "|---|---|---|",
+    "| 1 | LandEarly | NEW |",
+    "BOARDS FOUND: 7 screened",
+    "```careerrat:discovery",
+    JSON.stringify({ kind: "source_review", candidates }),
+    "```",
+  ].join("\n");
+  try {
+    const runtime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => fakeStreamingSdk([turnMessagesWithReply(reply, 1)]),
+    });
+    const started = await runtime.startSession({ skill: "research-boards" });
+    await waitForPredicate(() => runtime.getSession(started.chatId)?.state === "idle");
+    runtime.shutdown();
+
+    const stored = skillChatThreadRead({ repoRoot, env, skill: "research-boards" });
+    assert.equal(stored.messages.length, 1);
+    assert.equal(stored.messages[0].text, "I found 6 useful sources. Nothing has been added yet.");
+    assert.equal(stored.messages[0].artifacts.length, 1);
+    assert.equal(stored.messages[0].artifacts[0].kind, "source_review");
+    assert.equal(stored.messages[0].artifacts[0].candidates.length, 7);
+    assert.equal(
+      stored.messages[0].artifacts[0].candidates[6].rejectionReason,
+      "no visible dated listing"
+    );
+    assert.doesNotMatch(JSON.stringify(stored), /BOARDS FOUND|\| # \| Board|careerrat:discovery/);
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime: malformed board-review output persists a readable retry without protocol", async () => {
+  const repoRoot = tempRepoWithSkill("research-boards");
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
+  candidateSetupInitialize({ repoRoot, env });
+  const reply = [
+    "```careerrat:discovery",
+    '{"kind":"source_review","candidates":[{"label":"Bad","url":"file:///etc/passwd"}]}',
+    "```",
+  ].join("\n");
+  try {
+    const runtime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => fakeStreamingSdk([turnMessagesWithReply(reply, 1)]),
+    });
+    const started = await runtime.startSession({ skill: "research-boards" });
+    await waitForPredicate(() => runtime.getSession(started.chatId)?.state === "idle");
+    runtime.shutdown();
+
+    const stored = skillChatThreadRead({ repoRoot, env, skill: "research-boards" });
+    assert.equal(stored.messages[0].text, "I couldn't prepare the source review. Run it again.");
+    assert.deepEqual(stored.messages[0].artifacts, []);
+    assert.doesNotMatch(JSON.stringify(stored), /file:\/\/|careerrat:discovery/);
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime: board research suppresses intermediate prose and persists one fallback when no artifact arrives", async () => {
+  const repoRoot = tempRepoWithSkill("research-boards");
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
+  candidateSetupInitialize({ repoRoot, env });
+  const result = turnMessages(1)[1];
+  const assistant = (text) => ({
+    type: "assistant",
+    session_id: "sdk-session-1",
+    parent_tool_use_id: null,
+    message: { content: [{ type: "text", text }] },
+  });
+  try {
+    const runtime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () =>
+        fakeStreamingSdk([
+          [assistant("Searching the web now."), assistant("I found some sources."), result],
+        ]),
+    });
+    const started = await runtime.startSession({ skill: "research-boards" });
+    const events = subscribeCollect(runtime, started.chatId);
+    await waitForPredicate(() => runtime.getSession(started.chatId)?.state === "idle");
+    runtime.shutdown();
+
+    const stored = skillChatThreadRead({ repoRoot, env, skill: "research-boards" });
+    assert.equal(stored.messages.length, 1);
+    assert.equal(stored.messages[0].text, "I couldn't prepare the source review. Run it again.");
+    assert.equal(
+      events.filter((event) => event.type === "assistant").length,
+      1,
+      "intermediate model narration must not become transcript messages"
+    );
+    assert.doesNotMatch(JSON.stringify(stored), /Searching the web now|I found some sources/);
   } finally {
     cleanup(repoRoot);
   }
@@ -1642,7 +1898,7 @@ test("resolveCandidateChatContext carries the same exact 8-of-8 completion used 
       name: "profile",
       patch: {
         compensation: { minimum_base: 190000 },
-        location: { home: "Austin, TX" },
+        location: { home: "Austin, TX", mode_preferences_confirmed: true },
         authorization: { work_authorized: true, requires_sponsorship: false },
       },
     });
@@ -1772,40 +2028,79 @@ test("createChatRuntime (installed route): a runtime failure surfaces as an erro
   }
 });
 
-// Boundary regression — installed-runtimes.mjs's runInstalledRuntime fails
-// closed (RUNTIME_TOOL_PROFILE_UNSUPPORTED) whenever a non-claude runtime is
-// asked to run the restricted CHAT_RUNTIME_TOOLS profile (see that file's own
-// tests for the guard itself). This proves chat-runtime.mjs's catch block
-// (runInstalledTurn) turns that error code into the plain-language, no-jargon
-// explanation instead of relaying the raw error string, keeps the session
-// open rather than closing it (same contract as any other turn failure), and
-// adapts the runtime's display name dynamically rather than hardcoding
-// "Codex".
-test("createChatRuntime (installed route): a runtime with no tool-allowlist mechanism gets a plain-language error for a network-tool skill, and the session stays open", async () => {
-  const repoRoot = tempRepoWithSkill("company-health");
-  const env = {};
+test("createChatRuntime does not pass a Claude model override into a selected Codex runtime", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  const env = { ANTHROPIC_MODEL: "claude-only-model" };
   const binDir = selectFakeCodexRuntime({ repoRoot, env });
+  const calls = [];
   try {
-    let implCalls = 0;
     const chatRuntime = createChatRuntime({
       repoRoot,
       env,
       loadSdk: async () => {
         throw new Error("Agent SDK must not load for an installed route");
       },
-      // Simulates the real guard's outcome without re-running the actual
-      // spawn plumbing — installed-runtime.test.mjs already proves the real
-      // runInstalledRuntime throws this exact error/code combination before
-      // any spawn for a non-claude runtime + the chat tool profile.
-      runInstalledRuntimeImpl: async () => {
-        implCalls++;
-        const err = new Error(
-          "Codex has no tool-allowlist mechanism, so it cannot run CareerRat's restricted " +
-            "research-chat tool profile (network access without local file access)."
-        );
-        err.code = RUNTIME_TOOL_PROFILE_UNSUPPORTED;
-        err.runtimeId = "codex";
-        throw err;
+      runInstalledRuntimeStreamImpl: async (options) => {
+        calls.push(options);
+        return { text: "Reply", usage: null, model: null };
+      },
+    });
+    try {
+      const { chatId } = await chatRuntime.startSession({ skill: "ingest-profile" });
+      await waitForPredicate(() => chatRuntime.getSession(chatId)?.state === "idle");
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].runtime.id, "codex");
+      assert.equal(calls[0].model, undefined);
+    } finally {
+      chatRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+    rmSync(binDir, { recursive: true, force: true });
+  }
+});
+
+test("createChatRuntime lets Codex complete a network research skill through live activity", async () => {
+  const repoRoot = tempRepoWithSkill("company-health");
+  const env = {};
+  const binDir = selectFakeCodexRuntime({ repoRoot, env });
+  try {
+    let streamCalls = 0;
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => {
+        throw new Error("Agent SDK must not load for an installed route");
+      },
+      runInstalledRuntimeStreamImpl: async ({ onMessage }) => {
+        streamCalls++;
+        onMessage({
+          type: "assistant",
+          message: {
+            content: [
+              {
+                type: "tool_use",
+                id: "search-1",
+                name: "WebSearch",
+                input: { query: "company health" },
+              },
+            ],
+          },
+        });
+        onMessage({
+          type: "user",
+          message: {
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "search-1",
+                content: "Search completed",
+                is_error: false,
+              },
+            ],
+          },
+        });
+        return { text: "Company health research complete.", usage: null, model: null };
       },
     });
     try {
@@ -1815,26 +2110,26 @@ test("createChatRuntime (installed route): a runtime with no tool-allowlist mech
         events.some((e) => e.type === "chat_state" && e.data.state === "idle")
       );
 
-      assert.equal(implCalls, 1);
-
-      const errorEvt = events.find((e) => e.type === "error");
-      assert.ok(errorEvt, "expected an error event");
+      assert.equal(streamCalls, 1);
       assert.equal(
-        errorEvt.data.message,
-        "Codex can't run CareerRat's research chats. It has no way to keep local file access and " +
-          "web access separate, and CareerRat won't combine them. Switch to Claude Code for " +
-          "research chats, or keep using Codex for tailoring and apply runs, which don't need it."
+        events.some((event) => event.type === "error"),
+        false
       );
-      // No AI jargon or error codes leak into the user-facing message.
-      assert.equal(errorEvt.data.message.includes("RUNTIME_TOOL_PROFILE_UNSUPPORTED"), false);
-      assert.equal(errorEvt.data.message.includes("unfortunately"), false);
-      assert.equal(errorEvt.data.message.includes("—"), false);
-
-      // Same contract as any other turn failure: the session survives.
+      assert.equal(
+        events.some((event) => event.type === "tool_use"),
+        true
+      );
+      assert.equal(
+        events.some((event) => event.type === "tool_result"),
+        true
+      );
+      assert.equal(
+        events.find((event) => event.type === "assistant").data.message.content[0].text,
+        "Company health research complete."
+      );
       assert.equal(chatRuntime.getSession(chatId).state, "idle");
       const resultEvt = events.filter((e) => e.type === "result").pop();
-      assert.equal(resultEvt.data.ok, false);
-      assert.equal(resultEvt.data.error, errorEvt.data.message);
+      assert.equal(resultEvt.data.ok, true);
     } finally {
       chatRuntime.shutdown();
     }
@@ -2098,6 +2393,79 @@ test("createChatRuntime.postMessage (installed route): a message submitted mid-t
       chatRuntime.shutdown();
     }
   } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime.postMessage (installed route): durably replays a queued message after the assistant turn that preceded it", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  const env = {};
+  candidateSetupInitialize({ repoRoot, env });
+  selectInstalledRuntime({ repoRoot, env });
+
+  let chatRuntime;
+  let replacementRuntime;
+  try {
+    const calls = [];
+    let releaseFirstCall;
+    const firstCallGate = new Promise((resolve) => {
+      releaseFirstCall = resolve;
+    });
+    chatRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => {
+        throw new Error("Agent SDK must not load for an installed route");
+      },
+      runInstalledRuntimeImpl: async (args) => {
+        calls.push(args);
+        if (calls.length === 1) await firstCallGate;
+        return { text: `Reply ${calls.length}`, usage: null, model: null };
+      },
+    });
+
+    const { chatId } = await chatRuntime.startSession({ skill: "ingest-profile" });
+    await waitForPredicate(() => calls.length === 1);
+    chatRuntime.postMessage(chatId, "message 2");
+    releaseFirstCall();
+    await waitForPredicate(() => chatRuntime.getSession(chatId)?.state === "idle");
+
+    const stored = skillChatThreadRead({ repoRoot, env, skill: "ingest-profile" });
+    assert.deepEqual(
+      stored.messages.map(({ role, text }) => ({ role, text })),
+      [
+        { role: "assistant", text: "Reply 1" },
+        { role: "user", text: "message 2" },
+        { role: "assistant", text: "Reply 2" },
+      ]
+    );
+
+    chatRuntime.shutdown();
+    chatRuntime = null;
+
+    const restartCalls = [];
+    replacementRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => {
+        throw new Error("Agent SDK must not load for an installed route");
+      },
+      runInstalledRuntimeImpl: async (args) => {
+        restartCalls.push(args);
+        return { text: "Reply 3", usage: null, model: null };
+      },
+    });
+    const replacement = await replacementRuntime.startSession({ skill: "ingest-profile" });
+    assert.equal(replacement.state, "idle");
+    replacementRuntime.postMessage(replacement.chatId, "message 3");
+    await waitForPredicate(() => restartCalls.length === 1);
+    assert.match(
+      restartCalls[0].prompt,
+      /ASSISTANT:\nReply 1[\s\S]*USER:\nmessage 2[\s\S]*ASSISTANT:\nReply 2[\s\S]*USER:\nmessage 3/
+    );
+  } finally {
+    chatRuntime?.shutdown();
+    replacementRuntime?.shutdown();
     cleanup(repoRoot);
   }
 });

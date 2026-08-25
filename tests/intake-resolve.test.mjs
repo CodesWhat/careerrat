@@ -7,8 +7,10 @@
 // fetch liveness-classification branches (active/insufficient/bot-wall/
 // network-error).
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
-import { resolveJobUrl } from "../src/core/intake/resolve.mjs";
+import { hydrateJobOffer, resolveJobUrl } from "../src/core/intake/resolve.mjs";
 
 function jsonResponse(body, { status = 200 } = {}) {
   return {
@@ -92,6 +94,97 @@ test("known ATS (Greenhouse) board fetch succeeds and finds the matching posting
   assert.match(result.bodyText, /Full JD text here/);
 });
 
+test("known ATS preserves a complete canonical body beyond the old 4000-character preview cap", async () => {
+  const url = "https://job-boards.greenhouse.io/acme/jobs/long-body";
+  const ending =
+    "Final responsibility: keep the complete canonical job description available locally.";
+  const canonicalBody = `${"Build durable systems with the product team and own delivery outcomes. ".repeat(90)}${ending}`;
+  assert.ok(canonicalBody.length > 4000);
+
+  const result = await resolveJobUrl(url, {
+    fetchImpl: async () =>
+      jsonResponse({
+        jobs: [
+          {
+            title: "Staff Engineer",
+            absolute_url: url,
+            content: `<p>${canonicalBody}</p>`,
+          },
+        ],
+      }),
+    resolveHost: publicResolver,
+  });
+
+  assert.equal(result.bodyFetchStatus, "resolved");
+  assert.equal(result.bodyPartial, false);
+  assert.ok(result.bodyText.length > 4000);
+  assert.ok(result.bodyText.endsWith(ending));
+});
+
+test("known ATS resolutions share one provider-board fetch per run", async () => {
+  const firstUrl = "https://job-boards.greenhouse.io/acme/jobs/111111";
+  const secondUrl = "https://job-boards.greenhouse.io/acme/jobs/222222";
+  const resolutionCache = new Map();
+  let fetchCalls = 0;
+  const fetchImpl = async () => {
+    fetchCalls += 1;
+    return jsonResponse({
+      jobs: [
+        {
+          title: "Platform Engineer",
+          absolute_url: firstUrl,
+          content: `<p>${"Own the platform and ship reliable systems. ".repeat(4)}</p>`,
+        },
+        {
+          title: "Product Engineer",
+          absolute_url: secondUrl,
+          content: `<p>${"Build the product and collaborate with customers. ".repeat(4)}</p>`,
+        },
+      ],
+    });
+  };
+
+  const [first, second] = await Promise.all([
+    resolveJobUrl(firstUrl, { fetchImpl, resolveHost: publicResolver, resolutionCache }),
+    resolveJobUrl(secondUrl, { fetchImpl, resolveHost: publicResolver, resolutionCache }),
+  ]);
+
+  assert.equal(fetchCalls, 1);
+  assert.equal(first.title, "Platform Engineer");
+  assert.equal(second.title, "Product Engineer");
+});
+
+test("hydrateJobOffer keeps a safety-capped canonical body explicitly partial", async () => {
+  const url = "https://job-boards.greenhouse.io/acme/jobs/oversized";
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Acme",
+      title: "Staff Engineer",
+      url,
+      bodyText: "Model preview only.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        jsonResponse({
+          jobs: [
+            {
+              title: "Staff Engineer",
+              absolute_url: url,
+              content: `<p>${"A".repeat(70_000)}</p>`,
+            },
+          ],
+        }),
+    }
+  );
+
+  assert.equal(hydrated.bodyText.length, 65_536);
+  assert.equal(hydrated.bodyPartial, true);
+  assert.match(hydrated.bodyFetchReason, /safety limit/);
+});
+
 test("known ATS (Greenhouse) board fetch fails -> falls through to a plain fetch of the same URL", async () => {
   const url = "https://job-boards.greenhouse.io/acme/jobs/999999";
   let plainFetchCalled = false;
@@ -156,6 +249,24 @@ test("plain fetch: a long body with a visible apply control -> resolved, active 
   assert.equal(result.bodyFetchStatus, "resolved");
   assert.equal(result.liveness.result, "active");
   assert.match(result.bodyText, /Staff Engineer/);
+});
+
+test("plain aggregator fetch: prefers the structured JobPosting body over site navigation and footer noise", async () => {
+  const html = readFileSync(
+    join(import.meta.dirname, "fixtures/intake/job-posting-with-site-chrome.html"),
+    "utf8"
+  );
+  const result = await resolveJobUrl("https://remote-board.example/jobs/acme-platform", {
+    fetchImpl: async () => htmlResponse(html),
+    resolveHost: publicResolver,
+  });
+
+  assert.equal(result.bodyFetchStatus, "resolved");
+  assert.match(result.bodyText, /Build and operate the application platform/);
+  assert.match(result.bodyText, /Production Python and Kubernetes experience/);
+  assert.match(result.bodyText, /\$180,000-\$220,000 USD base salary\.$/);
+  assert.doesNotMatch(result.bodyText, /Jobs Companies Salaries|Similar Jobs|Developer Questions/);
+  assert.doesNotMatch(result.bodyText, /For Candidates|Privacy Policy|All rights reserved/);
 });
 
 test("plain aggregator page: follows a canonical ATS apply link and returns the full provider body", async () => {

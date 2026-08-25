@@ -2,11 +2,13 @@ import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { dbExists } from "../db/connection.mjs";
+import { buildDbSeenSets } from "../db/scan-context.mjs";
 import { sourcedUpsertBatch } from "../db/verbs/sourced.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { atomicWriteFile } from "../profile/gate-writer.mjs";
 import { stringifyYaml } from "../profile/yaml.mjs";
 import { trimEdgeCharacter } from "../text/slug.mjs";
+import { addPostingIdentity, postingIdentityIsSeen } from "./sourced-identity.mjs";
 
 function slug(value, fallback = "unknown") {
   const collapsed = String(value || "")
@@ -93,7 +95,7 @@ function renderCapturedJob({ offer, savedAt }) {
     fitBucket: offer.fit || null,
     fitBasis: "triage",
     gate: offer.gate || null,
-    partial: offer.bodyPartial === true || body.length === 0,
+    partial: jobDescriptionIsPartial(offer, body),
   };
   const triageLines = [
     offer.ratingReason ? `- Reason: ${offer.ratingReason}` : "",
@@ -126,6 +128,10 @@ function renderCapturedJob({ offer, savedAt }) {
     .join("\n");
 }
 
+function jobDescriptionIsPartial(offer, body = offerBodyText(offer)) {
+  return offer?.bodyPartial === true || body.length === 0;
+}
+
 function captureSourcedOfferJob({ repoRoot, env, offer, savedAt = new Date() } = {}) {
   const pathCtx = { repoRoot, env };
   const relPath = jobCaptureRelPath(offer);
@@ -136,17 +142,21 @@ function captureSourcedOfferJob({ repoRoot, env, offer, savedAt = new Date() } =
 }
 
 export function offersWithCapturedJobs({ repoRoot, env, offers, savedAt = new Date() } = {}) {
-  return (Array.isArray(offers) ? offers : []).filter(hasRequiredSourcedFields).map((offer) => {
-    const jd = captureSourcedOfferJob({ repoRoot, env, offer, savedAt });
-    const bodyText = offerBodyText(offer);
-    const { rawText, description, ...rest } = offer;
-    return {
-      ...rest,
-      ...(bodyText ? { bodyText } : {}),
-      bodyChars: bodyText.length,
-      artifacts: { ...(offer.artifacts || {}), jd },
-    };
-  });
+  return (Array.isArray(offers) ? offers : [])
+    .filter(hasRequiredSourcedFields)
+    .map((offer) => offerWithCapturedJob({ repoRoot, env, offer, savedAt }));
+}
+
+function offerWithCapturedJob({ repoRoot, env, offer, savedAt }) {
+  const jd = captureSourcedOfferJob({ repoRoot, env, offer, savedAt });
+  const bodyText = offerBodyText(offer);
+  const { rawText, description, ...rest } = offer;
+  return {
+    ...rest,
+    ...(bodyText ? { bodyText } : {}),
+    bodyChars: bodyText.length,
+    artifacts: { ...(offer.artifacts || {}), jd },
+  };
 }
 
 export function sourcedRowsFromScanOffers(offers, nowIso = new Date().toISOString()) {
@@ -177,32 +187,112 @@ export function sourcedRowsFromScanOffers(offers, nowIso = new Date().toISOStrin
         reqId: offer.reqId || null,
         key: offer.key || null,
         bodyChars: Number.isFinite(Number(offer.bodyChars)) ? Number(offer.bodyChars) : null,
+        bodyPartial: jobDescriptionIsPartial(offer),
         possibleDuplicate: Boolean(offer.possibleDuplicate),
       },
     };
   });
 }
 
-function persistScanOffersIfDb({ repoRoot, env, offers, nowIso } = {}) {
+function persistScanOffersIfDb({
+  repoRoot,
+  env,
+  offers,
+  nowIso,
+  guard,
+  dedupeCanonical,
+  prepareAcceptedRow,
+} = {}) {
   if (!dbExists({ repoRoot, env })) return null;
   const rows = sourcedRowsFromScanOffers(offers, nowIso);
   if (rows.length === 0) return null;
-  return sourcedUpsertBatch({ repoRoot, env, rows });
+  const persisted = sourcedUpsertBatch({
+    repoRoot,
+    env,
+    rows,
+    guard,
+    dedupeCanonical,
+    prepareAcceptedRow,
+  });
+  return { ...persisted, rows };
 }
 
-export function captureAndPersistOffersIfDb({ repoRoot, env, offers, savedAt = new Date() } = {}) {
+function reconcileOffersBeforeCapture({ repoRoot, env, offers, dedupeCanonical }) {
+  if (!dedupeCanonical) return { offers, duplicates: 0 };
+  const { seenPostingKeys } = buildDbSeenSets({ repoRoot, env });
+  const accepted = [];
+  let duplicates = 0;
+  for (const offer of offers) {
+    if (postingIdentityIsSeen(offer, seenPostingKeys)) {
+      duplicates++;
+      continue;
+    }
+    addPostingIdentity(seenPostingKeys, offer);
+    accepted.push(offer);
+  }
+  return { offers: accepted, duplicates };
+}
+
+export function captureAndPersistOffersIfDb({
+  repoRoot,
+  env,
+  offers,
+  savedAt = new Date(),
+  guard,
+  dedupeCanonical = false,
+} = {}) {
   if (!dbExists({ repoRoot, env })) return null;
-  const capturedOffers = offersWithCapturedJobs({ repoRoot, env, offers, savedAt });
+  const reconciled = reconcileOffersBeforeCapture({
+    repoRoot,
+    env,
+    offers: Array.isArray(offers) ? offers : [],
+    dedupeCanonical,
+  });
+  if (!reconciled.offers.length) {
+    return {
+      ok: true,
+      persistedRows: 0,
+      duplicates: reconciled.duplicates,
+      offers: [],
+      persisted: {
+        created: 0,
+        updated: 0,
+        duplicates: 0,
+        acceptedIds: [],
+      },
+    };
+  }
+  const acceptedOffersById = new Map();
+  const uncapturedRows = sourcedRowsFromScanOffers(reconciled.offers, savedAt.toISOString());
+  const offerById = new Map(
+    uncapturedRows.map((row, index) => [String(row.id), reconciled.offers[index]])
+  );
   const persisted = persistScanOffersIfDb({
     repoRoot,
     env,
-    offers: capturedOffers,
+    offers: reconciled.offers,
     nowIso: savedAt.toISOString(),
+    guard,
+    dedupeCanonical,
+    prepareAcceptedRow: (row) => {
+      const captured = offerWithCapturedJob({
+        repoRoot,
+        env,
+        offer: offerById.get(String(row.id)),
+        savedAt,
+      });
+      acceptedOffersById.set(String(row.id), captured);
+      return sourcedRowsFromScanOffers([captured], savedAt.toISOString())[0];
+    },
   });
+  const acceptedOffers = (persisted?.acceptedIds || [])
+    .map((id) => acceptedOffersById.get(String(id)))
+    .filter(Boolean);
   return {
     ok: true,
     persistedRows: (persisted?.created || 0) + (persisted?.updated || 0),
-    offers: capturedOffers,
+    duplicates: reconciled.duplicates + (persisted?.duplicates || 0),
+    offers: acceptedOffers,
     persisted,
   };
 }

@@ -27,6 +27,20 @@ function tempRoot() {
   return mkdtempSync(join(tmpdir(), "careerrat-call-ai-"));
 }
 
+const VERIFIED_CAPABILITIES = Object.freeze({
+  completion: true,
+  structuredOutput: true,
+  appWorkflows: true,
+  exactRead: true,
+  publicWeb: true,
+  liveActivity: true,
+  resumable: true,
+});
+
+function verifiedInstalled(id, name, path) {
+  return { id, name, path, available: true, capabilities: VERIFIED_CAPABILITIES };
+}
+
 const NON_STREAM_BODY = {
   id: "msg_1",
   type: "message",
@@ -255,13 +269,143 @@ test("resolveAIRoute: selected installed CLI wins in desktop even when a provide
       { CAREERRAT_DESKTOP_SHELL: "1", ANTHROPIC_API_KEY: "sk-ant-test" },
       {
         repoRoot: root,
-        runtimeInventory: [{ id: "codex", name: "Codex", path: "/safe/codex", available: true }],
+        runtimeInventory: [verifiedInstalled("codex", "Codex", "/safe/codex")],
       }
     );
     assert.equal(route.type, "installed");
     assert.equal(route.runtime.id, "codex");
     assert.equal(route.runtime.path, "/safe/codex");
     assert.equal(Object.hasOwn(route, "apiKey"), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resolveAIRoute: carries the selected runtime's verified capability evidence into execution", () => {
+  const root = tempRoot();
+  try {
+    const capabilities = {
+      completion: true,
+      structuredOutput: true,
+      appWorkflows: true,
+      exactRead: true,
+      publicWeb: true,
+      liveActivity: true,
+      resumable: true,
+    };
+    writeInstalledRuntimeSelection({
+      repoRoot: root,
+      env: {},
+      runtimeId: "codex",
+      verification: {
+        path: "/safe/codex",
+        capabilities,
+        checkedAt: "2026-08-25T12:00:00.000Z",
+      },
+    });
+
+    const route = resolveAIRoute(
+      { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+      {
+        repoRoot: root,
+        runtimeInventory: [{ id: "codex", name: "Codex", path: "/safe/codex", available: true }],
+      }
+    );
+
+    assert.equal(route.type, "installed");
+    assert.deepEqual(route.runtime.capabilities, {
+      ...capabilities,
+      taskTools: true,
+      research: true,
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resolveAIRoute: rejects a selected supported runtime missing any full-workflow capability", () => {
+  for (const missingCapability of Object.keys(VERIFIED_CAPABILITIES)) {
+    const root = tempRoot();
+    try {
+      const path = "/safe/codex";
+      writeInstalledRuntimeSelection({
+        repoRoot: root,
+        env: {},
+        runtimeId: "codex",
+        verification: {
+          path,
+          capabilities: {
+            ...VERIFIED_CAPABILITIES,
+            [missingCapability]: false,
+          },
+          checkedAt: "2026-08-25T12:00:00.000Z",
+        },
+      });
+
+      const route = resolveAIRoute(
+        { CAREERRAT_DESKTOP_SHELL: "1", ANTHROPIC_API_KEY: "sk-ant-test" },
+        {
+          repoRoot: root,
+          runtimeInventory: [{ id: "codex", name: "Codex", path, available: true }],
+        }
+      );
+
+      assert.equal(route.type, "none", `${missingCapability} must be required for dispatch`);
+      assert.match(route.error, /capability verification/i);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("resolveAIRoute: dispatches verified Claude and Codex runtimes", () => {
+  for (const [runtimeId, name] of [
+    ["claude", "Claude Code"],
+    ["codex", "Codex"],
+  ]) {
+    const root = tempRoot();
+    try {
+      writeInstalledRuntimeSelection({ repoRoot: root, env: {}, runtimeId });
+      const route = resolveAIRoute(
+        { CAREERRAT_DESKTOP_SHELL: "1" },
+        {
+          repoRoot: root,
+          runtimeInventory: [verifiedInstalled(runtimeId, name, `/safe/${runtimeId}`)],
+        }
+      );
+
+      assert.equal(route.type, "installed");
+      assert.equal(route.runtime.id, runtimeId);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("resolveAIRoute: rejects persisted evidence when the selected executable path changes", () => {
+  const root = tempRoot();
+  try {
+    writeInstalledRuntimeSelection({
+      repoRoot: root,
+      env: {},
+      runtimeId: "codex",
+      verification: {
+        path: "/safe/codex-old",
+        capabilities: VERIFIED_CAPABILITIES,
+        checkedAt: "2026-08-25T12:00:00.000Z",
+      },
+    });
+    const route = resolveAIRoute(
+      { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+      {
+        repoRoot: root,
+        runtimeInventory: [
+          { id: "codex", name: "Codex", path: "/safe/codex-new", available: true },
+        ],
+      }
+    );
+    assert.equal(route.type, "none");
+    assert.match(route.error, /verification/i);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -345,7 +489,7 @@ test("resolveAIRoute: packaged desktop resolves a selected CLI without repeating
         },
         {
           repoRoot: root,
-          runtimeInventory: [{ id: "codex", name: "Codex", path: "/safe/codex", available: true }],
+          runtimeInventory: [verifiedInstalled("codex", "Codex", "/safe/codex")],
           probeRuntime: () => {
             probeCalls += 1;
             return { status: "ready", ready: true };
@@ -381,7 +525,7 @@ test("callAI: routes a structured request through the selected CLI without a pro
       outputMode: "native",
       root,
       env: { CAREERRAT_DESKTOP_SHELL: "1" },
-      runtimeInventory: [{ id: "codex", name: "Codex", path: "/safe/codex", available: true }],
+      runtimeInventory: [verifiedInstalled("codex", "Codex", "/safe/codex")],
       runInstalledRuntimeImpl: async (input) => {
         calls.push(input);
         return {
@@ -426,7 +570,7 @@ test("callAI (installed): an explicit model always wins", async () => {
       messages: [{ role: "user", content: "hi" }],
       root,
       env: { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_INSTALLED_AI_MODEL: "base-default" },
-      runtimeInventory: [{ id: "codex", name: "Codex", path: "/safe/codex", available: true }],
+      runtimeInventory: [verifiedInstalled("codex", "Codex", "/safe/codex")],
       runInstalledRuntimeImpl: async (input) => {
         calls.push(input);
         return { text: "ok", runtimeId: "codex", usage: null };
@@ -455,7 +599,7 @@ test("callAI (installed): tier smallFast on the claude runtime resolves config/a
       messages: [{ role: "user", content: "hi" }],
       root,
       env: { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_INSTALLED_AI_MODEL: "base-default" },
-      runtimeInventory: [{ id: "claude", name: "Claude", path: "/safe/claude", available: true }],
+      runtimeInventory: [verifiedInstalled("claude", "Claude", "/safe/claude")],
       runInstalledRuntimeImpl: async (input) => {
         calls.push(input);
         return { text: "ok", runtimeId: "claude", usage: null };
@@ -478,7 +622,7 @@ test("callAI (installed): tier smallFast on the claude runtime with no config fi
       messages: [{ role: "user", content: "hi" }],
       root,
       env: { CAREERRAT_DESKTOP_SHELL: "1" },
-      runtimeInventory: [{ id: "claude", name: "Claude", path: "/safe/claude", available: true }],
+      runtimeInventory: [verifiedInstalled("claude", "Claude", "/safe/claude")],
       runInstalledRuntimeImpl: async (input) => {
         calls.push(input);
         return { text: "ok", runtimeId: "claude", usage: null };
@@ -507,7 +651,7 @@ test("callAI (installed): tier smallFast on a non-claude runtime ignores the Ant
       messages: [{ role: "user", content: "hi" }],
       root,
       env: { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_INSTALLED_AI_MODEL: "base-default" },
-      runtimeInventory: [{ id: "codex", name: "Codex", path: "/safe/codex", available: true }],
+      runtimeInventory: [verifiedInstalled("codex", "Codex", "/safe/codex")],
       runInstalledRuntimeImpl: async (input) => {
         calls.push(input);
         return { text: "ok", runtimeId: "codex", usage: null };
@@ -530,7 +674,7 @@ test("callAI (installed): tier smallFast on a non-claude runtime with no base de
       messages: [{ role: "user", content: "hi" }],
       root,
       env: { CAREERRAT_DESKTOP_SHELL: "1" },
-      runtimeInventory: [{ id: "codex", name: "Codex", path: "/safe/codex", available: true }],
+      runtimeInventory: [verifiedInstalled("codex", "Codex", "/safe/codex")],
       runInstalledRuntimeImpl: async (input) => {
         calls.push(input);
         return { text: "ok", runtimeId: "codex", usage: null };
@@ -552,7 +696,7 @@ test("callAI (installed): no model/tier falls back to CAREERRAT_INSTALLED_AI_MOD
       messages: [{ role: "user", content: "hi" }],
       root,
       env: { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_INSTALLED_AI_MODEL: "base-default" },
-      runtimeInventory: [{ id: "codex", name: "Codex", path: "/safe/codex", available: true }],
+      runtimeInventory: [verifiedInstalled("codex", "Codex", "/safe/codex")],
       runInstalledRuntimeImpl: async (input) => {
         calls.push(input);
         return { text: "ok", runtimeId: "codex", usage: null };

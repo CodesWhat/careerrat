@@ -354,6 +354,29 @@ test("pinning, messaging, and manual archive state survive restart without copyi
   assert.equal(stored.touchDue, undefined);
 });
 
+test("scanner rows preserve whether the saved job description is partial", async () => {
+  const { sourcedRowsFromScanOffers } = await import("../src/core/scoring/sourced-persistence.mjs");
+  const rows = sourcedRowsFromScanOffers([
+    {
+      company: "Partial Co",
+      title: "Platform Engineer",
+      url: "https://jobs.example.test/partial",
+      bodyText: "Only the visible excerpt was available.",
+      bodyPartial: true,
+    },
+    {
+      company: "Complete Co",
+      title: "Staff Engineer",
+      url: "https://jobs.example.test/complete",
+      bodyText: "The complete job description was captured.",
+      bodyPartial: false,
+    },
+  ]);
+
+  assert.equal(rows[0].scanner.bodyPartial, true);
+  assert.equal(rows[1].scanner.bodyPartial, false);
+});
+
 test("promoted scanner facts reach job threads and their AI context", async () => {
   const api = await chatFirstApi();
   const repoRoot = tempRepo();
@@ -397,11 +420,15 @@ test("promoted scanner facts reach job threads and their AI context", async () =
     call: async (options) => {
       request = options;
       return {
-        content: [{ type: "text", text: JSON.stringify({ reply: "Yes." }) }],
+        content: [{ type: "text", text: JSON.stringify({ reply: "Yes.", answerMode: null }) }],
       };
     },
   });
   const application = JSON.parse(request.messages[0].content).canonicalContext.application;
+  assert.match(request.system, /natural, conversational plain English/i);
+  assert.match(request.system, /short, direct sentences/i);
+  assert.match(request.system, /raw JSON/i);
+  assert.match(request.system, /tool narration/i);
   assert.equal(application.location, "Remote - United States");
   assert.equal(application.mode, "remote");
   assert.equal(application.compensation, "$185,000 - $215,000");
@@ -454,6 +481,35 @@ test("earned job threads project canonical conversations and communications with
   assert.equal(stored.communications, undefined);
 });
 
+test("job-thread turns persist a typed yes-no answer mode on the assistant message", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-binary-question",
+    company: "Binary Corp",
+  });
+
+  const result = await api.jobThreadTurn({
+    repoRoot,
+    applicationId: "app-binary-question",
+    text: "Check whether you need permission.",
+    call: async () => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            reply: "Should I draft the recruiter reply now?",
+            answerMode: "yes-no",
+          }),
+        },
+      ],
+    }),
+  });
+
+  assert.equal(result.assistantMessage.text, "Should I draft the recruiter reply now?");
+  assert.equal(result.assistantMessage.metadata.answerMode, "yes-no");
+});
+
 test("unpinning an application that never earned a conversation does not create one", async () => {
   const api = await chatFirstApi();
   const repoRoot = tempRepo();
@@ -499,7 +555,7 @@ test("job-thread turns retain authoritative messages and advance an exact rollin
         content: [
           {
             type: "text",
-            text: JSON.stringify({ reply: "Prepare the screen examples." }),
+            text: JSON.stringify({ reply: "Prepare the screen examples.", answerMode: null }),
           },
         ],
       };
@@ -547,7 +603,9 @@ test("rolling checkpoints keep an early durable decision after later prose excee
     call: async (options) => {
       request = options;
       return {
-        content: [{ type: "text", text: JSON.stringify({ reply: "Stay in Boston." }) }],
+        content: [
+          { type: "text", text: JSON.stringify({ reply: "Stay in Boston.", answerMode: null }) },
+        ],
       };
     },
   });
@@ -609,7 +667,7 @@ test("bounded job-thread context allowlists professional facts and redacts conta
         content: [
           {
             type: "text",
-            text: JSON.stringify({ reply: "Use the platform example." }),
+            text: JSON.stringify({ reply: "Use the platform example.", answerMode: null }),
           },
         ],
       };
@@ -672,7 +730,7 @@ test("job-thread candidate context includes worldwide remote scope without widen
         content: [
           {
             type: "text",
-            text: JSON.stringify({ reply: "Worldwide remote." }),
+            text: JSON.stringify({ reply: "Worldwide remote.", answerMode: null }),
           },
         ],
       };
@@ -725,7 +783,9 @@ test("job-thread AI context includes redacted recent inbound and draft communica
     call: async (options) => {
       request = options;
       return {
-        content: [{ type: "text", text: JSON.stringify({ reply: "Confirm Tuesday." }) }],
+        content: [
+          { type: "text", text: JSON.stringify({ reply: "Confirm Tuesday.", answerMode: null }) },
+        ],
       };
     },
   });
@@ -759,7 +819,9 @@ test("compound job-thread turns treat a committed compatibility-export failure a
     call: async () => {
       calls += 1;
       return {
-        content: [{ type: "text", text: JSON.stringify({ reply: "Saved once." }) }],
+        content: [
+          { type: "text", text: JSON.stringify({ reply: "Saved once.", answerMode: null }) },
+        ],
       };
     },
   });

@@ -80,6 +80,15 @@ export function collectControls(elements) {
   // page with a button, which is nearly every ATS form. The stubbed tests could
   // not catch it because nothing is serialized there.
   const DOCUMENT_POSITION_FOLLOWING = 0x04;
+  const EXACT_ADVANCE_LABELS = new Set([
+    "next",
+    "next step",
+    "continue",
+    "continue applying",
+    "save and continue",
+    "review",
+    "review your application",
+  ]);
 
   function isVisible(el) {
     const rect = el.getBoundingClientRect();
@@ -142,6 +151,104 @@ export function collectControls(elements) {
       return "textbox";
     }
     return tag;
+  }
+
+  function controlFormScope(el) {
+    let node = el.parentElement;
+    while (node) {
+      const role = String(node.getAttribute?.("role") || "").toLowerCase();
+      if (node.tagName === "FORM" || role === "form" || role === "dialog") return node;
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  function normalizedControlLabel(el) {
+    return accessibleName(el)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function exactAdvanceControl(el) {
+    const label = normalizedControlLabel(el);
+    if (!EXACT_ADVANCE_LABELS.has(label)) return false;
+    if (["BUTTON", "INPUT"].includes(el.tagName)) {
+      const fallbackType = el.tagName === "BUTTON" ? "submit" : "";
+      const type = String(el.type || el.getAttribute("type") || fallbackType).toLowerCase();
+      return type === "button";
+    }
+    return String(el.getAttribute("role") || "").toLowerCase() === "button";
+  }
+
+  function progressName(progress) {
+    const direct = String(progress.getAttribute("aria-label") || "").trim();
+    if (direct) return direct;
+    const labelledBy = String(progress.getAttribute("aria-labelledby") || "")
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((id) => document.getElementById(id)?.innerText || "")
+      .join(" ")
+      .trim();
+    return labelledBy || String(progress.getAttribute("title") || progress.innerText || "").trim();
+  }
+
+  function isStepProgress(progress) {
+    const name = progressName(progress)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return (
+      /\bsteps?\b/.test(name) ||
+      (/\b(?:application|form)\b/.test(name) && /\bprogress\b/.test(name))
+    );
+  }
+
+  function structuredProgressHasRemainingStep(el) {
+    if (!exactAdvanceControl(el)) return false;
+    const scope = controlFormScope(el);
+    if (!scope) return false;
+    for (const progress of scope.querySelectorAll("progress, [role='progressbar']")) {
+      if (!isVisible(progress) || !isStepProgress(progress)) continue;
+      const current = Number(progress.value ?? progress.getAttribute("aria-valuenow"));
+      const total = Number(progress.max ?? progress.getAttribute("aria-valuemax"));
+      const minimum = Number(progress.getAttribute("aria-valuemin") ?? 0);
+      if (
+        Number.isFinite(current) &&
+        Number.isFinite(total) &&
+        Number.isFinite(minimum) &&
+        total > minimum &&
+        current >= minimum &&
+        current < total
+      ) {
+        return true;
+      }
+    }
+    for (const marker of scope.querySelectorAll("[aria-current='step']")) {
+      const siblings = Array.from(marker.parentElement?.children || []).filter((candidate) => {
+        if (!isVisible(candidate)) return false;
+        const role = String(candidate.getAttribute?.("role") || "").toLowerCase();
+        return candidate.tagName === "LI" || ["listitem", "step", "tab"].includes(role);
+      });
+      const currentIndex = siblings.indexOf(marker);
+      if (siblings.length > 1 && currentIndex >= 0 && currentIndex < siblings.length - 1)
+        return true;
+    }
+    for (const progress of scope.querySelectorAll("[data-current-step]")) {
+      const current = Number(progress.getAttribute("data-current-step"));
+      const total = Number(progress.getAttribute("data-total-steps"));
+      if (
+        Number.isSafeInteger(current) &&
+        Number.isSafeInteger(total) &&
+        current >= 1 &&
+        total > current
+      ) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // Nearest ancestor caption for a control — fieldset legend, an
@@ -251,6 +358,7 @@ export function collectControls(elements) {
             : null,
       choiceGroup,
       checked: isNativeRadio && el.checked === true,
+      ...(role === "button" && structuredProgressHasRemainingStep(el) ? { advanceSafe: true } : {}),
     });
   });
   return controls;
@@ -761,7 +869,12 @@ export function createPlaywrightOps({
           // name the field the same way the rest of the snapshot does.
           name: control.name,
         });
-        refs[ref] = { role: control.role, name: control.name, required: Boolean(control.required) };
+        refs[ref] = {
+          role: control.role,
+          name: control.name,
+          required: Boolean(control.required),
+          ...(control.advanceSafe === true ? { advanceSafe: true } : {}),
+        };
       }
       foldNativeRadioGroups(controlsWithRef, refs);
       latestRefs.set(pageId, refMap);

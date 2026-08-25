@@ -388,7 +388,7 @@
 }
 
 .chat-first-thread-card.is-active .chat-first-thread-card__subtitle {
-  color: var(--gray-dim);
+  color: var(--cf-selection-foreground);
 }
 
 .chat-first-avatar {
@@ -659,6 +659,7 @@
 .chat-first-artifact-card {
   box-sizing: content-box;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   min-width: 340px;
@@ -683,6 +684,301 @@
 }
 
 .chat-first-artifact-card__copy span {
+  color: var(--slate);
+  font-size: 12px;
+}
+
+.chat-first-artifact-card__details {
+  flex-basis: 100%;
+  margin-left: 31px;
+  color: var(--slate);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.chat-first-artifact-card__details summary {
+  width: fit-content;
+  color: var(--ink);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chat-first-artifact-card__details ul {
+  display: grid;
+  gap: 4px;
+  margin: 7px 0 0;
+  padding-left: 18px;
+}
+
+.chat-first-artifact-card__details li strong {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.company-proposal-review {
+  max-width: 860px;
+}
+
+.company-proposal-review__toolbar-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.company-proposal-review__stage {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: clamp(16px, 3vw, 28px);
+}
+
+.company-proposal-review__card {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  border: 1.5px solid var(--line-warm);
+  border-radius: 16px;
+  background: var(--white);
+}
+
+.company-proposal-review__card p,
+.company-proposal-review__evidence {
+  margin: 0;
+}
+
+.company-proposal-review__heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 16px;
+}
+
+.company-proposal-review__heading span,
+.company-proposal-review__evidence dt {
+  color: var(--slate);
+  font-size: 12px;
+}
+
+.company-proposal-review__role {
+  font-weight: 700;
+}
+
+.company-proposal-review__evidence {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.35fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.company-proposal-review__evidence-item {
+  min-width: 0;
+}
+
+.company-proposal-review__evidence dd {
+  overflow-wrap: anywhere;
+  margin: 2px 0 0;
+}
+
+.company-proposal-review__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.company-proposal-review__empty {
+  margin: auto;
+  padding: 48px 24px;
+  color: var(--slate);
+  text-align: center;
+}
+
+.source-review-summary {
+  width: min(560px, calc(100vw - 420px));
+  min-width: 420px;
+  align-items: flex-start;
+}
+
+.source-review-summary__copy {
+  gap: 2px;
+}
+
+.source-review-summary__sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.source-review-summary__source {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border: 1px solid var(--line-warm);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  background: var(--white);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.source-review-summary__action {
+  align-self: center;
+}
+
+.source-review {
+  max-width: 900px;
+}
+
+.source-review__toolbar-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.source-review__stage {
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  padding: clamp(16px, 3vw, 28px);
+}
+
+.source-review__list {
+  display: grid;
+  gap: 12px;
+}
+
+.source-review__card {
+  display: grid;
+  gap: 9px;
+  padding: 16px;
+  border: 1.5px solid var(--line-warm);
+  border-radius: 16px;
+  background: var(--white);
+}
+
+.source-review__card p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.source-review__heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.source-review__heading > div {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.source-review__heading > div > span,
+.source-review__url {
+  color: var(--slate);
+  font-size: 11px;
+}
+
+.source-review__source-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: var(--tint-cool-2);
+}
+
+.source-review__confidence {
+  flex: none;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 800;
+}
+
+.source-review__confidence--high {
+  background: var(--lime);
+}
+
+.source-review__confidence--borderline {
+  background: var(--cream-edge);
+}
+
+.source-review__url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-review__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.source-review__decision {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.source-review__rejected {
+  display: grid;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.source-review__rejected h3 {
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.source-review__rejected-row {
+  display: flex;
+  gap: 8px;
+  padding: 11px 13px;
+  border: 1px dashed var(--line-cool);
+  border-radius: 14px;
+  color: var(--slate);
+}
+
+.source-review__rejected-row > svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.source-review__rejected-row > div {
+  display: grid;
+  gap: 2px;
+}
+
+.source-review__rejected-row strong {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.source-review__rejected-row span,
+.source-review__rejected-row small {
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.source-review__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-warm);
   color: var(--slate);
   font-size: 12px;
 }
@@ -1142,6 +1438,24 @@
   height: 17px;
 }
 
+.chat-first-binary-actions {
+  align-items: center;
+  margin-left: 42px;
+  padding: 0;
+  border: 0;
+}
+
+.chat-first-binary-actions .chat-first-pill {
+  min-width: 54px;
+  padding: 5px 13px;
+  font-size: 12px;
+}
+
+.chat-first-binary-actions > span {
+  color: var(--gray);
+  font-size: 11.5px;
+}
+
 .chat-first-needs,
 .chat-first-context-stack {
   display: flex;
@@ -1238,6 +1552,7 @@
 
 .chat-first-need-card__actions {
   display: flex;
+  justify-content: flex-end;
   gap: 6px;
   margin-top: 9px;
 }
@@ -1285,6 +1600,11 @@
   flex: none;
   width: 15px;
   height: 15px;
+}
+
+.chat-first-deep-card__icon-badge svg {
+  width: 14px;
+  height: 14px;
 }
 
 .chat-first-deep-card p {

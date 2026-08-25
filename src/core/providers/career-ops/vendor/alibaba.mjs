@@ -1,6 +1,8 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { capDescriptionText } from './_html-to-text.mjs';
+
 // Alibaba Group careers provider — posts to the public talent.alibaba.com
 // JSON API (no auth, no login, no browser). Verified 2026-07 by capturing the
 // site's own XHR:
@@ -86,19 +88,21 @@ export function parseAlibabaResponse(json, companyName) {
     const id = p.id;
     if (!title || id == null) continue;
     const experience = formatExperience(p.experience);
+    const { text: description, truncated: descriptionPartial } = capDescriptionText(
+      [
+        Array.isArray(p.categories) && p.categories.length && `类别: ${p.categories.filter(Boolean).join('/')}`,
+        experience && `经验: ${experience}`,
+        p.description,
+        p.requirement,
+      ].filter(Boolean).join('\n')
+    );
     jobs.push({
       title,
       url: DETAIL + encodeURIComponent(id),
       company: companyName,
       location: Array.isArray(p.workLocations) ? p.workLocations.filter(Boolean).join('/') : '',
-      // Alibaba posts carry full-text JDs (description + requirement), much
-      // longer than other boards' summaries — cap to keep scan payloads sane.
-      description: [
-        Array.isArray(p.categories) && p.categories.length && `类别: ${p.categories.filter(Boolean).join('/')}`,
-        experience && `经验: ${experience}`,
-        p.description,
-        p.requirement,
-      ].filter(Boolean).join('\n').slice(0, 4000),
+      description,
+      ...(descriptionPartial ? { descriptionPartial: true } : {}),
       postedAt: Number(p.publishTime) || Number(p.modifyTime) || undefined,
     });
   }

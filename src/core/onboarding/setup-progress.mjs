@@ -30,10 +30,12 @@ export function computeSetupProgress({
   const profile = data.profile || {};
   const profileLocation = profile.location || {};
   const locationReady =
-    !!String(profileLocation.home || "").trim() ||
-    !!profileLocation.hybrid ||
-    !!profileLocation.onsite ||
-    (Array.isArray(profileLocation.relocation) && profileLocation.relocation.length > 0);
+    profileLocation.mode_preferences_confirmed === true &&
+    (!!String(profileLocation.home || "").trim() ||
+      profileLocation.remote === true ||
+      !!profileLocation.hybrid ||
+      !!profileLocation.onsite ||
+      (Array.isArray(profileLocation.relocation) && profileLocation.relocation.length > 0));
 
   const done = {
     engine: !!keyConfigured,
