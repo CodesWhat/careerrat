@@ -8,12 +8,8 @@ const INSTALLED_RUNTIME_SELECTION_RELPATH = ".internal/ai-runtime.json";
 
 const ALLOWED_RUNTIME_IDS = new Set(INSTALLED_RUNTIME_DEFINITIONS.map(({ id }) => id));
 
-// "custom" is not in the fixed registry above (see installed-runtimes.mjs's
-// probeCustomRuntimeCommand/buildInstalledRuntimeInvocation "custom" branch)
-// — it's the W4 onboarding 3d/3f escape hatch, a user-supplied command
-// persisted alongside the usual runtimeId/providerFallback selection.
 function isKnownRuntimeId(runtimeId) {
-  return runtimeId === "custom" || ALLOWED_RUNTIME_IDS.has(runtimeId);
+  return ALLOWED_RUNTIME_IDS.has(runtimeId);
 }
 
 export function loadInstalledRuntimeSelection({ repoRoot, env = process.env } = {}) {
@@ -27,10 +23,7 @@ export function loadInstalledRuntimeSelection({ repoRoot, env = process.env } = 
     return {
       runtimeId,
       providerFallback: value?.providerFallback === true,
-      customCommand:
-        runtimeId === "custom" && typeof value?.customCommand === "string"
-          ? value.customCommand
-          : null,
+      customCommand: null,
     };
   } catch {
     return { runtimeId: null, providerFallback: false, customCommand: null };
@@ -42,13 +35,9 @@ export function writeInstalledRuntimeSelection({
   env = process.env,
   runtimeId = null,
   providerFallback = false,
-  customCommand = null,
 } = {}) {
   if (runtimeId !== null && !isKnownRuntimeId(runtimeId)) {
     throw new Error(`unsupported installed AI runtime: ${runtimeId}`);
-  }
-  if (runtimeId === "custom" && !String(customCommand || "").trim()) {
-    throw new Error('customCommand is required when runtimeId is "custom"');
   }
   const path = userPath({ repoRoot, env }, INSTALLED_RUNTIME_SELECTION_RELPATH);
   mkdirSync(dirname(path), { recursive: true });
@@ -59,7 +48,7 @@ export function writeInstalledRuntimeSelection({
       {
         runtimeId,
         providerFallback: providerFallback === true,
-        customCommand: runtimeId === "custom" ? String(customCommand).trim() : null,
+        customCommand: null,
       },
       null,
       2

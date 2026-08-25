@@ -285,11 +285,31 @@ function selectedValueMatches(actual, expected) {
   return Boolean(city && selected.startsWith(`${city} `));
 }
 
+function encodedDataExpression(value) {
+  const encoded = Buffer.from(JSON.stringify(value), "utf8").toString("base64");
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) {
+    throw new Error("Browser probe data could not be encoded safely.");
+  }
+  return `JSON.parse(new TextDecoder().decode(Uint8Array.from(atob("${encoded}"),(character)=>character.charCodeAt(0))))`;
+}
+
 // ---------------------------------------------------------------------------
 // createOrcaOps — Orca CLI implementation of the provider-neutral ops contract.
 // ---------------------------------------------------------------------------
 
 export function createOrcaOps({ runOrcaImpl } = {}) {
+  async function evaluate(pageId, expression) {
+    const response = await runOrcaImpl([
+      "eval",
+      "--page",
+      pageId,
+      "--expression",
+      expression,
+      "--json",
+    ]);
+    return response?.result;
+  }
+
   async function snapshot(pageId) {
     const raw = await runOrcaImpl(["snapshot", "--page", pageId, "--json"]);
     let probe = [];
@@ -318,6 +338,69 @@ export function createOrcaOps({ runOrcaImpl } = {}) {
     },
     async focusTab({ pageId }) {
       return runOrcaImpl(["tab", "switch", "--page", pageId, "--json"]);
+    },
+    async navigate({ pageId, url }) {
+      await runOrcaImpl(["navigate", "--page", pageId, "--url", String(url), "--json"]);
+      return { pageId, url: String(url) };
+    },
+    async back({ pageId }) {
+      await runOrcaImpl(["keypress", "--page", pageId, "--key", "ALT+LEFT", "--json"]);
+      return { pageId };
+    },
+    async pageContent({ pageId, maxText = 20_000 }) {
+      const bounded = Math.min(Math.max(Number(maxText) || 20_000, 1), 100_000);
+      const raw = await evaluate(
+        pageId,
+        `JSON.stringify({url:location.href,title:document.title,text:String(document.body?.innerText||"").slice(0,${bounded})})`
+      );
+      return JSON.parse(String(raw || "{}"));
+    },
+    async extractText({ pageId, selectors, maxText = 20_000 }) {
+      const input = encodedDataExpression({
+        selectors: (Array.isArray(selectors) ? selectors : [selectors])
+          .map((value) => String(value || "").trim())
+          .filter(Boolean)
+          .slice(0, 12),
+        maxText: Math.min(Math.max(Number(maxText) || 20_000, 1), 100_000),
+      });
+      const raw = await evaluate(
+        pageId,
+        `(() => { const input=${input}; for(const selector of input.selectors){const matches=Array.from(document.querySelectorAll(selector));if(!matches.length)continue;return JSON.stringify({selector,text:matches.map((node)=>String(node.innerText||node.textContent||"").trim()).filter(Boolean).join("\\n\\n").slice(0,input.maxText)});}return JSON.stringify({selector:null,text:""});})()`
+      );
+      return JSON.parse(String(raw || "{}"));
+    },
+    async extractRows({ pageId, rowSelectors, fields, maxRows = 100 }) {
+      const input = encodedDataExpression({
+        selectors: (Array.isArray(rowSelectors) ? rowSelectors : [rowSelectors])
+          .map((value) => String(value || "").trim())
+          .filter(Boolean)
+          .slice(0, 12),
+        fields: Object.fromEntries(
+          Object.entries(fields && typeof fields === "object" ? fields : {}).slice(0, 24)
+        ),
+        maxRows: Math.min(Math.max(Number(maxRows) || 100, 1), 250),
+      });
+      const raw = await evaluate(
+        pageId,
+        `(() => { const input=${input}; const first=(root,values)=>{ for(const selector of (Array.isArray(values)?values:[values])) { if(!selector) continue; const found=selector===":scope"?root:root.querySelector(selector); if(found) return found; } return null; }; let rowSelector=null; let rows=[]; for(const selector of input.selectors){ const matches=Array.from(document.querySelectorAll(selector)); if(matches.length){rowSelector=selector;rows=matches.slice(0,input.maxRows);break;} } return JSON.stringify({rowSelector,rows:rows.map((row,index)=>{const output={index};for(const [name,value] of Object.entries(input.fields)){const spec=value&&typeof value==="object"?value:{};const node=first(row,spec.selectors||":scope");if(!node)output[name]="";else if(spec.kind==="href")output[name]=node.href||node.getAttribute("href")||"";else if(spec.kind==="attr")output[name]=node.getAttribute(String(spec.attribute||""))||"";else output[name]=String(node.innerText||node.textContent||"").trim();}return output;})}); })()`
+      );
+      return JSON.parse(String(raw || "{}"));
+    },
+    async clickRow({ pageId, rowSelector, index }) {
+      const input = encodedDataExpression({
+        selector: String(rowSelector),
+        position: Math.max(Number(index) || 0, 0),
+      });
+      await evaluate(
+        pageId,
+        `(() => { const input=${input}; const row=document.querySelectorAll(input.selector)[input.position]; if(!row) throw new Error("row not found"); row.click(); return location.href; })()`
+      );
+      return { pageId };
+    },
+    async scroll({ pageId, amount = 900 }) {
+      const delta = Math.min(Math.max(Number(amount) || 900, -5_000), 5_000);
+      await evaluate(pageId, `window.scrollBy(0,${delta}); location.href`);
+      return { pageId };
     },
     async snapshot({ pageId }) {
       return snapshot(pageId);

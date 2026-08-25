@@ -23,7 +23,6 @@ import {
   INSTALLED_RUNTIME_DEFINITIONS,
   materializeIsolatedSkillCwd,
   ONE_SHOT_RUNTIME_TIMEOUT_MS,
-  openInstalledRuntimeTerminal,
   parseCustomCommandString,
   probeCustomRuntimeCommand,
   probeInstalledRuntime,
@@ -32,6 +31,8 @@ import {
   runInstalledRuntime,
   runInstalledRuntimeStream,
   runtimeSearchDirectories,
+  startInstalledRuntimeSignIn,
+  stopInstalledRuntimeSignIns,
   supportsInstalledRuntimeStreaming,
 } from "../src/core/ai/installed-runtimes.mjs";
 import {
@@ -186,6 +187,43 @@ test("detectInstalledRuntimes finds multiple CLIs outside the inherited PATH", (
   }
 });
 
+test("detected runtimes publish honest completion, task-tool, and research tiers", () => {
+  const root = tempRoot();
+  const binDir = join(root, "bin");
+  executable(join(binDir, "claude"));
+  executable(join(binDir, "codex"));
+  executable(join(binDir, "hermes"));
+  try {
+    const inventory = detectInstalledRuntimes({
+      env: { PATH: binDir },
+      platform: "darwin",
+      homeDir: join(root, "home"),
+    });
+    const byId = Object.fromEntries(inventory.map((runtime) => [runtime.id, runtime]));
+    assert.deepEqual(byId.claude.capabilities, {
+      completion: true,
+      taskTools: true,
+      research: true,
+    });
+    assert.equal(byId.claude.capabilityTier, "task_tools");
+    assert.deepEqual(byId.codex.capabilities, {
+      completion: true,
+      taskTools: false,
+      research: false,
+    });
+    assert.equal(byId.codex.capabilityTier, "chat_drafting");
+    assert.deepEqual(byId.hermes.capabilities, {
+      completion: false,
+      taskTools: false,
+      research: false,
+    });
+    assert.equal(byId.hermes.capabilityTier, "detected_unverified");
+    assert.equal(byId.gemini.capabilityTier, "unavailable");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("auth probe exposes only bounded readiness state, never CLI account output", () => {
   const calls = [];
   const ready = probeInstalledRuntime(
@@ -193,7 +231,9 @@ test("auth probe exposes only bounded readiness state, never CLI account output"
     {
       spawnSyncImpl(executablePath, args, options) {
         calls.push({ executablePath, args, options });
-        return { status: 0, stdout: "Logged in as morgan@example.com", stderr: "" };
+        return args[0] === "--version"
+          ? { status: 0, stdout: "codex-cli 0.149.1", stderr: "" }
+          : { status: 0, stdout: "Logged in as morgan@example.com", stderr: "" };
       },
     }
   );
@@ -201,14 +241,19 @@ test("auth probe exposes only bounded readiness state, never CLI account output"
     status: "ready",
     ready: true,
     action: null,
+    completionSupported: true,
     toolExecutionSupported: false,
-    capabilityReason: "Detected, but this CLI cannot safely run CareerRat tools yet.",
+    capabilityReason:
+      "Ready for chat and drafting. Task tools and research are not verified for this CLI yet.",
   });
   assert.equal(JSON.stringify(ready).includes("morgan@example.com"), false);
-  assert.equal(calls[0].executablePath, "/safe/codex");
-  assert.deepEqual(calls[0].args, ["login", "status"]);
-  assert.equal(calls[0].options.shell, false);
-  assert.ok(calls[0].options.timeout > 0);
+  assert.equal(calls[1].executablePath, "/safe/codex");
+  assert.deepEqual(
+    calls.map(({ args }) => args),
+    [["--version"], ["login", "status"]]
+  );
+  assert.equal(calls[1].options.shell, false);
+  assert.ok(calls[1].options.timeout > 0);
 
   const signedOut = probeInstalledRuntime(
     { id: "claude", path: "/safe/claude", available: true },
@@ -223,7 +268,7 @@ test("auth probe exposes only bounded readiness state, never CLI account output"
   assert.deepEqual(signedOut, {
     status: "authentication_required",
     ready: false,
-    action: "open_terminal",
+    action: "start_sign_in",
   });
   assert.equal(JSON.stringify(signedOut).includes("secret"), false);
 });
@@ -249,28 +294,47 @@ test("Claude readiness fails closed below the verified CLI boundary version", ()
   assert.deepEqual(calls, [["--version"]]);
 });
 
-test("tool-bearing Claude runs re-verify the boundary version before model spawn", async () => {
+test("Codex readiness requires the CLI version that supports the completion capsule controls", () => {
+  const calls = [];
+  const unsupported = probeInstalledRuntime(
+    { id: "codex", path: "/safe/codex", available: true },
+    {
+      spawnSyncImpl(_path, args) {
+        calls.push(args);
+        return { status: 0, stdout: "codex-cli 0.148.0", stderr: "" };
+      },
+    }
+  );
+  assert.deepEqual(unsupported, {
+    status: "unsupported_capability",
+    ready: false,
+    action: null,
+    completionSupported: false,
+    capabilityReason: "Update Codex to 0.149.1 or newer for isolated chat and drafting.",
+  });
+  assert.deepEqual(calls, [["--version"]]);
+});
+
+test("Skill-only Claude runs are completion-only and do not require the tool boundary version", async () => {
   const repoRoot = tempRepoWithOneSkill("ingest-profile");
   let spawned = false;
   try {
-    await assert.rejects(
-      runInstalledRuntime({
-        runtime: { id: "claude", name: "Claude Code", path: "/safe/claude" },
-        prompt: "onboard",
-        skill: "ingest-profile",
-        repoRoot,
-        tools: ["Skill"],
-        spawnSyncImpl: () => ({ status: 0, stdout: "2.1.200 (Claude Code)", stderr: "" }),
-        spawnImpl() {
-          spawned = true;
-          return fakeInstalledChild({
-            stdout: JSON.stringify({ type: "result", subtype: "success", result: "bad" }),
-          });
-        },
-      }),
-      { code: RUNTIME_TOOL_PROFILE_UNSUPPORTED }
-    );
-    assert.equal(spawned, false);
+    const result = await runInstalledRuntime({
+      runtime: { id: "claude", name: "Claude Code", path: "/safe/claude" },
+      prompt: "onboard",
+      skill: "ingest-profile",
+      repoRoot,
+      tools: ["Skill"],
+      spawnSyncImpl: () => ({ status: 0, stdout: "2.1.200 (Claude Code)", stderr: "" }),
+      spawnImpl() {
+        spawned = true;
+        return fakeInstalledChild({
+          stdout: JSON.stringify({ type: "result", subtype: "success", result: "bad" }),
+        });
+      },
+    });
+    assert.equal(result.text, "bad");
+    assert.equal(spawned, true);
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
@@ -320,6 +384,24 @@ test("fixed invocation adapters pass prompts on stdin and never use a shell", ()
     codex.args.includes("--ignore-user-config"),
     "bounded app calls must not inherit unrelated user MCP servers or hooks"
   );
+  assert.ok(codex.args.includes("--ignore-rules"));
+  for (const feature of [
+    "shell_tool",
+    "unified_exec",
+    "apps",
+    "browser_use",
+    "computer_use",
+    "image_generation",
+    "multi_agent",
+    "plugins",
+    "skill_search",
+    "view_image",
+  ]) {
+    const index = codex.args.findIndex(
+      (arg, position) => arg === "--disable" && codex.args[position + 1] === feature
+    );
+    assert.ok(index >= 0, `Codex completion capsule must disable ${feature}`);
+  }
   assert.ok(codex.args.includes("--output-schema"));
   assert.equal(codex.args.at(-1), "-");
   assert.equal(codex.options.shell, false);
@@ -561,13 +643,21 @@ test("newly added installed CLIs deliver the prompt on stdin with a fixed, shell
   assert.equal(droid.options.shell, false);
 });
 
-test("Open Terminal runs only the allowlisted sign-in command on macOS", () => {
+test("runtime sign-in starts the resolved CLI directly without a shell or terminal app", () => {
   const calls = [];
-  const child = { unref() {} };
-  const result = openInstalledRuntimeTerminal(
+  const listeners = {};
+  const child = {
+    unref() {},
+    once(event, listener) {
+      listeners[event] = listener;
+    },
+    kill(signal) {
+      calls.push({ signal });
+    },
+  };
+  const result = startInstalledRuntimeSignIn(
     { id: "claude", path: "/safe/claude" },
     {
-      platform: "darwin",
       spawnImpl(command, args, options) {
         calls.push({ command, args, options });
         return child;
@@ -576,12 +666,13 @@ test("Open Terminal runs only the allowlisted sign-in command on macOS", () => {
   );
 
   assert.equal(result.signInCommand, "claude auth login");
-  assert.equal(calls[0].command, "/usr/bin/osascript");
-  assert.deepEqual(calls[0].args, [
-    "-e",
-    'tell application "Terminal" to do script "claude auth login"',
-  ]);
+  assert.equal(result.reused, false);
+  assert.equal(calls[0].command, "/safe/claude");
+  assert.deepEqual(calls[0].args, ["auth", "login"]);
   assert.equal(calls[0].options.shell, false);
+  assert.equal(calls[0].options.windowsHide, true);
+  stopInstalledRuntimeSignIns();
+  assert.deepEqual(calls.at(-1), { signal: "SIGTERM" });
 });
 
 test("installed runtime selection persists under the active private CareerRat home", () => {
@@ -1017,7 +1108,7 @@ test("buildInstalledRuntimeChildEnv retains only process/auth paths, locale, and
   });
 });
 
-test("runInstalledRuntime scrubs server secrets from both version and one-shot Claude children", async () => {
+test("runInstalledRuntime scrubs server secrets from a completion-only Claude child", async () => {
   const repoRoot = tempRepoWithOneSkill("ingest-profile");
   const env = {
     PATH: "/usr/bin",
@@ -1053,7 +1144,7 @@ test("runInstalledRuntime scrubs server secrets from both version and one-shot C
         });
       },
     });
-    assert.equal(seenEnvs.length, 2);
+    assert.equal(seenEnvs.length, 1);
     for (const childEnv of seenEnvs) {
       assert.equal(childEnv.HOME, "/Users/morgan");
       assert.equal(childEnv.USER, "morgan");
@@ -1210,7 +1301,7 @@ test("runInstalledRuntime rejects broad Glob/Grep tools before spawning Claude",
   }
 });
 
-test("runInstalledRuntime (claude, no skill): uses isolated inline settings at the caller cwd", async () => {
+test("runInstalledRuntime (claude, no skill): uses an ephemeral completion cwd", async () => {
   const root = tempRoot();
   const executablePath = join(root, "fake-claude-plain");
   writeFileSync(
@@ -1240,7 +1331,9 @@ process.stdin.on("end", () => {
     // macOS resolves the tmp dir's /var symlink to /private/var inside the
     // child (process.cwd() reports the real path) — compare realpaths rather
     // than the raw strings so this isn't platform-flaky.
-    assert.equal(realpathSync(data.cwd), realpathSync(root));
+    assert.notEqual(data.cwd, realpathSync(root));
+    assert.match(data.cwd, /careerrat-task-cwd-/);
+    assert.equal(existsSync(data.cwd), false);
     assert.equal(data.usedSafeMode, false);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1319,10 +1412,10 @@ test("runInstalledRuntime: claude + the same restricted chat tool profile is una
     const args = spawnCalls[0].args;
     const toolsIdx = args.indexOf("--tools");
     assert.ok(toolsIdx >= 0, "expected --tools in argv");
-    assert.equal(args[toolsIdx + 1], "WebSearch,Skill");
+    assert.equal(args[toolsIdx + 1], "WebSearch");
     const allowed = args[args.indexOf("--allowedTools") + 1];
     assert.match(allowed, /WebSearch/);
-    assert.match(allowed, /Skill\(research-company\)/);
+    assert.doesNotMatch(allowed, /Skill\(research-company\)/);
     assert.match(allowed, /mcp__careerrat_public_web__fetch/);
     assert.doesNotMatch(allowed, /WebFetch/);
     assert.equal(result.text, "ok");
@@ -1331,20 +1424,93 @@ test("runInstalledRuntime: claude + the same restricted chat tool profile is una
   }
 });
 
-test("runInstalledRuntime: codex rejects the former app-safe profile before spawn", async () => {
+test("runInstalledRuntime: codex still rejects a local-read tool profile before spawn", async () => {
   let spawned = false;
   await assert.rejects(
     runInstalledRuntime({
       runtime: { id: "codex", path: "/safe/codex" },
       prompt: "evaluate this job",
       skill: "evaluate-job",
-      tools: ["Skill"],
+      tools: ["Read", "Skill"],
       spawnImpl() {
         spawned = true;
         return fakeInstalledChild();
       },
     }),
     { code: RUNTIME_TOOL_PROFILE_UNSUPPORTED }
+  );
+  assert.equal(spawned, false);
+});
+
+test("runInstalledRuntime treats Skill-only Codex work as an isolated completion", async () => {
+  const repoRoot = tempRepoWithOneSkill(
+    "answer-question",
+    "Answer only from the supplied evidence. Marker: CAREERRAT_SKILL_CONTEXT.\n"
+  );
+  const calls = [];
+  let writtenPrompt = "";
+  let isolatedAtSpawn = false;
+  let spawnedCwd = null;
+  try {
+    const result = await runInstalledRuntime({
+      runtime: { id: "codex", name: "Codex", path: "/safe/codex" },
+      prompt: "Draft the answer.",
+      skill: "answer-question",
+      repoRoot,
+      cwd: repoRoot,
+      tools: ["Skill"],
+      spawnImpl(command, args, options) {
+        calls.push({ command, args, options });
+        spawnedCwd = options.cwd;
+        isolatedAtSpawn = realpathSync(options.cwd) !== realpathSync(repoRoot);
+        const child = fakeInstalledChild();
+        child.stdin.end = (value) => {
+          writtenPrompt = String(value);
+          queueMicrotask(() => {
+            child.stdout.emit(
+              "data",
+              Buffer.from(
+                ndjson([
+                  {
+                    type: "item.completed",
+                    item: { type: "agent_message", text: "bounded answer" },
+                  },
+                  { type: "turn.completed", usage: { input_tokens: 10, output_tokens: 2 } },
+                ])
+              )
+            );
+            child.emit("close", 0, null);
+          });
+        };
+        return child;
+      },
+    });
+    assert.equal(result.text, "bounded answer");
+    assert.equal(calls.length, 1);
+    assert.equal(isolatedAtSpawn, true);
+    assert.equal(existsSync(spawnedCwd), false);
+    assert.equal(calls[0].args.includes("--ignore-user-config"), true);
+    assert.match(writtenPrompt, /CAREERRAT_SKILL_CONTEXT/);
+    assert.match(writtenPrompt, /Draft the answer\./);
+    assert.equal(writtenPrompt.includes(repoRoot), false);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("runInstalledRuntime rejects an unverified completion adapter before spawn", async () => {
+  let spawned = false;
+  await assert.rejects(
+    runInstalledRuntime({
+      runtime: { id: "hermes", name: "Hermes Agent", path: "/safe/hermes" },
+      prompt: "Draft an answer.",
+      tools: [],
+      spawnImpl() {
+        spawned = true;
+        return fakeInstalledChild();
+      },
+    }),
+    { code: "RUNTIME_COMPLETION_UNSUPPORTED" }
   );
   assert.equal(spawned, false);
 });

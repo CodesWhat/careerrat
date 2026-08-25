@@ -41,8 +41,23 @@ function findElements(node, predicate, matches = []) {
 }
 
 const ENGINES = [
-  { id: "claude", name: "Claude Code", detected: true, ready: true, recommended: true },
-  { id: "codex", name: "Codex", detected: true, ready: true },
+  {
+    id: "claude",
+    name: "Claude Code",
+    detected: true,
+    ready: true,
+    selectable: true,
+    toolExecutionSupported: true,
+    recommended: true,
+  },
+  {
+    id: "codex",
+    name: "Codex",
+    detected: true,
+    ready: true,
+    selectable: false,
+    toolExecutionSupported: false,
+  },
 ];
 
 const MESSAGES = [
@@ -115,20 +130,35 @@ describe("FirstRunExperience", () => {
     const tree = FirstRunExperience({
       stage: "engine",
       agentName: "Paul",
-      engines: ENGINES,
-      onSelectEngine,
+      engines: ENGINES.map((engine) => ({
+        ...engine,
+        selected: engine.id === "claude",
+      })),
+      onChooseEngine: onSelectEngine,
+      onStartInterview: vi.fn(),
     });
     const html = renderToStaticMarkup(tree);
 
-    expect(html).toContain("Choose the AI that powers Paul");
+    expect(html).toContain("Pick your engine.");
+    expect(html).toContain("We found 2 AI tools on this computer.");
+    expect(html).toContain("Each tool shows the capabilities CareerRat has actually verified.");
     expect(html).toContain("Claude Code");
-    expect(html).toContain("Ready · detected ✓");
-    expect(html).toContain("RECOMMENDED");
-    expect(html).toContain("no account, no CareerRat server");
+    expect(html).toContain("READY FOR TASK TOOLS AND RESEARCH");
+    expect(html).toContain("DETECTED NOT VERIFIED");
+    expect(html).not.toMatch(/not yet supported/i);
+    expect(html).toContain('<fieldset class="cf-first-run__engine-choices">');
+    expect(html).toContain(
+      '<legend class="cf-first-run__engine-legend">Detected AI tools</legend>'
+    );
+    expect(html).toContain("Start the interview");
+    expect(html).not.toContain("RECOMMENDED");
 
-    const choices = tree.props.children[2];
-    choices.props.children[1].props.onClick();
-    expect(onSelectEngine).toHaveBeenCalledWith("codex");
+    const choice = findElement(
+      tree,
+      (node) => node.type?.name === "DetectedEngine" && node.props.engine.id === "claude"
+    );
+    choice.type(choice.props).props.onClick();
+    expect(onSelectEngine).toHaveBeenCalledWith("claude");
   });
 
   it("marks the configured engine as selected without a separate accent tile", async () => {
@@ -143,7 +173,7 @@ describe("FirstRunExperience", () => {
     expect(html).toContain('aria-pressed="true"');
   });
 
-  it("keeps first run to four compact icon choices and leaves the full list in settings", async () => {
+  it("collapses every missing runtime under a truthful not-installed inventory", async () => {
     const { FirstRunExperience } = await loadFirstRun();
     const html = renderToStaticMarkup(
       <FirstRunExperience
@@ -152,18 +182,23 @@ describe("FirstRunExperience", () => {
           ...ENGINES,
           { id: "gemini", name: "Gemini CLI", detected: false, ready: false },
           { id: "opencode", name: "OpenCode", detected: false, ready: false },
-          { id: "copilot", name: "GitHub Copilot CLI", detected: false, ready: false },
+          {
+            id: "copilot",
+            name: "GitHub Copilot CLI",
+            detected: false,
+            ready: false,
+          },
         ]}
       />
     );
 
     expect(html).toContain("Claude Code");
     expect(html).toContain("Codex");
+    expect(html).toContain("NOT INSTALLED · 3");
     expect(html).toContain("Gemini CLI");
     expect(html).toContain("OpenCode");
-    expect(html).not.toContain("GitHub Copilot CLI");
-    expect(html.match(/cf-runtime-icon/g)).toHaveLength(4);
-    expect(html).toContain("See all 5 in settings");
+    expect(html).toContain("GitHub Copilot CLI");
+    expect(html).toContain("Install guide");
   });
 
   it("keeps sign-in-required engines inactive and routes setup through Settings", async () => {
@@ -180,8 +215,10 @@ describe("FirstRunExperience", () => {
           name: "Claude Code",
           detected: true,
           ready: false,
+          selectable: false,
+          toolExecutionSupported: true,
           status: "authentication_required",
-          action: "open_terminal",
+          action: "start_sign_in",
         },
         {
           id: "codex",
@@ -198,27 +235,53 @@ describe("FirstRunExperience", () => {
     });
     const html = renderToStaticMarkup(tree);
 
-    expect(html).toContain("Choose the AI that powers Maya");
-    expect(html).toContain("Sign-in needed");
-    expect(html).not.toContain("Open Terminal to sign in");
-    expect(html).toContain("Not found");
-    expect(html).toContain("Set up in settings");
+    expect(html).toContain("Pick your engine.");
+    expect(html).toContain("AUTH REQUIRED");
+    expect(html).toContain("Detected on this computer. Sign in before CareerRat can use it.");
+    expect(html).not.toContain("account already signed in");
+    expect(html).toContain("Open setup");
+    expect(html).toContain("NOT INSTALLED · 1");
+    expect(html).toContain("Install guide");
     expect(html).toContain("Runtime check failed.");
-    expect(html).toContain("Open settings");
+    expect(html).toContain("Check again");
 
-    const setup = findElement(
+    const claude = findElement(
       tree,
-      (node) => node.type === "button" && textOf(node) === "Set up in settings"
+      (node) => node.type?.name === "DetectedEngine" && node.props.engine.id === "claude"
     );
-    const settings = findElement(
-      tree,
-      (node) => node.type === "button" && textOf(node) === "Open settings"
+    const claudeView = claude.type(claude.props);
+    const retry = findElement(
+      claudeView,
+      (node) => node.type === "button" && textOf(node) === "Check again"
     );
-    setup.props.onClick();
-    settings.props.onClick();
-    expect(onRetryEngine).not.toHaveBeenCalled();
-    expect(onOpenSettings).toHaveBeenCalledTimes(2);
+    const openSetup = findElement(
+      claudeView,
+      (node) => node.type === "button" && textOf(node) === "Open setup"
+    );
+    expect(claudeView.props["aria-disabled"]).toBeUndefined();
+    openSetup.props.onClick();
+    retry.props.onClick();
+    expect(onRetryEngine).toHaveBeenCalledWith("claude");
+    expect(onOpenSettings).toHaveBeenCalledWith("claude");
     expect(onSelectEngine).not.toHaveBeenCalled();
+  });
+
+  it("retries inventory discovery from the empty state", async () => {
+    const { FirstRunExperience } = await loadFirstRun();
+    const onRefreshEngines = vi.fn();
+    const tree = FirstRunExperience({
+      stage: "engine",
+      engines: [],
+      onRefreshEngines,
+    });
+    const checkAgain = findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "Check again"
+    );
+
+    expect(checkAgain).not.toBeNull();
+    checkAgain.props.onClick();
+    expect(onRefreshEngines).toHaveBeenCalledOnce();
   });
 
   it("keeps a detected runtime without a secure tool boundary visible but not selectable", async () => {
@@ -236,7 +299,7 @@ describe("FirstRunExperience", () => {
           capabilityReason: "Detected, but CareerRat cannot safely use this CLI for tool runs yet.",
         },
       ],
-      onSelectEngine,
+      onChooseEngine: onSelectEngine,
     });
     const html = renderToStaticMarkup(tree);
 
@@ -245,6 +308,127 @@ describe("FirstRunExperience", () => {
       findElement(tree, (node) => node.type === "button" && textOf(node).includes("Codex"))
     ).toBe(null);
     expect(onSelectEngine).not.toHaveBeenCalled();
+  });
+
+  it("shows chat-only providers as useful without claiming task-tool support", async () => {
+    const { FirstRunExperience } = await loadFirstRun();
+    const tree = FirstRunExperience({
+      stage: "engine",
+      engines: [
+        {
+          id: "codex",
+          name: "Codex",
+          detected: true,
+          ready: true,
+          selectable: true,
+          presentationState: "chat_drafting",
+          presentationLabel: "Ready for chat and drafting",
+        },
+      ],
+    });
+    const html = renderToStaticMarkup(tree);
+
+    expect(html).toContain("READY FOR CHAT AND DRAFTING");
+    expect(html).toContain("Task tools and research are not verified for this provider yet.");
+    expect(html).not.toMatch(/unsupported/i);
+  });
+
+  it("keeps custom commands unavailable and collects CareerRat AI access interest inline", async () => {
+    const { FirstRunExperience } = await loadFirstRun();
+    const onHostedInterestStart = vi.fn();
+    const idleTree = FirstRunExperience({
+      stage: "engine",
+      engines: ENGINES,
+      hostedInterest: { status: "idle", email: "", error: null },
+      onHostedInterestStart,
+    });
+    const tree = idleTree;
+    const html = renderToStaticMarkup(tree);
+    const hostedCard = findElement(tree, (node) => node.type?.name === "HostedInterestCard");
+    const hostedCardView = hostedCard.type(hostedCard.props);
+
+    expect(html).toContain("Custom command");
+    expect(html).toContain("Unavailable until CareerRat can verify its tool boundary");
+    expect(html).toContain("CareerRat AI");
+    expect(html).toContain("COMING SOON");
+    const requestAccess = findElement(
+      hostedCardView,
+      (node) => node.type === "button" && textOf(node) === "Request access"
+    );
+    expect(requestAccess.props.disabled).not.toBe(true);
+    requestAccess.props.onClick();
+    expect(onHostedInterestStart).toHaveBeenCalledOnce();
+
+    const onHostedInterestChange = vi.fn();
+    const onHostedInterestSubmit = vi.fn();
+    const editingTree = FirstRunExperience({
+      stage: "engine",
+      engines: ENGINES,
+      hostedInterest: {
+        status: "error",
+        email: "person@example.com",
+        error: "Try again.",
+      },
+      onHostedInterestChange,
+      onHostedInterestSubmit,
+    });
+    const editingCard = findElement(
+      editingTree,
+      (node) => node.type?.name === "HostedInterestCard"
+    );
+    const editingCardView = editingCard.type(editingCard.props);
+    const input = findElement(
+      editingCardView,
+      (node) => node.type === "input" && node.props.type === "email"
+    );
+    const form = findElement(
+      editingCardView,
+      (node) => node.type === "form" && node.props.className === "cf-first-run__hosted-form"
+    );
+    expect(input.props.value).toBe("person@example.com");
+    expect(renderToStaticMarkup(editingTree)).toContain("Try again.");
+    input.props.onChange({ target: { value: "next@example.com" } });
+    form.props.onSubmit({ preventDefault: vi.fn() });
+    expect(onHostedInterestChange).toHaveBeenCalledWith("next@example.com");
+    expect(onHostedInterestSubmit).toHaveBeenCalledOnce();
+
+    const requestedHtml = renderToStaticMarkup(
+      <FirstRunExperience
+        stage="engine"
+        engines={ENGINES}
+        hostedInterest={{ status: "requested", email: "", error: null }}
+      />
+    );
+    expect(requestedHtml).toContain("REQUESTED ✓");
+    expect(requestedHtml).toContain("Thanks, we’ll email you when it’s ready.");
+  });
+
+  it("requires a selected safe runtime before the interview can start", async () => {
+    const { FirstRunExperience } = await loadFirstRun();
+    const onStartInterview = vi.fn();
+    const withoutSelection = FirstRunExperience({
+      stage: "engine",
+      engines: ENGINES,
+      onStartInterview,
+    });
+    const disabledStart = findElement(
+      withoutSelection,
+      (node) => node.type === "button" && textOf(node).includes("Start the interview")
+    );
+    expect(disabledStart.props.disabled).toBe(true);
+
+    const withSelection = FirstRunExperience({
+      stage: "engine",
+      engines: [{ ...ENGINES[0], selected: true }],
+      onStartInterview,
+    });
+    const enabledStart = findElement(
+      withSelection,
+      (node) => node.type === "button" && textOf(node).includes("Start the interview")
+    );
+    expect(enabledStart.props.disabled).toBe(false);
+    enabledStart.props.onClick();
+    expect(onStartInterview).toHaveBeenCalledWith("claude");
   });
 
   it("renders the staged chat and What Paul knows from persisted setup data", async () => {
@@ -368,7 +552,12 @@ describe("FirstRunExperience", () => {
     };
     const onCancel = vi.fn();
     const onSave = vi.fn();
-    const tree = KnowledgeSectionEditor({ agentName: "Maya", item, onCancel, onSave });
+    const tree = KnowledgeSectionEditor({
+      agentName: "Maya",
+      item,
+      onCancel,
+      onSave,
+    });
     const html = renderToStaticMarkup(tree);
 
     expect(html).toContain('role="dialog"');
@@ -393,6 +582,44 @@ describe("FirstRunExperience", () => {
     expect(onSave).toHaveBeenCalledWith(item, { titles: "Principal Engineer" });
   });
 
+  it("renders remote eligibility as one select and submits its chosen scope", async () => {
+    const { KnowledgeSectionEditor } = await loadFirstRun();
+    const item = {
+      id: "quickFacts",
+      label: "Quick facts",
+      editor: {
+        fields: [
+          {
+            id: "remoteScope",
+            label: "Remote job eligibility",
+            type: "select",
+            value: "home-country",
+            options: [
+              { value: "off", label: "Not open to remote roles" },
+              { value: "home-country", label: "Remote within my home country" },
+              { value: "worldwide", label: "Remote worldwide" },
+            ],
+          },
+        ],
+      },
+    };
+    const onSave = vi.fn();
+    const tree = KnowledgeSectionEditor({ item, onSave });
+    const html = renderToStaticMarkup(tree);
+    const form = findElement(tree, (node) => node.type === "form");
+
+    expect(html).toContain("Remote job eligibility");
+    expect(html).toContain("Remote within my home country");
+    expect(html).toContain("Remote worldwide");
+    form.props.onSubmit({
+      preventDefault: vi.fn(),
+      currentTarget: {
+        elements: { namedItem: () => ({ value: "worldwide" }) },
+      },
+    });
+    expect(onSave).toHaveBeenCalledWith(item, { remoteScope: "worldwide" });
+  });
+
   it("accepts resume files from the conversation drop target and Resume section picker", async () => {
     const { FirstRunChat } = await loadFirstRun();
     const onResumeFile = vi.fn();
@@ -402,7 +629,16 @@ describe("FirstRunExperience", () => {
       label: "RESUME",
       status: "pending",
       lines: [],
-      editor: { fields: [{ id: "resumeText", label: "Resume text", type: "textarea", value: "" }] },
+      editor: {
+        fields: [
+          {
+            id: "resumeText",
+            label: "Resume text",
+            type: "textarea",
+            value: "",
+          },
+        ],
+      },
     };
     const tree = FirstRunChat({
       agentName: "Paul",
@@ -416,7 +652,10 @@ describe("FirstRunExperience", () => {
     const file = { name: "resume.pdf", type: "application/pdf" };
     const preventDefault = vi.fn();
     conversation.props.onDragOver({ preventDefault });
-    conversation.props.onDrop({ preventDefault, dataTransfer: { files: [file] } });
+    conversation.props.onDrop({
+      preventDefault,
+      dataTransfer: { files: [file] },
+    });
 
     const panelElement = tree.props.children[2];
     const panel = panelElement.type(panelElement.props);
@@ -508,7 +747,9 @@ describe("FirstRunExperience", () => {
       center,
       (node) => node.type === "form" && node.props.className === "cf-first-run__composer"
     );
-    composer.props.children[0].props.onChange({ target: { value: "new answer" } });
+    composer.props.children[0].props.onChange({
+      target: { value: "new answer" },
+    });
     composer.props.onSubmit({ preventDefault: vi.fn() });
     expect(onDraftChange).toHaveBeenCalledWith("new answer");
     expect(onSubmitAnswer).toHaveBeenCalledWith("platform roles");
@@ -528,10 +769,8 @@ describe("FirstRunExperience", () => {
     expect(css).toContain(".cf-first-run__file-action");
     expect(css).toMatch(/\.cf-first-run__assistant-bubble\s*\{[^}]*white-space:\s*pre-wrap/s);
     expect(css).not.toContain(".cf-first-run__confirmation-actions");
-    expect(css).toMatch(
-      /\.cf-first-run__engine-choices\s*\{[^}]*grid-template-columns:\s*repeat\(4,/s
-    );
-    expect(css).toMatch(/\.cf-first-run__engine-choice\s*\{[^}]*min-height:\s*96px/s);
+    expect(css).toMatch(/\.cf-first-run__engine-content\s*\{[^}]*max-width:\s*1060px/s);
+    expect(css).toMatch(/\.cf-first-run__engine-choice\s*\{[^}]*min-height:\s*84px/s);
     expect(css).toMatch(/\.cf-first-run__engine-choice\s*\{[^}]*cursor:\s*default/s);
     expect(css).toMatch(/button\.cf-first-run__engine-choice\s*\{[^}]*cursor:\s*pointer/s);
     expect(css).toMatch(
@@ -542,5 +781,12 @@ describe("FirstRunExperience", () => {
     );
     expect(css).toMatch(/\.cf-first-run-shell__body\s*\{[^}]*height:\s*calc\(100dvh - 52px\)/s);
     expect(css).toMatch(/\.cf-first-run-shell__body\s*\{[^}]*padding:\s*0 20px 20px/s);
+    expect(css).toMatch(
+      /\.cf-first-run__user-bubble\s*\{[^}]*background:\s*var\(--cf-message-user-surface\)[^}]*color:\s*var\(--cf-message-user-foreground\)/s
+    );
+    expect(css).toMatch(
+      /\.cf-first-run__engine \.cf-first-run__engine-start\s*\{[^}]*color:\s*var\(--paper\)/s
+    );
+    expect(css).toMatch(/\.cf-first-run__engine-capability\s*\{[^}]*color:\s*var\(--ink-soft\)/s);
   });
 });

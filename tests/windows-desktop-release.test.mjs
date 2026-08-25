@@ -86,7 +86,7 @@ test("the staged and packaged trees have an explicit Agent SDK exclusion", async
   assert.match(builder, /!@anthropic-ai\/claude-agent-sdk\/\*\*/);
 });
 
-test("Electron builds a fixed desktop Windows x64 NSIS installer with the rat icon", async () => {
+test("Electron builds a fixed desktop Windows x64 NSIS installer with the selected text icon", async () => {
   const [builder, pkg] = await Promise.all([
     text("apps/desktop/electron-builder.yml"),
     json("apps/desktop/package.json"),
@@ -192,6 +192,27 @@ test("tag release prepares one draft and requires both macOS and Windows artifac
   assert.match(publish, /needs:\s*\[[^\]]*build-notarize-upload[^\]]*build-windows-upload[^\]]*\]/);
   assert.match(publish, /endswith\("\.dmg"\)/);
   assert.match(publish, /endswith\("\.exe"\)/);
+});
+
+test("draft preparation tolerates bounded release-list consistency lag", async () => {
+  const release = await text(".github/workflows/desktop-release.yml");
+  const prepare = release.slice(
+    release.indexOf("  prepare-draft-release:"),
+    release.indexOf("  build-notarize-upload:")
+  );
+
+  assert.match(prepare, /for attempt in \{1\.\.[3-9]\}; do/);
+  assert.match(prepare, /final_count="\$\(jq 'length' <<<"\$final_matches"\)"/);
+  assert.match(
+    prepare,
+    /if \[ "\$final_count" -gt 1 \]; then[\s\S]*refusing to choose one[\s\S]*exit 1/
+  );
+  assert.match(prepare, /if \[ "\$final_count" -eq 1 \]; then[\s\S]*break/);
+  assert.match(prepare, /sleep [^\n]+/);
+  assert.match(
+    prepare,
+    /if \[ "\$final_count" -ne 1 \] \|\|[\s\S]*\.draft[\s\S]*not one exact draft/
+  );
 });
 
 test("an unsigned Windows installer can never reach a public release", async () => {

@@ -59,7 +59,11 @@ describe("buildSetupItemViewModels", () => {
   });
 
   it("marks only the first NOT-done item after a run of done items as UP NEXT", () => {
-    const items = buildSetupItemViewModels({ engine: true, resume: true, roles: false });
+    const items = buildSetupItemViewModels({
+      engine: true,
+      resume: true,
+      roles: false,
+    });
     const roles = items.find((item) => item.key === "roles");
     const companies = items.find((item) => item.key === "companies");
     expect(roles.isNext).toBe(true);
@@ -92,7 +96,10 @@ describe("setupProgressFromState", () => {
         ],
       },
     };
-    expect(setupProgressFromState(state)).toEqual({ engine: true, resume: false });
+    expect(setupProgressFromState(state)).toEqual({
+      engine: true,
+      resume: false,
+    });
   });
 
   it("returns an empty object when setupProgress.items is missing or not an array", () => {
@@ -298,7 +305,11 @@ describe("setupDisclosureRows", () => {
         value:
           "Jamie Rivera · jamie@example.com · 555-0100 · Baltimore, MD · Remote · $180,000 minimum base",
       },
-      { key: "authorization", label: "Work authorization", value: "Authorized" },
+      {
+        key: "authorization",
+        label: "Work authorization",
+        value: "Authorized",
+      },
     ]);
   });
 
@@ -359,7 +370,9 @@ describe("engineDetailLine", () => {
 
   it("renders the raw command shape for the custom runtime, or null without one", () => {
     expect(
-      engineDetailLine({ runtime: { id: "custom", commandShape: "~/bin/my-agent --chat" } })
+      engineDetailLine({
+        runtime: { id: "custom", commandShape: "~/bin/my-agent --chat" },
+      })
     ).toBe("~/bin/my-agent --chat");
     expect(engineDetailLine({ runtime: { id: "custom", commandShape: null } })).toBeNull();
   });
@@ -369,7 +382,10 @@ describe("resumeDetailLine", () => {
   it("returns null when no source résumé is present, regardless of claim count", () => {
     expect(
       resumeDetailLine({
-        state: { sourceResumePresent: false, data: { evidence: { claims: [1] } } },
+        state: {
+          sourceResumePresent: false,
+          data: { evidence: { claims: [1] } },
+        },
       })
     ).toBeNull();
   });
@@ -381,7 +397,9 @@ describe("resumeDetailLine", () => {
           sourceResumePresent: false,
           data: {
             "form-defaults": {
-              declined_fields: { resume: { declined_at: "2026-08-10T12:00:00Z" } },
+              declined_fields: {
+                resume: { declined_at: "2026-08-10T12:00:00Z" },
+              },
             },
           },
         },
@@ -397,7 +415,9 @@ describe("resumeDetailLine", () => {
           files: [{ name: "form-defaults", exists: false }],
           data: {
             "form-defaults": {
-              declined_fields: { resume: { declined_at: "2026-08-10T12:00:00Z" } },
+              declined_fields: {
+                resume: { declined_at: "2026-08-10T12:00:00Z" },
+              },
             },
           },
         },
@@ -412,12 +432,18 @@ describe("resumeDetailLine", () => {
   it("pluralizes the claim count when present", () => {
     expect(
       resumeDetailLine({
-        state: { sourceResumePresent: true, data: { evidence: { claims: [1] } } },
+        state: {
+          sourceResumePresent: true,
+          data: { evidence: { claims: [1] } },
+        },
       })
     ).toBe("1 claim extracted");
     expect(
       resumeDetailLine({
-        state: { sourceResumePresent: true, data: { evidence: { claims: [1, 2, 3] } } },
+        state: {
+          sourceResumePresent: true,
+          data: { evidence: { claims: [1, 2, 3] } },
+        },
       })
     ).toBe("3 claims extracted");
   });
@@ -439,7 +465,9 @@ describe("rolesDetailLine", () => {
     };
     expect(rolesDetailLine({ state })).toBe("2 buckets · 3 titles");
 
-    const singleState = { data: { targeting: { role_buckets: [{ titles: ["A"] }] } } };
+    const singleState = {
+      data: { targeting: { role_buckets: [{ titles: ["A"] }] } },
+    };
     expect(rolesDetailLine({ state: singleState })).toBe("1 bucket · 1 title");
   });
 
@@ -459,7 +487,9 @@ describe("companiesDetailLine", () => {
   it("returns null with no tracked sources, else makes their scope explicit", () => {
     expect(companiesDetailLine({ state: {} })).toBeNull();
     expect(
-      companiesDetailLine({ state: { data: { targeting: { tracked_companies: ["Stripe"] } } } })
+      companiesDetailLine({
+        state: { data: { targeting: { tracked_companies: ["Stripe"] } } },
+      })
     ).toBe("1 tracked source · broad discovery on");
   });
 
@@ -502,11 +532,15 @@ describe("guardrailsDetailLine", () => {
   it("returns null with no cut signals, else pluralized '<n> dealbreaker(s)'", () => {
     expect(guardrailsDetailLine({ state: {} })).toBeNull();
     expect(
-      guardrailsDetailLine({ state: { data: { targeting: { cut_signals: ["Below $200K"] } } } })
+      guardrailsDetailLine({
+        state: { data: { targeting: { cut_signals: ["Below $200K"] } } },
+      })
     ).toBe("1 dealbreaker");
     expect(
       guardrailsDetailLine({
-        state: { data: { targeting: { cut_signals: ["Below $200K", "No remote"] } } },
+        state: {
+          data: { targeting: { cut_signals: ["Below $200K", "No remote"] } },
+        },
       })
     ).toBe("2 dealbreakers");
   });
@@ -549,7 +583,9 @@ describe("quickFactsDetailLine", () => {
   it("shows location modes with the missing or saved minimum base", () => {
     expect(
       quickFactsDetailLine({
-        state: { data: { profile: { location: { remote: true, onsite: true } } } },
+        state: {
+          data: { profile: { location: { remote: true, onsite: true } } },
+        },
       })
     ).toBe("Remote · On-site · Add minimum base");
     expect(
@@ -578,6 +614,27 @@ describe("quickFactsDetailLine", () => {
     ).toBe("Remote $175K floor · Hybrid $190K floor");
   });
 
+  it("labels worldwide remote eligibility without changing hybrid or on-site locality", () => {
+    expect(
+      quickFactsDetailLine({
+        state: {
+          data: {
+            profile: {
+              location: {
+                home: "New York, NY",
+                remote: true,
+                remote_scope: "worldwide",
+                hybrid: true,
+                onsite: true,
+              },
+              compensation: { minimum_base: 180000 },
+            },
+          },
+        },
+      })
+    ).toBe("Remote worldwide · Hybrid · On-site · $180K floor");
+  });
+
   it("Bug 4: returns null when state.files marks profile.yml as not existing", () => {
     expect(
       quickFactsDetailLine({
@@ -595,7 +652,9 @@ describe("authorizationDetailLine", () => {
     expect(authorizationDetailLine({ state: {} })).toBeNull();
     expect(
       authorizationDetailLine({
-        state: { data: { profile: { authorization: { work_authorized: false } } } },
+        state: {
+          data: { profile: { authorization: { work_authorized: false } } },
+        },
       })
     ).toBeNull();
   });
@@ -603,7 +662,9 @@ describe("authorizationDetailLine", () => {
   it("returns 'Declined' when declined_fields.authorization is recorded, regardless of the answer", () => {
     expect(
       authorizationDetailLine({
-        state: { data: { "form-defaults": { declined_fields: { authorization: {} } } } },
+        state: {
+          data: { "form-defaults": { declined_fields: { authorization: {} } } },
+        },
       })
     ).toBe("Declined");
   });
@@ -611,12 +672,16 @@ describe("authorizationDetailLine", () => {
   it("returns 'Authorized' or 'Needs sponsorship' from the profile answer", () => {
     expect(
       authorizationDetailLine({
-        state: { data: { profile: { authorization: { work_authorized: true } } } },
+        state: {
+          data: { profile: { authorization: { work_authorized: true } } },
+        },
       })
     ).toBe("Authorized");
     expect(
       authorizationDetailLine({
-        state: { data: { profile: { authorization: { requires_sponsorship: true } } } },
+        state: {
+          data: { profile: { authorization: { requires_sponsorship: true } } },
+        },
       })
     ).toBe("Needs sponsorship");
   });
@@ -647,7 +712,9 @@ describe("authorizationDetailLine", () => {
 describe("detailLineFor", () => {
   it("dispatches to the matching builder by key", () => {
     expect(
-      detailLineFor("companies", { state: { data: { targeting: { tracked_companies: ["A"] } } } })
+      detailLineFor("companies", {
+        state: { data: { targeting: { tracked_companies: ["A"] } } },
+      })
     ).toBe("1 tracked source · broad discovery on");
   });
 

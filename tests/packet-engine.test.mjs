@@ -615,6 +615,8 @@ test("generatePacket reports one plain-language action per required unresolved a
   assert.equal(result.manifest.gapCount, 3);
   assert.equal(result.manifest.warnings.length, 1);
   assert.match(result.manifest.warnings[0].message, /skills omitted/i);
+  assert.deepEqual(result.manifest.answerLineage.answeredQuestionIds, []);
+  assert.deepEqual(result.manifest.answerLineage.skippedQuestionIds, ["preferences"]);
 });
 
 test("generatePacket keeps an unknown required yes-no answer reviewable when its NEEDS YOU copy names the choices", async () => {

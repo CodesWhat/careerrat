@@ -147,6 +147,8 @@
             }
           },
           "link":   { "type": ["string", "null"] },
+          "statusUrl": { "type": ["string", "null"], "description": "Candidate-supplied signed-in ATS application dashboard URL used only by the consent-gated status polling controller." },
+          "statusPlatform": { "type": ["string", "null"], "enum": ["greenhouse", "workday", "ashby", "lever", null] },
           "domain": { "type": ["string", "null"] },
           "channel": { "type": ["string", "null"], "enum": ["board", "linkedin", "portal", "referral", "recruiter", null] },
           "artifacts": {

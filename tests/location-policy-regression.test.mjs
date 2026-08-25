@@ -170,3 +170,44 @@ test("NYC-only local scope accepts the metro and rejects other US cities", () =>
     "Boston Local Corp",
   ]);
 });
+
+test("worldwide remote scope keeps remote roles globally while local work stays NYC-only", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "NYC",
+      remote: true,
+      remote_scope: "worldwide",
+      hybrid: true,
+      onsite: true,
+      relocation: [],
+    },
+  };
+  const result = qualifyByLocation(profile, [
+    offer("remote-us-worldwide", "Remote US Worldwide", "Remote - United States"),
+    offer("remote-emea-worldwide", "Remote EMEA Worldwide", "Remote - EMEA"),
+    offer("remote-anywhere-worldwide", "Remote Anywhere Worldwide", "Remote - Anywhere"),
+    offer("nyc-hybrid-worldwide", "NYC Hybrid Worldwide", "New York, NY (Hybrid)"),
+    offer("nyc-onsite-worldwide", "NYC Onsite Worldwide", "New York, NY (On-site)"),
+    offer("boston-hybrid-worldwide", "Boston Hybrid Worldwide", "Boston, MA (Hybrid)"),
+    offer(
+      "london-remote-friendly-hybrid-worldwide",
+      "London Remote-Friendly Hybrid Worldwide",
+      "London, UK (Remote-friendly hybrid)"
+    ),
+    offer("berlin-onsite-worldwide", "Berlin Onsite Worldwide", "Berlin, Germany (On-site)"),
+  ]);
+
+  assert.deepEqual(result.kept.map((row) => row.company).sort(), [
+    "NYC Hybrid Worldwide",
+    "NYC Onsite Worldwide",
+    "Remote Anywhere Worldwide",
+    "Remote EMEA Worldwide",
+    "Remote US Worldwide",
+  ]);
+  assert.deepEqual(result.filteredLocation.map((row) => row.company).sort(), [
+    "Berlin Onsite Worldwide",
+    "Boston Hybrid Worldwide",
+    "London Remote-Friendly Hybrid Worldwide",
+  ]);
+});

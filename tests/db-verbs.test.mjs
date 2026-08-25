@@ -203,7 +203,12 @@ test("appSetStatus: staying in 'interview' while advancing to the next round (cl
   seedFixture(repoRoot);
   const db = openDb({ repoRoot });
 
-  appSetStatus({ repoRoot, id: "app-next-round-booked", to: "interview", clearInterview: true });
+  appSetStatus({
+    repoRoot,
+    id: "app-next-round-booked",
+    to: "interview",
+    clearInterview: true,
+  });
 
   const row = db.prepare("SELECT data FROM applications WHERE id = ?").get("app-next-round-booked");
   const app = JSON.parse(row.data);
@@ -265,8 +270,18 @@ test("a pre-existing application row with role: null does not wedge later outcom
       {
         meta: {},
         applications: [
-          { id: "app-null-role", company: "Acme", role: null, status: "applied" },
-          { id: "app-valid-role", company: "Globex", role: "Engineer", status: "applied" },
+          {
+            id: "app-null-role",
+            company: "Acme",
+            role: null,
+            status: "applied",
+          },
+          {
+            id: "app-valid-role",
+            company: "Globex",
+            role: "Engineer",
+            status: "applied",
+          },
         ],
         sourced: [],
         sources: [],
@@ -278,7 +293,11 @@ test("a pre-existing application row with role: null does not wedge later outcom
   );
   importFromTracker({ repoRoot, sourceDir });
 
-  const result = appSetStatus({ repoRoot, id: "app-valid-role", to: "interview" });
+  const result = appSetStatus({
+    repoRoot,
+    id: "app-valid-role",
+    to: "interview",
+  });
   assert.equal(result.ok, true);
 });
 
@@ -309,7 +328,11 @@ test("appPersistEvaluation: a cut re-evaluation resyncs top-level gate/status/no
     repoRoot,
     id: "app-eval-review-hold",
     evaluation: cutEvaluation,
-    projection: { evaluation: cutEvaluation, fitScore: 55, fitBucket: "stretch" },
+    projection: {
+      evaluation: cutEvaluation,
+      fitScore: 55,
+      fitBucket: "stretch",
+    },
   });
 
   const row = db.prepare("SELECT data FROM applications WHERE id = ?").get("app-eval-review-hold");
@@ -351,7 +374,11 @@ test("appPersistEvaluation: a re-evaluation does not regress a post-apply status
     repoRoot,
     id: "app-eval-post-apply",
     evaluation: cutEvaluation,
-    projection: { evaluation: cutEvaluation, fitScore: 40, fitBucket: "stretch" },
+    projection: {
+      evaluation: cutEvaluation,
+      fitScore: 40,
+      fitBucket: "stretch",
+    },
   });
 
   const row = db.prepare("SELECT data FROM applications WHERE id = ?").get("app-eval-post-apply");
@@ -586,7 +613,11 @@ test("commMarkSent still clears comm.draft (sent-clears-draft invariant) regardl
   seedFixture(repoRoot);
   const db = openDb({ repoRoot });
 
-  commMarkSent({ repoRoot, id: "comm-with-draft", verification: "user_report" });
+  commMarkSent({
+    repoRoot,
+    id: "comm-with-draft",
+    verification: "user_report",
+  });
 
   const commRow = db.prepare("SELECT data FROM communications WHERE id = ?").get("comm-with-draft");
   const comm = JSON.parse(commRow.data);
@@ -717,11 +748,20 @@ test("every domain-action verb bumps version by exactly 1, advances lastUpdatedA
   expectOneBump("appUpsert", () =>
     appUpsert({
       repoRoot,
-      row: { id: "app-new-upsert", company: "NewCo", role: "Eng", status: "sourced" },
+      row: {
+        id: "app-new-upsert",
+        company: "NewCo",
+        role: "Eng",
+        status: "sourced",
+      },
     })
   );
   expectOneBump("appSetFields", () =>
-    appSetFields({ repoRoot, id: "app-non-interview", patch: { statusNote: "note added" } })
+    appSetFields({
+      repoRoot,
+      id: "app-non-interview",
+      patch: { statusNote: "note added" },
+    })
   );
   expectOneBump("appPersistEvaluation", () => {
     const evaluation = {
@@ -788,7 +828,12 @@ test("every domain-action verb bumps version by exactly 1, advances lastUpdatedA
   expectOneBump("commUpsert", () =>
     commUpsert({
       repoRoot,
-      row: { id: "comm-new", company: "NewCo", channel: "email", status: "waiting" },
+      row: {
+        id: "comm-new",
+        company: "NewCo",
+        channel: "email",
+        status: "waiting",
+      },
     })
   );
   expectOneBump("commAppendMessage", () =>
@@ -1163,7 +1208,9 @@ test("calendarWriteAppend defaults provenance to manual, coerces an invalid valu
     name: "automation",
     patch: {
       setup_mode: "advanced",
-      capabilities: { calendar_sync: { enabled: true, platforms: { outlook_calendar: true } } },
+      capabilities: {
+        calendar_sync: { enabled: true, platforms: { outlook_calendar: true } },
+      },
       consent: { outlook_calendar: true },
     },
   });
@@ -1198,7 +1245,9 @@ test("calendarWriteAppend dedupe policy: same-kind re-records replace, automated
     name: "automation",
     patch: {
       setup_mode: "advanced",
-      capabilities: { calendar_sync: { enabled: true, platforms: { google_calendar: true } } },
+      capabilities: {
+        calendar_sync: { enabled: true, platforms: { google_calendar: true } },
+      },
       consent: { google_calendar: true },
     },
   });
@@ -1229,7 +1278,11 @@ test("calendarWriteAppend dedupe policy: same-kind re-records replace, automated
   result = calendarWriteAppend({
     repoRoot,
     env: {},
-    record: { ...sameEvent, provenance: "automated", summary: "Now automated." },
+    record: {
+      ...sameEvent,
+      provenance: "automated",
+      summary: "Now automated.",
+    },
   });
   assert.equal(result.record.provenance, "automated");
   assert.equal(result.record.summary, "Now automated.");
@@ -1241,7 +1294,11 @@ test("calendarWriteAppend dedupe policy: same-kind re-records replace, automated
   result = calendarWriteAppend({
     repoRoot,
     env: {},
-    record: { ...sameEvent, provenance: "manual", summary: "Attempted downgrade." },
+    record: {
+      ...sameEvent,
+      provenance: "manual",
+      summary: "Attempted downgrade.",
+    },
   });
   assert.equal(result.record.provenance, "automated");
   assert.equal(result.record.summary, "Now automated.");
@@ -1253,7 +1310,11 @@ test("calendarWriteAppend dedupe policy: same-kind re-records replace, automated
   result = calendarWriteAppend({
     repoRoot,
     env: {},
-    record: { ...sameEvent, provenance: "automated", summary: "Second automated." },
+    record: {
+      ...sameEvent,
+      provenance: "automated",
+      summary: "Second automated.",
+    },
   });
   assert.equal(result.record.provenance, "automated");
   assert.equal(result.record.summary, "Second automated.");
@@ -1499,6 +1560,7 @@ test("candidate setup initializes neutral DB records without writing candidate Y
 
   assert.equal(config.profile.candidate.full_name, "");
   assert.equal(config.profile.candidate.email, "");
+  assert.equal(config.profile.location.remote_scope, "home-country");
   assert.deepEqual(config.targeting.role_buckets, []);
   assert.deepEqual(config.evidence.claims, []);
   assert.equal(config.modes.usage_mode, "standard");
@@ -1520,8 +1582,18 @@ test("candidate setup patches profile, search tracks, companies, and evidence in
     repoRoot,
     name: "profile",
     patch: {
-      candidate: { full_name: "Ada Lovelace", email: "ada@example.com", location: "London" },
-      location: { home: "London", remote: true, hybrid: false, onsite: false, relocation: [] },
+      candidate: {
+        full_name: "Ada Lovelace",
+        email: "ada@example.com",
+        location: "London",
+      },
+      location: {
+        home: "London",
+        remote: true,
+        hybrid: false,
+        onsite: false,
+        relocation: [],
+      },
       compensation: { minimum_base: 181234, target_base: 223456 },
       authorization: { work_authorized: true, requires_sponsorship: false },
     },
@@ -1586,6 +1658,25 @@ test("candidate setup patches profile, search tracks, companies, and evidence in
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM candidate_evidence_claims").get().n, 2);
 
   assert.equal(existsSync(userPath({ repoRoot }, "candidate/targeting.yml")), false);
+});
+
+test("candidate profile reads normalize missing remote scope to home-country", () => {
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+  db.prepare("UPDATE candidate_profile SET data = ? WHERE id = 1").run(
+    JSON.stringify({
+      candidate: { full_name: "Legacy Candidate" },
+      location: {
+        home: "London, UK",
+        remote: true,
+        hybrid: false,
+        onsite: false,
+      },
+    })
+  );
+
+  assert.equal(candidateConfigGet({ repoRoot }).profile.location.remote_scope, "home-country");
 });
 
 test("candidate setup recomputes quick-start readiness from SQLite setup facts", () => {
@@ -1778,7 +1869,9 @@ test("candidate setup initialize is idempotent and never resets saved DB config"
   candidateConfigPatch({
     repoRoot,
     name: "profile",
-    patch: { candidate: { full_name: "Katherine Johnson", email: "kj@example.com" } },
+    patch: {
+      candidate: { full_name: "Katherine Johnson", email: "kj@example.com" },
+    },
   });
 
   candidateSetupInitialize({ repoRoot });
@@ -1809,7 +1902,9 @@ test("candidateConfigPatch stays tracker.json-free in a candidate-only workspace
   const patched = candidateConfigPatch({
     repoRoot,
     name: "profile",
-    patch: { candidate: { full_name: "Grace Hopper", email: "grace@example.com" } },
+    patch: {
+      candidate: { full_name: "Grace Hopper", email: "grace@example.com" },
+    },
   });
 
   assert.equal(patched.exported, false);
@@ -1827,13 +1922,19 @@ test("candidateConfigPatch keeps an EXISTING workspace/tracker.json in sync inst
 
   // A real tracker-pipeline write materializes tracker.json first — this is
   // the "tracker-dev is already watching this file" case the fix targets.
-  kvUpsert({ repoRoot, key: "strategyReview", value: { snapshot: { rejected: 0 } } });
+  kvUpsert({
+    repoRoot,
+    key: "strategyReview",
+    value: { snapshot: { rejected: 0 } },
+  });
   assert.ok(existsSync(userPath({ repoRoot }, "workspace/tracker.json")));
 
   candidateConfigPatch({
     repoRoot,
     name: "profile",
-    patch: { candidate: { full_name: "Grace Hopper", email: "grace@example.com" } },
+    patch: {
+      candidate: { full_name: "Grace Hopper", email: "grace@example.com" },
+    },
   });
 
   const exportedTracker = JSON.parse(
@@ -1847,7 +1948,11 @@ test("candidateConfigPatch keeps an EXISTING workspace/tracker.json in sync inst
 test("candidateApplicationLimitUpsert, candidateEvidenceMerge, and candidateEvidenceRemoveOne all keep an existing tracker.json in sync", () => {
   const repoRoot = tempRepo();
   candidateSetupInitialize({ repoRoot });
-  kvUpsert({ repoRoot, key: "strategyReview", value: { snapshot: { rejected: 0 } } });
+  kvUpsert({
+    repoRoot,
+    key: "strategyReview",
+    value: { snapshot: { rejected: 0 } },
+  });
 
   const limitResult = candidateApplicationLimitUpsert({
     repoRoot,
@@ -1899,7 +2004,12 @@ test("candidate and evidence writes stamp Activity with user-facing outcomes", (
       candidateConfigPatch({
         repoRoot,
         name: "profile",
-        patch: { candidate: { full_name: "Katherine Johnson", email: "kj@example.com" } },
+        patch: {
+          candidate: {
+            full_name: "Katherine Johnson",
+            email: "kj@example.com",
+          },
+        },
       }),
     "Candidate profile updated",
     "candidate:profile-update"
@@ -1911,7 +2021,13 @@ test("candidate and evidence writes stamp Activity with user-facing outcomes", (
         repoRoot,
         name: "targeting",
         patch: {
-          role_buckets: [{ name: "Platform", priority: "primary", titles: ["Staff Engineer"] }],
+          role_buckets: [
+            {
+              name: "Platform",
+              priority: "primary",
+              titles: ["Staff Engineer"],
+            },
+          ],
         },
       }),
     "Job targets updated",
@@ -1922,7 +2038,13 @@ test("candidate and evidence writes stamp Activity with user-facing outcomes", (
     () =>
       candidateEvidenceMerge({
         repoRoot,
-        claims: [{ id: "resume-001", claim: "Led platform migration", evidence: "Resume" }],
+        claims: [
+          {
+            id: "resume-001",
+            claim: "Led platform migration",
+            evidence: "Resume",
+          },
+        ],
       }),
     "Evidence bank updated",
     "candidate:evidence-save"
@@ -1939,7 +2061,11 @@ test("application activity names outcomes instead of internal mutation verbs", (
   const repoRoot = tempRepo();
   seedFixture(repoRoot);
 
-  const status = appSetStatus({ repoRoot, id: "app-non-interview", to: "applied" });
+  const status = appSetStatus({
+    repoRoot,
+    id: "app-non-interview",
+    to: "applied",
+  });
   assert.equal(status.event.title, "Initech: Status changed to Applied");
   assert.equal(status.event.summary, "Previous status: Saved for review.");
   assert.doesNotMatch(status.event.title, /status\s+reviewed-hold|→/i);
@@ -2002,11 +2128,23 @@ test("candidateEvidenceMerge replaces an existing explicit id even when the clai
 
   candidateEvidenceMerge({
     repoRoot,
-    claims: [{ id: "resume-001", claim: "Built the first version", evidence: "Resume" }],
+    claims: [
+      {
+        id: "resume-001",
+        claim: "Built the first version",
+        evidence: "Resume",
+      },
+    ],
   });
   candidateEvidenceMerge({
     repoRoot,
-    claims: [{ id: "resume-001", claim: "Built the production version", evidence: "Resume v2" }],
+    claims: [
+      {
+        id: "resume-001",
+        claim: "Built the production version",
+        evidence: "Resume v2",
+      },
+    ],
   });
 
   const config = candidateConfigGet({ repoRoot });
@@ -2023,8 +2161,16 @@ test("candidateEvidenceReplace atomically preserves edited ids and deletes unref
   candidateEvidenceMerge({
     repoRoot,
     claims: [
-      { id: "resume-001", claim: "Built the first version", evidence: "Resume" },
-      { id: "project-001", claim: "Led the rollout", evidence: "Project notes" },
+      {
+        id: "resume-001",
+        claim: "Built the first version",
+        evidence: "Resume",
+      },
+      {
+        id: "project-001",
+        claim: "Led the rollout",
+        evidence: "Project notes",
+      },
       { id: "omit-001", claim: "Old claim", evidence: "Old notes" },
     ],
   });
@@ -2036,7 +2182,9 @@ test("candidateEvidenceReplace atomically preserves edited ids and deletes unref
       role: "Staff Engineer",
       status: "drafted",
       packetManifest: {
-        resume: { blocks: [{ text: "Grounded claim", evidenceIds: ["resume-001"] }] },
+        resume: {
+          blocks: [{ text: "Grounded claim", evidenceIds: ["resume-001"] }],
+        },
       },
     },
   });
@@ -2044,8 +2192,16 @@ test("candidateEvidenceReplace atomically preserves edited ids and deletes unref
   const result = candidateEvidenceReplace({
     repoRoot,
     claims: [
-      { id: "resume-001", claim: "Built the production version", evidence: "Resume v2" },
-      { id: "project-001", claim: "Led the rollout", evidence: "Project notes" },
+      {
+        id: "resume-001",
+        claim: "Built the production version",
+        evidence: "Resume v2",
+      },
+      {
+        id: "project-001",
+        claim: "Led the rollout",
+        evidence: "Project notes",
+      },
     ],
   });
 
@@ -2074,9 +2230,17 @@ test("candidateEvidenceReplace refuses to delete claims cited by application pac
   candidateEvidenceMerge({
     repoRoot,
     claims: [
-      { id: "keep-001", claim: "Built the production version", evidence: "Resume" },
+      {
+        id: "keep-001",
+        claim: "Built the production version",
+        evidence: "Resume",
+      },
       { id: "packet-001", claim: "Led the rollout", evidence: "Project notes" },
-      { id: "story-001", claim: "Reduced latency", evidence: "Interview notes" },
+      {
+        id: "story-001",
+        claim: "Reduced latency",
+        evidence: "Interview notes",
+      },
     ],
   });
   appUpsert({
@@ -2087,7 +2251,9 @@ test("candidateEvidenceReplace refuses to delete claims cited by application pac
       role: "Staff Engineer",
       status: "drafted",
       packetManifest: {
-        resume: { blocks: [{ text: "Grounded claim", evidenceIds: ["packet-001"] }] },
+        resume: {
+          blocks: [{ text: "Grounded claim", evidenceIds: ["packet-001"] }],
+        },
       },
     },
   });
@@ -2106,7 +2272,13 @@ test("candidateEvidenceReplace refuses to delete claims cited by application pac
     () =>
       candidateEvidenceReplace({
         repoRoot,
-        claims: [{ id: "keep-001", claim: "Built the production version", evidence: "Resume" }],
+        claims: [
+          {
+            id: "keep-001",
+            claim: "Built the production version",
+            evidence: "Resume",
+          },
+        ],
       }),
     (error) => {
       assert.equal(error.code, "EVIDENCE_IN_USE");
@@ -2164,8 +2336,16 @@ test("candidateEvidenceRemoveOne removes only the requested claim and rejects mi
   candidateEvidenceMerge({
     repoRoot,
     claims: [
-      { id: "resume-001", claim: "Built the first workflow", evidence: "Resume" },
-      { id: "project-001", claim: "Led the second rollout", evidence: "Project notes" },
+      {
+        id: "resume-001",
+        claim: "Built the first workflow",
+        evidence: "Resume",
+      },
+      {
+        id: "project-001",
+        claim: "Led the second rollout",
+        evidence: "Project notes",
+      },
     ],
   });
 

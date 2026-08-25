@@ -26,16 +26,14 @@ describe("chat-first browser model", () => {
 
     expect(one).toMatchObject({
       title: "SELECTED · 1",
-      chatLabel: "Chat about this",
-      applyLabel: "Draft, then gate each apply",
+      applyLabel: "Apply to 1 job",
     });
     expect(many).toMatchObject({
       title: "CART · 2 JOBS",
       averageFit: 86,
       evaluationCount: 1,
       compPendingCount: 1,
-      chatLabel: "Chat about these 2",
-      applyLabel: "Draft, then gate each apply",
+      applyLabel: "Apply to 2 jobs",
     });
   });
 

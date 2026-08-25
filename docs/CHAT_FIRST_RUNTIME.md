@@ -27,11 +27,13 @@ does not explain the current decision, conversation, or due action.
 ## Returning to a conversation
 
 CareerRat rehydrates a returning agent from its own durable state, so
-conversation identity is runtime-neutral. The packaged app currently permits
-only boundary-verified Claude Code 2.1.241 or newer for in-app skill and chat
-execution, and disables its native session persistence. Codex, Gemini, and the
-other registry entries are detected but not selectable for tool-bearing in-app
-runs; they can still drive the workspace through the terminal agent flow.
+conversation identity is runtime-neutral. Claude Code 2.1.241 or newer runs
+full in-app task tools and research through its verified boundary. Codex
+0.149.1 or newer runs isolated in-app chat and drafting with its native agent
+features disabled for each call. Codex remains unavailable for task-tool and
+research runs. Gemini and the other registry entries are detected but not
+selectable until their own completion boundaries are verified. Every provider
+can still drive the workspace through the terminal agent flow.
 
 Vendor-specific exact-session resume handles may be added later as optional
 acceleration metadata. They cannot become the source of truth because retention,

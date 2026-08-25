@@ -196,6 +196,114 @@ export function appSetStatus({
   });
 }
 
+function statusSyncAction(value) {
+  const text = String(value || "").toLowerCase();
+  return (
+    /\b(?:check|sync|verify|review|refresh)\b[^.!?]*\b(?:application )?(?:status|portal)\b/.test(
+      text
+    ) || /\b(?:status|portal)\b[^.!?]*\b(?:check|sync|verify|review|refresh)\b/.test(text)
+  );
+}
+
+// Status-sync completion owns the application transition and every matching
+// portal-check CTA in one transaction. This prevents a verified portal read
+// from advancing the application while leaving a ghost communication draft or
+// stale "check status" action behind.
+export function appApplySyncedStatus({ repoRoot, env, id, to, rawStatus, round, at } = {}) {
+  if (!to) throw new Error("appApplySyncedStatus: to is required");
+  const timestamp = at || nowIso();
+  if (Number.isNaN(Date.parse(timestamp))) {
+    throw new Error("appApplySyncedStatus: at must be an ISO datetime");
+  }
+  return runVerb({ repoRoot, env }, (db) => {
+    const app = requireApp(db, id);
+    const from = app.status;
+    const note = String(rawStatus || `Portal status: ${to}`)
+      .trim()
+      .slice(0, 120);
+    const updated = {
+      ...app,
+      status: to,
+      statusNote: note,
+    };
+    if (statusSyncAction(app.nextAction)) {
+      updated.nextAction = null;
+      updated.nextActionDue = null;
+    }
+    if (round) {
+      updated.conversations = [
+        ...(Array.isArray(app.conversations) ? app.conversations : []),
+        {
+          date: timestamp,
+          kind: String(round).trim().slice(0, 60),
+          who: null,
+          notes: note.slice(0, 200),
+        },
+      ];
+    }
+    const wasInterview = classifyStage(from).id === "interview";
+    if (wasInterview && to !== from) Object.assign(updated, applyRoundCompletionClearing(app));
+    putRow(db, "applications", id, updated);
+
+    const clearedCommunicationIds = [];
+    const commRows = db
+      .prepare("SELECT id, data FROM communications WHERE application_id = ? ORDER BY id")
+      .all(id);
+    for (const row of commRows) {
+      const communication = JSON.parse(row.data);
+      if (
+        !statusSyncAction(communication.nextAction) &&
+        !statusSyncAction(communication.summary) &&
+        !statusSyncAction(communication.subject)
+      ) {
+        continue;
+      }
+      const messages = Array.isArray(communication.messages) ? communication.messages.slice() : [];
+      messages.push({
+        id: `status-sync:${timestamp}:${row.id}`,
+        direction: "note",
+        at: timestamp,
+        summary: `Verified portal status: ${note}`.slice(0, 240),
+      });
+      putRow(
+        db,
+        "communications",
+        row.id,
+        {
+          ...communication,
+          status: "waiting",
+          nextAction: null,
+          nextActionDue: null,
+          draft: null,
+          messages,
+          summary: note,
+        },
+        { application_id: id }
+      );
+      clearedCommunicationIds.push(row.id);
+    }
+
+    const meta = bumpMeta(db);
+    const event = logActivityEvent(db, {
+      type: "status_change",
+      title: `${app.company || id}: Status changed to ${activityStatusLabel(to)}`,
+      summary: `Verified from the application portal. Previous status: ${activityStatusLabel(from)}.`,
+      refs: { applicationId: id, company: app.company, role: app.role },
+      tags: [`status:${to}`, "operation:application:status-sync"],
+    });
+    const analytics = refreshAnalytics(db, new Date(timestamp));
+    return {
+      id,
+      from,
+      to,
+      clearedCommunicationIds,
+      meta,
+      event,
+      analytics,
+    };
+  });
+}
+
 function shallowMergeOneLevel(base, patch) {
   const out = { ...base };
   for (const [key, value] of Object.entries(patch)) {

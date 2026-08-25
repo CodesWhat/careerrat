@@ -24,8 +24,8 @@ targeting, fit-calibration, or channel-mix changes when outcome thresholds trip.
 
 ## Intent Router
 
-Root `AGENTS.md` and `CLAUDE.md` instruct agents how to map user intent to the
-16 skills. Routes are grouped below by cluster.
+The root router in `AGENTS.md` and `CLAUDE.md` maps user intent to all 28 skills.
+Routes are grouped below by cluster.
 
 ### Onboarding
 
@@ -197,15 +197,20 @@ typed routes and the workspace agent. The generic chat surface exposes only
 `company-health`. Company discovery stays on the app-owned reviewed proposal
 path, and `search-jobs` stays on its dedicated AI web-search route.
 
-The packaged app detects the full installed CLI registry but permits only
-Claude Code 2.1.241 or newer for tool-bearing skill and chat execution. Its
-per-call settings deny all filesystem reads except the exact approved upload
-and isolated skill, separate public-web research from candidate files, and use
-the guarded CareerRat fetch MCP instead of native broad fetch. Codex and other
-CLIs fail closed before spawn because they do not provide an equivalent proven
-boundary. Both one-shot and streaming children inherit an allowlisted process
-environment, not server credentials. Source-only provider fallback remains a
-separate Agent SDK path.
+The packaged app detects the full installed CLI registry. Claude Code 2.1.241
+or newer runs tool-bearing skills and research. Its per-call settings deny all
+filesystem reads except the exact approved upload and isolated skill, separate
+public-web research from candidate files, and use the guarded CareerRat fetch
+MCP instead of native broad fetch. Codex 0.149.1 or newer supports isolated
+in-app chat and drafting from a disposable task directory. CareerRat ignores
+its user config and rules and disables shell, apps, browser, computer use,
+plugins, skill search, image tools, and multi-agent features for those calls.
+Codex still fails closed before any task-tool or research spawn. Other detected
+CLIs fail closed before any in-app spawn until their own completion boundary is
+verified. Every child inherits an allowlisted process environment, not server
+credentials. The packaged app has no provider fallback and never silently
+switches engines. Source development retains a separately selected Agent SDK
+test path outside the packaged product.
 
 Visible chat handoffs are separate from app-default actions. They are explicit
 user-selected sessions, not hidden fallbacks from local API errors.

@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { join } from "node:path";
 
-export const SAFE_EXTERNAL_PROTOCOLS = Object.freeze(["https:", "mailto:"]);
+const SAFE_EXTERNAL_PROTOCOLS = Object.freeze(["https:", "mailto:"]);
 
 const PDF_RENDER_MAX_BODY_BYTES = 8 * 1024 * 1024;
 

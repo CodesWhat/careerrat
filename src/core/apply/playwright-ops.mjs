@@ -614,6 +614,125 @@ export function createPlaywrightOps({
       await page(pageId).bringToFront();
     },
 
+    async navigate({ pageId, url }) {
+      const target = page(pageId);
+      await target.goto(url, { waitUntil: "domcontentloaded" });
+      return { pageId, url: target.url() };
+    },
+
+    async back({ pageId }) {
+      const target = page(pageId);
+      await target.goBack({ waitUntil: "domcontentloaded" });
+      return { pageId, url: target.url() };
+    },
+
+    async pageContent({ pageId, maxText = MAX_PAGE_TEXT }) {
+      const target = page(pageId);
+      const bounded = Math.min(Math.max(Number(maxText) || MAX_PAGE_TEXT, 1), 100_000);
+      const body = target.locator("body");
+      return {
+        url: target.url(),
+        title: await target.title().catch(() => ""),
+        text: String((await body.innerText().catch(() => "")) || "").slice(0, bounded),
+      };
+    },
+
+    async extractText({ pageId, selectors, maxText = MAX_PAGE_TEXT }) {
+      const target = page(pageId);
+      const candidates = (Array.isArray(selectors) ? selectors : [selectors])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+        .slice(0, 12);
+      const bounded = Math.min(Math.max(Number(maxText) || MAX_PAGE_TEXT, 1), 100_000);
+      return target.evaluate(
+        ({ candidates: values, bounded: limit }) => {
+          for (const selector of values) {
+            const matches = Array.from(document.querySelectorAll(selector));
+            if (!matches.length) continue;
+            return {
+              selector,
+              text: matches
+                .map((node) => String(node.innerText || node.textContent || "").trim())
+                .filter(Boolean)
+                .join("\n\n")
+                .slice(0, limit),
+            };
+          }
+          return { selector: null, text: "" };
+        },
+        { candidates, bounded }
+      );
+    },
+
+    async extractRows({ pageId, rowSelectors, fields, maxRows = 100 }) {
+      const target = page(pageId);
+      const selectors = (Array.isArray(rowSelectors) ? rowSelectors : [rowSelectors])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+        .slice(0, 12);
+      const fieldSpecs = Object.fromEntries(
+        Object.entries(fields && typeof fields === "object" ? fields : {}).slice(0, 24)
+      );
+      const boundedRows = Math.min(Math.max(Number(maxRows) || 100, 1), 250);
+      return target.evaluate(
+        ({ selectors: candidates, fieldSpecs: specs, boundedRows: limit }) => {
+          function first(root, values) {
+            for (const selector of Array.isArray(values) ? values : [values]) {
+              if (!selector) continue;
+              const found = selector === ":scope" ? root : root.querySelector(selector);
+              if (found) return found;
+            }
+            return null;
+          }
+          let rowSelector = null;
+          let rows = [];
+          for (const selector of candidates) {
+            const matches = Array.from(document.querySelectorAll(selector));
+            if (matches.length) {
+              rowSelector = selector;
+              rows = matches.slice(0, limit);
+              break;
+            }
+          }
+          return {
+            rowSelector,
+            rows: rows.map((row, index) => {
+              const output = { index };
+              for (const [name, specValue] of Object.entries(specs)) {
+                const spec = specValue && typeof specValue === "object" ? specValue : {};
+                const node = first(row, spec.selectors || ":scope");
+                if (!node) {
+                  output[name] = "";
+                } else if (spec.kind === "href") {
+                  output[name] = node.href || node.getAttribute("href") || "";
+                } else if (spec.kind === "attr") {
+                  output[name] = node.getAttribute(String(spec.attribute || "")) || "";
+                } else {
+                  output[name] = String(node.innerText || node.textContent || "").trim();
+                }
+              }
+              return output;
+            }),
+          };
+        },
+        { selectors, fieldSpecs, boundedRows }
+      );
+    },
+
+    async clickRow({ pageId, rowSelector, index }) {
+      const target = page(pageId);
+      await target.locator(String(rowSelector)).nth(Number(index)).click();
+      await target.waitForLoadState("domcontentloaded").catch(() => {});
+      return { pageId, url: target.url() };
+    },
+
+    async scroll({ pageId, amount = 900 }) {
+      const target = page(pageId);
+      const delta = Math.min(Math.max(Number(amount) || 900, -5_000), 5_000);
+      await target.evaluate((value) => window.scrollBy(0, value), delta);
+      return { pageId, url: target.url() };
+    },
+
     async snapshot({ pageId }) {
       const target = page(pageId);
       const container = target.locator(CONTROL_SELECTOR);

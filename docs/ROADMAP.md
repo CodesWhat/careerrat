@@ -260,17 +260,20 @@ nurse, a driver, and an engineer each bring their own config.
 - **Company logos everywhere** — a server-side logo proxy with a local cache (and optional
   brand-search autocomplete when a key is configured), with an initials fallback so nothing
   breaks offline or keyless.
-- **Desktop app shell**: an Electron wrapper around the same local server, so the
-  whole thing runs in a fixed-size native window with full-screen support. First
-  run lands in the onboarding conversation, external links open in the OS
+- **Desktop app shell**: an Electron wrapper around the same local server, using
+  a designed 1280 by 860 desktop size that remains resizable and maximizable,
+  supports native full screen, and preserves a 1100 by 680 minimum working size.
+  First run lands in the onboarding conversation, external links open in the OS
   browser, and quitting cleanly shuts down every agent session.
 - **Installed AI runtime first** — onboarding and Settings detect the expanded coding-CLI
-  registry, select boundary-verified Claude Code 2.1.241 or newer for packaged skill/chat
-  runs, and show every other detected CLI as unsupported instead of pretending it is ready.
-  Terminal workspace-agent flows still support compatible outer agents. External capabilities stay off until
-  a concrete action needs one, then the app explains and requests that specific permission.
-  Direct provider keys and managed AI remain explicit fallbacks, and every AI feature still
-  degrades to a manual path.
+  registry, select boundary-verified Claude Code 2.1.241 or newer for full in-app task tools
+  and research, and select Codex 0.149.1 or newer for isolated in-app chat and drafting.
+  Codex task-tool and research work fails closed. Other detected CLIs remain visible but
+  unverified and are not selectable. The packaged app has no provider fallback and never
+  silently switches engines. Terminal workspace-agent flows still support compatible outer
+  agents. External capabilities stay off until a concrete action needs one, then the app
+  explains and requests that specific permission. Workflows with no verified engine path
+  fail clearly or retain an explicit manual path.
 - **Database-backed setup and sourcing** — onboarding, settings, search setup, and the
   sourcing sweep all read and write the local database first: setup readiness
   (search-ready / gate-ready / apply-ready) is computed from stored facts and gates what
@@ -303,15 +306,16 @@ nurse, a driver, and an engineer each bring their own config.
   a fictional demo candidate through the installed AI CLI, so malformed AI output is caught
   before it reaches a real job seeker mid-search.
 
-## Release status (v0.14.0, updated August 24, 2026)
+## Release status (v0.15.0, updated August 24, 2026)
 
-**v0.14.0 is the current release line.** It completes the chat-first desktop
-cutover: durable conversations replace the page-based dashboard, Search,
-Pipeline, Files, People, and Schedule provide focused browse surfaces, and
-missions, Deep ingest, research, and mock interviews remain resumable in their
-own threads. The complete skill catalog ships in the app, and supervised form
-automation stops before final Submit. Since v0.11.0 the repo runs the strict flow:
-feature PRs land on the active dev branch (`dev/v0.14` for this cycle), `main`
+**v0.15.0 is the current release line.** It finishes the chat-first desktop
+cutover as the only product shell, brings every shipped workflow into durable
+threads and supervised browser sessions, and applies the new visual system to
+the desktop app and public website. The release also adds worldwide-remote
+location handling, retained Deep ingest and mock-interview state, whole-section
+profile editing, the full in-app engine picker, and a compact final-submit gate.
+Since v0.11.0 the repo runs the strict flow: feature PRs land on the active dev
+branch (`dev/v0.15` for this cycle), `main`
 advances only through a promotion merge immediately before each cut, and the tag
 fires the whole pipeline — `desktop-release.yml` builds, signs, notarizes, and
 uploads the DMG, publishing the release then fires `publish.yml` (npm) and the
@@ -643,9 +647,8 @@ keeping. Three of the four were not where the issue text pointed.
      and heavily used `logoImageUrl()`.
    - `GET /api/intake/one` is REST symmetry, not a missing feature. The only intake surface
      renders from the bulk list response and there is no per-item view to deep-link to.
-   - `POST /api/onboard/write-config` is not orphaned at all and is listed only so nobody
-     rediscovers it as such. It is alive through `careerrat ingest --write-config`. Only the web
-     client half was ever unwired, and that half is deleted.
+   - The retired web config-export endpoint is gone. `careerrat ingest --write-config` remains an
+     explicit CLI recovery/export command and does not expose a second app product path.
 
    So reaching 0 means teaching knip about the remaining references, not deleting them. Anyone who
    closes the gap the other way has made the number prettier and the product worse. That reasoning
@@ -896,7 +899,7 @@ and DMG container, staples the ticket, and passes Gatekeeper.
 - **Library and Deep Ingest** — evidence, stories, role signals, writing voice, honesty boundaries,
   source provenance, edit/remove/confirm flows, filters, empty states, and whether confirmed facts
   actually influence later evaluation and packet generation.
-- **Settings** — candidate and targeting edits, runtimes, direct-provider fallback, automation
+- **Settings** — candidate and targeting edits, graded installed-runtime capabilities, automation
   consent, source maintenance, validation and recovery, persistence after restart, and honest
   descriptions of what each installed tool can do.
 - **Release surfaces** — explicit retired-dashboard behavior, CLI
@@ -919,8 +922,9 @@ and the live dashboard. The repository cleanup and full automated gates below ar
 same release contract:
 
 - **Installed-runtime isolation** — run bounded Claude Code tasks without inheriting unrelated
-  server credentials or global MCP configuration; reject Codex and other unverified adapters
-  before a tool-bearing spawn, with the actual capability error and recovery path.
+  server credentials or global MCP configuration; permit Codex only for isolated in-app chat
+  and drafting; and reject Codex task-tool or research work plus every in-app spawn from other
+  unverified adapters, with the actual capability error and recovery path.
 - **Résumé intake matrix** — verify PDF, DOCX, text, retry, restart, and docked-upload recovery;
   failed retries must not create duplicate uploads.
 - **Plain-language permissions** — avoid implementation-mode choices. Ask for browser,
@@ -964,8 +968,8 @@ same release contract:
   The remaining work is natural-language entity/action resolution, inline
   workflow progress and results, executor wiring, and complete skill-to-screen parity.
 - **Bring-your-own authenticated CLI** — use a supported installed agent as the normal AI
-  runtime. Be precise about which adapters are fully supported; direct provider keys are an
-  Advanced fallback and managed AI is a parked future convenience.
+  runtime. Be precise about the graded capability of every adapter. The packaged app never
+  switches to a direct-provider key. Managed AI remains a parked future convenience.
 - **First-day outcome** — carry a new user from résumé through targets/gates and the interview
   into source setup and one strictly filtered search with a small, useful review queue.
 - **QA remediation, web-first** — preserve the completed candidate-truth, local-runtime,
@@ -1009,16 +1013,13 @@ extra surface area.
 - **Voice layer** — browser speech input/output, voice-extended interview prep, and
   post-interview voice debriefs. Text conversation and adaptive setup are now current work;
   voice remains deferred until that interaction model is proven.
-- **Agent CLI adapters / multi-runtime skill homes** — Gemini CLI, DeepSeek, Qwen,
-  Kimi, Hermes Agent, and any other runner need launch/handoff support, local
-  router/context loading, skill discovery, and a smoke-test path before appearing on
-  a compatibility list. The mechanism: one canonical skill body in `.agents/skills/`
-  mirrored into each runtime's native home (`.claude/`, `.opencode/`, `.qwen/`,
-  `.antigravitycli/`) plus per-runtime command wrappers and an `OPENCODE.md`, via a
-  symlink-or-materialize installer (symlinks in a git checkout; a tracked pointer
-  stub that the installer overwrites with real content wherever symlinks don't
-  survive — npm tarballs, zips, Windows). Today only Claude Code is wired, by a
-  single dir symlink. Note the scale: 21 skills × N runtimes, not one entrypoint.
+- **Additional installed CLI adapters**: Claude Code has the verified full task
+  boundary, and Codex has isolated chat and drafting. Gemini CLI, Qwen, OpenCode,
+  Copilot, Hermes Agent, and other runners remain detected but unverified until
+  provider-specific config isolation, native-tool suppression, cancellation, and
+  disposable-task smoke tests pass. CareerRat loads the one canonical skill body
+  from `.agents/skills/`; adapters own only detection, auth, fixed invocation,
+  output parsing, cancellation, and honest capability declarations.
 - **Cleanup and maintenance skill** — a shared housekeeping workflow for stale
   screenshots, browser traces, temp captures, detached logs, orphaned generated
   artifacts, and other maintenance debris. It should preview first, stay

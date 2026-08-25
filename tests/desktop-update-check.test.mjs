@@ -374,6 +374,34 @@ describe("runUpdateCheck", () => {
     assert.equal(outcome.result, null);
   });
 
+  it("force-checks even when automatic checks are disabled and recent without changing the preference", async () => {
+    let called = false;
+    const now = Date.parse("2026-08-24T22:00:00Z");
+    const outcome = await runUpdateCheck({
+      currentVersion,
+      force: true,
+      now,
+      state: { ...DEFAULT_STATE, enabled: false, lastCheckedAt: now - 1000 },
+      fetchImpl: async () => {
+        called = true;
+        return {
+          ok: true,
+          json: async () => ({
+            tag_name: "v0.14.0",
+            html_url: "https://github.com/CodesWhat/careerrat/releases/tag/v0.14.0",
+            assets: [],
+          }),
+        };
+      },
+    });
+
+    assert.equal(called, true);
+    assert.equal(outcome.checked, true);
+    assert.equal(outcome.fetchSucceeded, true);
+    assert.equal(outcome.state.enabled, false);
+    assert.equal(outcome.state.lastCheckedAt, now);
+  });
+
   it("performs no network call when the interval has not elapsed", async () => {
     let called = false;
     const now = Date.parse("2026-08-18T00:00:00Z");
@@ -470,5 +498,41 @@ describe("mergeCheckedState", () => {
 
     assert.equal(merged.enabled, false);
     assert.equal(merged.lastCheckedAt, 999);
+  });
+});
+
+describe("nextUpdateCheckDelay", () => {
+  it("schedules from the completed check time instead of drifting to the next 24-hour interval", async () => {
+    const module = await import("../apps/desktop/update-check.mjs");
+    assert.equal(typeof module.nextUpdateCheckDelay, "function");
+    const launch = Date.parse("2026-08-24T12:00:00Z");
+    const completed = launch + 5000;
+    const intervalWake = launch + CHECK_INTERVAL_MS;
+
+    assert.equal(
+      module.nextUpdateCheckDelay({
+        enabled: true,
+        lastCheckedAt: completed,
+        now: intervalWake,
+      }),
+      5000
+    );
+  });
+
+  it("uses the initial delay with no check, returns null while disabled, and clamps oversized waits", async () => {
+    const module = await import("../apps/desktop/update-check.mjs");
+    assert.equal(
+      module.nextUpdateCheckDelay({ enabled: true, lastCheckedAt: null, initialDelayMs: 4321 }),
+      4321
+    );
+    assert.equal(module.nextUpdateCheckDelay({ enabled: false }), null);
+    assert.equal(
+      module.nextUpdateCheckDelay({
+        enabled: true,
+        lastCheckedAt: Date.now(),
+        intervalMs: Number.MAX_SAFE_INTEGER,
+      }),
+      module.MAX_TIMER_DELAY_MS
+    );
   });
 });

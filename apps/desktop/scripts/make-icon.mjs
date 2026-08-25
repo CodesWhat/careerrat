@@ -1,72 +1,91 @@
-// apps/desktop/scripts/make-icon.mjs — generate the macOS app icon from the
-// CareerRat rat emoji artwork on the brand cream background.
+// Generate the selected CareerRat text mark for macOS and Windows packaging.
 //
 //   node apps/desktop/scripts/make-icon.mjs
 //
-// Produces apps/desktop/build/icon.png (1024) and apps/desktop/build/icon.icns.
-// electron-builder.yml points mac.icon at the .icns; main.mjs uses the .png for
-// the dev dock icon. Re-run after changing the desktop artwork or brand color.
-//
-// Design: Apple "Big Sur" grid — 1024 canvas, 824 rounded-rect body (corner
-// radius 185, 100px margin), filled with a soft cream gradient, mascot centred
-// with breathing room. The transparent rat artwork stays readable from the
-// smallest Finder size through the full-size Dock preview.
+// Option 08: a tight lower-left Career / Rat. stack on the sky square.
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BUILD_DIR = join(HERE, "..", "build");
-const ARTWORK = join(HERE, "..", "assets", "rat-emoji.png");
+const FONT_PATH = join(
+  HERE,
+  "..",
+  "..",
+  "..",
+  "node_modules",
+  "@fontsource",
+  "figtree",
+  "files",
+  "figtree-latin-800-normal.woff2",
+);
 
 const CANVAS = 1024;
-const BODY = 824; // Big Sur icon body
-const MARGIN = (CANVAS - BODY) / 2; // 100
-const RADIUS = 185; // ~22.5% of body
-const ARTWORK_BOX = 820; // emoji bounding box, centred within the icon body
+const BODY = 824;
+const MARGIN = (CANVAS - BODY) / 2;
+const RADIUS = Math.round(BODY * 0.24);
+const SKY = "#8fd0f8";
+const INK = "#17171a";
+const fontData = readFileSync(FONT_PATH).toString("base64");
 
-// Cream brand ramp for the existing desktop icon artwork.
-const CREAM_TOP = "#fffaf2"; // --paper-surface
-const CREAM_BOTTOM = "#f4eee1"; // a touch deeper than --paper-bg (#faf6ef)
-const EDGE = "#e7dcca"; // --paper-edge-ish hairline for definition on white
+function iconSvg() {
+  const left = Math.round(MARGIN + BODY * 0.09);
+  const firstBaseline = Math.round(MARGIN + BODY * 0.66);
+  const secondBaseline = Math.round(MARGIN + BODY * 0.865);
+  const fontSize = Math.round(BODY * 0.25);
 
-const bgSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${CANVAS}" height="${CANVAS}" viewBox="0 0 ${CANVAS} ${CANVAS}">
-  <defs>
-    <linearGradient id="cream" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="${CREAM_TOP}"/>
-      <stop offset="1" stop-color="${CREAM_BOTTOM}"/>
-    </linearGradient>
-  </defs>
-  <rect x="${MARGIN}" y="${MARGIN}" width="${BODY}" height="${BODY}" rx="${RADIUS}" ry="${RADIUS}"
-        fill="url(#cream)" stroke="${EDGE}" stroke-width="2"/>
-</svg>`;
+  return Buffer.from(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="${CANVAS}" height="${CANVAS}" viewBox="0 0 ${CANVAS} ${CANVAS}">
+      <style>
+        @font-face {
+          font-family: "FigtreeIcon";
+          src: url("data:font/woff2;base64,${fontData}") format("woff2");
+          font-weight: 800;
+        }
+        text { font-family: "FigtreeIcon", Figtree, Arial, sans-serif; font-weight: 800; letter-spacing: -0.07em; }
+      </style>
+      <rect x="${MARGIN}" y="${MARGIN}" width="${BODY}" height="${BODY}" rx="${RADIUS}" fill="${SKY}" />
+      <text x="${left}" y="${firstBaseline}" font-size="${fontSize}" fill="${INK}">Career</text>
+      <text x="${left}" y="${secondBaseline}" font-size="${fontSize}" fill="${INK}">Rat.</text>
+    </svg>
+  `);
+}
+
+function icoFromPngs(images) {
+  const directory = Buffer.alloc(6 + images.length * 16);
+  directory.writeUInt16LE(0, 0);
+  directory.writeUInt16LE(1, 2);
+  directory.writeUInt16LE(images.length, 4);
+
+  let offset = directory.length;
+  images.forEach(({ png, size }, index) => {
+    const entry = 6 + index * 16;
+    directory[entry] = size === 256 ? 0 : size;
+    directory[entry + 1] = size === 256 ? 0 : size;
+    directory.writeUInt16LE(1, entry + 4);
+    directory.writeUInt16LE(32, entry + 6);
+    directory.writeUInt32LE(png.length, entry + 8);
+    directory.writeUInt32LE(offset, entry + 12);
+    offset += png.length;
+  });
+
+  return Buffer.concat([directory, ...images.map(({ png }) => png)]);
+}
 
 async function main() {
   mkdirSync(BUILD_DIR, { recursive: true });
-
-  const background = await sharp(Buffer.from(bgSvg)).png().toBuffer();
-  const mascot = await sharp(ARTWORK)
-    .resize(ARTWORK_BOX, ARTWORK_BOX, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
-    .toBuffer();
-
-  const icon1024 = await sharp(background)
-    .composite([{ input: mascot, gravity: "center" }])
-    .png()
-    .toBuffer();
-
+  const icon1024 = await sharp(iconSvg()).png().toBuffer();
   const pngPath = join(BUILD_DIR, "icon.png");
   await sharp(icon1024).toFile(pngPath);
-  console.log(`wrote ${pngPath}`);
 
-  // Build a .icns via macOS iconutil (reliable, native). Generate the standard
-  // iconset sizes from the 1024 source, then pack.
   const iconset = join(BUILD_DIR, "icon.iconset");
   rmSync(iconset, { recursive: true, force: true });
   mkdirSync(iconset, { recursive: true });
-  const sizes = [
+  const macSizes = [
     ["icon_16x16.png", 16],
     ["icon_16x16@2x.png", 32],
     ["icon_32x32.png", 32],
@@ -78,16 +97,24 @@ async function main() {
     ["icon_512x512.png", 512],
     ["icon_512x512@2x.png", 1024],
   ];
-  for (const [name, size] of sizes) {
+  for (const [name, size] of macSizes) {
     await sharp(icon1024).resize(size, size).png().toFile(join(iconset, name));
   }
-  const icnsPath = join(BUILD_DIR, "icon.icns");
-  execFileSync("iconutil", ["-c", "icns", iconset, "-o", icnsPath]);
+  execFileSync("iconutil", ["-c", "icns", iconset, "-o", join(BUILD_DIR, "icon.icns")]);
   rmSync(iconset, { recursive: true, force: true });
-  console.log(`wrote ${icnsPath}`);
+
+  const windowsImages = await Promise.all(
+    [16, 24, 32, 48, 64, 128, 256].map(async (size) => ({
+      size,
+      png: await sharp(icon1024).resize(size, size).png().toBuffer(),
+    })),
+  );
+  writeFileSync(join(BUILD_DIR, "icon.ico"), icoFromPngs(windowsImages));
+
+  process.stdout.write(`wrote ${pngPath}, icon.icns, and icon.ico\n`);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
+main().catch((error) => {
+  process.stderr.write(`${error?.stack || error}\n`);
+  process.exitCode = 1;
 });

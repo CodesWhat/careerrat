@@ -50,7 +50,11 @@ function readSkill(name) {
   const text = readFileSync(join(skillsRoot, name, "SKILL.md"), "utf8");
   const match = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   assert.ok(match, `${name} must have one complete YAML frontmatter block`);
-  return { frontmatterText: match[1], frontmatter: parseYaml(match[1]), body: match[2] };
+  return {
+    frontmatterText: match[1],
+    frontmatter: parseYaml(match[1]),
+    body: match[2],
+  };
 }
 
 function pathIsPackaged(path) {
@@ -121,6 +125,45 @@ test("every canonical skill uses portable frontmatter and preserves supported Ca
       assert.doesNotMatch(body, /^\s*\[TODO:[^\n]*\]\s*$/m, `${name} has scaffold residue`);
     });
   }
+});
+
+test("the published skills catalog lists every shipped skill exactly once", () => {
+  const catalog = readFileSync(
+    join(root, "apps", "docs", "content", "docs", "reference", "skills.mdx"),
+    "utf8"
+  );
+  const advertisedCount = Number(catalog.match(/description:\s+All (\d+) skills/)?.[1]);
+  const introCount = Number(catalog.match(/CareerRat ships (\d+) skills/)?.[1]);
+  const listed = [...catalog.matchAll(/^\| `([a-z][a-z0-9-]*)` \|/gm)]
+    .map((match) => match[1])
+    .sort();
+  const expected = canonicalSkillNames();
+
+  assert.equal(advertisedCount, expected.length);
+  assert.equal(introCount, expected.length);
+  assert.equal(new Set(listed).size, listed.length, "catalog must not duplicate a skill row");
+  assert.deepEqual(listed, expected);
+});
+
+test("architecture docs do not advertise a stale shipped skill count", () => {
+  const expected = canonicalSkillNames().length;
+  for (const path of [
+    join(root, "docs", "ARCHITECTURE.md"),
+    join(root, "apps", "docs", "content", "docs", "advanced", "architecture.mdx"),
+  ]) {
+    const source = readFileSync(path, "utf8");
+    assert.match(source, new RegExp(`maps user intent to (?:all )?${expected} skills`, "i"));
+    assert.doesNotMatch(source, /\b(?:16|21) skills\b/i);
+  }
+});
+
+test("ingest-profile captures remote geographic eligibility separately from local work modes", () => {
+  const { body } = readSkill("ingest-profile");
+
+  assert.match(body, /remote_scope/);
+  assert.match(body, /home-country/);
+  assert.match(body, /worldwide/);
+  assert.match(body, /hybrid.*on-site.*home.*relocation/is);
 });
 
 test("the agent router documents CareerRat skill extensions inside portable metadata", () => {

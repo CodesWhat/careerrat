@@ -1,4 +1,4 @@
-// Installed AI CLI registry shared by the terminal launcher and Electron.
+// Installed AI CLI registry shared by in-app sign-in and Electron.
 // Discovery never executes a candidate binary. Readiness probes and requests
 // spawn the resolved executable directly with fixed argv and shell:false.
 
@@ -12,6 +12,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   statSync,
@@ -25,8 +26,11 @@ import { fetchPublicHttpText, validatePublicHttpUrl } from "../net/public-http-f
 import { userPath } from "../paths/workspace.mjs";
 
 const CLAUDE_BOUNDARY_MINIMUM_VERSION = "2.1.241";
+const CODEX_COMPLETION_MINIMUM_VERSION = "0.149.1";
 const UNSUPPORTED_CAPABILITY_REASON =
   "Detected, but this CLI cannot safely run CareerRat tools yet.";
+const UNVERIFIED_COMPLETION_REASON =
+  "Detected, but this CLI's isolated chat and drafting mode has not been verified yet.";
 const PUBLIC_WEB_SERVER_NAME = "careerrat_public_web";
 const PUBLIC_WEB_FETCH_TOOL = `mcp__${PUBLIC_WEB_SERVER_NAME}__fetch`;
 const PUBLIC_WEB_SERVER_ARG = "--careerrat-public-web";
@@ -93,6 +97,7 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     commandShape: "claude -p --output-format json",
     authProbe: { args: ["auth", "status"] },
     installUrl: "https://code.claude.com/docs/en/quickstart",
+    completionSupported: true,
     // The only installed runtime whose CLI actually has a tool-allowlist
     // mechanism (`--tools`/`--allowedTools`, wired in
     // buildInstalledRuntimeInvocation's "claude" branch below). Every other
@@ -122,6 +127,8 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     commandShape: "codex exec --json -",
     authProbe: { args: ["login", "status"] },
     installUrl: "https://learn.chatgpt.com/docs/codex/cli",
+    completionSupported: true,
+    minimumCompletionVersion: CODEX_COMPLETION_MINIMUM_VERSION,
   },
   {
     id: "gemini",
@@ -285,6 +292,9 @@ export function findInstalledExecutable(
 export function detectInstalledRuntimes(options = {}) {
   return INSTALLED_RUNTIME_DEFINITIONS.map((definition) => {
     const path = findInstalledExecutable(definition.binaries, options);
+    const runtimeCapabilities = installedRuntimeCapabilities(definition.id, {
+      available: Boolean(path),
+    });
     return {
       id: definition.id,
       name: definition.name,
@@ -294,10 +304,43 @@ export function detectInstalledRuntimes(options = {}) {
       warning: definition.warning || null,
       installUrl: definition.installUrl || null,
       toolExecutionSupported: definition.toolExecutionSupported === true,
+      capabilities: runtimeCapabilities.capabilities,
+      capabilityTier: runtimeCapabilities.capabilityTier,
       capabilityReason:
-        definition.toolExecutionSupported === true ? null : UNSUPPORTED_CAPABILITY_REASON,
+        definition.toolExecutionSupported === true
+          ? null
+          : definition.completionSupported === true
+            ? "Ready for chat and drafting. Task tools and research are not verified for this CLI yet."
+            : UNVERIFIED_COMPLETION_REASON,
     };
   });
+}
+
+export function installedRuntimeCapabilities(
+  runtimeId,
+  { available = true, completion = undefined, taskTools = undefined } = {}
+) {
+  const definition = INSTALLED_RUNTIME_DEFINITIONS.find(({ id }) => id === runtimeId);
+  const completionSupported =
+    completion === undefined
+      ? definition?.completionSupported === true
+      : definition?.completionSupported === true && completion === true;
+  const declaredTaskTools = definition?.toolExecutionSupported === true;
+  const verifiedTaskTools =
+    taskTools === undefined ? declaredTaskTools : declaredTaskTools && taskTools === true;
+  const capabilities = {
+    completion: completionSupported,
+    taskTools: verifiedTaskTools,
+    research: verifiedTaskTools,
+  };
+  const capabilityTier = !available
+    ? "unavailable"
+    : verifiedTaskTools
+      ? "task_tools"
+      : completionSupported
+        ? "chat_drafting"
+        : "detected_unverified";
+  return { capabilities, capabilityTier };
 }
 
 export function installedRuntimeToolExecutionCapability(runtimeId) {
@@ -307,6 +350,34 @@ export function installedRuntimeToolExecutionCapability(runtimeId) {
     reason: definition?.toolExecutionSupported === true ? null : UNSUPPORTED_CAPABILITY_REASON,
     minimumVersion: definition?.minimumBoundaryVersion || null,
   };
+}
+
+function loadInstalledSkillInstructions({ repoRoot, skill } = {}) {
+  if (!repoRoot || !skill) return null;
+  try {
+    return readFileSync(join(repoRoot, ".agents", "skills", skill, "SKILL.md"), "utf8");
+  } catch {
+    return null;
+  }
+}
+
+function promptWithInstalledSkill({ prompt, repoRoot, skill } = {}) {
+  if (!skill) return String(prompt || "");
+  const instructions = loadInstalledSkillInstructions({ repoRoot, skill });
+  if (!instructions) {
+    throw runtimeError(
+      `Could not load the allowlisted CareerRat instructions for skill "${skill}".`,
+      "RUNTIME_BOUNDARY_UNAVAILABLE"
+    );
+  }
+  return [
+    "CareerRat loaded the following allowlisted skill instructions. Follow them exactly. The " +
+      "provider has no authority beyond the capabilities explicitly granted by this request.",
+    "<careerrat-skill-instructions>",
+    instructions.trim(),
+    "</careerrat-skill-instructions>",
+    String(prompt || ""),
+  ].join("\n\n");
 }
 
 function parseVersion(value) {
@@ -371,6 +442,37 @@ export function probeInstalledRuntime(
   if (!definition) return { status: "unsupported", ready: false, action: null };
   const childEnv = buildInstalledRuntimeChildEnv({ env });
 
+  if (definition.minimumCompletionVersion) {
+    let versionResult;
+    try {
+      versionResult = spawnSyncImpl(runtime.path, ["--version"], {
+        shell: false,
+        windowsHide: true,
+        encoding: "utf8",
+        timeout: timeoutMs,
+        env: childEnv,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch {
+      versionResult = null;
+    }
+    if (
+      versionResult?.status !== 0 ||
+      !versionAtLeast(
+        `${versionResult?.stdout || ""}\n${versionResult?.stderr || ""}`,
+        definition.minimumCompletionVersion
+      )
+    ) {
+      return {
+        status: "unsupported_capability",
+        ready: false,
+        action: null,
+        completionSupported: false,
+        capabilityReason: `Update ${definition.name} to ${definition.minimumCompletionVersion} or newer for isolated chat and drafting.`,
+      };
+    }
+  }
+
   if (definition.toolExecutionSupported === true && definition.minimumBoundaryVersion) {
     let versionResult;
     try {
@@ -423,15 +525,20 @@ export function probeInstalledRuntime(
       status: definition.authProbe.launchOnly ? "ready_unverified" : "ready",
       ready: true,
       action: null,
+      completionSupported: definition.completionSupported === true,
       toolExecutionSupported: definition.toolExecutionSupported === true,
       capabilityReason:
-        definition.toolExecutionSupported === true ? null : UNSUPPORTED_CAPABILITY_REASON,
+        definition.toolExecutionSupported === true
+          ? null
+          : definition.completionSupported === true
+            ? "Ready for chat and drafting. Task tools and research are not verified for this CLI yet."
+            : UNVERIFIED_COMPLETION_REASON,
     };
   }
   return {
     status: "authentication_required",
     ready: false,
-    action: "open_terminal",
+    action: "start_sign_in",
   };
 }
 
@@ -676,13 +783,30 @@ export function buildInstalledRuntimeInvocation({
     return { ...common, args };
   }
   if (runtimeId === "codex") {
+    const disabledFeatures = [
+      "shell_tool",
+      "unified_exec",
+      "apps",
+      "browser_use",
+      "browser_use_external",
+      "browser_use_full_cdp_access",
+      "computer_use",
+      "image_generation",
+      "multi_agent",
+      "multi_agent_v2",
+      "plugins",
+      "skill_search",
+      "view_image",
+    ];
     const args = [
       "exec",
       "--json",
       // CareerRat supplies the whole bounded task. Keep Codex account auth,
       // but do not load unrelated global MCP servers, hooks, or defaults
-      // from ~/.codex/config.toml into an app-owned extraction/search call.
+      // from ~/.codex/config.toml into an app-owned completion call.
       "--ignore-user-config",
+      "--ignore-rules",
+      ...disabledFeatures.flatMap((feature) => ["--disable", feature]),
       "--sandbox",
       "read-only",
       "--ephemeral",
@@ -713,21 +837,6 @@ export function buildInstalledRuntimeInvocation({
   }
   if (runtimeId === "droid") {
     return { ...common, args: ["exec"] };
-  }
-  // "custom" is the W4 onboarding 3d/3f custom-command runtime — its
-  // `executablePath` isn't a resolved binary path (there's no fixed
-  // definition to resolve against), it's the raw command string persisted by
-  // POST /api/settings/ai-runtime/custom/select. Split it into argv here, at
-  // invocation time, the same way probeCustomRuntimeCommand does.
-  if (runtimeId === "custom") {
-    const argv = parseCustomCommandString(executablePath);
-    if (!argv.length) {
-      const error = new Error("no custom command is configured");
-      error.code = "RUNTIME_UNSUPPORTED";
-      throw error;
-    }
-    const [bin, ...args] = argv;
-    return { ...common, command: bin, args };
   }
   const error = new Error(`unsupported installed AI runtime: ${runtimeId}`);
   error.code = "RUNTIME_UNSUPPORTED";
@@ -938,36 +1047,59 @@ export function installedRuntimeSignInCommand(runtimeId) {
   return null;
 }
 
-export function openInstalledRuntimeTerminal(
+const ACTIVE_RUNTIME_SIGN_INS = new Map();
+const RUNTIME_SIGN_IN_TIMEOUT_MS = 10 * 60 * 1000;
+
+function installedRuntimeSignInArgs(runtimeId) {
+  if (runtimeId === "claude") return ["auth", "login"];
+  if (runtimeId === "codex") return ["login"];
+  if (runtimeId === "opencode") return ["auth", "login"];
+  if (runtimeId === "goose") return ["configure"];
+  return null;
+}
+
+export function startInstalledRuntimeSignIn(
   runtime,
-  { platform = process.platform, spawnImpl = spawn } = {}
+  { spawnImpl = spawn, timeoutMs = RUNTIME_SIGN_IN_TIMEOUT_MS } = {}
 ) {
   const signInCommand = installedRuntimeSignInCommand(runtime?.id);
-  if (!signInCommand) {
+  const args = installedRuntimeSignInArgs(runtime?.id);
+  if (!signInCommand || !args || !runtime?.path) {
     throw runtimeError("Unsupported installed AI runtime.", "RUNTIME_UNSUPPORTED");
   }
-  let command;
-  let args;
-  if (platform === "darwin") {
-    // The string passed to Terminal is produced entirely by the allowlisted
-    // registry above; no request or filesystem value reaches the shell.
-    command = "/usr/bin/osascript";
-    args = ["-e", `tell application "Terminal" to do script "${signInCommand}"`];
-  } else if (platform === "win32") {
-    command = "cmd.exe";
-    args = ["/c", "start", "", "cmd.exe"];
-  } else {
-    command = "x-terminal-emulator";
-    args = [];
+
+  const existing = ACTIVE_RUNTIME_SIGN_INS.get(runtime.id);
+  if (existing) {
+    return { ok: true, runtimeId: runtime.id, signInCommand, reused: true };
   }
-  const child = spawnImpl(command, args, {
+
+  const child = spawnImpl(runtime.path, args, {
     shell: false,
-    detached: true,
+    detached: false,
     stdio: "ignore",
-    windowsHide: false,
+    windowsHide: true,
   });
+  const timer = setTimeout(() => child.kill?.("SIGTERM"), timeoutMs);
+  timer.unref?.();
+  const clear = () => {
+    clearTimeout(timer);
+    if (ACTIVE_RUNTIME_SIGN_INS.get(runtime.id)?.child === child) {
+      ACTIVE_RUNTIME_SIGN_INS.delete(runtime.id);
+    }
+  };
+  child.once?.("exit", clear);
+  child.once?.("error", clear);
+  ACTIVE_RUNTIME_SIGN_INS.set(runtime.id, { child, timer });
   child.unref?.();
-  return { ok: true, signInCommand };
+  return { ok: true, runtimeId: runtime.id, signInCommand, reused: false };
+}
+
+export function stopInstalledRuntimeSignIns() {
+  for (const { child, timer } of ACTIVE_RUNTIME_SIGN_INS.values()) {
+    clearTimeout(timer);
+    child.kill?.("SIGTERM");
+  }
+  ACTIVE_RUNTIME_SIGN_INS.clear();
 }
 
 const MAX_RUNTIME_OUTPUT_BYTES = 10 * 1024 * 1024;
@@ -1124,9 +1256,9 @@ export async function runInstalledRuntime({
   spawnImpl = spawn,
   spawnSyncImpl = spawnSync,
   onEvent,
-  // A tool-bearing skill always runs in materializeIsolatedSkillCwd()'s
-  // single-skill project. Exact-read skills must also supply one canonical
-  // saved upload through approvedReadPaths; broad repo reads fail closed.
+  // A named skill always runs in materializeIsolatedSkillCwd()'s single-skill
+  // project. Exact-read tool runs must also supply one canonical saved upload
+  // through approvedReadPaths; broad repo reads fail closed.
   skill = null,
   repoRoot = null,
   approvedReadPaths = [],
@@ -1138,7 +1270,19 @@ export async function runInstalledRuntime({
     throw runtimeError("Installed AI request was cancelled.", "RUNTIME_CANCELLED");
   }
   const definition = INSTALLED_RUNTIME_DEFINITIONS.find(({ id }) => id === runtime.id);
-  const toolBearing = Boolean(skill) || (Array.isArray(tools) && tools.length > 0);
+  const providerTools = Array.isArray(tools)
+    ? tools.filter((tool) => tool && tool !== "Skill")
+    : [];
+  const toolBearing = providerTools.length > 0;
+  const runtimeCapabilities = installedRuntimeCapabilities(runtime.id).capabilities;
+  if (!toolBearing && runtimeCapabilities.completion !== true) {
+    throw runtimeError(
+      `${definition?.name || runtime.id} is detected, but its isolated chat and drafting mode ` +
+        "has not been verified yet.",
+      "RUNTIME_COMPLETION_UNSUPPORTED",
+      { runtimeId: runtime.id }
+    );
+  }
   if (toolBearing && definition?.toolExecutionSupported !== true) {
     throw runtimeError(
       `${definition?.name || runtime.id} is detected, but it cannot safely run CareerRat tools. ` +
@@ -1149,9 +1293,11 @@ export async function runInstalledRuntime({
   }
   const childEnv = buildInstalledRuntimeChildEnv({ env });
   if (toolBearing) assertInstalledRuntimeBoundaryVersion(runtime, { spawnSyncImpl, env: childEnv });
+  const installedPrompt = promptWithInstalledSkill({ prompt, repoRoot, skill });
 
   let tempDir = null;
   let skillCwd = null;
+  let taskCwd = null;
   try {
     let schemaPath = null;
     if (runtime.id === "codex" && outputSchema) {
@@ -1162,7 +1308,7 @@ export async function runInstalledRuntime({
         mode: 0o600,
       });
     }
-    if (runtime.id === "claude" && skill) {
+    if (skill) {
       skillCwd = materializeIsolatedSkillCwd({ repoRoot, skill });
       if (!skillCwd) {
         throw runtimeError(
@@ -1171,6 +1317,9 @@ export async function runInstalledRuntime({
           { runtimeId: runtime.id }
         );
       }
+    } else if (!toolBearing) {
+      taskCwd = mkdtempSync(join(tmpdir(), "careerrat-task-cwd-"));
+      chmodSync(taskCwd, 0o700);
     }
     const invocation = buildInstalledRuntimeInvocation({
       runtimeId: runtime.id,
@@ -1178,12 +1327,12 @@ export async function runInstalledRuntime({
       schema: outputSchema,
       schemaPath,
       model,
-      tools,
+      tools: providerTools,
       // Only tell the arg-builder a skill is "ready" once isolation actually
       // succeeded — never claim --setting-sources project against a plain
       // repoRoot cwd, which would reintroduce the full checkout context and
       // defeat the per-call filesystem boundary.
-      skill: skillCwd ? skill : undefined,
+      skill: runtime.id === "claude" && skillCwd ? skill : undefined,
       repoRoot,
       env,
       isolatedCwd: skillCwd,
@@ -1195,7 +1344,7 @@ export async function runInstalledRuntime({
       try {
         child = spawnImpl(invocation.command, invocation.args, {
           ...invocation.options,
-          cwd: skillCwd || cwd,
+          cwd: skillCwd || taskCwd || cwd,
           env: childEnv,
           detached: process.platform !== "win32",
           stdio: ["pipe", "pipe", "pipe"],
@@ -1305,13 +1454,14 @@ export async function runInstalledRuntime({
         // A fast process can close stdin before the write completes; close/error
         // handling above owns the final outcome.
       });
-      child.stdin?.end(String(prompt || ""));
+      child.stdin?.end(installedPrompt);
     });
 
     return { ...result, runtimeId: runtime.id };
   } finally {
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
     if (skillCwd) rmSync(skillCwd, { recursive: true, force: true });
+    if (taskCwd) rmSync(taskCwd, { recursive: true, force: true });
   }
 }
 

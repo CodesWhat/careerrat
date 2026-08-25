@@ -303,7 +303,11 @@ export function jobThreadSetPinned({ repoRoot, env, applicationId, pinned = true
       at,
       type: "system",
       title: `${application.company || id}: job conversation ${pinned ? "pinned" : "unpinned"}`,
-      refs: { applicationId: id, company: application.company, role: application.role },
+      refs: {
+        applicationId: id,
+        company: application.company,
+        role: application.role,
+      },
       skill: "chat-first",
       operation: `job-thread:${pinned ? "pin" : "unpin"}`,
     });
@@ -319,14 +323,22 @@ export function jobThreadSetArchived({ repoRoot, env, applicationId, archived = 
     const existing = readJobThread(db, id);
     if (!existing) throw new NotFoundError(`no job thread for application "${id}"`);
     const at = nextIso(existing.updatedAt, now);
-    const updated = { ...existing, status: archived ? "archived" : "active", updatedAt: at };
+    const updated = {
+      ...existing,
+      status: archived ? "archived" : "active",
+      updatedAt: at,
+    };
     writeJobThread(db, updated);
     const meta = bumpMeta(db, at);
     const event = logActivityEvent(db, {
       at,
       type: "system",
       title: `${application.company || id}: job conversation ${archived ? "archived" : "restored"}`,
-      refs: { applicationId: id, company: application.company, role: application.role },
+      refs: {
+        applicationId: id,
+        company: application.company,
+        role: application.role,
+      },
       skill: "chat-first",
       operation: `job-thread:${archived ? "archive" : "restore"}`,
     });
@@ -585,10 +597,20 @@ function candidatePromptContext(db) {
     profile: {
       headline: safePromptText(candidate.headline || profile.headline, 300) || null,
       locationPreferences: {
+        home: safePromptText(location.home || candidate.location, 160) || null,
         remote: location.remote === true,
+        remoteScope:
+          location.remote === true
+            ? location.remote_scope === "worldwide"
+              ? "worldwide"
+              : "home-country"
+            : null,
         hybrid: location.hybrid === true,
         onsite: location.onsite === true,
-        relocation: safePromptList(location.relocation, { maxItems: 8, maxText: 120 }),
+        relocation: safePromptList(location.relocation, {
+          maxItems: 8,
+          maxText: 120,
+        }),
         travelTolerance: safePromptText(location.travel_tolerance, 120) || null,
       },
       authorization: {
@@ -607,14 +629,24 @@ function candidatePromptContext(db) {
           fitSignals: safePromptList(bucket.fit_signals),
           downSignals: safePromptList(bucket.down_signals),
         })),
-      keepSignals: safePromptList(targeting.keep_signals, { maxItems: 20, maxText: 240 }),
-      cutSignals: safePromptList(targeting.cut_signals, { maxItems: 20, maxText: 240 }),
+      keepSignals: safePromptList(targeting.keep_signals, {
+        maxItems: 20,
+        maxText: 240,
+      }),
+      cutSignals: safePromptList(targeting.cut_signals, {
+        maxItems: 20,
+        maxText: 240,
+      }),
       companyPreferences: withoutPrivatePromptFields(targeting.company_preferences || {}),
     },
     honesty: {
-      confirmedTools: safePromptList(honesty.tools?.confirmed, { maxItems: 30 }),
+      confirmedTools: safePromptList(honesty.tools?.confirmed, {
+        maxItems: 30,
+      }),
       adjacentTools: safePromptList(honesty.tools?.adjacent, { maxItems: 30 }),
-      doNotClaimTools: safePromptList(honesty.tools?.do_not_claim, { maxItems: 30 }),
+      doNotClaimTools: safePromptList(honesty.tools?.do_not_claim, {
+        maxItems: 30,
+      }),
       doNotFabricate: safePromptList(honesty.claims?.do_not_fabricate, {
         maxItems: 30,
         maxText: 500,
@@ -749,7 +781,11 @@ async function runChatFirstAI({
       operation: `chat-first.${action}`,
     },
     schema,
-    manual: { available: true, reason: "retry-later", action: "Retry this turn." },
+    manual: {
+      available: true,
+      reason: "retry-later",
+      action: "Retry this turn.",
+    },
     maxRetries: 1,
     structuredMode: "native-preferred",
     call,
@@ -1256,7 +1292,12 @@ export function missionStepSetStatus({
       skill: "chat-first",
       operation: `mission:step-${nextStatus}`,
     });
-    return { mission: { ...updatedMission, steps }, step: updatedStep, meta, event };
+    return {
+      mission: { ...updatedMission, steps },
+      step: updatedStep,
+      meta,
+      event,
+    };
   });
 }
 
@@ -1360,7 +1401,12 @@ function recoverStaleMissionAttempts({
       skill: "chat-first",
       operation: "mission:recover-stale",
     });
-    return { mission: hydrateMission(db, updatedMission), recoveredStepIds: stale, meta, event };
+    return {
+      mission: hydrateMission(db, updatedMission),
+      recoveredStepIds: stale,
+      meta,
+      event,
+    };
   });
 }
 
@@ -1409,7 +1455,13 @@ function claimMissionStepAttempt({ repoRoot, env, missionId, stepId, leaseMs, no
       skill: "chat-first",
       operation: "mission:attempt-start",
     });
-    return { mission: hydrateMission(db, updatedMission), step: updatedStep, attempt, meta, event };
+    return {
+      mission: hydrateMission(db, updatedMission),
+      step: updatedStep,
+      attempt,
+      meta,
+      event,
+    };
   });
 }
 
@@ -1506,16 +1558,27 @@ function operationSummary(result) {
 
 function intentForMissionStep(step, applicationId) {
   if (step.action === "promote") {
-    return { type: "sourced.promote", entity: { type: "sourced", id: step.jobRef.id }, input: {} };
+    return {
+      type: "sourced.promote",
+      entity: { type: "sourced", id: step.jobRef.id },
+      input: {},
+    };
   }
   if (step.action === "evaluate") {
-    return { type: "job.evaluate", entity: { type: "application", id: applicationId }, input: {} };
+    return {
+      type: "job.evaluate",
+      entity: { type: "application", id: applicationId },
+      input: {},
+    };
   }
   if (step.action === "generate-documents") {
     return {
       type: "job.generate-documents",
       entity: { type: "application", id: applicationId },
-      input: { applyIntent: step.input?.applyIntent === true, formats: ["pdf"] },
+      input: {
+        applyIntent: step.input?.applyIntent === true,
+        formats: ["pdf"],
+      },
     };
   }
   if (step.action === "prepare-submit") {
@@ -1548,9 +1611,14 @@ function applicationGateState(application) {
   const answeredIds = Array.isArray(manifest.answerLineage?.answeredQuestionIds)
     ? manifest.answerLineage.answeredQuestionIds.map(String).filter(Boolean)
     : [];
+  const skippedIds = new Set(
+    Array.isArray(manifest.answerLineage?.skippedQuestionIds)
+      ? manifest.answerLineage.skippedQuestionIds.map(String).filter(Boolean)
+      : []
+  );
   const questionCount = Number(manifest.questions?.answerableCount);
   return {
-    answeredCount: new Set(answeredIds).size,
+    answeredCount: new Set(answeredIds.filter((id) => !skippedIds.has(id))).size,
     questionCount: Number.isInteger(questionCount) && questionCount >= 0 ? questionCount : 0,
     packet,
   };
@@ -1601,6 +1669,11 @@ export async function missionRun({
   for (const step of mission.steps) {
     const retryablePrepare = retryablePrepareStep(step);
     if (step.status !== "pending" && !retryablePrepare) continue;
+    // Give a user pause request waiting on the HTTP event loop a chance to
+    // commit before this runner claims more work. Some installed CLI agents
+    // block the server process while they run, so a microtask-only loop would
+    // otherwise race through the next step before the pause route can run.
+    await new Promise((resolve) => setImmediate(resolve));
     const liveMission = missionRequired(db, missionId);
     if (liveMission.status !== "running") {
       return { ok: true, mission: hydrateMission(db, liveMission) };
@@ -1722,7 +1795,13 @@ export async function missionRun({
           return {
             ok: true,
             mission: committedWrite(() =>
-              missionSetStatus({ repoRoot, env, id: missionId, status: "paused", now })
+              missionSetStatus({
+                repoRoot,
+                env,
+                id: missionId,
+                status: "paused",
+                now,
+              })
             ).mission,
           };
         }
@@ -1758,7 +1837,10 @@ export async function missionRun({
               missionId,
               stepId: candidate.id,
               status: "skipped",
-              result: { gate: result.state, reason: "Evaluation did not return KEEP." },
+              result: {
+                gate: result.state,
+                reason: "Evaluation did not return KEEP.",
+              },
               now,
             })
           );
@@ -1807,7 +1889,13 @@ export async function missionResume({ repoRoot, env, id, executeIntent, leaseMs,
   }
   if (current.status === "paused") {
     committedWrite(() =>
-      missionSetStatus({ repoRoot, env, id: missionId, status: "running", now })
+      missionSetStatus({
+        repoRoot,
+        env,
+        id: missionId,
+        status: "running",
+        now,
+      })
     );
   }
   return missionRun({
@@ -1898,7 +1986,11 @@ export function mockInterviewStart({
       at,
       type: "interview",
       title: `${application.company || applicationKey}: mock interview started`,
-      refs: { applicationId: applicationKey, company: application.company, role: application.role },
+      refs: {
+        applicationId: applicationKey,
+        company: application.company,
+        role: application.role,
+      },
       skill: "chat-first",
       operation: "mock-interview:start",
     });
@@ -1954,7 +2046,12 @@ export async function mockInterviewStartWithAI({
   call,
   runAI,
 } = {}) {
-  const resumable = resumableEmptyMockSession({ repoRoot, env, id, applicationId });
+  const resumable = resumableEmptyMockSession({
+    repoRoot,
+    env,
+    id,
+    applicationId,
+  });
   const started = resumable
     ? { session: resumable, meta: null, event: null, reused: true }
     : committedWrite(() =>
@@ -2089,7 +2186,9 @@ export function mockInterviewMessageAppend({
       ...session,
       updatedAt: at,
       ...((cleanKind === "question" || cleanKind === "answer") && normalizedQuestion != null
-        ? { currentQuestion: Math.max(session.currentQuestion || 0, normalizedQuestion) }
+        ? {
+            currentQuestion: Math.max(session.currentQuestion || 0, normalizedQuestion),
+          }
         : {}),
     };
     writeMockSession(db, updated);
@@ -2380,7 +2479,9 @@ export async function mockInterviewTurn({ repoRoot, env, sessionId, text, now, c
       },
     });
     const worked = cleanText(generated.data.worked, "worked", { max: 2_000 });
-    const tighten = cleanText(generated.data.tighten, "tighten", { max: 2_000 });
+    const tighten = cleanText(generated.data.tighten, "tighten", {
+      max: 2_000,
+    });
     const finalQuestion = questionNumber >= answer.session.questionTotal;
     const nextQuestion =
       generated.data.nextQuestion == null
@@ -2436,11 +2537,19 @@ export async function mockInterviewTurn({ repoRoot, env, sessionId, text, now, c
 
 export function mockInterviewEnd({ repoRoot, env, sessionId, summary, now } = {}) {
   const cleanSessionId = cleanId(sessionId, "sessionId");
-  const cleanSummary = cleanText(summary, "summary", { max: 5_000, required: false });
+  const cleanSummary = cleanText(summary, "summary", {
+    max: 5_000,
+    required: false,
+  });
   return runVerb({ repoRoot, env }, (db) => {
     const session = mockSessionRequired(db, cleanSessionId);
     if (session.status === "ended") {
-      return { session: hydrateMockSession(db, session), reused: true, meta: null, event: null };
+      return {
+        session: hydrateMockSession(db, session),
+        reused: true,
+        meta: null,
+        event: null,
+      };
     }
     const at = nextIso(session.updatedAt, now);
     const updated = {
@@ -2466,7 +2575,12 @@ export function mockInterviewEnd({ repoRoot, env, sessionId, summary, now } = {}
       skill: "chat-first",
       operation: "mock-interview:end",
     });
-    return { session: hydrateMockSession(db, updated), reused: false, meta, event };
+    return {
+      session: hydrateMockSession(db, updated),
+      reused: false,
+      meta,
+      event,
+    };
   });
 }
 
@@ -2676,13 +2790,21 @@ function deriveTouchDue(db, applications, communications, now) {
 
 function touchDueOwner(db, id, source) {
   if (source === "communication") {
-    return { table: "communications", ownerId: id, owner: getRow(db, "communications", id) };
+    return {
+      table: "communications",
+      ownerId: id,
+      owner: getRow(db, "communications", id),
+    };
   }
   if (!id.startsWith("application:") || id.length === "application:".length) {
     throw makeError('application touch ids must use the "application:<id>" shape');
   }
   const ownerId = id.slice("application:".length);
-  return { table: "applications", ownerId, owner: getRow(db, "applications", ownerId) };
+  return {
+    table: "applications",
+    ownerId,
+    owner: getRow(db, "applications", ownerId),
+  };
 }
 
 export function touchDueDismiss({ repoRoot, env, id, source, now = new Date() } = {}) {
@@ -2792,7 +2914,8 @@ function deepIngestPromptFromDb(db) {
 function deepIngestThreadFromDb(db) {
   const preference = getRow(db, "chat_first_preferences", DEEP_INGEST_PROMPT_PREFERENCE_ID);
   const durable = db
-    .prepare(`SELECT updated_at FROM (
+    .prepare(
+      `SELECT updated_at FROM (
       SELECT updated_at FROM deep_ingest_sources
       UNION ALL SELECT updated_at FROM deep_ingest_proposals
       UNION ALL SELECT updated_at FROM deep_ingest_lane_states
@@ -2800,7 +2923,8 @@ function deepIngestThreadFromDb(db) {
       UNION ALL SELECT updated_at FROM deep_ingest_writing_voice
       UNION ALL SELECT updated_at FROM deep_ingest_honesty_boundaries
       UNION ALL SELECT updated_at FROM deep_ingest_role_signals
-    ) WHERE updated_at IS NOT NULL ORDER BY updated_at ASC LIMIT 1`)
+    ) WHERE updated_at IS NOT NULL ORDER BY updated_at ASC LIMIT 1`
+    )
     .get();
   const startedAt = String(preference?.startedAt || durable?.updated_at || "").trim();
   if (!startedAt) return null;

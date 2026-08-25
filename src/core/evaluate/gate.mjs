@@ -122,7 +122,7 @@ export function matchedTitleBucket(title, targeting) {
  *
  * @returns {{ floor: number|null, relo: boolean, label: string, arrangement: string }}
  */
-export function resolveCompFloor({ profile, frontmatter }) {
+function resolveCompFloor({ profile, frontmatter }) {
   const comp = profile?.compensation ? profile.compensation : {};
   const minimumBase =
     comp.minimum_base != null && Number.isFinite(Number(comp.minimum_base))
@@ -409,7 +409,7 @@ function evaluateLocation({ body, frontmatter, profile }) {
  *
  * @returns {{ tier: string, score: number, why: string, caveats: string, priority: string }}
  */
-export function scoreFit({ body, title, targeting, _profile, bucket }) {
+function scoreFit({ body, title, targeting, _profile, bucket }) {
   const searchText = [String(title || ""), String(body || "")].join("\n");
 
   const keepSignals = targeting?.keep_signals ? targeting.keep_signals : [];

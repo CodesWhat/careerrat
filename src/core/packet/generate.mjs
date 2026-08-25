@@ -964,7 +964,19 @@ function manifestFor({
 }) {
   const generatedAt = new Date().toISOString();
   const artifacts = {};
-  const answerIds = (answers.answers || []).map((answer) => String(answer.questionId));
+  const answerRows = Array.isArray(answers.answers) ? answers.answers : [];
+  const answerIds = answerRows
+    .filter(
+      (answer) =>
+        answer?.skipped !== true &&
+        answer?.uploadReady !== false &&
+        cleanText(answer?.answer) &&
+        !needsUser(answer.answer)
+    )
+    .map((answer) => String(answer.questionId));
+  const skippedAnswerIds = answerRows
+    .filter((answer) => answer?.skipped === true)
+    .map((answer) => String(answer.questionId));
   return {
     applicationId: appId,
     generatedAt,
@@ -980,6 +992,7 @@ function manifestFor({
       ? {
           answerLineage: {
             answeredQuestionIds: answerIds,
+            skippedQuestionIds: skippedAnswerIds,
             excludedQuestionIds:
               answers.excludedQuestionIds || questionCapture.excluded.map((q) => q.id),
             source: questionCapture.path,

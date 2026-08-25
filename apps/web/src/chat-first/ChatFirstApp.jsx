@@ -289,7 +289,7 @@ function browserLaunchers(view) {
     : null;
   return [
     { id: "search", label: "Search", meta: `${view.counts.search} need action`, tone: "lime" },
-    { id: "pipeline", label: "Pipeline", meta: `${view.counts.pipeline} in play` },
+    { id: "pipeline", label: "Pipeline", meta: `${view.counts.pipeline} tracked` },
     { id: "files", label: "Files", meta: String(view.counts.files) },
     {
       id: "people",
@@ -567,9 +567,7 @@ export function ChatFirstAppView({
             onDraftNudge={actions.draftNudge}
             onScheduleAction={actions.openScheduleItem}
             onCalendarAction={actions.calendarAction}
-            onDraftPackets={(ids) => actions.runCartMission?.(ids, "draft")}
             onDraftAndApply={(ids) => actions.runCartMission?.(ids, "prepare-to-submit")}
-            onChatAbout={actions.chatAboutSelection}
             onDismissSelection={actions.dismissSelection}
           />
         </div>

@@ -392,3 +392,54 @@ test("job.prepare-submit rebuilds a packet whose answer lineage predates its sav
   assert.match(last.text, /captured application questions changed/i);
   assert.match(last.artifacts[0].gaps[0].message, /willing to travel/i);
 });
+
+test("job.prepare-submit treats an intentionally skipped optional question as current lineage", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot, {
+    packetManifest: {
+      applicationId: "app-prepared",
+      uploadReady: true,
+      gaps: [],
+      questions: {
+        source: "workspace/jobs/example-rendered.questions.json",
+        answerableCount: 4,
+        excludedCount: 0,
+        answerableIds: ["q1", "q2", "q3", "portfolio"],
+        excludedIds: [],
+      },
+      answerLineage: {
+        answeredQuestionIds: ["q1", "q2", "q3"],
+        skippedQuestionIds: ["portfolio"],
+        excludedQuestionIds: [],
+        source: "workspace/jobs/example-rendered.questions.json",
+      },
+      artifacts: { resumePdf: "workspace/tailored/example-resume.pdf" },
+    },
+  });
+  let generateCalls = 0;
+  let applyCalls = 0;
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(),
+    generateDocumentsImpl: async () => {
+      generateCalls += 1;
+      throw new Error("current lineage must not regenerate");
+    },
+    applyJobImpl: async () => {
+      applyCalls += 1;
+      return {
+        available: true,
+        verified: false,
+        state: "awaiting-submit",
+        reason: "Review the prepared form.",
+        session: { provider: "test", filledCount: 3, submitMode: "manual" },
+      };
+    },
+  });
+
+  assert.equal(generateCalls, 0);
+  assert.equal(applyCalls, 1);
+  assert.equal(result.messages.at(-1).metadata.state, "awaiting-submit");
+});

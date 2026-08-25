@@ -6,6 +6,7 @@
 export { activityAppend } from "./activity.mjs";
 export { analyticsRefresh } from "./analytics.mjs";
 export {
+  appApplySyncedStatus,
   appCaptureInterviewIntake,
   appPersistEvaluation,
   appRecordRoundOutcome,

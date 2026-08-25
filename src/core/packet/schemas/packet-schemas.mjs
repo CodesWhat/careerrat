@@ -141,6 +141,7 @@ export const packetManifestSchema = {
       additionalProperties: true,
       properties: {
         answeredQuestionIds: { type: "array", items: { type: "string" } },
+        skippedQuestionIds: { type: "array", items: { type: "string" } },
         excludedQuestionIds: { type: "array", items: { type: "string" } },
         source: workspacePath,
       },

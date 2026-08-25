@@ -147,7 +147,12 @@ function seedCandidateForAICompanyDiscovery(repoRoot) {
     repoRoot,
     name: "sourced-scan",
     data: {
-      tracked_companies: [{ name: "Tracked ATS Co", careers_url: "https://jobs.lever.co/tracked" }],
+      tracked_companies: [
+        {
+          name: "Tracked ATS Co",
+          careers_url: "https://jobs.lever.co/tracked",
+        },
+      ],
     },
   });
 }
@@ -501,6 +506,54 @@ test("POST /api/discovery/company-proposals turns AI seeds into deterministic re
   assert.equal(calls.filter((call) => call.name === "scanCompanies").length, 1);
 });
 
+test("company proposal rescoring preserves worldwide remote scope in its candidate snapshot", async () => {
+  const repoRoot = tempRepo();
+  seedCandidateForAICompanyDiscovery(repoRoot);
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "worldwide",
+        hybrid: true,
+        onsite: false,
+        relocation: ["NYC metro"],
+      },
+    },
+  });
+  const server = bootServer(repoRoot, {
+    resolveCompanyBoard: async ({ seed }) => supportedResolution(seed),
+    scanCompaniesImpl: async () => ({
+      offers: [
+        {
+          company: "Worldwide Remote Co",
+          title: "Applied AI Engineer",
+          url: "https://jobs.lever.co/worldwide-remote/ai-engineer",
+          location: "Remote - EMEA",
+          comp: "$220,000 - $260,000",
+          bodyText: "Build agentic developer workflows and customer-facing prototypes.",
+        },
+      ],
+      errors: [],
+    }),
+  });
+
+  const { status, body } = await postJson(server, "/api/discovery/company-proposals", {
+    manualSeeds: [
+      {
+        name: "Worldwide Remote Co",
+        domain_hint: "worldwide-remote.example",
+      },
+    ],
+  });
+
+  assert.equal(status, 200);
+  assert.equal(body.data.proposals.length, 1);
+  assert.equal(body.data.proposals[0].company.name, "Worldwide Remote Co");
+});
+
 test("POST /api/discovery/company-proposals maps malformed JSON to 400", async () => {
   const repoRoot = tempRepo();
   candidateSetupInitialize({ repoRoot });
@@ -716,12 +769,21 @@ test("POST /api/discovery/company-proposals returns review-only non-comp borderl
     scanCompaniesImpl: async (config) => {
       const company = config.tracked_companies[0].name;
       if (company === "Partial Body Co") {
-        return { offers: [matchingOffer(company, { bodyText: "" })], errors: [] };
+        return {
+          offers: [matchingOffer(company, { bodyText: "" })],
+          errors: [],
+        };
       }
       if (company === "Scanner Review Co") {
-        return { offers: [matchingOffer(company, { gate: "review", ruleFlags: [] })], errors: [] };
+        return {
+          offers: [matchingOffer(company, { gate: "review", ruleFlags: [] })],
+          errors: [],
+        };
       }
-      return { offers: [], errors: [{ company, error: "unsupported provider" }] };
+      return {
+        offers: [],
+        errors: [{ company, error: "unsupported provider" }],
+      };
     },
   });
 
@@ -887,7 +949,12 @@ test("VER-04 duplicate, excluded, in-play, and unsupported proposal states fail 
           atsProvider: "",
           classification: "unsupported_public",
           confidence: "medium",
-          provenance: [{ source: "cache", url: "https://unsupported-cache.example/careers" }],
+          provenance: [
+            {
+              source: "cache",
+              url: "https://unsupported-cache.example/careers",
+            },
+          ],
           cacheOnly: true,
         };
       }
@@ -897,7 +964,10 @@ test("VER-04 duplicate, excluded, in-play, and unsupported proposal states fail 
       const company = config.tracked_companies[0].name;
       calls.push({ name: "scanCompanies", company });
       if (company === "Unsupported Cache Co") {
-        return { offers: [], errors: [{ company, error: "unsupported provider" }] };
+        return {
+          offers: [],
+          errors: [{ company, error: "unsupported provider" }],
+        };
       }
       return { offers: [matchingOffer(company)], errors: [] };
     },

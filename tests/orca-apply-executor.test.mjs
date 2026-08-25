@@ -51,6 +51,34 @@ test("Orca focusTab switches to the retained supervised page", async () => {
   assert.deepEqual(commands, [["tab", "switch", "--page", "page-123", "--json"]]);
 });
 
+test("Orca DOM probes keep selectors out of constructed JavaScript", async () => {
+  const expressions = [];
+  const hostileSelector = 'div");globalThis.__careerratInjected=true;//';
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      if (args[0] !== "eval") return {};
+      expressions.push(args[args.indexOf("--expression") + 1]);
+      return {
+        result: args[args.indexOf("--expression") + 1].includes("querySelectorAll")
+          ? JSON.stringify({ rowSelector: null, rows: [] })
+          : JSON.stringify({ selector: null, text: "" }),
+      };
+    },
+  });
+
+  await ops.extractText({ pageId: "page-123", selectors: [hostileSelector] });
+  await ops.extractRows({
+    pageId: "page-123",
+    rowSelectors: [hostileSelector],
+    fields: { name: { selectors: [hostileSelector] } },
+  });
+  await ops.clickRow({ pageId: "page-123", rowSelector: hostileSelector, index: 0 });
+
+  assert.equal(expressions.length, 3);
+  assert.ok(expressions.every((expression) => !expression.includes(hostileSelector)));
+  assert.ok(expressions.every((expression) => expression.includes("atob")));
+});
+
 const UPLOAD_SNAPSHOT = {
   origin: "https://job-boards.greenhouse.io/example/jobs/123",
   refs: {

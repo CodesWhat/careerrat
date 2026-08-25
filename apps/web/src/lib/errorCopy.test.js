@@ -480,6 +480,24 @@ const RULE_CASES = [
     action: { label: "Open Settings", to: "/settings" },
   },
   {
+    name: "STATUS_PORTAL_URL_INVALID code",
+    err: new ApiError(400, {
+      code: "STATUS_PORTAL_URL_INVALID",
+      error: { message: "internal text must not render" },
+    }),
+    message: "Paste the full https:// URL for the signed-in application dashboard.",
+    action: null,
+  },
+  {
+    name: "STATUS_PORTAL_UNSUPPORTED code",
+    err: new ApiError(400, {
+      code: "STATUS_PORTAL_UNSUPPORTED",
+      error: { message: "internal text must not render" },
+    }),
+    message: "Use a Greenhouse, Workday, Ashby, or Lever application dashboard URL.",
+    action: null,
+  },
+  {
     name: "MAIL_SYNC_NOT_ALLOWED code",
     err: new ApiError(400, {
       code: "MAIL_SYNC_NOT_ALLOWED",

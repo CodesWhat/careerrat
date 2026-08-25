@@ -100,21 +100,16 @@ describe("WorkspaceBrowser", () => {
     expect(renderToStaticMarkup(tree)).not.toMatch(/\/onboard|write-config|\/jobs/);
   });
 
-  it("uses the exact full-width cart action geometry from the handoff", () => {
+  it("collapses cart actions into one primary apply control", () => {
     const css = readFileSync(
       fileURLToPath(new URL("./workspace-browser.css", import.meta.url)),
       "utf8"
     );
 
     expect(css).toMatch(
-      /\.cf-cart__actions \.cf-button--ink,[^{]*\.cf-cart__actions \.cf-button--lime\s*\{[^}]*padding:\s*9px[^}]*font-size:\s*13px/s
+      /\.cf-cart__actions--collapsed\s*\{[^}]*flex-direction:\s*row[^}]*padding:\s*0[^}]*background:\s*transparent/s
     );
-    expect(css).toMatch(
-      /\.cf-cart__actions \.cf-button--outline\s*\{[^}]*padding:\s*8px[^}]*font-size:\s*13px/s
-    );
-    expect(css).toMatch(
-      /\.cf-cart__actions \.cf-button--ghost\s*\{[^}]*padding:\s*6px[^}]*font-size:\s*12px/s
-    );
+    expect(css).toMatch(/\.cf-cart__actions--collapsed \.cf-button--lime\s*\{[^}]*flex:\s*1/s);
   });
 
   it("renders the desktop slide-in shell and controlled cart selection", async () => {
@@ -130,8 +125,10 @@ describe("WorkspaceBrowser", () => {
     expect(html).toContain("On-site limited to NYC");
     expect(html).toContain("United States (Remote)");
     expect(html).not.toContain("location ~");
-    expect(html).toContain("Draft, then gate each apply");
-    expect(html).toContain("each submit gates back to you in Today");
+    expect(html).toContain("Apply to 1 job");
+    expect(html).not.toContain("Draft packet");
+    expect(html).not.toContain("Chat about this");
+    expect(html).toContain("brings every final submit back to you");
     expect(html).toContain('type="checkbox"');
     expect(html).toContain('checked=""');
   });
@@ -141,7 +138,6 @@ describe("WorkspaceBrowser", () => {
     const onToggleSelection = vi.fn();
     const onRunSweep = vi.fn();
     const onFilter = vi.fn();
-    const onChatAbout = vi.fn();
     const onDraftAndApply = vi.fn();
     const search = SearchPanel({
       jobs: JOBS,
@@ -155,7 +151,6 @@ describe("WorkspaceBrowser", () => {
       jobs: JOBS,
       selection: ["tyrell", "aperture"],
       agentName: "Paul",
-      onChatAbout,
       onDraftAndApply,
     });
 
@@ -181,10 +176,12 @@ describe("WorkspaceBrowser", () => {
     expect(onFilter).toHaveBeenCalledWith("source", "greenhouse");
 
     const actions = cart.props.children[2];
-    actions.props.children[1].props.onClick();
-    actions.props.children[2].props.onClick();
+    actions.props.children[0].props.onClick();
     expect(onDraftAndApply).toHaveBeenCalledWith(["tyrell", "aperture"]);
-    expect(onChatAbout).toHaveBeenCalledWith(["tyrell", "aperture"]);
+    const actionMarkup = renderToStaticMarkup(actions);
+    expect(actionMarkup).toContain("Apply to 2 jobs");
+    expect(actionMarkup).not.toContain("Draft 2 packets");
+    expect(actionMarkup).not.toContain("Chat about these 2");
   });
 
   it("makes the whole search row one native keyboard-capable selection target", async () => {

@@ -19,6 +19,7 @@ test("Dashboard settings snapshot exposes onboarding config without private curr
       location: {
         home: "Example City, ST",
         remote: true,
+        remote_scope: "worldwide",
         hybrid: true,
         onsite: false,
       },
@@ -41,7 +42,8 @@ test("Dashboard settings snapshot exposes onboarding config without private curr
   assert.equal(snapshot.profile.minimumBase, "$200K");
   assert.equal(snapshot.profile.targetBase, "$165K");
   assert.equal(snapshot.profile.expectedBase, "$165K");
-  assert.equal(snapshot.profile.location, "Remote / hybrid - Example City, ST");
+  assert.equal(snapshot.profile.location, "Remote worldwide / hybrid - Example City, ST");
+  assert.equal(snapshot.profile.remoteScope, "worldwide");
   assert.equal(snapshot.profile.workAuthorization, "Authorized; no sponsorship");
   assert.equal(snapshot.automation.sessionProvider, "Browser extension");
   assert.deepEqual(snapshot.automation.enabledCapabilities, ["Status polling"]);

@@ -14,6 +14,47 @@ Unsigned Windows packages may be downloaded from a GitHub Actions run for QA,
 but the release workflow cannot attach one to a public release. See the
 [Code signing policy](CODE_SIGNING_POLICY.md).
 
+## Free signing paths
+
+Microsoft does not provide a separate free open-source application that signs
+a direct-download NSIS installer. Microsoft's current
+[Windows code-signing options](https://learn.microsoft.com/windows/apps/package-and-deploy/code-signing-options)
+instead direct qualifying open-source projects to SignPath Foundation. The
+CareerRat direct-download path is the
+[SignPath Foundation application](https://signpath.org/apply.html), subject to
+the Foundation's [open-source conditions](https://signpath.org/terms.html).
+The release workflow is already wired to the official SignPath GitHub action
+and stays disabled until an authorized CodesWhat owner completes that external
+application and SignPath approves and configures the project.
+
+Microsoft's separate free path is Store delivery as MSIX. A new Individual or
+Company developer account is free when registration starts at
+[`storedeveloper.microsoft.com`](https://storedeveloper.microsoft.com/), and
+Microsoft re-signs an accepted Store MSIX. This does not sign CareerRat's
+GitHub-hosted NSIS installer. Microsoft's Artifact Signing service is the paid
+direct-distribution option.
+
+### SignPath application handoff
+
+The public project portion of the SignPath application can be filled with:
+
+| Field | Value |
+| --- | --- |
+| Project Name | `CareerRat` |
+| Repository URL | `https://github.com/CodesWhat/careerrat` |
+| Homepage URL | `https://careerrat.com` |
+| Download URL | `https://github.com/CodesWhat/careerrat/releases/latest` |
+| Privacy Policy URL | `https://careerrat.com/docs/advanced/privacy` |
+| Tagline | `A chat-first desktop workspace for running a job search with your own AI CLI.` |
+| Build System | `GitHub Actions` |
+
+The description should summarize the released desktop app and its purpose.
+The reputation field can link the public npm package, releases, and the latest
+successful Windows release workflow run. An authorized owner must supply their
+own name and email, select the accurate maintainer and discovery categories,
+and personally accept the required Foundation conduct and personal-data terms.
+Those identity and agreement steps cannot be completed by repository code.
+
 ## Installation and first run
 
 Once a signed Windows asset is published, download
@@ -23,15 +64,15 @@ run the installer as the current user, and choose an install directory. The
 installer creates Start menu and desktop shortcuts and does not need an
 administrator account.
 
-CareerRat's in-app agent work currently requires Claude Code 2.1.241 or newer,
-installed and authenticated by the user. The app also detects Codex and the
-expanded CLI registry, but shows those engines as unsupported and disables
-selection because they do not yet provide an equivalent enforceable per-call
-tool, path, and network boundary. They remain usable as outer workspace agents
-through CareerRat's terminal flow. The packaged runtime does not ship the
-proprietary Claude Agent SDK and does not copy the selected CLI's credentials.
-If Claude Code is not installed and ready, chat and skills show a clear setup
-error instead of silently switching to an embedded provider.
+Claude Code 2.1.241 or newer runs full in-app task tools and research. Codex
+0.149.1 or newer runs isolated in-app chat and drafting with its native agent
+features disabled for the call. Codex task-tool and research work fails closed.
+The expanded CLI registry remains visible, but other engines are not selectable
+until their boundaries are verified. Every engine remains usable as an outer
+workspace agent through CareerRat's terminal flow. The packaged runtime does
+not ship the proprietary Claude Agent SDK and does not copy the selected CLI's
+credentials. Missing capability produces a clear in-app error instead of a
+silent provider switch.
 
 Candidate data, documents, and settings are stored below
 `%APPDATA%\CareerRat`. Relevant context leaves the machine only when the

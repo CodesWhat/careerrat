@@ -46,10 +46,18 @@ test("buildSearchPromptContext: omits application_limits/company_history by defa
   });
   appUpsert({
     repoRoot,
-    row: { id: "app-1", company: "Active Co", role: "Engineer", status: "awaiting" },
+    row: {
+      id: "app-1",
+      company: "Active Co",
+      role: "Engineer",
+      status: "awaiting",
+    },
   });
 
-  const context = buildSearchPromptContext({ repoRoot, config: { targeting: {}, profile: {} } });
+  const context = buildSearchPromptContext({
+    repoRoot,
+    config: { targeting: {}, profile: {} },
+  });
 
   assert.equal(Object.hasOwn(context, "application_limits"), false);
   assert.equal(Object.hasOwn(context, "company_history"), false);
@@ -65,7 +73,11 @@ test("buildSearchPromptContext (includeSearchLimits): carries only caution/block
       profile: {},
       "application-limits": {
         companies: [
-          { company: "Blocked Co", status: "blocked", reapply_after: "2027-01-01" },
+          {
+            company: "Blocked Co",
+            status: "blocked",
+            reapply_after: "2027-01-01",
+          },
           { company: "Caution Co", status: "caution" },
           { company: "Fine Co", status: "ok" },
         ],
@@ -90,7 +102,9 @@ test("buildSearchPromptContext (includeSearchLimits): reads application-limits f
     config: {
       targeting: {},
       profile: {},
-      "application-limits": { companies: [{ company: "From Config Co", status: "blocked" }] },
+      "application-limits": {
+        companies: [{ company: "From Config Co", status: "blocked" }],
+      },
     },
     includeSearchLimits: true,
   });
@@ -102,7 +116,12 @@ test("buildSearchPromptContext (includeSearchLimits): flags an active applicatio
   const repoRoot = repo();
   appUpsert({
     repoRoot,
-    row: { id: "app-1", company: "Active Co", role: "Engineer", status: "awaiting" },
+    row: {
+      id: "app-1",
+      company: "Active Co",
+      role: "Engineer",
+      status: "awaiting",
+    },
   });
 
   const context = buildSearchPromptContext({
@@ -194,7 +213,12 @@ test("buildSearchPromptContext (includeSearchLimits): omits company_history enti
   const repoRoot = repo();
   appUpsert({
     repoRoot,
-    row: { id: "app-1", company: "Quiet Co", role: "Engineer", status: "offer" },
+    row: {
+      id: "app-1",
+      company: "Quiet Co",
+      role: "Engineer",
+      status: "offer",
+    },
   });
 
   const context = buildSearchPromptContext({
@@ -237,6 +261,41 @@ test("buildSearchPromptContext: omits keep_signals/cut_signals when absent or em
 
   assert.equal(Object.hasOwn(context, "keep_signals"), false);
   assert.equal(Object.hasOwn(context, "cut_signals"), false);
+});
+
+test("buildSearchPromptContext carries explicit worldwide remote scope and defaults older profiles to home-country", () => {
+  const repoRoot = repo();
+  const worldwide = buildSearchPromptContext({
+    repoRoot,
+    config: {
+      targeting: {},
+      profile: {
+        location: {
+          home: "New York, NY, United States",
+          remote: true,
+          remote_scope: "worldwide",
+          hybrid: true,
+          onsite: true,
+        },
+      },
+    },
+  });
+  const legacy = buildSearchPromptContext({
+    repoRoot,
+    config: {
+      targeting: {},
+      profile: { location: { home: "London, UK", remote: true } },
+    },
+  });
+
+  assert.deepEqual(worldwide.location, {
+    remote: true,
+    remote_scope: "worldwide",
+    hybrid: true,
+    onsite: true,
+    home: "New York, NY, United States",
+  });
+  assert.equal(legacy.location.remote_scope, "home-country");
 });
 
 test("buildSearchPromptContext: top-level keep/cut signals don't affect per-bucket fit_signals/down_signals", () => {
