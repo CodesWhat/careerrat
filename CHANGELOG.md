@@ -4,17 +4,28 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.1] - 2026-08-25
+
+### Changed
+
+- Removed the website's redundant runtime-marketing sentence, restored calmer vertical spacing between sections, and updated the public docs with the completed v0.16.0 release state.
+
+### Fixed
+
+- The hosted-access email field and send action now share one bottom edge instead of rendering at mismatched heights.
+
 ## [0.16.0] - 2026-08-25
 
-Release status: the signed macOS package passed release-candidate acceptance,
-and the repository, docs, website, security, and packaging gates are green. The
-release is not published or deployed yet.
+Release status: v0.16.0 is published. Protected PRs #217 and #218 merged, the
+signed v0.16.0 tag points to the exact promotion merge on `main`, and the
+signed, notarized, and stapled macOS release is public with its SBOM.
+`careerrat@latest` is 0.16.0 and careerrat.com is running the production release.
 
 ### Added
 
 - Claude Code and Codex are the only supported v0.16 product runtime choices. CareerRat invokes either installed CLI directly through an app-owned adapter, uses the same workflows and durable state for both, and never falls back to another provider. Other detected CLIs remain diagnostic until they pass the full product boundary and packaged acceptance matrix.
 - Job search now combines deterministic job boards with bounded AI discovery, saves full job descriptions and source receipts, respects country-wide remote and New York City hybrid targeting, and reconciles overlapping results into one durable job.
-- The desktop and website include the new CareerRat wordmark, favicon, and social sharing image. Public Windows distribution remains pending a verified installer build and SignPath-backed Authenticode signing.
+- The desktop and website include the new CareerRat wordmark, favicon, and social sharing image. The Windows x64 installer passes build, install, launch, export, and uninstall QA; a public signed Windows asset remains blocked because SignPath Foundation signing requires project reputation CareerRat does not yet have.
 
 ### Changed
 
@@ -43,7 +54,8 @@ release is not published or deployed yet.
 - A real coordinated search returned two live US-remote roles, retained New York City travel context, rejected foreign and non-NYC local results, preserved distinct requisitions, saved local JD evidence, and labeled both partial descriptions in the Jobs list.
 - Source research renders one compact review card and decision window. Historical raw tables recover into that UI, while malformed output fails closed to a clear retry message.
 - Supervised application QA filled and uploaded through a real three-step form, clicked only the two verified Next controls, and stopped on `Submit application` with `prepareOnly=true` and `submitClicked=false`.
-- The full repository suite passed 3,737 tests with 15 intentional skips, the web suite passed 611 tests, and lint, Knip, builds, docs, website, security audit, workflow lint, signing, and package verification passed. PR review, publication, production deployment, and released-app installation remain pending.
+- The full repository suite passed 3,737 tests with 15 intentional skips, the web suite passed 611 tests, and lint, Knip, builds, docs, website, security audit, workflow lint, signing, and package verification passed. Protected PRs #217 and #218 merged, the signed v0.16.0 tag points to `main`, the GitHub release and production website are live, and `careerrat@latest` is 0.16.0.
+- The `codeswhat/tap/careerrat` Homebrew cask was updated to 0.16.0 and passed an in-place upgrade. `/Applications/CareerRat.app` reports version 0.16.0, passes Gatekeeper, and passed launch and visual inspection.
 
 ## [0.15.0] - 2026-08-24
 

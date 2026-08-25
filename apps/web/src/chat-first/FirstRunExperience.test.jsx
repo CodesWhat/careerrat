@@ -415,6 +415,27 @@ describe("FirstRunExperience", () => {
     expect(requestedHtml).toContain("Thanks, we’ll email you when it’s ready.");
   });
 
+  it("aligns the hosted access action with the email control while retaining its label", async () => {
+    const { FirstRunExperience } = await loadFirstRun();
+    const html = renderToStaticMarkup(
+      <FirstRunExperience
+        stage="engine"
+        engines={ENGINES}
+        hostedInterest={{ status: "editing", email: "person@example.com", error: null }}
+      />
+    );
+    const css = readFileSync(fileURLToPath(new URL("./first-run.css", import.meta.url)), "utf8");
+    const formRule = css.match(/\.cf-first-run__hosted-form\s*\{([^}]*)\}/)?.[1] || "";
+    const labelRule = css.match(/\.cf-first-run__hosted-label-text\s*\{([^}]*)\}/)?.[1] || "";
+
+    expect(html).toContain(
+      '<span class="cf-first-run__hosted-label-text">Email for CareerRat AI access</span>'
+    );
+    expect(formRule).toMatch(/align-items:\s*end/);
+    expect(labelRule).toMatch(/position:\s*absolute/);
+    expect(labelRule).toMatch(/clip-path:\s*inset\(50%\)/);
+  });
+
   it("requires a selected safe runtime before the interview can start", async () => {
     const { FirstRunExperience } = await loadFirstRun();
     const onStartInterview = vi.fn();

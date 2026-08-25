@@ -272,8 +272,8 @@ nurse, a driver, and an engineer each bring their own config.
   installed CLI directly and never falls back or silently switches engines. A
   local runtime becomes `Ready` only after its executable, authentication, and
   readiness check pass. Other detected adapters remain diagnostic-only until
-  the full promotion matrix passes. The v0.16 runtime boundary and packaged QA
-  gates passed; the publication steps in the checkpoint below remain open.
+  the full promotion matrix passes. The v0.16 runtime boundary, packaged QA,
+  and publication gates passed through protected PRs #217 and #218.
 - **Database-backed setup and sourcing** — onboarding, settings, search setup, and the
   sourcing sweep all read and write the local database first: setup readiness
   (search-ready / gate-ready / apply-ready) is computed from stored facts and gates what
@@ -311,14 +311,22 @@ nurse, a driver, and an engineer each bring their own config.
 This checkpoint consolidates `CLI-PARITY-EXEC-SUMMARY.html`,
 `RUNTIME-PARITY-PLAN.md`, the current branch audit, and live Codex canary
 evidence. The raw reviews are local evidence under `.internal/review/`; this
-section is the durable public plan. The branch passed release-candidate QA but
-is not published or deployed yet.
+section is the durable public release record. It passed packaged and release
+acceptance and shipped as v0.16.0.
+
+#### v0.16.1 hotfix checkpoint
+
+v0.16.1 keeps the v0.16.0 provider-parity release intact and closes the first
+public UI follow-ups. The hosted-access email and send controls now share one
+bottom edge, the redundant website runtime-marketing sentence is gone, and the
+website uses calmer section spacing. The v0.16.0 ledger and verification below
+remain the historical record for the underlying release.
 
 #### Superseding v0.16 release ledger
 
 This ledger is the current source of truth. It supersedes narrower or earlier
 acceptance statements later in this roadmap without rewriting those historical
-records. v0.16 is not released or deployed.
+records. v0.16.0 is released and deployed.
 
 | Area | Current status | Evidence and remaining gate |
 | --- | --- | --- |
@@ -329,7 +337,7 @@ records. v0.16 is not released or deployed.
 | Duplicate onboarding prompt repair | Packaged QA passed | A fresh realistic résumé produced one work-mode prompt and one next typed question. The same home, a restarted home, and a repaired historical completed home retained one copy of each prompt with no rendered or draft system messages. |
 | Requisition identity and search quality | Packaged QA passed | The signed app coordinated configured and AI-web lanes, examined 413 configured postings, and returned two distinct live US-remote roles with relevant New York City context. Foreign and non-NYC local rows were excluded, Ashby requisitions remained distinct, and local JD evidence was saved with visible partial-description badges. |
 | Strict no-submit application preparation | Packaged QA passed | The 127-test driver set is green. A real three-step Chromium form filled five fields, uploaded one file, clicked exactly two verified Next controls, and stopped on `Submit application` with `prepareOnly=true`, `submitClicked=false`, and no false Applied state. |
-| Packaging and release | Publication pending | The fresh macOS package built, passed Developer ID signature verification, and completed release-candidate desktop QA. The full repository and web suites, lint, Knip, builds, docs, website, audit, actionlint, and diff checks are green. Protected PRs, tag publication, hosted assets, production deployment, and installation of the released build remain. |
+| Packaging and release | Released and verified | Protected PRs #217 and #218 merged, and the signed v0.16.0 tag points to the exact promotion merge on `main`. The public GitHub release includes the signed, notarized, and stapled Mac DMG plus its SBOM. `careerrat@latest` is 0.16.0, careerrat.com is running the production release, the Homebrew cask is 0.16.0, and the released app passed upgrade, Gatekeeper, launch, and visual inspection. Windows build, install, launch, export, and uninstall QA are green; the public signed Windows asset remains blocked because SignPath requires project reputation CareerRat does not yet have. |
 
 The duplicate onboarding root fix has both required code paths. Completed homes
 run transcript repair before `ChatFirstApp` renders, and internal résumé-upload
@@ -444,11 +452,15 @@ reproductions passed in the signed package after restart.
   plus the complete matrix on an authenticated host before any public support
   claim.
 
-##### Current v0.16 release blocker
+##### v0.16 release completion
 
-- Release publication is still pending. The protected feature-to-dev and
-  dev-to-main PRs, signed tag, hosted release assets, production website, and
-  installation of the released app must be verified before v0.16 is complete.
+- v0.16.0 shipped through protected PRs #217 and #218. The signed tag points to
+  the exact promotion merge on `main`; the signed, notarized, and stapled Mac
+  DMG, SBOM, npm latest, production website, Homebrew cask, and released-app
+  installation are verified. Windows build, install, launch, export, and
+  uninstall QA are green. Public Windows distribution remains gated on
+  SignPath Foundation signing, which requires project reputation CareerRat does
+  not yet have.
 
 ##### Closed adversarial fix and verification queue
 
@@ -677,16 +689,15 @@ queue.
 - Alerts 108, 109, and 111 remain open only until a main-branch Scorecard run can
   observe the live protection and the two staged repository fixes.
 
-## Release status (v0.15.0, updated August 24, 2026)
+## Release status (v0.16.1, updated August 25, 2026)
 
-**v0.15.0 is the current release line.** It finishes the chat-first desktop
-cutover as the only product shell, brings every shipped workflow into durable
-threads and supervised browser sessions, and applies the new visual system to
-the desktop app and public website. The release also adds worldwide-remote
-location handling, retained Deep ingest and mock-interview state, whole-section
-profile editing, the full in-app engine picker, and a compact final-submit gate.
+**v0.16.1 is the current release line.** It preserves the v0.16.0 runtime and
+workflow release, fixes the hosted-access email and send alignment, removes one
+redundant runtime-marketing sentence, and restores calmer website section
+spacing. The v0.16.0 signed Mac app, npm package, Homebrew cask, and production
+website passed the release and installation gates above.
 Since v0.11.0 the repo runs the strict flow: feature PRs land on the active dev
-branch (`dev/v0.16` for the current cycle), `main`
+branch (`dev/v0.16` for this release), `main`
 advances only through a promotion merge immediately before each cut, and the tag
 fires the whole pipeline — `desktop-release.yml` builds, signs, notarizes, and
 uploads the DMG, publishing the release then fires `publish.yml` (npm) and the
