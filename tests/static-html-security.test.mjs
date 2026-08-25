@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   buildContentSecurityPolicy,
@@ -36,15 +40,17 @@ test("the shared policy exposes the complete defense-in-depth header set", () =>
   assert.equal(securityHeaders()["X-Frame-Options"], "DENY");
 });
 
-test("connect-src stays 'self' by default and only widens when a caller opts in", () => {
+test("PostHog sources stay closed by default and widen together when a caller opts in", () => {
   const defaultCsp = buildContentSecurityPolicy();
   assert.match(defaultCsp, /connect-src 'self';/);
   assert.doesNotMatch(defaultCsp, /e\.codeswhat\.com/);
 
   const optedInCsp = buildContentSecurityPolicy({
     extraConnectSrc: ["https://e.codeswhat.com"],
+    extraScriptSrc: ["https://e.codeswhat.com"],
   });
   assert.match(optedInCsp, /connect-src 'self' https:\/\/e\.codeswhat\.com;/);
+  assert.match(optedInCsp, /script-src [^;]*https:\/\/e\.codeswhat\.com/);
 });
 
 test("only the public website/docs builds opt into the PostHog ingest proxy", () => {
@@ -60,7 +66,31 @@ test("only the public website/docs builds opt into the PostHog ingest proxy", ()
   // The local-first app server must never gain a network egress point to an
   // external analytics host. connect-src stays 'self' there.
   const trackerDev = readFileSync(new URL("../src/cli/tracker-dev.mjs", import.meta.url), "utf8");
-  assert.doesNotMatch(trackerDev, /extraConnectSrc|e\.codeswhat\.com/);
+  assert.doesNotMatch(trackerDev, /extraConnectSrc|extraScriptSrc|e\.codeswhat\.com/);
+});
+
+test("the PostHog build flag permits its loader and ingest requests", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "careerrat-csp-"));
+  t.after(() => rmSync(directory, { force: true, recursive: true }));
+  const htmlPath = join(directory, "index.html");
+  writeFileSync(htmlPath, "<!doctype html><html><head></head><body></body></html>");
+
+  execFileSync(
+    process.execPath,
+    [
+      fileURLToPath(new URL("../scripts/harden-static-html.mjs", import.meta.url)),
+      directory,
+      "--allow-posthog-proxy",
+    ],
+    { stdio: "pipe" }
+  );
+
+  const csp =
+    readFileSync(htmlPath, "utf8").match(
+      /<meta http-equiv="Content-Security-Policy" content="([^"]+)"/
+    )?.[1] || "";
+  assert.match(csp, /script-src [^;]*https:\/\/e\.codeswhat\.com/);
+  assert.match(csp, /connect-src [^;]*https:\/\/e\.codeswhat\.com/);
 });
 
 test("Vite uses no inline theme bootstrap and Vercel enforces headers", () => {

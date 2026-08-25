@@ -5,9 +5,9 @@ const STATIC_EDGE_CONTENT_SECURITY_POLICY =
 
 // The shared house PostHog ingest proxy (cookieless, memory-persisted analytics
 // for the public website/docs surface — see apps/website/src/lib/posthog-privacy.ts
-// and apps/docs's copy of it). Only ever passed via extraConnectSrc below, and
-// only by the website/docs static builds: the local-first dashboard (apps/web,
-// tracker-dev) never opts in, so its connect-src stays 'self'.
+// and apps/docs's copy of it). Only the website/docs static builds pass it as
+// an extra script and connection source: the local-first dashboard (apps/web,
+// tracker-dev) never opts in, so both directives stay closed there.
 export const POSTHOG_INGEST_PROXY = "https://e.codeswhat.com";
 
 function inlineScriptsFromHtml(html) {
@@ -26,12 +26,14 @@ export function buildContentSecurityPolicy({
   allowTailwindCdn = false,
   includeFrameAncestors = true,
   extraConnectSrc = [],
+  extraScriptSrc = [],
 } = {}) {
   const hashes = [...new Set(inlineScripts.map(scriptHash))];
   const scriptSources = [
     "'self'",
     ...hashes,
     ...(allowTailwindCdn ? ["https://cdn.tailwindcss.com"] : []),
+    ...new Set(extraScriptSrc),
     "https://challenges.cloudflare.com",
   ];
   const connectSources = ["'self'", ...new Set(extraConnectSrc)];
@@ -64,7 +66,10 @@ export function securityHeaders({ csp = buildContentSecurityPolicy() } = {}) {
   };
 }
 
-export function hardenStaticHtml(html, { allowTailwindCdn = false, extraConnectSrc = [] } = {}) {
+export function hardenStaticHtml(
+  html,
+  { allowTailwindCdn = false, extraConnectSrc = [], extraScriptSrc = [] } = {}
+) {
   const source = String(html || "").replace(
     /<meta\s+http-equiv=["']Content-Security-Policy["'][^>]*>\s*/gi,
     ""
@@ -74,6 +79,7 @@ export function hardenStaticHtml(html, { allowTailwindCdn = false, extraConnectS
     allowTailwindCdn,
     includeFrameAncestors: false,
     extraConnectSrc,
+    extraScriptSrc,
   });
   const meta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
   if (/<head(?:\s[^>]*)?>/i.test(source)) {
