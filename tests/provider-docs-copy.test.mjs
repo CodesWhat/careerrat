@@ -46,7 +46,7 @@ test("public setup docs expose the neutral direct Claude Code and Codex contract
   );
 });
 
-test("v0.16 docs distinguish passed acceptance from unfinished publication", async () => {
+test("v0.16.1 docs record the hotfix and preserve v0.16.0 release evidence", async () => {
   const [changelog, roadmap, readme, install] = await Promise.all([
     readFile("CHANGELOG.md", "utf8"),
     readFile("docs/ROADMAP.md", "utf8"),
@@ -54,30 +54,74 @@ test("v0.16 docs distinguish passed acceptance from unfinished publication", asy
     readFile("apps/docs/content/docs/getting-started/install.mdx", "utf8"),
   ]);
 
-  assert.match(changelog, /signed macOS package passed release-candidate acceptance/i);
-  assert.match(changelog, /release is not published or deployed yet/i);
-  assert.match(changelog, /PR review, publication, production deployment[^.]*remain pending/i);
+  assert.match(changelog, /^## \[0\.16\.1\] - 2026-08-25/m);
+  assert.match(changelog, /hosted-access email field and send action/i);
+  assert.match(changelog, /runtime-marketing sentence/i);
+  assert.match(changelog, /calmer vertical spacing/i);
+  assert.match(changelog, /completed v0\.16\.0 release state/i);
+  assert.match(changelog, /protected PRs #217 and #218 merged/i);
+  assert.match(
+    changelog,
+    /signed v0\.16\.0 tag points to (?:the exact promotion merge on )?`main`/i
+  );
+  assert.match(changelog, /signed, notarized, and stapled macOS release is public/i);
+  assert.match(changelog, /careerrat@latest` is 0\.16\.0/i);
+  assert.match(changelog, /careerrat\.com is running the production release/i);
+  assert.match(changelog, /Homebrew cask was updated to 0\.16\.0/i);
+  assert.match(changelog, /passes Gatekeeper[^.]*launch and visual inspection/i);
+  assert.match(
+    changelog,
+    /Windows x64 installer passes build, install, launch, export, and uninstall QA/i
+  );
+  assert.match(changelog, /SignPath Foundation signing requires project reputation/i);
   assert.doesNotMatch(changelog, /packaged desktop QA[^.]*still[^.]*pass/i);
+  assert.doesNotMatch(changelog, /release is not published or deployed yet/i);
+  assert.doesNotMatch(
+    changelog,
+    /PR review, publication, production deployment[^.]*remain pending/i
+  );
 
   assert.match(roadmap, /Superseding v0\.16 release ledger/i);
+  assert.match(roadmap, /v0\.16\.1 hotfix checkpoint/i);
+  assert.match(roadmap, /hosted-access email and send controls/i);
+  assert.match(roadmap, /website runtime-marketing sentence/i);
+  assert.match(roadmap, /calmer section spacing/i);
   assert.match(roadmap, /duplicate onboarding prompt repair/i);
   assert.match(roadmap, /completed homes/i);
   assert.match(roadmap, /internal résumé-upload/i);
   assert.match(roadmap, /TERM-ignoring child/i);
   assert.match(roadmap, /ACP adapters remain diagnostic-only/i);
-  assert.match(roadmap, /branch passed release-candidate QA/i);
-  assert.match(roadmap, /release publication is still pending/i);
-  assert.match(roadmap, /protected feature-to-dev and\s+dev-to-main PRs/i);
-  assert.match(roadmap, /not released or deployed/i);
+  assert.match(roadmap, /v0\.16\.0 is released and deployed/i);
+  assert.match(roadmap, /Packaging and release \| Released and verified/i);
+  assert.match(roadmap, /protected PRs #217 and #218 merged/i);
+  assert.match(roadmap, /signed v0\.16\.0 tag points to the exact promotion merge on `main`/i);
+  assert.match(roadmap, /Homebrew cask is 0\.16\.0/i);
+  assert.match(roadmap, /Windows build, install, launch, export, and uninstall QA are green/i);
+  assert.match(roadmap, /SignPath requires project reputation/i);
   assert.doesNotMatch(roadmap, /fresh packaged rebuild and install/i);
+  assert.doesNotMatch(roadmap, /release publication is still pending/i);
+  assert.doesNotMatch(roadmap, /not released or deployed/i);
+  assert.doesNotMatch(roadmap, /Publication pending/i);
 
   for (const publicCopy of [readme, install]) {
+    assert.match(publicCopy, /v0\.16\.1 is the current public release/i);
+    assert.match(publicCopy, /v0\.16\.0 provider-parity\s+release/i);
+    assert.match(publicCopy, /protected PRs #217 and #218 merged/i);
     assert.match(
       publicCopy,
-      /v0\.16 provider-parity update passed packaged desktop QA and signing/i
+      /signed\s+v0\.16\.0 tag points to the exact promotion merge on `main`/i
     );
-    assert.match(publicCopy, /latest public (?:release|download) remains v0\.15\.0 until/i);
-    assert.doesNotMatch(publicCopy, /until packaged desktop QA, signing/i);
+    assert.match(publicCopy, /signed, notarized, and stapled Mac DMG/i);
+    assert.match(publicCopy, /careerrat@latest` is 0\.16\.1/i);
+    assert.match(publicCopy, /Homebrew cask is 0\.16\.1/i);
+    assert.match(publicCopy, /reports version 0\.16\.1/i);
+    assert.match(publicCopy, /passes Gatekeeper[^.]*launch and visual inspection/i);
+    assert.match(
+      publicCopy,
+      /Windows x64 installer pass(?:ed|es) build, install, launch, export, and uninstall\s+QA/i
+    );
+    assert.match(publicCopy, /SignPath Foundation signing[\s\S]{0,80}requires project reputation/i);
+    assert.doesNotMatch(publicCopy, /latest public (?:release|download) remains v0\.15\.0 until/i);
   }
 });
 

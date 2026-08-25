@@ -56,11 +56,13 @@ test("website leads with the signed Mac app and keeps installation focused on th
 test("website presents Claude Code and Codex as neutral direct runtime choices", async () => {
   const page = await readFile("apps/website/src/app/page.tsx", "utf8");
 
-  assert.match(page, /CareerRat owns the workflows and threads/);
+  assert.doesNotMatch(
+    page,
+    /CareerRat owns the workflows and threads\. Claude Code and OpenAI Codex are its two supported product choices\./
+  );
   for (const runtime of ["Claude Code", "OpenAI Codex"]) {
     assert.match(page, new RegExp(runtime));
   }
-  assert.match(page, /two supported product choices/i);
   assert.match(page, /runs the same CareerRat-owned workflows and skills/i);
   assert.match(page, /invokes it directly/i);
   assert.match(page, /available, signed in, and passes its readiness check/i);
@@ -68,6 +70,16 @@ test("website presents Claude Code and Codex as neutral direct runtime choices",
   assert.doesNotMatch(
     page,
     /Gemini CLI|GitHub Copilot|Hermes Agent|OpenCode|Claude Code · full tasks|Codex · chat \+ drafting|first-class|ACP verified|verified per capability|equal, complete/i
+  );
+});
+
+test("website sections keep a calm vertical rhythm", async () => {
+  const styles = await readFile("apps/website/src/app/globals.css", "utf8");
+
+  assert.match(styles, /\.section\s*\{[^}]*padding-top:\s*120px/s);
+  assert.match(
+    styles,
+    /@media \(max-width:\s*760px\)[\s\S]*?\.section\s*\{[^}]*padding-top:\s*88px/s
   );
 });
 

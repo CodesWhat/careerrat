@@ -52,14 +52,20 @@ directly and never falls back to or silently switches providers. A runtime
 becomes `Ready` only after local availability, authentication, and its readiness
 check pass.
 
-The v0.16 provider-parity update passed packaged desktop QA and signing. The
-latest public release remains v0.15.0 until the protected PRs merge, the signed
-tag publishes, production deploys, and the released app is installed and
-verified.
+v0.16.1 is the current public release. It carries the v0.16.0 provider-parity
+release with a small hosted-access alignment fix and calmer website spacing.
+Protected PRs #217 and #218 merged for the v0.16.0 release, and the signed
+v0.16.0 tag points to the exact promotion merge on `main`. The GitHub release
+includes the signed, notarized, and stapled Mac DMG plus its SBOM;
+`careerrat@latest` is 0.16.1 on npm; and careerrat.com is running the production
+release. The Homebrew cask is 0.16.1. The released app installs at
+`/Applications/CareerRat.app`, reports version 0.16.1, passes Gatekeeper, and
+passed launch and visual inspection.
 
-Windows x64 packaging is install-smoked in CI. A public Windows installer will
-ship only after the SignPath Foundation signing path is approved and the
-resulting Authenticode signature passes verification. See [Windows status](docs/WINDOWS.md).
+The Windows x64 installer passed build, install, launch, export, and uninstall
+QA. A public Windows installer will ship only after SignPath Foundation signing
+is available; SignPath requires project reputation CareerRat does not yet have.
+See [Windows status](docs/WINDOWS.md).
 
 CareerRat opens at a designed desktop size of 1280 by 860. The window is
 resizable, maximizable, and supports full screen, with a minimum working size of

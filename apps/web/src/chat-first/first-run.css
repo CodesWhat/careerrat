@@ -406,9 +406,22 @@ button.cf-first-run__engine-choice:not(.is-selected):hover {
 
 .cf-first-run__hosted-form {
   display: grid;
-  align-items: center;
+  align-items: end;
   grid-template-columns: minmax(170px, 1fr) auto;
   gap: 8px;
+}
+
+.cf-first-run__hosted-label-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 .cf-first-run__hosted-form label,
