@@ -29,7 +29,7 @@ targeting, fit-calibration, or channel-mix changes when outcome thresholds trip.
 
 ### Skill layer
 
-Skills are the 21 SKILL.md files under `.agents/skills/`. They make judgment calls:
+Skills are all 28 `SKILL.md` files under `.agents/skills/`. They make judgment calls:
 
 - what to ask during onboarding
 - whether a job passes the body-read gate
@@ -72,6 +72,7 @@ raw capture, and recency cutoff.
 ### User layer
 
 Candidate facts, generated artifacts, and tracker state stay local:
+
 - `candidate/` — private config, gitignored
 - `workspace/` — runtime data, gitignored
 
@@ -82,8 +83,8 @@ the package.
 
 ## Intent router
 
-`AGENTS.md` in the repo root is the canonical intent router. It maps user intent
-to the 21 skills. The agent reads it first, then routes every paste or instruction
+`AGENTS.md` in the repo root is the canonical intent router. It maps user intent to all 28 skills.
+The agent reads it first, then routes every paste or instruction
 through it. See [Agent Contract](/advanced/agent-contract) for the full routing
 table.
 

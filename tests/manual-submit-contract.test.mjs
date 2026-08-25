@@ -43,3 +43,11 @@ test("final submission has no setting, compatibility branch, or one-click capabi
     assert.doesNotMatch(source, /auto_submit|shouldAutoSubmit|one[_ -]?click apply/i, relativePath);
   }
 });
+
+test("onboarding never collects or persists an automatic-submission preference", () => {
+  const skill = read(".agents/skills/ingest-profile/SKILL.md");
+
+  assert.doesNotMatch(skill, /auto_submit|shouldAutoSubmit/i);
+  assert.match(skill, /final submit control/i);
+  assert.match(skill, /only the user can submit/i);
+});

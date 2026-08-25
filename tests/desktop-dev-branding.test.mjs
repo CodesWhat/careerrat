@@ -12,15 +12,14 @@ async function readText(relPath) {
   return readFile(join(root, relPath), "utf8");
 }
 
-test("desktop icon is generated from the tracked rat emoji artwork", async () => {
+test("desktop icon is generated from the selected text-only brand mark", async () => {
   const generator = await readText("apps/desktop/scripts/make-icon.mjs");
-  const artwork = await readFile(join(root, "apps/desktop/assets/rat-emoji.png"));
 
-  assert.match(generator, /assets["'], ["']rat-emoji\.png/);
-  assert.equal(artwork.subarray(1, 4).toString("ascii"), "PNG");
-  assert.equal(artwork.readUInt32BE(16), artwork.readUInt32BE(20));
-  assert.ok(artwork.readUInt32BE(16) >= 1024);
-  assert.equal(artwork[25], 6, "rat emoji artwork must retain an alpha channel");
+  assert.match(generator, /figtree-latin-800-normal\.woff2/);
+  assert.match(generator, />Career<\/text>/);
+  assert.match(generator, />Rat\.<\/text>/);
+  assert.match(generator, /SKY = "#8fd0f8"/);
+  assert.doesNotMatch(generator, /rat-emoji|emoji artwork/i);
 });
 
 test("desktop dev launch brands the local Electron.app as CareerRat before starting", async () => {

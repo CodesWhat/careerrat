@@ -864,6 +864,17 @@
   gap: 7px;
 }
 
+.cf-cart__actions--collapsed {
+  align-items: center;
+  flex-direction: row;
+  padding: 0;
+  background: transparent;
+}
+
+.cf-cart__actions--collapsed .cf-button--lime {
+  flex: 1;
+}
+
 .cf-cart__actions .cf-button--ink,
 .cf-cart__actions .cf-button--lime {
   padding: 9px;

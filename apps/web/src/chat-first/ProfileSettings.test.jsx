@@ -33,11 +33,12 @@ const PROFILE = {
   targets: ["Staff Software Engineer", "ML infra · platform", "Remote, or hybrid SF"],
   locationPolicy: {
     home: "NYC",
-    remoteRegion: "United States",
+    remoteRegion: "Worldwide",
+    remoteScope: "worldwide",
     hybrid: true,
     onsite: true,
     confirmed: true,
-    summary: "NYC local + US remote",
+    summary: "NYC local + worldwide remote",
     boundary: "On-site limited to NYC",
   },
   compensation: { floor: "$210k", target: "$230k+" },
@@ -80,8 +81,8 @@ describe("ProfileSettings", () => {
     expect(html).toContain("What Paul knows");
     expect(html).toContain("Staff Software Engineer");
     expect(html).toContain("LOCATION POLICY");
-    expect(html).toContain("NYC local + US remote");
-    expect(html).toContain("Remote · United States");
+    expect(html).toContain("NYC local + worldwide remote");
+    expect(html).toContain("Remote · Worldwide");
     expect(html).toContain("On-site · NYC only");
     expect(html).toContain("Confirmed search boundary");
     expect(html).toContain("$210k");
@@ -123,11 +124,29 @@ describe("ProfileSettings", () => {
         title: "Edit location policy",
         fields: [
           { id: "home", label: "Home market", type: "text" },
-          { id: "remote", label: "Remote", type: "checkbox" },
-          { id: "relocation", label: "Relocation markets", type: "textarea", rows: 3 },
+          {
+            id: "remoteScope",
+            label: "Remote job eligibility",
+            type: "select",
+            options: [
+              { value: "off", label: "Not open to remote roles" },
+              { value: "home-country", label: "Remote within my home country" },
+              { value: "worldwide", label: "Remote worldwide" },
+            ],
+          },
+          {
+            id: "relocation",
+            label: "Relocation markets",
+            type: "textarea",
+            rows: 3,
+          },
         ],
       },
-      editorValues: { home: "New York, NY", remote: true, relocation: "Boston, MA" },
+      editorValues: {
+        home: "New York, NY",
+        remoteScope: "worldwide",
+        relocation: "Boston, MA",
+      },
       onEditorChange,
       onSaveEditor,
       onAskAgent,
@@ -138,6 +157,7 @@ describe("ProfileSettings", () => {
     expect(html).toContain("Edit location policy");
     expect(html).toContain("New York, NY");
     expect(html).toContain("Boston, MA");
+    expect(html).toContain("Remote worldwide");
     expect(html).toContain("Save section");
     expect(html).toContain("Ask Paul instead");
     expect(html).not.toMatch(/approve|deny/i);
@@ -167,8 +187,17 @@ describe("ProfileSettings", () => {
         profile={PROFILE}
         permissions={PERMISSIONS}
         engine={{ name: "Claude Code", connected: true }}
-        sources={{ scannedCount: 72, pinnedCount: 4, lastSweep: "7:02am", blockedCount: 1 }}
-        publicSyncPreference={{ enabled: true, source: "default", updatedAt: null }}
+        sources={{
+          scannedCount: 72,
+          pinnedCount: 4,
+          lastSweep: "7:02am",
+          blockedCount: 1,
+        }}
+        publicSyncPreference={{
+          enabled: true,
+          source: "default",
+          updatedAt: null,
+        }}
       />
     );
 
@@ -215,6 +244,56 @@ describe("ProfileSettings", () => {
     expect(onPublicSyncChange).toHaveBeenCalledWith(true);
   });
 
+  it("shows desktop-only update preference and a manual check that works while opted out", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const onEnabledChange = vi.fn();
+    const onCheckNow = vi.fn();
+    const tree = ProfileSettings({
+      activeTab: "settings",
+      permissions: PERMISSIONS,
+      desktopUpdate: {
+        available: true,
+        enabled: false,
+        checking: false,
+        status: "CareerRat is up to date.",
+        onEnabledChange,
+        onCheckNow,
+      },
+    });
+    const html = renderToStaticMarkup(tree);
+
+    expect(html).toContain("DESKTOP APP");
+    expect(html).toContain("Automatically check for updates");
+    expect(html).toContain("Check now");
+    expect(html).toContain("CareerRat is up to date.");
+
+    const updateToggle = findElement(
+      tree,
+      (node) =>
+        node.type === "button" &&
+        node.props?.["aria-label"] === "Automatically check for updates: off"
+    );
+    updateToggle.props.onClick();
+    findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "Check now"
+    ).props.onClick();
+
+    expect(onEnabledChange).toHaveBeenCalledWith(true);
+    expect(onCheckNow).toHaveBeenCalledOnce();
+  });
+
+  it("does not render desktop update controls in the browser app", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const html = renderToStaticMarkup(
+      <ProfileSettings activeTab="settings" permissions={PERMISSIONS} />
+    );
+
+    expect(html).not.toContain("DESKTOP APP");
+    expect(html).not.toContain("Automatically check for updates");
+    expect(html).not.toContain("Check now");
+  });
+
   it("renders actionable engine setup, source entry, and technical details dialogs inline", async () => {
     const { ProfileSettings } = await loadProfile();
     const onCloseEnginePicker = vi.fn();
@@ -240,7 +319,7 @@ describe("ProfileSettings", () => {
             available: true,
             ready: false,
             status: "authentication_required",
-            action: "open_terminal",
+            action: "start_sign_in",
           },
           { id: "codex", name: "Codex", available: false, ready: false },
         ],
@@ -361,6 +440,110 @@ describe("ProfileSettings", () => {
     expect(html).toContain("cannot safely run CareerRat tools");
     expect(html).not.toContain("Use this tool");
     expect(onSelectEngine).not.toHaveBeenCalled();
+  });
+
+  it("keeps an in-app sign-in visible while the provider browser flow is pending", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const onRetryEngine = vi.fn();
+    const tree = ProfileSettings({
+      activeTab: "settings",
+      permissions: PERMISSIONS,
+      engine: {
+        name: "Claude Code",
+        connected: false,
+        choices: [
+          {
+            id: "claude",
+            name: "Claude Code",
+            available: true,
+            ready: false,
+            selectable: false,
+            status: "authentication_required",
+            action: "start_sign_in",
+          },
+        ],
+      },
+      enginePickerOpen: true,
+      engineSignInId: "claude",
+      onRetryEngine,
+    });
+    const html = renderToStaticMarkup(tree);
+
+    expect(html).toContain("Finish sign-in in your browser, then check again.");
+    expect(html).toContain(">Check sign-in</button>");
+    expect(html).not.toContain(">Sign in</button>");
+    findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "Check sign-in"
+    ).props.onClick();
+    expect(onRetryEngine).toHaveBeenCalledWith("claude");
+  });
+
+  it("presents every provider by its verified capability level in settings", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const html = renderToStaticMarkup(
+      <ProfileSettings
+        activeTab="settings"
+        permissions={PERMISSIONS}
+        engine={{
+          name: "Codex",
+          connected: true,
+          selectedId: "codex",
+          choices: [
+            {
+              id: "claude",
+              name: "Claude Code",
+              available: true,
+              ready: true,
+              selectable: true,
+              toolExecutionSupported: true,
+            },
+            {
+              id: "codex",
+              name: "Codex",
+              available: true,
+              ready: true,
+              selectable: true,
+              tier: "chat",
+              capabilities: ["isolated_completion"],
+            },
+            {
+              id: "gemini",
+              name: "Gemini CLI",
+              available: true,
+              ready: false,
+              selectable: false,
+              status: "authentication_required",
+              action: "start_sign_in",
+            },
+            {
+              id: "opencode",
+              name: "OpenCode",
+              available: true,
+              ready: true,
+              selectable: false,
+              status: "detected_not_verified",
+            },
+            {
+              id: "goose",
+              name: "Goose",
+              available: false,
+              ready: false,
+              selectable: false,
+              status: "not_found",
+            },
+          ],
+        }}
+        enginePickerOpen
+      />
+    );
+
+    expect(html).toContain("Ready for task tools and research");
+    expect(html).toContain("Ready for chat and drafting");
+    expect(html).toContain("Auth required");
+    expect(html).toContain("Detected not verified");
+    expect(html).toContain("Unavailable");
+    expect(html).not.toMatch(/secure tool runs unavailable/i);
   });
 
   it("keeps an empty engine picker actionable", async () => {

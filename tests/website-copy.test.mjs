@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { readdir, readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
+import sharp from "sharp";
 
 const LEGACY_BRAND = ["role", "ster"].join("");
 const STALE_PUBLIC_CLI_PATTERN = new RegExp(
@@ -23,7 +24,8 @@ test("website hero leads with the CareerRat pitch", async () => {
   const styles = await readFile("apps/website/src/app/globals.css", "utf8");
 
   assert.match(page, /Your job hunt, run by a rat\./);
-  assert.match(page, /npm install -g careerrat/);
+  assert.match(page, /Mac app that turns the AI CLI you already have into a personal recruiter/);
+  assert.doesNotMatch(page, /npm install -g careerrat|careerrat start|careerrat update/);
   assert.doesNotMatch(page, new RegExp(LEGACY_BRAND, "i"));
   assert.doesNotMatch(
     styles,
@@ -32,63 +34,147 @@ test("website hero leads with the CareerRat pitch", async () => {
   );
 });
 
-test("website leads with the signed Mac app, keeping npm as the cross-platform path", async () => {
+test("website leads with the signed Mac app and keeps installation focused on the download", async () => {
   const page = await readFile("apps/website/src/app/page.tsx", "utf8");
 
-  // Hero: the Mac app is the primary framing and the primary CTA.
-  assert.match(page, /free Mac app/);
-  assert.match(page, /free Mac app you talk to/);
+  // Hero: the Mac app is the primary framing and the primary CTA. Free and
+  // local are supporting facts, not the headline.
+  assert.match(page, /Mac app that turns the AI CLI you already have into a personal recruiter/);
   assert.match(page, /Download for Mac/);
   assert.match(page, /https:\/\/github\.com\/CodesWhat\/careerrat\/releases\/latest/);
-  assert.match(page, /Apple Silicon Macs, signed and notarized\./);
+  assert.match(page, /Signed and notarized, for Apple Silicon Macs on macOS 12 or newer\./);
+  assert.match(page, /CareerRat itself costs nothing/);
   assert.doesNotMatch(page, /Runs on your own AI CLI/);
   assert.doesNotMatch(page, /Get started, free &amp; open source/);
   assert.doesNotMatch(page, /bring your AI CLI/);
   assert.doesNotMatch(page, /Agent runtime/);
   assert.doesNotMatch(page, /Self-host it/);
 
-  // Get section: the Mac app leads, npm is the explicit second, cross-platform path.
-  assert.match(page, /On a Mac/);
-  assert.match(page, /Anywhere with npm/);
-  assert.match(page, /brew install --cask codeswhat\/tap\/careerrat/);
-  assert.match(page, /signed and notarized/i);
-  assert.match(page, /macOS 12/);
-
-  // npm stays on the page as the cross-platform option; a regression back to
-  // an npm-first hero or Get section fails this test by name.
-  assert.match(page, /npm install -g careerrat/);
+  assert.doesNotMatch(page, /Anywhere with npm|brew install|npm install|Node\.js 24/);
 });
 
-test("website frames app captures in a flat window chrome", async () => {
+test("website names only the runtime paths CareerRat actually supports", async () => {
+  const page = await readFile("apps/website/src/app/page.tsx", "utf8");
+
+  assert.match(page, /Claude Code 2\.1\.241\+/);
+  assert.match(page, /OpenAI Codex 0\.149\.1\+/);
+  assert.match(page, /Claude Code · full tasks/);
+  assert.match(page, /OpenAI Codex · chat \+ drafting/);
+  assert.doesNotMatch(page, /OpenAI Codex · terminal/);
+  assert.doesNotMatch(page, /Other detected CLIs work through the terminal workspace/);
+  assert.doesNotMatch(page, /Gemini CLI · terminal|OpenCode · terminal/);
+});
+
+test("public surfaces keep the graded installed-runtime contract aligned", async () => {
+  const paths = {
+    readme: "README.md",
+    website: "apps/website/src/app/page.tsx",
+    install: "apps/docs/content/docs/getting-started/install.mdx",
+    privacy: "apps/docs/content/docs/advanced/privacy.mdx",
+    architecture: "docs/ARCHITECTURE.md",
+    roadmap: "docs/ROADMAP.md",
+  };
+  const copy = Object.fromEntries(
+    await Promise.all(
+      Object.entries(paths).map(async ([name, path]) => [name, await readFile(path, "utf8")])
+    )
+  );
+  const combined = Object.values(copy).join("\n");
+
+  for (const name of ["readme", "website", "install", "privacy", "architecture", "roadmap"]) {
+    assert.match(
+      copy[name],
+      /Claude Code 2\.1\.241(?:\+|\s+or newer)[\s\S]{0,120}(?:full|tool-bearing)[\s\S]{0,80}(?:tasks?|skills?)[\s\S]{0,80}research/i,
+      `${paths[name]} should describe Claude's full task and research boundary`
+    );
+    assert.match(
+      copy[name],
+      /Codex[\s\S]{0,20}0\.149\.1(?:\+|\s+or newer)[\s\S]{0,120}(?:isolated\s+)?in-app chat\s+and\s+drafting/i,
+      `${paths[name]} should describe Codex's in-app chat and drafting boundary`
+    );
+  }
+
+  for (const name of ["readme", "install", "privacy", "architecture", "roadmap"]) {
+    assert.match(
+      copy[name],
+      /other (?:installed|detected)[\s\S]{0,100}(?:unverified|not selectable|fail closed)/i,
+      `${paths[name]} should keep other detected CLIs unverified and unselectable`
+    );
+  }
+
+  assert.match(copy.readme, /fails clearly when a workflow needs Claude/i);
+  assert.match(copy.install, /does not fall back to another\s+provider/i);
+  assert.match(copy.privacy, /does not silently switch providers/i);
+  assert.match(copy.architecture, /packaged app has no provider fallback/i);
+  assert.match(copy.roadmap, /packaged app has no provider fallback/i);
+
+  assert.doesNotMatch(
+    combined,
+    /in-app skill and chat execution currently needs\s+Claude|Codex remains supported as an outer agent|currently uses boundary-verified Claude Code and therefore Anthropic|show every other detected CLI as unsupported|Direct provider keys and managed AI remain explicit fallbacks|provider fallback remains a\s+separate Agent SDK path/i
+  );
+});
+
+test("website provides a keyboard skip link and preserves approved button variants", async () => {
   const page = await readFile("apps/website/src/app/page.tsx", "utf8");
   const styles = await readFile("apps/website/src/app/globals.css", "utf8");
 
-  // Both the hero screenshot and the steps-demo gif render inside the
-  // app-window wrapper, not bare against the page background.
+  assert.match(page, /className="skip-link" href="#main-content"/);
+  assert.match(page, /<main id="main-content">/);
+  assert.match(styles, /\.skip-link:focus-visible\s*\{[^}]*transform:\s*translate\(-50%,\s*0\)/s);
+  assert.match(styles, /\.site-nav__cta\s*\{[^}]*font-weight:\s*700/s);
   assert.match(
-    page,
-    /className="app-window"[\s\S]{0,400}chat-activity-pending\.png/,
-    "hero screenshot should be wrapped in the flat app-window chrome"
+    styles,
+    /\.button--white\.button--large,\s*\.button--outline\.button--large\s*\{[^}]*font-weight:\s*700/s
   );
   assert.match(
-    page,
-    /className="app-window"[\s\S]{0,400}chat-activity\.gif/,
-    "steps-demo gif should be wrapped in the flat app-window chrome"
+    styles,
+    /\.button--lime\.button--large,\s*\.button--ink\.button--large\s*\{[^}]*padding-inline:\s*24px/s
   );
-
-  // The wrapper itself stays flat: a hairline border, no shadow.
-  const windowRuleMatch = styles.match(/\.app-window\s*\{([^}]*)\}/);
-  assert.ok(windowRuleMatch, ".app-window rule should exist in globals.css");
-  const windowRule = windowRuleMatch[1];
-  assert.match(windowRule, /border:\s*1px solid var\(--ink\)/);
-  assert.doesNotMatch(windowRule, /box-shadow/);
 });
 
-test("root layout suppresses the intentional early html class hydration delta", async () => {
+test("website uses the approved text mark, natural chat colors, and house footer", async () => {
+  const page = await readFile("apps/website/src/app/page.tsx", "utf8");
+  const styles = await readFile("apps/website/src/app/globals.css", "utf8");
+  const iconBuild = await readFile("apps/website/scripts/generate-brand-icons.mjs", "utf8");
+
+  assert.match(page, /className="brand-mark"[\s\S]*Career[\s\S]*Rat\./);
+  assert.doesNotMatch(page, /🐀|chat-activity(?:-pending)?\.(?:png|gif)/);
+  assert.match(styles, /\.brand-mark\s*\{[^}]*background:\s*var\(--sky\)/s);
+  assert.match(
+    styles,
+    /\.chat-demo__user\s*\{[^}]*color:\s*var\(--ink\)[^}]*background:\s*var\(--tint-cool-2\)/s
+  );
+  assert.doesNotMatch(styles, /\.chat-demo__user\s*\{[^}]*background:\s*var\(--ink\)/s);
+  assert.match(page, /className="codeswhat-badge"/);
+  assert.match(page, /CODE_SIGNING_POLICY\.md/);
+  assert.match(page, />\s*Code signing policy\s*<\/a>/);
+  assert.match(styles, /\.codeswhat-badge\s*\{[^}]*background:\s*var\(--cream\)/s);
+  assert.doesNotMatch(
+    styles,
+    /\.js\s+\.reveal\s*\{[^}]*opacity:\s*0/s,
+    "marketing content must not depend on scroll animation JavaScript to become visible"
+  );
+  assert.match(iconBuild, />CR<\/text>/);
+  assert.match(iconBuild, /<circle[^>]+fill="\$\{INK\}"/);
+  assert.match(iconBuild, /MONOGRAM FAVICON/);
+  assert.match(iconBuild, /fontSize = Math\.round\(size \* 0\.64\)/);
+  assert.match(iconBuild, /textLength="\$\{Math\.round\(size \* 0\.8\)\}"/);
+  assert.match(iconBuild, /lengthAdjust="spacingAndGlyphs"/);
+  assert.match(iconBuild, /sharp\(faviconSvg\(512\)\).*icon\.png/s);
+  assert.match(iconBuild, /sharp\(faviconSvg\(180\)\).*apple-icon\.png/s);
+  assert.doesNotMatch(iconBuild, /appMarkSvg|TIGHT LOWER-LEFT STACK/);
+  assert.match(iconBuild, /favicon\.ico/);
+  assert.doesNotMatch(iconBuild, /🐀/);
+  await access("apps/website/src/app/favicon.ico");
+  await assert.rejects(access("apps/website/public/chat-activity.gif"));
+  await assert.rejects(access("apps/website/public/chat-activity-pending.png"));
+});
+
+test("root layout has no legacy scroll-reveal bootstrap", async () => {
   const layout = await readFile("apps/website/src/app/layout.tsx", "utf8");
 
-  assert.match(layout, /documentElement;?[\s\S]*?\.classList\.add\('js'\)/);
-  assert.match(layout, /<html[\s\S]*suppressHydrationWarning/);
+  assert.doesNotMatch(layout, /REVEAL_BOOTSTRAP|classList\.add\('js'\)/);
+  assert.doesNotMatch(layout, /suppressHydrationWarning/);
 });
 
 // House PostHog standard (mirrors CodesWhat/codeswhat.com's own
@@ -132,6 +218,7 @@ test("website analytics uses the cookieless house PostHog posture, not Vercel An
 
   const privacy = await readFile("apps/website/src/lib/posthog-privacy.ts", "utf8");
   assert.match(privacy, /POSTHOG_API_HOST = "https:\/\/e\.codeswhat\.com"/);
+  assert.match(privacy, /ALLOWED_PLACEMENTS = new Set\(\["header", "hero", "get", "final"\]\)/);
   assert.match(privacy, /schema_version: 1/);
   assert.match(privacy, /site: SITE/);
   assert.match(privacy, /surface: surfaceForPath\(path\)/);
@@ -157,6 +244,43 @@ test("website metadata is CareerRat-branded", async () => {
   }
 });
 
+test("website publishes canonical social metadata with the selected square CR icon", async () => {
+  const layout = await readFile("apps/website/src/app/layout.tsx", "utf8");
+
+  assert.match(layout, /metadataBase:\s*new URL\("https:\/\/careerrat\.com"\)/);
+  assert.match(layout, /alternates:\s*\{\s*canonical:\s*"\/"\s*\}/s);
+  assert.match(
+    layout,
+    /openGraph:\s*\{[\s\S]*?url:\s*"\/"[\s\S]*?images:\s*\[\s*\{[\s\S]*?url:\s*"\/icon\.png"[\s\S]*?width:\s*512[\s\S]*?height:\s*512/s
+  );
+  assert.match(
+    layout,
+    /twitter:\s*\{[\s\S]*?card:\s*"summary"[\s\S]*?images:\s*\[\s*\{[\s\S]*?url:\s*"\/icon\.png"[\s\S]*?width:\s*512[\s\S]*?height:\s*512/s
+  );
+  assert.doesNotMatch(layout, /summary_large_image/);
+
+  const icon = await sharp("apps/website/src/app/icon.png").metadata();
+  const appleIcon = await sharp("apps/website/src/app/apple-icon.png").metadata();
+  assert.deepEqual(
+    { width: icon.width, height: icon.height, format: icon.format },
+    { width: 512, height: 512, format: "png" }
+  );
+  assert.deepEqual(
+    { width: appleIcon.width, height: appleIcon.height, format: appleIcon.format },
+    { width: 180, height: 180, format: "png" }
+  );
+
+  const favicon = await readFile("apps/website/src/app/favicon.ico");
+  assert.equal(favicon.readUInt16LE(0), 0);
+  assert.equal(favicon.readUInt16LE(2), 1);
+  const faviconCount = favicon.readUInt16LE(4);
+  assert.equal(faviconCount, 4);
+  assert.deepEqual(
+    Array.from({ length: faviconCount }, (_, index) => favicon[6 + index * 16] || 256),
+    [16, 32, 48, 64]
+  );
+});
+
 test("deployed sites bundle fonts without Google build-time fetches", async () => {
   const websiteLayout = await readFile("apps/website/src/app/layout.tsx", "utf8");
   const docsLayout = await readFile("apps/docs/src/app/layout.tsx", "utf8");
@@ -164,29 +288,27 @@ test("deployed sites bundle fonts without Google build-time fetches", async () =
 
   assert.doesNotMatch(combined, /next\/font\/google|fonts\.(?:googleapis|gstatic)\.com/);
   assert.match(websiteLayout, /next\/font\/local/);
+  assert.match(websiteLayout, /@fontsource\/figtree/);
+  assert.doesNotMatch(websiteLayout, /GeistVF|GeistMonoVF|@fontsource\/archivo/);
   assert.match(docsLayout, /next\/font\/local/);
 });
 
-test("website install copy uses the public careerrat CLI convention", async () => {
+test("website stays download-only while docs keep the public careerrat CLI convention", async () => {
   const page = await readFile("apps/website/src/app/page.tsx", "utf8");
   const publicAgents = await readFile("apps/website/public/AGENTS.md", "utf8");
   const installDocs = await readFile("apps/docs/content/docs/getting-started/install.mdx", "utf8");
   const packageJson = JSON.parse(await readFile("package.json", "utf8"));
-  const combined = `${page}\n${publicAgents}`;
+  const combined = publicAgents;
 
-  assert.match(page, /npm install -g careerrat/);
-  assert.match(page, /careerrat start claude/);
-  assert.match(page, /careerrat update/);
+  assert.doesNotMatch(
+    page,
+    /npm install -g careerrat|careerrat start|careerrat update|Node\.js 24/
+  );
   assert.match(publicAgents, /careerrat start claude/);
   assert.match(publicAgents, /careerrat ingest/);
   assert.match(publicAgents, /careerrat update/);
   assert.equal(packageJson.engines.node, ">=24");
-  assert.match(page, /Node\.js 24 or newer/);
   assert.match(installDocs, /Node\.js >= 24/);
-  assert.doesNotMatch(
-    page,
-    /Node\.js 18|zero runtime deps|any CLI (?:already )?on your PATH|anything else on your PATH|whatever AI CLI|nothing leaves it|nothing phoned home|all of it stays on your machine|No wizard/i
-  );
 
   assert.doesNotMatch(combined, STALE_PUBLIC_CLI_PATTERN);
 });

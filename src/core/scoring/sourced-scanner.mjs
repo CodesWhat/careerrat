@@ -394,10 +394,14 @@ function locationEligibility(offer, config) {
     (mode) => typeof profileLocation?.[mode] === "boolean"
   );
 
-  if (remote) {
+  // Worldwide scope applies only to fully remote work. Explicit hybrid or
+  // on-site labels stay subject to the saved home/relocation commute policy,
+  // even when the listing also says "remote-friendly".
+  if (remote && !hybrid && !onsite) {
     if (hasExplicitModes && profileLocation.remote !== true) {
       return { eligible: false, reason: "remote-not-allowed" };
     }
+    if (profileLocation.remote_scope === "worldwide") return { eligible: true };
     if (homeLooksUs(profileLocation.home)) {
       const local = commuteEligibility(location, profileLocation);
       if (local.eligible) return { eligible: true };

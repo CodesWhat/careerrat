@@ -38,12 +38,9 @@ import {
 } from "../src/core/db/verbs.mjs";
 
 // Forces resolveAIRoute() to resolve route.type === "installed" deterministically
-// (no dependency on any real CLI actually being on this machine's PATH) — the
-// "custom" runtimeId short-circuits straight to a fixed { id: "custom", path:
-// customCommand } runtime (see call-ai.mjs's resolveAIRoute), same trick
-// tests/skill-runtime.test.mjs uses for its own installed-route coverage.
-// Same deterministic-route trick as selectInstalledRuntime below, but for a
-// real registry id ("codex") instead of "custom" — resolveAIRoute's non-custom
+// without depending on any real CLI actually being on this machine's PATH.
+// The helper uses a real registry id ("codex") so the production route remains
+// identical to the route used outside tests. resolveAIRoute's installed-runtime
 // branch calls detectInstalledRuntimes({env}), which walks env.PATH plus
 // CAREERRAT_RUNTIME_EXTRA_PATHS (installed-runtimes.mjs's runtimeSearchDirectories).
 // Pointing both at a throwaway bin dir containing a fake "codex" executable
@@ -64,11 +61,17 @@ function selectFakeCodexRuntime({ repoRoot, env }) {
 }
 
 function selectInstalledRuntime({ repoRoot, env }) {
+  const binDir = join(repoRoot, ".internal", "fake-runtime-bin");
+  mkdirSync(binDir, { recursive: true });
+  const codexPath = join(binDir, "codex");
+  writeFileSync(codexPath, "#!/bin/sh\nexit 0\n", "utf8");
+  chmodSync(codexPath, 0o755);
+  env.PATH = "";
+  env.CAREERRAT_RUNTIME_EXTRA_PATHS = binDir;
   writeInstalledRuntimeSelection({
     repoRoot,
     env,
-    runtimeId: "custom",
-    customCommand: "/fake/bin/custom-agent",
+    runtimeId: "codex",
   });
 }
 
@@ -403,6 +406,13 @@ test("buildChatKickoffPrompt: routes notice period to its real profile schema pa
   assert.match(prompt, /profile\.authorization\.notice_period/i);
   assert.match(prompt, /never form-defaults\.notice_period/i);
   assert.match(prompt, /do not collect an earliest start date during initial setup/i);
+});
+
+test("buildChatKickoffPrompt: never models final submission as a candidate setting", () => {
+  const prompt = buildChatKickoffPrompt({ skill: "ingest-profile" });
+
+  assert.match(prompt, /final application submission always requires a separate user action/i);
+  assert.match(prompt, /form-defaults contains ATS answers only and has no submission setting/i);
 });
 
 // ---------------------------------------------------------------------------
@@ -1316,7 +1326,7 @@ test("createChatRuntime.startSession (installed route): runs turns through the s
 
       await waitForPredicate(() => idleCount() >= 1);
       assert.equal(calls.length, 1);
-      assert.equal(calls[0].runtime.id, "custom");
+      assert.equal(calls[0].runtime.id, "codex");
       assert.deepEqual(calls[0].tools, ["Skill"]);
       assert.equal(
         calls[0].tools.some((tool) => ["Read", "Glob", "Grep"].includes(tool)),
@@ -1336,7 +1346,7 @@ test("createChatRuntime.startSession (installed route): runs turns through the s
       await waitForPredicate(() => idleCount() >= 2);
 
       assert.equal(calls.length, 2);
-      assert.equal(calls[1].runtime.id, "custom");
+      assert.equal(calls[1].runtime.id, "codex");
       // Turn 2's prompt replays turn 1's reply plus the just-posted user
       // message — the "stateless statelessly-replayed transcript" this fix
       // requires, since the installed-runtime call itself is one-shot.
@@ -1884,7 +1894,7 @@ test("createChatRuntime (installed route): writes a usage_event per turn, mirror
       assert.equal(rows[0].source, "installed");
       assert.equal(rows[0].skill, "ingest-profile");
       assert.equal(rows[0].model, "custom-model");
-      assert.equal(rows[0].upstream, "local-cli:custom");
+      assert.equal(rows[0].upstream, "local-cli:codex");
       assert.equal(rows[0].tokens_in, 42);
       assert.equal(rows[0].tokens_out, 7);
     } finally {

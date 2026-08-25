@@ -56,7 +56,9 @@ function baseK(value) {
 
 function compactLocation(location = {}, candidate = {}) {
   const modes = [];
-  if (location.remote) modes.push("Remote");
+  if (location.remote) {
+    modes.push(location.remote_scope === "worldwide" ? "Remote worldwide" : "Remote");
+  }
   if (location.hybrid) modes.push("hybrid");
   if (location.onsite) modes.push("on-site");
   const home = String(location.home || candidate.location || "").trim();
@@ -104,6 +106,12 @@ export function buildSettingsSnapshot({
       candidate: candidate.full_name || candidate.preferred_name || "Not set",
       headline: candidate.headline || candidate.domain || "Not set",
       location: compactLocation(location, candidate),
+      remoteScope:
+        location.remote === true
+          ? location.remote_scope === "worldwide"
+            ? "worldwide"
+            : "home-country"
+          : null,
       minimumBase: formatBase(compensation.minimum_base),
       targetBase: formatBase(compensation.target_base),
       expectedBase: formatBase(compensation.expected_base),

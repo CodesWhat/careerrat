@@ -58,6 +58,7 @@ export const CANDIDATE_DEFAULTS = Object.freeze({
       // deliberately excludes bare `remote` from its "answered" check for
       // exactly this reason.
       remote: true,
+      remote_scope: "home-country",
       hybrid: false,
       onsite: false,
       relocation: [],
@@ -129,6 +130,20 @@ export const CANDIDATE_DEFAULTS = Object.freeze({
 export function cloneCandidateDefault(name) {
   const doc = CANDIDATE_DEFAULTS[name];
   return doc ? JSON.parse(JSON.stringify(doc)) : {};
+}
+
+export function normalizeCandidateProfile(profile = {}) {
+  if (!profile || typeof profile !== "object" || Array.isArray(profile)) return profile;
+  const location = profile.location;
+  if (!location || typeof location !== "object" || Array.isArray(location)) return profile;
+  if (location.remote_scope === "home-country" || location.remote_scope === "worldwide") {
+    return profile;
+  }
+  if (location.remote_scope !== undefined && String(location.remote_scope).trim()) return profile;
+  return {
+    ...profile,
+    location: { ...location, remote_scope: "home-country" },
+  };
 }
 
 /**

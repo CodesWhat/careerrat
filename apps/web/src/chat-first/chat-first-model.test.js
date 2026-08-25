@@ -236,6 +236,7 @@ describe("buildChatFirstView", () => {
     expect(view.locationPolicy).toEqual({
       home: "NYC",
       remoteRegion: "United States",
+      remoteScope: "home-country",
       hybrid: true,
       onsite: true,
       confirmed: true,
@@ -247,7 +248,7 @@ describe("buildChatFirstView", () => {
     expect(view.archivedThreads).toEqual([expect.objectContaining(runtime.jobThreads[1])]);
     expect(view.counts).toEqual({
       search: 2,
-      pipeline: 22,
+      pipeline: 2,
       files: 3,
       people: 1,
       touchDue: 1,
@@ -423,6 +424,41 @@ describe("buildChatFirstView", () => {
     ]);
   });
 
+  it("collapses multiple ready applications into one review action", () => {
+    const submitStep = (id, company) => ({
+      id: `submit-${id}`,
+      action: "submit-gate",
+      status: "blocked",
+      jobRef: { id, company, role: "Engineer" },
+      result: { requiresUserSubmit: true, applicationId: id },
+    });
+    const view = buildChatFirstView(
+      { ...dashboard, allNextSteps: [] },
+      {
+        ...runtime,
+        missions: [
+          { id: "mission-one", steps: [submitStep("one", "Black Mesa")] },
+          { id: "mission-one-old", steps: [submitStep("one", "Black Mesa")] },
+          { id: "mission-two", steps: [submitStep("two", "Tyrell")] },
+          { id: "mission-three", steps: [submitStep("three", "Abstergo")] },
+        ],
+        needsYou: [],
+        touchDue: [{ id: "comm-1", name: "Angela" }],
+      }
+    );
+
+    expect(view.needsYou).toEqual([
+      expect.objectContaining({
+        id: "submit-batch:mission-one:submit-one:mission-two:submit-two:mission-three:submit-three",
+        kind: "submit-gate-group",
+        gateIds: ["mission-one:submit-one", "mission-two:submit-two", "mission-three:submit-three"],
+        title: "3 applications are ready",
+        primaryLabel: "Apply to 3 jobs",
+      }),
+      expect.objectContaining({ id: "touch:comm-1" }),
+    ]);
+  });
+
   it("personalizes generated action copy with the configured agent name", () => {
     const view = buildChatFirstView(
       {
@@ -590,7 +626,7 @@ describe("buildChatFirstView", () => {
       { ...runtime, missions: [] }
     );
 
-    expect(view.counts.pipeline).toBe(0);
+    expect(view.counts.pipeline).toBe(1);
     expect(view.browser.pipeline.applicationCount).toBe(1);
     expect(view.browser.pipeline.rows).toEqual([
       expect.objectContaining({ id: "applied", count: 0 }),
@@ -599,6 +635,86 @@ describe("buildChatFirstView", () => {
       expect.objectContaining({ id: "final", count: 0 }),
       expect.objectContaining({ id: "offer", count: 0 }),
     ]);
+  });
+
+  it("uses the evaluated application display label in matching job threads", () => {
+    const view = buildChatFirstView(
+      {
+        ...dashboard,
+        jobs: {
+          ...dashboard.jobs,
+          rows: [
+            {
+              id: "hold-keep",
+              company: "Keep Co",
+              status: "reviewed-hold",
+              stage: "reviewed-hold",
+              stageLabel: "Ready to apply",
+            },
+            {
+              id: "hold-review",
+              company: "Review Co",
+              status: "reviewed-hold",
+              stage: "reviewed-hold",
+              stageLabel: "Needs review",
+            },
+          ],
+        },
+      },
+      {
+        ...runtime,
+        jobThreads: [
+          { id: "job:hold-keep", applicationId: "hold-keep", stage: "reviewed-hold" },
+          { id: "job:hold-review", applicationId: "hold-review", stage: "reviewed-hold" },
+        ],
+      }
+    );
+
+    expect(view.threads.map((thread) => thread.stage)).toEqual(["Ready to apply", "Needs review"]);
+  });
+
+  it("deduplicates saved artifacts by path without collapsing matching filenames", () => {
+    const sharedPath = "workspace/jobs/acme-labs-senior-frontend-engineer.md";
+    const sameNameDifferentPath = "workspace/archive/acme-labs-senior-frontend-engineer.md";
+    const view = buildChatFirstView(
+      {
+        jobs: {
+          rows: [],
+          details: {
+            "app-acme": {
+              company: "Acme Labs",
+              artifacts: [{ kind: "Job description", path: sharedPath }],
+            },
+          },
+        },
+        library: {
+          cards: [
+            {
+              id: "library-acme",
+              title: "acme-labs-senior-frontend-engineer.md",
+              kind: "Job description",
+              path: sharedPath,
+            },
+            {
+              id: "library-archived-acme",
+              title: "acme-labs-senior-frontend-engineer.md",
+              kind: "Job description",
+              path: sameNameDifferentPath,
+            },
+          ],
+        },
+      },
+      {}
+    );
+
+    expect(view.browser.files.map((file) => file.path)).toEqual([
+      sharedPath,
+      sameNameDifferentPath,
+    ]);
+    expect(view.browser.files[0]).toEqual(
+      expect.objectContaining({ id: "library-acme", applicationId: "app-acme" })
+    );
+    expect(view.counts.files).toBe(2);
   });
 });
 

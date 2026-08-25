@@ -6,7 +6,6 @@ import { skillChatCompletionFor, skillChatDiscoveryPresentation } from "./skill-
 import "./chat-first.css";
 
 const EMPTY_LIST = [];
-
 function jobLocationCopy(job) {
   const location = String(job?.location || "").trim();
   const mode = String(job?.mode || "").trim();

@@ -211,6 +211,7 @@ function countryTerms(country) {
 
 function deriveLocationFilter(profile = {}) {
   const loc = profile.location ?? {};
+  const worldwideRemote = loc.remote === true && loc.remote_scope === "worldwide";
   const places = compactGeoValues([loc.home, ...(loc.relocation ?? [])]);
   const allowedCountries = new Set();
   const allowedRegions = new Set();
@@ -257,7 +258,7 @@ function deriveLocationFilter(profile = {}) {
   }
 
   const block = [];
-  if (places.length > 0) {
+  if (places.length > 0 && !worldwideRemote) {
     for (const country of COUNTRY_DEFINITIONS) {
       if (!allowedCountries.has(country.name)) block.push(...countryTerms(country));
     }

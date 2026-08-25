@@ -50,6 +50,9 @@ vi.mock("react", async (importOriginal) => {
       };
       return [hooks.states[index], setValue];
     },
+    useSyncExternalStore(_subscribe, getSnapshot) {
+      return getSnapshot();
+    },
   };
 });
 

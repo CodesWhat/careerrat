@@ -21,9 +21,23 @@ describe("chat-first onboarding controller", () => {
       controller.runtimeSelectionReady({
         selectedId: "codex",
         providerFallback: false,
-        runtimes: [{ id: "codex", available: true, ready: true }],
+        runtimes: [{ id: "codex", available: true, ready: true, selectable: true }],
       })
     ).toBe(true);
+    expect(
+      controller.runtimeSelectionReady({
+        selectedId: null,
+        providerFallback: true,
+        runtimes: [],
+      })
+    ).toBe(false);
+    expect(
+      controller.runtimeSelectionReady({
+        selectedId: "claude",
+        providerFallback: false,
+        runtimes: [{ id: "claude", available: true, ready: true }],
+      })
+    ).toBe(false);
   });
 
   it("keeps every supported runtime in the first-run chooser", async () => {
@@ -46,6 +60,49 @@ describe("chat-first onboarding controller", () => {
       expect.objectContaining({ id: "hermes", detected: true, ready: true }),
       expect.objectContaining({ id: "opencode", detected: true, ready: true }),
       expect.objectContaining({ id: "custom", detected: true, ready: true }),
+    ]);
+  });
+
+  it("drops malformed runtime inventory entries and deduplicates stable ids", async () => {
+    const controller = await import("./first-run-controller.js");
+
+    expect(
+      controller.firstRunRuntimeChoices({
+        selectedId: "claude",
+        runtimes: [
+          null,
+          {},
+          { id: "  ", name: "Blank" },
+          {
+            id: "claude",
+            name: "Claude Code",
+            available: true,
+            ready: true,
+            selectable: true,
+          },
+          {
+            id: "claude",
+            name: "Duplicate",
+            available: true,
+            ready: true,
+            selectable: true,
+          },
+          {
+            id: "codex",
+            name: null,
+            available: true,
+            ready: false,
+            selectable: false,
+          },
+        ],
+      })
+    ).toEqual([
+      expect.objectContaining({
+        id: "claude",
+        name: "Claude Code",
+        selected: true,
+      }),
+      expect.objectContaining({ id: "codex", name: "codex", selected: false }),
     ]);
   });
 
@@ -72,6 +129,96 @@ describe("chat-first onboarding controller", () => {
       selectable: false,
       capabilityReason: "Detected, but cannot safely run CareerRat tools yet.",
     });
+  });
+
+  it("normalizes current and graded provider inventory into honest capability states", async () => {
+    const controller = await import("./first-run-controller.js");
+
+    const choices = controller.firstRunRuntimeChoices({
+      runtimes: [
+        {
+          id: "claude",
+          name: "Claude Code",
+          available: true,
+          ready: true,
+          selectable: true,
+          toolExecutionSupported: true,
+        },
+        {
+          id: "codex",
+          name: "Codex",
+          detected: true,
+          ready: true,
+          selectable: true,
+          capabilityTier: "chat_drafting",
+          capabilities: { completion: true, taskTools: false, research: false },
+        },
+        {
+          id: "gemini",
+          name: "Gemini CLI",
+          available: true,
+          ready: false,
+          selectable: false,
+          status: "authentication_required",
+        },
+        {
+          id: "opencode",
+          name: "OpenCode",
+          available: true,
+          ready: true,
+          selectable: false,
+          status: "detected_not_verified",
+        },
+        {
+          id: "goose",
+          name: "Goose",
+          available: false,
+          ready: false,
+          selectable: false,
+          status: "not_found",
+        },
+      ],
+    });
+
+    expect(
+      choices.map(({ id, detected, presentationState, presentationLabel }) => ({
+        id,
+        detected,
+        presentationState,
+        presentationLabel,
+      }))
+    ).toEqual([
+      {
+        id: "claude",
+        detected: true,
+        presentationState: "task_tools",
+        presentationLabel: "Ready for task tools and research",
+      },
+      {
+        id: "codex",
+        detected: true,
+        presentationState: "chat_drafting",
+        presentationLabel: "Ready for chat and drafting",
+      },
+      {
+        id: "gemini",
+        detected: true,
+        presentationState: "auth_required",
+        presentationLabel: "Auth required",
+      },
+      {
+        id: "opencode",
+        detected: true,
+        presentationState: "detected_unverified",
+        presentationLabel: "Detected not verified",
+      },
+      {
+        id: "goose",
+        detected: false,
+        presentationState: "unavailable",
+        presentationLabel: "Unavailable",
+      },
+    ]);
   });
 
   it("uses the configured agent name from persisted onboarding state", async () => {
@@ -165,10 +312,15 @@ describe("chat-first onboarding controller", () => {
       },
       data: {
         profile: {
-          candidate: { full_name: "Riley", email: "riley@example.com", location: "NYC" },
+          candidate: {
+            full_name: "Riley",
+            email: "riley@example.com",
+            location: "NYC",
+          },
           location: {
             home: "NYC",
             remote: true,
+            remote_scope: "worldwide",
             hybrid: true,
             onsite: false,
             mode_preferences_confirmed: true,
@@ -225,12 +377,17 @@ describe("chat-first onboarding controller", () => {
     });
     expect(knowledge.items.find((item) => item.id === "quickFacts")).toMatchObject({
       status: "populated",
-      lines: ["Riley", "riley@example.com", "NYC", "Remote", "Hybrid"],
+      lines: ["Riley", "riley@example.com", "NYC", "Remote worldwide", "Hybrid"],
     });
     expect(knowledge.items.find((item) => item.id === "quickFacts").editor.fields).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: "home", value: "NYC" }),
-        expect.objectContaining({ id: "remote", checked: true }),
+        expect.objectContaining({
+          id: "remoteScope",
+          type: "select",
+          value: "worldwide",
+          label: "Remote job eligibility",
+        }),
         expect.objectContaining({ id: "onsite", checked: false }),
       ])
     );
@@ -281,13 +438,21 @@ describe("chat-first onboarding controller", () => {
     await applyFirstRunConfirmation(
       {
         kind: "evidence_claim",
-        payload: { claim: "Led a migration", evidence: "Shipped across three teams" },
+        payload: {
+          claim: "Led a migration",
+          evidence: "Shipped across three teams",
+        },
       },
       { api, state: {} }
     );
 
     expect(api.saveCandidateFile.mock.calls).toEqual([
-      ["profile", { authorization: { work_authorized: true, requires_sponsorship: false } }],
+      [
+        "profile",
+        {
+          authorization: { work_authorized: true, requires_sponsorship: false },
+        },
+      ],
       ["form-defaults", { work_authorization: "Yes", requires_sponsorship: "No" }],
     ]);
     expect(api.saveEvidenceSeed).toHaveBeenCalledWith([

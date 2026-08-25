@@ -52,6 +52,11 @@
       "properties": {
         "home": { "type": "string" },
         "remote": { "type": "boolean" },
+        "remote_scope": {
+          "type": "string",
+          "enum": ["home-country", "worldwide"],
+          "description": "Geographic eligibility for fully remote roles. Local hybrid and on-site roles still use home/relocation commute matching."
+        },
         "hybrid": { "type": "boolean" },
         "onsite": { "type": "boolean" },
         "mode_preferences_confirmed": {

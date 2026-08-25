@@ -46,7 +46,11 @@ export function renderLocalAgents({ template, profile, targeting }) {
   // --- Location ---
   const loc = profile.location ?? {};
   const locParts = [];
-  if (loc.remote) locParts.push("remote");
+  if (loc.remote) {
+    locParts.push(
+      loc.remote_scope === "worldwide" ? "remote (worldwide)" : "remote (home-country)"
+    );
+  }
   if (loc.hybrid) locParts.push("hybrid");
   if (loc.onsite) locParts.push("onsite");
   if (loc.home) locParts.push(`home: ${loc.home}`);

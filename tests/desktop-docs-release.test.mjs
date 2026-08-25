@@ -77,11 +77,13 @@ test("architecture docs describe the exact packaged runtime boundaries", async (
     /POST `?\/api\/skill\/run` exposes only `intake-extract` and `resume-extract`/i,
     /one canonical uploaded file plus its isolated skill/i,
     /generic chat surface exposes only[\s\S]*`company-health`/i,
-    /Claude Code 2\.1\.241 or newer/i,
-    /guarded CareerRat fetch MCP/i,
-    /Codex and other\s+CLIs fail closed before spawn/i,
+    /Claude Code 2\.1\.241\s+or newer/i,
+    /guarded CareerRat fetch\s+MCP/i,
+    /Codex 0\.149\.1\s+or newer supports isolated\s+in-app chat and drafting/i,
+    /Codex still fails closed before any task-tool or research spawn/i,
     /allowlisted process\s+environment/i,
-    /provider fallback remains a\s+separate Agent SDK path/i,
+    /packaged app has no provider fallback/i,
+    /separately selected Agent SDK\s+test path outside the packaged product/i,
     /only HTML product surface/i,
   ]);
 

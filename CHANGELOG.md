@@ -4,6 +4,28 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-08-24
+
+### Added
+
+- The complete chat-first handoff now ships as the only product shell, with first-class Deep ingest, durable job conversations, resumable missions, mock interviews, archive history, and whole-section profile editing.
+- Installed AI engines are detected and presented in one in-app picker. Claude Code runs the full task-tool and research workflow, Codex runs isolated chat and drafting, and other detected CLIs stay visible until their runtime boundary is verified.
+- Browser-backed mail, message, relationship, LinkedIn, and ATS-status workflows now share retained supervised sessions with explicit two-factor, CAPTCHA, retry, and final-submit handoffs.
+- The public website has been rebuilt in the new visual system with the selected `CR.` website favicon, while the desktop app uses the stacked Career/Rat wordmark icon.
+
+### Changed
+
+- Candidate location policy now distinguishes worldwide remote, country-scoped remote, and local hybrid or on-site markets end to end across onboarding, discovery, prompts, scanning, settings, and generated agent context.
+- Search selections collapse into one "Apply to N jobs" action. Application preparation fills supported fields in the supervised browser and always returns to a compact user submit gate.
+- CareerRat now opens at 1280 by 860 but remains resizable, maximizable, and full-screen capable down to its 1100 by 680 minimum.
+
+### Fixed
+
+- Mission pause requests now stop before the next step is claimed, including when an installed CLI call finishes at the same time as the pause request.
+- Optional blank application fields no longer inflate the answered-question count or force current packets to regenerate forever.
+- Pipeline rows use user-facing review states and typed status copy instead of internal notes, tracked-row counts match what the list shows, location confirmation heals correctly, and duplicate artifact paths collapse to one Files card.
+- The sidebar uses ink only for the active conversation, chat replies use neutral bubbles, Deep ingest uses the corrected pickaxe treatment, and the selected navigation no longer carries a glow or focus surround.
+
 ## [0.14.0] - 2026-08-24
 
 ### Added

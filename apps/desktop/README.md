@@ -63,10 +63,12 @@ imported. It points at Electron's per-user data directory:
 and `internal/ai.env` live there, outside the signed resources tree.
 
 The packaged app detects the expanded AI CLI registry in Finder-safe install
-locations, but only Claude Code 2.1.241 or newer is currently selectable for
-in-app skill and chat execution. It is the only adapter with a verified,
-enforceable per-call tool, path, and network boundary. Codex and the other
-detected CLIs remain visible with an unsupported-capability explanation; they
+locations. Claude Code 2.1.241 or newer is selectable for full in-app task tools
+and research through its verified per-call tool, path, and network boundary.
+Codex 0.149.1 or newer is selectable for isolated in-app chat and drafting with
+its user config, rules, shell, apps, browser, computer use, plugins, and other
+native agent features disabled for the call. Codex task-tool and research runs
+fail closed. Other detected CLIs remain visible as detected but unverified and
 can still drive CareerRat as outer agents through the terminal workflow.
 CareerRat stores only the selected runtime id; it never copies or persists the
 CLI's credentials. The signed artifact contains no Agent SDK and does not
@@ -109,7 +111,9 @@ install updates itself; users still update the open-core CLI with
 The packaged app checks GitHub's public releases API
 (`api.github.com/repos/CodesWhat/careerrat/releases/latest`) shortly after
 launch and then once every 24 hours, on by default with an opt-out in
-Settings. This is notify-only: on finding a newer version it shows an in-app
+Settings. “Check for Updates…” in the CareerRat menu and “Check now” in
+Settings run one immediate check even when automatic checks are off without
+changing that preference. This is notify-only: on finding a newer version it shows an in-app
 notice linking to the GitHub release page, the user downloads and installs
 the `.dmg` themselves, and nothing is downloaded, staged, or installed by the
 app. The request is unauthenticated and carries no candidate data.

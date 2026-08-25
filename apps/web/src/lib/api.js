@@ -183,6 +183,13 @@ export function getInstalledAiRuntimes() {
   return apiFetch("/api/settings/ai-runtimes");
 }
 
+export function requestHostedInterest(email) {
+  return apiFetch("/api/hosted-interest", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
 export function getAutomationSettings() {
   return apiFetch("/api/settings/automation");
 }
@@ -201,8 +208,8 @@ export function probeInstalledAiRuntime(runtimeId) {
   });
 }
 
-export function openInstalledAiRuntimeTerminal(runtimeId) {
-  return apiFetch("/api/settings/ai-runtime/open-terminal", {
+export function startInstalledAiRuntimeSignIn(runtimeId) {
+  return apiFetch("/api/settings/ai-runtime/sign-in", {
     method: "POST",
     body: JSON.stringify({ runtimeId }),
   });

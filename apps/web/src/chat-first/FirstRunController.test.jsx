@@ -101,17 +101,20 @@ function createApi(draft = { transcript: [] }) {
     findChatBySkill: vi.fn().mockResolvedValue({ chatId: "chat-1", state: "idle" }),
     getInstalledAiRuntimes: vi.fn().mockResolvedValue({
       selectedId: "claude",
-      runtimes: [{ id: "claude", available: true, ready: true }],
+      runtimes: [{ id: "claude", available: true, ready: true, selectable: true }],
     }),
     getOnboardingDraft: vi.fn().mockResolvedValue({ draft }),
     getOnboardState: vi.fn().mockResolvedValue(ONBOARD_STATE),
     initOnboard: vi.fn().mockResolvedValue({ ok: true }),
     parseResumeText: vi.fn().mockResolvedValue({ profileSeed: {}, evidenceSeed: { claims: [] } }),
+    probeInstalledAiRuntime: vi.fn().mockResolvedValue({ ok: true }),
     removeEvidenceClaim: vi.fn().mockResolvedValue({ ok: true }),
     replaceEvidenceClaims: vi.fn().mockResolvedValue({ ok: true }),
+    requestHostedInterest: vi.fn().mockResolvedValue({ ok: true }),
     saveCandidateFile: vi.fn().mockResolvedValue({ ok: true }),
     saveEvidenceSeed: vi.fn().mockResolvedValue({ ok: true }),
     saveOnboardingDraft: vi.fn().mockResolvedValue({ ok: true }),
+    selectInstalledAiRuntime: vi.fn().mockResolvedValue({ ok: true }),
     sendChatMessage: vi.fn().mockResolvedValue({ accepted: true }),
     startChat: vi.fn(),
     startFirstSearchRun: vi.fn(),
@@ -124,7 +127,7 @@ async function flushEffects() {
   for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
 }
 
-async function bootController(module, api) {
+async function bootController(module, api, { startInterview = true } = {}) {
   hooks.resetRender();
   module.FirstRunController({ api, inWorkspace: false });
   await flushEffects();
@@ -133,6 +136,16 @@ async function bootController(module, api) {
   module.FirstRunController({ api, inWorkspace: false });
   await flushEffects();
 
+  hooks.resetRender();
+  const view = module.FirstRunController({ api, inWorkspace: false });
+  if (!startInterview || view.props.stage !== "engine") return view;
+  const selectedEngine = view.props.engines.find((engine) => engine.selected);
+  if (!selectedEngine) return view;
+
+  await view.props.onStartInterview(selectedEngine.id);
+  hooks.resetRender();
+  module.FirstRunController({ api, inWorkspace: false });
+  await flushEffects();
   hooks.resetRender();
   return module.FirstRunController({ api, inWorkspace: false });
 }
@@ -165,6 +178,120 @@ beforeEach(() => {
 });
 
 describe("FirstRunController chat event reconciliation", () => {
+  it("does not skip the picker when a fresh install auto-selected its only safe runtime", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi({ transcript: [] });
+    const view = await bootController(module, api, { startInterview: false });
+
+    expect(view.props.stage).toBe("engine");
+    expect(view.props.engines[0]).toMatchObject({
+      id: "claude",
+      selected: true,
+    });
+  });
+
+  it("chooses a safe runtime before the explicit Start the interview action persists it", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    api.getInstalledAiRuntimes
+      .mockResolvedValueOnce({
+        selectedId: null,
+        runtimes: [
+          {
+            id: "claude",
+            name: "Claude Code",
+            available: true,
+            ready: true,
+            selectable: true,
+          },
+        ],
+      })
+      .mockResolvedValue({
+        selectedId: "claude",
+        runtimes: [
+          {
+            id: "claude",
+            name: "Claude Code",
+            available: true,
+            ready: true,
+            selectable: true,
+          },
+        ],
+      });
+    const view = await bootController(module, api, { startInterview: false });
+
+    expect(view.props.stage).toBe("engine");
+    expect(view.props.engines[0].selected).toBe(false);
+    view.props.onChooseEngine("claude");
+    expect(api.selectInstalledAiRuntime).not.toHaveBeenCalled();
+
+    const selectedView = rerender(module, api);
+    expect(selectedView.props.engines[0].selected).toBe(true);
+    await selectedView.props.onStartInterview("claude");
+    expect(api.selectInstalledAiRuntime).toHaveBeenCalledWith({
+      runtimeId: "claude",
+    });
+
+    const chatView = rerender(module, api);
+    expect(chatView.props.stage).toBe("chat");
+  });
+
+  it("submits hosted access interest and keeps a failed email ready to retry", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi({ transcript: [] });
+    api.requestHostedInterest
+      .mockRejectedValueOnce({
+        body: { error: "Interest service is unavailable." },
+      })
+      .mockResolvedValueOnce({ ok: true });
+    let view = await bootController(module, api, { startInterview: false });
+
+    view.props.onHostedInterestStart();
+    view = rerender(module, api);
+    expect(view.props.hostedInterest).toMatchObject({
+      status: "editing",
+      email: "",
+    });
+
+    view.props.onHostedInterestChange("person@example.com");
+    view = rerender(module, api);
+    await view.props.onHostedInterestSubmit();
+    view = rerender(module, api);
+    expect(view.props.hostedInterest).toEqual({
+      status: "error",
+      email: "person@example.com",
+      error: "Interest service is unavailable.",
+    });
+
+    await view.props.onHostedInterestSubmit();
+    view = rerender(module, api);
+    expect(api.requestHostedInterest).toHaveBeenNthCalledWith(2, "person@example.com");
+    expect(view.props.hostedInterest).toEqual({
+      status: "requested",
+      email: "",
+      error: null,
+    });
+  });
+
+  it("refreshes an empty runtime inventory without probing a made-up runtime", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi({ transcript: [] });
+    api.getInstalledAiRuntimes.mockResolvedValue({
+      selectedId: null,
+      providerFallback: false,
+      runtimes: [],
+    });
+    let view = await bootController(module, api, { startInterview: false });
+    const callsBeforeRetry = api.getInstalledAiRuntimes.mock.calls.length;
+
+    await view.props.onRefreshEngines();
+    view = rerender(module, api);
+
+    expect(api.getInstalledAiRuntimes).toHaveBeenCalledTimes(callsBeforeRetry + 1);
+    expect(api.probeInstalledAiRuntime).not.toHaveBeenCalled();
+    expect(view.props.engines).toEqual([]);
+  });
+
   it("reconnects from the last observed event after a posted answer", async () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi();
@@ -262,6 +389,50 @@ describe("FirstRunController chat event reconciliation", () => {
     expect(api.sendChatMessage.mock.calls[0][1]).toContain("profile sections");
   });
 
+  it("keeps successful extracted writes resolved when a later generated field is rejected", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    api.saveCandidateFile.mockResolvedValueOnce({ ok: true }).mockRejectedValueOnce({
+      status: 400,
+      message: "request failed with status 400",
+      body: {
+        error: "form-defaults does not validate",
+        errors: [
+          {
+            path: "auto_submit",
+            message: 'unexpected property "auto_submit"',
+          },
+        ],
+      },
+    });
+    let view = await bootController(module, api);
+    const stateReadsBeforeReply = api.getOnboardState.mock.calls.length;
+    const reply = [
+      "I found two facts.",
+      "```careerrat:confirm",
+      '{"kind":"candidate_patch","summary":"Domain","payload":{"doc":"profile","patch":{"candidate":{"domain":"Infrastructure"}}}}',
+      "```",
+      "```careerrat:confirm",
+      '{"kind":"candidate_patch","summary":"Submission","payload":{"doc":"form-defaults","patch":{"auto_submit":false}}}',
+      "```",
+    ].join("\n");
+    sse.calls.at(-1).options.onEvent("assistant", assistantPayload(reply), { lastEventId: "2" });
+
+    rerender(module, api);
+    await flushEffects();
+    view = rerender(module, api);
+
+    expect(api.saveCandidateFile).toHaveBeenCalledTimes(2);
+    expect(view.props.messages[0].blocks).toEqual([
+      expect.objectContaining({ status: "resolved", resultSummary: "Saved" }),
+      expect.objectContaining({ status: "error" }),
+    ]);
+    expect(view.props.error).toMatch(
+      /auto_submit.*not a supported setting.*other valid details were saved/i
+    );
+    expect(api.getOnboardState.mock.calls.length).toBeGreaterThan(stateReadsBeforeReply);
+  });
+
   it("routes the engine section editor to settings", async () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi();
@@ -300,7 +471,7 @@ describe("FirstRunController chat event reconciliation", () => {
         phone: "+1 212 555 0199",
         home: "New York, NY",
         minimumBase: "$190,000",
-        remote: true,
+        remoteScope: "worldwide",
         hybrid: true,
         onsite: false,
       }
@@ -315,6 +486,7 @@ describe("FirstRunController chat event reconciliation", () => {
       location: {
         home: "New York, NY",
         remote: true,
+        remote_scope: "worldwide",
         hybrid: true,
         onsite: false,
         mode_preferences_confirmed: true,
@@ -327,7 +499,13 @@ describe("FirstRunController chat event reconciliation", () => {
         id: "evidence",
         editor: {
           existingClaimIds: ["seed-001"],
-          existingClaims: [{ id: "seed-001", claim: "Led a team", evidence: "Candidate resume" }],
+          existingClaims: [
+            {
+              id: "seed-001",
+              claim: "Led a team",
+              evidence: "Candidate resume",
+            },
+          ],
         },
       },
       { claims: "Led a team :: Candidate resume" }
@@ -378,15 +556,29 @@ describe("FirstRunController chat event reconciliation", () => {
         id: "evidence",
         editor: {
           existingClaims: [
-            { id: "seed-001", claim: "Built the first version", evidence: "Resume" },
-            { id: "seed-002", claim: "Led the rollout", evidence: "Project notes" },
+            {
+              id: "seed-001",
+              claim: "Built the first version",
+              evidence: "Resume",
+            },
+            {
+              id: "seed-002",
+              claim: "Led the rollout",
+              evidence: "Project notes",
+            },
           ],
         },
       },
-      { claims: "Built the production version :: Resume v2\nLed the rollout :: Project notes" }
+      {
+        claims: "Built the production version :: Resume v2\nLed the rollout :: Project notes",
+      }
     );
     expect(api.replaceEvidenceClaims).toHaveBeenCalledWith([
-      { id: "seed-001", claim: "Built the production version", evidence: "Resume v2" },
+      {
+        id: "seed-001",
+        claim: "Built the production version",
+        evidence: "Resume v2",
+      },
       { id: "seed-002", claim: "Led the rollout", evidence: "Project notes" },
     ]);
     expect(api.removeEvidenceClaim).not.toHaveBeenCalled();
@@ -405,7 +597,11 @@ describe("FirstRunController chat event reconciliation", () => {
           id: "evidence",
           editor: {
             existingClaims: [
-              { id: "seed-001", claim: "Built the first version", evidence: "Resume" },
+              {
+                id: "seed-001",
+                claim: "Built the first version",
+                evidence: "Resume",
+              },
             ],
           },
         },
@@ -435,7 +631,9 @@ describe("FirstRunController chat event reconciliation", () => {
       { id: "id-b", claim: "Claim B", evidence: "Resume B" },
     ]);
 
-    await view.props.onSaveKnowledgeSection(item, { claims: "Claim B :: Resume B" });
+    await view.props.onSaveKnowledgeSection(item, {
+      claims: "Claim B :: Resume B",
+    });
     expect(api.replaceEvidenceClaims).toHaveBeenLastCalledWith([
       { id: "id-b", claim: "Claim B", evidence: "Resume B" },
     ]);
@@ -475,7 +673,9 @@ describe("FirstRunController chat event reconciliation", () => {
           ],
         },
       },
-      { claims: "New claim :: Notes\nClaim A, edited :: Resume A v2\nClaim C :: Resume C" }
+      {
+        claims: "New claim :: Notes\nClaim A, edited :: Resume A v2\nClaim C :: Resume C",
+      }
     );
     expect(api.replaceEvidenceClaims).toHaveBeenLastCalledWith([
       { claim: "New claim", evidence: "Notes" },
@@ -496,10 +696,16 @@ describe("FirstRunController chat event reconciliation", () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi();
     api.parseResumeText.mockResolvedValue({
-      profileSeed: { candidate: { full_name: "Jordan Rivera", location: "New York, NY" } },
+      profileSeed: {
+        candidate: { full_name: "Jordan Rivera", location: "New York, NY" },
+      },
       targetingSeed: {
         role_buckets: [
-          { name: "Primary", priority: "primary", titles: ["Staff Software Engineer"] },
+          {
+            name: "Primary",
+            priority: "primary",
+            titles: ["Staff Software Engineer"],
+          },
         ],
       },
       evidenceSeed: {
@@ -543,7 +749,9 @@ describe("FirstRunController chat event reconciliation", () => {
     ]);
 
     expect(result).toBe("saved");
-    expect(api.saveCandidateFile).toHaveBeenCalledWith("targeting", { cut_signals: ["Crypto"] });
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("targeting", {
+      cut_signals: ["Crypto"],
+    });
     expect(api.sendChatMessage).toHaveBeenCalledOnce();
   });
 });

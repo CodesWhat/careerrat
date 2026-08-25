@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dbExists } from "../db/connection.mjs";
 import { candidateConfigGet } from "../db/verbs.mjs";
 import { userPath } from "../paths/workspace.mjs";
+import { normalizeCandidateProfile } from "./candidate-defaults.mjs";
 import { parseYaml } from "./yaml.mjs";
 
 const DEFAULT_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
@@ -71,7 +72,11 @@ export function loadLegacyCandidateConfig({
 } = {}) {
   const out = {};
   for (const name of candidateDocNames()) {
-    const doc = loadLegacyCandidateDoc(name, { repoRoot, env, fallbackToTemplate });
+    const doc = loadLegacyCandidateDoc(name, {
+      repoRoot,
+      env,
+      fallbackToTemplate,
+    });
     if (doc) out[name] = doc;
   }
   return out;
@@ -109,11 +114,15 @@ function loadLegacyCandidateDoc(name, { repoRoot, env, fallbackToTemplate }) {
   const pathCtx = { repoRoot, env };
   const candidatePath = userPath(pathCtx, spec.candidatePath);
   if (existsSync(candidatePath)) {
-    return parseYaml(readFileSync(candidatePath, "utf8")) || {};
+    const doc = parseYaml(readFileSync(candidatePath, "utf8")) || {};
+    return name === "profile" ? normalizeCandidateProfile(doc) : doc;
   }
   if (fallbackToTemplate) {
     const templatePath = join(repoRoot, spec.templatePath);
-    if (existsSync(templatePath)) return parseYaml(readFileSync(templatePath, "utf8")) || {};
+    if (existsSync(templatePath)) {
+      const doc = parseYaml(readFileSync(templatePath, "utf8")) || {};
+      return name === "profile" ? normalizeCandidateProfile(doc) : doc;
+    }
   }
   return null;
 }

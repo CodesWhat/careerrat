@@ -6,6 +6,32 @@ import {
 } from "./profile-settings-controller.js";
 
 describe("profile settings controller mapping", () => {
+  it("treats an older completed quick-facts location as confirmed when the explicit flag is absent", () => {
+    const model = buildProfileSettingsModel({
+      onboard: {
+        data: {
+          profile: {
+            location: {
+              home: "NYC",
+              remote: true,
+              remote_scope: "home-country",
+              hybrid: true,
+              onsite: true,
+            },
+          },
+        },
+        setupProgress: {
+          items: [{ key: "quickFacts", done: true }],
+        },
+      },
+    });
+
+    expect(model.profile.locationPolicy).toMatchObject({
+      summary: "NYC local + US remote",
+      confirmed: true,
+    });
+  });
+
   it("maps canonical candidate, engine, source, and permission state into the handoff", () => {
     const model = buildProfileSettingsModel({
       onboard: {
@@ -21,6 +47,7 @@ describe("profile settings controller mapping", () => {
             location: {
               home: "NYC",
               remote: true,
+              remote_scope: "worldwide",
               hybrid: true,
               onsite: true,
               relocation: [],
@@ -63,7 +90,12 @@ describe("profile settings controller mapping", () => {
         selectedId: "codex",
         runtimes: [
           { id: "codex", name: "Codex", ready: true },
-          { id: "custom", name: "Custom command", ready: false, available: false },
+          {
+            id: "custom",
+            name: "Custom command",
+            ready: false,
+            available: false,
+          },
         ],
       },
       automation: {
@@ -124,11 +156,12 @@ describe("profile settings controller mapping", () => {
       dealbreakers: ["Fully onsite"],
       locationPolicy: {
         home: "NYC",
-        remoteRegion: "United States",
+        remoteRegion: "Worldwide",
+        remoteScope: "worldwide",
         hybrid: true,
         onsite: true,
         confirmed: true,
-        summary: "NYC local + US remote",
+        summary: "NYC local + worldwide remote",
         boundary: "On-site limited to NYC",
       },
       evidence: { roles: 2, promotions: 1, stories: 3 },
@@ -153,6 +186,16 @@ describe("profile settings controller mapping", () => {
           { id: "avoidPhrases", value: "Excited to apply" },
         ],
       },
+      "location-policy": {
+        fields: expect.arrayContaining([
+          expect.objectContaining({
+            id: "remoteScope",
+            type: "select",
+            value: "worldwide",
+            label: "Remote job eligibility",
+          }),
+        ]),
+      },
       "search-rules": {
         fields: [
           { id: "keepSignals", value: "Platform ownership" },
@@ -161,7 +204,11 @@ describe("profile settings controller mapping", () => {
         ],
       },
     });
-    expect(model.engine).toMatchObject({ name: "Codex", connected: true, selectedId: "codex" });
+    expect(model.engine).toMatchObject({
+      name: "Codex",
+      connected: true,
+      selectedId: "codex",
+    });
     expect(model.agentName).toBe("Scout");
     expect(
       model.permissions.find((row) => row.id === "authenticated_apply_preparation")?.description
@@ -249,7 +296,9 @@ describe("profile settings controller mapping", () => {
 
   it("turns every editable profile section into a canonical whole-section write", () => {
     expect(
-      profileSectionSavePlan("targets", { titles: "Staff Engineer\nEngineering Lead" })
+      profileSectionSavePlan("targets", {
+        titles: "Staff Engineer\nEngineering Lead",
+      })
     ).toEqual([
       {
         kind: "candidate",
@@ -266,7 +315,10 @@ describe("profile settings controller mapping", () => {
       },
     ]);
     expect(
-      profileSectionSavePlan("compensation", { minimumBase: "210000", targetBase: "235000" })
+      profileSectionSavePlan("compensation", {
+        minimumBase: "210000",
+        targetBase: "235000",
+      })
     ).toEqual([
       {
         kind: "candidate",
@@ -277,7 +329,7 @@ describe("profile settings controller mapping", () => {
     expect(
       profileSectionSavePlan("location-policy", {
         home: "New York, NY",
-        remote: true,
+        remoteScope: "worldwide",
         hybrid: true,
         onsite: false,
         relocation: "Boston, MA\nSeattle, WA",
@@ -291,9 +343,36 @@ describe("profile settings controller mapping", () => {
           location: {
             home: "New York, NY",
             remote: true,
+            remote_scope: "worldwide",
             hybrid: true,
             onsite: false,
             relocation: ["Boston, MA", "Seattle, WA"],
+            mode_preferences_confirmed: true,
+          },
+        },
+      },
+    ]);
+    expect(
+      profileSectionSavePlan("location-policy", {
+        home: "New York, NY",
+        remoteScope: "off",
+        hybrid: false,
+        onsite: false,
+        relocation: "",
+      })
+    ).toEqual([
+      {
+        kind: "candidate",
+        name: "profile",
+        patch: {
+          candidate: { location: "New York, NY" },
+          location: {
+            home: "New York, NY",
+            remote: false,
+            remote_scope: "home-country",
+            hybrid: false,
+            onsite: false,
+            relocation: [],
             mode_preferences_confirmed: true,
           },
         },
@@ -383,7 +462,10 @@ describe("profile settings controller mapping", () => {
       "Add at least one target role"
     );
     expect(() =>
-      profileSectionSavePlan("compensation", { minimumBase: "230000", targetBase: "210000" })
+      profileSectionSavePlan("compensation", {
+        minimumBase: "230000",
+        targetBase: "210000",
+      })
     ).toThrow("Target base must be at least the floor");
     expect(() => profileSectionSavePlan("search-rules", { fitFloor: "101" })).toThrow(
       "Fit floor must be between 0 and 100"

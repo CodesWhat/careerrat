@@ -18,6 +18,7 @@ export const GITHUB_RELEASES_URL =
 // an independent constant here since this module intentionally shares no
 // code with that CLI/npm-registry flow.
 export const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+export const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 // A hung connection must never wedge the app. Abort and treat it as a
 // silent failure past this point.
@@ -139,6 +140,23 @@ export function shouldCheckNow({
   if (!Number.isFinite(last)) return true;
 
   return now - last >= intervalMs;
+}
+
+export function nextUpdateCheckDelay({
+  enabled = true,
+  lastCheckedAt = null,
+  now = Date.now(),
+  initialDelayMs = 0,
+  intervalMs = CHECK_INTERVAL_MS,
+  maxDelayMs = MAX_TIMER_DELAY_MS,
+} = {}) {
+  if (!enabled) return null;
+  if (lastCheckedAt === null || lastCheckedAt === undefined || lastCheckedAt === "") {
+    return Math.min(maxDelayMs, Math.max(0, initialDelayMs));
+  }
+  const checkedAt = new Date(lastCheckedAt).getTime();
+  if (!Number.isFinite(checkedAt)) return 0;
+  return Math.min(maxDelayMs, Math.max(0, checkedAt + intervalMs - now));
 }
 
 const ALLOWED_RELEASE_HOST = "github.com";
@@ -287,6 +305,7 @@ export async function fetchLatestRelease({
 export async function runUpdateCheck({
   currentVersion,
   state = DEFAULT_STATE,
+  force = false,
   now = Date.now(),
   intervalMs = CHECK_INTERVAL_MS,
   url = GITHUB_RELEASES_URL,
@@ -295,7 +314,15 @@ export async function runUpdateCheck({
 } = {}) {
   const merged = { ...DEFAULT_STATE, ...state };
 
-  if (!shouldCheckNow({ enabled: merged.enabled, lastCheckedAt: merged.lastCheckedAt, now, intervalMs })) {
+  if (
+    !force &&
+    !shouldCheckNow({
+      enabled: merged.enabled,
+      lastCheckedAt: merged.lastCheckedAt,
+      now,
+      intervalMs,
+    })
+  ) {
     return { state: merged, result: null, checked: false, fetchSucceeded: false };
   }
 

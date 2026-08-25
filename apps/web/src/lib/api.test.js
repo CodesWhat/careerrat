@@ -9,6 +9,7 @@ import {
   recordExternalApplication,
   recordSkillChatDecision,
   replaceEvidenceClaims,
+  requestHostedInterest,
   runAiWebSearchStream,
   scheduleInterview,
   sendWorkspaceMessage,
@@ -39,6 +40,27 @@ describe("finishOnboarding", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/onboard/finish", {
       method: "POST",
       body: JSON.stringify({}),
+      headers: { "content-type": "application/json" },
+    });
+  });
+});
+
+describe("requestHostedInterest", () => {
+  it("posts the inline first-run email to the existing hosted-interest route", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await requestHostedInterest("person@example.com");
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/hosted-interest", {
+      method: "POST",
+      body: JSON.stringify({ email: "person@example.com" }),
       headers: { "content-type": "application/json" },
     });
   });

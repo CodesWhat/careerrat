@@ -13,6 +13,7 @@ import {
   executeWorkspaceIntent,
   mailSyncSources,
   messagesSyncSources,
+  previewWorkspaceIntent,
   recordWorkspaceSearchCompletion,
   runWorkspaceAgentTurn,
 } from "../src/core/agent/workspace-agent.mjs";
@@ -7844,6 +7845,7 @@ test("relationship.source-request: zero relationship_sourcing consent throws REL
 test("relationship.source-request: partial platform consent produces a per-platform receipt and records the sourcing CTA exactly once", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot, { id: "app-lumon", company: "Lumon Industries" });
+  const executions = [];
   candidateConfigPatch({
     repoRoot,
     env: {},
@@ -7860,6 +7862,15 @@ test("relationship.source-request: partial platform consent produces a per-platf
   const first = await executeWorkspaceIntent({
     repoRoot,
     env: {},
+    runRelationshipSourcingImpl: async (request) => {
+      executions.push(request);
+      return {
+        kind: "browser_workflow_result",
+        skill: "relationship-sourcing",
+        state: "completed",
+        summary: "2 leads captured for review.",
+      };
+    },
     intent: {
       type: "relationship.source-request",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
@@ -7874,13 +7885,27 @@ test("relationship.source-request: partial platform consent produces a per-platf
     { platform: "wellfound", allowed: false },
   ]);
   assert.equal(artifact.ctaRecorded, true);
+  assert.deepEqual(executions, [
+    {
+      company: "Lumon Industries",
+      applicationId: "app-lumon",
+      role: "Applied AI Engineer",
+    },
+  ]);
+  assert.equal(first.messages.at(-1).artifacts[1].kind, "browser_workflow_result");
 
   let app = readApplication(repoRoot, "app-lumon");
-  assert.equal(app.nextAction, "Run relationship-sourcing for Lumon Industries");
+  assert.equal(app.nextAction, "Relationship sourcing in progress for Lumon Industries");
 
   const second = await executeWorkspaceIntent({
     repoRoot,
     env: {},
+    runRelationshipSourcingImpl: async () => ({
+      kind: "browser_workflow_result",
+      skill: "relationship-sourcing",
+      state: "completed",
+      summary: "No new leads found.",
+    }),
     intent: {
       type: "relationship.source-request",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
@@ -7892,7 +7917,7 @@ test("relationship.source-request: partial platform consent produces a per-platf
   // against the same still-pending CTA records nothing new.
   assert.equal(second.messages.at(-1).artifacts[0].ctaRecorded, false);
   app = readApplication(repoRoot, "app-lumon");
-  assert.equal(app.nextAction, "Run relationship-sourcing for Lumon Industries");
+  assert.equal(app.nextAction, "Relationship sourcing in progress for Lumon Industries");
 });
 
 test("relationship.source-request: a landed relationship lead flips the sourcing CTA to the lead-review CTA", async () => {
@@ -7922,7 +7947,7 @@ test("relationship.source-request: a landed relationship lead flips the sourcing
   });
 
   let app = readApplication(repoRoot, "app-lumon");
-  assert.equal(app.nextAction, "Run relationship-sourcing for Lumon Industries");
+  assert.equal(app.nextAction, "Relationship sourcing in progress for Lumon Industries");
 
   relationshipLeadUpsertBatch({
     repoRoot,
@@ -8413,7 +8438,8 @@ test("workspace action errors map issue-report failure codes to 400", async () =
 // workspace-agent.mjs's status.* handlers). status_polling is a per-platform
 // capability (greenhouse/workday/ashby/lever) like relationship_sourcing
 // above; status.record-portal/apply-transition write through appSetStatus,
-// the only DB write path in this cluster.
+// while the browser controller uses appApplySyncedStatus for its atomic app +
+// matching communication transition.
 // ---------------------------------------------------------------------------
 
 function grantStatusPolling(repoRoot, platforms) {
@@ -8450,6 +8476,27 @@ test("status.sync-request: zero status_polling consent throws STATUS_SYNC_NOT_AL
   );
 });
 
+test("status portal connection is a typed in-app action that saves the dashboard URL on one application", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-acme", company: "Acme" });
+  const preview = previewWorkspaceIntent({
+    repoRoot,
+    env: {},
+    text: "Save https://acme.myworkdayjobs.com/en-US/candidateHome as the status portal for Acme",
+  });
+  assert.equal(preview.action.intent.type, "status.connect-portal-request");
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: preview.action.intent,
+  });
+  const application = readApplication(repoRoot, "app-acme");
+  assert.equal(application.statusUrl, "https://acme.myworkdayjobs.com/en-US/candidateHome");
+  assert.equal(application.statusPlatform, "workday");
+  assert.equal(result.messages.at(-1).artifacts[0].kind, "status_portal_connection");
+});
+
 test("status.sync-request: greenhouse consent produces a per-platform artifact with eligible counts scoped to that platform", async () => {
   const repoRoot = tempRepo();
   grantStatusPolling(repoRoot, ["greenhouse"]);
@@ -8457,18 +8504,30 @@ test("status.sync-request: greenhouse consent produces a per-platform artifact w
     id: "app-acme-active",
     company: "Acme",
     status: "applied",
-    link: "https://boards.greenhouse.io/acme/jobs/1",
+    statusPlatform: "greenhouse",
+    statusUrl: "https://boards.greenhouse.io/acme/candidate/1",
   });
   seedApplication(repoRoot, {
     id: "app-acme-rejected",
     company: "Acme",
     status: "rejected",
-    link: "https://boards.greenhouse.io/acme/jobs/2",
+    statusPlatform: "greenhouse",
+    statusUrl: "https://boards.greenhouse.io/acme/candidate/2",
   });
 
+  const executions = [];
   const result = await executeWorkspaceIntent({
     repoRoot,
     env: {},
+    runStatusSyncImpl: async ({ applications }) => {
+      executions.push(applications.map((application) => application.id));
+      return {
+        kind: "browser_workflow_result",
+        skill: "sync-status",
+        state: "completed",
+        summary: "1 status updated.",
+      };
+    },
     intent: {
       type: "status.sync-request",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
@@ -8484,6 +8543,8 @@ test("status.sync-request: greenhouse consent produces a per-platform artifact w
   assert.equal(byPlatform.workday.allowed, false);
   assert.equal(byPlatform.ashby.allowed, false);
   assert.equal(byPlatform.lever.allowed, false);
+  assert.deepEqual(executions, [["app-acme-active"]]);
+  assert.equal(result.messages.at(-1).artifacts[1].kind, "browser_workflow_result");
 });
 
 test("status.record-portal: an autoApplicable transition writes the status and a receipt with applied:true", async () => {
@@ -8723,19 +8784,22 @@ test("status.sync-request: offer-stage and accepted raw labels are excluded from
     id: "app-active",
     company: "Acme",
     status: "applied",
-    link: "https://boards.greenhouse.io/acme/jobs/1",
+    statusPlatform: "greenhouse",
+    statusUrl: "https://boards.greenhouse.io/acme/candidate/1",
   });
   seedApplication(repoRoot, {
     id: "app-offer-extended",
     company: "Acme",
     status: "offer-extended",
-    link: "https://boards.greenhouse.io/acme/jobs/2",
+    statusPlatform: "greenhouse",
+    statusUrl: "https://boards.greenhouse.io/acme/candidate/2",
   });
   seedApplication(repoRoot, {
     id: "app-accepted",
     company: "Acme",
     status: "accepted",
-    link: "https://boards.greenhouse.io/acme/jobs/3",
+    statusPlatform: "greenhouse",
+    statusUrl: "https://boards.greenhouse.io/acme/candidate/3",
   });
 
   const result = await executeWorkspaceIntent({
@@ -8814,8 +8878,8 @@ test("status.apply-transition: the proposal's round carries into the conversatio
 // like status_polling above, plus an ungated Apple Mail row that only
 // appears when hostPlatform is "darwin" — this machine's process.platform,
 // so the handler-level refusal test below only exercises the darwin path.
-// The handler never writes: it is a read-only count-and-handoff, never a
-// tracker mutation.
+// Controller execution is dependency-injected below so these intent tests stay
+// deterministic; browser fixture tests cover the canonical writes.
 // ---------------------------------------------------------------------------
 
 function grantMailAccess(repoRoot, platforms) {
@@ -8906,6 +8970,116 @@ test("mail.sync-request: gmail-only grant on darwin returns a mail_sync_handoff 
   assert.equal(byId["gmail-webmail"].lastRunAt, null);
   assert.equal(byId["outlook-webmail"].allowed, false);
   assert.equal(artifact.needsReply, 2);
+});
+
+test("mail.sync-request: executes the typed webmail controller and keeps its result in the durable thread", async () => {
+  const repoRoot = tempRepo();
+  grantMailAccess(repoRoot, ["gmail"]);
+  const calls = [];
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    hostPlatform: "linux",
+    runWebmailSyncImpl: async (request) => {
+      calls.push(request);
+      return {
+        kind: "browser_workflow_result",
+        skill: "ingest-mail",
+        title: "Webmail check",
+        state: "completed",
+        summary: "1 new job-search message captured.",
+      };
+    },
+    intent: {
+      type: "mail.sync-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].sources, [
+    { id: "gmail-webmail", platform: "gmail", allowed: true, lastRunAt: null },
+  ]);
+  const message = result.messages.at(-1);
+  assert.doesNotMatch(message.text, /terminal/i);
+  assert.match(message.text, /1 new job-search message captured/i);
+  assert.deepEqual(
+    message.artifacts.map((item) => item.kind),
+    ["mail_sync_handoff", "browser_workflow_result"]
+  );
+  assert.equal(message.artifacts[1].skill, "ingest-mail");
+});
+
+test("mail.sync-request: an auth wall remains a visible durable retry action", async () => {
+  const repoRoot = tempRepo();
+  grantMailAccess(repoRoot, ["gmail"]);
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    hostPlatform: "linux",
+    runWebmailSyncImpl: async () => ({
+      kind: "browser_workflow_result",
+      skill: "ingest-mail",
+      state: "needs-user",
+      summary: "Sign in in the CareerRat browser, then retry this workflow.",
+    }),
+    intent: {
+      type: "mail.sync-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+
+  const message = result.messages.at(-1);
+  assert.equal(message.metadata.state, "needs-user");
+  assert.deepEqual(message.metadata.nextActions, [
+    {
+      label: "Retry mail check",
+      intent: {
+        type: "mail.sync-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {},
+      },
+    },
+  ]);
+});
+
+test("mail.sync-request: executes Apple Mail through the typed app owner before returning", async () => {
+  const repoRoot = tempRepo();
+  const calls = [];
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    hostPlatform: "darwin",
+    runMailSyncImpl: async (request) => {
+      calls.push(request);
+      return {
+        kind: "mail_sync_result",
+        source: "apple-mail",
+        scanned: 2,
+        captured: 1,
+        duplicates: 1,
+        blocker: null,
+        at: "2026-08-24T12:00:00.000Z",
+      };
+    },
+    intent: {
+      type: "mail.sync-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].source.id, "apple-mail");
+  const message = result.messages.at(-1);
+  assert.match(message.text, /checked Apple Mail/i);
+  assert.deepEqual(
+    message.artifacts.map((item) => item.kind),
+    ["mail_sync_handoff", "mail_sync_result"]
+  );
+  assert.equal(message.artifacts[1].summary, "1 new message captured");
 });
 
 test("mail.sync-request: zero mail_access grant on darwin still returns the card because apple-mail keeps it alive", async () => {
@@ -9011,8 +9185,7 @@ test("mail.sync-request: needsReply counts only channel email + status needs-rep
 // a per-platform capability (linkedin/wellfound, see CAPABILITIES.messaging)
 // like mail_access above, but unlike mail there is no ungated always-allowed
 // entry (no Apple Mail equivalent), so a zero-grant ask refuses outright. The
-// handler never writes: it is a read-only count-and-handoff, never a tracker
-// mutation. needsReply is LinkedIn-scoped only — Wellfound threads record
+// needsReply is LinkedIn-scoped only — Wellfound threads record
 // under the shared "portal" channel, so they are deliberately not counted.
 // ---------------------------------------------------------------------------
 
@@ -9087,9 +9260,19 @@ test("messages.sync-request: linkedin grant returns a messages_sync_handoff arti
     status: "needs-reply",
   });
 
+  const executions = [];
   const result = await executeWorkspaceIntent({
     repoRoot,
     env: {},
+    runMessagesSyncImpl: async (request) => {
+      executions.push(request.sources.map((source) => source.id));
+      return {
+        kind: "browser_workflow_result",
+        skill: "ingest-messages",
+        state: "completed",
+        summary: "1 new recruiting message captured.",
+      };
+    },
     intent: {
       type: "messages.sync-request",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
@@ -9105,6 +9288,8 @@ test("messages.sync-request: linkedin grant returns a messages_sync_handoff arti
   assert.equal(byId["wellfound-messages"].allowed, false);
   assert.equal(byId["wellfound-messages"].lastRunAt, null);
   assert.equal(artifact.needsReply, 2);
+  assert.deepEqual(executions, [["linkedin-messages", "wellfound-messages"]]);
+  assert.equal(result.messages.at(-1).artifacts[1].kind, "browser_workflow_result");
 });
 
 test("messages.sync-request: zero messaging grant rejects with MESSAGES_SYNC_NOT_ALLOWED", async () => {
@@ -9207,9 +9392,19 @@ test("linkedin.optimize-request: profile_optimize granted returns handoff capabi
     profile_optimize: { enabled: true, platforms: { linkedin: true } },
   });
 
+  const executions = [];
   const result = await executeWorkspaceIntent({
     repoRoot,
     env: {},
+    runLinkedinOptimizeImpl: async (request) => {
+      executions.push(request);
+      return {
+        kind: "browser_workflow_result",
+        skill: "optimize-linkedin",
+        state: "completed",
+        summary: "2 profile suggestions ready for review. No profile edits were applied.",
+      };
+    },
     intent: {
       type: "linkedin.optimize-request",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
@@ -9223,6 +9418,8 @@ test("linkedin.optimize-request: profile_optimize granted returns handoff capabi
   assert.equal(byKey.profile_optimize.allowed, true);
   assert.equal(byKey.profile_apply.allowed, false);
   assert.equal(artifact.batch, null);
+  assert.deepEqual(executions, [{ profileUrl: null }]);
+  assert.equal(result.messages.at(-1).artifacts[1].kind, "browser_workflow_result");
 });
 
 test("linkedin.optimize-request: a pending batch surfaces its summary in the handoff card and the full proposals artifact", async () => {

@@ -1,127 +1,225 @@
 <p align="center">
-  <img src="assets/logo.png" alt="CareerRat" width="200">
+  <img src="apps/desktop/build/icon.png" alt="CareerRat" width="112">
 </p>
 
 <h1 align="center">CareerRat</h1>
 
-<p align="center"><strong>Reads the posting, writes only what's true, keeps score of your search.</strong></p>
+<p align="center"><strong>A Mac app that turns the AI CLI you already have into a personal recruiter.</strong></p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/careerrat"><img src="https://img.shields.io/npm/v/careerrat" alt="npm version"></a>
-  <a href="package.json"><img src="https://img.shields.io/badge/node-%3E%3D24-339933?logo=node.js&logoColor=white" alt="Node >=24"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-C9A227" alt="License MIT"></a>
-  <br>
-  <a href="https://github.com/CodesWhat/careerrat/actions/workflows/ci-verify.yml"><img src="https://github.com/CodesWhat/careerrat/actions/workflows/ci-verify.yml/badge.svg?branch=main" alt="CI"></a>
-  <a href="https://securityscorecards.dev/viewer/?uri=github.com/CodesWhat/careerrat"><img src="https://api.scorecard.dev/projects/github.com/CodesWhat/careerrat/badge" alt="OpenSSF Scorecard"></a>
-  <br>
-  <a href="https://www.npmjs.com/package/careerrat"><img src="https://img.shields.io/npm/dm/careerrat" alt="npm downloads"></a>
+  <a href="https://github.com/CodesWhat/careerrat/releases/latest"><strong>Download for Mac</strong></a>
+  · <a href="https://careerrat.com/docs">Docs</a>
+  · <a href="https://github.com/CodesWhat/careerrat">GitHub</a>
 </p>
 
-<hr>
+<p align="center">
+  <a href="https://github.com/CodesWhat/careerrat/releases/latest"><img src="https://img.shields.io/github/v/release/CodesWhat/careerrat?label=desktop" alt="Latest desktop release"></a>
+  <a href="https://www.npmjs.com/package/careerrat"><img src="https://img.shields.io/npm/v/careerrat" alt="npm version"></a>
+  <a href="https://github.com/CodesWhat/careerrat/actions/workflows/ci-verify.yml"><img src="https://github.com/CodesWhat/careerrat/actions/workflows/ci-verify.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://securityscorecards.dev/viewer/?uri=github.com/CodesWhat/careerrat"><img src="https://api.scorecard.dev/projects/github.com/CodesWhat/careerrat/badge" alt="OpenSSF Scorecard"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-C9A227" alt="MIT License"></a>
+</p>
 
-## Contents
+<p align="center"><small>CareerRat itself costs nothing. Your AI provider may have its own plan or usage costs.</small></p>
 
-- [Docs](https://careerrat.com/docs)
-- [Quick Start](#quick-start)
-- [Why CareerRat](#why-careerrat)
-- [Features](#features)
-- [Code signing policy](docs/CODE_SIGNING_POLICY.md)
-- [Roadmap](#roadmap)
-- [Community & Support](#community--support)
+## Rate. Apply. Track
 
-<hr>
+CareerRat reads the full job posting against your location, compensation floor,
+fit, and dealbreakers before it recommends anything. It builds resumes, cover
+letters, and screening answers from your real experience, then fills supported
+application forms for your review. It never presses the final Submit button.
 
-## Quick Start
+The search stays together in one local workspace: conversations, jobs, recruiter
+threads, missions, files, follow-ups, interviews, and outcomes. You can leave a
+thread, come back later, and CareerRat restores the relevant state without
+depending on one AI vendor's session history.
 
-Choose the AI CLI for the way you run CareerRat:
+## Get CareerRat
 
-- The packaged desktop app currently requires **Claude Code 2.1.241 or newer**
-  for in-app skill and chat execution. It detects Codex and other CLIs, but
-  leaves them disabled until they provide an equivalent enforceable per-call
-  tool, path, and network boundary.
-- The terminal workspace-agent flow supports Claude Code or Codex:
-  `npm install -g @anthropic-ai/claude-code` or
-  `npm install -g @openai/codex`.
+The current macOS release is a signed and notarized Apple Silicon app for macOS
+12 or newer.
 
-**On an Apple Silicon Mac**: download the signed, notarized app from the
-[latest release](https://github.com/CodesWhat/careerrat/releases/latest), or
-`brew install --cask codeswhat/tap/careerrat`. Install and sign in to Claude
-Code 2.1.241 or newer before first run.
+1. [Download the latest `.dmg`](https://github.com/CodesWhat/careerrat/releases/latest).
+2. Install and sign in to [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) 2.1.241 or newer, or [OpenAI Codex](https://developers.openai.com/codex/cli/) 0.149.1 or newer.
+3. Open CareerRat and choose a ready engine.
 
-**On Windows x64**: the installer is built and installed in Windows CI. A
-public installer will appear only after SignPath Foundation approval and a
-valid Authenticode signature. Current status, install behavior, and Microsoft
-Store prerequisites are in [Windows installation and release status](docs/WINDOWS.md).
+Claude Code 2.1.241+ provides full in-app task tools and research. Codex
+0.149.1+ provides isolated in-app chat and drafting. CareerRat disables Codex
+task tools for these calls and fails clearly when a workflow needs Claude's
+verified tool boundary. Other installed CLIs stay visible as detected but
+unverified until their boundaries pass the same tests. Claude Code and Codex
+both work in the [terminal workspace flow](#terminal-and-source-use).
 
-**On any other platform**, or if you'd rather use the terminal: install with
-npm (requires **Node.js 24 or newer**, check with `node -v`), then run it:
+Windows x64 packaging is install-smoked in CI. A public Windows installer will
+ship only after the SignPath Foundation signing path is approved and the
+resulting Authenticode signature passes verification. See [Windows status](docs/WINDOWS.md).
+
+CareerRat opens at a designed desktop size of 1280 by 860. The window is
+resizable, maximizable, and supports full screen, with a minimum working size of
+1100 by 680. There is no mobile app or Intel Mac build.
+
+## First run
+
+Choose the available AI engine, then drop a PDF, DOCX, image, or text resume into
+the conversation, or just start talking. Paul fills in “What Paul knows” beside
+the chat as it learns your target roles, location rules, compensation floor,
+dealbreakers, evidence, and honesty boundaries.
+
+Each profile section is editable as a whole. You can open its editor or ask Paul
+to change it in the conversation. Progress saves continuously. Once the minimum
+search profile is ready, CareerRat starts the first location-aware search while
+the rest of onboarding continues.
+
+From there, ask it to find roles, evaluate a posting, tailor an application,
+prepare an interview, or pick up a saved thread. Tool work appears as compact
+activity rows in the conversation, so you can see what it is reading, searching,
+and writing without a wall of approval prompts.
+
+## The workspace
+
+The app uses one desktop shell with three working areas:
+
+- The left rail holds the main conversation, job and recruiter threads,
+  research, Deep ingest, mock interviews, and the current view.
+- The conversation stays in the center. Job-search actions and skill results
+  return here instead of opening a second product.
+- The right panel shows structured profile or job facts as the conversation
+  discovers them. Whole sections open in focused editors when needed.
+
+Search, Pipeline, Files, People, and Schedule are alternate views of the same
+local state. Missions turn longer work into resumable, ordered steps with clear
+user gates. Deep ingest gets its own durable thread. Mock interviews preserve
+the session and debrief. “Needs You” groups actions such as reviewing several
+prepared applications into one focused handoff.
+
+CareerRat stores canonical candidate state, conversations, missions, mock
+sessions, and pipeline records in local SQLite. Job descriptions, research,
+interview dossiers, resumes, and exports remain readable Markdown, PDF, or other
+normal files. A conversation is not just a Markdown transcript. Returning to a
+thread rehydrates the selected engine from CareerRat's own bounded context. See
+the [chat-first runtime](docs/CHAT_FIRST_RUNTIME.md).
+
+## Safety boundary
+
+- Every job is read in full before tailoring or application work begins.
+- Generated claims must trace back to candidate evidence. Missing facts are
+  asked for or left out, never invented.
+- Authenticated browser, mail, calendar, and message access is opt-in when a
+  specific workflow needs it.
+- CAPTCHA, two-factor authentication, sensitive attestations, uncertainty, and
+  final submission stop for the user.
+- Application automation can prepare and fill supported forms. The user reviews
+  the result and presses Submit.
+- Durable state changes go through the same local domain layer whether they came
+  from chat, a mission, or a focused view.
+
+## Local data and privacy
+
+CareerRat has no product account, hosted candidate database, or app telemetry.
+Your workspace stays on your machine and can be exported.
+
+Outbound connections are limited to the work you ask for and a few explicit
+product boundaries:
+
+- The selected AI CLI connects to its own provider under that provider's account
+  and privacy terms.
+- Search, research, and browser skills fetch the public or authenticated pages
+  needed for the task you started.
+- The desktop app checks GitHub's public latest-release endpoint at most once a
+  day. It sends no candidate data, shows a notice when an update exists, and
+  never downloads or installs the update. Automatic checks can be disabled in
+  Settings, and “Check for Updates…” remains available as a manual action.
+- The public website uses cookieless, privacy-limited aggregate analytics. The
+  local app does not load that website analytics client.
+
+Read the full [privacy documentation](https://careerrat.com/docs/advanced/privacy),
+[data contract](docs/DATA_CONTRACT.md), and [Code signing policy](docs/CODE_SIGNING_POLICY.md).
+
+## All 28 skills
+
+The app and terminal flow share the same public skill definitions.
+
+<details>
+<summary><strong>Setup and intake</strong></summary>
+
+- `ingest-profile`: conversational candidate setup and resume intake
+- `resume-extract`: structured facts from PDF, image, or DOCX resumes
+- `intake-extract`: verbatim extraction from general dropped files
+- `configure`: inspect and change validated CareerRat settings
+
+</details>
+
+<details>
+<summary><strong>Find and research</strong></summary>
+
+- `setup-searches`: turn targeting into a reviewed source configuration
+- `search-jobs`: search configured sources, dedupe, check liveness, and triage
+- `discover-companies`: find likely employers and resolve their career boards
+- `research-boards`: find and validate additional job boards
+- `research-company`: build a cited company brief
+- `research-comp`: benchmark compensation for a role and location
+- `company-health`: assess role-specific company stability and momentum
+- `relationship-sourcing`: find recruiters, hiring teams, and warm contacts
+
+</details>
+
+<details>
+<summary><strong>Evaluate and apply</strong></summary>
+
+- `evaluate-job`: full-posting fit, compensation, location, and action gate
+- `coach-gaps`: turn review-worthy fit gaps into an honest plan
+- `tailor-application`: produce evidence-backed resumes and application artifacts
+- `answer-question`: answer screening questions from saved evidence and defaults
+- `apply-job`: orchestrate evaluation, artifacts, form filling, and user review
+- `optimize-linkedin`: propose evidence-backed LinkedIn profile improvements
+
+</details>
+
+<details>
+<summary><strong>Pipeline and communication</strong></summary>
+
+- `email-comms`: draft and track recruiter and hiring-team messages
+- `schedule-meeting`: handle scheduling threads and availability replies
+- `calendar-sync`: write approved search events to supported calendars
+- `ingest-mail`: fold recruiter and application email into the workspace
+- `ingest-messages`: capture LinkedIn and Wellfound message threads
+- `sync-status`: read ATS dashboards and normalize application status
+- `track-outcomes`: record transitions, rejections, advances, and learnings
+
+</details>
+
+<details>
+<summary><strong>Interview, strategy, and support</strong></summary>
+
+- `interview-prep`: create interview packets, practice, and debriefs
+- `reevaluate-strategy`: tune the search from accumulated funnel outcomes
+- `report-issue`: diagnose CareerRat failures and prepare redacted reports
+
+</details>
+
+## Terminal and source use
+
+Terminal mode requires Node.js 24 or newer and supports Claude Code or Codex as
+the workspace agent.
 
 ```bash
 npm install -g careerrat
-careerrat start claude    # or: careerrat start codex
+careerrat start claude
+# or
+careerrat start codex
 ```
 
-Either path sets up your workspace, opens the local app at
-`http://localhost:7777`, and hands you off to the agent. From there you just talk to it, and watch it work:
-each step shows up as a small activity line, reading your resume, searching the
-web, writing, instead of narrated text. No dashboard to learn first, no settings
-to get right before it's useful.
-
-### Your first hour
-
-1. **Let it onboard you.** A conversation, not a form: it asks what roles you
-   want, what you'll accept, what you won't, and the real work you've done, then
-   builds your profile from the answers. Want to kick the tires first? Say
-   *"set me up with a quick sample profile."*
-2. **Paste a job posting**, a link, or the sample in `examples/sample-jobs/`, and
-   say *"evaluate this."* You'll get a verdict: keep it or cut it, how well it
-   actually fits, whether the money works, and what to do next. All from a real
-   read of the posting, not a keyword match. You'll see it fetch and read the
-   posting as activity lines before the verdict lands.
-3. **Say "write a résumé and cover letter for this."** It builds them from your
-   own evidence and refuses to invent anything you didn't tell it.
-4. **Paste a recruiter email** and say *"draft a reply."* It writes the reply and
-   remembers the thread, so the next one has context.
-5. **Open `http://localhost:7777`** and watch the job land, move through your
-   funnel, and pick up history as you go. Every step in the chat shows as a
-   plain-language activity line, an icon plus a label like "Searching the web"
-   or "Reading files," with a spinner that settles once it's done. The
-   assistant only speaks up to ask a question or hand you a result.
-
-**One first-run thing that looks broken but isn't:** before you've onboarded,
-`careerrat doctor` will report your setup is incomplete and list `candidate/*.yml`
-files to create. That's expected. Onboarding fills them in.
-
-<p align="center">
-  <img src="assets/screenshots/chat-activity.gif" alt="Activity lines streaming in the CareerRat chat, each showing an icon, a plain-language label, and a spinner that settles when the step finishes" width="720">
-</p>
-
-<p align="center"><em>Activity lines streaming while CareerRat researches market comp.</em></p>
-
-### Everyday commands
+Useful terminal commands:
 
 ```bash
-careerrat next       # the one thing worth doing next
-careerrat doctor     # check your setup is healthy
-careerrat update     # pull the latest code; your data is untouched
+careerrat next          # show the next useful agent-led workflow
+careerrat doctor        # verify setup, data, skills, and runtime health
+careerrat update        # update an npm installation without touching user data
+careerrat tracker       # write a recovery snapshot and summary
+careerrat tracker-dev   # serve the local browser workspace at localhost:7777
 ```
 
-If the local app is already running, the update relaunches that recorded
-CareerRat process on the updated code. Unrelated processes are never stopped;
-CareerRat picks another loopback port instead.
-
-The local app comes up with `careerrat start`. To run it on its own:
-
-```bash
-careerrat tracker        # snapshot tracker.json for recovery
-careerrat tracker-dev    # serve http://localhost:7777 with live data updates
-```
-
-**Useful flags on `start`:** `--no-agent` (workspace + local app only),
-`--no-dashboard`, `--agent <name>` (override with a compatible agent command),
-`--port <n>` (default 7777).
-
-### Running from source
+To contribute from source:
 
 ```bash
 git clone https://github.com/CodesWhat/careerrat
@@ -132,159 +230,19 @@ npm link
 careerrat start claude
 ```
 
-<hr>
+The repository convention is in [AGENTS.md](AGENTS.md). Architecture, release,
+and product direction live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
+[docs/RELEASE.md](docs/RELEASE.md), and [docs/ROADMAP.md](docs/ROADMAP.md).
 
-## Why CareerRat
+## Community and trust
 
-CareerRat is a job-search workspace that runs on your own machine. Tell it what
-you're actually looking for, once. It reads real job postings and tells you which
-ones are worth your time, writes applications from things you've genuinely done,
-drafts your recruiter replies, preps you for interviews, and keeps track of where
-everything stands, so you're not rebuilding that picture from memory.
-
-No account, no CareerRat server, no telemetry. CareerRat never phones home, and
-your files stay on your machine. What does go out: your AI CLI talks to its own
-provider to do the work, same as any other task you'd give it, and the app
-fetches public resources like job postings and company logos from the services
-that host them. The packaged desktop app also checks GitHub once a day for a
-newer release and shows an in-app notice, nothing more; it never downloads or
-installs anything on its own, and you can turn that off in Settings. See
-[privacy](https://careerrat.com/docs/advanced/privacy) for the details.
-Release trust and the pending Windows signing process are documented in the
-[Code signing policy](docs/CODE_SIGNING_POLICY.md).
-
-Most job tools match keywords, then spray a hundred applications and hope one
-sticks. CareerRat won't write a single line of a cover letter until it has read
-the whole posting and checked it against what you said you want: your comp
-floor, your location, your dealbreakers. Jobs that don't clear that bar, it
-tells you to skip, and says why.
-
-And it won't lie for you. Every claim in a tailored résumé traces back to
-something you told it about your own work. If you didn't do it, it doesn't get
-written, full stop.
-
-CareerRat is an *agent runtime*, not a form-filling script. The CLI sets up the
-workspace and serves the local app, but the job-search work happens inside your
-own agent, reading a set of skills that spell out how each step gets done.
-That's why you talk to it in plain language instead of memorizing subcommands,
-and why the first run just detects which AI CLI you have and gets out of the way.
-
-<p align="center">
-  <img src="assets/screenshots/chat-activity-pending.png" alt="A CareerRat chat activity line mid-run, a spinner live next to Searching the web while the research-comp skill works" width="560">
-</p>
-
-<p align="center"><em>Activity lines mid-run: "Using the research-comp skill,"
-"Searching the web."</em></p>
-
-The rule underneath all of it: **no tailoring, no applying, until the job has
-passed a real read of the posting.** Titles and keywords are triage, not truth.
-
-Same skills for anyone. A nurse, an engineer, and a driver each answer onboarding
-their own way and get the same loop back. (The mascot's a rat named Paul. He
-doesn't do the reading, but he's why the app looks the way it does.)
-
-<hr>
-
-## Features
-
-CareerRat covers the whole search, not just the writing. Twenty-eight skills,
-grouped by what you're actually trying to do:
-
-### Find roles
-
-- **Search setup**: turns your targeting into real sources, boards, and company
-  career pages worth watching, and lets you tune or import them by hand.
-- **Sourced sweep**: scans everything configured, dedupes, drops dead links, and
-  coarse-triages every new posting so you see what's worth a closer look.
-- **Company discovery**: finds companies likely to be hiring your kind of role
-  from your own company thesis, checks each one is real, and proposes adding it.
-- **Board research**: looks for new job boards worth watching in your field and
-  proposes adding them.
-
-### Vet them
-
-- **Full-posting evaluation**: reads the whole posting and checks it against
-  your comp floor, location, and dealbreakers before anything gets written.
-  This is the gate every tailor or apply run has to clear first.
-- **Company health**: checks layoff risk, hiring momentum, financials,
-  sentiment, and leadership stability, and scores the company healthy, watch,
-  or risky.
-- **Company research**: pulls together a cited brief on a company across six
-  angles, for vetting and for interview prep.
-- **Comp research**: benchmarks the market rate for a role and location, so the
-  comp check has something real to compare your offer against.
-- **Gap coaching**: when a job lands at "worth a look, but" with named fit gaps,
-  works out an honest plan to close them, or tells you straight there isn't one.
-
-### Apply
-
-- **Honest tailoring**: résumés, cover letters, and short answers built only
-  from things you've actually done, with a check that blocks anything
-  half-finished.
-- **Screening answers**: drafts one-off application-question answers grounded
-  in your profile and evidence, and remembers your standard disclosures so
-  you're never asked twice.
-- **Supervised form preparation**: fills supported portal fields, including
-  LinkedIn Easy Apply, then stops for you to review and submit.
-- **LinkedIn tune-up**: diffs your profile against what you're targeting and
-  proposes honest rewrites, headline through Featured, with a preview before
-  anything gets written back.
-
-### Manage the pipeline
-
-- **Recruiter comms**: drafts replies, follow-ups, scheduling, and negotiation,
-  and keeps the whole thread on record.
-- **Scheduling**: reads proposed times, checks your timezone and calendar, and
-  drafts a clear availability reply.
-- **Calendar holds**: writes interviews, assessments, and deadlines to Apple
-  Calendar, Google Calendar, or Outlook.
-- **Reading your inbox and DMs**: pulls recruiter replies and status changes out
-  of Mail, Gmail, Outlook, and LinkedIn or Wellfound messages, so the tracker
-  reflects what's actually happening.
-- **Status sync**: reads your ATS dashboards and normalizes whatever label they
-  use into one vocabulary.
-- **Outcome tracking**: records what happened, learns the pattern for your role
-  family, and tells you when your results say the strategy needs a rethink.
-- **Warm contacts**: finds likely recruiters and hiring-team contacts at
-  companies you're tracking, for you to review before reaching out.
-
-### Interviews and offers
-
-- **Interview prep**: packets tailored to who you're talking to, built from your
-  real work and the job itself.
-- **Live comp coaching**: scripts and rehearses the actual negotiation with you
-  while you're in the room, then debriefs after and folds the lesson back in.
-
-**Desktop workspace**: one persistent conversation with durable job and research
-threads, resumable missions, Deep ingest, mock interviews, and focused Search,
-Pipeline, Files, People, and Schedule views beside the chat.
-
-<hr>
-
-## Roadmap
-
-- [Roadmap](docs/ROADMAP.md): version themes and what's next
-- [Sources strategy](docs/SOURCES.md): how job sources get curated
-- [Architecture](docs/ARCHITECTURE.md) and [AGENTS.md](AGENTS.md): how the
-  skills and the agent contract fit together
-
-<hr>
-
-## Community & Support
-
-Bugs and feature requests: [GitHub Issues](https://github.com/CodesWhat/careerrat/issues).
-
-Questions, ideas, and show-and-tell: [GitHub Discussions](https://github.com/CodesWhat/careerrat/discussions).
-
-Chat: [CodesWhat Discord](https://discord.gg/mWHCPJRzSx).
-
-## Star History
+- [Issues](https://github.com/CodesWhat/careerrat/issues) for bugs and feature requests
+- [Discussions](https://github.com/CodesWhat/careerrat/discussions) for questions and ideas
+- [CodesWhat Discord](https://discord.gg/mWHCPJRzSx) for chat
+- [Security policy](.github/SECURITY.md) for private vulnerability reporting
+- [MIT License](LICENSE)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="apps/website/public/star-history-dark.svg">
   <img src="apps/website/public/star-history.svg" alt="Star history for CodesWhat/careerrat">
 </picture>
-
----
-
-**[MIT License](LICENSE)**

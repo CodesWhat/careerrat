@@ -10,12 +10,16 @@ description: "Interview a new candidate to produce all user-layer config files: 
 > **Agent voice.** Read candidate modes through the shared DB-first accessor (`modes.agent_voice`, default `standard`) before producing any summary or explanation output. Apply the register semantics from AGENTS.md#mode-switches. This skill's interview is conversational by design, but **step confirmations, progress summaries, and section wrap-ups** must respect the register — e.g. `exec-summary` means a one-line "Got it — moving to targets" not a paragraph recap. Do not ask for a voice mode during initial setup; keep the stored value or use `standard`.
 
 > **Write mechanism depends on context.** This skill runs in two places, and only one has a shell:
+>
 > - **One-shot CLI context** — an agent shell exists. Every `careerrat ...` command named throughout this file runs directly, as written.
 > - **Conversational chat context** (the onboarding screen, now the primary path) — tools are Read/Glob/Grep/Skill only. There is no shell, so every `careerrat ...` command in this file is unreachable. The only way to save anything is to emit a fenced confirm block, which renders as a pill the user clicks to write it:
+>
 >   ```careerrat:confirm
 >   {"kind":"candidate_patch","summary":"Your name and contact details","payload":{"doc":"profile","patch":{"candidate":{"full_name":"Ada Lovelace","email":"ada@example.com"}}}}
 >   ```
+>
 >   `doc` is one of `profile`, `targeting`, `honesty`, `form-defaults`; `patch` is the field(s) at their real schema path. For work-history/evidence claims, use the evidence-claim shape instead:
+>
 >   ```careerrat:confirm
 >   {"kind":"evidence_claim","summary":"Ran a 12-person kitchen","payload":{"claim":"Ran a 12-person kitchen","evidence":"Candidate-stated during setup interview"}}
 >   ```
@@ -139,9 +143,11 @@ that opening message.
    apologize, do not explain the drawbacks, do not ask a second time later, and do not
    re-offer the upload at every step. Asking again reads as disbelief.
 2. **Record it so nothing re-asks.** Write the decline immediately:
+
    ```
    careerrat data candidate patch form-defaults --data '{"declined_fields":{"resume":{"declined_at":"<ISO timestamp>"}}}'
    ```
+
    This is what lets the setup checklist count the résumé step as answered — without it
    the candidate is stuck one step short of complete forever. Also set
    `resume_source: "none"` in `workspace/setup-state.json` so a resumed session doesn't
@@ -158,9 +164,11 @@ that opening message.
    military service, or self-taught projects as the history instead.
 5. **Bank each employer as you finish it, not at the end of the walk.** The moment one
    employer's answers are in, write them before asking about the next:
+
    ```
    careerrat data candidate evidence --data '{"claim":"...","evidence":"Candidate-stated during setup interview"}'
    ```
+
    Batching to the end of the step means an interrupted session loses the whole history.
    Every claim originates from what the candidate said, so its `evidence` field reads as
    candidate-stated, not as a cited document. The Honesty Firewall applies unchanged: no
@@ -216,10 +224,12 @@ résumés, cover letters, **and** the STAR+R story bank.
    drafted claims and let them correct, cut, or add metrics. Confirm-first, always.
 5. **Bank each confirmed claim via the guarded helper** (dry-run, then commit). Write the
    claim to a temp YAML fragment and:
+
    ```
    careerrat evidence add --file <claim.yml>          # preview + firewall check
    careerrat evidence add --file <claim.yml> --write   # commit (append / upsert by id)
    ```
+
    The helper refuses a claim missing `id`/`claim`/`evidence`, carrying placeholder
    residue, or holding the private `current_base` field, and won't rewrite the bank
    unless the result passes the schema + a round-trip check. Re-scanning the same project
@@ -278,28 +288,32 @@ own; a project's existence is evidence of building it, not of its business impac
 Treat this section as private by default. Capture and write each field separately:
 
 1. **(a) current_base — THE MOST SENSITIVE FIELD IN THE SCHEMA.** Ask only if the user wants market guidance or negotiation suggestions. **Always write `current_base` and `current_comp_shareable: false` together, in the same call — never write `current_base` alone:**
+
    ```
    careerrat data candidate patch profile --data '{"compensation":{"current_base":<N>,"current_comp_shareable":false}}'
    ```
+
    in DB mode, or confirm-block it in chat mode with both fields in the same patch:
+
    ```careerrat:confirm
    {"kind":"candidate_patch","summary":"Current base (private, never shared)","payload":{"doc":"profile","patch":{"compensation":{"current_base":120000,"current_comp_shareable":false}}}}
    ```
+
    **NEVER surface current_base in any outbound artifact** (résumé, cover letter, form field, message, packet, tracker note, or any other candidate-facing or employer-facing output). This is a private gate input only; all outbound comp comes from the fields below.
 2. **(b) minimum_base** — Absolute walk-away floor; comp below this is a hard cut regardless of arrangement. Write with `careerrat gate comp-floor <N> --write --confirm`.
 3. **(b2) Arrangement floors (the comp gate)** — Comp tolerance usually changes with the work arrangement, so collect floors only for arrangements the candidate would accept. If saved targeting or cut signals already exclude full-time onsite work or relocation, do not ask for an onsite or relocation floor and do not invent one; preserve that arrangement as unavailable. Ask only about the remaining viable arrangements, such as: *"What base salary would fully remote and hybrid in your home metro need to clear?"* Write the supplied numbers under their matching `comp_floors` keys (`remote`, `hybrid`, `onsite`, `relocation`) plus the home-metro match terms as `comp_floors.home_metro`, omitting disallowed arrangements, in one `careerrat data candidate patch profile --data ...` call in DB mode or one confirm block (`doc: "profile"`) in chat mode. These are a **hard gate**: `evaluate-job` cuts any posting whose band tops out below the floor for its allowed arrangement, while the saved cut signal rejects unavailable arrangements. If the user gives one number for every arrangement they accept, set each allowed arrangement equal to it. Confirm: "These become the comp gate — postings under the floor for their arrangement get cut automatically."
 4. **(c) target_base** — Default negotiation anchor (what to aim for in a salary conversation). Write with `careerrat gate comp-target <N> --write --confirm`.
-4. **(d) expected_base** — The number to enter in a salary **form field** on an application. May differ from the negotiation anchor (e.g. anchor = $160K, form field = $165K). In a one-shot CLI context, write it with `careerrat gate comp-expected <N> --write` and also patch `form-defaults.expected_base` so apply-job has a direct lookup. In conversational chat, emit one form-defaults confirmation block for `expected_base`, not separate profile and form-defaults proposals; the web surface mirrors that confirmed value into profile compensation from the same click. Confirm: "This is what goes on application forms — never your current salary."
-5. **(e) OE range** — If an OE bucket was chosen in STEP 4: capture `oe_min_base` and `oe_max_base`. Write with `careerrat data candidate patch profile --data '{"compensation":{"oe_min_base":<N>,"oe_max_base":<N>}}'` in DB mode, or confirm-block it (`doc: "profile"`) in chat mode. The overall `minimum_base` does NOT apply to OE roles; each OE bucket has its own floor.
-6. **(f) Additional comp context** — Ask about: `cash_over_equity` preference, equity tolerance, bonus tolerance, currency.
+5. **(d) expected_base** — The number to enter in a salary **form field** on an application. May differ from the negotiation anchor (e.g. anchor = $160K, form field = $165K). In a one-shot CLI context, write it with `careerrat gate comp-expected <N> --write` and also patch `form-defaults.expected_base` so apply-job has a direct lookup. In conversational chat, emit one form-defaults confirmation block for `expected_base`, not separate profile and form-defaults proposals; the web surface mirrors that confirmed value into profile compensation from the same click. Confirm: "This is what goes on application forms — never your current salary."
+6. **(e) OE range** — If an OE bucket was chosen in STEP 4: capture `oe_min_base` and `oe_max_base`. Write with `careerrat data candidate patch profile --data '{"compensation":{"oe_min_base":<N>,"oe_max_base":<N>}}'` in DB mode, or confirm-block it (`doc: "profile"`) in chat mode. The overall `minimum_base` does NOT apply to OE roles; each OE bucket has its own floor.
+7. **(f) Additional comp context** — Ask about: `cash_over_equity` preference, equity tolerance, bonus tolerance, currency.
    - **Lifestyle-burden multiplier** (separate concept): "If a role requires more travel or on-site time than your norm, does your comp floor rise?" If yes, capture the premium amount or percentage under `relo_package_needs` with a key like `burden_premium` (e.g. `"$20K uplift for >2 days/week on-site"`). This feeds the lifestyle sliding-scale in `evaluate-job` and `apply-job`.
    - **Relocation package arithmetic** (distinct concept): if the candidate would consider relocation, ask what they need covered (e.g. "first + last + deposit", "moving company + 30-day temp housing"). Write as a separate note in `relo_package_needs` (free-text field, §2 of foundations-spec). If both burden premium and relo needs exist, store both as a combined string: `"burden: $20K uplift for >2d/wk; relo: first+last+deposit+moving"`. Write it with `careerrat data candidate patch profile --data '{"compensation":{"relo_package_needs":"<string>"}}'` in DB mode, or confirm-block it (`doc: "profile"`) in chat mode.
 
-7. **(g) Fit auto-drop floor** — Ask: "Below what fit score should roles auto-drop without asking you? (e.g. 80; leave blank to never auto-drop)" Write the answer as an integer with `careerrat data candidate patch targeting --data '{"fit_bands":{"fit_floor":<N>}}'` in DB mode, or confirm-block it (`doc: "targeting"`) in chat mode. This is optional — omit the field entirely when the user leaves it blank (no auto-drop, default behavior unchanged).
+8. **(g) Fit auto-drop floor** — Ask: "Below what fit score should roles auto-drop without asking you? (e.g. 80; leave blank to never auto-drop)" Write the answer as an integer with `careerrat data candidate patch targeting --data '{"fit_bands":{"fit_floor":<N>}}'` in DB mode, or confirm-block it (`doc: "targeting"`) in chat mode. This is optional — omit the field entirely when the user leaves it blank (no auto-drop, default behavior unchanged).
 
-8. **(h) Unposted comp estimation** — No intake needed. When a job posting has no listed comp band, the gate automatically estimates a likely range from comparable roles already in the tracker (same role family + arrangement/metro). The estimate strengthens as more tracker rows accumulate. Nothing to capture here; it works from data the candidate already has.
+9. **(h) Unposted comp estimation** — No intake needed. When a job posting has no listed comp band, the gate automatically estimates a likely range from comparable roles already in the tracker (same role family + arrangement/metro). The estimate strengthens as more tracker rows accumulate. Nothing to capture here; it works from data the candidate already has.
 
-9. **(i) Benefits & perks priorities** — **Gated: only ask if `setup-state.json#optional_areas` includes `"benefits"`.**
+10. **(i) Benefits & perks priorities** — **Gated: only ask if `setup-state.json#optional_areas` includes `"benefits"`.**
 
    > "Which benefits or perks actually matter to you — and in what order of priority? For example: health/dental/vision, 401k with employer match, equity/options, unlimited PTO, parental leave, learning budget, home-office stipend, commuter benefits. List the ones you care about, roughly in order."
 
@@ -325,7 +339,7 @@ After writing all comp fields: read candidate profile config and confirm `curren
 Save each group the moment it's settled — through `careerrat data candidate patch profile --data ...` in DB mode, or confirm-block it (`doc: "profile"`) in chat mode — rather than holding everything to the end of the step.
 
 1. Capture: home city, state, country, timezone. Save this group once confirmed.
-2. Remote / hybrid / on-site tolerance. If hybrid is acceptable: max commute days per week. Save this group once settled.
+2. Remote / hybrid / on-site tolerance. If remote is acceptable, explicitly ask whether the candidate is eligible for remote roles only within their home country or worldwide. Save that answer as `profile.location.remote_scope: "home-country" | "worldwide"` in the same write as `profile.location.remote`; older profiles without the field default to `home-country`. This scope applies only to fully remote roles. Hybrid and on-site eligibility stays limited to the saved home and relocation markets. If hybrid is acceptable: max commute days per week. Save this group once settled.
 3. Travel tolerance (none / occasional / frequent / any). Save it once settled.
 4. Relocation cities (if any). For each relo city, ask if there is a per-city comp floor that differs from the default relocation floor (STEP 6 b2). When one differs, write it **structurally** in candidate profile compensation as `comp_floors.relocation_by_metro[]` — `{ label, floor, match: [<location words for that metro>] }` — so the gate enforces it (free-text notes are NOT read by the gate). High-cost metros (e.g. Bay Area) commonly carry a higher floor than the default. Save this the same way, per relo city, as each is settled.
 5. Ask about family or lifestyle constraints only when optional_areas includes lifestyle or the candidate raises one naturally. Otherwise skip this question. Save a constraint once settled.
@@ -368,8 +382,8 @@ Save each item below through `careerrat data candidate patch form-defaults --dat
 3. Current employer and current title (as typically entered in ATS forms). Save this group once settled.
 4. LinkedIn, GitHub, portfolio URLs (confirm these match candidate profile config). Profile link fields are strings; use an empty string when the candidate has no link, never `null`. In conversational chat, emit one profile confirmation block for LinkedIn, GitHub, and portfolio, not a second form-defaults proposal; the web surface mirrors those confirmed links into form-defaults from the same click. In a one-shot CLI context, write both documents. Save this group once settled.
 5. EEO/demographic default answer. Save it once settled.
-6. `auto_submit` — confirm explicitly: "Do you want applications submitted automatically when a form is filled, or do you want a confirm step every time?" Default is `false` (confirm-first). Only flip to `true` on explicit opt-in. Save it immediately once confirmed.
-7. Confirm every item above is written before moving to STEP 12 — nothing here should still be sitting in chat only.
+6. Final submission is not a preference to collect or persist. CareerRat always stops before the final submit control, and only the user can submit. Never write a submission setting into form-defaults.
+7. Confirm every supported item above is written before moving to STEP 12 — nothing here should still be sitting in chat only.
 
 ---
 
@@ -377,9 +391,11 @@ Save each item below through `careerrat data candidate patch form-defaults --dat
 
 1. Collect key projects with verifiable outcomes and metrics. For each: public link (repo, demo, article, talk, press, case study), allowed claim wording, any forbidden phrasing. Write through `careerrat data candidate evidence --data ...` in DB mode.
 2. Ask: "What is your core edge or differentiator in your field?" Capture the answer as a lead claim, written the same way as item 1: `careerrat data candidate evidence --data '{"claim":"<answer>","evidence":"Candidate-stated during setup interview"}'` in DB mode, or confirm-block it in chat mode:
+
    ```careerrat:confirm
    {"kind":"evidence_claim","summary":"Core differentiator","payload":{"claim":"Turns around understaffed teams without raising headcount","evidence":"Candidate-stated during setup interview"}}
    ```
+
 3. Skills and tools — capture in three buckets in `honesty.yml#tools`:
    - `confirmed`: proficient, can claim without qualification.
    - `adjacent`: learning or adjacent; qualify claims.
@@ -432,7 +448,7 @@ off. Never hand-edit `candidate/automation.yml`.
 | `status_polling` | Portal status polling | Reads application status from ATS dashboards (read-only) | greenhouse, workday, ashby, lever | Session browser + ToS consent per platform |
 | `authenticated_search` | Authenticated search scanning | Runs logged-in saved-search scraping to surface new postings | linkedin, indeed, wellfound, glassdoor | Session browser + ToS consent per platform |
 | `messaging` | In-platform messaging | Reads in-platform DMs into `communications[]` (read-only; replies go through `email-comms`) | linkedin, wellfound | Session browser + ToS consent per platform |
-| `one_click_apply` | Authenticated one-click apply | Modal-driven apply under the `apply-job` submit gate; halts before final submit unless `auto_submit: true` | linkedin | Session browser + ToS consent |
+| `one_click_apply` | Authenticated application fill | Modal-driven application filling under the `apply-job` submit gate; always halts before final submit so only the user can submit | linkedin | Session browser + ToS consent |
 | `profile_optimize` | LinkedIn profile optimize (read + suggest) | Reads your profile and proposes honest, evidence-backed rewrites of headline / About / experience / Featured (read-only; dry-run preview, also runs as a no-browser fix-doc) | linkedin | Session browser + ToS consent |
 | `profile_apply` | LinkedIn profile apply (write back) | Writes the approved profile rewrites back through the session browser, **confirm-first per field**; separate switch from `profile_optimize` (suggestions on never implies write-back) | linkedin | Session browser + ToS consent + `profile_optimize` |
 | `mail_access` | Session webmail access | Reads one specific recent verification-code email during apply/sign-in flows from any provider via `webmail`, or opted-in Gmail/Outlook recruiting messages for `ingest-mail`; never sends/deletes/replies or browses the broader inbox | gmail, outlook, webmail | Session browser + ToS consent per mail provider |
@@ -553,6 +569,7 @@ Any time the user states a new gate during this interview — an exclusion, cut 
 - Per-company cap / cooldown → `careerrat data candidate limits upsert --data '<json row>'` in DB mode; legacy mode writes `candidate/application-limits.yml`
 
 **Friction level:**
+
 - *Write-and-report* for unambiguous, low-blast-radius gates (one clear cut signal): write it, then echo the CLI confirmation.
 - *Confirm-first* for consequential gates (broad company exclusion, lowering comp floor, large re-rank): propose the exact change, get a yes, then write.
 

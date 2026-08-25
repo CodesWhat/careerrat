@@ -335,6 +335,16 @@ const RULES = [
     action: { label: "Open Settings", to: "/settings" },
   },
   {
+    match: ({ code }) => code === "STATUS_PORTAL_URL_INVALID",
+    message: "Paste the full https:// URL for the signed-in application dashboard.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "STATUS_PORTAL_UNSUPPORTED",
+    message: "Use a Greenhouse, Workday, Ashby, or Lever application dashboard URL.",
+    action: null,
+  },
+  {
     match: ({ code }) => code === "MAIL_SYNC_NOT_ALLOWED",
     message:
       "Mail sync isn't available on this device yet. Turn on mail access for Gmail or Outlook in Settings first.",

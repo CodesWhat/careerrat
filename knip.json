@@ -12,8 +12,18 @@
       ]
     },
     "apps/web": {},
+    "apps/docs": {
+      "ignoreDependencies": [
+        "@fontsource/archivo",
+        "@fontsource/ibm-plex-mono",
+        "@fontsource/ibm-plex-sans"
+      ]
+    },
     "apps/desktop": {
       "entry": ["scripts/*.mjs", "preload/*.cjs"]
+    },
+    "apps/website": {
+      "ignoreDependencies": ["@fontsource/figtree"]
     }
   }
 }

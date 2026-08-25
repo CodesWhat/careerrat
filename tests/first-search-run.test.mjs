@@ -79,7 +79,12 @@ function markSearchReady(repoRoot, { domain = "software engineering" } = {}) {
     name: "profile",
     patch: {
       candidate: { domain },
-      location: { home: "New York, NY", remote: true, hybrid: true, onsite: false },
+      location: {
+        home: "New York, NY",
+        remote: true,
+        hybrid: true,
+        onsite: false,
+      },
     },
   });
 }
@@ -219,6 +224,24 @@ test("prepareFirstSearchSources writes merged SQLite search-sources without comp
   assert.equal(result.sourcedScan.location_filter.block.includes("India"), true);
 });
 
+test("prepareFirstSearchSources replaces stale country blocks when remote scope becomes worldwide", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot);
+
+  const homeCountry = await prepareFirstSearchSources({ repoRoot, env: {} });
+  assert.equal(homeCountry.searchSources.location_filter.block.includes("India"), true);
+
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: { location: { remote: true, remote_scope: "worldwide" } },
+  });
+  const worldwide = await prepareFirstSearchSources({ repoRoot, env: {} });
+
+  assert.deepEqual(worldwide.searchSources.location_filter.block, []);
+  assert.deepEqual(worldwide.sourcedScan.location_filter.block, []);
+});
+
 test("first search parks with an actionable location error before creating a live run", async () => {
   const repoRoot = tempRepo();
   markSearchReady(repoRoot);
@@ -227,7 +250,13 @@ test("first search parks with an actionable location error before creating a liv
     name: "profile",
     patch: {
       candidate: { location: "" },
-      location: { home: "", remote: false, hybrid: false, onsite: false, relocation: [] },
+      location: {
+        home: "",
+        remote: false,
+        hybrid: false,
+        onsite: false,
+        relocation: [],
+      },
     },
   });
 
@@ -314,7 +343,11 @@ test('prepareFirstSearchSources reconciles a legacy machine-generated "AI engine
     name: "targeting",
     patch: {
       role_buckets: [
-        { name: "Platform", priority: "primary", titles: ["Platform Reliability Engineer"] },
+        {
+          name: "Platform",
+          priority: "primary",
+          titles: ["Platform Reliability Engineer"],
+        },
       ],
     },
   });
@@ -327,7 +360,10 @@ test('prepareFirstSearchSources reconciles a legacy machine-generated "AI engine
     rssUrl: "https://remotevibecodingjobs.com/feed.xml",
     enabled: true,
   };
-  const legacyWellfoundUrl = buildWellfoundUrl({ role: "AI engineer", remote: true });
+  const legacyWellfoundUrl = buildWellfoundUrl({
+    role: "AI engineer",
+    remote: true,
+  });
   const legacyWellfound = {
     provider: "Wellfound",
     source_type: "browser",
@@ -375,7 +411,11 @@ test('prepareFirstSearchSources reconciles a legacy machine-generated "AI engine
     stored.some(
       (source) =>
         source.provider === "Wellfound" &&
-        source.url === buildWellfoundUrl({ role: "Platform Reliability Engineer", remote: true })
+        source.url ===
+          buildWellfoundUrl({
+            role: "Platform Reliability Engineer",
+            remote: true,
+          })
     ),
     true,
     "the freshly generated title-derived Wellfound entry must take its place"
@@ -469,7 +509,11 @@ test("prepareFirstSearchSources skips AI rescue when no companies are tracked", 
   });
 
   assert.equal(aiCalled, false);
-  assert.deepEqual(result.companyBoardResolution, { attempted: 0, resolved: 0, promoted: 0 });
+  assert.deepEqual(result.companyBoardResolution, {
+    attempted: 0,
+    resolved: 0,
+    promoted: 0,
+  });
 });
 
 test("prepareFirstSearchSources degrades gracefully when AI domain-hint fill fails", async () => {
@@ -534,9 +578,21 @@ test("countDeterministicSources counts RSS, supported boards, and ATS while skip
   const counts = countDeterministicSources({
     searchSources: {
       searches: [
-        { source_type: "rss", rssUrl: "https://example.test/jobs.xml", enabled: true },
-        { source_type: "browser", url: "https://hiring.cafe/search?q=ai", enabled: true },
-        { source_type: "auth", url: "https://www.linkedin.com/jobs/search", enabled: true },
+        {
+          source_type: "rss",
+          rssUrl: "https://example.test/jobs.xml",
+          enabled: true,
+        },
+        {
+          source_type: "browser",
+          url: "https://hiring.cafe/search?q=ai",
+          enabled: true,
+        },
+        {
+          source_type: "auth",
+          url: "https://www.linkedin.com/jobs/search",
+          enabled: true,
+        },
         { url: "https://example.test/jobs?query=ai", enabled: true },
         { source_type: "board", provider: "RemoteOK", enabled: true },
         {
@@ -547,7 +603,11 @@ test("countDeterministicSources counts RSS, supported boards, and ATS while skip
         },
         { source_type: "board", provider: "remotive", enabled: false },
         { source_type: "board", provider: "unknown", enabled: true },
-        { source_type: "rss", rssUrl: "https://example.test/off.xml", enabled: false },
+        {
+          source_type: "rss",
+          rssUrl: "https://example.test/off.xml",
+          enabled: false,
+        },
       ],
     },
     sourcedScan: {
@@ -577,7 +637,11 @@ test("countDeterministicSources accepts sources as the search list key", () => {
     searchSources: {
       sources: [
         { source_type: "board", provider: "workingnomads", enabled: true },
-        { source_type: "rss", rssUrl: "https://example.test/jobs.xml", enabled: true },
+        {
+          source_type: "rss",
+          rssUrl: "https://example.test/jobs.xml",
+          enabled: true,
+        },
       ],
     },
   });
@@ -620,7 +684,11 @@ test("failed first-search can retry as fresh work after deterministic source set
     },
   });
 
-  const retry = await startFirstSearchRun({ repoRoot, env: {}, retryFailed: true });
+  const retry = await startFirstSearchRun({
+    repoRoot,
+    env: {},
+    retryFailed: true,
+  });
   assert.equal(retry.reused, false);
   assert.equal(retry.run.status, "running");
   assert.notEqual(retry.run.id, failed.run.id);
@@ -662,7 +730,9 @@ test("zero-result scans with attempted deterministic sources complete with zero-
             status: 200,
             headers: { "content-type": "application/json" },
           })
-        : new Response('<?xml version="1.0"?><rss><channel></channel></rss>', { status: 200 }),
+        : new Response('<?xml version="1.0"?><rss><channel></channel></rss>', {
+            status: 200,
+          }),
   });
 
   const latest = sourcingRunLatest({ repoRoot, purpose: "first-search" });
@@ -718,7 +788,10 @@ test("background first search publishes a growing found count before completion"
 
     await betaRequested.promise;
 
-    const running = latestSourcingRunForUi({ repoRoot, purpose: "first-search" }).run;
+    const running = latestSourcingRunForUi({
+      repoRoot,
+      purpose: "first-search",
+    }).run;
     assert.equal(running.status, "running");
     assert.equal(running.progress.foundCount, 1);
     assert.equal(running.progress.offerCount, 1);
@@ -733,7 +806,10 @@ test("background first search publishes a growing found count before completion"
     );
     await background;
 
-    const completed = sourcingRunLatest({ repoRoot, purpose: "first-search" }).run;
+    const completed = sourcingRunLatest({
+      repoRoot,
+      purpose: "first-search",
+    }).run;
     assert.equal(completed.status, "completed");
     assert.equal(completed.progress.foundCount, 2);
     assert.equal(completed.progress.foundCount, completed.summary.new);
