@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { commCaptureInbound } from "../db/verbs/comm.mjs";
 import { sourceWatermarkUpsert } from "../db/verbs/source.mjs";
 import { userPath } from "../paths/workspace.mjs";
+import { parseContactIdentity } from "./contact-identity.mjs";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_LOOKBACK_MS = 14 * 24 * 60 * 60 * 1_000;
@@ -52,17 +53,7 @@ function searchable(value) {
 }
 
 function senderIdentity(sender) {
-  const raw = clean(sender, 500);
-  const email = raw.match(/<([^<>\s]+@[^<>\s]+)>/)?.[1] || raw.match(/[^\s<>]+@[^\s<>]+/)?.[0];
-  const name = raw
-    .replace(/<[^<>]+>/g, "")
-    .replace(/^['"]|['"]$/g, "")
-    .trim();
-  const displayName = name && name !== email ? name : "";
-  return {
-    ...(displayName ? { name: displayName } : {}),
-    ...(email ? { email } : {}),
-  };
+  return parseContactIdentity(sender);
 }
 
 function matchApplication(message, applications) {

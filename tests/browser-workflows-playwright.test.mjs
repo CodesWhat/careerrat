@@ -138,7 +138,15 @@ function workspace(capabilities, consent) {
 }
 
 function headlessSession(options) {
-  return createConfiguredBrowserSession({ ...options, headless: true });
+  return createConfiguredBrowserSession({
+    ...options,
+    headless: true,
+    // GitHub's Linux runner already ships Google Chrome. Use that installed
+    // browser for these live fixtures so the full unit suite does not depend
+    // on an untracked Playwright browser download. Packaged desktop smoke tests
+    // separately exercise the hermetic Chromium bundled with CareerRat.
+    channel: process.platform === "linux" ? "chrome" : undefined,
+  });
 }
 
 function tracker(repoRoot) {

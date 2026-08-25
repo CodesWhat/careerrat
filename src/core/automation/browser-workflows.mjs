@@ -22,6 +22,7 @@ import {
 } from "./browser-adapters.mjs";
 import { createConfiguredBrowserSession } from "./browser-session.mjs";
 import { mayRun } from "./consent.mjs";
+import { parseContactIdentity } from "./contact-identity.mjs";
 import { statusTransition, toTrackOutcomeStatus } from "./status-map.mjs";
 
 const LINKEDIN_PROPOSAL_SCHEMA = {
@@ -130,13 +131,7 @@ function matchApplication(record, applications) {
 }
 
 function participantFromRecord(record) {
-  const raw = clean(record.sender || record.participant, 500);
-  const email = raw.match(/<([^<>\s]+@[^<>\s]+)>/)?.[1] || raw.match(/[^\s<>]+@[^\s<>]+/)?.[0];
-  const name = raw.replace(/<[^<>]+>/g, "").trim();
-  return {
-    ...(name && name !== email ? { name } : {}),
-    ...(email ? { email } : {}),
-  };
+  return parseContactIdentity(record.sender || record.participant);
 }
 
 function fallbackCompany(record) {

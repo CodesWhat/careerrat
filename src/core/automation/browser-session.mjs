@@ -96,8 +96,13 @@ export function classifyBrowserAuthState(page = {}) {
   };
 }
 
-function createPlaywrightBrowserSession({ profileDir, launchImpl, headless = false } = {}) {
-  return wrapOps(createPlaywrightOps({ profileDir, launchImpl, headless }), "playwright");
+function createPlaywrightBrowserSession({
+  profileDir,
+  launchImpl,
+  headless = false,
+  channel,
+} = {}) {
+  return wrapOps(createPlaywrightOps({ profileDir, launchImpl, headless, channel }), "playwright");
 }
 
 function createOrcaBrowserSession({ repoRoot, env = process.env, runOrcaImpl } = {}) {
@@ -113,6 +118,7 @@ export function createConfiguredBrowserSession({
   launchImpl,
   runOrcaImpl,
   headless = false,
+  channel,
 } = {}) {
   let data;
   try {
@@ -128,6 +134,7 @@ export function createConfiguredBrowserSession({
       }),
       launchImpl,
       headless,
+      channel,
     });
   }
   if (resolved.provider === "orca") {

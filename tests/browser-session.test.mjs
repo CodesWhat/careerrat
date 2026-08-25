@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   classifyBrowserAuthState,
   createBrowserSessionManager,
+  createConfiguredBrowserSession,
 } from "../src/core/automation/browser-session.mjs";
 
 test("auth classification ignores ordinary signed-in content that mentions signing in", () => {
@@ -62,4 +63,40 @@ test("browser session manager reuses one platform session until it closes", asyn
   assert.notEqual(manager.get({ platform: "gmail" }), first);
   await manager.shutdown();
   assert.equal(closes, 2);
+});
+
+test("configured Playwright sessions forward an explicit browser channel", async () => {
+  let launchOptions = null;
+  const page = {
+    async goto() {},
+    url: () => "http://127.0.0.1/fixture",
+    title: async () => "Fixture",
+    locator: () => ({ innerText: async () => "Fixture" }),
+  };
+  const session = createConfiguredBrowserSession({
+    repoRoot: "/tmp/careerrat-browser-channel-test",
+    env: {},
+    platform: "gmail",
+    channel: "chrome",
+    headless: true,
+    loadAutomationImpl: () => ({
+      data: {
+        session: {
+          provider: "playwright",
+          profile_root: "/tmp/careerrat-browser-channel-test/profiles",
+        },
+      },
+    }),
+    launchImpl: async (options) => {
+      launchOptions = options;
+      return {
+        newPage: async () => page,
+        close: async () => {},
+      };
+    },
+  });
+
+  await session.open("http://127.0.0.1/fixture");
+  assert.equal(launchOptions.channel, "chrome");
+  await session.close();
 });
