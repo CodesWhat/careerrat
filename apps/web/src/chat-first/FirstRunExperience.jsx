@@ -169,7 +169,7 @@ function HostedInterestCard({
             }}
           >
             <label>
-              <span className="sr-only">Email for CareerRat AI access</span>
+              <span className="cf-first-run__hosted-label-text">Email for CareerRat AI access</span>
               <input
                 type="email"
                 inputMode="email"

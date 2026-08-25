@@ -103,9 +103,6 @@ export default function Home() {
               See how it works
             </a>
           </div>
-          <p className="engine-note">
-            CareerRat owns the workflows and threads. Claude Code and OpenAI Codex are its two supported product choices.
-          </p>
         </section>
 
         <section className="section" id="how-it-works" aria-labelledby="how-title">

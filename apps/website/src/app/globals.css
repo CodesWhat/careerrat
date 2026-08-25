@@ -268,19 +268,8 @@ button {
   font-weight: 700;
 }
 
-.engine-note {
-  max-width: 610px;
-  margin: 0;
-  color: var(--slate);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  line-height: 1.5;
-  text-transform: uppercase;
-}
-
 .section {
-  padding-top: 96px;
+  padding-top: 120px;
   scroll-margin-top: 72px;
 }
 
@@ -700,7 +689,7 @@ button {
   }
 
   .section {
-    padding-top: 72px;
+    padding-top: 88px;
   }
 
   .steps-grid,

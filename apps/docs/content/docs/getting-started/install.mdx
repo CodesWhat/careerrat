@@ -8,10 +8,10 @@ description: Install a signed desktop app, or run CareerRat anywhere with npm.
 The signed, notarized macOS app is the simplest way to run CareerRat on an
 Apple Silicon Mac running macOS 12 or newer.
 
-The Windows x64 installer is built and installed in Windows CI, but public
-distribution remains pending SignPath Foundation approval and a valid
-Authenticode signature. Unsigned CI packages are QA-only and never public
-release assets. See the repository's
+The Windows x64 installer passes build, install, launch, export, and uninstall
+QA, but it is not a public release asset yet. SignPath Foundation signing
+requires project reputation CareerRat does not yet have. Unsigned CI packages
+are QA-only and never public release assets. See the repository's
 [Windows status](https://github.com/CodesWhat/careerrat/blob/main/docs/WINDOWS.md)
 and [code signing policy](https://github.com/CodesWhat/careerrat/blob/main/docs/CODE_SIGNING_POLICY.md).
 
@@ -36,10 +36,15 @@ The packaged app invokes the selected installed CLI directly and never falls
 back to or silently switches providers. A runtime becomes `Ready` only after
 local availability, authentication, and its readiness check pass.
 
-The v0.16 provider-parity update passed packaged desktop QA and signing. The
-latest public download remains v0.15.0 until the protected PRs merge, the
-signed tag publishes, production deploys, and the released app is installed
-and verified.
+v0.16.1 is the current public release. It carries the v0.16.0 provider-parity
+release with a small hosted-access alignment fix and calmer website spacing.
+Protected PRs #217 and #218 merged for the v0.16.0 release, and the signed
+v0.16.0 tag points to the exact promotion merge on `main`. The GitHub release
+includes the signed, notarized, and stapled Mac DMG plus its SBOM;
+`careerrat@latest` is 0.16.1 on npm; and careerrat.com is running the production
+release. The Homebrew cask is 0.16.1. The released app installs at
+`/Applications/CareerRat.app`, reports version 0.16.1, passes Gatekeeper, and
+passed launch and visual inspection.
 
 Open the app and it scaffolds your workspace, boots the local app at
 `http://localhost:7777`, and launches your agent with a starter message, the
