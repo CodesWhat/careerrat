@@ -6,12 +6,16 @@ import { hardenStaticHtml, POSTHOG_INGEST_PROXY } from "../src/core/security/bro
 
 export function hardenStaticDirectory(
   directory,
-  { allowTailwindCdn = false, extraConnectSrc = [] } = {}
+  { allowTailwindCdn = false, extraConnectSrc = [], extraScriptSrc = [] } = {}
 ) {
   let hardened = 0;
   for (const path of htmlFiles(resolve(directory))) {
     const source = readFileSync(path, "utf8");
-    const output = hardenStaticHtml(source, { allowTailwindCdn, extraConnectSrc });
+    const output = hardenStaticHtml(source, {
+      allowTailwindCdn,
+      extraConnectSrc,
+      extraScriptSrc,
+    });
     if (output !== source) writeFileSync(path, output, "utf8");
     hardened += 1;
   }
@@ -44,6 +48,7 @@ if (isMain) {
   const hardened = hardenStaticDirectory(directory, {
     allowTailwindCdn: process.argv.includes("--allow-tailwind-cdn"),
     extraConnectSrc: process.argv.includes("--allow-posthog-proxy") ? [POSTHOG_INGEST_PROXY] : [],
+    extraScriptSrc: process.argv.includes("--allow-posthog-proxy") ? [POSTHOG_INGEST_PROXY] : [],
   });
   process.stdout.write(`Hardened ${hardened} static HTML file(s).\n`);
 }
