@@ -86,7 +86,7 @@ test("the staged and packaged trees have an explicit Agent SDK exclusion", async
   assert.match(builder, /!@anthropic-ai\/claude-agent-sdk\/\*\*/);
 });
 
-test("Electron builds a fixed desktop Windows x64 NSIS installer with the rat icon", async () => {
+test("Electron builds a fixed desktop Windows x64 NSIS installer with the selected text icon", async () => {
   const [builder, pkg] = await Promise.all([
     text("apps/desktop/electron-builder.yml"),
     json("apps/desktop/package.json"),

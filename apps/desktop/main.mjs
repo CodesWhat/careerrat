@@ -33,7 +33,12 @@ import { get as httpGet } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { writeFileAtomic } from "./atomic-write.mjs";
-import { chooseDesktopRoute } from "./desktop-routing.mjs";
+import {
+  chooseDesktopRoute,
+  normalizeDesktopRoute,
+  rendererRouteFromDesktopRoute,
+} from "./desktop-routing.mjs";
+import { buildCareerRatMenuTemplate, runMenuUpdateCheck } from "./menu-template.mjs";
 import {
   choosePreferredPort,
   decideExternalOpen,
@@ -51,6 +56,7 @@ import {
   DEFAULT_STATE as DEFAULT_UPDATE_STATE,
   isNewerVersion,
   mergeCheckedState,
+  nextUpdateCheckDelay,
   runUpdateCheck,
   shouldNotify,
   withEnabled,
@@ -192,8 +198,9 @@ let shuttingDown = false;
 let updateStateDir = null;
 let updateState = { ...DEFAULT_UPDATE_STATE };
 let updateResult = { updateAvailable: false, version: null, releaseUrl: null, dmgUrl: null };
-let updateCheckInitialTimer = null;
 let updateCheckTimer = null;
+let desktopBaseUrl = null;
+let desktopRoute = "/";
 
 // Smoke creates and verifies a real app window, but none of its acceptance
 // checks require hardware acceleration. Skipping GPU process bring-up entirely
@@ -268,6 +275,8 @@ async function shutdown() {
     // idle-sweep timer so quitting the app never leaves an orphaned `claude`
     // CLI child running in the background.
     await active.chatRuntime.shutdown();
+    active.stopRuntimeSignIns();
+    await active.browserSessionManager.shutdown();
     await new Promise((resolve) => active.server.close(() => resolve()));
   }
 
@@ -277,12 +286,8 @@ async function shutdown() {
   delete process.env.CAREERRAT_DESKTOP_PDF_RENDER_TOKEN;
   if (activePdfRenderer) await activePdfRenderer.close();
 
-  if (updateCheckInitialTimer) {
-    clearTimeout(updateCheckInitialTimer);
-    updateCheckInitialTimer = null;
-  }
   if (updateCheckTimer) {
-    clearInterval(updateCheckTimer);
+    clearTimeout(updateCheckTimer);
     updateCheckTimer = null;
   }
 }
@@ -316,8 +321,12 @@ const UPDATE_IPC = Object.freeze({
   getState: "careerrat:update-check:get-state",
   skipVersion: "careerrat:update-check:skip-version",
   setEnabled: "careerrat:update-check:set-enabled",
+  checkNow: "careerrat:update-check:check-now",
   openRelease: "careerrat:update-check:open-release",
   result: "careerrat:update-check:result",
+});
+const DESKTOP_IPC = Object.freeze({
+  navigate: "careerrat:desktop:navigate",
 });
 
 function updateStateFilePath() {
@@ -372,31 +381,36 @@ function deriveUpdateResultFromState(state) {
   };
 }
 
-function currentUpdateNoticePayload() {
+function currentUpdateNoticePayload({ manualResult = null } = {}) {
   return {
     notify: shouldNotify({ result: updateResult, skippedVersion: updateState.skippedVersion }),
     enabled: updateState.enabled,
     version: updateResult.version,
     releaseUrl: updateResult.releaseUrl,
     dmgUrl: updateResult.dmgUrl,
+    lastCheckedAt: updateState.lastCheckedAt,
+    manualResult,
   };
 }
 
-function pushUpdateNoticeToRenderer() {
+function pushUpdateNoticeToRenderer(payload = currentUpdateNoticePayload()) {
   if (win && !win.isDestroyed()) {
-    win.webContents.send(UPDATE_IPC.result, currentUpdateNoticePayload());
+    win.webContents.send(UPDATE_IPC.result, payload);
   }
 }
 
-async function performUpdateCheck() {
-  if (!updateStateDir) return;
+async function performUpdateCheck({ force = false, manual = false } = {}) {
+  if (!updateStateDir) {
+    return currentUpdateNoticePayload({ manualResult: manual ? "failed" : null });
+  }
 
   const { state: nextState, result, checked, fetchSucceeded } = await runUpdateCheck({
     currentVersion: app.getVersion(),
     state: loadUpdateState(),
+    force,
   });
 
-  if (!checked) return;
+  if (!checked) return currentUpdateNoticePayload();
 
   // The fetch above can take up to REQUEST_TIMEOUT_MS. If the Settings
   // toggle or a "skip this version" landed through the IPC handlers below
@@ -408,12 +422,21 @@ async function performUpdateCheck() {
   persistUpdateState(updateState);
 
   updateResult = deriveUpdateResultFromState(updateState);
-  pushUpdateNoticeToRenderer();
+  const manualResult = manual
+    ? fetchSucceeded
+      ? updateResult.updateAvailable
+        ? "available"
+        : "current"
+      : "failed"
+    : null;
+  const payload = currentUpdateNoticePayload({ manualResult });
+  pushUpdateNoticeToRenderer(payload);
+  return payload;
 }
 
 // Registers the IPC handlers preload/update-check-preload.cjs calls into and
 // primes in-memory state from disk. Deliberately separate from
-// scheduleUpdateChecks(): the renderer calls getState() as soon as its bundle
+// scheduling: the renderer calls getState() as soon as its bundle
 // evaluates, including under `--smoke`, which never schedules anything. When
 // these two lived in one function, a passing smoke run still logged "No
 // handler registered for careerrat:update-check:get-state" twice, and a green
@@ -441,8 +464,11 @@ function registerUpdateCheckHandlers() {
   ipcMain.handle(UPDATE_IPC.setEnabled, (_event, enabled) => {
     updateState = withEnabled(updateState, enabled);
     persistUpdateState(updateState);
+    scheduleNextUpdateCheck();
     return currentUpdateNoticePayload();
   });
+
+  ipcMain.handle(UPDATE_IPC.checkNow, () => runManualUpdateCheck());
 
   ipcMain.handle(UPDATE_IPC.openRelease, () => {
     if (updateResult.releaseUrl) openExternalIfAllowed(updateResult.releaseUrl, null);
@@ -450,19 +476,106 @@ function registerUpdateCheckHandlers() {
   });
 }
 
-// Schedules the recurring check. Skipped under `--smoke`, which has no
-// business reaching the network.
-function scheduleUpdateChecks() {
-  updateCheckInitialTimer = setTimeout(() => {
-    updateCheckInitialTimer = null;
-    performUpdateCheck().catch((err) => log(`update check failed: ${err.message}`));
-  }, UPDATE_CHECK_INITIAL_DELAY_MS);
-  updateCheckInitialTimer.unref?.();
+function openDesktopRoute(route) {
+  if (!desktopBaseUrl) return;
+  const nextRoute = normalizeDesktopRoute(route || desktopRoute) || desktopRoute;
+  if (!win || win.isDestroyed()) {
+    return createWindow(desktopBaseUrl, nextRoute);
+  }
+  win.webContents.send(DESKTOP_IPC.navigate, rendererRouteFromDesktopRoute(nextRoute));
+  win.show();
+  win.focus();
+  return win;
+}
 
-  updateCheckTimer = setInterval(() => {
-    performUpdateCheck().catch((err) => log(`update check failed: ${err.message}`));
-  }, UPDATE_CHECK_INTERVAL_MS);
+function waitForRendererReady(browserWindow, timeoutMs = 20000) {
+  if (!browserWindow?.webContents?.isLoadingMainFrame?.()) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const wc = browserWindow.webContents;
+    const timer = setTimeout(() => finish(new Error("app window did not finish loading")), timeoutMs);
+    function cleanup() {
+      clearTimeout(timer);
+      wc.removeListener("did-finish-load", onLoad);
+      wc.removeListener("did-fail-load", onFailure);
+    }
+    function finish(error) {
+      cleanup();
+      if (error) reject(error);
+      else resolve();
+    }
+    function onLoad() {
+      finish();
+    }
+    function onFailure(_event, code, description, _url, isMainFrame) {
+      if (isMainFrame === false) return;
+      finish(new Error(`app window failed to load: ${description} (${code})`));
+    }
+    wc.once("did-finish-load", onLoad);
+    wc.on("did-fail-load", onFailure);
+  });
+}
+
+async function ensureDesktopWindow() {
+  const browserWindow = !win || win.isDestroyed() ? openDesktopRoute(desktopRoute) : win;
+  await waitForRendererReady(browserWindow);
+  browserWindow?.show();
+  browserWindow?.focus();
+  return browserWindow;
+}
+
+function installApplicationMenu() {
+  const open = (target) => openExternalIfAllowed(target, null);
+  const template = buildCareerRatMenuTemplate({
+    appName: app.name,
+    platform: process.platform,
+    isDevelopment: !app.isPackaged,
+    actions: {
+      openSettings: () => openDesktopRoute("/settings"),
+      checkForUpdates: () => {
+        runMenuUpdateCheck({
+          ensureWindow: ensureDesktopWindow,
+          checkNow: runManualUpdateCheck,
+        }).catch((err) => {
+          log(`manual update check failed: ${err.message}`);
+        });
+      },
+      openWebsite: () => open("https://careerrat.com"),
+      openDocumentation: () => open("https://github.com/CodesWhat/careerrat#readme"),
+      reportIssue: () => open("https://github.com/CodesWhat/careerrat/issues/new/choose"),
+    },
+  });
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function scheduleNextUpdateCheck() {
+  if (updateCheckTimer) clearTimeout(updateCheckTimer);
+  updateCheckTimer = null;
+  const delay = nextUpdateCheckDelay({
+    enabled: updateState.enabled,
+    lastCheckedAt: updateState.lastCheckedAt,
+    initialDelayMs: UPDATE_CHECK_INITIAL_DELAY_MS,
+    intervalMs: UPDATE_CHECK_INTERVAL_MS,
+  });
+  if (delay === null) return;
+  updateCheckTimer = setTimeout(async () => {
+    updateCheckTimer = null;
+    try {
+      await performUpdateCheck();
+    } catch (err) {
+      log(`update check failed: ${err.message}`);
+    } finally {
+      scheduleNextUpdateCheck();
+    }
+  }, delay);
   updateCheckTimer.unref?.();
+}
+
+async function runManualUpdateCheck() {
+  try {
+    return await performUpdateCheck({ force: true, manual: true });
+  } finally {
+    scheduleNextUpdateCheck();
+  }
 }
 
 function createWindow(url, route, { load = true } = {}) {
@@ -476,9 +589,9 @@ function createWindow(url, route, { load = true } = {}) {
       // adds contextIsolation or sandbox over there, a plain replace would
       // drop it with nothing at either site to say so.
       ...windowOptions.webPreferences,
-      // The only preload in this app. Exposes window.careerratDesktopUpdate
-      // for the notify-only update check above. Everything else about the UI
-      // is still server-rendered HTML loaded over loopback HTTP, so Electron's
+      // The only preload in this app. It exposes desktop update state and
+      // native-menu navigation without granting the renderer Node access.
+      // Everything else about the UI is served over loopback HTTP, so Electron's
       // secure remote-page defaults (nodeIntegration off, contextIsolation on,
       // sandbox on) are otherwise exactly what we want as-is.
       preload: UPDATE_CHECK_PRELOAD_PATH,
@@ -624,25 +737,14 @@ app.whenReady().then(async () => {
     }
   }
 
-  // Rebuild the standard macOS menu so the bold app-menu label follows
-  // app.name ("CareerRat") instead of "Electron" in dev; role-based items keep
-  // the expected copy/paste/quit/devtools/window behavior.
-  if (process.platform === "darwin") {
-    Menu.setApplicationMenu(
-      Menu.buildFromTemplate([
-        { role: "appMenu" },
-        { role: "editMenu" },
-        { role: "viewMenu" },
-        { role: "windowMenu" },
-      ]),
-    );
-  }
-
   const { url, route } = await boot();
+  desktopBaseUrl = url;
+  desktopRoute = route;
 
   // Before any window exists, including the smoke window: the renderer asks
   // for update state as soon as its bundle evaluates.
   registerUpdateCheckHandlers();
+  installApplicationMenu();
 
   if (isSmoke) {
     try {
@@ -694,7 +796,7 @@ app.whenReady().then(async () => {
   }
 
   createWindow(url, route);
-  scheduleUpdateChecks();
+  scheduleNextUpdateCheck();
 
   // macOS convention: clicking the dock icon with no open windows reopens
   // one instead of doing nothing.

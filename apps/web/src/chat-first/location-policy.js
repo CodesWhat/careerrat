@@ -18,6 +18,7 @@ function compactPolicy(value) {
   return {
     home,
     remote: /\bremote\b/i.test(modes),
+    remote_scope: /\bworldwide\b/i.test(modes) ? "worldwide" : "home-country",
     hybrid: /\bhybrid\b/i.test(modes),
     onsite: /\bon-?site\b/i.test(modes),
     relocation: [],
@@ -40,6 +41,7 @@ export function buildLocationPolicy(value) {
   if (!location) return null;
   const home = text(location.home);
   const remote = location.remote === true;
+  const remoteScope = location.remote_scope === "worldwide" ? "worldwide" : "home-country";
   const hybrid = location.hybrid === true;
   const onsite = location.onsite === true;
   const relocation = Array.isArray(location.relocation)
@@ -47,17 +49,28 @@ export function buildLocationPolicy(value) {
     : [];
   if (!home && !remote && !hybrid && !onsite) return null;
 
-  const remoteRegion = remote ? (isUnitedStatesHome(home) ? "United States" : "Enabled") : null;
+  const remoteRegion = remote
+    ? remoteScope === "worldwide"
+      ? "Worldwide"
+      : isUnitedStatesHome(home)
+        ? "United States"
+        : "Home country"
+    : null;
   const summaryParts = [];
   if (home && (hybrid || onsite)) summaryParts.push(`${home} local`);
   if (remote) {
-    summaryParts.push(`${remoteRegion === "United States" ? "US" : "Eligible-region"} remote`);
+    summaryParts.push(
+      remoteScope === "worldwide"
+        ? "worldwide remote"
+        : `${remoteRegion === "United States" ? "US" : "Home-country"} remote`
+    );
   }
 
   const onsitePlaces = [home, ...relocation].filter(Boolean);
   return {
     home: home || "Not set",
     remoteRegion,
+    remoteScope,
     hybrid,
     onsite,
     confirmed: location.mode_preferences_confirmed === true,

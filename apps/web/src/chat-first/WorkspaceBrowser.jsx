@@ -377,7 +377,7 @@ function PipelineList({ jobs = [], onOpenJob }) {
           >
             {job.stage || "Applied"}
           </span>
-          <span className="cf-pipeline__job-note">{job.note || ""}</span>
+          <span className="cf-pipeline__job-note">{job.statusNote || ""}</span>
           <strong>{Number(job.fit) || 0}</strong>
         </button>
       ))}
@@ -604,9 +604,7 @@ export function SelectionCart({
   jobs = [],
   selection = [],
   agentName = "Paul",
-  onDraftPackets,
   onDraftAndApply,
-  onChatAbout,
   onDismissSelection,
 }) {
   const chosen = selectedJobs(jobs, selection);
@@ -646,27 +644,13 @@ export function SelectionCart({
         </div>
       )}
       {cart.count > 0 ? (
-        <div className="cf-cart__actions">
-          <button
-            type="button"
-            className="cf-button cf-button--ink"
-            onClick={() => onDraftPackets?.(ids)}
-          >
-            {cart.draftLabel}
-          </button>
+        <div className="cf-cart__actions cf-cart__actions--collapsed">
           <button
             type="button"
             className="cf-button cf-button--lime"
             onClick={() => onDraftAndApply?.(ids)}
           >
             {cart.applyLabel}
-          </button>
-          <button
-            type="button"
-            className="cf-button cf-button--outline"
-            onClick={() => onChatAbout?.(ids)}
-          >
-            {cart.chatLabel}
           </button>
           <button
             type="button"
@@ -679,9 +663,8 @@ export function SelectionCart({
       ) : null}
       {cart.count > 0 ? (
         <div className="cf-cart__consequence">
-          Committing spawns a mission in Today. Each packet comes from a full read of the posting,
-          matched to its language and backed by your evidence, and each submit gates back to you in
-          Today.
+          Starts one mission. {agentName} reads every posting, builds each packet, fills each form,
+          and brings every final submit back to you.
         </div>
       ) : null}
     </aside>
@@ -721,9 +704,7 @@ export function WorkspaceBrowser({
   onDraftNudge,
   onScheduleAction,
   onCalendarAction,
-  onDraftPackets,
   onDraftAndApply,
-  onChatAbout,
   onDismissSelection,
 }) {
   return (
@@ -801,9 +782,7 @@ export function WorkspaceBrowser({
           jobs={cartJobs}
           selection={selection}
           agentName={agentName}
-          onDraftPackets={onDraftPackets}
           onDraftAndApply={onDraftAndApply}
-          onChatAbout={onChatAbout}
           onDismissSelection={onDismissSelection}
         />
       ) : null}

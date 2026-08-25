@@ -51,6 +51,12 @@ function locationPostureFromProfile(profile = {}) {
   return {
     home: trimString(location.home || profile.candidate?.location),
     remote: location.remote === true,
+    remoteScope:
+      location.remote === true
+        ? location.remote_scope === "worldwide"
+          ? "worldwide"
+          : "home-country"
+        : null,
     hybrid: location.hybrid === true,
     onsite: location.onsite === true,
     relocation: compactStrings(location.relocation),

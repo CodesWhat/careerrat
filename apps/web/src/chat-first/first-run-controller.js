@@ -22,39 +22,156 @@ const EXPLICIT_ACTION_LABELS = {
   companies_suggest: ["Show suggestions", "Not now"],
 };
 
+const RUNTIME_PRESENTATION_LABELS = {
+  task_tools: "Ready for task tools and research",
+  chat_drafting: "Ready for chat and drafting",
+  auth_required: "Auth required",
+  detected_unverified: "Detected not verified",
+  unavailable: "Unavailable",
+};
+
+function normalizedRuntimeValue(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, "_")
+    .replaceAll(/^_+|_+$/g, "");
+}
+
+function runtimeCapability(runtime, names) {
+  const wanted = new Set(names.map(normalizedRuntimeValue));
+  const capabilities = runtime?.capabilities;
+  if (Array.isArray(capabilities)) {
+    return capabilities.some((value) => wanted.has(normalizedRuntimeValue(value)));
+  }
+  if (!capabilities || typeof capabilities !== "object") return false;
+  return Object.entries(capabilities).some(
+    ([name, enabled]) => enabled === true && wanted.has(normalizedRuntimeValue(name))
+  );
+}
+
+export function runtimePresentation(runtime = {}) {
+  const explicitState = normalizedRuntimeValue(runtime.presentationState);
+  if (RUNTIME_PRESENTATION_LABELS[explicitState]) {
+    return {
+      state: explicitState,
+      label: RUNTIME_PRESENTATION_LABELS[explicitState],
+    };
+  }
+
+  const status = normalizedRuntimeValue(runtime.status);
+  if (["authentication_required", "auth_required", "sign_in_required"].includes(status)) {
+    return {
+      state: "auth_required",
+      label: RUNTIME_PRESENTATION_LABELS.auth_required,
+    };
+  }
+
+  const available =
+    runtime.available === true || runtime.detected === true || runtime.ready === true;
+  const ready = runtime.ready === true && runtime.selectable === true;
+  const tier = normalizedRuntimeValue(
+    runtime.capabilityTier || runtime.tier || runtime.capabilities?.tier
+  );
+
+  if (!available || tier === "unavailable" || ["not_found", "missing"].includes(status)) {
+    return {
+      state: "unavailable",
+      label: RUNTIME_PRESENTATION_LABELS.unavailable,
+    };
+  }
+  if (
+    tier === "detected_unverified" ||
+    ["detected_not_verified", "detected_unverified", "unverified"].includes(status)
+  ) {
+    return {
+      state: "detected_unverified",
+      label: RUNTIME_PRESENTATION_LABELS.detected_unverified,
+    };
+  }
+  if (
+    ready &&
+    (tier === "task_tools" ||
+      tier === "tools" ||
+      tier === "b" ||
+      runtime.toolExecutionSupported === true ||
+      runtimeCapability(runtime, ["taskTools", "task_tools", "toolExecution", "tool_execution"]))
+  ) {
+    return {
+      state: "task_tools",
+      label: RUNTIME_PRESENTATION_LABELS.task_tools,
+    };
+  }
+  if (
+    ready &&
+    (tier === "chat_drafting" ||
+      tier === "chat" ||
+      tier === "completion" ||
+      tier === "a" ||
+      runtimeCapability(runtime, ["completion", "isolatedCompletion", "isolated_completion"]) ||
+      runtime.ready === true)
+  ) {
+    return {
+      state: "chat_drafting",
+      label: RUNTIME_PRESENTATION_LABELS.chat_drafting,
+    };
+  }
+  return {
+    state: "detected_unverified",
+    label: RUNTIME_PRESENTATION_LABELS.detected_unverified,
+  };
+}
+
 export function isFirstRunExtractedFact(block) {
   return EXTRACTED_FACT_KINDS.has(block?.kind);
 }
 
 export function runtimeSelectionReady(state) {
-  if (state?.providerFallback === true) return true;
+  if (state?.providerFallback === true) return false;
   const selectedId = String(state?.selectedId || "").trim();
   if (!selectedId) return false;
   return list(state?.runtimes).some(
     (runtime) =>
-      runtime?.id === selectedId && runtime?.ready === true && runtime?.selectable !== false
+      runtime?.id === selectedId && runtime?.ready === true && runtime?.selectable === true
   );
 }
 
 export function firstRunRuntimeChoices(state) {
+  const seen = new Set();
   return list(state?.runtimes)
+    .flatMap((runtime) => {
+      if (!runtime || typeof runtime !== "object" || Array.isArray(runtime)) return [];
+      const id = String(runtime.id || "").trim();
+      if (!id || seen.has(id)) return [];
+      seen.add(id);
+      return [{ ...runtime, id }];
+    })
     .sort(
       (left, right) =>
         (FIRST_RUN_RUNTIME_PRIORITY.get(left.id) ?? 2) -
         (FIRST_RUN_RUNTIME_PRIORITY.get(right.id) ?? 2)
     )
-    .map((runtime) => ({
-      id: runtime.id,
-      name: runtime.name,
-      detected: runtime.available === true,
-      ready: runtime.ready === true,
-      selectable: runtime.selectable !== false,
-      selected: runtime.id === state?.selectedId,
-      recommended: runtime.id === "claude",
-      status: runtime.status,
-      action: runtime.action,
-      capabilityReason: runtime.capabilityReason || null,
-    }));
+    .map((runtime) => {
+      const presentation = runtimePresentation(runtime);
+      return {
+        id: runtime.id,
+        name: String(runtime.name || runtime.id).trim() || runtime.id,
+        detected: runtime.available === true || runtime.detected === true || runtime.ready === true,
+        ready: runtime.ready === true,
+        selectable: runtime.selectable === true,
+        toolExecutionSupported: runtime.toolExecutionSupported === true,
+        capabilities: runtime.capabilities,
+        capabilityTier: runtime.capabilityTier,
+        presentationState: presentation.state,
+        presentationLabel: presentation.label,
+        selected: runtime.id === state?.selectedId,
+        recommended: runtime.id === "claude",
+        status: runtime.status,
+        action: runtime.action,
+        installUrl: runtime.installUrl || null,
+        capabilityReason: runtime.capabilityReason || null,
+      };
+    });
 }
 
 export function firstRunAgentName(state, fallback = "Paul") {
@@ -83,6 +200,12 @@ function lineValue(values) {
 function editorField(id, label, type, value = "", extra = {}) {
   return { id, label, type, value, ...extra };
 }
+
+const REMOTE_SCOPE_OPTIONS = [
+  { value: "off", label: "Not open to remote roles" },
+  { value: "home-country", label: "Remote within my home country" },
+  { value: "worldwide", label: "Remote worldwide" },
+];
 
 function buildKnowledgeEditor(key, state) {
   const data = state?.data || {};
@@ -164,7 +287,10 @@ function buildKnowledgeEditor(key, state) {
             )
             .filter(Boolean)
             .join("\n"),
-          { placeholder: "One claim per line. Add supporting evidence after ::", rows: 9 }
+          {
+            placeholder: "One claim per line. Add supporting evidence after ::",
+            rows: 9,
+          }
         ),
       ],
     };
@@ -195,9 +321,23 @@ function buildKnowledgeEditor(key, state) {
           Number.isFinite(minimumBase) && minimumBase > 0 ? String(minimumBase) : "",
           { min: "0", step: "1000" }
         ),
-        editorField("remote", "Remote", "checkbox", "", { checked: location.remote === true }),
-        editorField("hybrid", "Hybrid", "checkbox", "", { checked: location.hybrid === true }),
-        editorField("onsite", "On-site", "checkbox", "", { checked: location.onsite === true }),
+        editorField(
+          "remoteScope",
+          "Remote job eligibility",
+          "select",
+          location.remote === true
+            ? location.remote_scope === "worldwide"
+              ? "worldwide"
+              : "home-country"
+            : "off",
+          { options: REMOTE_SCOPE_OPTIONS }
+        ),
+        editorField("hybrid", "Hybrid", "checkbox", "", {
+          checked: location.hybrid === true,
+        }),
+        editorField("onsite", "On-site", "checkbox", "", {
+          checked: location.onsite === true,
+        }),
       ],
     };
   }
@@ -315,7 +455,9 @@ export async function applyFirstRunConfirmation(block, { api, state } = {}) {
     const { capability, platform } = block.payload;
     await api.saveCandidateFile("automation", {
       setup_mode: "advanced",
-      capabilities: { [capability]: { enabled: true, platforms: { [platform]: true } } },
+      capabilities: {
+        [capability]: { enabled: true, platforms: { [platform]: true } },
+      },
       consent: { [platform]: true },
     });
     return "Permission granted";

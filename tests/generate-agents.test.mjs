@@ -142,13 +142,34 @@ test("renderLocalAgents: location remote appears in output", () => {
   assert.ok(out.includes("remote"), "location 'remote' missing from output");
 });
 
+test("renderLocalAgents: explicit worldwide remote scope is preserved in agent context", () => {
+  const p = {
+    ...profile,
+    location: {
+      ...profile.location,
+      remote_scope: "worldwide",
+      hybrid: true,
+      onsite: true,
+    },
+  };
+  const out = renderLocalAgents({ template, profile: p, targeting });
+
+  assert.match(out, /remote \(worldwide\)/);
+  assert.match(out, /hybrid/);
+  assert.match(out, /onsite/);
+  assert.match(out, /home: Austin, TX/);
+});
+
 test("renderLocalAgents: home city appears in output", () => {
   const out = renderLocalAgents({ template, profile, targeting });
   assert.ok(out.includes("Austin, TX"), "home city 'Austin, TX' missing from output");
 });
 
 test("renderLocalAgents: skips minimum_base when absent", () => {
-  const p = { ...profile, compensation: { currency: "USD", current_base: 199000 } };
+  const p = {
+    ...profile,
+    compensation: { currency: "USD", current_base: 199000 },
+  };
   const out = renderLocalAgents({ template, profile: p, targeting });
   assert.ok(!out.includes("Minimum base"), "Minimum base line should be absent when not set");
   assert.ok(!out.includes("199000"), "current_base must never appear");

@@ -429,6 +429,8 @@ const CONFIRM_BLOCK_GUIDANCE =
   "these blocks fully closed and out of prose otherwise; never describe the JSON to the user in words. " +
   "A candidate's notice period belongs at profile.authorization.notice_period, never " +
   "form-defaults.notice_period. Do not collect an earliest start date during initial setup. " +
+  "Final application submission always requires a separate user action. form-defaults contains " +
+  "ATS answers only and has no submission setting; never propose or persist one. " +
   "Emit a confirm block as soon as a fact is settled, not at the end of a topic: if the user gives " +
   "their name and email, send a candidate_patch for those two fields right away rather than waiting " +
   "to also collect phone, city, and links, so an interrupted conversation never loses everything " +

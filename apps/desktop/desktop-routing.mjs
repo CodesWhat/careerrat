@@ -17,3 +17,9 @@ export function normalizeDesktopRoute(value) {
   if (raw.startsWith("/")) return `/app${raw}`;
   return `/app/${raw}`;
 }
+
+export function rendererRouteFromDesktopRoute(value) {
+  const desktopRoute = normalizeDesktopRoute(value) || "/app";
+  const route = desktopRoute.slice("/app".length);
+  return route || "/";
+}

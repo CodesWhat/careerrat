@@ -133,7 +133,12 @@ function seedCandidateContext(repoRoot) {
     repoRoot,
     name: "sourced-scan",
     data: {
-      tracked_companies: [{ name: "Tracked ATS Co", careers_url: "https://jobs.lever.co/tracked" }],
+      tracked_companies: [
+        {
+          name: "Tracked ATS Co",
+          careers_url: "https://jobs.lever.co/tracked",
+        },
+      ],
     },
   });
   appUpsert({
@@ -238,6 +243,7 @@ test("buildCompanySeedContext includes candidate and dedupe inputs while omittin
   assert.deepEqual(context.locationPosture, {
     home: "New York, NY",
     remote: true,
+    remoteScope: "home-country",
     hybrid: true,
     onsite: false,
     relocation: ["NYC metro"],

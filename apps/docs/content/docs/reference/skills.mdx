@@ -1,9 +1,9 @@
 ---
 title: Skills Catalog
-description: All 21 skills — what each one does and when to invoke it.
+description: All 28 skills and what each one does.
 ---
 
-CareerRat ships 21 skills under `.agents/skills/`. Each is a `SKILL.md` file — a
+CareerRat ships 28 skills under `.agents/skills/`. Each is a `SKILL.md` file, a
 detailed, executable procedure the agent follows when routed to that skill. Skills
 are field-neutral: the same skill serves any candidate because it reads your
 private config, not hardcoded preferences.
@@ -11,18 +11,27 @@ private config, not hardcoded preferences.
 ## Apply cycle
 
 | Skill | Description |
-|-------|-------------|
+| ------- | ----------- |
 | `ingest-profile` | Interview a new candidate to produce all user-layer config files: profile, targeting, evidence, honesty boundaries, form defaults, writing style, personalized AGENTS.md, and seed search sources. Run on first setup or any major profile change. |
 | `setup-searches` | Build and maintain `config/search-sources.yml` from candidate targeting — generate a baseline from role buckets, curate enabled sources, add or import individual searches (including pasted board URLs with embedded filters preserved), and tune global filters. Upstream of search-jobs; does not scan. |
 | `search-jobs` | Run the top-of-funnel sourced sweep — scan configured sources, dedupe, check liveness, coarse-triage every new entry with fitScore/fitBucket/fitBasis, save JD bodies, write watermarks, and optionally hand top sourced roles to evaluate-job. Does not tailor, fill, or submit. |
 | `evaluate-job` | Body-read gate for a single job posting — fetch, save, check limits/comp/fit, emit GATE/FIT/COMP/ACTION, and write calibrated fit back to the tracker. Run before any tailoring or submission. |
+| `answer-question` | Draft evidence-grounded answers to one-off application or screening questions, reuse saved disclosure answers, and return `NEEDS YOU` instead of guessing when the evidence is insufficient. |
 | `tailor-application` | Generate finished, honest role-specific resumes, cover letters, short answers, and non-message outreach artifacts from a saved JD, source resume facts, candidate evidence bank, writing style, and form defaults after the job passes the CareerRat gate. Reject unresolved placeholders. |
 | `apply-job` | End-to-end job application workflow — gates on app limits and evaluate-job verdict, tailors artifacts, builds the render, prepares supported ATS forms (including LinkedIn Easy Apply), stops for user submission, verifies the reported outcome, and updates the tracker. |
+| `coach-gaps` | Turn each named REVIEW fit gap into an evidence-grounded claim draft or an explicit no-close path, then offer re-evaluation only after the evidence firewall confirms the change. |
+
+## Intake extraction
+
+| Skill | Description |
+| ------- | ----------- |
+| `intake-extract` | Backend-only verbatim transcription for PDF and image uploads sent through Universal Intake. It does not summarize, classify, or make candidate-specific assumptions. |
+| `resume-extract` | Backend-only structured extraction for PDF, image, and converted DOCX résumés. It emits the onboarding profile and targeting draft without inventing facts. |
 
 ## Research loop
 
 | Skill | Description |
-|-------|-------------|
+| ------- | ----------- |
 | `research-company` | Web-search a company across six domain-neutral axes and compose a cited `workspace/research/<slug>.md` artifact that feeds interview-prep and evaluate-job FIT context. |
 | `research-comp` | Web-search market comp for a role+location and produce a cited `workspace/research/comp-bench-*.md` that feeds evaluate-job COMP CHECK/ANCHOR and a confirm-first gate write-back. |
 | `research-boards` | Web-search and legitimacy-screen new job boards for the candidate's domain/role families, then propose adding to `search-sources.yml` confirm-first. |
@@ -32,7 +41,7 @@ private config, not hardcoded preferences.
 ## Communications
 
 | Skill | Description |
-|-------|-------------|
+| ------- | ----------- |
 | `email-comms` | Draft, reply to, follow up on, summarize, and track job-search email and recruiter-message threads — including thank-yous, scheduling, negotiation, and cold outreach — while persisting full thread context in the CareerRat tracker. |
 | `schedule-meeting` | Handle recruiter / hiring-team scheduling threads — read the proposed slots, the candidate's timezone and availability, and any calendar context; draft a clear availability reply, prepare a calendar-ready hold, and write scheduling state back to the tracker. Confirm-first before any outbound reply or calendar write. |
 | `ingest-mail` | Read job-search email updates from Apple Mail on macOS or, with separate mail_access consent, Gmail/Outlook webmail through the session browser; fold recruiter replies and status changes into CareerRat tracker communication state. Opt-in, local-only, read-only. |
@@ -41,7 +50,7 @@ private config, not hardcoded preferences.
 ## Interview & outcomes
 
 | Skill | Description |
-|-------|-------------|
+| ------- | ----------- |
 | `interview-prep` | Build interview packets, script live comp answers, and capture post-interview debriefs and durable lessons from a saved JD, tracker record, candidate evidence, and interview invite context. |
 | `track-outcomes` | Record application outcomes, execute status transitions in tracker.json, append durable patterns to role-family learning files, check reevaluation thresholds, and write back any mid-flow gate changes stated by the user. |
 | `reevaluate-strategy` | Learn from accumulated outcomes — read the funnel, rejections, interview transcripts, and wins, then recommend concrete tuning to targeting signals, comp anchoring, fit calibration, channel mix, and writing-style. Triggered by outcome thresholds or an explicit review request. |
@@ -49,7 +58,7 @@ private config, not hardcoded preferences.
 ## Optimization & sync
 
 | Skill | Description |
-|-------|-------------|
+| ------- | ----------- |
 | `optimize-linkedin` | Read the candidate's LinkedIn profile through the session browser, diff it against their targeting and evidence, and propose honest, evidence-backed rewrites of the headline / About / experience / skills / Featured — then, with a separate opt-in, write the approved edits back confirm-first per field. |
 | `sync-status` | Read application status from ATS dashboards via the session browser, normalize each raw label to the canonical tracker vocabulary, and hand real transitions to track-outcomes — which remains the only writer of workspace/tracker.json. Opt-in, user-initiated, read-only at the portal. |
 | `relationship-sourcing` | Find likely recruiters, hiring-team members, or warm contacts for tracked companies through the session browser, then capture candidate-reviewed leads into Network. Opt-in, user-initiated, local-only. |
@@ -57,12 +66,12 @@ private config, not hardcoded preferences.
 ## Settings & calendar
 
 | Skill | Description |
-|-------|-------------|
+| ------- | ----------- |
 | `configure` | Show current settings and route changes to the validated CLI or owning skill — never a new mutation path itself. |
 | `calendar-sync` | Write tracker-derived interviews, assessments, follow-ups, prep blocks, and deadlines to Apple Calendar, Google Calendar, Outlook, or approved local automation tools. Opt-in, user-initiated, confirm-first. |
 
 ## Diagnostics
 
 | Skill | Description |
-|-------|-------------|
+| ------- | ----------- |
 | `report-issue` | When CareerRat itself looks broken — a crash, stack trace, non-zero exit, or clearly-wrong output — separate a real defect from a config problem, assemble redacted diagnostics (no candidate PII, comp, or workspace contents), and, only with an explicit yes, open a GitHub issue on the upstream `CodesWhat/careerrat` repo under the user's own `gh` identity. Never auto-files; falls back to a prefilled issue URL when `gh` is unavailable. |

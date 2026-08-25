@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { profileSettingsApi } from "./api.js";
+import { useDesktopUpdate } from "./desktop-update.js";
 import { ProfileSettings } from "./ProfileSettings.jsx";
 import {
   buildProfileSettingsModel,
@@ -22,6 +23,7 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
     () => location.state?.openEnginePicker === true
   );
   const [enginePickerBusy, setEnginePickerBusy] = useState(false);
+  const [engineSignInId, setEngineSignInId] = useState(null);
   const [sourceDialogOpen, setSourceDialogOpen] = useState(false);
   const [sourceDialogBusy, setSourceDialogBusy] = useState(false);
   const [sourceDraft, setSourceDraft] = useState("");
@@ -31,6 +33,7 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   const [editingSection, setEditingSection] = useState(null);
   const [editorValues, setEditorValues] = useState({});
   const [editorBusy, setEditorBusy] = useState(false);
+  const desktopUpdate = useDesktopUpdate();
 
   async function load() {
     const [onboard, runtimes, automation, sources] = await Promise.all([
@@ -42,6 +45,7 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
     const next = { onboard, runtimes, automation, sources };
     setModel(buildProfileSettingsModel(next));
     setError(null);
+    return next;
   }
 
   useEffect(() => {
@@ -160,7 +164,7 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
     setError(null);
     try {
       await action();
-      await load();
+      return await load();
     } catch (cause) {
       setError(cause?.message || fallback);
     } finally {
@@ -169,24 +173,33 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   }
 
   async function selectEngine(runtimeId) {
-    await updateRuntime(
+    const result = await updateRuntime(
       () => api.selectInstalledAiRuntime({ runtimeId }),
       "That AI engine could not be selected."
     );
+    if (result) setEngineSignInId(null);
   }
 
   async function connectEngine(runtimeId) {
-    await updateRuntime(
-      () => api.openInstalledAiRuntimeTerminal(runtimeId),
-      "The sign-in terminal could not be opened."
-    );
+    const result = await updateRuntime(async () => {
+      await api.startInstalledAiRuntimeSignIn(runtimeId);
+      setEngineSignInId(runtimeId);
+    }, "That AI sign-in could not be started.");
+    if (!result) setEngineSignInId(null);
   }
 
   async function retryEngine(runtimeId) {
-    await updateRuntime(
+    const result = await updateRuntime(
       () => api.probeInstalledAiRuntime(runtimeId),
       "CareerRat could not check that AI engine."
     );
+    if (
+      result?.runtimes?.runtimes?.some(
+        (runtime) => runtime.id === runtimeId && runtime.ready === true
+      )
+    ) {
+      setEngineSignInId(null);
+    }
   }
 
   function addSource() {
@@ -244,6 +257,15 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
         onOpenFiles={() => navigate("/", { state: { browse: "files" } })}
         onPermissionChange={changePermission}
         publicSyncBusy={publicSyncBusy}
+        desktopUpdate={{
+          available: desktopUpdate.available,
+          enabled: desktopUpdate.enabled,
+          saving: desktopUpdate.saving,
+          checking: desktopUpdate.checking,
+          status: desktopUpdate.status,
+          onEnabledChange: desktopUpdate.setEnabled,
+          onCheckNow: desktopUpdate.checkNow,
+        }}
         onPublicSyncChange={changePublicSync}
         onChangeEngine={changeEngine}
         onShowTechnicalDetails={() => setTechnicalDetailsOpen(true)}
@@ -251,6 +273,7 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
         onExportData={exportData}
         enginePickerOpen={enginePickerOpen}
         enginePickerBusy={enginePickerBusy}
+        engineSignInId={engineSignInId}
         onCloseEnginePicker={() => setEnginePickerOpen(false)}
         onSelectEngine={selectEngine}
         onConnectEngine={connectEngine}

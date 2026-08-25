@@ -109,6 +109,17 @@ function mergeFilterObject(existing = {}, generated = {}) {
   return merged;
 }
 
+function mergeLocationFilter(existing = {}, generated = {}) {
+  const merged = mergeFilterObject(existing, generated);
+  for (const key of ["allow", "block"]) {
+    if (Array.isArray(generated?.[key])) merged[key] = compactArrayValues(generated[key]);
+  }
+  if (generated?.needs_location !== undefined) {
+    merged.needs_location = generated.needs_location;
+  }
+  return merged;
+}
+
 function sourceEntryKey(entry = {}) {
   const provider = String(entry.provider || entry.platform || "")
     .trim()
@@ -243,7 +254,7 @@ function mergeSearchSources(existing = {}, generated = {}) {
     ...generated,
     ...existing,
     title_filter: mergeFilterObject(existing.title_filter, generated.title_filter),
-    location_filter: mergeFilterObject(existing.location_filter, generated.location_filter),
+    location_filter: mergeLocationFilter(existing.location_filter, generated.location_filter),
     searches: resyncDomainGatedEntries(
       mergeEntries(reconciledExistingSearches, generated.searches, sourceEntryKey),
       generated.searches,
@@ -327,7 +338,11 @@ function knownCompanyNames(sourcedScan) {
 function cachedBoardHint({ repoRoot, env, name }) {
   const companyKey = normalizeCompanyKey(name);
   if (!companyKey) return "";
-  const cached = companyBoardResolutionGet({ repoRoot, env, companyKey }).resolution;
+  const cached = companyBoardResolutionGet({
+    repoRoot,
+    env,
+    companyKey,
+  }).resolution;
   return String(cached?.job_board_url || cached?.careers_url || "").trim();
 }
 
@@ -349,7 +364,10 @@ async function resolveAndPromoteCompanyBoard({ repoRoot, env, fetchImpl, name, h
       companyAtsUpsert({
         repoRoot,
         env,
-        entry: { name: result.companyName || name, careers_url: result.careersUrl },
+        entry: {
+          name: result.companyName || name,
+          careers_url: result.careersUrl,
+        },
       });
       promoted = true;
     }
@@ -406,7 +424,13 @@ async function aiRescueHintlessCompanies({ repoRoot, env, call, fetchImpl, names
   }
 
   const hintedSeeds = filled ? filled.seeds.filter((seed) => seed.domain_hint) : [];
-  const outcome = { requested, hinted: hintedSeeds.length, attempted: 0, resolved: 0, promoted: 0 };
+  const outcome = {
+    requested,
+    hinted: hintedSeeds.length,
+    attempted: 0,
+    resolved: 0,
+    promoted: 0,
+  };
   if (!hintedSeeds.length) return outcome;
 
   const deadline = Date.now() + COMPANY_BOARD_BACKFILL_BUDGET_MS;
@@ -430,7 +454,12 @@ async function aiRescueHintlessCompanies({ repoRoot, env, call, fetchImpl, names
     }
   }
   await Promise.all(
-    Array.from({ length: Math.min(COMPANY_BOARD_BACKFILL_CONCURRENCY, hintedSeeds.length) }, worker)
+    Array.from(
+      {
+        length: Math.min(COMPANY_BOARD_BACKFILL_CONCURRENCY, hintedSeeds.length),
+      },
+      worker
+    )
   );
   return outcome;
 }
@@ -584,7 +613,12 @@ async function startSearchRun({
     };
   }
   ensureSearchReady(pathCtx, config);
-  const prepared = await prepareFirstSearchSources({ repoRoot, env, fetchImpl, config });
+  const prepared = await prepareFirstSearchSources({
+    repoRoot,
+    env,
+    fetchImpl,
+    config,
+  });
   const deterministicSources = prepared.deterministicSources;
   const start = sourcingRunStart({
     ...pathCtx,
@@ -599,7 +633,11 @@ async function startSearchRun({
 
   let run = start.run;
   if (start.reused !== true && deterministicSources.attempted < 1) {
-    run = sourcingRunFail({ ...pathCtx, id: start.run.id, error: sourceSetupError() }).run;
+    run = sourcingRunFail({
+      ...pathCtx,
+      id: start.run.id,
+      error: sourceSetupError(),
+    }).run;
   }
 
   return {
@@ -662,19 +700,40 @@ export function healSearchSourceConfig({ repoRoot, env = process.env, config = n
   const generated = buildSearchSources(candidateConfig.targeting, candidateConfig.profile);
   const current = sourceConfigGet({ ...pathCtx, name: "search-sources" });
   const merged = current.stored === true ? mergeSearchSources(current.data, generated) : generated;
-  const sourcedScan = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
+  const sourcedScan = sourceConfigGet({
+    ...pathCtx,
+    name: "sourced-scan",
+  }).data;
 
-  const before = countDeterministicSources({ searchSources: current.data, sourcedScan });
-  const after = countDeterministicSources({ searchSources: merged, sourcedScan });
+  const before = countDeterministicSources({
+    searchSources: current.data,
+    sourcedScan,
+  });
+  const after = countDeterministicSources({
+    searchSources: merged,
+    sourcedScan,
+  });
   const changed =
     after.attempted > before.attempted || JSON.stringify(merged) !== JSON.stringify(current.data);
 
   if (!changed) {
-    return { healed: false, searchSources: current.data, deterministicSources: before };
+    return {
+      healed: false,
+      searchSources: current.data,
+      deterministicSources: before,
+    };
   }
 
-  const written = sourceConfigPut({ ...pathCtx, name: "search-sources", data: merged });
-  return { healed: true, searchSources: written.data, deterministicSources: after };
+  const written = sourceConfigPut({
+    ...pathCtx,
+    name: "search-sources",
+    data: merged,
+  });
+  return {
+    healed: true,
+    searchSources: written.data,
+    deterministicSources: after,
+  };
 }
 
 export async function prepareFirstSearchSources({
@@ -693,15 +752,25 @@ export async function prepareFirstSearchSources({
   const generated = buildSearchSources(candidateConfig.targeting, candidateConfig.profile);
   const current = sourceConfigGet({ ...pathCtx, name: "search-sources" });
   const next = current.stored === true ? mergeSearchSources(current.data, generated) : generated;
-  const sources = sourceConfigPut({ ...pathCtx, name: "search-sources", data: next });
-  const currentSourcedScan = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
+  const sources = sourceConfigPut({
+    ...pathCtx,
+    name: "search-sources",
+    data: next,
+  });
+  const currentSourcedScan = sourceConfigGet({
+    ...pathCtx,
+    name: "sourced-scan",
+  }).data;
   let sourcedScan = sourceConfigPut({
     ...pathCtx,
     name: "sourced-scan",
     data: {
       ...currentSourcedScan,
       title_filter: mergeFilterObject(currentSourcedScan.title_filter, next.title_filter),
-      location_filter: mergeFilterObject(currentSourcedScan.location_filter, next.location_filter),
+      location_filter: mergeLocationFilter(
+        currentSourcedScan.location_filter,
+        next.location_filter
+      ),
     },
   }).data;
 
@@ -774,9 +843,16 @@ export async function runFirstSearchInBackground({
   const pathCtx = { repoRoot, env };
   try {
     const { searchSources, sourcedScan } = currentSourceConfigs(pathCtx);
-    const deterministicSources = countDeterministicSources({ searchSources, sourcedScan });
+    const deterministicSources = countDeterministicSources({
+      searchSources,
+      sourcedScan,
+    });
     if (deterministicSources.attempted < 1) {
-      return sourcingRunFail({ ...pathCtx, id: runId, error: sourceSetupError() }).run;
+      return sourcingRunFail({
+        ...pathCtx,
+        id: runId,
+        error: sourceSetupError(),
+      }).run;
     }
 
     // Progress is best-effort telemetry. A failed progress write (e.g. the run

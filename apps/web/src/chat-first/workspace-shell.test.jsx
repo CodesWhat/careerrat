@@ -78,6 +78,66 @@ describe("TopBar", () => {
     expect(html).not.toContain("Open activity");
   });
 
+  it("shows desktop update status and actions without adding controls to browser mode", () => {
+    const onOpenRelease = vi.fn();
+    const onDismiss = vi.fn();
+    const desktop = TopBar({
+      agentName: "Mina",
+      showActivity: false,
+      desktopUpdate: {
+        visible: true,
+        kind: "available",
+        version: "0.14.1",
+        onOpenRelease,
+        onDismiss,
+      },
+    });
+    const desktopHtml = markup(desktop);
+
+    expect(desktopHtml).toContain('aria-label="CareerRat update available"');
+    expect(desktopHtml).toContain("CareerRat 0.14.1 is ready");
+    expect(desktopHtml).toContain("Download");
+    expect(desktopHtml).toContain("Later");
+
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(visit);
+      if (typeof node.type === "function") return visit(node.type(node.props));
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(desktop);
+    buttons.find((node) => node?.props?.children === "Download").props.onClick();
+    buttons.find((node) => node?.props?.children === "Later").props.onClick();
+    expect(onOpenRelease).toHaveBeenCalledOnce();
+    expect(onDismiss).toHaveBeenCalledOnce();
+
+    const browserHtml = markup(<TopBar agentName="Mina" showActivity={false} />);
+    expect(browserHtml).not.toContain("CareerRat update available");
+    expect(browserHtml).not.toContain("Check for updates");
+  });
+
+  it("hides Download and explains recovery when an available release has no safe URL", () => {
+    const html = markup(
+      <TopBar
+        showActivity={false}
+        desktopUpdate={{
+          visible: true,
+          kind: "available",
+          version: "0.14.1",
+          canOpenRelease: false,
+          message:
+            "CareerRat 0.14.1 is available, but its release link is unavailable. Check again.",
+        }}
+      />
+    );
+
+    expect(html).toContain("release link is unavailable");
+    expect(html).not.toContain(">Download</button>");
+    expect(html).toContain(">Later</button>");
+  });
+
   it("keeps a full day of activity inside the fixed desktop window", () => {
     const css = readFileSync(fileURLToPath(new URL("./chat-first.css", import.meta.url)), "utf8");
 

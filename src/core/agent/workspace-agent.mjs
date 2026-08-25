@@ -181,6 +181,8 @@ export const EXECUTABLE_INTENTS = new Set([
   "calendar.record-write",
   "relationship.record-lead",
   "relationship.source-request",
+  "status.connect-portal-request",
+  "status.connect-portal",
   "status.sync-request",
   "mail.sync-request",
   "messages.sync-request",
@@ -456,6 +458,16 @@ function statusPollingPlatformForUrl(url) {
     return null;
   }
   return null;
+}
+
+function statusPollingPlatformForApplication(application = {}) {
+  const declared = String(application.statusPlatform || "")
+    .trim()
+    .toLowerCase();
+  if (["greenhouse", "workday", "ashby", "lever"].includes(declared)) return declared;
+  return statusPollingPlatformForUrl(
+    application.statusUrl || application.portalUrl || application.applicationUrl
+  );
 }
 
 // Mail sync sources: one entry per ingest-mail webmail platform (the list
@@ -1388,6 +1400,26 @@ function resolveNaturalWorkspaceRequest({ repoRoot, env, intent }) {
       entity: { type: "application", id: application.id },
     };
   }
+  if (intent.type === "status.connect-portal-request") {
+    const url = safeExternalHttpUrl(input.url);
+    if (!url || new URL(url).protocol !== "https:") {
+      throw actionError(
+        "Paste a full https:// application dashboard URL.",
+        "STATUS_PORTAL_URL_INVALID"
+      );
+    }
+    const application = resolveReferencedApplication({
+      repoRoot,
+      env,
+      jobReference: input.jobReference,
+    });
+    return {
+      ...intent,
+      type: "status.connect-portal",
+      entity: { type: "application", id: application.id },
+      input: { url },
+    };
+  }
   if (intent.type === "application.record-external-request") {
     const application = resolveReferencedApplication({
       repoRoot,
@@ -1662,7 +1694,11 @@ function packetQuestionLineageIsStale(application) {
   );
   const lineage = manifest.answerLineage;
   const lineageIds = new Set(
-    [...idsFrom(lineage?.answeredQuestionIds), ...idsFrom(lineage?.excludedQuestionIds)]
+    [
+      ...idsFrom(lineage?.answeredQuestionIds),
+      ...idsFrom(lineage?.skippedQuestionIds),
+      ...idsFrom(lineage?.excludedQuestionIds),
+    ]
       .map((id) => String(id || "").trim())
       .filter(Boolean)
   );
@@ -2463,6 +2499,27 @@ function appendActionResult({
   return { ...workspaceThreadRead({ repoRoot, env }), operationResult };
 }
 
+function workflowActionMetadata(normalized, execution, retryLabel, extra = {}) {
+  return {
+    state: execution?.state || "requested",
+    ...extra,
+    ...(execution?.state === "needs-user"
+      ? {
+          nextActions: [
+            {
+              label: retryLabel,
+              intent: {
+                type: normalized.type,
+                entity: normalized.entity,
+                input: normalized.input || {},
+              },
+            },
+          ],
+        }
+      : {}),
+  };
+}
+
 export async function executeWorkspaceIntent({
   repoRoot,
   env = process.env,
@@ -2487,6 +2544,12 @@ export async function executeWorkspaceIntent({
   startCompanyResearchImpl,
   startCompResearchImpl,
   startCompanyHealthImpl,
+  runMailSyncImpl,
+  runWebmailSyncImpl,
+  runMessagesSyncImpl,
+  runRelationshipSourcingImpl,
+  runLinkedinOptimizeImpl,
+  runStatusSyncImpl,
   buildCoachingPlanImpl = buildCoachingPlan,
   onSearchStarted,
   searchFetchImpl,
@@ -5243,10 +5306,32 @@ export async function executeWorkspaceIntent({
             repoRoot,
             env,
             id: applicationId,
-            patch: { nextAction: `Run relationship-sourcing for ${company}`, nextActionDue: null },
+            patch: {
+              nextAction: `Relationship sourcing in progress for ${company}`,
+              nextActionDue: null,
+            },
           });
           ctaRecorded = true;
         }
+      }
+
+      const role = applicationId
+        ? applicationForIntent({ repoRoot, env, id: applicationId }).role || null
+        : null;
+      const execution =
+        typeof runRelationshipSourcingImpl === "function"
+          ? await runRelationshipSourcingImpl({ company, applicationId, role })
+          : null;
+      if (execution?.state === "needs-user" && applicationId && ctaRecorded) {
+        appSetFields({
+          repoRoot,
+          env,
+          id: applicationId,
+          patch: {
+            nextAction: `Retry relationship sourcing for ${company} after browser sign-in`,
+            nextActionDue: null,
+          },
+        });
       }
 
       return appendActionResult({
@@ -5254,7 +5339,9 @@ export async function executeWorkspaceIntent({
         env,
         normalized,
         intentMessage,
-        text: `Sourcing requested for ${company}. Run the relationship-sourcing skill from your agent or terminal to search; new leads land in the Network tab for your review.`,
+        text:
+          execution?.summary ||
+          `Relationship sourcing for ${company} is ready in CareerRat. New leads land in the Network tab for your review.`,
         artifacts: [
           {
             kind: "sourcing_handoff",
@@ -5264,8 +5351,11 @@ export async function executeWorkspaceIntent({
             ctaRecorded,
             at: requestDate(now).toISOString(),
           },
+          ...(execution ? [execution] : []),
         ],
-        metadata: { state: "requested", ctaRecorded },
+        metadata: workflowActionMetadata(normalized, execution, "Retry people sourcing", {
+          ctaRecorded,
+        }),
         now,
       });
     }
@@ -5285,11 +5375,7 @@ export async function executeWorkspaceIntent({
       const applications = assembleTrackerObject(requireDb({ repoRoot, env })).applications || [];
       for (const entry of platforms) {
         entry.eligible = applications.filter((application) => {
-          if (
-            statusPollingPlatformForUrl(
-              application.link || application.url || application.sourceUrl
-            ) !== entry.platform
-          ) {
+          if (statusPollingPlatformForApplication(application) !== entry.platform) {
             return false;
           }
           // In-flight only: settled stages are excluded by classified stage so
@@ -5299,20 +5385,32 @@ export async function executeWorkspaceIntent({
         }).length;
       }
 
+      const eligibleApplications = applications.filter((application) => {
+        const stageId = classifyStage(application.status).id;
+        return !["rejected", "withdrawn", "offer", "accepted"].includes(stageId);
+      });
+      const execution =
+        typeof runStatusSyncImpl === "function"
+          ? await runStatusSyncImpl({ applications: eligibleApplications })
+          : null;
+
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: "Status check requested. Run the sync-status skill from your agent or terminal to read your job portals; any updates come back here for review.",
+        text:
+          execution?.summary ||
+          "Portal status checking is ready in CareerRat. Any updates come back here for review.",
         artifacts: [
           {
             kind: "status_sync_handoff",
             platforms,
             at: requestDate(now).toISOString(),
           },
+          ...(execution ? [execution] : []),
         ],
-        metadata: { state: "requested" },
+        metadata: workflowActionMetadata(normalized, execution, "Retry portal status check"),
         now,
       });
     }
@@ -5338,12 +5436,54 @@ export async function executeWorkspaceIntent({
         (comm) => comm.channel === "email" && comm.status === "needs-reply"
       ).length;
 
+      const appleMailSource = sources.find(
+        (source) => source.id === "apple-mail" && source.allowed
+      );
+      const mailResult =
+        appleMailSource && typeof runMailSyncImpl === "function"
+          ? await runMailSyncImpl({
+              source: appleMailSource,
+              applications: tracker.applications || [],
+            })
+          : null;
+      const supervisedSources = sources.filter(
+        (source) => source.id !== "apple-mail" && source.allowed
+      );
+      const webmailResult =
+        supervisedSources.length && typeof runWebmailSyncImpl === "function"
+          ? await runWebmailSyncImpl({
+              sources: supervisedSources,
+              applications: tracker.applications || [],
+            })
+          : null;
+
+      const mailResultArtifact = mailResult
+        ? {
+            ...mailResult,
+            title: "Apple Mail check",
+            summary: mailResult.blocker
+              ? mailResult.blocker.message
+              : `${mailResult.captured} new message${mailResult.captured === 1 ? "" : "s"} captured`,
+          }
+        : null;
+      const resultCopy = mailResult?.blocker
+        ? mailResult.blocker.message
+        : mailResult
+          ? `Checked Apple Mail and captured ${mailResult.captured} new job-search message${mailResult.captured === 1 ? "" : "s"}.`
+          : null;
+      const mailExecution =
+        mailResult?.blocker || webmailResult?.state === "needs-user"
+          ? { state: "needs-user" }
+          : webmailResult || mailResult;
+
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: "Mail check requested. Run the ingest-mail skill from your agent or terminal to read your mail; anything it finds comes back here for review.",
+        text:
+          [resultCopy, webmailResult?.summary].filter(Boolean).join(" ") ||
+          "Mail checking is ready in CareerRat.",
         artifacts: [
           {
             kind: "mail_sync_handoff",
@@ -5351,8 +5491,10 @@ export async function executeWorkspaceIntent({
             needsReply,
             at: requestDate(now).toISOString(),
           },
+          ...(mailResultArtifact ? [mailResultArtifact] : []),
+          ...(webmailResult ? [webmailResult] : []),
         ],
-        metadata: { state: "requested" },
+        metadata: workflowActionMetadata(normalized, mailExecution, "Retry mail check"),
         now,
       });
     }
@@ -5375,12 +5517,19 @@ export async function executeWorkspaceIntent({
         (comm) => comm.channel === "linkedin" && comm.status === "needs-reply"
       ).length;
 
+      const execution =
+        typeof runMessagesSyncImpl === "function"
+          ? await runMessagesSyncImpl({ sources, applications: tracker.applications || [] })
+          : null;
+
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: "Message check requested. Run the ingest-messages skill from your agent or terminal to read your messages; anything it finds comes back here for review.",
+        text:
+          execution?.summary ||
+          "Message checking is ready in CareerRat. Anything it finds comes back here for review.",
         artifacts: [
           {
             kind: "messages_sync_handoff",
@@ -5388,8 +5537,9 @@ export async function executeWorkspaceIntent({
             needsReply,
             at: requestDate(now).toISOString(),
           },
+          ...(execution ? [execution] : []),
         ],
-        metadata: { state: "requested" },
+        metadata: workflowActionMetadata(normalized, execution, "Retry message check"),
         now,
       });
     }
@@ -5422,18 +5572,27 @@ export async function executeWorkspaceIntent({
         },
       ];
       const batch = linkedinProposalBatchLatest({ repoRoot, env });
+      const execution =
+        capabilities[0].allowed && typeof runLinkedinOptimizeImpl === "function"
+          ? await runLinkedinOptimizeImpl({ profileUrl: null })
+          : null;
 
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: "LinkedIn review requested. Run the optimize-linkedin skill from your agent or terminal to read your profile and draft suggestions; they come back here for your review.",
+        text: execution
+          ? execution.summary
+          : capabilities[0].allowed
+            ? "LinkedIn profile review is ready in CareerRat. Suggestions come back here for your approval."
+            : "Turn on LinkedIn profile review in Settings to read your profile and draft suggestions here.",
         artifacts: [
           linkedinOptimizeHandoffArtifact({ capabilities, batch, now }),
           ...(batch ? [linkedinProfileProposalsArtifact(batch)] : []),
+          ...(execution ? [execution] : []),
         ],
-        metadata: { state: "requested" },
+        metadata: workflowActionMetadata(normalized, execution, "Retry LinkedIn review"),
         now,
       });
     }
@@ -5979,6 +6138,41 @@ export async function executeWorkspaceIntent({
           submissionVerified: false,
           appliedAt,
         },
+        now,
+      });
+    }
+
+    if (normalized.type === "status.connect-portal") {
+      const statusUrl = safeExternalHttpUrl(input.url);
+      const statusPlatform = statusPollingPlatformForUrl(statusUrl);
+      if (!statusUrl || new URL(statusUrl).protocol !== "https:" || !statusPlatform) {
+        throw actionError(
+          "Use a Greenhouse, Workday, Ashby, or Lever application dashboard URL.",
+          "STATUS_PORTAL_UNSUPPORTED"
+        );
+      }
+      appSetFields({
+        repoRoot,
+        env,
+        id: normalized.entity.id,
+        patch: { statusUrl, statusPlatform },
+      });
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: `Connected the ${statusPlatform} status portal for ${applicationLabel(application)}.`,
+        artifacts: [
+          {
+            kind: "status_portal_connection",
+            title: `${application.company}: Status portal connected`,
+            summary: `${statusPlatform} is ready for in-app status checks.`,
+            applicationId: application.id,
+            platform: statusPlatform,
+          },
+        ],
+        metadata: { state: "connected", applicationId: application.id, statusPlatform },
         now,
       });
     }
@@ -7681,9 +7875,8 @@ function relationshipRecordLeadFromText(text) {
 }
 
 // "find a recruiter at Acme" / "who do I know at Acme" / "get me a warm
-// intro to Acme" — a consent-checked sourcing handoff. This never drives a
-// browser itself; it only records the request and, when consent allows it,
-// points the candidate at the relationship-sourcing skill.
+// intro to Acme" — a consent-checked request for the app-owned relationship
+// sourcing controller.
 function relationshipSourceRequestFromText(text) {
   const value = String(text || "").trim();
   if (!value) return null;
@@ -7740,8 +7933,20 @@ function statusRecordPortalFromText(text) {
   return null;
 }
 
+function statusConnectPortalFromText(text) {
+  const value = String(text || "").trim();
+  const url = firstHttpUrl(value);
+  if (!url) return null;
+  let match = value.match(/\b(?:status|application)\s+portal\s+for\s+(.+?)\s*[.?!]*$/i);
+  if (!match) {
+    match = value.match(/^(.+?)\s+(?:status|application)\s+portal\s+(?:is|=)\s+https?:\/\//i);
+  }
+  const jobReference = String(match?.[1] || "").trim();
+  return jobReference ? { input: { jobReference, url } } : null;
+}
+
 // "check my application statuses" / "sync my portal status" — a
-// consent-checked handoff to the sync-status skill. Deliberately requires
+// consent-checked request for the app-owned status controller. Deliberately requires
 // the word status/statuses so it never collides with the generic
 // jobs/roles/postings/boards/sources vocabulary the terminal search.run
 // catch-all owns.
@@ -7755,8 +7960,8 @@ function statusSyncRequestFromText(text) {
   return match ? { input: {} } : null;
 }
 
-// "check my inbox" / "any new recruiter emails" — a consent-checked handoff
-// to the ingest-mail skill. Anchored (^...$) like statusSyncRequestFromText
+// "check my inbox" / "any new recruiter emails" — a consent-checked request
+// for the app-owned mail controller. Anchored (^...$) like statusSyncRequestFromText
 // so it never matches "email"/"mail" mentioned mid-sentence: drafting a
 // reply, reporting a sent email, mail settings, or job/status vocabulary
 // that happens to share the word "check".
@@ -7779,7 +7984,7 @@ function mailSyncRequestFromText(text) {
 }
 
 // "check my messages" / "any new linkedin messages" — a consent-checked
-// handoff to the ingest-messages skill. Anchored (^...$) like
+// request for the app-owned messages controller. Anchored (^...$) like
 // mailSyncRequestFromText so it never matches "message"/"dm" mentioned
 // mid-sentence: sending a message, drafting a reply, messaging settings, or
 // unrelated status/email checks that happen to share the word "check".
@@ -7804,8 +8009,8 @@ function messagesSyncRequestFromText(text) {
 }
 
 // "optimize my linkedin" / "review my linkedin profile" / "make my linkedin
-// profile read for staff roles" — a consent-checked handoff to the
-// optimize-linkedin skill. Anchored (^...$) and requires the literal token
+// profile read for staff roles" — a consent-checked request for the app-owned
+// LinkedIn review controller. Anchored (^...$) and requires the literal token
 // "linkedin" so it never matches "review my profile", "update my resume", or
 // "review my search strategy" (which stays strategy.review), and the verb
 // list (optimize/review/improve/update/polish) never overlaps
@@ -8184,7 +8389,8 @@ const ACTION_PREVIEW_RULES = [
   },
   // ORDERING REQUIREMENT: settings.explain / settings.apply / issue.report /
   // calendar.record-write / relationship.record-lead / relationship.source-request /
-  // status.record-portal-request / status.sync-request / mail.sync-request /
+  // status.connect-portal-request / status.record-portal-request /
+  // status.sync-request / mail.sync-request /
   // messages.sync-request / linkedin.optimize-request MUST stay above the
   // terminal search.run catch-all immediately below — that rule matches a
   // bare "check"/"search"/"find"/"run" verb near "jobs/roles/postings/boards/
@@ -8258,6 +8464,15 @@ const ACTION_PREVIEW_RULES = [
       type: "relationship.source-request",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
       input: relationshipSourceRequestFromText(text).input,
+    }),
+  },
+  {
+    test: (text) => Boolean(statusConnectPortalFromText(text)),
+    label: "Connect this status portal",
+    intent: (text) => ({
+      type: "status.connect-portal-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: statusConnectPortalFromText(text).input,
     }),
   },
   {
@@ -8472,6 +8687,12 @@ export function createWorkspaceAgentRuntime({
   startCompanyResearchImpl,
   startCompResearchImpl,
   startCompanyHealthImpl,
+  runMailSyncImpl,
+  runWebmailSyncImpl,
+  runMessagesSyncImpl,
+  runRelationshipSourcingImpl,
+  runLinkedinOptimizeImpl,
+  runStatusSyncImpl,
   runSearchInBackgroundImpl = runFirstSearchInBackground,
   searchFetchImpl = fetch,
   applyJobImpl,
@@ -8540,6 +8761,12 @@ export function createWorkspaceAgentRuntime({
           startCompanyResearchImpl,
           startCompResearchImpl,
           startCompanyHealthImpl,
+          runMailSyncImpl,
+          runWebmailSyncImpl,
+          runMessagesSyncImpl,
+          runRelationshipSourcingImpl,
+          runLinkedinOptimizeImpl,
+          runStatusSyncImpl,
           onSearchStarted: startSearchInBackground,
           searchFetchImpl,
           applyJobImpl,

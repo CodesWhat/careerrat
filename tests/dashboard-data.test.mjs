@@ -80,9 +80,24 @@ test("Dashboard adapter excludes reviewed holds from application counts", () => 
     {
       meta: {},
       applications: [
-        { id: "hold-1", company: "Hold One", role: "Engineer", status: "reviewed-hold" },
-        { id: "hold-2", company: "Hold Two", role: "Engineer", status: "reviewed-hold" },
-        { id: "applied-1", company: "Active", role: "Engineer", status: "applied" },
+        {
+          id: "hold-1",
+          company: "Hold One",
+          role: "Engineer",
+          status: "reviewed-hold",
+        },
+        {
+          id: "hold-2",
+          company: "Hold Two",
+          role: "Engineer",
+          status: "reviewed-hold",
+        },
+        {
+          id: "applied-1",
+          company: "Active",
+          role: "Engineer",
+          status: "applied",
+        },
       ],
       sourced: [],
       sources: [],
@@ -357,7 +372,12 @@ test("Calendar counts and names a scheduled round inside the rolling 14-day hori
 });
 
 test("buildCalendarSync maps each providerStatus shape to its status label", () => {
-  const tracker = { applications: [], sourced: [], sources: [], communications: [] };
+  const tracker = {
+    applications: [],
+    sourced: [],
+    sources: [],
+    communications: [],
+  };
 
   const withMap = buildDashboardViewModel(tracker, {
     now: new Date("2026-08-15T12:00:00.000Z"),
@@ -443,7 +463,9 @@ test("normalizeCalendarWrite passes through an explicit manual provenance and de
     ],
   };
 
-  const vm = buildDashboardViewModel(tracker, { now: new Date("2026-08-15T12:00:00.000Z") });
+  const vm = buildDashboardViewModel(tracker, {
+    now: new Date("2026-08-15T12:00:00.000Z"),
+  });
   const byId = Object.fromEntries(vm.calendar.sync.history.map((entry) => [entry.id, entry]));
   assert.equal(byId["cal-write-manual"].provenance, "manual");
   assert.equal(byId["cal-write-legacy"].provenance, "automated");
@@ -714,11 +736,23 @@ test("Dashboard library snapshot summarizes evidence, stories, voice, and claim 
 });
 
 test("Dashboard adapter exposes data-backed Evidence Library status", () => {
-  const tracker = { applications: [], sourced: [], sources: [], communications: [] };
+  const tracker = {
+    applications: [],
+    sourced: [],
+    sources: [],
+    communications: [],
+  };
   const vm = buildDashboardViewModel(tracker, {
     now: new Date("2026-06-17T13:30:00.000Z"),
     library: {
-      metrics: { claims: 2, stories: 1, voice: 1, honesty: 2, roleSignals: 3, gaps: 1 },
+      metrics: {
+        claims: 2,
+        stories: 1,
+        voice: 1,
+        honesty: 2,
+        roleSignals: 3,
+        gaps: 1,
+      },
       index: [{ label: "Evidence bank", value: "2" }],
       filters: [{ label: "Agents", count: 2 }],
       cards: [
@@ -732,7 +766,13 @@ test("Dashboard adapter exposes data-backed Evidence Library status", () => {
         },
       ],
       readiness: { proof: 1, stories: 1, voice: 1, honesty: 2, roleSignals: 3 },
-      gaps: [{ tone: "coral", title: "Do not use yet", body: "Do not invent metrics." }],
+      gaps: [
+        {
+          tone: "coral",
+          title: "Do not use yet",
+          body: "Do not invent metrics.",
+        },
+      ],
       storyLanes: [{ tone: "teal", body: "0-to-1 applied AI systems." }],
     },
   });
@@ -1087,6 +1127,8 @@ test("a reviewed-hold application never claims it was submitted", () => {
 
   const row = vm.jobs.rows.find((candidate) => candidate.id === "curri-hold");
   assert.equal(row.stage, "reviewed-hold");
+  assert.equal(row.stageLabel, "Ready to apply");
+  assert.equal(row.drawer.stage, "Ready to apply");
   assert.equal(row.action.label, "Prepare");
   assert.match(row.action.summary, /not been submitted/i);
   assert.doesNotMatch(row.action.summary, /application is submitted/i);
@@ -1117,6 +1159,29 @@ test("a reviewed-hold application never claims it was submitted", () => {
   );
 });
 
+test("a reviewed-hold application that has not cleared the gate uses needs-review display copy", () => {
+  const vm = buildDashboardViewModel({
+    applications: [
+      {
+        id: "review-hold",
+        company: "Review Co",
+        role: "Platform Engineer",
+        status: "reviewed-hold",
+        gate: "review",
+        evaluation: { gate: "review" },
+      },
+    ],
+    sourced: [],
+    communications: [],
+    sources: [],
+  });
+
+  const row = vm.jobs.rows.find((candidate) => candidate.id === "review-hold");
+  assert.equal(row.stage, "reviewed-hold");
+  assert.equal(row.stageLabel, "Needs review");
+  assert.equal(row.drawer.stage, "Needs review");
+});
+
 test("Network never hides approved contacts or companies behind arbitrary display caps", () => {
   const applications = Array.from({ length: 7 }, (_, index) => ({
     id: `app-${index}`,
@@ -1124,8 +1189,16 @@ test("Network never hides approved contacts or companies behind arbitrary displa
     role: "Engineer",
     status: "applied",
     conversations: [
-      { who: `Recruiter ${index}A`, kind: "recruiter screen", date: "2026-06-01" },
-      { who: `Recruiter ${index}B`, kind: "recruiter screen", date: "2026-06-02" },
+      {
+        who: `Recruiter ${index}A`,
+        kind: "recruiter screen",
+        date: "2026-06-01",
+      },
+      {
+        who: `Recruiter ${index}B`,
+        kind: "recruiter screen",
+        date: "2026-06-02",
+      },
       { who: `Manager ${index}`, kind: "hiring manager", date: "2026-06-03" },
     ],
   }));
@@ -1248,7 +1321,9 @@ test("Dashboard adapter's artifact list surfaces friendly notes, never raw paths
     communications: [],
   };
 
-  const vm = buildDashboardViewModel(tracker, { now: new Date("2026-06-18T13:30:00.000Z") });
+  const vm = buildDashboardViewModel(tracker, {
+    now: new Date("2026-06-18T13:30:00.000Z"),
+  });
   const byId = new Map(vm.jobs.rows.map((row) => [row.id, row]));
 
   const dated = byId.get("with-dates");
@@ -1406,7 +1481,12 @@ test("Dashboard adapter builds Strategy insights from outcomes by source role an
 });
 
 test("Dashboard adapter exposes the next agent task", () => {
-  const tracker = { applications: [], sourced: [], sources: [], communications: [] };
+  const tracker = {
+    applications: [],
+    sourced: [],
+    sources: [],
+    communications: [],
+  };
   const vm = buildDashboardViewModel(tracker, {
     now: new Date("2026-06-18T12:00:00.000Z"),
     agentGuidance: {
@@ -1651,7 +1731,12 @@ test("Dashboard focus card prioritizes the next interview dossier when one is up
       },
     ],
     sourced: [
-      { id: "src-1", company: "Massive Dynamic", role: "Applied AI Engineer", fitScore: 93 },
+      {
+        id: "src-1",
+        company: "Massive Dynamic",
+        role: "Applied AI Engineer",
+        fitScore: 93,
+      },
     ],
     sources: [],
     communications: [
@@ -1680,7 +1765,12 @@ test("Dashboard focus card falls back to urgent action when no interview is upco
   const tracker = {
     applications: [],
     sourced: [
-      { id: "src-1", company: "Massive Dynamic", role: "Applied AI Engineer", fitScore: 93 },
+      {
+        id: "src-1",
+        company: "Massive Dynamic",
+        role: "Applied AI Engineer",
+        fitScore: 93,
+      },
     ],
     sources: [],
     communications: [
@@ -1705,7 +1795,12 @@ test("Dashboard focus card falls back to urgent action when no interview is upco
 });
 
 test("Dashboard adapter exposes usage and application mode status", () => {
-  const tracker = { applications: [], sourced: [], sources: [], communications: [] };
+  const tracker = {
+    applications: [],
+    sourced: [],
+    sources: [],
+    communications: [],
+  };
   const vm = buildDashboardViewModel(tracker, {
     now: new Date("2026-06-15T13:30:00.000Z"),
     modes: {
@@ -1724,7 +1819,12 @@ test("Dashboard adapter exposes usage and application mode status", () => {
 });
 
 test("Dashboard adapter exposes safe read-only settings without current compensation", () => {
-  const tracker = { applications: [], sourced: [], sources: [], communications: [] };
+  const tracker = {
+    applications: [],
+    sourced: [],
+    sources: [],
+    communications: [],
+  };
   const vm = buildDashboardViewModel(tracker, {
     now: new Date("2026-06-15T13:30:00.000Z"),
     settings: {
@@ -1732,6 +1832,7 @@ test("Dashboard adapter exposes safe read-only settings without current compensa
         candidate: "Demo Candidate",
         headline: "AI-native builder",
         location: "Remote / hybrid · Example City, ST",
+        remoteScope: "worldwide",
         minimumBase: "$200K",
         targetBase: "$240K",
         currentBase: "$123K",
@@ -1747,6 +1848,7 @@ test("Dashboard adapter exposes safe read-only settings without current compensa
   assert.equal(vm.settings.profile.candidate, "Demo Candidate");
   assert.equal(vm.settings.profile.minimumBase, "$200K");
   assert.equal(vm.settings.profile.targetBase, "$240K");
+  assert.equal(vm.settings.profile.remoteScope, "worldwide");
   assert.equal(vm.settings.automation.sessionProvider, "Browser extension");
   assert.deepEqual(vm.settings.automation.enabledCapabilities, [
     "Status polling",
@@ -1761,7 +1863,12 @@ test("Dashboard adapter archives cut sourced rows but surfaces manual-apply as a
     applications: [],
     sourced: [
       { id: "live", company: "Live Co", role: "FDE", status: "prospect" },
-      { id: "blocked", company: "Blocked Co", role: "FDE", status: "manual blocked" },
+      {
+        id: "blocked",
+        company: "Blocked Co",
+        role: "FDE",
+        status: "manual blocked",
+      },
       { id: "cut", company: "Cut Co", role: "FDE", status: "cut" },
     ],
     sources: [],
@@ -1786,7 +1893,14 @@ test("Dashboard adapter archives cut sourced rows but surfaces manual-apply as a
 test("Dashboard adapter keeps an explicit sourced status in the pre-application queue", () => {
   const tracker = {
     applications: [],
-    sourced: [{ id: "fresh", company: "Fresh Co", role: "Staff Engineer", status: "sourced" }],
+    sourced: [
+      {
+        id: "fresh",
+        company: "Fresh Co",
+        role: "Staff Engineer",
+        status: "sourced",
+      },
+    ],
     sources: [],
     communications: [],
   };

@@ -32,8 +32,18 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createWorkspaceAgentRuntime } from "../core/agent/workspace-agent.mjs";
 import { loadLocalAiEnv } from "../core/ai/ai-env.mjs";
 import { createChatRuntime } from "../core/ai/chat-runtime.mjs";
+import { stopInstalledRuntimeSignIns } from "../core/ai/installed-runtimes.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
 import { createConfiguredApplyExecutor } from "../core/apply/apply-executor-factory.mjs";
+import { ingestAppleMail } from "../core/automation/apple-mail-ingest.mjs";
+import { createBrowserSessionManager } from "../core/automation/browser-session.mjs";
+import {
+  ingestPlatformMessagesInApp,
+  ingestWebmailInApp,
+  optimizeLinkedinInApp,
+  sourceRelationshipsInApp,
+  syncStatusesInApp,
+} from "../core/automation/browser-workflows.mjs";
 import { resolveUserPaths } from "../core/paths/workspace.mjs";
 import { securityHeaders } from "../core/security/browser-policy.mjs";
 import { mimeFor, resolvePort, safeAssetPath } from "../core/tracker/dev-server.mjs";
@@ -115,6 +125,7 @@ export function createDevServer({
   // as before M2.
   chatRuntime = createChatRuntime({ repoRoot, env }),
   applyJobImpl = createConfiguredApplyExecutor({ repoRoot, env }),
+  browserSessionManager = createBrowserSessionManager({ defaults: { repoRoot, env } }),
   workspaceAgentRuntime = createWorkspaceAgentRuntime({
     repoRoot,
     env,
@@ -154,6 +165,47 @@ export function createDevServer({
         chatRuntime,
         skill: "company-health",
         request,
+      }),
+    runMailSyncImpl: ({ source, applications }) =>
+      ingestAppleMail({ repoRoot, env, source, applications }),
+    runWebmailSyncImpl: ({ sources, applications }) =>
+      ingestWebmailInApp({
+        repoRoot,
+        env,
+        sources,
+        applications,
+        createSessionImpl: (options) => browserSessionManager.get(options),
+      }),
+    runMessagesSyncImpl: ({ sources, applications }) =>
+      ingestPlatformMessagesInApp({
+        repoRoot,
+        env,
+        sources,
+        applications,
+        createSessionImpl: (options) => browserSessionManager.get(options),
+      }),
+    runRelationshipSourcingImpl: ({ company, applicationId, role }) =>
+      sourceRelationshipsInApp({
+        repoRoot,
+        env,
+        company,
+        applicationId,
+        role,
+        createSessionImpl: (options) => browserSessionManager.get(options),
+      }),
+    runLinkedinOptimizeImpl: ({ profileUrl }) =>
+      optimizeLinkedinInApp({
+        repoRoot,
+        env,
+        profileUrl,
+        createSessionImpl: (options) => browserSessionManager.get(options),
+      }),
+    runStatusSyncImpl: ({ applications }) =>
+      syncStatusesInApp({
+        repoRoot,
+        env,
+        applications,
+        createSessionImpl: (options) => browserSessionManager.get(options),
       }),
   }),
 } = {}) {
@@ -550,6 +602,8 @@ export function createDevServer({
     closeClients,
     clients,
     chatRuntime,
+    browserSessionManager,
+    stopRuntimeSignIns: stopInstalledRuntimeSignIns,
   };
 }
 
@@ -589,13 +643,15 @@ async function main() {
     process.exit(1);
   });
 
-  function shutdown() {
+  async function shutdown() {
     dev.closeClients();
     dev.stopWatching();
     // M2 — closes every live chat session (query.close() + abort) and stops
     // the idle-sweep timer so a Ctrl-C never leaves an orphaned Agent SDK
     // child process running.
     dev.chatRuntime.shutdown();
+    dev.stopRuntimeSignIns();
+    await dev.browserSessionManager.shutdown();
     dev.server.close(() => process.exit(0));
     // Don't hang on a lingering socket.
     setTimeout(() => process.exit(0), 200).unref();
@@ -641,7 +697,6 @@ Local app APIs:
   POST /api/onboard/resume              Parse a pasted/loaded resume (no AI)
   POST /api/onboard/candidate/:name     Merge + validate + write one candidate file
   POST /api/onboard/evidence-seed       Dedupe-merge claims into candidate/evidence.yml
-  POST /api/onboard/write-config        Export compatibility candidate/source files
   POST /api/onboard/quick-start         Search-ready DB setup -> durable local first search
   GET  /api/discovery/state             Current supervised discovery handoff state
   POST /api/discovery/quick-start       Prepare sources and start/reuse first discovery chat

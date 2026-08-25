@@ -1,3 +1,4 @@
+import { runtimePresentation } from "./first-run-controller.js";
 import { buildLocationPolicy } from "./location-policy.js";
 
 function list(value) {
@@ -33,6 +34,17 @@ function amountOrNull(value, label) {
   if (!Number.isFinite(amount) || amount < 0) throw new Error(`${label} must be a valid amount.`);
   return amount;
 }
+
+function remoteScopeValue(location = {}) {
+  if (location.remote !== true) return "off";
+  return location.remote_scope === "worldwide" ? "worldwide" : "home-country";
+}
+
+const REMOTE_SCOPE_OPTIONS = [
+  { value: "off", label: "Not open to remote roles" },
+  { value: "home-country", label: "Remote within my home country" },
+  { value: "worldwide", label: "Remote worldwide" },
+];
 
 function cadenceLabel(value) {
   return (
@@ -124,6 +136,13 @@ function evidenceTally(data, fallbackClaims) {
   };
 }
 
+function locationPolicyForProfile(location, onboard) {
+  const policy = buildLocationPolicy(location);
+  if (!policy || typeof location?.mode_preferences_confirmed === "boolean") return policy;
+  const quickFacts = list(onboard?.setupProgress?.items).find((item) => item?.key === "quickFacts");
+  return quickFacts ? { ...policy, confirmed: quickFacts.done === true } : policy;
+}
+
 function latestSourceSweep(rows) {
   return rows
     .map((source) => source?.lastRunAt)
@@ -156,6 +175,7 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
   const displayedFitFloor = Number.isFinite(fitFloor) ? fitFloor : 70;
   const agentName = data.modes?.agent_name || "Paul";
   const publicSyncPreference = onboard?.publicSyncPreference || {};
+  const runtimeSupport = runtimePresentation(runtime || {});
 
   return {
     agentName,
@@ -165,7 +185,7 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
         floor: money(compensation.minimum_base ?? compensation.oe_min_base),
         target: money(compensation.target_base ?? compensation.expected_base),
       },
-      locationPolicy: buildLocationPolicy(location),
+      locationPolicy: locationPolicyForProfile(location, onboard),
       dealbreakers,
       evidence: {
         ...evidenceTally(data, evidenceClaims),
@@ -246,9 +266,15 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
               "text",
               location.home || profile.candidate?.location || ""
             ),
-            field("remote", "Remote", "checkbox", "", { checked: location.remote === true }),
-            field("hybrid", "Hybrid", "checkbox", "", { checked: location.hybrid === true }),
-            field("onsite", "On-site", "checkbox", "", { checked: location.onsite === true }),
+            field("remoteScope", "Remote job eligibility", "select", remoteScopeValue(location), {
+              options: REMOTE_SCOPE_OPTIONS,
+            }),
+            field("hybrid", "Hybrid", "checkbox", "", {
+              checked: location.hybrid === true,
+            }),
+            field("onsite", "On-site", "checkbox", "", {
+              checked: location.onsite === true,
+            }),
             field("relocation", "Relocation markets", "textarea", lineValue(location.relocation), {
               rows: 4,
               placeholder: "One market per line",
@@ -311,6 +337,8 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
     engine: {
       name: runtime?.name || "AI engine",
       connected: Boolean(runtime?.ready && runtime?.selectable !== false),
+      presentationState: runtimeSupport.state,
+      statusLabel: runtimeSupport.label,
       selectedId: runtimes?.selectedId || null,
       choices: list(runtimes?.runtimes).map((choice) => ({ ...choice })),
     },
@@ -399,7 +427,9 @@ export function profileSectionSavePlan(section, values = {}, editor = {}) {
       {
         kind: "candidate",
         name: "profile",
-        patch: { compensation: { minimum_base: minimumBase, target_base: targetBase } },
+        patch: {
+          compensation: { minimum_base: minimumBase, target_base: targetBase },
+        },
       },
     ];
   }
@@ -414,6 +444,7 @@ export function profileSectionSavePlan(section, values = {}, editor = {}) {
   }
   if (section === "location-policy") {
     const home = String(values.home || "").trim();
+    const remoteScope = values.remoteScope === "worldwide" ? "worldwide" : "home-country";
     return [
       {
         kind: "candidate",
@@ -422,7 +453,8 @@ export function profileSectionSavePlan(section, values = {}, editor = {}) {
           candidate: { location: home },
           location: {
             home,
-            remote: values.remote === true,
+            remote: ["home-country", "worldwide"].includes(values.remoteScope),
+            remote_scope: remoteScope,
             hybrid: values.hybrid === true,
             onsite: values.onsite === true,
             relocation: lines(values.relocation),

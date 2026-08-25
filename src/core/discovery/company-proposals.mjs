@@ -82,6 +82,11 @@ function scoringConfigFromContext(context = {}) {
       },
       location: {
         home: context.locationPosture?.home,
+        remote: context.locationPosture?.remote === true,
+        remote_scope:
+          context.locationPosture?.remoteScope === "worldwide" ? "worldwide" : "home-country",
+        hybrid: context.locationPosture?.hybrid === true,
+        onsite: context.locationPosture?.onsite === true,
         relocation: context.locationPosture?.relocation || [],
       },
     },
@@ -136,7 +141,12 @@ async function proposalForSeed({
 }) {
   const proposalId = stableId("cpp", [batchId, seed.name, String(index), createdAt]);
   try {
-    const resolution = await resolveCompanyBoard({ repoRoot, env, seed, fetchImpl });
+    const resolution = await resolveCompanyBoard({
+      repoRoot,
+      env,
+      seed,
+      fetchImpl,
+    });
     const scanConfig = {
       tracked_companies: [
         {

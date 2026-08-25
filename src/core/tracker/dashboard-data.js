@@ -94,14 +94,29 @@ const TERMINAL_STAGES = new Set(["rejected", "withdrawn"]);
 
 const JOB_FUNNEL_STAGES = [
   { id: "sourced", label: "Sourced", color: "#B4B2A9", icon: "search" },
-  { id: "reviewed-hold", label: "Reviewed: hold", color: "#b08948", icon: "clock" },
-  { id: "manual-apply", label: "Manual apply needed", color: "#e8553d", icon: "alert" },
+  {
+    id: "reviewed-hold",
+    label: "Reviewed: hold",
+    color: "#b08948",
+    icon: "clock",
+  },
+  {
+    id: "manual-apply",
+    label: "Manual apply needed",
+    color: "#e8553d",
+    icon: "alert",
+  },
   { id: "applied", label: "Applied", color: "#9C998F", icon: "send" },
   { id: "screen", label: "Screen", color: "#E0A93B", icon: "chat" },
   { id: "interview", label: "Interview", color: "#7FCBA6", icon: "calendar" },
   { id: "assessment", label: "Assessment", color: "#5BC4A0", icon: "calendar" },
   { id: "technical", label: "Technical", color: "#34B488", icon: "calendar" },
-  { id: "hiring-manager", label: "Hiring manager", color: "#1D9E75", icon: "calendar" },
+  {
+    id: "hiring-manager",
+    label: "Hiring manager",
+    color: "#1D9E75",
+    icon: "calendar",
+  },
   { id: "onsite", label: "Onsite", color: "#179069", icon: "calendar" },
   { id: "final", label: "Final", color: "#14795A", icon: "clock" },
   { id: "offer", label: "Offer", color: "#34A853", icon: "star" },
@@ -599,6 +614,9 @@ function buildSettingsStatus(settings = {}) {
       candidate: stringOrFallback(profile.candidate),
       headline: stringOrFallback(profile.headline),
       location: stringOrFallback(profile.location),
+      remoteScope: ["home-country", "worldwide"].includes(profile.remoteScope)
+        ? profile.remoteScope
+        : null,
       minimumBase: stringOrFallback(profile.minimumBase),
       targetBase: stringOrFallback(profile.targetBase),
       expectedBase: stringOrFallback(profile.expectedBase),
@@ -1409,7 +1427,12 @@ function buildNextSteps(trackerData, now, { limit = 3 } = {}) {
       const title = followUpTitle(app);
       // Templated, non-prose: the role title only. statusNote/note are drawer-only.
       const detail = app.role || "";
-      const actionLabel = nextStepActionLabel({ title, detail, source: "follow-up", app });
+      const actionLabel = nextStepActionLabel({
+        title,
+        detail,
+        source: "follow-up",
+        app,
+      });
       return {
         title,
         company,
@@ -1438,7 +1461,12 @@ function buildNextSteps(trackerData, now, { limit = 3 } = {}) {
       const title = String(app.nextAction || "").trim();
       // Templated, non-prose: the role title only. statusNote/note are drawer-only.
       const detail = app.role || "";
-      const actionLabel = nextStepActionLabel({ title, detail, source: "application", app });
+      const actionLabel = nextStepActionLabel({
+        title,
+        detail,
+        source: "application",
+        app,
+      });
       return {
         title,
         company,
@@ -3187,7 +3215,12 @@ export function strategyReviewSignal(applications, reviewState, now) {
   const outcomes = strategyOutcomeTotal(applications);
   const lastReviewedAt = reviewState?.lastReviewedAt || null;
   if (!lastReviewedAt) {
-    return { reviewed: false, outcomes, newOutcomes: outcomes, daysSince: null };
+    return {
+      reviewed: false,
+      outcomes,
+      newOutcomes: outcomes,
+      daysSince: null,
+    };
   }
   const snap = reviewState.snapshot || {};
   const reviewedOutcomes =
@@ -3296,7 +3329,12 @@ function buildReevaluationProgress(reevaluationData) {
 
 function buildStrategyLearning(applications, now, reviewState, reevaluationData) {
   const history = strategyLearningBuckets(applications, now);
-  const current = history[0] || { applied: 0, advanced: 0, interviews: 0, rejected: 0 };
+  const current = history[0] || {
+    applied: 0,
+    advanced: 0,
+    interviews: 0,
+    rejected: 0,
+  };
   const reviewSignal = strategyReviewSignal(applications, reviewState, now);
   return {
     windowLabel: "Last 30d",
@@ -3432,7 +3470,9 @@ export function buildStrategyInsights(trackerData, { now = new Date() } = {}) {
     addStrategyGroup(roleGroups, normalizeName(lane), lane, app);
 
     const fitBand = strategyFitBand(app.fitScore);
-    addStrategyGroup(fitGroups, fitBand.id, fitBand.label, app, { order: fitBand.order });
+    addStrategyGroup(fitGroups, fitBand.id, fitBand.label, app, {
+      order: fitBand.order,
+    });
   }
 
   const sources = finalizeStrategyRows(sourceGroups).slice(0, 4);
@@ -4151,7 +4191,11 @@ function buildInterviewBlock(record = {}) {
 // company-health skill wrote to the tracker row (never recomputed client-side —
 // persist-then-render, like compEstimate/benefits). Returns null when absent so the
 // drawer section + card pill collapse cleanly.
-const HEALTH_RATING_LABEL = { healthy: "Healthy", watch: "Watch", risky: "Risky" };
+const HEALTH_RATING_LABEL = {
+  healthy: "Healthy",
+  watch: "Watch",
+  risky: "Risky",
+};
 const HEALTH_PROV_LABEL = {
   "built-from-data": "Built from data",
   "needs-more-info": "Needs more info",
@@ -4211,7 +4255,11 @@ function buildHealthBadge(ch) {
   if (!ch?.rating || ch.rating === "healthy") return null;
   const word = ch.rating === "risky" ? "Risky" : "Watch";
   const scope = ch.forFunction ? `${word} for ${ch.forFunction}` : word;
-  return { rating: ch.rating, label: word, title: `Company health: ${scope} (internal signal)` };
+  return {
+    rating: ch.rating,
+    label: word,
+    title: `Company health: ${scope} (internal signal)`,
+  };
 }
 
 // Short "Mon D" label for an artifact's <kind>GeneratedAt stamp
@@ -4288,7 +4336,10 @@ function jobDetailFromRow(
         )
       : null,
     !jdPath && (row.link || sourceRecord.link || sourceRecord.url)
-      ? { kind: "Job description", note: "Source link is available from the drawer header." }
+      ? {
+          kind: "Job description",
+          note: "Source link is available from the drawer header.",
+        }
       : null,
     resumePath
       ? artifactRow(
@@ -4507,6 +4558,13 @@ function applicationJobRow(app, index, communications = [], now = new Date(), pr
   const mode = modeInfo(app.mode || "", location);
   const source = sourceInfo("application", app.channel || "");
   const comp = compactComp(app.base || app.comp?.base || "", app.tc || app.comp?.tc || "");
+  const displayStageLabel = advancedByHistory
+    ? stageGroupLabel(stage)
+    : stage === "reviewed-hold"
+      ? String(app.evaluation?.gate || app.gate || "").toLowerCase() === "keep"
+        ? "Ready to apply"
+        : "Needs review"
+      : stageLabel(app.status || stage, "application");
   const row = {
     id: app.id || `application-${index + 1}`,
     drawerId: app.id || `application-${index + 1}`,
@@ -4519,9 +4577,7 @@ function applicationJobRow(app, index, communications = [], now = new Date(), pr
     status: app.status || stage,
     stage,
     interviewRounds,
-    stageLabel: advancedByHistory
-      ? stageGroupLabel(stage)
-      : stageLabel(app.status || stage, "application"),
+    stageLabel: displayStageLabel,
     stageGroupLabel: stageGroupLabel(stage),
     comp: comp.base,
     tc: comp.tc,
@@ -4588,7 +4644,10 @@ function applicationJobRow(app, index, communications = [], now = new Date(), pr
     .join(" ")
     .toLowerCase();
   row.tooltip = jobTooltip(row);
-  return { ...row, drawer: jobDetailFromRow(row, app, communications, now, profileComp) };
+  return {
+    ...row,
+    drawer: jobDetailFromRow(row, app, communications, now, profileComp),
+  };
 }
 
 function sourcedJobRow(role, index, now = new Date(), profileComp = {}) {
@@ -4844,7 +4903,12 @@ function buildJobsSankey(rows, { showGhosted = false, hideStale = false } = {}) 
 
   function addStageRow(stage, row, outcome = "active") {
     if (!stageGroups.has(stage)) {
-      stageGroups.set(stage, { rows: [], rejected: [], withdrawn: [], accepted: [] });
+      stageGroups.set(stage, {
+        rows: [],
+        rejected: [],
+        withdrawn: [],
+        accepted: [],
+      });
     }
     const group = stageGroups.get(stage);
     group.rows.push(row);
@@ -5289,7 +5353,11 @@ export function buildDashboardViewModel(
     settings: buildSettingsStatus(settings),
     library: buildLibraryStatus(library),
     stats: buildStats(trackerData),
-    focus: buildFocusCard(trackerData, { now, nextSteps: timeNextSteps, latestRoles }),
+    focus: buildFocusCard(trackerData, {
+      now,
+      nextSteps: timeNextSteps,
+      latestRoles,
+    }),
     nextSteps,
     allNextSteps,
     latestRoles,
@@ -5348,16 +5416,46 @@ const ACTIVITY_ICON_PATHS = {
 // world/system on the neutral surface, offer on the success (tertiary) tint,
 // failure on the error tint.
 const ACTIVITY_TYPE_STYLE = {
-  sourced: { dot: "bg-secondary-container", icon: "text-on-secondary-container" },
-  evaluated: { dot: "bg-secondary-container", icon: "text-on-secondary-container" },
-  tailored: { dot: "bg-secondary-container", icon: "text-on-secondary-container" },
-  drafted: { dot: "bg-secondary-container", icon: "text-on-secondary-container" },
-  applied: { dot: "bg-secondary-container", icon: "text-on-secondary-container" },
-  research: { dot: "bg-secondary-container", icon: "text-on-secondary-container" },
-  negotiation: { dot: "bg-secondary-container", icon: "text-on-secondary-container" },
-  status_change: { dot: "bg-surface-container-high", icon: "text-on-surface-variant" },
-  message: { dot: "bg-surface-container-high", icon: "text-on-surface-variant" },
-  interview: { dot: "bg-surface-container-high", icon: "text-on-surface-variant" },
+  sourced: {
+    dot: "bg-secondary-container",
+    icon: "text-on-secondary-container",
+  },
+  evaluated: {
+    dot: "bg-secondary-container",
+    icon: "text-on-secondary-container",
+  },
+  tailored: {
+    dot: "bg-secondary-container",
+    icon: "text-on-secondary-container",
+  },
+  drafted: {
+    dot: "bg-secondary-container",
+    icon: "text-on-secondary-container",
+  },
+  applied: {
+    dot: "bg-secondary-container",
+    icon: "text-on-secondary-container",
+  },
+  research: {
+    dot: "bg-secondary-container",
+    icon: "text-on-secondary-container",
+  },
+  negotiation: {
+    dot: "bg-secondary-container",
+    icon: "text-on-secondary-container",
+  },
+  status_change: {
+    dot: "bg-surface-container-high",
+    icon: "text-on-surface-variant",
+  },
+  message: {
+    dot: "bg-surface-container-high",
+    icon: "text-on-surface-variant",
+  },
+  interview: {
+    dot: "bg-surface-container-high",
+    icon: "text-on-surface-variant",
+  },
   system: { dot: "bg-surface-container-high", icon: "text-on-surface-variant" },
   offer: { dot: "bg-tertiary-container", icon: "text-on-tertiary-container" },
   failure: { dot: "bg-error-container", icon: "text-error" },

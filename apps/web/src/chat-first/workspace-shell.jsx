@@ -10,9 +10,11 @@ import {
   SendUpIcon,
   SettingsIcon,
 } from "./chat-first-icons.jsx";
+import { useDesktopUpdate } from "./desktop-update.js";
 import "./chat-first.css";
 
 const EMPTY_LIST = [];
+const DESKTOP_UPDATE_AVAILABLE = Boolean(globalThis.careerratDesktopUpdate);
 
 function activityHeading(agentName) {
   return `WHAT ${String(agentName || "Paul").toUpperCase()} DID TODAY`;
@@ -20,6 +22,39 @@ function activityHeading(agentName) {
 
 function Dot({ label = "Needs action" }) {
   return <span className="chat-first-dot" role="img" aria-label={label} />;
+}
+
+function UpdateNotice({ update }) {
+  if (!update?.visible) return null;
+  return (
+    <div
+      className={`chat-first-update-notice chat-first-update-notice--${update.kind || "current"}`}
+      role="status"
+      aria-label={
+        update.kind === "available" ? "CareerRat update available" : "CareerRat update status"
+      }
+    >
+      <span>
+        {update.message ||
+          (update.kind === "available"
+            ? `CareerRat ${update.version} is ready`
+            : "CareerRat is up to date")}
+      </span>
+      {update.kind === "available" && update.canOpenRelease !== false ? (
+        <button type="button" onClick={update.onOpenRelease}>
+          Download
+        </button>
+      ) : null}
+      <button type="button" onClick={update.onDismiss}>
+        {update.kind === "available" ? "Later" : "Dismiss"}
+      </button>
+    </div>
+  );
+}
+
+function DesktopUpdateNotice() {
+  const desktopUpdate = useDesktopUpdate();
+  return <UpdateNotice update={desktopUpdate.notice} />;
 }
 
 const ICON_BADGE_TONES = ["lime", "sky", "lilac", "cool", "cream"];
@@ -50,6 +85,7 @@ export function TopBar({
   agentName = "Paul",
   activityItems = EMPTY_LIST,
   activityOpen = false,
+  desktopUpdate = null,
   missionLive = false,
   showActivity = true,
   onOpenProfile,
@@ -104,6 +140,11 @@ export function TopBar({
               </div>
             ) : null}
           </div>
+        ) : null}
+        {desktopUpdate ? (
+          <UpdateNotice update={desktopUpdate} />
+        ) : DESKTOP_UPDATE_AVAILABLE ? (
+          <DesktopUpdateNotice />
         ) : null}
       </div>
     </header>

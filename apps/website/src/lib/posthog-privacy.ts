@@ -15,7 +15,7 @@ const DOCS_PATH_PREFIX = "/docs";
 const OTHER_PATH = "/_other";
 const PROJECT_TOKEN_PATTERN = /^phc_[A-Za-z0-9_-]+$/u;
 const ALLOWED_CTA_IDS = new Set(["get_started"]);
-const ALLOWED_PLACEMENTS = new Set(["header", "hero", "pricing", "final"]);
+const ALLOWED_PLACEMENTS = new Set(["header", "hero", "get", "final"]);
 const allowedVitalKeys = new Set([
   "$web_vitals_CLS_value",
   "$web_vitals_FCP_value",

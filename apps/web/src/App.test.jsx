@@ -20,6 +20,7 @@ const hooks = vi.hoisted(() => ({
 
 const apiMocks = vi.hoisted(() => ({ getOnboardState: vi.fn() }));
 const routerState = vi.hoisted(() => ({ pathname: "/" }));
+const navigate = vi.hoisted(() => vi.fn());
 const COMPLETE_ONBOARD_STATE = {
   setupProgress: { complete: true },
   data: {
@@ -76,6 +77,7 @@ vi.mock("react-router-dom", () => ({
     return fallback ? fallback.props.element : null;
   },
   useLocation: () => ({ pathname: routerState.pathname }),
+  useNavigate: () => navigate,
 }));
 
 vi.mock("./lib/api.js", () => ({ getOnboardState: apiMocks.getOnboardState }));
@@ -119,9 +121,36 @@ beforeEach(() => {
   hooks.clear();
   apiMocks.getOnboardState.mockReset();
   routerState.pathname = "/";
+  navigate.mockReset();
+  delete globalThis.careerratDesktopApp;
 });
 
 describe("App chat-first flip", () => {
+  it("routes a native-menu request through React Router without resetting live renderer state", async () => {
+    let routeRequest;
+    const unsubscribe = vi.fn();
+    globalThis.careerratDesktopApp = {
+      onNavigate: vi.fn((callback) => {
+        routeRequest = callback;
+        return unsubscribe;
+      }),
+    };
+    const module = await loadApp();
+    const workspace = await renderAtWhenComplete(module, "/");
+    await flushEffects();
+
+    expect(workspace).toContain("chat-first-app");
+    expect(globalThis.careerratDesktopApp.onNavigate).toHaveBeenCalledOnce();
+    routeRequest("/settings");
+    expect(navigate).toHaveBeenCalledWith("/settings");
+
+    routerState.pathname = "/settings";
+    const settings = renderApp(module);
+    expect(settings).toContain("profile-settings-controller");
+    expect(settings).toContain("chat-first-app");
+    expect(settings).toContain('hidden=""');
+  });
+
   it("keeps the first-run controller as the hard setup gate", async () => {
     const module = await loadApp();
     apiMocks.getOnboardState.mockResolvedValueOnce({ setupProgress: { complete: false } });

@@ -1,5 +1,6 @@
 import "./profile-settings.css";
 import { ArrowLeftIcon } from "./chat-first-icons.jsx";
+import { runtimePresentation } from "./first-run-controller.js";
 import { RuntimeIcon } from "./RuntimeIcon.jsx";
 
 function safeArray(value) {
@@ -132,6 +133,7 @@ function ProfileGrid({ agentName, profile = {}, onEditSection, onOpenFiles }) {
 
 function SettingsView({
   agentName,
+  desktopUpdate = null,
   engine = {},
   permissions = [],
   sources = {},
@@ -151,7 +153,7 @@ function SettingsView({
         <div className="cf-settings__engine-heading">
           <span className="cf-settings__eyebrow">AI ENGINE</span>
           {engine?.connected ? (
-            <span className="cf-settings__connected">Connected</span>
+            <span className="cf-settings__connected">{engine.statusLabel || "Connected"}</span>
           ) : (
             <span className="cf-settings__disconnected">Needs attention</span>
           )}
@@ -262,6 +264,46 @@ function SettingsView({
               : "On · public metadata only"}
         </span>
       </article>
+      {desktopUpdate?.available ? (
+        <article className="cf-settings__card cf-settings__desktop-update">
+          <div className="cf-settings__eyebrow">DESKTOP APP</div>
+          <div className="cf-settings__permission">
+            <div>
+              <strong>Automatically check for updates</strong>
+              <span>Checks GitHub once a day. Nothing downloads or installs on its own.</span>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={desktopUpdate.enabled !== false}
+              aria-label={`Automatically check for updates: ${desktopUpdate.enabled !== false ? "on" : "off"}`}
+              className="cf-settings__switch"
+              disabled={desktopUpdate.saving}
+              onClick={() => desktopUpdate.onEnabledChange?.(desktopUpdate.enabled === false)}
+            >
+              <span />
+            </button>
+          </div>
+          <div className="cf-settings__desktop-update-actions">
+            <span>
+              Manual checks work even when automatic checks are off and never change that setting.
+            </span>
+            <button
+              type="button"
+              className="cf-settings__outline-button"
+              disabled={desktopUpdate.checking}
+              onClick={() => desktopUpdate.onCheckNow?.()}
+            >
+              {desktopUpdate.checking ? "Checking…" : "Check now"}
+            </button>
+          </div>
+          {desktopUpdate.status ? (
+            <span className="cf-settings__desktop-update-status" role="status">
+              {desktopUpdate.status}
+            </span>
+          ) : null}
+        </article>
+      ) : null}
       <article className="cf-settings__card cf-settings__data-card">
         <div>
           <strong>Your data</strong>
@@ -295,16 +337,20 @@ function SettingsDialog({ title, children, onClose }) {
   );
 }
 
-function runtimeStatus(choice, selectedId) {
-  if (choice.selectable === false) return "Secure tool runs unavailable";
-  if (choice.id === selectedId && choice.ready) return "Selected";
-  if (choice.ready) return "Ready";
-  if (choice.status === "authentication_required") return "Sign-in needed";
-  if (!choice.available) return "Not found";
-  return "Needs attention";
+function runtimeStatus(choice) {
+  return runtimePresentation(choice).label;
 }
 
-function EnginePicker({ engine, busy, onClose, onSelect, onConnect, onRetry, onRefresh }) {
+function EnginePicker({
+  engine,
+  busy,
+  signInRuntimeId,
+  onClose,
+  onSelect,
+  onConnect,
+  onRetry,
+  onRefresh,
+}) {
   const choices = safeArray(engine?.choices);
   return (
     <SettingsDialog title="Choose an AI engine" onClose={onClose}>
@@ -315,6 +361,7 @@ function EnginePicker({ engine, busy, onClose, onSelect, onConnect, onRetry, onR
         {choices.map((choice) => {
           const selected =
             choice.id === engine?.selectedId && choice.ready && choice.selectable !== false;
+          const signingIn = choice.id === signInRuntimeId && choice.ready !== true;
           return (
             <article
               className="cf-settings-dialog__runtime"
@@ -325,9 +372,10 @@ function EnginePicker({ engine, busy, onClose, onSelect, onConnect, onRetry, onR
                 <RuntimeIcon runtimeId={choice.id} name={choice.name} size={22} />
                 <div>
                   <strong>{choice.name || "AI engine"}</strong>
-                  <span>{runtimeStatus(choice, engine?.selectedId)}</span>
-                  {choice.selectable === false && choice.capabilityReason ? (
-                    <span>{choice.capabilityReason}</span>
+                  <span>{runtimeStatus(choice)}</span>
+                  {choice.capabilityReason ? <span>{choice.capabilityReason}</span> : null}
+                  {signingIn ? (
+                    <span role="status">Finish sign-in in your browser, then check again.</span>
                   ) : null}
                 </div>
               </div>
@@ -337,11 +385,15 @@ function EnginePicker({ engine, busy, onClose, onSelect, onConnect, onRetry, onR
                 <button type="button" disabled={busy} onClick={() => onSelect?.(choice.id)}>
                   Use this tool
                 </button>
-              ) : choice.selectable === false ? null : choice.action === "open_terminal" ? (
+              ) : signingIn ? (
+                <button type="button" disabled={busy} onClick={() => onRetry?.(choice.id)}>
+                  Check sign-in
+                </button>
+              ) : choice.action === "start_sign_in" ? (
                 <button type="button" disabled={busy} onClick={() => onConnect?.(choice.id)}>
                   Sign in
                 </button>
-              ) : (
+              ) : choice.selectable === false ? null : (
                 <button type="button" disabled={busy} onClick={() => onRetry?.(choice.id)}>
                   Retry detection
                 </button>
@@ -580,6 +632,7 @@ export function ProfileSettings({
   sources = {},
   publicSyncPreference = { enabled: true, source: "default", updatedAt: null },
   publicSyncBusy = false,
+  desktopUpdate = null,
   onBack,
   onTabChange,
   onEditSection,
@@ -592,6 +645,7 @@ export function ProfileSettings({
   onExportData,
   enginePickerOpen = false,
   enginePickerBusy = false,
+  engineSignInId = null,
   onCloseEnginePicker,
   onSelectEngine,
   onConnectEngine,
@@ -646,6 +700,7 @@ export function ProfileSettings({
       {settingsActive
         ? SettingsView({
             agentName,
+            desktopUpdate,
             engine,
             permissions,
             sources,
@@ -663,6 +718,7 @@ export function ProfileSettings({
         <EnginePicker
           engine={engine}
           busy={enginePickerBusy}
+          signInRuntimeId={engineSignInId}
           onClose={onCloseEnginePicker}
           onSelect={onSelectEngine}
           onConnect={onConnectEngine}

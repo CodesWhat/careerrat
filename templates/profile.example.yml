@@ -27,6 +27,7 @@ compensation:
 location:
   home: "New York, NY"
   remote: true
+  remote_scope: "home-country"
   hybrid: true
   onsite: false
   commute_radius_miles: 25

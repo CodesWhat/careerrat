@@ -40,6 +40,22 @@ function moneyAmount(value) {
   return Number.isFinite(amount) ? amount : 0;
 }
 
+function profileWriteErrorMessage(error, savedCount = 0) {
+  const issue = list(error?.body?.errors)[0];
+  const path = String(issue?.path || "").trim();
+  const message = String(issue?.message || "").trim();
+  const savedSuffix = savedCount > 0 ? " The other valid details were saved." : "";
+  if (path && /unexpected property/i.test(message)) {
+    return `That profile update could not save "${path}" because it is not a supported setting.${savedSuffix}`;
+  }
+  const bodyError = error?.body?.error;
+  const detail =
+    (typeof bodyError === "string" ? bodyError : bodyError?.message) ||
+    error?.message ||
+    "Those profile details did not save.";
+  return `${detail}${savedSuffix}`;
+}
+
 function normalizedClaimText(value) {
   return String(value || "")
     .normalize("NFKC")
@@ -177,14 +193,28 @@ function restoredMessages(payload) {
           options: confirmationOptions(message.blocks),
         };
       }
-      return { ...firstRunAssistantMessage(message?.text || "", id), ...message, id };
+      return {
+        ...firstRunAssistantMessage(message?.text || "", id),
+        ...message,
+        id,
+      };
     }
-    return { ...message, id, role: message?.role === "user" ? "user" : "assistant" };
+    return {
+      ...message,
+      id,
+      role: message?.role === "user" ? "user" : "assistant",
+    };
   });
 }
 
 function serializableTranscript(messages) {
   return list(messages).map(({ options: _options, ...message }) => message);
+}
+
+function effectiveRuntimeId(state, preferredId = state?.selectedId) {
+  const runtimeId = String(preferredId || "").trim();
+  if (!runtimeId) return null;
+  return runtimeSelectionReady({ ...state, selectedId: runtimeId }) ? runtimeId : null;
 }
 
 export function FirstRunController({
@@ -196,18 +226,27 @@ export function FirstRunController({
   const navigate = useNavigate();
   const [stage, setStage] = useState("engine");
   const [runtimeState, setRuntimeState] = useState(null);
+  const [pendingRuntimeId, setPendingRuntimeId] = useState(null);
   const [onboardState, setOnboardState] = useState(null);
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState("");
   const [chatId, setChatId] = useState(null);
   const [chatCursor, setChatCursor] = useState(null);
-  const [streamConnection, setStreamConnection] = useState({ after: null, revision: 0 });
+  const [streamConnection, setStreamConnection] = useState({
+    after: null,
+    revision: 0,
+  });
   const [submitting, setSubmitting] = useState(false);
   const [resumeUploading, setResumeUploading] = useState(false);
   const [resumeUploadingName, setResumeUploadingName] = useState("");
   const [editingKnowledgeSection, setEditingKnowledgeSection] = useState(null);
   const [knowledgeSaving, setKnowledgeSaving] = useState(false);
   const [engineError, setEngineError] = useState(null);
+  const [hostedInterest, setHostedInterest] = useState({
+    status: "idle",
+    email: "",
+    error: null,
+  });
   const startedRef = useRef(false);
   const searchStartingRef = useRef(false);
   const cursorRef = useRef(null);
@@ -265,12 +304,14 @@ export function FirstRunController({
         ]);
         if (cancelled) return;
         setRuntimeState(nextRuntime);
+        setPendingRuntimeId(effectiveRuntimeId(nextRuntime));
         setOnboardState(nextOnboard);
-        setMessages(restoredMessages(savedDraft));
+        const savedMessages = restoredMessages(savedDraft);
+        setMessages(savedMessages);
         const savedCursor = restoredChatCursor(savedDraft);
         cursorRef.current = savedCursor;
         setChatCursor(savedCursor);
-        if (runtimeSelectionReady(nextRuntime)) setStage("chat");
+        if (runtimeSelectionReady(nextRuntime) && savedMessages.length > 0) setStage("chat");
         if (setupCanGraduate(nextOnboard)) onComplete?.(nextOnboard);
       } catch (error) {
         if (cancelled) return;
@@ -414,10 +455,32 @@ export function FirstRunController({
         )
       );
 
+      const receipts = new Map();
       try {
-        const receipts = new Map();
         for (const { block, index } of indexedBlocks) {
-          receipts.set(index, await applyFirstRunConfirmation(block, { api, state: onboardState }));
+          const receipt = await applyFirstRunConfirmation(block, {
+            api,
+            state: onboardState,
+          });
+          receipts.set(index, receipt);
+          setMessages((current) =>
+            current.map((candidate) =>
+              candidate.id === messageId
+                ? {
+                    ...candidate,
+                    blocks: list(candidate.blocks).map((candidateBlock, candidateIndex) =>
+                      candidateIndex === index
+                        ? {
+                            ...candidateBlock,
+                            status: "resolved",
+                            resultSummary: receipt,
+                          }
+                        : candidateBlock
+                    ),
+                  }
+                : candidate
+            )
+          );
         }
         setMessages((current) =>
           current.map((candidate) =>
@@ -426,7 +489,11 @@ export function FirstRunController({
                   ...candidate,
                   blocks: list(candidate.blocks).map((block, index) =>
                     receipts.has(index)
-                      ? { ...block, status: "resolved", resultSummary: receipts.get(index) }
+                      ? {
+                          ...block,
+                          status: "resolved",
+                          resultSummary: receipts.get(index),
+                        }
                       : block
                   ),
                 }
@@ -464,9 +531,8 @@ export function FirstRunController({
               : candidate
           )
         );
-        setEngineError(
-          error?.message || "Those profile details did not save. Try the answer again."
-        );
+        await refreshOnboard().catch(() => undefined);
+        setEngineError(profileWriteErrorMessage(error, receipts.size));
       } finally {
         savingProfileMessagesRef.current.delete(messageId);
         setSubmitting(false);
@@ -531,7 +597,10 @@ export function FirstRunController({
     let waitingForChat = false;
     try {
       if (action === "confirm") {
-        const receipt = await applyFirstRunConfirmation(block, { api, state: onboardState });
+        const receipt = await applyFirstRunConfirmation(block, {
+          api,
+          state: onboardState,
+        });
         setMessages((current) =>
           current.map((candidate) =>
             candidate.id === messageId
@@ -539,7 +608,11 @@ export function FirstRunController({
                   ...candidate,
                   blocks: list(candidate.blocks).map((candidateBlock, index) =>
                     index === blockIndex
-                      ? { ...candidateBlock, status: "resolved", resultSummary: receipt }
+                      ? {
+                          ...candidateBlock,
+                          status: "resolved",
+                          resultSummary: receipt,
+                        }
                       : candidateBlock
                   ),
                   options: list(candidate.options).filter(
@@ -670,9 +743,12 @@ export function FirstRunController({
         const claims = parsedClaims(values.claims, item?.editor?.existingClaims);
         await api.replaceEvidenceClaims(claims);
       } else if (sectionId === "guardrails") {
-        await api.saveCandidateFile("targeting", { cut_signals: cleanLines(values.signals) });
+        await api.saveCandidateFile("targeting", {
+          cut_signals: cleanLines(values.signals),
+        });
       } else if (sectionId === "quickFacts") {
         const minimumBase = moneyAmount(values.minimumBase);
+        const remoteScope = values.remoteScope === "worldwide" ? "worldwide" : "home-country";
         await api.saveCandidateFile("profile", {
           candidate: {
             full_name: String(values.name || "").trim(),
@@ -682,7 +758,8 @@ export function FirstRunController({
           },
           location: {
             home: String(values.home || "").trim(),
-            remote: values.remote === true,
+            remote: ["home-country", "worldwide"].includes(values.remoteScope),
+            remote_scope: remoteScope,
             hybrid: values.hybrid === true,
             onsite: values.onsite === true,
             mode_preferences_confirmed: true,
@@ -796,15 +873,23 @@ export function FirstRunController({
     }
   }
 
-  async function selectEngine(runtimeId) {
+  function chooseEngine(runtimeId) {
     const runtime = list(runtimeState?.runtimes).find((candidate) => candidate.id === runtimeId);
-    if (runtime?.ready !== true) return;
+    if (runtime?.ready !== true || runtime?.selectable !== true) return;
+    setPendingRuntimeId(runtimeId);
+    setEngineError(null);
+  }
+
+  async function startInterview(runtimeId = pendingRuntimeId) {
+    const runtime = list(runtimeState?.runtimes).find((candidate) => candidate.id === runtimeId);
+    if (runtime?.ready !== true || runtime?.selectable !== true) return;
     setSubmitting(true);
     setEngineError(null);
     try {
       await api.selectInstalledAiRuntime({ runtimeId });
       const nextRuntime = await api.getInstalledAiRuntimes();
       setRuntimeState(nextRuntime);
+      setPendingRuntimeId(effectiveRuntimeId(nextRuntime));
       if (!runtimeSelectionReady(nextRuntime)) {
         setEngineError("That AI still needs setup before it can power CareerRat.");
         return;
@@ -825,10 +910,45 @@ export function FirstRunController({
       await api.probeInstalledAiRuntime(runtimeId);
       const nextRuntime = await api.getInstalledAiRuntimes();
       setRuntimeState(nextRuntime);
+      setPendingRuntimeId(
+        (current) => effectiveRuntimeId(nextRuntime, current) || effectiveRuntimeId(nextRuntime)
+      );
     } catch (error) {
       setEngineError(error?.message || "CareerRat could not check that AI.");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function refreshEngines() {
+    setSubmitting(true);
+    setEngineError(null);
+    try {
+      const nextRuntime = await api.getInstalledAiRuntimes();
+      setRuntimeState(nextRuntime);
+      setPendingRuntimeId(
+        (current) => effectiveRuntimeId(nextRuntime, current) || effectiveRuntimeId(nextRuntime)
+      );
+    } catch (error) {
+      setEngineError(error?.message || "CareerRat could not check for AI tools.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function submitHostedInterest() {
+    const email = String(hostedInterest.email || "").trim();
+    if (!email || hostedInterest.status === "submitting") return;
+    setHostedInterest({ status: "submitting", email, error: null });
+    try {
+      await api.requestHostedInterest(email);
+      setHostedInterest({ status: "requested", email: "", error: null });
+    } catch (error) {
+      setHostedInterest({
+        status: "error",
+        email,
+        error: error?.body?.error || error?.message || "Could not send that. Try again.",
+      });
     }
   }
 
@@ -838,13 +958,18 @@ export function FirstRunController({
   const knowledge = buildFirstRunKnowledge(onboardState, runtime);
   const configuredAgentName = firstRunAgentName(onboardState, agentName);
   const openSettings = () =>
-    navigate("/settings", { state: { activeTab: "settings", openEnginePicker: true } });
+    navigate("/settings", {
+      state: { activeTab: "settings", openEnginePicker: true },
+    });
 
   const experience = (
     <FirstRunExperience
       stage={stage}
       agentName={configuredAgentName}
-      engines={firstRunRuntimeChoices(runtimeState)}
+      engines={firstRunRuntimeChoices(runtimeState).map((choice) => ({
+        ...choice,
+        selected: choice.id === pendingRuntimeId,
+      }))}
       error={engineError}
       messages={messages}
       knowledge={knowledge.items}
@@ -855,9 +980,28 @@ export function FirstRunController({
       resumeUploadingName={resumeUploadingName}
       editingKnowledgeSection={editingKnowledgeSection}
       knowledgeSaving={knowledgeSaving}
-      onSelectEngine={selectEngine}
+      onChooseEngine={chooseEngine}
+      onStartInterview={startInterview}
       onRetryEngine={(runtimeId) => refreshRuntime(runtimeId)}
+      onRefreshEngines={refreshEngines}
       onOpenSettings={openSettings}
+      hostedInterest={hostedInterest}
+      onHostedInterestStart={() =>
+        setHostedInterest((current) => ({
+          ...current,
+          status: "editing",
+          error: null,
+        }))
+      }
+      onHostedInterestChange={(email) =>
+        setHostedInterest((current) => ({
+          ...current,
+          status: "editing",
+          email,
+          error: null,
+        }))
+      }
+      onHostedInterestSubmit={submitHostedInterest}
       onChooseOption={chooseOption}
       onEditKnowledgeSection={(item) => {
         if (item?.id === "engine") {

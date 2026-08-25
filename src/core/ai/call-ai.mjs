@@ -60,17 +60,6 @@ export function resolveAIRoute(
       };
     }
     if (installedRuntimeEnabled && !selection.providerFallback) {
-      // "custom" isn't in the fixed registry detectInstalledRuntimes() scans
-      // (see installed-runtimes.mjs's probeCustomRuntimeCommand /
-      // buildInstalledRuntimeInvocation "custom" branch) — its "path" is the
-      // raw command string persisted by
-      // POST /api/settings/ai-runtime/custom/select, not a resolved binary.
-      if (selection.runtimeId === "custom" && selection.customCommand) {
-        return {
-          type: "installed",
-          runtime: { id: "custom", name: "Custom command", path: selection.customCommand },
-        };
-      }
       const inventory = runtimeInventory || detectInstalledRuntimes({ env });
       const runtime = selection.runtimeId
         ? inventory.find(({ id, available }) => id === selection.runtimeId && available)

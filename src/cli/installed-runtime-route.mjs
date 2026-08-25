@@ -1,10 +1,11 @@
 import {
   detectInstalledRuntimes,
+  installedRuntimeCapabilities,
   installedRuntimeSignInCommand,
   installedRuntimeToolExecutionCapability,
-  openInstalledRuntimeTerminal,
   probeCustomRuntimeCommand,
   probeInstalledRuntime,
+  startInstalledRuntimeSignIn,
 } from "../core/ai/installed-runtimes.mjs";
 import {
   loadInstalledRuntimeSelection,
@@ -32,6 +33,8 @@ function customRuntimeEntry(selection) {
     ready: Boolean(command),
     action: null,
     toolExecutionSupported: false,
+    capabilities: { completion: false, taskTools: false, research: false },
+    capabilityTier: command ? "detected_unverified" : "unavailable",
     selectable: false,
     capabilityReason: "Detected, but custom commands cannot safely run CareerRat tools yet.",
     selected: selection.runtimeId === "custom" && !selection.providerFallback,
@@ -44,14 +47,27 @@ function withToolExecutionCapability(runtime, probe) {
     probe?.toolExecutionSupported === undefined
       ? declared.supported
       : probe.toolExecutionSupported === true;
+  const declaredCapabilities = installedRuntimeCapabilities(runtime.id, {
+    available: runtime.available === true,
+    completion: probe?.completionSupported === false ? false : undefined,
+    taskTools: supported,
+  });
   const capabilityReason = supported
     ? null
-    : probe?.capabilityReason || declared.reason || "Cannot safely run CareerRat tools.";
+    : probe?.capabilityReason ||
+      (declaredCapabilities.capabilities.completion
+        ? "Ready for chat and drafting. Task tools and research are not verified for this CLI yet."
+        : declared.reason || "Cannot safely run CareerRat tools.");
   return {
     ...runtime,
     ...probe,
     toolExecutionSupported: supported,
-    selectable: runtime.available === true && probe?.ready === true && supported,
+    capabilities: declaredCapabilities.capabilities,
+    capabilityTier: declaredCapabilities.capabilityTier,
+    selectable:
+      runtime.available === true &&
+      probe?.ready === true &&
+      declaredCapabilities.capabilities.completion === true,
     capabilityReason,
   };
 }
@@ -78,7 +94,22 @@ export function inspectInstalledRuntimeState({
   // readyCount check lands on the picker screen instead, and the user picks.
   let selectedId = selection.runtimeId;
   let effectiveSelection = selection;
-  if (selectedId && !selection.providerFallback) {
+  const providerFallbackAllowed = env.CAREERRAT_DESKTOP_CLI_ONLY !== "1";
+  if (selection.providerFallback && !providerFallbackAllowed) {
+    selectedId = null;
+    effectiveSelection = {
+      runtimeId: null,
+      providerFallback: false,
+      customCommand: null,
+    };
+    writeInstalledRuntimeSelection({
+      repoRoot,
+      env,
+      runtimeId: null,
+      providerFallback: false,
+    });
+  }
+  if (selectedId && !effectiveSelection.providerFallback) {
     const selectedRuntime = runtimes.find(({ id }) => id === selectedId);
     if (!selectedRuntime?.selectable) {
       selectedId = null;
@@ -95,7 +126,7 @@ export function inspectInstalledRuntimeState({
       });
     }
   }
-  if (!selectedId && !selection.providerFallback && autoSelect) {
+  if (!selectedId && !effectiveSelection.providerFallback && autoSelect) {
     const readyRuntimes = runtimes.filter(({ selectable }) => selectable);
     if (readyRuntimes.length === 1) {
       selectedId = readyRuntimes[0].id;
@@ -111,6 +142,7 @@ export function inspectInstalledRuntimeState({
   return {
     selectedId,
     providerFallback: effectiveSelection.providerFallback,
+    providerFallbackAllowed,
     runtimes: [
       ...runtimes.map((runtime) => ({
         ...runtime,
@@ -127,7 +159,7 @@ export function mountInstalledRuntimeRoutes({
   env = process.env,
   detectImpl = detectInstalledRuntimes,
   probeImpl = probeInstalledRuntime,
-  openTerminalImpl = openInstalledRuntimeTerminal,
+  startSignInImpl = startInstalledRuntimeSignIn,
   probeCustomImpl = probeCustomRuntimeCommand,
 } = {}) {
   const inspect = (autoSelect = true) =>
@@ -171,13 +203,26 @@ export function mountInstalledRuntimeRoutes({
     }
 
     if (body?.providerFallback === true) {
+      if (env.CAREERRAT_DESKTOP_CLI_ONLY === "1") {
+        sendJson(res, 409, {
+          ok: false,
+          code: "PROVIDER_FALLBACK_UNAVAILABLE",
+          error: "The packaged app requires a ready installed AI CLI.",
+        });
+        return;
+      }
       writeInstalledRuntimeSelection({
         repoRoot,
         env,
         runtimeId: null,
         providerFallback: true,
       });
-      sendJson(res, 200, { ok: true, selectedId: null, providerFallback: true });
+      sendJson(res, 200, {
+        ok: true,
+        selectedId: null,
+        providerFallback: true,
+        providerFallbackAllowed: true,
+      });
       return;
     }
 
@@ -188,7 +233,7 @@ export function mountInstalledRuntimeRoutes({
       sendJson(res, 400, { ok: false, code: "RUNTIME_NOT_AVAILABLE" });
       return;
     }
-    if (!runtime.toolExecutionSupported) {
+    if (!runtime.capabilities?.completion) {
       sendJson(res, 409, {
         ok: false,
         code: "RUNTIME_CAPABILITY_UNSUPPORTED",
@@ -200,7 +245,7 @@ export function mountInstalledRuntimeRoutes({
       sendJson(res, 409, {
         ok: false,
         code: "RUNTIME_AUTH_REQUIRED",
-        action: runtime.action || "open_terminal",
+        action: runtime.action || "start_sign_in",
       });
       return;
     }
@@ -214,7 +259,7 @@ export function mountInstalledRuntimeRoutes({
     sendJson(res, 200, { ok: true, selectedId: runtimeId, providerFallback: false });
   });
 
-  addRoute("POST", "/api/settings/ai-runtime/open-terminal", async (req, res) => {
+  addRoute("POST", "/api/settings/ai-runtime/sign-in", async (req, res) => {
     let body;
     try {
       body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
@@ -229,13 +274,15 @@ export function mountInstalledRuntimeRoutes({
       return;
     }
     try {
-      const opened = openTerminalImpl(runtime) || {};
-      sendJson(res, 200, {
+      const started = startSignInImpl(runtime) || {};
+      sendJson(res, 202, {
         ok: true,
-        signInCommand: opened.signInCommand || installedRuntimeSignInCommand(runtimeId),
+        runtimeId,
+        signInCommand: started.signInCommand || installedRuntimeSignInCommand(runtimeId),
+        reused: started.reused === true,
       });
     } catch {
-      sendJson(res, 500, { ok: false, code: "TERMINAL_OPEN_FAILED" });
+      sendJson(res, 500, { ok: false, code: "RUNTIME_SIGN_IN_FAILED" });
     }
   });
 
@@ -257,27 +304,5 @@ export function mountInstalledRuntimeRoutes({
     }
     const result = await probeCustomImpl({ command, env });
     sendJson(res, 200, result);
-  });
-
-  // POST /api/settings/ai-runtime/custom/select — retained so old clients get
-  // an explicit capability error instead of a 404. It never persists.
-  addRoute("POST", "/api/settings/ai-runtime/custom/select", async (req, res) => {
-    let body;
-    try {
-      body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
-    } catch (error) {
-      sendJson(res, error.status || 400, { ok: false, error: error.message });
-      return;
-    }
-    const command = String(body?.command || "").trim();
-    if (!command) {
-      sendJson(res, 400, { ok: false, error: "command is required" });
-      return;
-    }
-    sendJson(res, 409, {
-      ok: false,
-      code: "RUNTIME_CAPABILITY_UNSUPPORTED",
-      error: "Custom commands cannot safely run CareerRat tools yet.",
-    });
   });
 }

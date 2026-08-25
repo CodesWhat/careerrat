@@ -13,7 +13,7 @@ function firstCalendarExport(groups) {
 }
 
 export function engineUnavailable(state) {
-  if (state?.providerFallback === true) return false;
+  if (state?.providerFallback === true && state?.providerFallbackAllowed === true) return false;
   const selectedId = String(state?.selectedId || "").trim();
   if (!selectedId) return true;
   const selected = list(state?.runtimes).find((runtime) => runtime?.id === selectedId);
@@ -442,6 +442,10 @@ export function resolveNeedDecision(item, decision = "primary") {
   const kind = String(item?.kind || "");
   if (kind === "submit" || kind === "submit-gate") {
     return decision === "primary" ? { kind: "open-gate", gateId: item?.id || null } : null;
+  }
+  if (kind === "submit-gate-group") {
+    const gateId = list(item?.gateIds).find(Boolean) || null;
+    return decision === "primary" && gateId ? { kind: "open-gate", gateId } : null;
   }
   if (kind === "sourced-decision") {
     const payload = action?.body || {

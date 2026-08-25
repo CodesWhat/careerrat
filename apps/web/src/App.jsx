@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { ChatFirstApp } from "./chat-first/ChatFirstApp.jsx";
 import { DashboardProvider } from "./chat-first/dashboard-context.jsx";
 import { FirstRunController } from "./chat-first/FirstRunController.jsx";
@@ -13,8 +13,16 @@ const UNGATED_PATHS = new Set(["/settings"]);
 
 export function App() {
   const location = useLocation();
+  const navigate = useNavigate();
   const ungated = UNGATED_PATHS.has(location.pathname);
   const [gate, setGate] = useState(CHECKING);
+  const [workspaceMounted, setWorkspaceMounted] = useState(false);
+
+  useEffect(() => {
+    const desktop = globalThis.careerratDesktopApp;
+    if (!desktop?.onNavigate) return undefined;
+    return desktop.onNavigate((route) => navigate(route));
+  }, [navigate]);
 
   useEffect(() => {
     if (ungated || gate.status === "released") return;
@@ -24,9 +32,12 @@ export function App() {
     getOnboardState()
       .then((state) => {
         if (cancelled) return;
-        setGate(
-          setupCanGraduate(state) ? RELEASED : { status: "blocked", forPath: location.pathname }
-        );
+        if (setupCanGraduate(state)) {
+          setWorkspaceMounted(true);
+          setGate(RELEASED);
+        } else {
+          setGate({ status: "blocked", forPath: location.pathname });
+        }
       })
       .catch(() => {
         if (!cancelled) setGate({ status: "blocked", forPath: location.pathname });
@@ -38,13 +49,26 @@ export function App() {
 
   if (!ungated && gate.status === "checking") return null;
   if (!ungated && gate.status === "blocked") {
-    return <FirstRunController inWorkspace onComplete={() => setGate(RELEASED)} />;
+    return (
+      <FirstRunController
+        inWorkspace
+        onComplete={() => {
+          setWorkspaceMounted(true);
+          setGate(RELEASED);
+        }}
+      />
+    );
   }
 
   return (
     <DashboardProvider>
+      {workspaceMounted && gate.status === "released" ? (
+        <div hidden={location.pathname !== "/"}>
+          <ChatFirstApp />
+        </div>
+      ) : null}
       <Routes>
-        <Route path="/" element={<ChatFirstApp />} />
+        <Route path="/" element={null} />
         <Route path="/settings" element={<ProfileSettingsController />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

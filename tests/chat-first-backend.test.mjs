@@ -396,7 +396,9 @@ test("promoted scanner facts reach job threads and their AI context", async () =
     text: "Does the location and compensation fit?",
     call: async (options) => {
       request = options;
-      return { content: [{ type: "text", text: JSON.stringify({ reply: "Yes." }) }] };
+      return {
+        content: [{ type: "text", text: JSON.stringify({ reply: "Yes." }) }],
+      };
     },
   });
   const application = JSON.parse(request.messages[0].content).canonicalContext.application;
@@ -455,7 +457,10 @@ test("earned job threads project canonical conversations and communications with
 test("unpinning an application that never earned a conversation does not create one", async () => {
   const api = await chatFirstApi();
   const repoRoot = tempRepo();
-  seedApplication(repoRoot, { id: "app-never-threaded", company: "No Thread Corp" });
+  seedApplication(repoRoot, {
+    id: "app-never-threaded",
+    company: "No Thread Corp",
+  });
   assert.throws(
     () =>
       api.jobThreadSetPinned({
@@ -471,7 +476,10 @@ test("unpinning an application that never earned a conversation does not create 
 test("job-thread turns retain authoritative messages and advance an exact rolling checkpoint boundary", async () => {
   const api = await chatFirstApi();
   const repoRoot = tempRepo();
-  seedApplication(repoRoot, { id: "app-checkpoint", company: "Checkpoint Corp" });
+  seedApplication(repoRoot, {
+    id: "app-checkpoint",
+    company: "Checkpoint Corp",
+  });
   for (let index = 1; index <= 18; index += 1) {
     api.jobThreadMessageAppend({
       repoRoot,
@@ -489,7 +497,10 @@ test("job-thread turns retain authoritative messages and advance an exact rollin
       request = options;
       return {
         content: [
-          { type: "text", text: JSON.stringify({ reply: "Prepare the screen examples." }) },
+          {
+            type: "text",
+            text: JSON.stringify({ reply: "Prepare the screen examples." }),
+          },
         ],
       };
     },
@@ -535,7 +546,9 @@ test("rolling checkpoints keep an early durable decision after later prose excee
     text: "What constraint should I keep in mind?",
     call: async (options) => {
       request = options;
-      return { content: [{ type: "text", text: JSON.stringify({ reply: "Stay in Boston." }) }] };
+      return {
+        content: [{ type: "text", text: JSON.stringify({ reply: "Stay in Boston." }) }],
+      };
     },
   });
 
@@ -593,7 +606,12 @@ test("bounded job-thread context allowlists professional facts and redacts conta
     call: async (options) => {
       request = options;
       return {
-        content: [{ type: "text", text: JSON.stringify({ reply: "Use the platform example." }) }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ reply: "Use the platform example." }),
+          },
+        ],
       };
     },
   });
@@ -621,10 +639,60 @@ test("bounded job-thread context allowlists professional facts and redacts conta
   }
 });
 
+test("job-thread candidate context includes worldwide remote scope without widening local modes", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-location-scope",
+    company: "Scope Corp",
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "worldwide",
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+
+  let request;
+  await api.jobThreadTurn({
+    repoRoot,
+    applicationId: "app-location-scope",
+    text: "Where can I work?",
+    call: async (options) => {
+      request = options;
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ reply: "Worldwide remote." }),
+          },
+        ],
+      };
+    },
+  });
+
+  const serialized = request.messages[0].content;
+  assert.match(serialized, /"remoteScope":"worldwide"/);
+  assert.match(serialized, /"home":"New York, NY"/);
+  assert.match(serialized, /"hybrid":true/);
+  assert.match(serialized, /"onsite":true/);
+});
+
 test("job-thread AI context includes redacted recent inbound and draft communication bodies", async () => {
   const api = await chatFirstApi();
   const repoRoot = tempRepo();
-  seedApplication(repoRoot, { id: "app-recent-comms", company: "Recent Comms Corp" });
+  seedApplication(repoRoot, {
+    id: "app-recent-comms",
+    company: "Recent Comms Corp",
+  });
   commUpsert({
     repoRoot,
     row: {
@@ -656,7 +724,9 @@ test("job-thread AI context includes redacted recent inbound and draft communica
     text: "What should I send?",
     call: async (options) => {
       request = options;
-      return { content: [{ type: "text", text: JSON.stringify({ reply: "Confirm Tuesday." }) }] };
+      return {
+        content: [{ type: "text", text: JSON.stringify({ reply: "Confirm Tuesday." }) }],
+      };
     },
   });
 
@@ -674,7 +744,10 @@ test("job-thread AI context includes redacted recent inbound and draft communica
 test("compound job-thread turns treat a committed compatibility-export failure as success without duplicate or false-error messages", async () => {
   const api = await chatFirstApi();
   const repoRoot = tempRepo();
-  seedApplication(repoRoot, { id: "app-export-failure", company: "Canonical DB Corp" });
+  seedApplication(repoRoot, {
+    id: "app-export-failure",
+    company: "Canonical DB Corp",
+  });
   rmSync(join(repoRoot, "workspace", "tracker.json"), { force: true });
   mkdirSync(join(repoRoot, "workspace", "tracker.json"), { recursive: true });
 
@@ -685,7 +758,9 @@ test("compound job-thread turns treat a committed compatibility-export failure a
     text: "Save this exactly once.",
     call: async () => {
       calls += 1;
-      return { content: [{ type: "text", text: JSON.stringify({ reply: "Saved once." }) }] };
+      return {
+        content: [{ type: "text", text: JSON.stringify({ reply: "Saved once." }) }],
+      };
     },
   });
 
@@ -709,7 +784,11 @@ test("closed-job archive state and touch-due people are derived from application
     nextAction: "Nudge William Bell",
     nextActionDue: "2026-08-22",
   });
-  api.jobThreadSetPinned({ repoRoot, applicationId: "app-closed", pinned: true });
+  api.jobThreadSetPinned({
+    repoRoot,
+    applicationId: "app-closed",
+    pinned: true,
+  });
   commUpsert({
     repoRoot,
     row: {
@@ -1077,7 +1156,11 @@ test("a new human inbound reopens a manually archived active-job conversation", 
   const repoRoot = tempRepo();
   seedApplication(repoRoot, { id: "app-reopen", company: "Massive Dynamic" });
   api.jobThreadSetPinned({ repoRoot, applicationId: "app-reopen" });
-  api.jobThreadSetArchived({ repoRoot, applicationId: "app-reopen", archived: true });
+  api.jobThreadSetArchived({
+    repoRoot,
+    applicationId: "app-reopen",
+    archived: true,
+  });
   commCaptureInbound({
     repoRoot,
     applicationId: "app-reopen",
@@ -1299,6 +1382,40 @@ test("an operational job mission promotes sourced roles, evaluates applications,
   );
 });
 
+test("mission pause requests stop the runner before it claims the next step", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-pause-one", company: "Pause One" });
+  seedApplication(repoRoot, { id: "app-pause-two", company: "Pause Two" });
+  const created = api.missionCreateForJobs({
+    repoRoot,
+    id: "mission-user-pause",
+    jobs: [
+      { type: "application", id: "app-pause-one" },
+      { type: "application", id: "app-pause-two" },
+    ],
+  });
+  const calls = [];
+  const result = await api.missionRun({
+    repoRoot,
+    id: created.mission.id,
+    executeIntent: async ({ intent }) => {
+      calls.push(intent.type);
+      if (calls.length === 1) {
+        setImmediate(() =>
+          api.missionSetStatus({ repoRoot, id: created.mission.id, status: "paused" })
+        );
+      }
+      return { operationResult: { ok: true } };
+    },
+  });
+
+  assert.deepEqual(calls, ["job.evaluate"]);
+  assert.equal(result.mission.status, "paused");
+  assert.equal(result.mission.steps[0].status, "completed");
+  assert.equal(result.mission.steps[1].status, "pending");
+});
+
 test("submit gates preserve real sourced deadlines and derive packet and answered-question state", async () => {
   const api = await chatFirstApi();
   const repoRoot = tempRepo();
@@ -1319,8 +1436,11 @@ test("submit gates preserve real sourced deadlines and derive packet and answere
           answers: "workspace/tailored/gate-data-answers.pdf",
         },
         packetManifest: {
-          questions: { answerableCount: 3 },
-          answerLineage: { answeredQuestionIds: ["q1", "q2", "q2"] },
+          questions: { answerableCount: 4 },
+          answerLineage: {
+            answeredQuestionIds: ["q1", "q2", "q2", "q3", "portfolio"],
+            skippedQuestionIds: ["portfolio"],
+          },
         },
       },
     ],
@@ -1365,8 +1485,8 @@ test("submit gates preserve real sourced deadlines and derive packet and answere
     {
       deadline: "2026-08-30T18:00:00.000Z",
       expiryLabel: "EXPIRES AUG 30",
-      answeredCount: 2,
-      questionCount: 3,
+      answeredCount: 3,
+      questionCount: 4,
       packet: [
         {
           id: "resume",
@@ -1390,11 +1510,14 @@ test("submit gates preserve real sourced deadlines and derive packet and answere
     (item) => item.kind === "submit-gate" && item.missionId === "mission-gate-data"
   );
   assert.equal(need.deadline, gate.result.deadline);
-  assert.equal(need.answeredCount, 2);
+  assert.equal(need.answeredCount, 3);
   assert.deepEqual(need.packet, gate.result.packet);
   assert.equal(need.actions[0].policy, "user-submit-only");
 
-  seedApplication(repoRoot, { id: "app-gate-no-deadline", company: "No Deadline Corp" });
+  seedApplication(repoRoot, {
+    id: "app-gate-no-deadline",
+    company: "No Deadline Corp",
+  });
   api.missionCreateForJobs({
     repoRoot,
     id: "mission-gate-no-deadline",
@@ -1467,7 +1590,9 @@ test("job mission mode separates draft-only tailoring from supervised prepare-to
         operationResult: { ok: true },
         messages: [
           {
-            metadata: { state: intent.type === "job.prepare-submit" ? "awaiting-submit" : "ready" },
+            metadata: {
+              state: intent.type === "job.prepare-submit" ? "awaiting-submit" : "ready",
+            },
             ...(intent.type === "job.prepare-submit"
               ? {
                   artifacts: [
@@ -1770,7 +1895,11 @@ test("pausing during an in-flight mission step lets that step settle and prevent
     id: "mission-pause-live",
     executeIntent: async ({ intent }) => {
       calls.push(intent.type);
-      api.missionSetStatus({ repoRoot, id: "mission-pause-live", status: "paused" });
+      api.missionSetStatus({
+        repoRoot,
+        id: "mission-pause-live",
+        status: "paused",
+      });
       return { operationResult: { ok: true } };
     },
   });
@@ -1857,7 +1986,10 @@ test("mock interview sessions persist questions, answers, coaching feedback, and
     applicationId: "app-cyberdyne",
     title: "Technical mock interview",
     questionTotal: 6,
-    context: { dossierPath: "workspace/interview-prep/cyberdyne.md", interviewer: "Miles" },
+    context: {
+      dossierPath: "workspace/interview-prep/cyberdyne.md",
+      interviewer: "Miles",
+    },
   });
   assert.equal(started.session.status, "active");
   const question = api.mockInterviewMessageAppend({

@@ -37,9 +37,7 @@ export function buildCartView(jobs) {
     averageFit: count > 0 ? Math.round(fitTotal / count) : 0,
     evaluationCount,
     compPendingCount,
-    draftLabel: `Draft ${count === 1 ? "1 packet" : `${count} packets`} (resume + cover)`,
-    applyLabel: "Draft, then gate each apply",
-    chatLabel: count === 1 ? "Chat about this" : `Chat about these ${count}`,
+    applyLabel: `Apply to ${count} ${count === 1 ? "job" : "jobs"}`,
   };
 }
 

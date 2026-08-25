@@ -1,6 +1,6 @@
 import { cleanAgentCopy } from "./agent-copy.js";
 import { SendUpIcon } from "./chat-first-icons.jsx";
-import { isFirstRunExtractedFact } from "./first-run-controller.js";
+import { isFirstRunExtractedFact, runtimePresentation } from "./first-run-controller.js";
 import { RuntimeIcon } from "./RuntimeIcon.jsx";
 import { TopBar } from "./workspace-shell.jsx";
 import "./first-run.css";
@@ -14,6 +14,7 @@ function compactAssistantText(value) {
 }
 
 const RESUME_ACCEPT = ".pdf,.docx,.txt,.md,image/*";
+const EMAIL_SHAPE_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function firstFile(files) {
   return files?.[0] || null;
@@ -30,15 +31,179 @@ function actionableOptions(message, blocks) {
 function progressValues(progress = {}) {
   const total = Math.max(0, Number(progress?.total) || 0);
   const completed = Math.max(0, Math.min(total, Number(progress?.completed) || 0));
-  return { completed, total, percent: total > 0 ? Math.round((completed / total) * 100) : 0 };
+  return {
+    completed,
+    total,
+    percent: total > 0 ? Math.round((completed / total) * 100) : 0,
+  };
 }
 
 function engineStatus(engine) {
-  if (engine.selectable === false) return "Secure tool runs unavailable";
-  if (engine.ready) return engine.selected ? "Selected" : "Ready";
-  if (engine.status === "authentication_required") return "Sign-in needed";
-  if (!engine.detected) return "Not found";
-  return "Needs attention";
+  return engine.presentationLabel || runtimePresentation(engine).label;
+}
+
+const RUNTIME_DESCRIPTIONS = {
+  claude: "Uses the Claude Code account already signed in on this computer",
+};
+
+function engineDescription(engine) {
+  const presentation = runtimePresentation(engine);
+  if (presentation.state === "auth_required")
+    return "Detected on this computer. Sign in before CareerRat can use it.";
+  if (presentation.state === "detected_unverified")
+    return "Detected on this computer. CareerRat has not verified this provider’s available capabilities yet.";
+  if (presentation.state === "chat_drafting")
+    return "Ready for conversations and document drafts. Task tools and research are not verified for this provider yet.";
+  if (presentation.state === "task_tools")
+    return (
+      RUNTIME_DESCRIPTIONS[engine.id] ||
+      `Ready to chat, draft, research, and run CareerRat tasks with ${engine.name || "this AI CLI"}`
+    );
+  return "This provider is not available on this computer.";
+}
+
+function DetectedEngine({ engine, submitting, onChooseEngine, onRetryEngine, onOpenSettings }) {
+  const selectable = engine.ready && engine.selectable === true;
+  const presentation = runtimePresentation(engine);
+  const canCompleteSetup =
+    presentation.state === "auth_required" &&
+    (engine.action === "start_sign_in" || engine.toolExecutionSupported === true);
+  const canRetry = engine.detected === true && engine.ready !== true;
+  const hasActions = canCompleteSetup || canRetry;
+  const className = "cf-first-run__engine-choice";
+  const content = (
+    <>
+      <span className="cf-first-run__engine-radio" aria-hidden="true">
+        <span>✓</span>
+      </span>
+      <span className="cf-first-run__engine-identity">
+        <span className="cf-first-run__engine-name">
+          <RuntimeIcon runtimeId={engine.id} name={engine.name} size={28} />
+          <strong>{engine.name || "AI engine"}</strong>
+        </span>
+        <span className="cf-first-run__engine-description">{engineDescription(engine)}</span>
+        {engine.capabilityReason ? (
+          <span className="cf-first-run__engine-capability">{engine.capabilityReason}</span>
+        ) : null}
+      </span>
+      <span className="cf-first-run__engine-status">{engineStatus(engine).toUpperCase()}</span>
+    </>
+  );
+
+  if (selectable) {
+    return (
+      <button
+        type="button"
+        className={className}
+        aria-pressed={Boolean(engine.selected)}
+        disabled={submitting}
+        onClick={() => onChooseEngine?.(engine.id)}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <article className={className} aria-disabled={hasActions ? undefined : "true"}>
+      {content}
+      {hasActions ? (
+        <span className="cf-first-run__engine-actions">
+          {canCompleteSetup ? (
+            <button
+              className="cf-first-run__engine-action"
+              type="button"
+              disabled={submitting}
+              onClick={() => onOpenSettings?.(engine.id)}
+            >
+              Open setup
+            </button>
+          ) : null}
+          {canRetry ? (
+            <button
+              className="cf-first-run__engine-action"
+              type="button"
+              disabled={submitting}
+              onClick={() => onRetryEngine?.(engine.id)}
+            >
+              Check again
+            </button>
+          ) : null}
+        </span>
+      ) : null}
+    </article>
+  );
+}
+
+function HostedInterestCard({
+  hostedInterest = {},
+  onHostedInterestStart,
+  onHostedInterestChange,
+  onHostedInterestSubmit,
+}) {
+  const status = hostedInterest.status || "idle";
+  const email = String(hostedInterest.email || "");
+  const editing = ["editing", "error", "submitting"].includes(status);
+  const validEmail = EMAIL_SHAPE_RE.test(email.trim());
+
+  return (
+    <article className="cf-first-run__engine-special cf-first-run__engine-special--managed">
+      <span>
+        <strong>CareerRat AI</strong>
+        <small>Hosted CareerRat AI is planned, but it is not available today.</small>
+      </span>
+      <span className="cf-first-run__engine-coming-soon">COMING SOON</span>
+      <span className="cf-first-run__hosted-control">
+        {status === "requested" ? (
+          <>
+            <button type="button" className="cf-first-run__hosted-trigger" disabled>
+              REQUESTED ✓
+            </button>
+            <small className="cf-first-run__hosted-confirm">
+              Thanks, we’ll email you when it’s ready.
+            </small>
+          </>
+        ) : editing ? (
+          <form
+            className="cf-first-run__hosted-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (validEmail && status !== "submitting") onHostedInterestSubmit?.();
+            }}
+          >
+            <label>
+              <span className="sr-only">Email for CareerRat AI access</span>
+              <input
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                placeholder="you@email.com"
+                value={email}
+                disabled={status === "submitting"}
+                onChange={(event) => onHostedInterestChange?.(event.target.value)}
+              />
+            </label>
+            <button type="submit" disabled={!validEmail || status === "submitting"}>
+              {status === "submitting" ? "Sending…" : "Send request"}
+            </button>
+            {hostedInterest.error ? (
+              <small className="cf-first-run__hosted-error" role="alert">
+                {hostedInterest.error}
+              </small>
+            ) : null}
+          </form>
+        ) : (
+          <button
+            type="button"
+            className="cf-first-run__hosted-trigger"
+            onClick={onHostedInterestStart}
+          >
+            Request access
+          </button>
+        )}
+      </span>
+    </article>
+  );
 }
 
 export function FirstRunShell({ agentName = "Paul", onOpenSettings, children }) {
@@ -51,100 +216,129 @@ export function FirstRunShell({ agentName = "Paul", onOpenSettings, children }) 
 }
 
 export function EngineSelection({
-  agentName = "Paul",
   engines = [],
   error,
   submitting = false,
-  onSelectEngine,
+  onChooseEngine,
+  onStartInterview,
   onRetryEngine,
+  onRefreshEngines,
   onOpenSettings,
+  hostedInterest,
+  onHostedInterestStart,
+  onHostedInterestChange,
+  onHostedInterestSubmit,
 }) {
-  const choices = safeArray(engines);
-  const primaryChoices = choices.slice(0, 4);
+  const choices = safeArray(engines).filter(
+    (engine) => engine && typeof engine === "object" && String(engine.id || "").trim()
+  );
+  const detectedChoices = choices.filter(
+    (engine) => engine.id !== "custom" && engine.detected === true
+  );
+  const missingChoices = choices.filter(
+    (engine) => engine.id !== "custom" && engine.detected !== true
+  );
+  const selectedEngine = detectedChoices.find(
+    (engine) => engine.selected && engine.ready && engine.selectable === true
+  );
   return (
     <section className="cf-first-run__engine" aria-labelledby="cf-engine-title">
-      <span className="cf-first-run__large-avatar" aria-hidden="true">
-        🐀
-      </span>
-      <div className="cf-first-run__engine-intro">
-        <h1 id="cf-engine-title">Choose the AI that powers {agentName}</h1>
-        <p>
-          CareerRat found these on your computer. Your files stay here. The one you pick talks to
-          its own provider, the same as any task you'd give it.
-        </p>
+      <div className="cf-first-run__engine-content">
+        <div className="cf-first-run__engine-intro">
+          <h1 id="cf-engine-title">Pick your engine.</h1>
+          <p>
+            We found {detectedChoices.length} AI {detectedChoices.length === 1 ? "tool" : "tools"}{" "}
+            on this computer. Each tool shows the capabilities CareerRat has actually verified.
+            Chat-only tools stay useful while unverified task actions remain locked.
+          </p>
+        </div>
         {error ? (
           <div className="cf-first-run__engine-error" role="alert">
             {error}
           </div>
         ) : null}
-      </div>
-      <div className="cf-first-run__engine-choices">
-        {primaryChoices.length > 0 ? (
-          primaryChoices.map((engine) => {
-            const className = `cf-first-run__engine-choice${engine.recommended ? " cf-first-run__engine-choice--recommended" : ""}`;
-            const content = (
-              <>
-                <div className="cf-first-run__engine-name">
-                  <RuntimeIcon runtimeId={engine.id} name={engine.name} size={24} />
-                  <strong>{engine.name || "AI engine"}</strong>
+        <fieldset className="cf-first-run__engine-choices">
+          <legend className="cf-first-run__engine-legend">Detected AI tools</legend>
+          {detectedChoices.length > 0 ? (
+            detectedChoices.map((engine) => (
+              <DetectedEngine
+                key={engine.id}
+                engine={engine}
+                submitting={submitting}
+                onChooseEngine={onChooseEngine}
+                onRetryEngine={onRetryEngine}
+                onOpenSettings={onOpenSettings}
+              />
+            ))
+          ) : (
+            <div className="cf-first-run__engine-empty">
+              <span>
+                No AI CLI was detected. The install guides below show every runtime CareerRat knows.
+              </span>
+              <button
+                className="cf-first-run__engine-action"
+                type="button"
+                disabled={submitting}
+                onClick={onRefreshEngines}
+              >
+                Check again
+              </button>
+            </div>
+          )}
+        </fieldset>
+        {missingChoices.length > 0 ? (
+          <details className="cf-first-run__engine-missing">
+            <summary>NOT INSTALLED · {missingChoices.length}</summary>
+            <div className="cf-first-run__engine-missing-list">
+              {missingChoices.map((engine) => (
+                <div className="cf-first-run__engine-missing-row" key={engine.id}>
+                  <span className="cf-first-run__engine-name">
+                    <RuntimeIcon runtimeId={engine.id} name={engine.name} size={24} />
+                    <strong>{engine.name}</strong>
+                  </span>
+                  {engine.installUrl ? (
+                    <a href={engine.installUrl} target="_blank" rel="noreferrer">
+                      Install guide
+                    </a>
+                  ) : (
+                    <button
+                      className="cf-first-run__engine-action"
+                      type="button"
+                      disabled={submitting}
+                      onClick={onOpenSettings}
+                    >
+                      Install guide
+                    </button>
+                  )}
                 </div>
-                <span>
-                  {engineStatus(engine)}
-                  {engine.detected ? " · detected ✓" : ""}
-                </span>
-                {engine.selectable === false && engine.capabilityReason ? (
-                  <span>{engine.capabilityReason}</span>
-                ) : null}
-                {engine.recommended ? (
-                  <span className="cf-first-run__recommended">RECOMMENDED</span>
-                ) : null}
-              </>
-            );
-            if (engine.ready && engine.selectable !== false) {
-              return (
-                <button
-                  key={engine.id}
-                  type="button"
-                  className={className}
-                  aria-pressed={Boolean(engine.selected)}
-                  disabled={submitting}
-                  onClick={() => onSelectEngine?.(engine.id)}
-                >
-                  {content}
-                </button>
-              );
-            }
-            return (
-              <article key={engine.id} className={className}>
-                {content}
-                {engine.action === "open_terminal" ? null : (
-                  <button
-                    className="cf-first-run__engine-action"
-                    type="button"
-                    disabled={submitting}
-                    onClick={() =>
-                      engine.detected ? onRetryEngine?.(engine.id) : onOpenSettings?.()
-                    }
-                  >
-                    {engine.detected ? "Retry detection" : "Set up in settings"}
-                  </button>
-                )}
-              </article>
-            );
-          })
-        ) : (
-          <div className="cf-first-run__engine-empty">
-            No compatible AI was found yet. Retry detection or open settings to connect one.
-          </div>
-        )}
-      </div>
-      <div className="cf-first-run__engine-footer">
-        <span>no account, no CareerRat server · you can switch later in settings</span>
-        <button type="button" disabled={submitting} onClick={onOpenSettings}>
-          {choices.length > primaryChoices.length
-            ? `See all ${choices.length} in settings`
-            : "Open settings"}
-        </button>
+              ))}
+            </div>
+          </details>
+        ) : null}
+        <article className="cf-first-run__engine-special cf-first-run__engine-special--custom">
+          <span>
+            <strong>Custom command</strong>
+            <small>Unavailable until CareerRat can verify its tool boundary</small>
+          </span>
+          <span className="cf-first-run__engine-unavailable">UNAVAILABLE</span>
+        </article>
+        <HostedInterestCard
+          hostedInterest={hostedInterest}
+          onHostedInterestStart={onHostedInterestStart}
+          onHostedInterestChange={onHostedInterestChange}
+          onHostedInterestSubmit={onHostedInterestSubmit}
+        />
+        <footer className="cf-first-run__engine-footer">
+          <button
+            type="button"
+            className="cf-first-run__engine-start"
+            disabled={!selectedEngine || submitting}
+            onClick={() => onStartInterview?.(selectedEngine.id)}
+          >
+            {submitting ? "Starting…" : "Start the interview"}
+            <span aria-hidden="true">→</span>
+          </button>
+        </footer>
       </div>
     </section>
   );
@@ -233,7 +427,12 @@ function TranscriptMessage({ message, agentName, onChooseOption, itemKey }) {
         {message.text || ""}
       </article>
     );
-  return AssistantMessage({ message: message || {}, agentName, onChooseOption, itemKey });
+  return AssistantMessage({
+    message: message || {},
+    agentName,
+    onChooseOption,
+    itemKey,
+  });
 }
 
 function KnowledgePanel({ agentName, knowledge = [], progress = {}, onEditSection, onResumeFile }) {
@@ -362,6 +561,20 @@ function EditorField({ itemId, field }) {
           defaultChecked={field.checked === true}
         />
         <span>{field.label}</span>
+      </label>
+    );
+  }
+  if (field.type === "select") {
+    return (
+      <label className="cf-first-run__editor-field" htmlFor={inputId}>
+        <span>{field.label}</span>
+        <select id={inputId} name={field.id} defaultValue={field.value || ""}>
+          {safeArray(field.options).map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
       </label>
     );
   }
@@ -499,7 +712,12 @@ export function FirstRunChat({
           </div>
           {rows.length > 0 ? (
             rows.map((message) =>
-              TranscriptMessage({ message, agentName, onChooseOption, itemKey: message.id })
+              TranscriptMessage({
+                message,
+                agentName,
+                onChooseOption,
+                itemKey: message.id,
+              })
             )
           ) : (
             <div className="cf-first-run__empty-chat">

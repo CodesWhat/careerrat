@@ -83,7 +83,13 @@ export function buildSetupItemViewModels(doneByKey = {}) {
     const done = !!doneByKey[key];
     const isNext = !done && !nextAssigned;
     if (isNext) nextAssigned = true;
-    return { key, label: SETUP_ITEM_LABELS[key], chipLabel: SETUP_CHIP_LABELS[key], done, isNext };
+    return {
+      key,
+      label: SETUP_ITEM_LABELS[key],
+      chipLabel: SETUP_CHIP_LABELS[key],
+      done,
+      isNext,
+    };
   });
 }
 
@@ -170,7 +176,11 @@ export function setupDisclosureRows({ state, runtime } = {}) {
   const location = candidate.location || profile.location?.home;
   const modes = locationModePreferencesConfirmed(state)
     ? [
-        profile.location?.remote ? "Remote" : null,
+        profile.location?.remote
+          ? profile.location?.remote_scope === "worldwide"
+            ? "Remote worldwide"
+            : "Remote"
+          : null,
         profile.location?.hybrid ? "Hybrid" : null,
         profile.location?.onsite ? "On-site" : null,
       ].filter(Boolean)
@@ -212,7 +222,11 @@ export function setupDisclosureRows({ state, runtime } = {}) {
     : "Not provided";
 
   return [
-    { key: "engine", label: SETUP_ITEM_LABELS.engine, value: runtime?.name || "Connected" },
+    {
+      key: "engine",
+      label: SETUP_ITEM_LABELS.engine,
+      value: runtime?.name || "Connected",
+    },
     { key: "resume", label: SETUP_ITEM_LABELS.resume, value: resumeValue },
     {
       key: "roles",
@@ -234,7 +248,11 @@ export function setupDisclosureRows({ state, runtime } = {}) {
             ? `Tracked sources: ${trackedCompanies.join(", ")}`
             : "Not provided",
     },
-    { key: "evidence", label: SETUP_ITEM_LABELS.evidence, value: evidenceValue },
+    {
+      key: "evidence",
+      label: SETUP_ITEM_LABELS.evidence,
+      value: evidenceValue,
+    },
     {
       key: "guardrails",
       label: SETUP_ITEM_LABELS.guardrails,
@@ -342,7 +360,11 @@ export function quickFactsDetailLine({ state } = {}) {
   const location = state?.data?.profile?.location ?? {};
   const modes = locationModePreferencesConfirmed(state)
     ? [
-        location.remote ? "Remote" : null,
+        location.remote
+          ? location.remote_scope === "worldwide"
+            ? "Remote worldwide"
+            : "Remote"
+          : null,
         location.hybrid ? "Hybrid" : null,
         location.onsite ? "On-site" : null,
       ].filter(Boolean)

@@ -12,7 +12,10 @@ import {
   DEFAULT_DEEP_INGEST_REQUIRED_LANES,
   evaluateDeepIngestReadiness,
 } from "../../deep-ingest/readiness.mjs";
-import { CANDIDATE_DEFAULTS } from "../../profile/candidate-defaults.mjs";
+import {
+  CANDIDATE_DEFAULTS,
+  normalizeCandidateProfile,
+} from "../../profile/candidate-defaults.mjs";
 import { hasConfiguredCompensationFloor } from "../../profile/compensation.mjs";
 import { validateClaimFields } from "../../profile/evidence-validation.mjs";
 import { validate } from "../../profile/schema-validator.mjs";
@@ -218,7 +221,7 @@ function readEvidence(db) {
 
 function readCandidateConfigFromDb(db) {
   return {
-    profile: readSingleton(db, "candidate_profile", DEFAULTS.profile),
+    profile: normalizeCandidateProfile(readSingleton(db, "candidate_profile", DEFAULTS.profile)),
     targeting: readTargeting(db),
     evidence: readEvidence(db),
     honesty: readSingleton(db, "candidate_honesty", DEFAULTS.honesty),
@@ -656,7 +659,10 @@ export function candidateConfigPatch({ repoRoot, env, name, patch, recordActivit
 
       const table = SINGLETON_TABLES[name];
       const current = readSingleton(db, table, DEFAULTS[name] || {});
-      const merged = deepMerge(current, patch);
+      const merged =
+        name === "profile"
+          ? normalizeCandidateProfile(deepMerge(current, patch))
+          : deepMerge(current, patch);
       assertValid(name, merged);
       putSingleton(db, table, merged);
       return completeCandidateConfigWrite(
@@ -830,7 +836,12 @@ export function candidateEvidenceMerge({ repoRoot, env, claims, recordActivity =
         }
         seenClaims.set(claimText, id);
         usedIds.add(id);
-        const data = { ...raw, id, claim: claimText, evidence: String(raw?.evidence || "") };
+        const data = {
+          ...raw,
+          id,
+          claim: claimText,
+          evidence: String(raw?.evidence || ""),
+        };
         stmt.run(id, JSON.stringify(data), new Date().toISOString());
         added += 1;
       }

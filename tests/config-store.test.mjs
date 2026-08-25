@@ -42,12 +42,14 @@ test("loadCandidateDoc reads legacy YAML when no SQLite database exists", () => 
     join(repoRoot, "candidate/profile.yml"),
     `${stringifyYaml({
       candidate: { full_name: "Legacy Person", email: "legacy@example.com" },
+      location: { home: "London, UK", remote: true },
     })}\n`
   );
 
   assert.equal(candidateConfigSource({ repoRoot }), "legacy");
   const profile = loadCandidateDoc("profile", { repoRoot });
   assert.equal(profile.candidate.full_name, "Legacy Person");
+  assert.equal(profile.location.remote_scope, "home-country");
 });
 
 test("loadCandidateConfig prefers SQLite over stale legacy YAML in DB mode", () => {
@@ -65,7 +67,9 @@ test("loadCandidateConfig prefers SQLite over stale legacy YAML in DB mode", () 
   candidateConfigPatch({
     repoRoot,
     name: "profile",
-    patch: { candidate: { full_name: "SQLite Person", email: "db@example.com" } },
+    patch: {
+      candidate: { full_name: "SQLite Person", email: "db@example.com" },
+    },
   });
 
   const config = loadCandidateConfig({ repoRoot });
@@ -88,7 +92,11 @@ test("loadCandidateDoc reads DB application limits instead of stale compatibilit
   candidateSetupInitialize({ repoRoot });
   candidateApplicationLimitUpsert({
     repoRoot,
-    row: { company: "SQLite Limits", cap: { max: 2, window_days: 60 }, status: "caution" },
+    row: {
+      company: "SQLite Limits",
+      cap: { max: 2, window_days: 60 },
+      status: "caution",
+    },
   });
 
   const limits = loadCandidateDoc("application-limits", { repoRoot });

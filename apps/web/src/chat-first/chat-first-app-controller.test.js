@@ -633,6 +633,12 @@ describe("chat-first app controller", () => {
       kind: "open-gate",
       gateId: "mission:gate",
     });
+    expect(
+      resolveNeedDecision(
+        { kind: "submit-gate-group", gateIds: ["mission-a:gate", "mission-b:gate"] },
+        "primary"
+      )
+    ).toEqual({ kind: "open-gate", gateId: "mission-a:gate" });
   });
 
   it("maps durable search-run snapshots without claiming a running sweep completed", () => {
@@ -980,7 +986,20 @@ describe("chat-first app controller", () => {
         runtimes: [{ id: "codex", ready: true }],
       })
     ).toBe(false);
-    expect(engineUnavailable({ providerFallback: true, runtimes: [] })).toBe(false);
+    expect(
+      engineUnavailable({
+        providerFallback: true,
+        providerFallbackAllowed: true,
+        runtimes: [],
+      })
+    ).toBe(false);
+    expect(
+      engineUnavailable({
+        providerFallback: true,
+        providerFallbackAllowed: false,
+        runtimes: [],
+      })
+    ).toBe(true);
   });
 
   it("does not cover the workspace for ordinary validation errors", () => {

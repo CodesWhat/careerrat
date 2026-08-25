@@ -59,9 +59,11 @@ function titleCase(value, fallback = "In play") {
     .join(" ");
 }
 
-function normalizeThread(thread, nextActionIds) {
+function normalizeThread(thread, nextActionIds, applicationRow) {
   const last = list(thread?.messages).at(-1);
-  const stage = titleCase(thread?.stage);
+  const stage = applicationRow?.stageLabel
+    ? String(applicationRow.stageLabel).trim()
+    : titleCase(thread?.stage);
   const lastText =
     last?.role === "user" ? String(last?.text || "").trim() : cleanAgentCopy(last?.text);
   const communicationNeedsAction = list(thread?.communications).some((communication) =>
@@ -69,6 +71,7 @@ function normalizeThread(thread, nextActionIds) {
   );
   return {
     ...thread,
+    stage,
     title: thread?.company || thread?.role || "Job conversation",
     subtitle: lastText || stage,
     needsAction:
@@ -128,6 +131,41 @@ function jobArtifactFiles(details) {
       };
     });
   });
+}
+
+function canonicalArtifactPath(path) {
+  if (typeof path !== "string") return "";
+  const trimmed = path.trim();
+  if (!trimmed) return "";
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return trimmed;
+  return trimmed
+    .replaceAll("\\", "/")
+    .replace(/\/{2,}/g, "/")
+    .replace(/(^|\/)\.\//g, "$1");
+}
+
+function dedupeArtifactFiles(files) {
+  const deduped = [];
+  const indexesByPath = new Map();
+  for (const file of list(files)) {
+    const path = canonicalArtifactPath(file?.path);
+    if (!path || !indexesByPath.has(path)) {
+      if (path) indexesByPath.set(path, deduped.length);
+      deduped.push(file);
+      continue;
+    }
+
+    const index = indexesByPath.get(path);
+    const merged = { ...deduped[index] };
+    for (const [key, value] of Object.entries(file || {})) {
+      const missing = merged[key] === undefined || merged[key] === null || merged[key] === "";
+      if (missing && value != null) {
+        merged[key] = value;
+      }
+    }
+    deduped[index] = merged;
+  }
+  return deduped;
 }
 
 function scheduleEvents(calendar) {
@@ -279,21 +317,30 @@ export function filterPipelineJobs(jobs, stageId) {
 }
 
 function submitGates(missions) {
-  return missions.flatMap((mission) =>
-    list(mission?.steps)
-      .filter(
-        (step) =>
-          step?.action === "submit-gate" &&
-          step?.status === "blocked" &&
-          step?.result?.requiresUserSubmit === true
-      )
-      .map((step) => ({
+  const gates = [];
+  const seenApplications = new Set();
+  for (const mission of list(missions)) {
+    for (const step of list(mission?.steps)) {
+      if (
+        step?.action !== "submit-gate" ||
+        step?.status !== "blocked" ||
+        step?.result?.requiresUserSubmit !== true
+      ) {
+        continue;
+      }
+      const applicationId = step?.result?.applicationId || step?.jobRef?.id || null;
+      const identity = applicationId
+        ? `application:${applicationId}`
+        : `gate:${mission.id}:${step.id}`;
+      if (seenApplications.has(identity)) continue;
+      seenApplications.add(identity);
+      gates.push({
         ...(step?.result?.expiryLabel ? { eyebrow: step.result.expiryLabel } : {}),
         id: `${mission.id}:${step.id}`,
         kind: "submit",
         missionId: mission.id,
         stepId: step.id,
-        applicationId: step?.result?.applicationId || step?.jobRef?.id || null,
+        applicationId,
         company: step?.jobRef?.company || "Application",
         role: step?.jobRef?.role || "Role",
         title: `${step?.jobRef?.company || "Application"} application ready`,
@@ -305,8 +352,10 @@ function submitGates(missions) {
         answeredCount: Number(step?.result?.answeredCount) || 0,
         questionCount: Number(step?.result?.questionCount) || 0,
         packet: list(step?.result?.packet),
-      }))
-  );
+      });
+    }
+  }
+  return gates;
 }
 
 function normalizeNextStep(item, index) {
@@ -367,6 +416,29 @@ function collapseSourcedDecisions(items, agentName) {
   return remaining;
 }
 
+function collapseSubmitGates(items) {
+  const needs = list(items);
+  const gates = needs.filter((item) => item?.kind === "submit");
+  if (gates.length < 2) return needs;
+  const gateIds = gates.map((item) => String(item.id)).filter(Boolean);
+  if (gateIds.length < 2) return needs;
+  const firstIndex = needs.findIndex((item) => item?.kind === "submit");
+  const remaining = needs.filter((item) => item?.kind !== "submit");
+  const urgent = gates.filter((item) => item?.tone === "attention");
+  remaining.splice(firstIndex, 0, {
+    ...(urgent.length ? { eyebrow: `${urgent.length} time-sensitive` } : {}),
+    id: `submit-batch:${gateIds.join(":")}`,
+    kind: "submit-gate-group",
+    gateIds,
+    items: gates,
+    title: `${gates.length} applications are ready`,
+    detail: "Each form is filled. Review them one at a time and press submit.",
+    primaryLabel: `Apply to ${gates.length} jobs`,
+    tone: urgent.length ? "attention" : "plain",
+  });
+  return remaining;
+}
+
 function flattenPeople(network, agentName) {
   const people = [];
   for (const company of list(network?.companies)) {
@@ -404,15 +476,25 @@ export function buildChatFirstView(dashboardInput, runtimeInput) {
       .map((item) => item?.applicationId || item?.detailId)
       .filter(Boolean)
   );
+  const dashboardJobRows = list(dashboard.jobs?.rows);
+  const applicationRowsById = new Map(
+    dashboardJobRows
+      .filter((row) => row?.source !== "sourced")
+      .map((row) => [String(row?.id || ""), row])
+  );
   const threads = allThreads
     .filter((thread) => !thread.archived)
-    .map((thread) => normalizeThread(thread, nextActionIds));
+    .map((thread) =>
+      normalizeThread(thread, nextActionIds, applicationRowsById.get(String(thread?.applicationId)))
+    );
   const archivedThreads = (
     list(runtime.archivedThreads).length
       ? list(runtime.archivedThreads)
       : allThreads.filter((thread) => thread.archived)
-  ).map((thread) => normalizeThread(thread, nextActionIds));
-  const dashboardSearchRows = list(dashboard.jobs?.rows).filter((row) => row?.source === "sourced");
+  ).map((thread) =>
+    normalizeThread(thread, nextActionIds, applicationRowsById.get(String(thread?.applicationId)))
+  );
+  const dashboardSearchRows = dashboardJobRows.filter((row) => row?.source === "sourced");
   const richSearchRows = new Map(dashboardSearchRows.map((row) => [String(row.id), row]));
   const searchSeeds = [
     ...list(dashboard.sourcedRoles).map((row) => ({ row, source: "sourced" })),
@@ -427,11 +509,14 @@ export function buildChatFirstView(dashboardInput, runtimeInput) {
         return [normalizeSearchRow({ ...row, ...(richSearchRows.get(id) || {}) }, source)];
       })
     : dashboardSearchRows.map((row) => normalizeSearchRow(row, "sourced"));
-  const pipelineRows = list(dashboard.jobs?.rows).filter((row) => row?.source !== "sourced");
+  const pipelineRows = dashboardJobRows.filter((row) => row?.source !== "sourced");
   const rawFiles = list(dashboard.library?.cards).length
     ? list(dashboard.library.cards)
     : list(dashboard.library?.index);
-  const files = [...rawFiles.map(normalizeFile), ...jobArtifactFiles(dashboard.jobs?.details)];
+  const files = dedupeArtifactFiles([
+    ...rawFiles.map(normalizeFile),
+    ...jobArtifactFiles(dashboard.jobs?.details),
+  ]);
   const people = flattenPeople(dashboard.network, agentName);
   const missions = list(runtime.missions);
   const gates = submitGates(missions);
@@ -439,16 +524,18 @@ export function buildChatFirstView(dashboardInput, runtimeInput) {
   const canonicalNeeds = hasCanonicalNeeds
     ? list(runtime.needsYou)
     : list(dashboard.allNextSteps).map(normalizeNextStep);
-  const needsYou = collapseSourcedDecisions(
-    [
-      ...gates,
-      ...canonicalNeeds.filter(
-        (item) =>
-          !gates.some((gate) => gate.applicationId && gate.applicationId === item.applicationId)
-      ),
-      ...(hasCanonicalNeeds ? [] : touchNeeds(runtime.touchDue)),
-    ],
-    agentName
+  const needsYou = collapseSubmitGates(
+    collapseSourcedDecisions(
+      [
+        ...gates,
+        ...canonicalNeeds.filter(
+          (item) =>
+            !gates.some((gate) => gate.applicationId && gate.applicationId === item.applicationId)
+        ),
+        ...(hasCanonicalNeeds ? [] : touchNeeds(runtime.touchDue)),
+      ],
+      agentName
+    )
   );
 
   return {
@@ -472,7 +559,7 @@ export function buildChatFirstView(dashboardInput, runtimeInput) {
     submitPolicy: SUBMIT_POLICY,
     counts: {
       search: search.length,
-      pipeline: dashboard.stats?.inPlay ?? dashboard.jobs?.visibleCount ?? pipelineRows.length,
+      pipeline: pipelineRows.length,
       files: files.length,
       people: people.length,
       touchDue: list(runtime.touchDue).length,

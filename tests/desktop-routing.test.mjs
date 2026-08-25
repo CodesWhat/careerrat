@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { chooseDesktopRoute, normalizeDesktopRoute } from "../apps/desktop/desktop-routing.mjs";
+import {
+  chooseDesktopRoute,
+  normalizeDesktopRoute,
+  rendererRouteFromDesktopRoute,
+} from "../apps/desktop/desktop-routing.mjs";
 
 describe("desktop route selection", () => {
   it("opens the chat-first workspace for every candidate state", () => {
@@ -12,6 +16,12 @@ describe("desktop route selection", () => {
     assert.equal(normalizeDesktopRoute("settings"), "/app/settings");
     assert.equal(normalizeDesktopRoute("/settings"), "/app/settings");
     assert.equal(normalizeDesktopRoute("/app/settings"), "/app/settings");
+  });
+
+  it("maps desktop URLs back into BrowserRouter routes without its basename", () => {
+    assert.equal(rendererRouteFromDesktopRoute("/app"), "/");
+    assert.equal(rendererRouteFromDesktopRoute("/app/settings"), "/settings");
+    assert.equal(rendererRouteFromDesktopRoute("settings"), "/settings");
   });
 
   it("lets explicit dev route overrides win over the workspace default", () => {

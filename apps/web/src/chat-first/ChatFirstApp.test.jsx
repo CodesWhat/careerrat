@@ -441,8 +441,55 @@ describe("ChatFirstAppView", () => {
 
     expect(html).toContain("Workspace browser");
     expect(html).toContain("Tyrell");
-    expect(html).toContain("Draft 1 packet");
+    expect(html).toContain("Apply to 1 job");
     expect(html).not.toContain("Conversation threads");
+  });
+
+  it("keeps internal tracker notes out of Pipeline and labels the tab by tracked rows", async () => {
+    const view = {
+      ...VIEW,
+      counts: { ...VIEW.counts, pipeline: 2 },
+      browser: {
+        ...VIEW.browser,
+        pipeline: {
+          applicationCount: 2,
+          rows: [],
+          leaks: [],
+          jobs: [
+            {
+              id: "keep-1",
+              company: "Keep Co",
+              role: "Platform Engineer",
+              stage: "Ready to apply",
+              note: "gate keep; fit 88",
+              statusNote: "Cleared review and ready for preparation.",
+              fit: 88,
+            },
+            {
+              id: "review-1",
+              company: "Review Co",
+              role: "Staff Engineer",
+              stage: "Needs review",
+              note: "gate review; fit 84",
+              fit: 84,
+            },
+          ],
+        },
+      },
+    };
+    const pipeline = await renderView({
+      view,
+      ui: { ...BASE_UI, browse: "pipeline", pipeView: "list" },
+    });
+    const threads = await renderView({ view });
+
+    expect(pipeline).toContain("Ready to apply");
+    expect(pipeline).toContain("Needs review");
+    expect(pipeline).toContain("Cleared review and ready for preparation.");
+    expect(pipeline).not.toContain("gate keep; fit 88");
+    expect(pipeline).not.toContain("gate review; fit 84");
+    expect(threads).toContain("2 tracked");
+    expect(threads).not.toContain("0 in play");
   });
 
   it("renders a durable job conversation and job-scoped context", async () => {
