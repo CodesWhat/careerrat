@@ -158,7 +158,7 @@ test("dedupe filters existing tracker roles by URL and req id, but only flags co
   assert.equal(result.kept[0].possibleDuplicate, true);
 });
 
-test("dedupe presents one canonical role when a single source batch repeats it under different URLs", () => {
+test("dedupe presents one canonical role when different URLs carry the same requisition ID", () => {
   const result = filterAndDedupeOffers(
     [
       {
@@ -166,12 +166,14 @@ test("dedupe presents one canonical role when a single source batch repeats it u
         title: "Senior Engineering Manager, Conversational Agents",
         url: "https://remote.example.test/twilio-agents",
         location: "Remote - US",
+        reqId: "greenhouse:7926887",
       },
       {
         company: "Twilio",
         title: "Senior Engineering Manager Conversational Agents",
         url: "https://job-boards.example.test/twilio/jobs/7926887",
         location: "Remote - US",
+        reqId: "greenhouse:7926887",
       },
     ],
     {
@@ -188,8 +190,283 @@ test("dedupe presents one canonical role when a single source batch repeats it u
     ["https://remote.example.test/twilio-agents"]
   );
   assert.equal(result.duplicates.length, 1);
-  assert.equal(result.duplicates[0].duplicateReason, "company_role_batch");
+  assert.equal(result.duplicates[0].duplicateReason, "req_id_batch");
   assert.equal(result.possibleDuplicates.length, 0);
+});
+
+test("same-run exact duplicates are removed before location rejection counting", () => {
+  const repeated = {
+    company: "Grafana Labs",
+    title: "Staff Software Engineer - Databases",
+    url: "https://jobs.example.test/grafana-databases",
+    location: "Germany (Remote)",
+  };
+  const result = filterAndDedupeOffers([repeated, { ...repeated }], {
+    seenUrls: new Set(),
+    seenReqIds: new Set(),
+    seenCompanyRoles: new Set(),
+    titleFilter: () => true,
+    locationFilter: buildLocationFilter({ allow: ["Remote", "United States"], block: ["Germany"] }),
+  });
+
+  assert.equal(result.filteredLocation.length, 1);
+  assert.equal(result.duplicates.length, 1);
+  assert.equal(result.duplicates[0].duplicateReason, "url_batch");
+});
+
+test("same-run canonical dedupe selects the richer copy independent of source order", () => {
+  const weak = {
+    company: "Acme",
+    title: "Staff Platform Engineer",
+    url: "https://aggregator.example.test/acme-platform",
+    location: "Remote - US",
+    bodyText: "Short preview.",
+    bodyPartial: true,
+    reqId: "greenhouse:acme-platform",
+  };
+  const rich = {
+    ...weak,
+    url: "https://jobs.example.test/acme-platform",
+    bodyText: "Own a distributed platform and mentor engineers. ".repeat(20),
+    bodyPartial: false,
+    comp: "$210,000 - $250,000 base",
+  };
+  const run = (offers) =>
+    filterAndDedupeOffers(offers, {
+      seenUrls: new Set(),
+      seenReqIds: new Set(),
+      seenCompanyRoles: new Set(),
+      titleFilter: () => true,
+      locationFilter: () => true,
+    });
+
+  for (const offers of [
+    [weak, rich],
+    [rich, weak],
+  ]) {
+    const result = run(offers);
+    assert.deepEqual(
+      result.kept.map((offer) => offer.url),
+      [rich.url]
+    );
+    assert.equal(result.duplicates.length, 1);
+    assert.equal(result.duplicates[0].duplicateReason, "req_id_batch");
+  }
+});
+
+test("adjacent engineering titles need strong candidate evidence while blockers stay blocked", () => {
+  const titleFilter = buildTitleFilter({
+    positive: ["Staff Frontend Engineer"],
+    negative: ["Security", "Sales"],
+  });
+  const config = {
+    targeting: {
+      role_buckets: [{ titles: ["Staff Frontend Engineer"] }],
+      keep_signals: ["accessibility systems"],
+    },
+    profile: { location: { home: "New York, NY", remote: true } },
+  };
+  const makeOffer = (id, title) => ({
+    company: "Acme",
+    title,
+    url: `https://jobs.example.test/${id}`,
+    location: "Remote - United States",
+    bodyText: "Build accessibility systems for a mature product platform. ".repeat(12),
+  });
+  const result = filterAndDedupeOffers(
+    [
+      makeOffer("design-systems", "Staff Software Engineer, Design Systems"),
+      makeOffer("security", "Staff Security Engineer"),
+      makeOffer("marketing", "Product Marketing Manager"),
+    ],
+    {
+      seenUrls: new Set(),
+      seenReqIds: new Set(),
+      seenCompanyRoles: new Set(),
+      titleFilter,
+      locationFilter: () => true,
+      config,
+    }
+  );
+
+  assert.deepEqual(
+    result.kept.map((offer) => [offer.title, offer.titleRelevance]),
+    [["Staff Software Engineer, Design Systems", "adjacent-signal"]]
+  );
+  assert.deepEqual(
+    result.filteredTitle.map((offer) => offer.qualificationReason),
+    ["title-negative-blocker", "title-relevance-low"]
+  );
+});
+
+test("dedupe keeps unrelated generic /jobs/<id> URLs from distinct domains", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Alpha",
+        title: "Platform Engineer",
+        url: "https://careers.alpha.example/jobs/123",
+        location: "Remote - US",
+      },
+      {
+        company: "Beta",
+        title: "Product Designer",
+        url: "https://careers.beta.example/jobs/123",
+        location: "New York, NY",
+      },
+    ],
+    {
+      seenUrls: new Set(),
+      seenReqIds: new Set(),
+      seenCompanyRoles: new Set(),
+      titleFilter: () => true,
+      locationFilter: () => true,
+    }
+  );
+
+  assert.deepEqual(
+    result.kept.map((offer) => offer.company),
+    ["Alpha", "Beta"]
+  );
+  assert.equal(result.duplicates.length, 0);
+});
+
+test("dedupe keeps UUID-shaped paths on unrelated hosts as distinct requisitions", () => {
+  const sharedUuid = "17330e14-aaaa-bbbb-cccc-123456789000";
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Alpha",
+        title: "Platform Engineer",
+        url: `https://careers.alpha.example/openings/${sharedUuid}`,
+        location: "Remote - US",
+      },
+      {
+        company: "Beta",
+        title: "Product Designer",
+        url: `https://careers.beta.example/roles/${sharedUuid}`,
+        location: "New York, NY",
+      },
+    ],
+    {
+      seenUrls: new Set(),
+      seenReqIds: new Set(),
+      seenCompanyRoles: new Set(),
+      titleFilter: () => true,
+      locationFilter: () => true,
+    }
+  );
+
+  assert.deepEqual(
+    result.kept.map((offer) => offer.company),
+    ["Alpha", "Beta"]
+  );
+  assert.equal(result.duplicates.length, 0);
+});
+
+test("dedupe still recognizes one Greenhouse requisition across official URL forms", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Acme",
+        title: "Platform Engineer",
+        url: "https://boards.greenhouse.io/acme/jobs/123456",
+        location: "Remote - US",
+      },
+      {
+        company: "Acme",
+        title: "Platform Engineer",
+        url: "https://job-boards.eu.greenhouse.io/acme/jobs/123456",
+        location: "Remote - US",
+      },
+    ],
+    {
+      seenUrls: new Set(),
+      seenReqIds: new Set(),
+      seenCompanyRoles: new Set(),
+      titleFilter: () => true,
+      locationFilter: () => true,
+    }
+  );
+
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.duplicates.length, 1);
+});
+
+test("dedupe recognizes one Ashby requisition across official URL variants", () => {
+  const reqId = "17330e14-aaaa-bbbb-cccc-123456789000";
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Acme",
+        title: "Platform Engineer",
+        url: `https://jobs.ashbyhq.com/acme/${reqId}`,
+        location: "Remote - US",
+      },
+      {
+        company: "Acme",
+        title: "Platform Engineer",
+        url: `https://jobs.ashbyhq.com/acme/${reqId}/application?source=careerrat`,
+        location: "Remote - US",
+      },
+    ],
+    {
+      seenUrls: new Set(),
+      seenReqIds: new Set(),
+      seenCompanyRoles: new Set(),
+      titleFilter: () => true,
+      locationFilter: () => true,
+    }
+  );
+
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.duplicates.length, 1);
+  assert.equal(result.duplicates[0].duplicateReason, "req_id_batch");
+});
+
+test("adjacent non-engineering titles require a shared occupation and strong candidate evidence", () => {
+  const titleFilter = buildTitleFilter({
+    positive: ["Registered Nurse, ICU"],
+    negative: ["Travel Nurse"],
+  });
+  const config = {
+    targeting: {
+      role_buckets: [{ titles: ["Registered Nurse, ICU"] }],
+      keep_signals: ["bedside care"],
+    },
+    profile: { location: { home: "Columbus, OH", remote: true } },
+  };
+  const makeOffer = (id, title) => ({
+    company: "Regional Health",
+    title,
+    url: `https://jobs.example.test/${id}`,
+    location: "Remote - United States",
+    bodyText: "Coordinate bedside care and mentor clinical teams. ".repeat(12),
+  });
+  const result = filterAndDedupeOffers(
+    [
+      makeOffer("clinical-nurse", "Clinical Nurse Specialist"),
+      makeOffer("finance", "Hospital Finance Manager"),
+      makeOffer("travel", "Travel Nurse"),
+    ],
+    {
+      seenUrls: new Set(),
+      seenReqIds: new Set(),
+      seenCompanyRoles: new Set(),
+      titleFilter,
+      locationFilter: () => true,
+      config,
+    }
+  );
+
+  assert.deepEqual(
+    result.kept.map((offer) => [offer.title, offer.titleRelevance]),
+    [["Clinical Nurse Specialist", "adjacent-signal"]]
+  );
+  assert.deepEqual(
+    result.filteredTitle.map((offer) => offer.qualificationReason),
+    ["title-relevance-low", "title-negative-blocker"]
+  );
 });
 
 test("infers ATS provider from common careers URLs", () => {
@@ -408,6 +685,10 @@ test("extracts canonical req ids from common ATS URLs", () => {
     "ashby:17330e14-aaaa-bbbb-cccc-123456789000"
   );
   assert.equal(
+    extractReqId("https://careers.example.com/openings/17330e14-aaaa-bbbb-cccc-123456789000").id,
+    null
+  );
+  assert.equal(
     extractReqId("https://hiring.cafe/job/swfwvwmaq6basefz").id,
     "hiringcafe:swfwvwmaq6basefz"
   );
@@ -415,6 +696,7 @@ test("extracts canonical req ids from common ATS URLs", () => {
     extractReqId("https://www.linkedin.com/jobs/view/444555666/").id,
     "linkedin:444555666"
   );
+  assert.equal(extractReqId("https://careers.example.com/jobs/123456").id, null);
 });
 
 // ---------------------------------------------------------------------------

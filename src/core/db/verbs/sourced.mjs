@@ -1,4 +1,6 @@
 // verbs/sourced.mjs — sourced[] domain actions.
+
+import { addPostingIdentity, postingIdentityIsSeen } from "../../scoring/sourced-identity.mjs";
 import { buildReevaluationAnalytics } from "../../tracker/outcome-analysis.mjs";
 import {
   bumpMeta,
@@ -21,6 +23,16 @@ function applicationNote(value) {
     .join("");
 }
 
+function storedPostingKeys(db) {
+  const keys = new Set();
+  for (const entry of db
+    .prepare("SELECT data FROM applications UNION ALL SELECT data FROM sourced")
+    .all()) {
+    addPostingIdentity(keys, JSON.parse(entry.data));
+  }
+  return keys;
+}
+
 // sourcedUpsertBatch({rows}) — one sweep's worth of sourced rows, upserted in
 // ONE transaction with ONE activity event summarizing the batch (matching
 // search-jobs' own "one sweep, one write" shape rather than one event per
@@ -28,28 +40,60 @@ function applicationNote(value) {
 // analytics-refreshing writes — refreshed here too, even though
 // buildReevaluationAnalytics only consumes applications[] today (a no-op
 // recompute), so the contract holds if that ever changes.
-export function sourcedUpsertBatch({ repoRoot, env, rows } = {}) {
+export function sourcedUpsertBatch({
+  repoRoot,
+  env,
+  rows,
+  guard,
+  dedupeCanonical = false,
+  prepareAcceptedRow,
+} = {}) {
   if (!Array.isArray(rows) || rows.length === 0) {
     throw new Error("sourcedUpsertBatch: rows must be a non-empty array");
   }
   return runVerb({ repoRoot, env }, (db) => {
+    if (typeof guard === "function") guard(db);
     let created = 0;
     let updated = 0;
+    let duplicates = 0;
+    const acceptedIds = [];
+    const seenPostingKeys = dedupeCanonical ? storedPostingKeys(db) : null;
     for (const row of rows) {
       if (!row?.id) throw new Error("sourcedUpsertBatch: every row needs an id");
-      const existed = Boolean(getRow(db, "sourced", row.id));
-      putRow(db, "sourced", row.id, row);
+      if (seenPostingKeys && postingIdentityIsSeen(row, seenPostingKeys)) {
+        duplicates++;
+        continue;
+      }
+      if (seenPostingKeys) addPostingIdentity(seenPostingKeys, row);
+      const acceptedRow = typeof prepareAcceptedRow === "function" ? prepareAcceptedRow(row) : row;
+      if (!acceptedRow?.id || String(acceptedRow.id) !== String(row.id)) {
+        throw new Error("sourcedUpsertBatch: prepared rows must preserve their id");
+      }
+      const existed = Boolean(getRow(db, "sourced", acceptedRow.id));
+      putRow(db, "sourced", acceptedRow.id, acceptedRow);
       if (existed) updated++;
       else created++;
+      acceptedIds.push(String(acceptedRow.id));
+    }
+    if (!acceptedIds.length) {
+      return {
+        created,
+        updated,
+        duplicates,
+        acceptedIds,
+        meta: null,
+        event: null,
+        analytics: null,
+      };
     }
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "sourced",
       title: `Sourced sweep: ${created} new, ${updated} updated`,
-      tags: [`count:${rows.length}`],
+      tags: [`count:${acceptedIds.length}`],
     });
     const analytics = refreshAnalytics(db);
-    return { created, updated, meta, event, analytics };
+    return { created, updated, duplicates, acceptedIds, meta, event, analytics };
   });
 }
 

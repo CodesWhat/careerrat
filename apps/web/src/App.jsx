@@ -4,7 +4,7 @@ import { ChatFirstApp } from "./chat-first/ChatFirstApp.jsx";
 import { DashboardProvider } from "./chat-first/dashboard-context.jsx";
 import { FirstRunController } from "./chat-first/FirstRunController.jsx";
 import { ProfileSettingsController } from "./chat-first/ProfileSettingsController.jsx";
-import { getOnboardState } from "./lib/api.js";
+import { finishOnboarding, getOnboardState } from "./lib/api.js";
 import { setupCanGraduate } from "./onboarding/onboardingSetup.js";
 
 const CHECKING = { status: "checking", forPath: null };
@@ -30,9 +30,11 @@ export function App() {
 
     let cancelled = false;
     getOnboardState()
-      .then((state) => {
+      .then(async (state) => {
         if (cancelled) return;
         if (setupCanGraduate(state)) {
+          await finishOnboarding();
+          if (cancelled) return;
           setWorkspaceMounted(true);
           setGate(RELEASED);
         } else {

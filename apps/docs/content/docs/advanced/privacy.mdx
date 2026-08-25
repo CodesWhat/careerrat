@@ -46,12 +46,12 @@ and docs only: the CareerRat app and CLI you run locally send nothing to it.
 ## What the agent API receives
 
 When your agent generates text (tailoring a résumé, drafting an email), its
-runtime may call an AI provider. Claude Code 2.1.241 or newer runs full in-app
-task tools and research. Codex 0.149.1 or newer runs isolated in-app chat and
-drafting; Codex task-tool and research work fails closed. Other detected CLIs
-remain visible but unverified and are not selectable in the packaged app. The
-app does not silently switch providers when the selected engine lacks a
-capability.
+runtime may call an AI provider. CareerRat supports Claude Code and OpenAI Codex
+for the complete CareerRat product.
+
+CareerRat owns the workflows and threads locally. An engine is selectable only
+after local availability, authentication, and the complete readiness check
+pass. A failed check stops clearly. The app never silently switches providers.
 
 The text sent includes the relevant portions of your candidate profile, JD body,
 and instructions. Review the selected provider's privacy and retention terms

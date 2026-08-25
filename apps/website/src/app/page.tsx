@@ -104,7 +104,7 @@ export default function Home() {
             </a>
           </div>
           <p className="engine-note">
-            Claude Code 2.1.241+ runs full in-app tasks and research. OpenAI Codex 0.149.1+ runs in-app chat and drafting.
+            CareerRat owns the workflows and threads. Claude Code and OpenAI Codex are its two supported product choices.
           </p>
         </section>
 
@@ -116,7 +116,7 @@ export default function Home() {
               <span className="step-card__number">01</span>
               <h3>Open it</h3>
               <p>It finds the AI CLI on your machine and sets itself up. No account, no forms.</p>
-              <span className="status-pill status-pill--active">CLAUDE CODE · DETECTED</span>
+              <span className="status-pill status-pill--active">LOCAL AI CLI · READY</span>
             </article>
             <article className="step-card">
               <span className="step-card__number">02</span>
@@ -203,18 +203,21 @@ export default function Home() {
             <div className="engine-card">
               <p className="eyebrow">You&apos;ll need an AI CLI</p>
               <p>
-                CareerRat thinks with a coding agent on your machine. It shows only the capabilities verified for each detected CLI.
+                Pick Claude Code or OpenAI Codex. Either one runs the same CareerRat-owned workflows and skills. CareerRat invokes it directly and never falls back to another provider.
               </p>
               <div className="engine-pills" role="list" aria-label="Detected AI CLI support">
-                <span className="engine-pill engine-pill--ready" role="listitem">
-                  Claude Code · full tasks
+                <span className="engine-pill" role="listitem">
+                  Claude Code
                 </span>
-                <span className="engine-pill engine-pill--ready" role="listitem">
-                  OpenAI Codex · chat + drafting
+                <span className="engine-pill" role="listitem">
+                  OpenAI Codex
+                </span>
+                <span className="engine-pill" role="listitem">
+                  Same CareerRat workflow
                 </span>
               </div>
               <p className="engine-card__note">
-                CareerRat itself costs nothing. Your AI plan covers the thinking, and the app never silently installs an update.
+                A runtime appears ready only when it is available, signed in, and passes its readiness check. CareerRat itself costs nothing, and the app never silently installs an update.
               </p>
             </div>
           </div>

@@ -78,6 +78,25 @@ export function anyMatched(text, signals) {
   return matchSignals(text, signals).some((r) => r.matched);
 }
 
+function normalizeExcludedText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+export function matchesExcluded({ company, title, excludedCompanies } = {}) {
+  const haystacks = [company, title].map(normalizeExcludedText).filter(Boolean);
+  for (const entry of Array.isArray(excludedCompanies) ? excludedCompanies : []) {
+    const normalized = normalizeExcludedText(entry);
+    if (!normalized) continue;
+    const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`);
+    if (haystacks.some((haystack) => pattern.test(haystack))) return entry;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // matchedTitleBucket
 // ---------------------------------------------------------------------------
@@ -558,23 +577,10 @@ export function evaluateGate({
 
   // (b) excluded company or title — match on whole words, not substrings, so a
   // short entry like "X" doesn't false-cut "UX Engineer", "Box", or "Nexus".
-  const companyLower = company.toLowerCase();
-  const titleLower = title.toLowerCase();
-  const matchesExcluded = (haystack, needle) => {
-    const n = String(needle || "")
-      .trim()
-      .toLowerCase();
-    if (!n) return false;
-    const escaped = n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    // boundary = start/end or any non-alphanumeric, so the entry must stand alone
-    return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`).test(haystack);
-  };
-  for (const ex of excludedCompanies) {
-    if (matchesExcluded(companyLower, ex) || matchesExcluded(titleLower, ex)) {
-      hardCut = true;
-      reasons.push(`company/title matches excluded list: "${ex}"`);
-      break;
-    }
+  const matchedExcluded = matchesExcluded({ company, title, excludedCompanies });
+  if (matchedExcluded) {
+    hardCut = true;
+    reasons.push(`company/title matches excluded list: "${matchedExcluded}"`);
   }
 
   // (c) sponsorship mismatch

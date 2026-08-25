@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ArtifactViewerModal } from "../jobs/ArtifactViewerModal.jsx";
-import { runJobsPageSearch } from "../jobs/jobsSearch.js";
+import {
+  jobSearchCapabilities,
+  runAiWebSearchLane,
+  runCoordinatedJobSearch,
+  runJobsPageSearch,
+} from "../jobs/jobsSearch.js";
 import { resolveErrorCopy } from "../lib/errorCopy.js";
 import { useEventSource } from "../lib/sse.js";
 import { chatFirstApi } from "./api.js";
@@ -43,6 +48,11 @@ import {
   filterPipelineJobs,
 } from "./chat-first-model.js";
 import {
+  CompanyProposalReview,
+  companyProposalReviewForArtifact,
+  companyProposalReviewFromResult,
+} from "./company-proposal-review.jsx";
+import {
   CanonicalJobConversation,
   ConversationPanel,
   DeepIngestContext,
@@ -74,6 +84,7 @@ import {
   skillChatStreamUrl,
   skillChatSubmitBlocked,
 } from "./skill-chat-model.js";
+import { SourceReview } from "./source-review.jsx";
 import { WorkspaceBrowser } from "./WorkspaceBrowser.jsx";
 import {
   ChatFirstWorkspace,
@@ -94,6 +105,76 @@ const DEFAULT_BROWSER_FILTERS = Object.freeze({
   files: "All",
   people: "all",
 });
+
+export async function runChatFirstJobSearch({
+  api,
+  refetch,
+  setSearchState,
+  signal,
+  runCoordinator = runCoordinatedJobSearch,
+  runDeterministicLane = runJobsPageSearch,
+  runAiLane = runAiWebSearchLane,
+} = {}) {
+  const [sourceStatusResult, runtimeConfigResult] = await Promise.allSettled([
+    typeof api?.getSearchSourceStatus === "function"
+      ? api.getSearchSourceStatus()
+      : Promise.reject(new Error("Search source status is unavailable")),
+    typeof api?.getRuntimeConfig === "function"
+      ? api.getRuntimeConfig()
+      : Promise.reject(new Error("AI runtime configuration is unavailable")),
+  ]);
+  const sourceStatus = sourceStatusResult.status === "fulfilled" ? sourceStatusResult.value : null;
+  const runtimeConfig =
+    runtimeConfigResult.status === "fulfilled" ? runtimeConfigResult.value : null;
+  const aiConfigured = runtimeConfig?.ai?.available === true;
+  const capabilities = jobSearchCapabilities({
+    sourceStatus,
+    ai: {
+      configured: aiConfigured,
+      executable: aiConfigured,
+      consented: aiConfigured,
+    },
+  });
+
+  return runCoordinator({
+    capabilities,
+    refetch,
+    setSearchState,
+    signal,
+    runDeterministic: ({ signal: laneSignal, onLaneState }) =>
+      runDeterministicLane({
+        startSearchRun: api.startSearchRun,
+        getSourcingRun: api.getSourcingRun,
+        setSearchRun: (run) => {
+          const presentation = sourceSweepPresentation(run);
+          onLaneState?.({
+            ...(presentation.detail || presentation.summary
+              ? { detail: presentation.detail || presentation.summary }
+              : {}),
+            ...(presentation.providers ? { providers: presentation.providers } : {}),
+          });
+        },
+        setSearchError: (error) => {
+          if (error) onLaneState?.({ error });
+        },
+        signal: laneSignal,
+      }),
+    runAiWeb: ({ signal: laneSignal, onLaneState }) =>
+      runAiLane({
+        signal: laneSignal,
+        setStatus: () => undefined,
+        setActivity: (detail) => {
+          if (detail) onLaneState?.({ detail });
+        },
+        setCounts: (counts) => {
+          if (counts) onLaneState?.({ counts });
+        },
+        setError: (error) => {
+          if (error) onLaneState?.({ error });
+        },
+      }),
+  });
+}
 const SKILL_CHAT_EVENT_TYPES = [
   "assistant",
   "chat_state",
@@ -377,7 +458,7 @@ function jobContext(view, thread, mockSession, actions) {
     };
   });
   const canRunMock =
-    /review|saved|screen|assessment|technical|hiring manager|interview|onsite|final/i.test(
+    /review|saved|ready to apply|screen|assessment|technical|hiring manager|interview|onsite|final/i.test(
       String(thread.stage || "")
     ) || files.some((file) => /interview dossier/i.test(String(file.kind || file.name || "")));
   const matchingMock =
@@ -469,6 +550,8 @@ export function ChatFirstAppView({
   mockSession,
   activeGate,
   artifactViewer,
+  companyProposalReview,
+  sourceReview,
   engineDown = false,
   technicalDetails = null,
   busy = false,
@@ -507,6 +590,19 @@ export function ChatFirstAppView({
         title={artifactViewer?.title || "Artifact preview"}
         artifact={artifactViewer?.artifact || null}
         onClose={actions.closeArtifact}
+      />
+      <CompanyProposalReview
+        artifact={companyProposalReview}
+        busy={busy}
+        onIntent={actions.decideCompanyProposal}
+        onClose={actions.closeCompanyProposalReview}
+      />
+      <SourceReview
+        artifact={sourceReview}
+        busy={busy}
+        onDecision={actions.decideSkillChatDiscovery}
+        onComplete={actions.completeSkillChatDiscovery}
+        onClose={actions.closeSourceReview}
       />
       <EngineDownCover
         open={engineDown}
@@ -588,6 +684,8 @@ export function ChatFirstAppView({
           busy={busy}
           onDecision={actions.decideSkillChatDiscovery}
           onComplete={actions.completeSkillChatDiscovery}
+          onReviewSources={actions.openSourceReview}
+          onAnswer={actions.submitComposer}
         />
       </ConversationPanel>
     );
@@ -689,6 +787,8 @@ export function ChatFirstAppView({
           onMessageAction={actions.openActivity}
           onIntentAction={(intent) => actions.runMessageIntent?.(intent)}
           intentBusy={busy}
+          onAnswer={actions.submitComposer}
+          answerBusy={busy}
         />
       </ConversationPanel>
     );
@@ -708,6 +808,8 @@ export function ChatFirstAppView({
           onMessageAction={actions.openActivity}
           onIntentAction={(intent) => actions.runMessageIntent?.(intent)}
           intentBusy={busy}
+          onAnswer={actions.submitComposer}
+          answerBusy={busy}
           mission={missionPresentation(activeMission, {
             onPause: () => actions.pauseMission?.(activeMission.id),
             onResume: () => actions.resumeMission?.(activeMission.id),
@@ -783,6 +885,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   const [newSearchIds, setNewSearchIds] = useState([]);
   const [sweepComparison, setSweepComparison] = useState(0);
   const sweepBaselineRef = useRef(null);
+  const sweepAbortRef = useRef(null);
   const missionExecutionRef = useRef(new Set());
   const [deepState, setDeepState] = useState(null);
   const [deepInputMode, setDeepInputMode] = useState(null);
@@ -791,6 +894,8 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   const [deepEditDraft, setDeepEditDraft] = useState({});
   const [deepReceipt, setDeepReceipt] = useState(null);
   const [artifactViewer, setArtifactViewer] = useState(null);
+  const [companyProposalReview, setCompanyProposalReview] = useState(null);
+  const [sourceReview, setSourceReview] = useState(null);
   const [gatePacket, setGatePacket] = useState(null);
   const [skillChatState, setSkillChatState] = useState(null);
   const skillChatCursorsRef = useRef(new Map());
@@ -845,6 +950,13 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     if (dashboard.loading || ui.searchSelectionSeeded || !baseView.browser.search.length) return;
     dispatch({ type: "selection.seed-search", rows: baseView.browser.search });
   }, [baseView.browser.search, dashboard.loading, ui.searchSelectionSeeded]);
+
+  useEffect(
+    () => () => {
+      sweepAbortRef.current?.abort();
+    },
+    []
+  );
 
   useEffect(() => {
     const next = location.state || {};
@@ -1116,6 +1228,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   }
 
   async function runCartMission(ids, mode) {
+    if (busy) return;
     const result = await run(() =>
       createMissionAndStart({
         api,
@@ -1138,21 +1251,23 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   }
 
   async function runSweep() {
+    if (sourceSweep?.status === "running") return;
     sweepBaselineRef.current = new Set(baseView.browser.search.map((row) => row.id));
     setNewSearchIds([]);
     const controller = new AbortController();
-    const result = await runJobsPageSearch({
-      startSearchRun: api.startSearchRun,
-      getSourcingRun: api.getSourcingRun,
-      refetch: dashboard.refetch,
-      setSearchRun: (searchRun) => setSourceSweep(sourceSweepPresentation(searchRun)),
-      setSearchError: (message) => {
-        if (message) setSourceSweep({ status: "error", summary: message });
-      },
-      signal: controller.signal,
-    });
-    if (result?.ok) setSweepComparison((current) => current + 1);
-    else if (!result?.timedOut) sweepBaselineRef.current = null;
+    sweepAbortRef.current = controller;
+    try {
+      const result = await runChatFirstJobSearch({
+        api,
+        refetch: dashboard.refetch,
+        setSearchState: setSourceSweep,
+        signal: controller.signal,
+      });
+      if (result?.ok) setSweepComparison((current) => current + 1);
+      else if (!result?.timedOut) sweepBaselineRef.current = null;
+    } finally {
+      if (sweepAbortRef.current === controller) sweepAbortRef.current = null;
+    }
   }
 
   async function openJob(applicationId) {
@@ -1449,6 +1564,17 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     return result;
   }
 
+  async function decideCompanyProposal(intent) {
+    if (intent?.type !== "company.proposal-decide") return;
+    const response = await run(() =>
+      api.runWorkspaceIntent(intent.type, intent.entity, intent.input || {})
+    );
+    if (!response) return;
+    const refreshed = companyProposalReviewFromResult(response);
+    if (refreshed?.proposals.length) setCompanyProposalReview(refreshed);
+    else setCompanyProposalReview(null);
+  }
+
   async function decideSkillChatDiscovery(item, action) {
     if (!activeSkillChat?.skill || !item?.id || !["save", "discard"].includes(action)) return;
     setBusy(true);
@@ -1460,6 +1586,18 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         item,
         action,
       });
+      setSourceReview((current) =>
+        current
+          ? {
+              ...current,
+              candidates: list(current.candidates).map((candidate) =>
+                candidate?.id === item.id
+                  ? { ...candidate, decision: { action, status: "completed" } }
+                  : candidate
+              ),
+            }
+          : current
+      );
     } catch (cause) {
       const resultText = errorCopy(cause);
       setSkillChatState((current) =>
@@ -1491,6 +1629,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     setError(null);
     try {
       await commitSkillChatCompletion({ api, skill: activeSkillChat.skill, item });
+      setSourceReview(null);
     } catch (cause) {
       setError(errorCopy(cause));
     } finally {
@@ -1521,6 +1660,8 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     runMessageIntent,
     decideSkillChatDiscovery,
     completeSkillChatDiscovery,
+    openSourceReview: (artifact) => setSourceReview(artifact),
+    closeSourceReview: () => setSourceReview(null),
     runSweep,
     setQuery,
     openSourceHealth: () => navigate("/settings", { state: { activeTab: "settings" } }),
@@ -1568,6 +1709,11 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       );
     },
     openThreadArtifact: async (thread, artifact) => {
+      const proposalReview = companyProposalReviewForArtifact(artifact);
+      if (proposalReview) {
+        setCompanyProposalReview(proposalReview);
+        return;
+      }
       if (artifact?.html || artifact?.binary || artifact?.text || artifact?.markdown) {
         setArtifactViewer({
           title: artifact?.title || artifact?.name || titleCase(artifact?.kind, "Artifact"),
@@ -1733,6 +1879,8 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       else setError(`${file?.name || "This file"} is not ready to preview yet.`);
     },
     closeArtifact: () => setArtifactViewer(null),
+    decideCompanyProposal,
+    closeCompanyProposalReview: () => setCompanyProposalReview(null),
     retryEngine: async () => {
       const [runtimeState] = await Promise.all([
         typeof api.getInstalledAiRuntimes === "function"
@@ -1760,6 +1908,8 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       mockSession={mockSession}
       activeGate={activeGate}
       artifactViewer={artifactViewer}
+      companyProposalReview={companyProposalReview}
+      sourceReview={sourceReview}
       engineDown={engineDown}
       technicalDetails={
         technicalOpen

@@ -21,7 +21,7 @@ function runCli(script, args, home) {
   });
 }
 
-function runCareerRat(args, home) {
+function runCareerRat(args, home, extraEnv = {}) {
   return spawnSync(process.execPath, ["bin/careerrat.mjs", ...args], {
     cwd: ROOT,
     // CAREERRAT_NO_UPDATE_CHECK: bin/careerrat.mjs otherwise fires a detached
@@ -30,7 +30,12 @@ function runCareerRat(args, home) {
     // races the test's own `rmSync(home, { recursive: true, force: true })`
     // cleanup — an ENOTEMPTY on a tempdir that has nothing to do with the
     // assertion under test. See src/core/update/update-core.mjs.
-    env: { ...process.env, CAREERRAT_HOME: home, CAREERRAT_NO_UPDATE_CHECK: "1" },
+    env: {
+      ...process.env,
+      CAREERRAT_HOME: home,
+      CAREERRAT_NO_UPDATE_CHECK: "1",
+      ...extraEnv,
+    },
     encoding: "utf8",
   });
 }
@@ -516,6 +521,24 @@ test("careerrat start --no-agent prints the manual agent handoff", () => {
     assert.match(result.stdout, /Open your agent in this folder and say:/);
     assert.match(result.stdout, /run careerrat doctor/);
     assert.match(result.stdout, /next unfinished CareerRat skill/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("careerrat start refuses an unaccepted detected agent command", () => {
+  const home = tempHome();
+  const binDir = join(home, "bin");
+  try {
+    mkdirSync(binDir, { recursive: true });
+    const hermes = join(binDir, "hermes");
+    writeFileSync(hermes, "#!/bin/sh\nexit 42\n", { mode: 0o755 });
+    const result = runCareerRat(["start", "hermes", "--no-dashboard"], home, {
+      PATH: binDir,
+    });
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /Couldn't find "hermes"/);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

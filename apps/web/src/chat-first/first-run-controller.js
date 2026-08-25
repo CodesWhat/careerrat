@@ -1,3 +1,4 @@
+import { parseChatAnswerMode } from "../../../../src/core/ai/chat-answer-mode.mjs";
 import { parseConfirmBlocks } from "../onboarding/confirmBlocks.js";
 import { setupDisclosureRows, setupProgressFromState } from "../onboarding/onboardingSetup.js";
 
@@ -10,10 +11,6 @@ const FIRST_ROLE_SUGGESTION = {
   label: "Staff SWE · ML infra",
 };
 
-const FIRST_RUN_RUNTIME_PRIORITY = new Map([
-  ["claude", 0],
-  ["codex", 1],
-]);
 const EXTRACTED_FACT_KINDS = new Set(["authorization", "candidate_patch", "evidence_claim"]);
 const EXPLICIT_ACTION_LABELS = {
   consent_capability: ["Allow", "Not now"],
@@ -23,10 +20,8 @@ const EXPLICIT_ACTION_LABELS = {
 };
 
 const RUNTIME_PRESENTATION_LABELS = {
-  task_tools: "Ready for task tools and research",
-  chat_drafting: "Ready for chat and drafting",
+  ready: "Ready",
   auth_required: "Auth required",
-  detected_unverified: "Detected not verified",
   unavailable: "Unavailable",
 };
 
@@ -38,29 +33,16 @@ function normalizedRuntimeValue(value) {
     .replaceAll(/^_+|_+$/g, "");
 }
 
-function runtimeCapability(runtime, names) {
-  const wanted = new Set(names.map(normalizedRuntimeValue));
-  const capabilities = runtime?.capabilities;
-  if (Array.isArray(capabilities)) {
-    return capabilities.some((value) => wanted.has(normalizedRuntimeValue(value)));
-  }
-  if (!capabilities || typeof capabilities !== "object") return false;
-  return Object.entries(capabilities).some(
-    ([name, enabled]) => enabled === true && wanted.has(normalizedRuntimeValue(name))
-  );
+export function runtimeIsSupported(runtime) {
+  return runtime?.supported === true;
 }
 
 export function runtimePresentation(runtime = {}) {
-  const explicitState = normalizedRuntimeValue(runtime.presentationState);
-  if (RUNTIME_PRESENTATION_LABELS[explicitState]) {
-    return {
-      state: explicitState,
-      label: RUNTIME_PRESENTATION_LABELS[explicitState],
-    };
+  if (!runtimeIsSupported(runtime)) {
+    return { state: "unavailable", label: RUNTIME_PRESENTATION_LABELS.unavailable };
   }
-
   const status = normalizedRuntimeValue(runtime.status);
-  if (["authentication_required", "auth_required", "sign_in_required"].includes(status)) {
+  if (status === "authentication_required") {
     return {
       state: "auth_required",
       label: RUNTIME_PRESENTATION_LABELS.auth_required,
@@ -69,57 +51,20 @@ export function runtimePresentation(runtime = {}) {
 
   const available =
     runtime.available === true || runtime.detected === true || runtime.ready === true;
-  const ready = runtime.ready === true && runtime.selectable === true;
-  const tier = normalizedRuntimeValue(
-    runtime.capabilityTier || runtime.tier || runtime.capabilities?.tier
-  );
-
-  if (!available || tier === "unavailable" || ["not_found", "missing"].includes(status)) {
+  if (!available) {
     return {
       state: "unavailable",
       label: RUNTIME_PRESENTATION_LABELS.unavailable,
     };
   }
-  if (
-    tier === "detected_unverified" ||
-    ["detected_not_verified", "detected_unverified", "unverified"].includes(status)
-  ) {
-    return {
-      state: "detected_unverified",
-      label: RUNTIME_PRESENTATION_LABELS.detected_unverified,
-    };
+  if (runtime.ready === true && runtime.selectable === true) {
+    return { state: "ready", label: RUNTIME_PRESENTATION_LABELS.ready };
   }
-  if (
-    ready &&
-    (tier === "task_tools" ||
-      tier === "tools" ||
-      tier === "b" ||
-      runtime.toolExecutionSupported === true ||
-      runtimeCapability(runtime, ["taskTools", "task_tools", "toolExecution", "tool_execution"]))
-  ) {
-    return {
-      state: "task_tools",
-      label: RUNTIME_PRESENTATION_LABELS.task_tools,
-    };
-  }
-  if (
-    ready &&
-    (tier === "chat_drafting" ||
-      tier === "chat" ||
-      tier === "completion" ||
-      tier === "a" ||
-      runtimeCapability(runtime, ["completion", "isolatedCompletion", "isolated_completion"]) ||
-      runtime.ready === true)
-  ) {
-    return {
-      state: "chat_drafting",
-      label: RUNTIME_PRESENTATION_LABELS.chat_drafting,
-    };
-  }
-  return {
-    state: "detected_unverified",
-    label: RUNTIME_PRESENTATION_LABELS.detected_unverified,
-  };
+  return { state: "unavailable", label: RUNTIME_PRESENTATION_LABELS.unavailable };
+}
+
+function runtimeIsSelectable(runtime, presentation = runtimePresentation(runtime)) {
+  return runtime?.ready === true && runtime?.selectable === true && presentation.state === "ready";
 }
 
 export function isFirstRunExtractedFact(block) {
@@ -131,8 +76,7 @@ export function runtimeSelectionReady(state) {
   const selectedId = String(state?.selectedId || "").trim();
   if (!selectedId) return false;
   return list(state?.runtimes).some(
-    (runtime) =>
-      runtime?.id === selectedId && runtime?.ready === true && runtime?.selectable === true
+    (runtime) => runtime?.id === selectedId && runtimeIsSelectable(runtime)
   );
 }
 
@@ -146,11 +90,7 @@ export function firstRunRuntimeChoices(state) {
       seen.add(id);
       return [{ ...runtime, id }];
     })
-    .sort(
-      (left, right) =>
-        (FIRST_RUN_RUNTIME_PRIORITY.get(left.id) ?? 2) -
-        (FIRST_RUN_RUNTIME_PRIORITY.get(right.id) ?? 2)
-    )
+    .filter(runtimeIsSupported)
     .map((runtime) => {
       const presentation = runtimePresentation(runtime);
       return {
@@ -158,20 +98,19 @@ export function firstRunRuntimeChoices(state) {
         name: String(runtime.name || runtime.id).trim() || runtime.id,
         detected: runtime.available === true || runtime.detected === true || runtime.ready === true,
         ready: runtime.ready === true,
-        selectable: runtime.selectable === true,
-        toolExecutionSupported: runtime.toolExecutionSupported === true,
+        supported: true,
+        selectable: runtimeIsSelectable(runtime, presentation),
         capabilities: runtime.capabilities,
-        capabilityTier: runtime.capabilityTier,
         presentationState: presentation.state,
         presentationLabel: presentation.label,
         selected: runtime.id === state?.selectedId,
-        recommended: runtime.id === "claude",
         status: runtime.status,
         action: runtime.action,
         installUrl: runtime.installUrl || null,
         capabilityReason: runtime.capabilityReason || null,
       };
-    });
+    })
+    .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
 }
 
 export function firstRunAgentName(state, fallback = "Paul") {
@@ -390,7 +329,8 @@ export function buildFirstRunKnowledge(state, runtime) {
 }
 
 export function firstRunAssistantMessage(raw, id) {
-  const { text, blocks } = parseConfirmBlocks(raw);
+  const parsedAnswer = parseChatAnswerMode(raw);
+  const { text, blocks } = parseConfirmBlocks(parsedAnswer.text);
   const suggested =
     blocks.length === 0 && /what kind of role are you actually after/i.test(text)
       ? [FIRST_ROLE_SUGGESTION]
@@ -400,6 +340,7 @@ export function firstRunAssistantMessage(raw, id) {
     role: "assistant",
     text,
     blocks,
+    ...(parsedAnswer.answerMode ? { answerMode: parsedAnswer.answerMode } : {}),
     options: blocks.length
       ? blocks.flatMap((block, index) =>
           isFirstRunExtractedFact(block)

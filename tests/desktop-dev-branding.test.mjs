@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import sharp from "sharp";
 
 import { brandElectronDevApp, buildInfoPlistBrandCommands } from "../apps/desktop/dev-branding.mjs";
 
@@ -20,6 +21,43 @@ test("desktop icon is generated from the selected text-only brand mark", async (
   assert.match(generator, />Rat\.<\/text>/);
   assert.match(generator, /SKY = "#8fd0f8"/);
   assert.doesNotMatch(generator, /rat-emoji|emoji artwork/i);
+});
+
+test("desktop icon text fills and centers the sky tile", async () => {
+  const { data, info } = await sharp(join(root, "apps/desktop/build/icon.png"))
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const bounds = {
+    minX: info.width,
+    minY: info.height,
+    maxX: -1,
+    maxY: -1,
+  };
+
+  for (let y = 0; y < info.height; y += 1) {
+    for (let x = 0; x < info.width; x += 1) {
+      const offset = (y * info.width + x) * info.channels;
+      const isInk =
+        data[offset + 3] > 128 &&
+        data[offset] < 80 &&
+        data[offset + 1] < 80 &&
+        data[offset + 2] < 80;
+      if (!isInk) continue;
+      bounds.minX = Math.min(bounds.minX, x);
+      bounds.minY = Math.min(bounds.minY, y);
+      bounds.maxX = Math.max(bounds.maxX, x);
+      bounds.maxY = Math.max(bounds.maxY, y);
+    }
+  }
+
+  const width = bounds.maxX - bounds.minX + 1;
+  const centerX = (bounds.minX + bounds.maxX) / 2;
+  const centerY = (bounds.minY + bounds.maxY) / 2;
+
+  assert.ok(width >= 740, `ink width ${width}px should fill most of the 824px tile`);
+  assert.ok(Math.abs(centerX - 512) <= 3, `ink center x=${centerX}px should center on 512px`);
+  assert.ok(Math.abs(centerY - 512) <= 12, `ink center y=${centerY}px should center on 512px`);
 });
 
 test("desktop dev launch brands the local Electron.app as CareerRat before starting", async () => {

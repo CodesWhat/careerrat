@@ -99,8 +99,10 @@ jobs:
           node-version: 24
       - name: Install dependencies
         run: npm ci
-      - name: Full test suite
+      - name: Core test suite
         run: npm test
+      - name: Web UI test suite
+        run: npm --workspace apps/web test
 
   # M7 — builds the apps/web SPA shell. Non-gating (not in the "Main branch
   # protection" ruleset's required_status_checks) until the workspace is

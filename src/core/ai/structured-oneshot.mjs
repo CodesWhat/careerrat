@@ -55,7 +55,7 @@ export function extractFencedJson(rawText) {
 // Parse `rawText`'s extracted JSON payload and validate it against `schema`.
 // Never throws — parse/validate failures come back as { ok: false, errors }
 // so callers can build a corrective retry prompt from them.
-export function parseStructuredJson(rawText, schema) {
+export function parseStructuredJson(rawText, schema, validateData) {
   const candidate = extractFencedJson(rawText);
   if (!candidate) {
     return { ok: false, errors: [{ path: "", message: "reply contained no text to parse" }] };
@@ -68,6 +68,12 @@ export function parseStructuredJson(rawText, schema) {
   }
   const { valid, errors } = validate(data, schema);
   if (!valid) return { ok: false, data, errors };
+  if (typeof validateData === "function") {
+    const semanticErrors = validateData(data);
+    if (Array.isArray(semanticErrors) && semanticErrors.length > 0) {
+      return { ok: false, data, errors: semanticErrors };
+    }
+  }
   return { ok: true, data };
 }
 
@@ -95,7 +101,7 @@ export function buildCorrectiveAddendum(errors) {
 //     NO_AI_ROUTE/SDK_NOT_INSTALLED) is NOT caught here — it propagates to
 //     the caller, which is what lets a route tell "the model replied badly"
 //     (422-shaped) apart from "the AI route isn't configured" (501-shaped).
-export async function runStructuredOneshot({ schema, maxRetries = 1, invoke }) {
+export async function runStructuredOneshot({ schema, maxRetries = 1, invoke, validateData }) {
   if (typeof invoke !== "function") {
     throw new TypeError("runStructuredOneshot: invoke callback is required");
   }
@@ -107,7 +113,7 @@ export async function runStructuredOneshot({ schema, maxRetries = 1, invoke }) {
     const correction = attempt === 0 ? null : buildCorrectiveAddendum(lastErrors);
     const rawText = await invoke({ attempt, correction });
     lastRaw = rawText;
-    const result = parseStructuredJson(rawText, schema);
+    const result = parseStructuredJson(rawText, schema, validateData);
     if (result.ok) {
       return { ok: true, data: result.data, retried: attempt > 0, raw: rawText };
     }

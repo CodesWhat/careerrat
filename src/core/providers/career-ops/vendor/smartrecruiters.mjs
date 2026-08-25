@@ -19,7 +19,7 @@
 // in small batches so a 400-posting board cannot hammer the shared API host.
 
 import { intInRange } from './_config-utils.mjs';
-import { htmlToText } from './_html-to-text.mjs';
+import { htmlToTextCapture } from './_html-to-text.mjs';
 
 const ALLOWED_SMARTRECRUITERS_HOSTS = new Set(['api.smartrecruiters.com']);
 const SR_CAREERS_HOSTS = new Set(['careers.smartrecruiters.com', 'jobs.smartrecruiters.com']);
@@ -51,15 +51,23 @@ function parseSmartRecruitersConfig(entry) {
  * @returns {string}
  */
 export function extractDescription(detail) {
+  return extractDescriptionCapture(detail).text;
+}
+
+/**
+ * @param {any} detail
+ * @returns {{ text: string, truncated: boolean }}
+ */
+function extractDescriptionCapture(detail) {
   const sections = detail?.jobAd?.sections;
-  if (!sections || typeof sections !== 'object') return '';
+  if (!sections || typeof sections !== 'object') return { text: '', truncated: false };
   const parts = [];
   for (const key of ['companyDescription', 'jobDescription', 'qualifications', 'additionalInformation']) {
     const text = sections[key]?.text;
     if (typeof text === 'string' && text.trim()) parts.push(text);
   }
-  if (parts.length === 0) return '';
-  return htmlToText(parts.join('\n'));
+  if (parts.length === 0) return { text: '', truncated: false };
+  return htmlToTextCapture(parts.join('\n'));
 }
 
 function assertSmartRecruitersUrl(url) {
@@ -155,8 +163,12 @@ export default {
             const detailUrl = buildPostingDetailUrl(slug, job.id);
             assertSmartRecruitersUrl(detailUrl);
             const detail = await ctx.fetchJson(detailUrl, { redirect: 'error' });
-            const description = extractDescription(detail);
-            if (description) job.description = description;
+            const { text: description, truncated: descriptionPartial } =
+              extractDescriptionCapture(detail);
+            if (description) {
+              job.description = description;
+              if (descriptionPartial) job.descriptionPartial = true;
+            }
           } catch {
             // Detail fetch is an enrichment only. Keep the listing result.
           }

@@ -353,13 +353,19 @@ test("conversational board research never asks users to recite internal source c
   assert.match(skill, /never ask the\s+candidate for configured source labels or urls/i);
 });
 
-test("web discovery emits typed proposals that the app can actually persist", async () => {
+test("web discovery emits one structured board review that the app can validate and persist", async () => {
   const boards = await readText(".agents/skills/research-boards/SKILL.md");
   const companies = await readText(".agents/skills/discover-companies/SKILL.md");
 
   assert.match(boards, /careerrat:discovery/);
-  assert.match(boards, /"kind":"source_proposal"/);
-  assert.match(boards, /"kind":"discovery_complete","step":"research-boards"/);
+  assert.match(boards, /"kind":"source_review"/);
+  assert.match(boards, /"candidates":/);
+  assert.match(boards, /"sourceType":"url-query\|rss\|browser"/);
+  assert.match(boards, /"status":"proposed\|rejected"/);
+  assert.match(boards, /"rejectionReason"/);
+  assert.doesNotMatch(boards, /\| # \| Board \|/);
+  assert.doesNotMatch(boards, /BOARDS FOUND:/);
+  assert.doesNotMatch(boards, /"kind":"source_proposal"/);
   assert.match(companies, /careerrat:discovery/);
   assert.match(companies, /"kind":"company_proposal"/);
   assert.match(companies, /"kind":"discovery_complete","step":"discover-companies"/);

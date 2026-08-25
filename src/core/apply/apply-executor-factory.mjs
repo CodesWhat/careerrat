@@ -28,6 +28,19 @@ const EXECUTOR_FACTORIES = {
   playwright: createPlaywrightApplyExecutor,
 };
 
+function browserFailureReason(provider, error) {
+  const providerLabel = PROVIDERS[provider]?.label || provider;
+  const detail = String(error?.message || "browser command failed").slice(0, 300);
+  const exposesInternals =
+    /command failed|careerrat automation|authenticated_[a-z_]+|(?:^|\s)--[a-z]|(?:^|\s)@[a-z0-9]|(?:^|\s)spawn\s|node_modules|\/[A-Za-z0-9._-]+\/[A-Za-z0-9._/-]+/i.test(
+      detail
+    );
+  if (exposesInternals) {
+    return `The ${providerLabel} couldn't open the application. Check Browser automation in Settings and try again.`;
+  }
+  return `The ${providerLabel} is unavailable: ${detail}`;
+}
+
 export function createConfiguredApplyExecutor({
   repoRoot,
   env = process.env,
@@ -53,9 +66,7 @@ export function createConfiguredApplyExecutor({
         available: false,
         verified: false,
         state: "unavailable",
-        reason: `The ${PROVIDERS[provider]?.label || provider} is unavailable: ${String(
-          error?.message || "browser command failed"
-        ).slice(0, 300)}`,
+        reason: browserFailureReason(provider, error),
       };
     }
   };

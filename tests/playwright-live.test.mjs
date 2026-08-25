@@ -12,7 +12,7 @@
 // on every push would make every push slow and flaky (browser startup time,
 // headless rendering/timing variance). A human or CI job opts in explicitly.
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -70,6 +70,7 @@ test("real Chromium end-to-end: openTab -> snapshot -> fill/select/toggle/upload
     assert.equal(snapshot.refs[fullNameRef].role, "textbox");
     assert.equal(snapshot.refs[workAuthRef].role, "combobox");
     assert.equal(snapshot.refs[nextRef].role, "button");
+    assert.equal(snapshot.refs[nextRef].advanceSafe, true);
 
     await ops.fillField({ pageId, ref: fullNameRef, value: "Jordan Rivera" });
     await ops.fillField({ pageId, ref: emailRef, value: "jordan.rivera@example.test" });
@@ -78,10 +79,10 @@ test("real Chromium end-to-end: openTab -> snapshot -> fill/select/toggle/upload
 
     await ops.clickButton({ pageId, ref: nextRef });
 
-    // clickButton on a real submit button triggers a real navigation.
+    // The real type=button handler explicitly advances to the next step.
     // Assert it actually happened (the new step's h1) AND that every field
-    // genuinely changed in the DOM: this fixture's step1 form submits via
-    // plain GET, so the resulting query string is a real read-back of
+    // genuinely changed in the DOM: the handler carries the live form values
+    // in the query string, so it remains a real read-back of
     // exactly what was live in each control's value at submit time — not a
     // stubbed assumption about what fillField/selectOption did.
     snapshot = await ops.snapshot({ pageId });
@@ -104,6 +105,7 @@ test("real Chromium end-to-end: openTab -> snapshot -> fill/select/toggle/upload
     const coverLetterRef = refByName(snapshot, "Cover letter");
     const agreeRef = refByName(snapshot, "I agree to the terms");
     nextRef = refByName(snapshot, "Next");
+    assert.equal(snapshot.refs[nextRef].advanceSafe, true);
 
     await ops.toggleField({ pageId, ref: agreeRef, checked: true });
     await ops.upload({ pageId, ref: resumeRef, files: resumePath });
@@ -155,6 +157,73 @@ test("real Chromium end-to-end: openTab -> snapshot -> fill/select/toggle/upload
   }
 });
 
+test("real Chromium prepare-only driver advances structured steps and never clicks final Submit", {
+  skip: !LIVE && "set CAREERRAT_LIVE_BROWSER=1 to run this against a real Chromium instance",
+}, async () => {
+  const profileDir = mkdtempSync(join(tmpdir(), "careerrat-live-driver-profile-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-live-driver-root-"));
+  const resumePath = join(repoRoot, "workspace", "tailored", "resume.pdf");
+  mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
+  writeFileSync(resumePath, "%PDF-1.4 fake resume content for the live driver test\n");
+  const { url: baseUrl, close: closeServer } = await startFixtureServer(FIXTURE_DIR);
+  const ops = createPlaywrightOps({ profileDir, headless: true });
+  const clicked = [];
+  const driverOps = {
+    ...ops,
+    async clickButton(args) {
+      const before = await ops.snapshot({ pageId: args.pageId });
+      clicked.push(before.refs[args.ref]?.name || args.ref);
+      return ops.clickButton(args);
+    },
+  };
+  const execute = createApplyDriver({
+    ops: driverOps,
+    providerLabel: "playwright",
+    repoRoot,
+    candidateConfigGetImpl: () => ({
+      profile: {
+        candidate: {
+          full_name: "Jordan Rivera",
+          email: "jordan.rivera@example.test",
+          phone: "555-0100",
+        },
+      },
+      honesty: {},
+      "form-defaults": { work_authorization: "Yes, authorized to work" },
+    }),
+    mayRunImpl: () => ({ allowed: true }),
+    loadAnswerMapImpl: async () => new Map([["i agree to the terms", "Yes"]]),
+  });
+
+  try {
+    const result = await execute({
+      applicationId: "live-structured-wizard",
+      application: {
+        id: "live-structured-wizard",
+        link: `${baseUrl}/step1.html`,
+        artifacts: { resumePdf: "workspace/tailored/resume.pdf" },
+      },
+      postingUrl: `${baseUrl}/step1.html`,
+      questionCapture: { state: "captured" },
+      prepareOnly: true,
+    });
+
+    assert.equal(result.state, "awaiting-submit");
+    assert.equal(result.verified, false);
+    assert.equal(result.session.prepareOnly, true);
+    assert.equal(result.session.stepIndex, 3);
+    assert.equal(result.session.uploadedCount, 1);
+    assert.deepEqual(clicked, ["Next", "Next"]);
+    assert.match(result.currentUrl, /step3\.html/);
+    assert.equal(clicked.includes("Submit application"), false);
+  } finally {
+    await ops.close();
+    await closeServer();
+    rmSync(profileDir, { recursive: true, force: true });
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("real Chromium snapshots and selects a native required radio fieldset without touching Submit", {
   skip: !LIVE && "set CAREERRAT_LIVE_BROWSER=1 to run this against a real Chromium instance",
 }, async () => {
@@ -186,6 +255,7 @@ test("real Chromium snapshots and selects a native required radio fieldset witho
         honesty: {},
         "form-defaults": { requires_sponsorship: "No" },
       }),
+      mayRunImpl: () => ({ allowed: true }),
       loadAnswerMapImpl: async () => new Map(),
     });
 
@@ -257,6 +327,7 @@ test("real Chromium groups unwrapped native radios by form owner and name withou
           work_authorization: "Yes",
         },
       }),
+      mayRunImpl: () => ({ allowed: true }),
       loadAnswerMapImpl: async () => new Map(),
     });
 

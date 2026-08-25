@@ -60,23 +60,23 @@ export const metadata: Metadata = {
     type: "website",
     images: [
       {
-        url: "/icon.png",
-        width: 512,
-        height: 512,
-        alt: "CareerRat CR. logo",
+        url: "/opengraph-image.png",
+        width: 1200,
+        height: 630,
+        alt: "CareerRat: Your AI CLI, working your job search.",
       },
     ],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: "CareerRat: Rate. Apply. Track.",
     description: siteDescription,
     images: [
       {
-        url: "/icon.png",
-        width: 512,
-        height: 512,
-        alt: "CareerRat CR. logo",
+        url: "/opengraph-image.png",
+        width: 1200,
+        height: 630,
+        alt: "CareerRat: Your AI CLI, working your job search.",
       },
     ],
   },

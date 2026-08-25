@@ -1,15 +1,20 @@
 # Setup
 
-CareerRat is a local, skill-driven job-search workspace. An agent (Claude Code,
-Codex, or any AGENTS.md-aware tool) drives the workflow; the CLI scaffolds,
-renders, and serves the local app.
+CareerRat is a local, skill-driven job-search workspace. A supported local AI
+CLI drives the workflow; the CareerRat CLI scaffolds, renders, and serves the
+local app. CareerRat owns the workflows and threads, so durable search state
+does not depend on one provider's session history.
 
 ## Prerequisites
 
 - Node.js >= 24
-- A coding-agent CLI on your PATH — Claude Code or Codex:
+- A supported coding-agent CLI on your PATH:
   - Claude Code:  `npm install -g @anthropic-ai/claude-code`  (<https://claude.com/claude-code>)
   - Codex:        `npm install -g @openai/codex`               (<https://github.com/openai/codex>)
+
+Claude Code and Codex both run the complete CareerRat product. CareerRat shows a
+runtime as `Ready` only after local availability, authentication, and the
+complete readiness check pass.
 
 ## Get It Running
 
@@ -37,14 +42,15 @@ That scaffolds your workspace, installs the skills, opens the local app at
 `start` does the whole arc in one shot:
 
 1. Scaffolds `candidate/` and `workspace/` directories (idempotent).
-2. Installs skills so Claude Code sees `/apply-job`, `/evaluate-job`, etc.
+2. Installs the canonical skills so the selected agent sees `/apply-job`,
+   `/evaluate-job`, etc.
 3. Seeds `workspace/tracker.json` from the demo template (if not yet present).
 4. Boots the live local app at <http://localhost:7777> with event-driven data updates.
 5. Launches your agent with the starter message that asks it to read
    `AGENTS.md`, run `careerrat doctor`, and follow the next unfinished skill.
 
-The first bare word picks the agent (`careerrat start claude` or `careerrat start
-codex`). Omit it to use the first supported launcher found.
+The first bare word picks the agent (`careerrat start claude` or `careerrat
+start codex`). Omit it to use the first supported launcher found.
 
 Flags: `--no-agent` (scaffold + local app only), `--no-dashboard`,
 `--agent <name>` (alias for the positional), `--port <n>`.
@@ -109,7 +115,8 @@ task needs one; CareerRat explains and asks for that specific capability then.
 
 ## Agent Files
 
-- `AGENTS.md` — canonical intent router (used natively by Codex and similar).
+- `AGENTS.md` — canonical intent router used by provider-neutral workspace flows.
+- `.agents/skills/` — one canonical skill tree shared by direct and ACP runtimes.
 - `CLAUDE.md` — points Claude Code at the same rules.
 
 Both require `apply-job` to run or verify `evaluate-job` before tailoring,

@@ -1916,6 +1916,26 @@ test("Dashboard adapter keeps an explicit sourced status in the pre-application 
   assert.equal(vm.jobs.funnel[1].id, "sourced");
 });
 
+test("Dashboard adapter projects partial job-description capture status onto its sourced row", () => {
+  const vm = buildDashboardViewModel({
+    applications: [],
+    sourced: [
+      {
+        id: "partial-description",
+        company: "Partial Co",
+        role: "Platform Engineer",
+        status: "sourced",
+        scanner: { bodyPartial: true },
+        artifacts: { jd: "workspace/jobs/partial-co-platform-engineer.md" },
+      },
+    ],
+    sources: [],
+    communications: [],
+  });
+
+  assert.equal(vm.jobs.rows[0].descriptionPartial, true);
+});
+
 test("Dashboard sourcebuckets count only true recruiter-sourced jobs", () => {
   const tracker = {
     applications: [

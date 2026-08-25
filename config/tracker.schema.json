@@ -98,6 +98,16 @@
               "evaluatedAt": { "type": ["string", "null"] }
             }
           },
+          "reviewApproval": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "description": "Explicit candidate approval to proceed on the exact current REVIEW evaluation. Cleared whenever evaluation changes.",
+            "required": ["evaluatedAt", "approvedAt"],
+            "properties": {
+              "evaluatedAt": { "type": "string" },
+              "approvedAt": { "type": "string" }
+            }
+          },
           "coachingPlan": {
             "type": ["object", "null"],
             "additionalProperties": true,

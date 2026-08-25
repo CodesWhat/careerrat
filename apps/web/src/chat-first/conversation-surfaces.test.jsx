@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { normalizeSourceReviewArtifact } from "../../../../src/core/discovery/source-review-artifact.mjs";
 import { GENERIC_ERROR_MESSAGE } from "../lib/errorCopy.js";
 import {
   CanonicalJobConversation,
@@ -18,6 +19,7 @@ import {
   SubmitGateModal,
   TodayConversation,
 } from "./conversation-surfaces.jsx";
+import { hydrateSkillChatMessages } from "./skill-chat-model.js";
 
 function markup(node) {
   return renderToStaticMarkup(node);
@@ -73,6 +75,75 @@ describe("TodayConversation", () => {
     expect(css).toMatch(/\.chat-first-bubble\s*\{[^}]*white-space:\s*pre-wrap/s);
   });
 
+  it("offers Yes and No only for the latest unanswered typed binary question", () => {
+    const onAnswer = vi.fn();
+    const tree = MessageTranscript({
+      onAnswer,
+      answerBusy: true,
+      messages: [
+        {
+          id: "question",
+          role: "assistant",
+          kind: "text",
+          text: "Should I keep this company in your search?",
+          metadata: { answerMode: "yes-no" },
+        },
+      ],
+    });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) {
+        node.forEach(visit);
+        return;
+      }
+      if (typeof node.type === "function") {
+        visit(node.type(node.props));
+        return;
+      }
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+
+    expect(buttons.map((button) => button.props.children)).toEqual(["Yes", "No"]);
+    expect(buttons.every((button) => button.props.disabled === true)).toBe(true);
+    buttons[1].props.onClick();
+    expect(onAnswer).toHaveBeenCalledWith("No");
+
+    const answered = markup(
+      <MessageTranscript
+        onAnswer={onAnswer}
+        messages={[
+          {
+            id: "question",
+            role: "assistant",
+            kind: "text",
+            text: "Should I keep this company in your search?",
+            metadata: { answerMode: "yes-no" },
+          },
+          { id: "answer", role: "user", kind: "text", text: "No" },
+        ]}
+      />
+    );
+    const untyped = markup(
+      <MessageTranscript
+        onAnswer={onAnswer}
+        messages={[
+          {
+            id: "looks-binary",
+            role: "assistant",
+            kind: "text",
+            text: "Would you rather focus on platform or product roles?",
+          },
+        ]}
+      />
+    );
+
+    expect(answered).not.toContain("chat-first-binary-actions");
+    expect(untyped).not.toContain("chat-first-binary-actions");
+  });
+
   it("keeps indented cards at the handoff intrinsic desktop widths", () => {
     const css = readFileSync(fileURLToPath(new URL("./chat-first.css", import.meta.url)), "utf8");
 
@@ -90,6 +161,7 @@ describe("TodayConversation", () => {
   it("renders completed search-run artifact summaries as readable copy", () => {
     const html = markup(
       <MessageTranscript
+        onMessageAction={() => undefined}
         messages={[
           {
             id: "search-complete",
@@ -106,6 +178,25 @@ describe("TodayConversation", () => {
                   qualified: 7,
                   filtered: 354,
                   reasonCounts: { title: 302, location: 52 },
+                  rejectionSamples: {
+                    title: [
+                      {
+                        company: "Acme",
+                        title: "Sales Engineer",
+                        location: "Remote - US",
+                        reason: "title-negative-blocker",
+                        kind: "blocker",
+                      },
+                    ],
+                    location: [
+                      {
+                        company: "Elsewhere",
+                        title: "Staff Engineer",
+                        location: "Remote Spain",
+                        reason: "location-policy-mismatch",
+                      },
+                    ],
+                  },
                   errors: [],
                   zeroResults: false,
                 },
@@ -118,7 +209,217 @@ describe("TodayConversation", () => {
 
     expect(html).toContain("First job search: Complete");
     expect(html).toContain("7 qualified · 361 scanned · 5 sources");
+    expect(html).toContain("Why some jobs were filtered");
+    expect(html).toContain("Sales Engineer at Acme");
+    expect(html).toContain("blocked by your role settings");
+    expect(html).toContain("Remote Spain");
+    expect(html).toContain("outside your location settings");
+    expect(html).not.toContain(">activity<");
     expect(html).not.toContain("[object Object]");
+  });
+
+  it("collapses superseded search activity into the latest compact result", () => {
+    const searchArtifact = (runId, status) => ({
+      kind: "search_run",
+      title: `First job search: ${status === "running" ? "Running" : "Complete"}`,
+      purpose: "first-search",
+      runId,
+      status,
+      summary:
+        status === "completed"
+          ? { attemptedSources: 2, scanned: runId === "run-2" ? 240 : 200, qualified: 0 }
+          : null,
+    });
+    const html = markup(
+      <MessageTranscript
+        onMessageAction={() => undefined}
+        messages={[
+          {
+            id: "user-1",
+            role: "user",
+            kind: "intent",
+            text: "Search for qualified jobs.",
+            intent: { type: "search.run" },
+          },
+          {
+            id: "start-1",
+            role: "assistant",
+            kind: "action_result",
+            text: "Job search started.",
+            artifacts: [searchArtifact("run-1", "running")],
+          },
+          {
+            id: "done-1",
+            role: "assistant",
+            kind: "action_result",
+            text: "Job search complete.",
+            artifacts: [searchArtifact("run-1", "completed")],
+          },
+          {
+            id: "user-2",
+            role: "user",
+            kind: "intent",
+            text: "Search for qualified jobs.",
+            intent: { type: "search.run" },
+          },
+          {
+            id: "start-2",
+            role: "assistant",
+            kind: "action_result",
+            text: "Job search started.",
+            artifacts: [searchArtifact("run-2", "running")],
+          },
+          {
+            id: "done-2",
+            role: "assistant",
+            kind: "action_result",
+            text: "Job search complete.",
+            artifacts: [searchArtifact("run-2", "completed")],
+          },
+        ]}
+      />
+    );
+
+    expect(html.match(/First job search: Complete/g)).toHaveLength(1);
+    expect(html).toContain("240 scanned");
+    expect(html).not.toContain("200 scanned");
+    expect(html).not.toContain("First job search: Running");
+    expect(html).not.toContain("Search for qualified jobs");
+    expect(html).not.toContain("Job search started");
+    expect(html).not.toContain("Action updated");
+    expect(html).not.toContain(">activity<");
+  });
+
+  it("keeps one real company-review card while compacting its search lifecycle", () => {
+    const proposal = {
+      kind: "company_proposals",
+      batchId: "batch-1",
+      title: "Company discovery: 3 to review",
+    };
+    const html = markup(
+      <MessageTranscript
+        messages={[
+          {
+            id: "search-start",
+            role: "assistant",
+            kind: "action_result",
+            text: "Job search started.",
+            artifacts: [
+              {
+                kind: "search_run",
+                purpose: "manual-search",
+                runId: "run-1",
+                status: "running",
+                title: "Job search: Running",
+              },
+              proposal,
+            ],
+          },
+          {
+            id: "search-done",
+            role: "assistant",
+            kind: "action_result",
+            text: "Job search complete.",
+            artifacts: [
+              {
+                kind: "search_run",
+                purpose: "manual-search",
+                runId: "run-1",
+                status: "completed",
+                title: "Job search: Complete",
+              },
+              proposal,
+            ],
+          },
+        ]}
+      />
+    );
+
+    expect(html.match(/Company discovery: 3 to review/g)).toHaveLength(1);
+    expect(html).toContain("Job search: Complete");
+    expect(html).not.toContain("Job search: Running");
+    expect(html).not.toContain("Job search started");
+    expect(html).not.toContain("Job search complete");
+  });
+
+  it("prefers a terminal search artifact over an older running artifact when history is newest-first", () => {
+    const html = markup(
+      <MessageTranscript
+        messages={[
+          {
+            id: "done",
+            sequence: 53,
+            role: "assistant",
+            kind: "action_result",
+            artifacts: [
+              {
+                kind: "search_run",
+                purpose: "first-search",
+                runId: "run-1",
+                status: "completed",
+                title: "First job search: Complete",
+              },
+            ],
+          },
+          {
+            id: "running",
+            sequence: 50,
+            role: "assistant",
+            kind: "action_result",
+            artifacts: [
+              {
+                kind: "search_run",
+                purpose: "first-search",
+                runId: "run-1",
+                status: "running",
+                title: "First job search: Running",
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    expect(html).toContain("First job search: Complete");
+    expect(html).not.toContain("First job search: Running");
+  });
+
+  it("offers binary controls for a clear persisted yes-or-no question without model metadata", () => {
+    const html = markup(
+      <MessageTranscript
+        onAnswer={() => undefined}
+        messages={[
+          {
+            id: "sponsorship",
+            role: "assistant",
+            kind: "text",
+            text: "Do you need employer sponsorship now or in the future?",
+          },
+        ]}
+      />
+    );
+
+    expect(html).toContain(">Yes<");
+    expect(html).toContain(">No<");
+  });
+
+  it("does not collapse a compound persisted question into one Yes or No choice", () => {
+    const html = markup(
+      <MessageTranscript
+        onAnswer={() => undefined}
+        messages={[
+          {
+            id: "authorization-and-sponsorship",
+            role: "assistant",
+            kind: "text",
+            text: "Are you authorized to work in the US and will you need sponsorship?",
+          },
+        ]}
+      />
+    );
+
+    expect(html).not.toContain(">Yes<");
+    expect(html).not.toContain(">No<");
   });
 
   it("renders durable action outcomes and every attached artifact with action callbacks", () => {
@@ -134,6 +435,7 @@ describe("TodayConversation", () => {
           role: "assistant",
           kind: "action_result",
           text: "Packet drafted.",
+          metadata: { actionLabel: "Details" },
           artifacts: [
             { kind: "resume", title: "Tyrell resume", summary: "Evidence backed" },
             { kind: "cover_letter", name: "Tyrell cover letter" },
@@ -167,7 +469,7 @@ describe("TodayConversation", () => {
     }
     visit(tree);
     buttons.find((button) => button.props.children === "Open").props.onClick();
-    buttons.find((button) => button.props.children === "activity").props.onClick();
+    buttons.find((button) => button.props.children === "Details").props.onClick();
 
     const html = markup(tree);
     expect(html).toContain("Packet drafted.");
@@ -179,6 +481,7 @@ describe("TodayConversation", () => {
     expect(html).toContain(GENERIC_ERROR_MESSAGE);
     expect(html).not.toContain("Source sweep could not finish.");
     expect(html).toContain("chat-first-run-receipt--error");
+    expect(html).not.toContain(">activity<");
     expect(onArtifactAction).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "resume" }),
       expect.objectContaining({ id: "done" })
@@ -425,6 +728,124 @@ describe("TodayConversation", () => {
 });
 
 describe("SkillChatConversation", () => {
+  it("collapses the real board-research payload into one review card without transcript bookkeeping", () => {
+    const candidates = [
+      ["LandEarly", "https://www.landearly.com/remote-jobs/platform-engineer", "url-query", "high"],
+      ["4 Day Week", "https://4dayweek.io/platform-engineering-jobs", "url-query", "high"],
+      [
+        "TrulyRemote Dev",
+        "https://trulyremote.dev/remote-backend-engineer-jobs",
+        "url-query",
+        "high",
+      ],
+      [
+        "Built In",
+        "https://builtin.com/jobs/remote/dev-engineering/search/platform-engineer",
+        "url-query",
+        "high",
+      ],
+      [
+        "RemotePilot",
+        "https://remotepilot.dev/categories/backend-engineering/",
+        "url-query",
+        "borderline",
+      ],
+      ["DevJobsList", "https://www.devjobslist.com/", "browser", "borderline"],
+    ].map(([label, url, sourceType, confidence]) => ({
+      label,
+      url,
+      sourceType,
+      confidence,
+      why: `${label} has dated relevant listings`,
+      status: "proposed",
+    }));
+    candidates.push({
+      label: "Anywhere Devs",
+      url: "https://anywheredevs.com/",
+      sourceType: "browser",
+      why: "Landing page claims fresh remote engineering coverage but exposes no specific listings",
+      status: "rejected",
+      rejectionReason: "no visible dated listing",
+    });
+    const review = normalizeSourceReviewArtifact({ kind: "source_review", candidates });
+    const html = markup(
+      <SkillChatConversation
+        thread={{
+          title: "Job board discovery",
+          skill: "research-boards",
+          state: "idle",
+        }}
+        messages={[
+          {
+            id: "result",
+            role: "assistant",
+            kind: "text",
+            text: "I found 6 useful sources. Nothing has been added yet.",
+            artifacts: [review],
+          },
+        ]}
+        onDecision={() => {}}
+        onComplete={() => {}}
+        onReviewSources={() => {}}
+      />
+    );
+
+    expect(html).toContain("6 sources found");
+    expect(html).toContain("LandEarly");
+    expect(html).toContain("4 Day Week");
+    expect(html).toContain("TrulyRemote Dev");
+    expect(html).toContain("Built In");
+    expect(html).toContain("Review sources");
+    expect(html).not.toContain("RemotePilot");
+    expect(html).not.toContain("Anywhere Devs");
+    expect(html).not.toContain("Save to workspace");
+    expect(html).not.toContain("Discard");
+    expect(html).not.toContain("| # | Board |");
+    expect(html).not.toContain("BOARDS FOUND");
+    expect(html.match(/chat-first-indented-card/g)).toHaveLength(1);
+  });
+
+  it("renders a persisted historical board ledger as the source review card instead of raw text", () => {
+    const messages = hydrateSkillChatMessages({
+      id: "skill:research-boards",
+      skill: "research-boards",
+      messages: [
+        {
+          id: "persisted-table-review",
+          role: "assistant",
+          text: [
+            "I found two useful new sources. Nothing has been added yet.",
+            "| # | Board | Source type | Why relevant | Status |",
+            "|---|---|---|---|---|",
+            "| 1 | [LandEarly](https://www.landearly.com/remote-jobs/platform-engineer) | url-query | Dated US platform roles | NEW |",
+            "| 2 | [DevJobsList](https://www.devjobslist.com/) | browser | Dated remote software listings | NEW (borderline: weak targeting) |",
+            "BOARDS FOUND: 2 screened",
+            "PROPOSED (new): 2 (1 high-confidence, 1 borderline/medium)",
+            "REJECTED: 0",
+            "AUTO-ADDED: none",
+          ].join("\n"),
+        },
+      ],
+    });
+    const html = markup(
+      <SkillChatConversation
+        thread={{ title: "Job board discovery", skill: "research-boards", state: "idle" }}
+        messages={messages}
+        onDecision={() => {}}
+        onComplete={() => {}}
+        onReviewSources={() => {}}
+      />
+    );
+
+    expect(html).toContain("2 sources found");
+    expect(html).toContain("LandEarly");
+    expect(html).toContain("DevJobsList");
+    expect(html).toContain("Review sources");
+    expect(html).not.toContain("| # | Board |");
+    expect(html).not.toContain("BOARDS FOUND");
+    expect(html).not.toContain("AUTO-ADDED");
+  });
+
   it("never renders the raw completion marker and gates completion on proposal decisions", () => {
     const onComplete = vi.fn();
     const completion = {

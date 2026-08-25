@@ -150,7 +150,7 @@ button.cf-first-run__engine-choice {
   cursor: default;
 }
 
-button.cf-first-run__engine-choice:hover {
+button.cf-first-run__engine-choice:not(.is-selected):hover {
   background: var(--cream);
 }
 
@@ -525,7 +525,7 @@ button.cf-first-run__engine-choice:hover {
 .cf-first-run__rail-subtitle {
   display: block;
   margin-top: 3px;
-  color: var(--gray-dim);
+  color: var(--cf-selection-foreground);
   font-size: 11.5px;
 }
 
@@ -653,6 +653,37 @@ button.cf-first-run__engine-choice:hover {
 
 .cf-first-run__answer-options button {
   cursor: pointer;
+}
+
+.cf-first-run__binary-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 9px;
+  padding: 0;
+  border: 0;
+}
+
+.cf-first-run__binary-actions button {
+  min-width: 54px;
+  padding: 5px 13px;
+  border: 1.5px solid var(--line-warm-2);
+  border-radius: 999px;
+  background: var(--white);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cf-first-run__binary-actions button:hover:not(:disabled) {
+  background: var(--cream);
+}
+
+.cf-first-run__binary-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .cf-first-run__answer-options button:hover {
@@ -1018,7 +1049,7 @@ button.cf-first-run__engine-choice:hover {
 .cf-first-run__editor-checkbox input {
   width: 17px;
   height: 17px;
-  accent-color: var(--ink);
+  accent-color: var(--cf-selection-fill);
 }
 
 .cf-first-run__editor-file-action {

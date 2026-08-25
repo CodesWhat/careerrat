@@ -9,8 +9,7 @@
 //   - PARITY: the route's payload deep-equals a direct buildDashboardViewModel()
 //     call over the same source data — this is the actual correctness bar,
 //     since dashboard-data.js's buildDashboardViewModel is reused UNMODIFIED
-//     and the only new code is assembleTrackerObject(db)'s DB->trackerData
-//     shape-fidelity
+//     after the route's deterministic local-artifact read-model hydration
 //   - CTA self-clear regression: commMarkSent (via the EXISTING
 //     POST /api/data/comm/send verb route) clears a job's "Ready to send"
 //     drawer panel on the very next dashboard refetch
@@ -20,7 +19,7 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -36,6 +35,7 @@ import {
   missionCreate,
   mockInterviewStart,
 } from "../src/core/db/verbs.mjs";
+import { userPath } from "../src/core/paths/workspace.mjs";
 import { loadModes } from "../src/core/profile/modes.mjs";
 import { loadAgentGuidanceSnapshot } from "../src/core/tracker/agent-guidance-snapshot.mjs";
 import { buildDashboardViewModel } from "../src/core/tracker/dashboard-data.js";
@@ -285,6 +285,45 @@ test("GET /api/data/dashboard: setup derivation errors degrade to setup null whi
     assert.equal(body.ok, true);
     assert.equal(body.setup, null);
     assert.equal(body.data.jobs.rows[0].company, "Aperture Science");
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("GET /api/data/dashboard hydrates an old sourced row from its saved partial capture", async () => {
+  const repoRoot = tempRepo();
+  const jd = "workspace/jobs/old-partial-capture.md";
+  seedFixture(repoRoot, {
+    meta: {},
+    applications: [],
+    sourced: [
+      {
+        id: "old-partial",
+        company: "Old Capture Co",
+        role: "Platform Engineer",
+        status: "sourced",
+        artifacts: { jd },
+      },
+    ],
+    sources: [],
+    communications: [],
+  });
+  const full = userPath({ repoRoot, env: {} }, jd);
+  mkdirSync(dirname(full), { recursive: true });
+  writeFileSync(full, "---\npartial: true\n---\n\nOnly the visible excerpt was captured.\n");
+  closeAll();
+
+  const server = await bootServer(repoRoot);
+  try {
+    const { status, body } = await getJson(server, "/api/data/dashboard");
+    assert.equal(status, 200);
+    assert.equal(body.data.jobs.rows[0].descriptionPartial, true);
+    const stored = JSON.parse(
+      openDb({ repoRoot, env: {} })
+        .prepare("SELECT data FROM sourced WHERE id = ?")
+        .get("old-partial").data
+    );
+    assert.equal(stored.scanner?.bodyPartial, undefined);
   } finally {
     await closeServer(server);
   }

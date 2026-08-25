@@ -9,6 +9,7 @@
     <main>
       <h1>Step 2: Documents</h1>
       <form action="step3.html" method="get">
+        <progress value="2" max="3" aria-label="Application progress">2 of 3</progress>
         <p>
           <label for="resume">Resume/CV</label>
           <input id="resume" name="resume" type="file" required />
@@ -22,7 +23,7 @@
           <label for="agree_terms">I agree to the terms</label>
           <input id="agree_terms" name="agree_terms" type="checkbox" required />
         </p>
-        <button type="submit">Next</button>
+        <button id="next-step" type="button">Next</button>
       </form>
     </main>
     <script>
@@ -36,6 +37,15 @@
         var span = document.getElementById("resume-filename");
         var files = event.target.files;
         span.textContent = files && files.length ? files[0].name : "";
+      });
+      document.getElementById("next-step").addEventListener("click", () => {
+        const form = document.querySelector("form");
+        if (!form.reportValidity()) return;
+        const data = new FormData(form);
+        data.delete("resume");
+        const target = new URL(form.action);
+        target.search = new URLSearchParams(data).toString();
+        window.location.assign(target.href);
       });
     </script>
   </body>

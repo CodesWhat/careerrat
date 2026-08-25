@@ -44,6 +44,7 @@ function normalizeSearchRow(row, source) {
     id: row?.id || row?.detailId || "",
     stage: row?.stage || row?.status || row?.location || "Needs triage",
     evaluationRequired: source === "sourced",
+    descriptionPartial: row?.descriptionPartial === true,
     compStatus,
     source,
   };

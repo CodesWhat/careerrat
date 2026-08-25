@@ -23,20 +23,23 @@ install it with Homebrew:
 brew install --cask codeswhat/tap/careerrat
 ```
 
-The app is not self-contained. Install and sign in to one of its verified
-in-app engines:
+The app is not self-contained. Install and sign in to a supported local AI CLI:
 
 - `npm install -g @anthropic-ai/claude-code`
   ([claude.com/claude-code](https://claude.com/claude-code))
 - `npm install -g @openai/codex`
   ([developers.openai.com/codex/cli](https://developers.openai.com/codex/cli/))
 
-Claude Code 2.1.241 or newer runs full in-app task tools and research. Codex
-0.149.1 or newer runs isolated in-app chat and drafting; task-tool and research
-work still requires Claude's verified boundary. Other detected CLIs stay
-visible but unverified and are not selectable. If the selected engine cannot
-run a workflow, the app fails clearly and does not fall back to another
-provider.
+Claude Code and OpenAI Codex are the two supported product choices. Both run the
+same CareerRat-owned workflows and skills against the same durable local state.
+The packaged app invokes the selected installed CLI directly and never falls
+back to or silently switches providers. A runtime becomes `Ready` only after
+local availability, authentication, and its readiness check pass.
+
+The v0.16 provider-parity update passed packaged desktop QA and signing. The
+latest public download remains v0.15.0 until the protected PRs merge, the
+signed tag publishes, production deploys, and the released app is installed
+and verified.
 
 Open the app and it scaffolds your workspace, boots the local app at
 `http://localhost:7777`, and launches your agent with a starter message, the
@@ -51,17 +54,17 @@ notice. It never downloads or installs anything on its own; see
 Prerequisites:
 
 - **Node.js >= 24** — check with `node -v`
-- **A coding-agent CLI on your PATH** — Claude Code or Codex:
+- **A supported coding-agent CLI on your PATH.** Install any one listed above.
   - Claude Code: `npm install -g @anthropic-ai/claude-code`
     ([claude.com/claude-code](https://claude.com/claude-code))
   - Codex: `npm install -g @openai/codex`
     ([github.com/openai/codex](https://github.com/openai/codex))
 
-You need one of those on your PATH before running `careerrat start`.
+You need one supported CLI on your PATH before running `careerrat start`.
 
 ```bash
 npm install -g careerrat
-careerrat start claude        # or: careerrat start codex
+careerrat start
 ```
 
 The `start` command does the whole arc in one shot:
@@ -83,7 +86,7 @@ cd careerrat
 npm install
 npm run hooks:install
 npm link
-careerrat start claude        # or: careerrat start codex
+careerrat start
 ```
 
 ### Useful flags
@@ -103,7 +106,7 @@ If you prefer to open your agent yourself:
 careerrat doctor     # verify environment + scaffold state
 ```
 
-Then open Claude Code or Codex in the repo root and say:
+Then open your compatible agent in the repo root and say:
 
 > familiarize yourself and let's get started
 

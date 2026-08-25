@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import { normalizeSourceReviewArtifact } from "../../discovery/source-review-artifact.mjs";
 import { requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
 
@@ -32,6 +33,22 @@ function cleanText(value) {
     throw error;
   }
   return text;
+}
+
+function cleanArtifacts(value) {
+  if (value === undefined) return null;
+  if (!Array.isArray(value) || value.length > 4) {
+    const error = new Error("chat message artifacts are invalid");
+    error.code = "BAD_ARTIFACTS";
+    throw error;
+  }
+  const artifacts = value.map((artifact) => normalizeSourceReviewArtifact(artifact));
+  if (artifacts.some((artifact) => !artifact)) {
+    const error = new Error("chat message artifact is invalid");
+    error.code = "BAD_ARTIFACT";
+    throw error;
+  }
+  return artifacts;
 }
 
 function dateIso(now) {
@@ -95,6 +112,8 @@ export function skillChatMessageAppend({
   text,
   kind,
   visibility,
+  metadata,
+  artifacts,
   runtimeSessionId,
   now,
 } = {}) {
@@ -113,6 +132,8 @@ export function skillChatMessageAppend({
     throw error;
   }
   const cleanVisibility = visibility === "internal" ? "internal" : null;
+  const cleanMetadata = metadata?.answerMode === "yes-no" ? { answerMode: "yes-no" } : null;
+  const cleanMessageArtifacts = cleanArtifacts(artifacts);
   const at = dateIso(now);
   const db = requireDb({ repoRoot, env });
 
@@ -140,6 +161,8 @@ export function skillChatMessageAppend({
       createdAt: at,
       ...(cleanKind ? { kind: cleanKind } : {}),
       ...(cleanVisibility ? { visibility: cleanVisibility } : {}),
+      ...(cleanMetadata ? { metadata: cleanMetadata } : {}),
+      ...(cleanMessageArtifacts ? { artifacts: cleanMessageArtifacts } : {}),
       ...(runtimeSessionId ? { runtimeSessionId: String(runtimeSessionId).slice(0, 500) } : {}),
     };
     db.prepare(

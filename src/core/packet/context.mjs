@@ -269,5 +269,6 @@ export function packetPromptFromContext(context) {
     "",
     "Return one typed packet-gate verdict. Base fit only on the candidate context and saved job description. Parse posted base compensation into numeric minBase/maxBase when present; otherwise use nulls and status unknown. Never invent compensation or evidence.",
     "Use complete plain-English sentences. Keep fitSummary within 150 characters, compensation.summary within 130 characters, and every fitReasons/fitRisks item within 72 characters. Never shorten copy by switching languages, clipping words, or appending fragments.",
+    "Every display string must be final user-facing copy. Do not include questions, drafting notes, self-corrections, editing chatter, or markdown fences inside a field.",
   ].join("\n");
 }

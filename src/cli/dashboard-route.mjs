@@ -11,7 +11,7 @@
 // {now, activityEvents, modes, settings, library, agentGuidance,
 // calendarProviderStatus})`) is assembled from these sources:
 //
-//   trackerData             assembleTrackerObject(db)      src/core/db/export-to-tracker.mjs
+//   trackerData             assembleTrackerObject(db), then safe local-JD completeness hydration
 //   activityEvents          assembleActivityEvents(db)     same module
 //   modes                   loadModes({ root })            src/core/profile/modes.mjs
 //   settings                loadSettingsSnapshot({ root })  src/core/tracker/settings-snapshot.mjs
@@ -40,6 +40,7 @@ import { automationStatus } from "../core/automation/consent.mjs";
 import { requireDb } from "../core/db/connection.mjs";
 import { assembleActivityEvents, assembleTrackerObject } from "../core/db/export-to-tracker.mjs";
 import { candidateConfigGet, chatFirstStateFromDb } from "../core/db/verbs.mjs";
+import { hydrateJobDescriptionCompleteness } from "../core/jobs/job-description.mjs";
 import { loadModes } from "../core/profile/modes.mjs";
 import { loadAgentGuidanceSnapshot } from "../core/tracker/agent-guidance-snapshot.mjs";
 import { buildDashboardViewModel } from "../core/tracker/dashboard-data.js";
@@ -117,7 +118,11 @@ export function mountDashboardRoutes({
     }
 
     try {
-      const trackerData = assembleTrackerObject(db);
+      const trackerData = hydrateJobDescriptionCompleteness({
+        trackerData: assembleTrackerObject(db),
+        repoRoot,
+        env,
+      });
       const activityEvents = assembleActivityEvents(db);
       const modes = loadModes({ root: repoRoot });
       const settings = loadSettingsSnapshot({ root: repoRoot });

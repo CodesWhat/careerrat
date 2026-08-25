@@ -336,7 +336,7 @@
 }
 
 .cf-settings__switch[aria-checked="true"] {
-  background: var(--ink);
+  background: var(--cf-selection-fill);
 }
 
 .cf-settings__switch[aria-checked="true"] > span {
@@ -669,7 +669,7 @@
 }
 
 .cf-settings-dialog__runtime[data-selected="true"] > div span {
-  color: var(--gray-dim);
+  color: var(--cf-selection-foreground);
 }
 
 .cf-settings-dialog__actions button[type="submit"] {
@@ -737,7 +737,7 @@
   width: 17px;
   height: 17px;
   margin: 0;
-  accent-color: var(--ink);
+  accent-color: var(--cf-selection-fill);
 }
 
 .cf-profile-editor__actions > button:first-child {

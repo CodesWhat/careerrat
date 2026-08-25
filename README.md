@@ -32,7 +32,8 @@ application forms for your review. It never presses the final Submit button.
 The search stays together in one local workspace: conversations, jobs, recruiter
 threads, missions, files, follow-ups, interviews, and outcomes. You can leave a
 thread, come back later, and CareerRat restores the relevant state without
-depending on one AI vendor's session history.
+depending on one AI vendor's session history. CareerRat owns those workflows and
+threads, so the execution layer stays provider-neutral.
 
 ## Get CareerRat
 
@@ -40,15 +41,21 @@ The current macOS release is a signed and notarized Apple Silicon app for macOS
 12 or newer.
 
 1. [Download the latest `.dmg`](https://github.com/CodesWhat/careerrat/releases/latest).
-2. Install and sign in to [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) 2.1.241 or newer, or [OpenAI Codex](https://developers.openai.com/codex/cli/) 0.149.1 or newer.
+2. Install and sign in to a supported local AI CLI.
 3. Open CareerRat and choose a ready engine.
 
-Claude Code 2.1.241+ provides full in-app task tools and research. Codex
-0.149.1+ provides isolated in-app chat and drafting. CareerRat disables Codex
-task tools for these calls and fails clearly when a workflow needs Claude's
-verified tool boundary. Other installed CLIs stay visible as detected but
-unverified until their boundaries pass the same tests. Claude Code and Codex
-both work in the [terminal workspace flow](#terminal-and-source-use).
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) and
+[OpenAI Codex](https://developers.openai.com/codex/cli/) are CareerRat's only
+supported product runtime choices. Both use the same CareerRat-owned workflows,
+skills, and durable state. The packaged app invokes the selected installed CLI
+directly and never falls back to or silently switches providers. A runtime
+becomes `Ready` only after local availability, authentication, and its readiness
+check pass.
+
+The v0.16 provider-parity update passed packaged desktop QA and signing. The
+latest public release remains v0.15.0 until the protected PRs merge, the signed
+tag publishes, production deploys, and the released app is installed and
+verified.
 
 Windows x64 packaging is install-smoked in CI. A public Windows installer will
 ship only after the SignPath Foundation signing path is approved and the
@@ -199,8 +206,8 @@ The app and terminal flow share the same public skill definitions.
 
 ## Terminal and source use
 
-Terminal mode requires Node.js 24 or newer and supports Claude Code or Codex as
-the workspace agent.
+Terminal mode requires Node.js 24 or newer and launches Claude Code or Codex.
+Both use the same canonical skills and local data.
 
 ```bash
 npm install -g careerrat

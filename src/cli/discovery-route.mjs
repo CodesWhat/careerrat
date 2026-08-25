@@ -3,6 +3,7 @@
 // research-boards is a visible confirm-first chat. Company discovery stays on
 // the app-owned proposal path, and search-jobs stops at sourced/review state.
 
+import { WORKSPACE_THREAD_ID } from "../core/agent/workspace-thread.mjs";
 import { DISCOVERY_PIPELINE, recordDiscoveryCompletion } from "../core/agent-guidance.mjs";
 import { dbExists } from "../core/db/connection.mjs";
 import { companyProposalBatchLatest } from "../core/db/verbs/company-discovery.mjs";
@@ -356,6 +357,7 @@ export function mountDiscoveryRoutes({
   publicIntelReviewDecisionImpl = defaultPublicIntelReviewDecision,
   publicIntelSyncPreviewImpl = publicIntelSyncPreview,
   companyDiscoveryCadenceImpl = companyDiscoveryCadenceState,
+  workspaceAgentRuntime,
 }) {
   addRoute("GET", "/api/discovery/public-intel/state", (_req, res) => {
     try {
@@ -551,14 +553,29 @@ export function mountDiscoveryRoutes({
   addRoute("POST", "/api/discovery/complete", async (req, res) => {
     try {
       const body = await readJsonBodyCapped(req, COMPANY_PROPOSAL_BODY_MAX_BYTES);
+      const step = String(body?.step || "").trim();
       const completion = recordDiscoveryCompletion({
         root: repoRoot,
         env,
-        step: String(body?.step || "").trim(),
+        step,
       });
       if (!completion.ok) {
         sendJson(res, 400, completion);
         return;
+      }
+      if (
+        step === "research-boards" &&
+        typeof workspaceAgentRuntime?.executeIntent === "function"
+      ) {
+        await workspaceAgentRuntime.executeIntent({
+          intent: {
+            type: "company.discover",
+            entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+            input: {
+              request: "Continue post-onboarding discovery from approved job boards.",
+            },
+          },
+        });
       }
       sendJson(res, 200, { ok: true, completion });
     } catch (err) {

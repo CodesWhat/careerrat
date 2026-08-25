@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { profileSettingsApi } from "./api.js";
 import { useDesktopUpdate } from "./desktop-update.js";
+import { firstRunRuntimeChoices } from "./first-run-controller.js";
 import { ProfileSettings } from "./ProfileSettings.jsx";
 import {
   buildProfileSettingsModel,
@@ -9,7 +10,18 @@ import {
   profileSectionSavePlan,
 } from "./profile-settings-controller.js";
 
-const EMPTY_MODEL = buildProfileSettingsModel();
+function buildSettingsModel(input = {}) {
+  const model = buildProfileSettingsModel(input);
+  return {
+    ...model,
+    engine: {
+      ...model.engine,
+      choices: firstRunRuntimeChoices(input.runtimes),
+    },
+  };
+}
+
+const EMPTY_MODEL = buildSettingsModel();
 
 export function ProfileSettingsController({ api = profileSettingsApi }) {
   const navigate = useNavigate();
@@ -43,7 +55,7 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
       api.getSourceMaintenance(),
     ]);
     const next = { onboard, runtimes, automation, sources };
-    setModel(buildProfileSettingsModel(next));
+    setModel(buildSettingsModel(next));
     setError(null);
     return next;
   }
@@ -59,7 +71,7 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
       .then(([onboard, runtimes, automation, sources]) => {
         if (cancelled) return;
         const next = { onboard, runtimes, automation, sources };
-        setModel(buildProfileSettingsModel(next));
+        setModel(buildSettingsModel(next));
       })
       .catch((cause) => {
         if (!cancelled) setError(cause?.message || "Profile settings could not load.");
@@ -119,7 +131,7 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   }
 
   async function changePermission(id, enabled) {
-    const patch = permissionPatch(id, enabled);
+    const patch = permissionPatch(id, enabled, model.permissions);
     if (!patch) return;
     try {
       await api.saveCandidateFile("automation", patch);

@@ -65,7 +65,15 @@ test("automation consent: relationship_sourcing supports LinkedIn and Wellfound"
 });
 
 test("automation consent: supervised apply preparation replaces the removed one-click capability", () => {
-  assert.deepEqual(CAPABILITIES.authenticated_apply_preparation.platforms, ["linkedin"]);
+  assert.deepEqual(CAPABILITIES.authenticated_apply_preparation.platforms, [
+    "greenhouse",
+    "lever",
+    "ashby",
+    "workable",
+    "smartrecruiters",
+    "linkedin",
+    "external_ats",
+  ]);
   assert.equal(
     CAPABILITIES.authenticated_apply_preparation.label,
     "Authenticated apply preparation"
@@ -81,6 +89,16 @@ test("automation consent: supervised apply preparation replaces the removed one-
     mayRun({
       capability: "authenticated_apply_preparation",
       platform: "linkedin",
+      data: cfg,
+    }).allowed,
+    true
+  );
+  cfg.capabilities.authenticated_apply_preparation.platforms.greenhouse = true;
+  cfg.consent.greenhouse = true;
+  assert.equal(
+    mayRun({
+      capability: "authenticated_apply_preparation",
+      platform: "greenhouse",
       data: cfg,
     }).allowed,
     true

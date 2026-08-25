@@ -87,3 +87,17 @@ export function validateClaimFields(c, where) {
 
   return errors;
 }
+
+export function assertCleanEvidenceClaims(claims) {
+  const errors = [];
+  (Array.isArray(claims) ? claims : []).forEach((raw, i) => {
+    const where = raw?.id ? `claim "${raw.id}"` : `claims[${i}]`;
+    errors.push(...validateClaimFields(raw, where));
+  });
+  if (errors.length) {
+    const error = new Error("evidence claim(s) refused by the honesty/privacy guard");
+    error.code = "EVIDENCE_GUARD_REJECTED";
+    error.errors = errors;
+    throw error;
+  }
+}

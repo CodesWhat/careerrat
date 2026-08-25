@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../lib/api.js";
-import { runAiWebSearchLane, runJobsPageSearch } from "./jobsSearch.js";
+import {
+  jobSearchCapabilities,
+  runAiWebSearchLane,
+  runCoordinatedJobSearch,
+  runJobsPageSearch,
+} from "./jobsSearch.js";
 
 const FAILED_SEARCH_FALLBACK =
   "Search failed. Add an RSS source or supported public ATS company, then retry.";
@@ -247,15 +252,49 @@ function freshPromptsStub() {
     getSearchPrompts: vi.fn(async () => ({
       data: {
         prompts: [{ id: "prompt-1", text: "existing prompt", updatedAt: "2026-07-01T00:00:00Z" }],
+        inputFingerprint: "inputs-current",
+        savedInputFingerprint: "inputs-current",
       },
     })),
     generateSearchPrompts: vi.fn(),
     saveSearchPrompts: vi.fn(),
-    getTargetingUpdatedAt: vi.fn(async () => null),
   };
 }
 
 describe("runAiWebSearchLane", () => {
+  it("regenerates invisible prompts when candidate search inputs changed", async () => {
+    const state = stateSpies();
+    const getSearchPrompts = vi.fn(async () => ({
+      data: {
+        prompts: [{ id: "prompt-1", text: "old prompt" }],
+        inputFingerprint: "inputs-new",
+        savedInputFingerprint: "inputs-old",
+      },
+    }));
+    const generateSearchPrompts = vi.fn(async () => ({
+      data: { prompts: [{ text: "new prompt" }] },
+    }));
+    const saveSearchPrompts = vi.fn(async () => ({
+      data: { prompts: [{ id: "prompt-2", text: "new prompt" }] },
+    }));
+    const runAiWebSearchStream = vi.fn(async ({ onEvent }) => {
+      onEvent({ type: "done", data: { searched: 1, found: 1, new: 1, duplicates: 0, errors: [] } });
+    });
+
+    const result = await runAiWebSearchLane({
+      ...state,
+      getSearchPrompts,
+      generateSearchPrompts,
+      saveSearchPrompts,
+      runAiWebSearchStream,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(generateSearchPrompts).toHaveBeenCalledOnce();
+    expect(saveSearchPrompts).toHaveBeenCalledWith([{ text: "new prompt" }]);
+    expect(runAiWebSearchStream).toHaveBeenCalledOnce();
+  });
+
   it("moves running to results, records activity/counts, and refetches", async () => {
     const state = stateSpies();
     const refetch = vi.fn();
@@ -367,5 +406,326 @@ describe("runAiWebSearchLane", () => {
     expect(result).toEqual({ ok: false, aborted: true });
     expect(state.setStatus.mock.calls).toEqual([["running"], ["idle"]]);
     expect(state.setError).toHaveBeenCalledOnce();
+  });
+});
+
+describe("runCoordinatedJobSearch", () => {
+  const capabilities = {
+    deterministic: { configured: true, executable: true },
+    aiWeb: { configured: true, executable: true, consented: true },
+  };
+
+  it("starts every executable lane from one action and refetches once after both finish", async () => {
+    const setSearchState = vi.fn();
+    const refetch = vi.fn();
+    let finishDeterministic;
+    let finishAiWeb;
+    const runDeterministic = vi.fn(
+      () => new Promise((resolve) => (finishDeterministic = () => resolve({ ok: true })))
+    );
+    const runAiWeb = vi.fn(
+      () => new Promise((resolve) => (finishAiWeb = () => resolve({ ok: true })))
+    );
+
+    const search = runCoordinatedJobSearch({
+      capabilities,
+      runDeterministic,
+      runAiWeb,
+      refetch,
+      setSearchState,
+    });
+
+    await vi.waitFor(() => {
+      expect(runDeterministic).toHaveBeenCalledOnce();
+      expect(runAiWeb).toHaveBeenCalledOnce();
+    });
+    expect(setSearchState).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        status: "running",
+        lanes: {
+          deterministic: expect.objectContaining({
+            configured: true,
+            executable: true,
+            status: "running",
+          }),
+          aiWeb: expect.objectContaining({
+            configured: true,
+            executable: true,
+            status: "running",
+          }),
+        },
+      })
+    );
+    finishAiWeb();
+    finishDeterministic();
+
+    await expect(search).resolves.toMatchObject({ ok: true, partial: false });
+    expect(refetch).toHaveBeenCalledOnce();
+    expect(setSearchState).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        status: "complete",
+        lanes: {
+          deterministic: expect.objectContaining({ status: "succeeded" }),
+          aiWeb: expect.objectContaining({ status: "succeeded" }),
+        },
+      })
+    );
+  });
+
+  it("keeps successful results while clearly summarizing JD capture gaps", async () => {
+    const states = [];
+    const result = await runCoordinatedJobSearch({
+      capabilities,
+      setSearchState: (state) => states.push(state),
+      runDeterministic: async () => ({ ok: true, run: { summary: { new: 2 } } }),
+      runAiWeb: async () => ({
+        ok: true,
+        data: { new: 1, unreadable: 2, partial: 1, errors: ["2 descriptions could not be read"] },
+      }),
+    });
+
+    expect(result).toMatchObject({ ok: true, partial: false });
+    expect(states.at(-1).summary).toBe(
+      "2 search lanes finished · 3 new · 2 couldn't be added · 1 has a partial description"
+    );
+  });
+
+  it("counts one exact posting once when both parallel lanes report it as new", async () => {
+    const states = [];
+    const result = await runCoordinatedJobSearch({
+      capabilities,
+      setSearchState: (state) => states.push(state),
+      runDeterministic: async () => ({
+        ok: true,
+        run: {
+          summary: {
+            new: 1,
+            offers: [
+              {
+                company: "Acme & Co",
+                title: "Platform Engineer",
+                url: "https://jobs.example.test/acme/platform",
+              },
+            ],
+          },
+        },
+      }),
+      runAiWeb: async () => ({
+        ok: true,
+        data: {
+          new: 1,
+          offers: [
+            {
+              company: "Acme and Co",
+              role: "Platform Engineer",
+              url: "https://jobs.example.test/acme/platform",
+            },
+          ],
+        },
+      }),
+    });
+
+    expect(result).toMatchObject({ ok: true, partial: false });
+    expect(states.at(-1).summary).toBe("2 search lanes finished · 1 new");
+  });
+
+  it("counts distinct same-title requisitions from parallel lanes separately", async () => {
+    const states = [];
+    await runCoordinatedJobSearch({
+      capabilities,
+      setSearchState: (state) => states.push(state),
+      runDeterministic: async () => ({
+        ok: true,
+        run: {
+          summary: {
+            new: 1,
+            offers: [
+              {
+                company: "Acme",
+                title: "Platform Engineer",
+                url: "https://jobs.lever.co/acme/platform-a",
+                reqId: "lever:platform-a",
+                location: "Remote, US",
+              },
+            ],
+          },
+        },
+      }),
+      runAiWeb: async () => ({
+        ok: true,
+        data: {
+          new: 1,
+          offers: [
+            {
+              company: "Acme",
+              role: "Platform Engineer",
+              url: "https://jobs.lever.co/acme/platform-b",
+              reqId: "lever:platform-b",
+              location: "Remote, US",
+            },
+          ],
+        },
+      }),
+    });
+
+    expect(states.at(-1).summary).toBe("2 search lanes finished · 2 new");
+  });
+
+  it("counts NYC and US-remote versions of the same title separately", async () => {
+    const states = [];
+    await runCoordinatedJobSearch({
+      capabilities,
+      setSearchState: (state) => states.push(state),
+      runDeterministic: async () => ({
+        ok: true,
+        run: {
+          summary: {
+            new: 1,
+            offers: [
+              {
+                company: "Acme",
+                title: "Platform Engineer",
+                url: "https://jobs.example.test/acme/platform-remote",
+                location: "Remote, US",
+              },
+            ],
+          },
+        },
+      }),
+      runAiWeb: async () => ({
+        ok: true,
+        data: {
+          new: 1,
+          offers: [
+            {
+              company: "Acme",
+              role: "Platform Engineer",
+              url: "https://jobs.example.test/acme/platform-nyc",
+              location: "New York, NY",
+            },
+          ],
+        },
+      }),
+    });
+
+    expect(states.at(-1).summary).toBe("2 search lanes finished · 2 new");
+  });
+
+  it("skips unavailable or unconsented lanes without invoking them", async () => {
+    const runDeterministic = vi.fn();
+    const runAiWeb = vi.fn();
+    const refetch = vi.fn();
+    const states = [];
+
+    const result = await runCoordinatedJobSearch({
+      capabilities: {
+        deterministic: { configured: true, executable: false },
+        aiWeb: { configured: true, executable: true, consented: false },
+      },
+      runDeterministic,
+      runAiWeb,
+      refetch,
+      setSearchState: (state) => states.push(state),
+    });
+
+    expect(result).toMatchObject({ ok: false, skipped: true });
+    expect(runDeterministic).not.toHaveBeenCalled();
+    expect(runAiWeb).not.toHaveBeenCalled();
+    expect(refetch).not.toHaveBeenCalled();
+    expect(states.at(-1)).toMatchObject({
+      status: "error",
+      lanes: {
+        deterministic: { configured: true, executable: false, status: "skipped" },
+        aiWeb: {
+          configured: true,
+          executable: true,
+          consented: false,
+          status: "skipped",
+        },
+      },
+    });
+  });
+
+  it("keeps a successful lane when its sibling fails", async () => {
+    const setSearchState = vi.fn();
+    const refetch = vi.fn();
+
+    const result = await runCoordinatedJobSearch({
+      capabilities,
+      runDeterministic: vi.fn(async () => ({ ok: true, run: { summary: { new: 3 } } })),
+      runAiWeb: vi.fn(async () => ({ ok: false, error: "AI search timed out" })),
+      refetch,
+      setSearchState,
+    });
+
+    expect(result).toMatchObject({ ok: true, partial: true });
+    expect(refetch).toHaveBeenCalledOnce();
+    expect(setSearchState).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        status: "complete",
+        summary: expect.stringContaining("1 search lane finished"),
+        lanes: {
+          deterministic: expect.objectContaining({ status: "succeeded" }),
+          aiWeb: expect.objectContaining({ status: "failed", error: "AI search timed out" }),
+        },
+      })
+    );
+  });
+
+  it("shares cancellation with both lanes and does not refetch after abort", async () => {
+    const controller = new AbortController();
+    const refetch = vi.fn();
+    const setSearchState = vi.fn();
+    const runLane = vi.fn(async ({ signal }) => {
+      expect(signal).toBe(controller.signal);
+      controller.abort();
+      return { ok: false, aborted: true };
+    });
+
+    const result = await runCoordinatedJobSearch({
+      capabilities,
+      runDeterministic: runLane,
+      runAiWeb: runLane,
+      refetch,
+      setSearchState,
+      signal: controller.signal,
+    });
+
+    expect(result).toEqual({ ok: false, aborted: true });
+    expect(refetch).not.toHaveBeenCalled();
+    expect(setSearchState).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        status: "idle",
+        lanes: {
+          deterministic: expect.objectContaining({ status: "skipped" }),
+          aiWeb: expect.objectContaining({ status: "skipped" }),
+        },
+      })
+    );
+  });
+});
+
+describe("jobSearchCapabilities", () => {
+  it("distinguishes configured sources from executable deterministic work", () => {
+    expect(
+      jobSearchCapabilities({
+        sourceStatus: {
+          searches: { enabled: 2 },
+          enabledTrackedCompanies: 0,
+          deterministicSources: { attempted: 0 },
+        },
+        ai: { configured: true, executable: true, consented: true },
+      })
+    ).toEqual({
+      deterministic: { configured: true, executable: false, consented: true },
+      aiWeb: { configured: true, executable: true, consented: true },
+    });
+  });
+
+  it("fails closed when source or AI capability state is unavailable", () => {
+    expect(jobSearchCapabilities()).toEqual({
+      deterministic: { configured: false, executable: false, consented: true },
+      aiWeb: { configured: false, executable: false, consented: false },
+    });
   });
 });

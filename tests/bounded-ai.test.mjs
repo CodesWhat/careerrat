@@ -245,6 +245,52 @@ test("runBoundedAI native-preferred mode calls callAI with native output options
   assertNoSensitiveFields(result.body);
 });
 
+test("runBoundedAI native-preferred retries schema-valid output rejected by route quality validation", async () => {
+  const calls = [];
+  const result = await runBoundedAI({
+    labels: LABELS,
+    schema: SEED_SCHEMA,
+    manual: MANUAL,
+    structuredMode: "native-preferred",
+    maxRetries: 1,
+    validateData: (data) =>
+      data.seeds.some((seed) => seed.reason.includes("Wait typo"))
+        ? [{ path: "seeds[0].reason", message: "must be final user-facing copy" }]
+        : [],
+    call: async (options) => {
+      calls.push(options);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              seeds: [
+                {
+                  company: "Native Labs",
+                  reason:
+                    calls.length === 1
+                      ? "Builds agent workflows? Wait typo."
+                      : "Builds agent workflows.",
+                },
+              ],
+            }),
+          },
+        ],
+        model: "installed:codex",
+      };
+    },
+    messages: [{ role: "user", content: "Suggest company seeds." }],
+    root: ROOT,
+  });
+
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].messages.at(-1).content, /seeds\[0\]\.reason.*final user-facing copy/i);
+  assert.equal(result.status, 200);
+  assert.equal(result.body.data.seeds[0].reason, "Builds agent workflows.");
+  assert.equal(result.body.ai.model, "installed:codex");
+  assert.equal(result.body.ai.retried, true);
+});
+
 test("runBoundedAI maps parse and schema exhaustion to a safe 422 manual envelope", async () => {
   const seenCorrections = [];
   const result = await runBoundedAI({

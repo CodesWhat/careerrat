@@ -119,7 +119,9 @@ const STARTER_PROMPT =
 // the starter prompt as a single positional argument (the seed-a-session form
 // both Claude Code and Codex accept). Declared above the command dispatch so
 // runStart can read them on its synchronous (no-await) --no-dashboard path.
-const AGENT_CANDIDATES = INSTALLED_RUNTIME_DEFINITIONS.map(({ name, binaries }) => ({
+const AGENT_CANDIDATES = INSTALLED_RUNTIME_DEFINITIONS.filter(
+  ({ supported }) => supported === true
+).map(({ name, binaries }) => ({
   name,
   bin: binaries[0],
 }));
@@ -183,8 +185,7 @@ function runInit(extra) {
 
 // Parse `start` args. The first bare word is the agent to launch
 // (`careerrat start claude`); `--agent <name>` is an equivalent alias. Both
-// accept an explicitly named compatible command on PATH, in addition to the
-// automatically detected Claude and Codex launchers.
+// accept either supported launcher by name.
 function parseStartArgs(extra) {
   const out = { agent: null, port: null, noAgent: false, noDashboard: false };
   for (let i = 0; i < extra.length; i++) {
@@ -203,7 +204,7 @@ function parseStartArgs(extra) {
 // `careerrat start [agent]` — the one-command front door:
 //   scaffold workspace → install skills → boot the local app (:7777) →
 //   hand off to the named agent (or first found on PATH) with the starter prompt.
-// Usage: careerrat start [claude|codex|<compatible-command>]
+// Usage: careerrat start [claude|codex]
 //        [--agent <name>] [--no-agent] [--no-dashboard] [--port <n>]
 async function runStart(extra) {
   const opts = parseStartArgs(extra);
@@ -465,9 +466,10 @@ function resolveForcedAgent(name) {
   const known = AGENT_CANDIDATES.find(
     (c) => c.bin === name || c.name.toLowerCase() === String(name).toLowerCase()
   );
-  const bin = findOnPath(name) || (known && findOnPath(known.bin));
+  if (!known) return null;
+  const bin = findOnPath(known.bin);
   if (!bin) return null;
-  return { name: known?.name || name, bin };
+  return { name: known.name, bin };
 }
 
 // Resolve an executable on PATH without running it (no version probes).

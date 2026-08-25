@@ -21,7 +21,11 @@ import {
   candidateConfigPatch,
   candidateSetupInitialize,
 } from "../src/core/db/verbs.mjs";
-import { buildSearchPromptContext } from "../src/core/search/search-prompts.mjs";
+import {
+  buildSearchPromptContext,
+  getSearchPrompts,
+  saveSearchPrompts,
+} from "../src/core/search/search-prompts.mjs";
 
 const roots = [];
 
@@ -35,6 +39,43 @@ function repo() {
 after(() => {
   closeAll();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+test("saved search prompts carry the candidate-input fingerprint they were generated from", () => {
+  const repoRoot = repo();
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        {
+          name: "Engineering",
+          priority: "primary",
+          titles: ["Staff Software Engineer"],
+        },
+      ],
+    },
+  });
+
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [{ text: "Find remote Staff Software Engineer roles" }],
+    defaultSource: "generated",
+  });
+
+  const fresh = getSearchPrompts({ repoRoot });
+  assert.match(fresh.inputFingerprint, /^[a-f0-9]{64}$/);
+  assert.equal(fresh.savedInputFingerprint, fresh.inputFingerprint);
+
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: { location: { home: "New York, NY", remote: true } },
+  });
+
+  const stale = getSearchPrompts({ repoRoot });
+  assert.notEqual(stale.inputFingerprint, fresh.inputFingerprint);
+  assert.equal(stale.savedInputFingerprint, fresh.savedInputFingerprint);
 });
 
 test("buildSearchPromptContext: omits application_limits/company_history by default", () => {

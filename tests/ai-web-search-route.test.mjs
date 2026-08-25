@@ -150,6 +150,7 @@ test("AI web-search route streams activity before done and emits heartbeat comme
     assert.equal(durable.status, "completed");
     assert.equal(durable.summary.new, 1);
     assert.deepEqual(durable.metadata.promptIds, ["p1"]);
+    assert.match(durable.metadata.inputFingerprint, /^[a-f0-9]{64}$/);
   } finally {
     globalThis.setInterval = originalSetInterval;
     globalThis.clearInterval = originalClearInterval;
@@ -309,4 +310,9 @@ test("AI web-search disconnect aborts the underlying run via an AbortSignal", as
   res.emit("close");
   await abortSeen;
   await running;
+
+  const durable = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+  assert.equal(durable.status, "failed");
+  assert.equal(durable.summary, null);
+  assert.equal(durable.error.code, "AI_WEB_SEARCH_ABORTED");
 });

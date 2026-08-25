@@ -46,6 +46,28 @@ const REMOTE_SCOPE_OPTIONS = [
   { value: "worldwide", label: "Remote worldwide" },
 ];
 
+const PERMISSION_PLATFORMS = Object.freeze({
+  authenticated_search: ["linkedin", "indeed", "wellfound", "glassdoor"],
+  authenticated_apply_preparation: [
+    "greenhouse",
+    "lever",
+    "ashby",
+    "workable",
+    "smartrecruiters",
+    "linkedin",
+    "external_ats",
+  ],
+  mail_access: ["gmail", "outlook", "webmail"],
+});
+
+const PERMISSION_PROVIDER_SCOPES = Object.freeze({
+  authenticated_search:
+    "Turning this on records consent for LinkedIn, Indeed, Wellfound, and Glassdoor.",
+  authenticated_apply_preparation:
+    "Turning this on records consent for Greenhouse, Lever, Ashby, Workable, SmartRecruiters, LinkedIn, and external ATS sites.",
+  mail_access: "Turning this on records consent for Gmail, Outlook, and webmail.",
+});
+
 function cadenceLabel(value) {
   return (
     {
@@ -361,6 +383,7 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
         id: "authenticated_search",
         name: "Browse job portals",
         description: "use connected browser sessions when needed",
+        providerScope: PERMISSION_PROVIDER_SCOPES.authenticated_search,
         enabled: capabilityEnabled(automation, "authenticated_search"),
         mutable: true,
       },
@@ -368,13 +391,15 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
         id: "authenticated_apply_preparation",
         name: "Prepare application forms",
         description: `${agentName} fills authenticated forms, you press every submit`,
+        providerScope: PERMISSION_PROVIDER_SCOPES.authenticated_apply_preparation,
         enabled: capabilityEnabled(automation, "authenticated_apply_preparation"),
         mutable: true,
       },
       {
         id: "mail_access",
-        name: "Send email replies",
-        description: "uses the mail access you explicitly connected",
+        name: "Read job-search email",
+        description: "reads recruiting updates and verification codes from connected mail",
+        providerScope: PERMISSION_PROVIDER_SCOPES.mail_access,
         enabled: capabilityEnabled(automation, "mail_access"),
         mutable: true,
       },
@@ -503,10 +528,33 @@ export function profileSectionSavePlan(section, values = {}, editor = {}) {
   throw new Error("That profile section is not editable here.");
 }
 
-export function permissionPatch(id, enabled) {
+export function permissionPatch(id, enabled, currentPermissions = []) {
   if (id === "draft_documents") return null;
+  const value = Boolean(enabled);
+  const platforms = PERMISSION_PLATFORMS[id] || [];
+  const providerState = Object.fromEntries(platforms.map((platform) => [platform, value]));
+  const consentState = Object.fromEntries(
+    platforms.map((platform) => [
+      platform,
+      value ||
+        list(currentPermissions).some((permission) => {
+          const permissionId = permission?.id || permission?.capability;
+          return (
+            permissionId !== id &&
+            permission?.enabled === true &&
+            list(PERMISSION_PLATFORMS[permissionId]).includes(platform)
+          );
+        }),
+    ])
+  );
   return {
     setup_mode: "advanced",
-    capabilities: { [id]: { enabled: Boolean(enabled) } },
+    ...(platforms.length ? { consent: consentState } : {}),
+    capabilities: {
+      [id]: {
+        enabled: value,
+        ...(platforms.length ? { platforms: { ...providerState } } : {}),
+      },
+    },
   };
 }

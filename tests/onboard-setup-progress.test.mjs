@@ -132,7 +132,11 @@ describe("computeSetupProgress", () => {
       computeSetupProgress({
         data: {
           profile: {
-            location: { home: "Austin, TX", hybrid: true },
+            location: {
+              home: "Austin, TX",
+              hybrid: true,
+              mode_preferences_confirmed: true,
+            },
             compensation: { minimum_base: 180000 },
           },
         },
@@ -150,13 +154,72 @@ describe("computeSetupProgress", () => {
       computeSetupProgress({
         data: {
           profile: {
-            location: { home: "Austin, TX", remote: true, hybrid: true },
+            location: {
+              home: "Austin, TX",
+              remote: true,
+              hybrid: true,
+              mode_preferences_confirmed: true,
+            },
             compensation: { comp_floors: { remote: 180000, hybrid: 195000 } },
           },
         },
       }).items.find((i) => i.key === "quickFacts").done,
       true,
       "arrangement-specific floors are a complete compensation gate without a flat fallback"
+    );
+    assert.equal(
+      computeSetupProgress({
+        data: {
+          profile: {
+            location: {
+              remote: true,
+              remote_scope: "worldwide",
+              hybrid: false,
+              onsite: false,
+              mode_preferences_confirmed: true,
+            },
+            compensation: { minimum_base: 180000 },
+          },
+        },
+      }).items.find((i) => i.key === "quickFacts").done,
+      true,
+      "confirmed remote-only candidates do not need a home, hybrid, on-site, or relocation market"
+    );
+  });
+
+  it("does not treat a resume location and the ambient remote fallback as a confirmed work-mode posture", () => {
+    const resumeSeededProfile = {
+      location: {
+        home: "Brooklyn, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: false,
+        onsite: false,
+      },
+      compensation: { minimum_base: 180000 },
+    };
+
+    assert.equal(
+      computeSetupProgress({ data: { profile: resumeSeededProfile } }).items.find(
+        (item) => item.key === "quickFacts"
+      ).done,
+      false,
+      "a resume can establish the home market but cannot choose remote, hybrid, or on-site for the candidate"
+    );
+    assert.equal(
+      computeSetupProgress({
+        data: {
+          profile: {
+            ...resumeSeededProfile,
+            location: {
+              ...resumeSeededProfile.location,
+              hybrid: true,
+              mode_preferences_confirmed: true,
+            },
+          },
+        },
+      }).items.find((item) => item.key === "quickFacts").done,
+      true
     );
   });
 
@@ -247,7 +310,7 @@ describe("computeSetupProgress", () => {
         },
         profile: {
           compensation: { minimum_base: 200000 },
-          location: { home: "Austin, TX" },
+          location: { home: "Austin, TX", mode_preferences_confirmed: true },
           authorization: { work_authorized: true },
         },
       },
@@ -267,7 +330,7 @@ describe("computeSetupProgress", () => {
         evidence: { claims: [{ claim: "Shipped a thing" }] },
         profile: {
           compensation: { minimum_base: 200000 },
-          location: { home: "Austin, TX" },
+          location: { home: "Austin, TX", mode_preferences_confirmed: true },
           authorization: { work_authorized: true },
         },
       },
@@ -296,7 +359,7 @@ describe("computeSetupProgress", () => {
         evidence: { claims: [{ claim: "Shipped a thing" }] },
         profile: {
           compensation: { minimum_base: 200000 },
-          location: { home: "Austin, TX" },
+          location: { home: "Austin, TX", mode_preferences_confirmed: true },
           authorization: { work_authorized: true },
         },
         // No `automation` key at all, and no form-defaults.declined_fields —

@@ -17,7 +17,7 @@ import {
   normalizeCandidateProfile,
 } from "../../profile/candidate-defaults.mjs";
 import { hasConfiguredCompensationFloor } from "../../profile/compensation.mjs";
-import { validateClaimFields } from "../../profile/evidence-validation.mjs";
+import { assertCleanEvidenceClaims } from "../../profile/evidence-validation.mjs";
 import { validate } from "../../profile/schema-validator.mjs";
 import { openDb, requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
@@ -171,6 +171,20 @@ function deepMerge(base, patch) {
 
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+const LOCATION_MODE_FIELDS = ["remote", "remote_scope", "hybrid", "onsite", "relocation"];
+
+function normalizeCandidateProfilePatch(patch) {
+  const location = patch?.location;
+  if (!isPlainObject(location) || Object.hasOwn(location, "mode_preferences_confirmed")) {
+    return patch;
+  }
+  if (!LOCATION_MODE_FIELDS.some((field) => Object.hasOwn(location, field))) return patch;
+  return {
+    ...patch,
+    location: { ...location, mode_preferences_confirmed: true },
+  };
 }
 
 function compactStrings(values) {
@@ -661,7 +675,7 @@ export function candidateConfigPatch({ repoRoot, env, name, patch, recordActivit
       const current = readSingleton(db, table, DEFAULTS[name] || {});
       const merged =
         name === "profile"
-          ? normalizeCandidateProfile(deepMerge(current, patch))
+          ? normalizeCandidateProfile(deepMerge(current, normalizeCandidateProfilePatch(patch)))
           : deepMerge(current, patch);
       assertValid(name, merged);
       putSingleton(db, table, merged);
@@ -730,20 +744,6 @@ export function candidateApplicationLimitUpsert({ repoRoot, env, row } = {}) {
 // post-write assertValid("evidence", ...) schema check below covers once ids
 // are in place. A claim that fails either guard can never enter the bank
 // through any surface, not just the CLI's own guarded add.
-function assertCleanEvidenceClaims(claims) {
-  const errors = [];
-  (Array.isArray(claims) ? claims : []).forEach((raw, i) => {
-    const where = raw?.id ? `claim "${raw.id}"` : `claims[${i}]`;
-    errors.push(...validateClaimFields(raw, where));
-  });
-  if (errors.length) {
-    const err = new Error("evidence claim(s) refused by the honesty/privacy guard");
-    err.code = "EVIDENCE_GUARD_REJECTED";
-    err.errors = errors;
-    throw err;
-  }
-}
-
 function evidenceIdsInValue(value, targetIds, found = new Set()) {
   if (Array.isArray(value)) {
     for (const item of value) evidenceIdsInValue(item, targetIds, found);

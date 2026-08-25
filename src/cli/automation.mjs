@@ -629,7 +629,7 @@ function handleDbAutomationEdit({ command, kind, capability, platform, value }) 
   }
 
   try {
-    candidateConfigPatch({ ...pathCtx, name: "automation", patch: nextData });
+    candidateConfigPatch({ repoRoot: opts.root, name: "automation", patch: nextData });
   } catch (err) {
     if (opts.json) {
       console.log(
@@ -699,7 +699,7 @@ function handleDbSession(provider) {
   }
 
   try {
-    candidateConfigPatch({ ...pathCtx, name: "automation", patch: nextData });
+    candidateConfigPatch({ repoRoot: opts.root, name: "automation", patch: nextData });
   } catch (err) {
     if (opts.json) {
       console.log(

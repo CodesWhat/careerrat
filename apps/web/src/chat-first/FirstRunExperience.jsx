@@ -1,6 +1,10 @@
 import { cleanAgentCopy } from "./agent-copy.js";
 import { SendUpIcon } from "./chat-first-icons.jsx";
-import { isFirstRunExtractedFact, runtimePresentation } from "./first-run-controller.js";
+import {
+  isFirstRunExtractedFact,
+  runtimeIsSupported,
+  runtimePresentation,
+} from "./first-run-controller.js";
 import { RuntimeIcon } from "./RuntimeIcon.jsx";
 import { TopBar } from "./workspace-shell.jsx";
 import "./first-run.css";
@@ -39,38 +43,31 @@ function progressValues(progress = {}) {
 }
 
 function engineStatus(engine) {
-  return engine.presentationLabel || runtimePresentation(engine).label;
+  return runtimePresentation(engine).label;
 }
 
-const RUNTIME_DESCRIPTIONS = {
-  claude: "Uses the Claude Code account already signed in on this computer",
-};
+function engineSelectable(engine) {
+  const state = runtimePresentation(engine).state;
+  return engine?.ready === true && engine?.selectable === true && state === "ready";
+}
 
 function engineDescription(engine) {
   const presentation = runtimePresentation(engine);
   if (presentation.state === "auth_required")
     return "Detected on this computer. Sign in before CareerRat can use it.";
-  if (presentation.state === "detected_unverified")
-    return "Detected on this computer. CareerRat has not verified this provider’s available capabilities yet.";
-  if (presentation.state === "chat_drafting")
-    return "Ready for conversations and document drafts. Task tools and research are not verified for this provider yet.";
-  if (presentation.state === "task_tools")
-    return (
-      RUNTIME_DESCRIPTIONS[engine.id] ||
-      `Ready to chat, draft, research, and run CareerRat tasks with ${engine.name || "this AI CLI"}`
-    );
+  if (presentation.state === "ready")
+    return `Ready to run the complete CareerRat workflow with ${engine.name || "this AI CLI"}.`;
   return "This provider is not available on this computer.";
 }
 
 function DetectedEngine({ engine, submitting, onChooseEngine, onRetryEngine, onOpenSettings }) {
-  const selectable = engine.ready && engine.selectable === true;
+  const selectable = engineSelectable(engine);
   const presentation = runtimePresentation(engine);
   const canCompleteSetup =
-    presentation.state === "auth_required" &&
-    (engine.action === "start_sign_in" || engine.toolExecutionSupported === true);
+    presentation.state === "auth_required" && engine.action === "start_sign_in";
   const canRetry = engine.detected === true && engine.ready !== true;
   const hasActions = canCompleteSetup || canRetry;
-  const className = "cf-first-run__engine-choice";
+  const className = `cf-first-run__engine-choice${engine.selected ? " is-selected" : ""}`;
   const content = (
     <>
       <span className="cf-first-run__engine-radio" aria-hidden="true">
@@ -230,7 +227,11 @@ export function EngineSelection({
   onHostedInterestSubmit,
 }) {
   const choices = safeArray(engines).filter(
-    (engine) => engine && typeof engine === "object" && String(engine.id || "").trim()
+    (engine) =>
+      engine &&
+      typeof engine === "object" &&
+      String(engine.id || "").trim() &&
+      runtimeIsSupported(engine)
   );
   const detectedChoices = choices.filter(
     (engine) => engine.id !== "custom" && engine.detected === true
@@ -239,7 +240,7 @@ export function EngineSelection({
     (engine) => engine.id !== "custom" && engine.detected !== true
   );
   const selectedEngine = detectedChoices.find(
-    (engine) => engine.selected && engine.ready && engine.selectable === true
+    (engine) => engine.selected && engineSelectable(engine)
   );
   return (
     <section className="cf-first-run__engine" aria-labelledby="cf-engine-title">
@@ -248,8 +249,7 @@ export function EngineSelection({
           <h1 id="cf-engine-title">Pick your engine.</h1>
           <p>
             We found {detectedChoices.length} AI {detectedChoices.length === 1 ? "tool" : "tools"}{" "}
-            on this computer. Each tool shows the capabilities CareerRat has actually verified.
-            Chat-only tools stay useful while unverified task actions remain locked.
+            on this computer. Every choice shown here runs the complete CareerRat workflow.
           </p>
         </div>
         {error ? (
@@ -273,7 +273,7 @@ export function EngineSelection({
           ) : (
             <div className="cf-first-run__engine-empty">
               <span>
-                No AI CLI was detected. The install guides below show every runtime CareerRat knows.
+                No supported AI CLI was detected. Install Claude Code or Codex, then check again.
               </span>
               <button
                 className="cf-first-run__engine-action"
@@ -315,13 +315,6 @@ export function EngineSelection({
             </div>
           </details>
         ) : null}
-        <article className="cf-first-run__engine-special cf-first-run__engine-special--custom">
-          <span>
-            <strong>Custom command</strong>
-            <small>Unavailable until CareerRat can verify its tool boundary</small>
-          </span>
-          <span className="cf-first-run__engine-unavailable">UNAVAILABLE</span>
-        </article>
         <HostedInterestCard
           hostedInterest={hostedInterest}
           onHostedInterestStart={onHostedInterestStart}
@@ -370,7 +363,15 @@ function FirstRunRail({ agentName }) {
   );
 }
 
-function AssistantMessage({ message, agentName, onChooseOption, itemKey }) {
+function AssistantMessage({
+  message,
+  agentName,
+  onChooseOption,
+  onAnswer,
+  binaryAnswerActive = false,
+  submitting = false,
+  itemKey,
+}) {
   const blocks = safeArray(message.blocks);
   const extractedFacts = blocks.filter(isFirstRunExtractedFact);
   const hasExtractedFacts = extractedFacts.length > 0;
@@ -415,12 +416,36 @@ function AssistantMessage({ message, agentName, onChooseOption, itemKey }) {
             ) : null}
           </div>
         ) : null}
+        {binaryAnswerActive ? (
+          <fieldset className="cf-first-run__binary-actions">
+            <legend className="sr-only">Suggested answers</legend>
+            {["Yes", "No"].map((answer) => (
+              <button
+                key={answer}
+                type="button"
+                disabled={submitting}
+                onClick={() => onAnswer?.(answer)}
+              >
+                {answer}
+              </button>
+            ))}
+            <span className="cf-first-run__answer-hint">or just type it</span>
+          </fieldset>
+        ) : null}
       </div>
     </article>
   );
 }
 
-function TranscriptMessage({ message, agentName, onChooseOption, itemKey }) {
+function TranscriptMessage({
+  message,
+  agentName,
+  onChooseOption,
+  onAnswer,
+  binaryAnswerActive,
+  submitting,
+  itemKey,
+}) {
   if (message?.role === "user")
     return (
       <article key={itemKey} className="cf-first-run__user-bubble">
@@ -431,6 +456,9 @@ function TranscriptMessage({ message, agentName, onChooseOption, itemKey }) {
     message: message || {},
     agentName,
     onChooseOption,
+    onAnswer,
+    binaryAnswerActive,
+    submitting,
     itemKey,
   });
 }
@@ -685,6 +713,13 @@ export function FirstRunChat({
   onSubmitAnswer,
 }) {
   const rows = safeArray(messages);
+  const latestDialogue = [...rows]
+    .reverse()
+    .find((message) => message?.role === "assistant" || message?.role === "user");
+  const binaryQuestionId =
+    latestDialogue?.role === "assistant" && latestDialogue?.answerMode === "yes-no"
+      ? latestDialogue.id
+      : null;
   function submit(event) {
     event.preventDefault();
     if (!String(draft).trim() || submitting) return;
@@ -716,6 +751,9 @@ export function FirstRunChat({
                 message,
                 agentName,
                 onChooseOption,
+                onAnswer: onSubmitAnswer,
+                binaryAnswerActive: message.id === binaryQuestionId,
+                submitting,
                 itemKey: message.id,
               })
             )

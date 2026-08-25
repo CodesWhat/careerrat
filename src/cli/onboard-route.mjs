@@ -90,6 +90,10 @@ import {
   normalizeDocxResumeText,
 } from "../core/onboarding/resume-docx.mjs";
 import { computeSetupProgress } from "../core/onboarding/setup-progress.mjs";
+import {
+  collapseUnansweredOnboardingPrompts,
+  onboardingMessageIsInternal,
+} from "../core/onboarding/transcript-cleanup.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import {
   cloneCandidateDefault,
@@ -451,7 +455,12 @@ function normalizeOnboardingChatCursor(value) {
 function normalizeOnboardingTranscript(value) {
   if (!Array.isArray(value)) return [];
   return value.slice(-200).flatMap((message) => {
-    if (!isPlainObject(message) || !ONBOARDING_TRANSCRIPT_ROLES.has(message.role)) return [];
+    if (
+      !isPlainObject(message) ||
+      !ONBOARDING_TRANSCRIPT_ROLES.has(message.role) ||
+      onboardingMessageIsInternal(message)
+    )
+      return [];
     const normalized = {
       role: message.role,
       text: typeof message.text === "string" ? message.text.slice(0, 20000) : "",
@@ -465,6 +474,10 @@ function normalizeOnboardingTranscript(value) {
         normalized.chatId = cursor.chatId;
         normalized.eventId = cursor.eventId;
       }
+    }
+    if (message?.answerMode === "yes-no" || message?.metadata?.answerMode === "yes-no") {
+      normalized.answerMode = "yes-no";
+      normalized.metadata = { answerMode: "yes-no" };
     }
     if (message.role === "assistant" && Array.isArray(message.blocks)) {
       normalized.blocks = message.blocks.slice(0, 20).flatMap((block) => {
@@ -542,7 +555,9 @@ export function readOnboardingDraft(pathCtx) {
   }).messages.filter((message) => message.visibility !== "internal");
   return normalizeOnboardingDraft({
     ...draft,
-    transcript: reconcileOnboardingTranscript(draft.transcript, canonical),
+    transcript: collapseUnansweredOnboardingPrompts(
+      reconcileOnboardingTranscript(draft.transcript, canonical)
+    ),
   });
 }
 
@@ -600,7 +615,9 @@ export function finishOnboarding({ repoRoot, env = process.env, now } = {}) {
       purpose: "first-search",
     });
     const firstSearchStatus = firstSearchRun.run?.status;
-    const firstSearchReady = firstSearchStatus === "running" || firstSearchStatus === "completed";
+    const firstSearchReady =
+      (firstSearchStatus === "running" || firstSearchStatus === "completed") &&
+      firstSearchRun.inputsChanged !== true;
     const ready =
       setupProgress.complete &&
       config.setup?.readiness?.search_ready === true &&
@@ -646,6 +663,7 @@ export function finishOnboarding({ repoRoot, env = process.env, now } = {}) {
         draft: savedDraft,
         handoff: {
           reused: handoff.reused,
+          repaired: handoff.repaired,
           messageCount: handoff.messages.length,
           finishedAt: handoff.finishedAt,
         },
@@ -1403,6 +1421,28 @@ export function mountOnboardRoutes({
   addRoute("POST", "/api/onboard/finish", async (_req, res) => {
     try {
       const result = await finishOnboardingImpl({ repoRoot, env });
+      if (
+        result.status === 200 &&
+        result.body?.handoff?.reused !== true &&
+        result.body?.handoff?.repaired !== true &&
+        typeof workspaceAgentRuntime?.executeIntent === "function"
+      ) {
+        try {
+          await workspaceAgentRuntime.executeIntent({
+            intent: {
+              type: "source.discover",
+              entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+              input: {
+                request:
+                  "Continue post-onboarding source discovery with research-boards before company discovery.",
+              },
+            },
+          });
+        } catch {
+          // Graduation is already durable and the baseline search is usable.
+          // Doctor keeps the same research-boards handoff available for retry.
+        }
+      }
       sendJson(res, result.status, result.body);
     } catch (err) {
       sendJson(res, 500, {

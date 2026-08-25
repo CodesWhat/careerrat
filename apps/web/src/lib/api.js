@@ -183,6 +183,10 @@ export function getInstalledAiRuntimes() {
   return apiFetch("/api/settings/ai-runtimes");
 }
 
+export function getRuntimeConfig() {
+  return apiFetch("/api/runtime/config");
+}
+
 export function requestHostedInterest(email) {
   return apiFetch("/api/hosted-interest", {
     method: "POST",
@@ -442,6 +446,10 @@ export function getSourcingRun({ purpose } = {}) {
   if (purpose) params.set("purpose", purpose);
   const query = params.toString();
   return apiFetch(`/api/sourcing/runs/latest${query ? `?${query}` : ""}`);
+}
+
+export function getSearchSourceStatus() {
+  return apiFetch("/api/search/sources");
 }
 
 // AI search-assistant prompts (src/cli/search-route.mjs) — generate-first:

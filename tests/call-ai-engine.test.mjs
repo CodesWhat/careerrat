@@ -89,7 +89,23 @@ test("callAI (installed runtime): result carries numeric elapsedMs and the insta
       maxTokens: 16,
       root,
       env: { CAREERRAT_DESKTOP_SHELL: "1" },
-      runtimeInventory: [{ id: "codex", name: "Codex", path: "/safe/codex", available: true }],
+      runtimeInventory: [
+        {
+          id: "codex",
+          name: "Codex",
+          path: "/safe/codex",
+          available: true,
+          capabilities: {
+            completion: true,
+            structuredOutput: true,
+            appWorkflows: true,
+            exactRead: true,
+            publicWeb: true,
+            liveActivity: true,
+            resumable: true,
+          },
+        },
+      ],
       runInstalledRuntimeImpl: async () => ({
         text: "hello from codex",
         runtimeId: "codex",

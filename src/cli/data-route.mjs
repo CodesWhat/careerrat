@@ -310,7 +310,12 @@ export function mountDataRoutes({ addRoute, repoRoot, env = process.env }) {
   addRoute("POST", "/api/data/comm/send", async (req, res) => {
     await withBodyVerb(req, res, (body) => {
       if (!body?.id) throw badRequest("body.id is required");
-      return commMarkSent({ ...pathCtx, ...body });
+      return commMarkSent({
+        ...pathCtx,
+        id: body.id,
+        at: body.at,
+        summary: body.summary,
+      });
     });
   });
 

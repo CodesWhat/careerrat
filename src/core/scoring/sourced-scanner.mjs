@@ -15,7 +15,9 @@ import { feedItemsToOffers, parseFeed } from "../providers/rss.mjs";
 import { fetchWorkingNomads } from "../providers/workingnomads.mjs";
 import { classifyRoleFamily } from "../tracker/outcome-analysis.mjs";
 import { normalizeCompanyRoleKey } from "../tracker/tracker-data.mjs";
+import { extractReqId, postingIdentityKeys } from "./sourced-identity.mjs";
 
+export { extractReqId } from "./sourced-identity.mjs";
 export { normalizeCompanyRoleKey };
 
 // Matches career-ops-registry.mjs's own DEFAULT_TIMEOUT_MS. fetchRss is the
@@ -108,16 +110,24 @@ function normalizeKeywordList(value) {
 export function buildTitleFilter(titleFilter = {}) {
   const positive = normalizeKeywordList(titleFilter.positive);
   const negative = normalizeKeywordList(titleFilter.negative);
-  return (title = "") => {
+  const classify = (title = "") => {
     const lower = title.toLowerCase();
-    const hasPositive =
+    const blocked = negative.some((term) => keywordMatches(lower, term));
+    const matched =
       positive.length === 0 ||
       positive.some(
         (term) => keywordMatches(lower, term) || boundedRoleTitleEquivalent(lower, term)
       );
-    const hasNegative = negative.some((term) => keywordMatches(lower, term));
-    return hasPositive && !hasNegative;
+    return {
+      matched: matched && !blocked,
+      blocked,
+      adjacent:
+        !matched && !blocked && positive.some((term) => adjacentRoleTitleEquivalent(lower, term)),
+    };
   };
+  const filter = (title = "") => classify(title).matched;
+  filter.classify = classify;
+  return filter;
 }
 
 // Full target titles are often narrower labels than employers use for the
@@ -156,6 +166,23 @@ const TITLE_SPECIALIZATIONS = [
 ];
 const TITLE_ENGINEERING_KINDS = new Set(["developer", "engineer", "engineering"]);
 const TITLE_SENIORITY_GROUPS = [new Set(["staff", "principal", "lead"]), new Set(["senior", "sr"])];
+const TITLE_ADJACENCY_STOPWORDS = new Set([
+  "assistant",
+  "associate",
+  "chief",
+  "director",
+  "head",
+  "intern",
+  "junior",
+  "lead",
+  "manager",
+  "principal",
+  "senior",
+  "specialist",
+  "staff",
+  "the",
+  "vice",
+]);
 
 function titleTokens(value) {
   return new Set(
@@ -199,6 +226,41 @@ function boundedRoleTitleEquivalent(actualTitle, targetTitle) {
 
   const targetDomains = TITLE_DOMAIN_FAMILIES.filter((family) => hasAny(target, family));
   return targetDomains.length > 0 && targetDomains.some((family) => hasAny(actual, family));
+}
+
+function titleSeniorityCompatible(actual, target) {
+  const targetSeniority = TITLE_SENIORITY_GROUPS.find((group) => hasAny(target, group));
+  if (!targetSeniority) return true;
+  return (
+    hasAny(actual, targetSeniority) ||
+    (targetSeniority.has("senior") && hasAny(actual, TITLE_SENIORITY_GROUPS[0]))
+  );
+}
+
+function adjacentRoleTitleEquivalent(actualTitle, targetTitle) {
+  const actual = titleTokens(actualTitle);
+  const target = titleTokens(targetTitle);
+  if (!titleSeniorityCompatible(actual, target)) return false;
+
+  if (hasAny(target, TITLE_ENGINEERING_KINDS)) {
+    if (!hasAny(actual, TITLE_ENGINEERING_KINDS)) return false;
+    if (
+      TITLE_SPECIALIZATIONS.some(
+        (specialization) => actual.has(specialization) && !target.has(specialization)
+      )
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  return [...target].some(
+    (value) =>
+      value.length >= 4 &&
+      !TITLE_ADJACENCY_STOPWORDS.has(value) &&
+      !TITLE_ENGINEERING_KINDS.has(value) &&
+      actual.has(value)
+  );
 }
 
 function keywordMatches(text, term) {
@@ -405,10 +467,11 @@ function locationEligibility(offer, config) {
     if (homeLooksUs(profileLocation.home)) {
       const local = commuteEligibility(location, profileLocation);
       if (local.eligible) return { eligible: true };
-      if (FOREIGN_REMOTE_RE.test(location) && !US_REMOTE_RE.test(location)) {
+      const usRemoteLocation = US_REMOTE_RE.test(location) || US_STATE_RE.test(location);
+      if (FOREIGN_REMOTE_RE.test(location) && !usRemoteLocation) {
         return { eligible: false, reason: "remote-region-mismatch" };
       }
-      if (!US_REMOTE_RE.test(location)) {
+      if (!usRemoteLocation) {
         return { eligible: false, reason: "remote-region-unverified" };
       }
       return { eligible: true };
@@ -765,14 +828,109 @@ export function inferProvider(entry = {}) {
   return inferCareerOpsProvider(entry);
 }
 
+function sameRunOfferKeys(offer) {
+  return postingIdentityKeys(offer);
+}
+
+function offerCompleteness(offer) {
+  const bodyLength = String(offer?.bodyText || offer?.description || "").trim().length;
+  return (
+    Math.min(bodyLength, 20_000) +
+    (offer?.bodyPartial === false ? 40_000 : 0) +
+    (String(offer?.comp || "").trim() ? 4_000 : 0) +
+    (String(offer?.location || "").trim() ? 1_000 : 0) +
+    (offer?.postedAt ? 500 : 0)
+  );
+}
+
+function sameRunDuplicateReason(left, right) {
+  const rightKeys = new Set(postingIdentityKeys(right));
+  const sharedKey = postingIdentityKeys(left).find((key) => rightKeys.has(key));
+  if (sharedKey?.startsWith("url:")) return "url_batch";
+  if (sharedKey?.startsWith("req:")) return "req_id_batch";
+  return "company_role_batch";
+}
+
+function dedupeBeforeQualification(offers, { seenUrls, seenReqIds, seenRunCompanyRoles }) {
+  const canonical = [];
+  const duplicates = [];
+  const entriesByKey = new Map();
+
+  for (const [inputIndex, offer] of offers.entries()) {
+    const req = extractReqId(offer?.url);
+    if (seenUrls.has(offer?.url) || (req.id && seenReqIds.has(req.id))) {
+      duplicates.push({
+        ...offer,
+        duplicateReason: seenUrls.has(offer?.url) ? "url" : "req_id",
+        reqId: req.id,
+      });
+      continue;
+    }
+
+    const keys = sameRunOfferKeys(offer);
+    const seenRunKey = keys.find((key) => seenRunCompanyRoles.has(key));
+    if (seenRunKey) {
+      duplicates.push({ ...offer, duplicateReason: "company_role_batch", reqId: req.id });
+      continue;
+    }
+    const matches = [...new Set(keys.map((key) => entriesByKey.get(key)).filter(Boolean))].filter(
+      (entry) => entry.active
+    );
+    if (matches.length === 0) {
+      const entry = { offer, inputIndex, keys: new Set(keys), active: true };
+      canonical.push(entry);
+      for (const key of keys) entriesByKey.set(key, entry);
+      continue;
+    }
+
+    const primary = matches[0];
+    const candidates = [
+      ...matches.map((entry) => ({ entry, offer: entry.offer, inputIndex: entry.inputIndex })),
+      { entry: null, offer, inputIndex },
+    ];
+    const winner = candidates.reduce((best, candidate) =>
+      offerCompleteness(candidate.offer) > offerCompleteness(best.offer) ? candidate : best
+    );
+    const mergedKeys = new Set(keys);
+    for (const match of matches) {
+      for (const key of match.keys) mergedKeys.add(key);
+      if (match !== primary) match.active = false;
+      if (match !== winner.entry) {
+        duplicates.push({
+          ...match.offer,
+          duplicateReason: sameRunDuplicateReason(match.offer, winner.offer),
+          reqId: extractReqId(match.offer?.url).id,
+        });
+      }
+    }
+    if (winner.entry !== null) {
+      duplicates.push({
+        ...offer,
+        duplicateReason: sameRunDuplicateReason(winner.offer, offer),
+        reqId: req.id,
+      });
+    }
+    primary.offer = winner.offer;
+    primary.inputIndex = winner.inputIndex;
+    primary.keys = mergedKeys;
+    for (const key of mergedKeys) entriesByKey.set(key, primary);
+  }
+
+  const activeCanonical = canonical.filter((entry) => entry.active);
+  for (const entry of activeCanonical) {
+    for (const key of entry.keys) seenRunCompanyRoles.add(key);
+  }
+  return { canonical: activeCanonical, duplicates };
+}
+
 export function filterAndDedupeOffers(
   offers,
   {
-    seenUrls,
+    seenUrls = new Set(),
     seenReqIds = new Set(),
-    seenCompanyRoles,
-    titleFilter,
-    locationFilter,
+    seenCompanyRoles = new Set(),
+    titleFilter = () => true,
+    locationFilter = () => true,
     config = {},
     now = Date.now(),
     companyPresentationCounts = new Map(),
@@ -792,15 +950,47 @@ export function filterAndDedupeOffers(
   const invalid = [];
   const overflow = [];
   const qualified = [];
+  const prequalified = dedupeBeforeQualification(offers, {
+    seenUrls,
+    seenReqIds,
+    seenRunCompanyRoles,
+  });
+  duplicates.push(...prequalified.duplicates);
 
-  for (const [inputIndex, offer] of offers.entries()) {
+  for (const { offer, inputIndex } of prequalified.canonical) {
     if (!offer.url || !offer.title || !offer.company) {
       invalid.push({ ...offer, reason: "missing url, title, or company" });
       continue;
     }
-    if (!titleFilter(offer.title)) {
-      filteredTitle.push({ ...offer, qualificationReason: "title-mismatch" });
-      continue;
+    const titleDecision =
+      typeof titleFilter.classify === "function"
+        ? titleFilter.classify(offer.title)
+        : { matched: titleFilter(offer.title), blocked: false, adjacent: false };
+    let rating = null;
+    let titleRelevance = null;
+    if (!titleDecision.matched) {
+      if (titleDecision.blocked) {
+        filteredTitle.push({
+          ...offer,
+          qualificationKind: "blocker",
+          qualificationReason: "title-negative-blocker",
+        });
+        continue;
+      }
+      rating = scoreSourcedOffer(offer, config);
+      if (
+        !titleDecision.adjacent ||
+        rating.score < scannerLikelyKeepThreshold(config?.modes) ||
+        rating.gate === "likely-cut"
+      ) {
+        filteredTitle.push({
+          ...offer,
+          qualificationKind: "relevance",
+          qualificationReason: "title-relevance-low",
+        });
+        continue;
+      }
+      titleRelevance = "adjacent-signal";
     }
     const seniority = seniorityEligibility(offer, config);
     if (!seniority.eligible) {
@@ -838,27 +1028,9 @@ export function filterAndDedupeOffers(
       continue;
     }
     const key = normalizeCompanyRoleKey(offer.company, offer.title);
-    const runKey = `${key}::${normalizePlace(offer.location)}`;
     const req = extractReqId(offer.url);
-    if (seenUrls.has(offer.url) || (req.id && seenReqIds.has(req.id))) {
-      duplicates.push({
-        ...offer,
-        duplicateReason: seenUrls.has(offer.url) ? "url" : "req_id",
-        reqId: req.id,
-      });
-      continue;
-    }
-    if (seenRunCompanyRoles.has(runKey)) {
-      duplicates.push({
-        ...offer,
-        duplicateReason: "company_role_batch",
-        reqId: req.id,
-      });
-      continue;
-    }
     seenUrls.add(offer.url);
     if (req.id) seenReqIds.add(req.id);
-    seenRunCompanyRoles.add(runKey);
     const possibleDuplicate = seenCompanyRoles.has(key);
     if (possibleDuplicate) possibleDuplicates.push(offer);
     seenCompanyRoles.add(key);
@@ -871,8 +1043,9 @@ export function filterAndDedupeOffers(
       reqId: req.id,
       possibleDuplicate,
       qualificationUnknowns,
+      ...(titleRelevance ? { titleRelevance } : {}),
       _qualificationInputIndex: inputIndex,
-      ...scoreSourcedOffer(offer, config),
+      ...(rating || scoreSourcedOffer(offer, config)),
     });
   }
 
@@ -924,42 +1097,6 @@ export function filterAndDedupeOffers(
     invalid,
     overflow,
   };
-}
-
-export function extractReqId(rawUrl = "") {
-  try {
-    const url = new URL(rawUrl);
-    const path = url.pathname;
-    const greenhouse = path.match(/\/jobs\/(\d+)/);
-    if (greenhouse)
-      return { provider: "greenhouse", value: greenhouse[1], id: `greenhouse:${greenhouse[1]}` };
-    const ashby = path.match(/\/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})(?:\/|$)/i);
-    if (ashby)
-      return {
-        provider: "ashby",
-        value: ashby[1].toLowerCase(),
-        id: `ashby:${ashby[1].toLowerCase()}`,
-      };
-    const lever = path.match(/\/([^/]+)$/);
-    if (url.hostname === "jobs.lever.co" && lever)
-      return { provider: "lever", value: lever[1], id: `lever:${lever[1].toLowerCase()}` };
-    const apple = path.match(/\/details\/([0-9-]+)/);
-    if ((url.hostname === "apple.com" || url.hostname.endsWith(".apple.com")) && apple)
-      return { provider: "apple", value: apple[1], id: `apple:${apple[1]}` };
-    const hiringCafe = path.match(/\/job\/([a-z0-9_-]+)/i);
-    if (url.hostname === "hiring.cafe" && hiringCafe)
-      return {
-        provider: "hiringcafe",
-        value: hiringCafe[1].toLowerCase(),
-        id: `hiringcafe:${hiringCafe[1].toLowerCase()}`,
-      };
-    const linkedIn = path.match(/\/jobs\/view\/(\d+)/);
-    if ((url.hostname === "linkedin.com" || url.hostname.endsWith(".linkedin.com")) && linkedIn)
-      return { provider: "linkedin", value: linkedIn[1], id: `linkedin:${linkedIn[1]}` };
-  } catch {
-    return { provider: null, value: null, id: null };
-  }
-  return { provider: null, value: null, id: null };
 }
 
 export async function scanCompanies(
@@ -1038,7 +1175,10 @@ export async function fetchProvider(provider, entry, fetchImplOrOptions = fetch)
 // same way a tracked-company entry's api/careers_url is, so it goes through
 // the same guardedFetch used by every Career Ops provider request rather than
 // a raw fetchImpl call.
-async function fetchRss(source = {}, { fetchImpl = fetch, resolveHost, dispatcherFactory } = {}) {
+async function fetchRss(
+  source = {},
+  { fetchImpl = fetch, resolveHost, dispatcherFactory, signal } = {}
+) {
   const url = source.rssUrl || source.url;
   if (!url) return [];
   // guardedFetch has no timeoutMs of its own (see its own comment). The
@@ -1051,11 +1191,12 @@ async function fetchRss(source = {}, { fetchImpl = fetch, resolveHost, dispatche
   // hanging that read forever instead of failing the source on deadline.
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), RSS_TIMEOUT_MS);
+  const requestSignal = signal ? AbortSignal.any([controller.signal, signal]) : controller.signal;
   let close = null;
   try {
     const guarded = await guardedFetch(
       url,
-      { signal: controller.signal },
+      { signal: requestSignal },
       { fetchImpl, resolveHost, dispatcherFactory }
     );
     if (!guarded.ok) {

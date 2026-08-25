@@ -18,7 +18,7 @@ const hooks = vi.hoisted(() => ({
   },
 }));
 
-const apiMocks = vi.hoisted(() => ({ getOnboardState: vi.fn() }));
+const apiMocks = vi.hoisted(() => ({ finishOnboarding: vi.fn(), getOnboardState: vi.fn() }));
 const routerState = vi.hoisted(() => ({ pathname: "/" }));
 const navigate = vi.hoisted(() => vi.fn());
 const COMPLETE_ONBOARD_STATE = {
@@ -80,7 +80,10 @@ vi.mock("react-router-dom", () => ({
   useNavigate: () => navigate,
 }));
 
-vi.mock("./lib/api.js", () => ({ getOnboardState: apiMocks.getOnboardState }));
+vi.mock("./lib/api.js", () => ({
+  finishOnboarding: apiMocks.finishOnboarding,
+  getOnboardState: apiMocks.getOnboardState,
+}));
 vi.mock("./chat-first/dashboard-context.jsx", () => ({
   DashboardProvider: ({ children }) => <div data-testid="dashboard-provider">{children}</div>,
 }));
@@ -119,6 +122,7 @@ async function renderAtWhenComplete(module, path) {
 
 beforeEach(() => {
   hooks.clear();
+  apiMocks.finishOnboarding.mockReset().mockResolvedValue({ ok: true });
   apiMocks.getOnboardState.mockReset();
   routerState.pathname = "/";
   navigate.mockReset();
@@ -169,6 +173,18 @@ describe("App chat-first flip", () => {
 
     expect(html).toContain("chat-first-app");
     expect(html).toContain("dashboard-provider");
+  });
+
+  it("repairs the completed onboarding handoff before releasing the workspace", async () => {
+    const module = await loadApp();
+    apiMocks.getOnboardState.mockResolvedValueOnce(COMPLETE_ONBOARD_STATE);
+
+    expect(renderApp(module)).toBe("");
+    await flushEffects();
+    const html = renderApp(module);
+
+    expect(apiMocks.finishOnboarding).toHaveBeenCalledOnce();
+    expect(html).toContain("chat-first-app");
   });
 
   it("exposes the chat-first profile at /settings without gating it", async () => {

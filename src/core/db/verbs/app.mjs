@@ -34,6 +34,50 @@ function requireApp(db, id) {
   return requireRow(db, "applications", id, "application");
 }
 
+const APP_SETTABLE_FIELDS = new Set([
+  "artifacts",
+  "sourceMeta",
+  "link",
+  "coachingPlan",
+  "nextAction",
+  "nextActionDue",
+  "statusUrl",
+  "statusPlatform",
+  "followUp",
+  "priority",
+  "statusNote",
+  "compNote",
+  "roleFit",
+  "compensation",
+  "loc",
+  "mode",
+  "base",
+  "tc",
+  "ask",
+  "compEstimate",
+  "benefits",
+  "sub",
+  "warn",
+  "note",
+  "domain",
+  "channel",
+]);
+
+function assertSettableApplicationFields(patch) {
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+    throw new Error("appSetFields: patch must be an object");
+  }
+  const forbidden = Object.keys(patch).filter((key) => !APP_SETTABLE_FIELDS.has(key));
+  if (forbidden.length) {
+    const error = new Error(
+      `appSetFields: unsupported or protected field${forbidden.length === 1 ? "" : "s"}: ${forbidden.join(", ")}`
+    );
+    error.code = "APP_FIELDS_FORBIDDEN";
+    error.details = { fields: forbidden };
+    throw error;
+  }
+}
+
 function refreshAnalytics(db, now = new Date()) {
   return refreshAnalyticsInDb(db, { buildReevaluationAnalytics, now });
 }
@@ -348,7 +392,7 @@ function applicationFieldsActivity(patch) {
 // appSetFields({id, patch}) — shallow merge (objects merge one level,
 // arrays/scalars replace). Not outcome-changing: no analytics refresh.
 export function appSetFields({ repoRoot, env, id, patch } = {}) {
-  if (!patch || typeof patch !== "object") throw new Error("appSetFields: patch is required");
+  assertSettableApplicationFields(patch);
   return runVerb({ repoRoot, env }, (db) => {
     const app = requireApp(db, id);
     const activity = applicationFieldsActivity(patch);
@@ -363,6 +407,40 @@ export function appSetFields({ repoRoot, env, id, patch } = {}) {
       tags: ["operation:application:details-update"],
     });
     return { id, meta, event };
+  });
+}
+
+export function appApproveReview({ repoRoot, env, id, expectedEvaluatedAt, at } = {}) {
+  return runVerb({ repoRoot, env }, (db) => {
+    const app = requireApp(db, id);
+    const evaluation = app.evaluation;
+    const evaluatedAt = String(evaluation?.evaluatedAt || "").trim();
+    if (String(evaluation?.gate || "").toLowerCase() !== "review" || !evaluatedAt) {
+      const error = new Error(
+        "appApproveReview: a current REVIEW evaluation is required before approval"
+      );
+      error.code = "REVIEW_APPROVAL_NOT_AVAILABLE";
+      throw error;
+    }
+    if (!expectedEvaluatedAt || String(expectedEvaluatedAt).trim() !== evaluatedAt) {
+      const error = new Error("appApproveReview: the REVIEW evaluation changed before approval");
+      error.code = "REVIEW_APPROVAL_STALE";
+      throw error;
+    }
+    const approvedAt = at || nowIso();
+    putRow(db, "applications", id, {
+      ...app,
+      reviewApproval: { evaluatedAt, approvedAt },
+    });
+    const meta = bumpMeta(db);
+    const event = logActivityEvent(db, {
+      type: "status_change",
+      title: `${app.company || id}: Review verdict approved`,
+      summary: "The candidate explicitly approved preparing this REVIEW role.",
+      refs: { applicationId: id, company: app.company, role: app.role },
+      tags: ["operation:application:review-approve"],
+    });
+    return { id, evaluatedAt, approvedAt, meta, event };
   });
 }
 
@@ -417,7 +495,7 @@ export function appPersistEvaluation({ repoRoot, env, id, evaluation, projection
   return runVerb({ repoRoot, env }, (db) => {
     const app = requireApp(db, id);
     const from = app.status;
-    const patch = { ...(projection || {}) };
+    const patch = { ...(projection || {}), reviewApproval: null };
     const resynced = isPreApplicationStatus(from);
     if (resynced) {
       const raw = String(evaluation.gate || "review").toLowerCase();

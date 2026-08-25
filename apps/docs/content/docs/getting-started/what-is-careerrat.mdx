@@ -14,11 +14,12 @@ principle.
 
 ## What CareerRat actually is
 
-CareerRat is an **agent runtime** — a local workspace that a coding agent (Claude
-Code, Codex, or similar) runs inside. The agent reads a contract file
-(`AGENTS.md`) that tells it how to route your intent to the installed skills. Each skill is
-a detailed, executable procedure. You talk to the agent; the agent drives the
-skills.
+CareerRat is an **agent runtime**, a local workspace that a supported AI CLI runs
+inside. The agent reads a contract file (`AGENTS.md`) that tells it how to route
+your intent to the installed skills. Each skill is a detailed, executable
+procedure. You talk to the agent; the agent drives the skills. CareerRat owns
+the durable workflows and threads, while direct and ACP adapters let the
+selected local engine execute them.
 
 The CLI (`careerrat`) scaffolds the workspace, serves the local app, checks
 health, and exposes validated config helpers. It does not do job-search work.
