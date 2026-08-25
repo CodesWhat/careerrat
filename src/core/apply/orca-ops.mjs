@@ -68,6 +68,20 @@ function normalizeText(value) {
     .trim();
 }
 
+const SAFE_ADVANCE_LABELS = new Set([
+  "next",
+  "next step",
+  "continue",
+  "continue applying",
+  "save and continue",
+  "review",
+  "review your application",
+]);
+
+function isExactAdvanceLabel(value) {
+  return SAFE_ADVANCE_LABELS.has(normalizeText(value));
+}
+
 function snapshotNodes(snapshotText) {
   const nodes = [];
   for (const rawLine of String(snapshotText || "").split(/\r?\n/)) {
@@ -155,20 +169,36 @@ function probeByLabel(probe = []) {
   );
 }
 
-function normalizeSnapshot(raw = {}, probe = []) {
+function normalizeSnapshot(raw = {}, probe = [], safeAdvanceLabels = []) {
   const requiredRefs = requiredRefsFromText(raw.snapshot);
   const nodes = snapshotNodes(raw.snapshot);
   const nodeByRef = new Map(nodes.filter((node) => node.ref).map((node) => [node.ref, node]));
   const nestedRefs = nestedInteractiveRefs(nodes);
   const refs = {};
+  const buttonLabelCounts = new Map();
+  for (const entry of Object.values(raw.refs || {})) {
+    if (String(entry?.role || "").toLowerCase() !== "button") continue;
+    const label = normalizeText(entry?.name);
+    if (label) buttonLabelCounts.set(label, (buttonLabelCounts.get(label) || 0) + 1);
+  }
+  const safeLabels = new Set(
+    safeAdvanceLabels.map((label) => normalizeText(label)).filter(Boolean)
+  );
   for (const [ref, entry] of Object.entries(raw.refs || {})) {
     const node = nodeByRef.get(ref);
+    const normalizedName = normalizeText(entry?.name);
     refs[ref] = {
       role: entry?.role,
       name: entry?.name,
       required: requiredRefs.has(ref),
       ...(node?.stateKnown ? { stateKnown: true, value: node.value } : {}),
       ...(nestedRefs.has(ref) ? { field: false } : {}),
+      ...(String(entry?.role || "").toLowerCase() === "button" &&
+      isExactAdvanceLabel(entry?.name) &&
+      buttonLabelCounts.get(normalizedName) === 1 &&
+      safeLabels.has(normalizedName)
+        ? { advanceSafe: true }
+        : {}),
     };
   }
 
@@ -229,6 +259,26 @@ const FORM_STATE_EXPRESSION = `JSON.stringify(Array.from(document.querySelectorA
     }))
   };
 }))`;
+
+const ADVANCE_SAFETY_EXPRESSION = `JSON.stringify((() => {
+  const visible = (el) => { const rect=el.getBoundingClientRect(); const style=getComputedStyle(el); return rect.width>0 && rect.height>0 && style.visibility!=="hidden" && style.display!=="none"; };
+  const label = (el) => String(el.getAttribute("aria-label") || el.innerText || el.value || el.getAttribute("name") || "").replace(/\\s+/g," ").trim();
+  const normalized = (value) => String(value||"").toLowerCase().replace(/[^a-z0-9]+/g," ").replace(/\\s+/g," ").trim();
+  const exactLabels = new Set(["next","next step","continue","continue applying","save and continue","review","review your application"]);
+  const safeControl = (el) => { if(!exactLabels.has(normalized(label(el)))) return false; if(el.tagName==="BUTTON"||el.tagName==="INPUT"){ const fallback=el.tagName==="BUTTON"?"submit":""; return String(el.type||el.getAttribute("type")||fallback).toLowerCase()==="button"; } return String(el.getAttribute("role")||"").toLowerCase()==="button"; };
+  const progressName = (el) => { const direct=String(el.getAttribute("aria-label")||"").trim(); if(direct) return direct; const labelled=String(el.getAttribute("aria-labelledby")||"").split(/\\s+/).filter(Boolean).map((id)=>document.getElementById(id)?.innerText||"").join(" ").trim(); return labelled||String(el.getAttribute("title")||el.innerText||"").trim(); };
+  const stepProgress = (el) => { const name=normalized(progressName(el)); return /\\bsteps?\\b/.test(name)||(/\\b(?:application|form)\\b/.test(name)&&/\\bprogress\\b/.test(name)); };
+  const scopeFor = (el) => { let node=el.parentElement; while(node){ const role=String(node.getAttribute("role")||"").toLowerCase(); if(node.tagName==="FORM" || role==="form" || role==="dialog") return node; node=node.parentElement; } return null; };
+  const hasRemaining = (button) => { const scope=scopeFor(button); if(!scope) return false; for(const progress of scope.querySelectorAll("progress,[role='progressbar']")){ if(!visible(progress)||!stepProgress(progress)) continue; const current=Number(progress.value ?? progress.getAttribute("aria-valuenow")); const total=Number(progress.max ?? progress.getAttribute("aria-valuemax")); const minimum=Number(progress.getAttribute("aria-valuemin") ?? 0); if(Number.isFinite(current)&&Number.isFinite(total)&&Number.isFinite(minimum)&&total>minimum&&current>=minimum&&current<total) return true; } for(const marker of scope.querySelectorAll("[aria-current='step']")){ const siblings=Array.from(marker.parentElement?.children||[]).filter((candidate)=>{ if(!visible(candidate)) return false; const role=String(candidate.getAttribute("role")||"").toLowerCase(); return candidate.tagName==="LI" || ["listitem","step","tab"].includes(role); }); const index=siblings.indexOf(marker); if(siblings.length>1&&index>=0&&index<siblings.length-1) return true; } for(const progress of scope.querySelectorAll("[data-current-step]")){ const current=Number(progress.getAttribute("data-current-step")); const total=Number(progress.getAttribute("data-total-steps")); if(Number.isSafeInteger(current)&&Number.isSafeInteger(total)&&current>=1&&total>current) return true; } return false; };
+  return Array.from(document.querySelectorAll("button,input[type='button'],input[type='submit'],[role='button']")).filter((button)=>visible(button)&&safeControl(button)&&hasRemaining(button)).map(label).filter(Boolean);
+})())`;
+
+function needsAdvanceSafetyProbe(raw = {}) {
+  return Object.values(raw.refs || {}).some((entry) => {
+    if (String(entry?.role || "").toLowerCase() !== "button") return false;
+    return isExactAdvanceLabel(entry?.name);
+  });
+}
 
 function needsFormStateProbe(raw = {}) {
   const text = String(raw.snapshot || "");
@@ -328,7 +378,24 @@ export function createOrcaOps({ runOrcaImpl } = {}) {
         probe = [];
       }
     }
-    return normalizeSnapshot(raw, probe);
+    let safeAdvanceLabels = [];
+    if (needsAdvanceSafetyProbe(raw)) {
+      try {
+        const inspected = await runOrcaImpl([
+          "eval",
+          "--page",
+          pageId,
+          "--expression",
+          ADVANCE_SAFETY_EXPRESSION,
+          "--json",
+        ]);
+        const parsed = JSON.parse(String(inspected?.result || "[]"));
+        safeAdvanceLabels = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        safeAdvanceLabels = [];
+      }
+    }
+    return normalizeSnapshot(raw, probe, safeAdvanceLabels);
   }
 
   return {
@@ -417,7 +484,7 @@ export function createOrcaOps({ runOrcaImpl } = {}) {
         "--json",
       ]);
     },
-    async selectOption({ pageId, ref, label, value, typeahead = false }) {
+    async selectOption({ pageId, ref, value, typeahead = false }) {
       if (!typeahead) {
         await runOrcaImpl([
           "select",
@@ -430,9 +497,7 @@ export function createOrcaOps({ runOrcaImpl } = {}) {
           "--json",
         ]);
         const after = await snapshot(pageId);
-        const field = Object.values(after.refs).find(
-          (entry) => normalizeText(entry?.name) === normalizeText(label)
-        );
+        const field = after.refs?.[ref];
         if (field?.stateKnown && !selectedValueMatches(field.value, value)) {
           throw new Error(`The field still showed "${field.value || "blank"}" after selection.`);
         }
@@ -458,16 +523,21 @@ export function createOrcaOps({ runOrcaImpl } = {}) {
       if (!option) throw new Error(`No unambiguous option matched "${value}".`);
       await runOrcaImpl(["click", "--page", pageId, "--element", `@${option.ref}`, "--json"]);
       const after = await snapshot(pageId);
-      const field = Object.values(after.refs).find(
-        (entry) => normalizeText(entry?.name) === normalizeText(label)
-      );
+      const field = after.refs?.[ref];
       if (!field?.stateKnown || !selectedValueMatches(field.value, option.name)) {
         throw new Error(`The field did not keep the selected option "${option.name}".`);
       }
       return {};
     },
-    async toggleField({ pageId, ref }) {
-      return runOrcaImpl(["check", "--page", pageId, "--element", `@${ref}`, "--json"]);
+    async toggleField({ pageId, ref, checked }) {
+      return runOrcaImpl([
+        checked ? "check" : "uncheck",
+        "--page",
+        pageId,
+        "--element",
+        `@${ref}`,
+        "--json",
+      ]);
     },
     async chooseButtonOption({ pageId, ref }) {
       await runOrcaImpl(["focus", "--page", pageId, "--element", `@${ref}`, "--json"]);

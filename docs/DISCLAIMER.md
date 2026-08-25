@@ -40,9 +40,9 @@ constitute fraud and is solely your responsibility.
 Your candidate data (profile, evidence, compensation) is stored **locally** on
 your machine inside the `candidate/` directory, which is gitignored by default.
 CareerRat does not transmit your personal data to any CareerRat-operated server.
-Data may be sent to third-party AI provider APIs (e.g., via Claude Code) in the
-course of generating tailored content — review those providers' privacy policies
-before use.
+Data may be sent to third-party AI provider APIs through the selected local AI
+runtime in the course of generating tailored content. Review that provider's
+privacy policy before use.
 
 ## No Legal or Career Advice
 

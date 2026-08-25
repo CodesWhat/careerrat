@@ -13,6 +13,7 @@ import {
 import { validateDeepIngestGrounding } from "../../deep-ingest/validators/grounding.mjs";
 import { validateDeepIngestLaneTransition } from "../../deep-ingest/validators/lane-state.mjs";
 import { validateDeepIngestPrivacy } from "../../deep-ingest/validators/privacy.mjs";
+import { assertCleanEvidenceClaims } from "../../profile/evidence-validation.mjs";
 import { requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
 import { bumpMeta, logActivityEvent } from "./shared.mjs";
@@ -525,6 +526,7 @@ function writeEvidenceClaims(db, items, proposal, confirmedAt) {
       supportingQuote: raw?.supportingQuote ? String(raw.supportingQuote) : null,
       confirmedAt,
     };
+    assertCleanEvidenceClaims([data]);
     stmt.run(id, JSON.stringify(data), nowIso());
     added += 1;
   }

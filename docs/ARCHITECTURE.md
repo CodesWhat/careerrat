@@ -197,20 +197,27 @@ typed routes and the workspace agent. The generic chat surface exposes only
 `company-health`. Company discovery stays on the app-owned reviewed proposal
 path, and `search-jobs` stays on its dedicated AI web-search route.
 
-The packaged app detects the full installed CLI registry. Claude Code 2.1.241
-or newer runs tool-bearing skills and research. Its per-call settings deny all
-filesystem reads except the exact approved upload and isolated skill, separate
-public-web research from candidate files, and use the guarded CareerRat fetch
-MCP instead of native broad fetch. Codex 0.149.1 or newer supports isolated
-in-app chat and drafting from a disposable task directory. CareerRat ignores
-its user config and rules and disables shell, apps, browser, computer use,
-plugins, skill search, image tools, and multi-agent features for those calls.
-Codex still fails closed before any task-tool or research spawn. Other detected
-CLIs fail closed before any in-app spawn until their own completion boundary is
-verified. Every child inherits an allowlisted process environment, not server
-credentials. The packaged app has no provider fallback and never silently
-switches engines. Source development retains a separately selected Agent SDK
-test path outside the packaged product.
+CareerRat owns the workflow executor, durable threads, context assembly, and
+write-back. That product layer is provider-neutral. Runtime adapters translate a
+capability-scoped request into one local CLI call and normalize text, activity,
+usage, cancellation, and errors back into the same app contract.
+
+Claude Code 2.1.241 or newer and OpenAI Codex 0.149.1 or newer are the supported
+engines for the complete CareerRat product. Each runtime must pass local
+availability, authentication, and the complete readiness check before
+selection. Both adapters run from disposable task directories with bounded
+input, approved-file reads, the guarded CareerRat public web MCP, structured
+output, live activity, and canonical CareerRat resume. Claude receives a fixed
+tool allowlist. Codex ignores user config for the call and receives only the
+scoped CareerRat MCP tools required by the request. Each child inherits an
+allowlisted process environment, not server credentials. A failed boundary
+stops that request; the app never silently switches engines.
+
+CareerOps uses one canonical skill body plus thin provider discovery wrappers.
+CareerRat keeps that portable skill shape, then adds a stricter distinction:
+finding an executable on `PATH` is detection, not proof that its app boundary is
+ready. Fixed invocation, authentication, capability, cancellation, and output
+checks decide what the app can actually offer.
 
 Visible chat handoffs are separate from app-default actions. They are explicit
 user-selected sessions, not hidden fallbacks from local API errors.

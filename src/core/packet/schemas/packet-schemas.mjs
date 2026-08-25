@@ -58,6 +58,30 @@ export const packetGateAiVerdictSchema = {
   },
 };
 
+const DRAFTING_RESIDUE =
+  /\?|```|\b(?:oops|typo|scratch that|ignore (?:that|this)|let me (?:fix|rephrase|rewrite)|i mean|correction)\b|\bwait(?=\s*(?:[,;:—-]\s*)?(?:no|sorry|typo|scratch that|i mean|correction)\b)/iu;
+
+export function validatePacketGateVerdictQuality(verdict = {}) {
+  const entries = [
+    ["fitSummary", verdict.fitSummary],
+    ["compensation.summary", verdict.compensation?.summary],
+    ["action", verdict.action],
+    ...(Array.isArray(verdict.fitReasons)
+      ? verdict.fitReasons.map((value, index) => [`fitReasons[${index}]`, value])
+      : []),
+    ...(Array.isArray(verdict.fitRisks)
+      ? verdict.fitRisks.map((value, index) => [`fitRisks[${index}]`, value])
+      : []),
+  ];
+  return entries
+    .filter(([, value]) => DRAFTING_RESIDUE.test(String(value || "")))
+    .map(([path]) => ({
+      path,
+      message:
+        "must be final user-facing copy without questions, drafting notes, or self-corrections",
+    }));
+}
+
 const packetQuestionSchema = {
   type: "object",
   required: ["id", "label", "type", "required"],

@@ -53,24 +53,30 @@ test("website leads with the signed Mac app and keeps installation focused on th
   assert.doesNotMatch(page, /Anywhere with npm|brew install|npm install|Node\.js 24/);
 });
 
-test("website names only the runtime paths CareerRat actually supports", async () => {
+test("website presents Claude Code and Codex as neutral direct runtime choices", async () => {
   const page = await readFile("apps/website/src/app/page.tsx", "utf8");
 
-  assert.match(page, /Claude Code 2\.1\.241\+/);
-  assert.match(page, /OpenAI Codex 0\.149\.1\+/);
-  assert.match(page, /Claude Code · full tasks/);
-  assert.match(page, /OpenAI Codex · chat \+ drafting/);
-  assert.doesNotMatch(page, /OpenAI Codex · terminal/);
-  assert.doesNotMatch(page, /Other detected CLIs work through the terminal workspace/);
-  assert.doesNotMatch(page, /Gemini CLI · terminal|OpenCode · terminal/);
+  assert.match(page, /CareerRat owns the workflows and threads/);
+  for (const runtime of ["Claude Code", "OpenAI Codex"]) {
+    assert.match(page, new RegExp(runtime));
+  }
+  assert.match(page, /two supported product choices/i);
+  assert.match(page, /runs the same CareerRat-owned workflows and skills/i);
+  assert.match(page, /invokes it directly/i);
+  assert.match(page, /available, signed in, and passes its readiness check/i);
+  assert.match(page, /never falls back to another provider/i);
+  assert.doesNotMatch(
+    page,
+    /Gemini CLI|GitHub Copilot|Hermes Agent|OpenCode|Claude Code · full tasks|Codex · chat \+ drafting|first-class|ACP verified|verified per capability|equal, complete/i
+  );
 });
 
-test("public surfaces keep the graded installed-runtime contract aligned", async () => {
+test("public surfaces keep the provider-neutral installed-runtime contract aligned", async () => {
   const paths = {
     readme: "README.md",
     website: "apps/website/src/app/page.tsx",
-    install: "apps/docs/content/docs/getting-started/install.mdx",
-    privacy: "apps/docs/content/docs/advanced/privacy.mdx",
+    runtime: "docs/CHAT_FIRST_RUNTIME.md",
+    windows: "docs/WINDOWS.md",
     architecture: "docs/ARCHITECTURE.md",
     roadmap: "docs/ROADMAP.md",
   };
@@ -81,36 +87,28 @@ test("public surfaces keep the graded installed-runtime contract aligned", async
   );
   const combined = Object.values(copy).join("\n");
 
-  for (const name of ["readme", "website", "install", "privacy", "architecture", "roadmap"]) {
+  for (const name of ["readme", "runtime", "windows", "architecture"]) {
     assert.match(
       copy[name],
-      /Claude Code 2\.1\.241(?:\+|\s+or newer)[\s\S]{0,120}(?:full|tool-bearing)[\s\S]{0,80}(?:tasks?|skills?)[\s\S]{0,80}research/i,
-      `${paths[name]} should describe Claude's full task and research boundary`
+      /CareerRat[\s\S]{0,180}(?:owns|keeps)[\s\S]{0,120}(?:workflows?|threads?)[\s\S]{0,120}provider-neutral/i,
+      `${paths[name]} should make CareerRat-owned state provider-neutral`
     );
+    assert.match(copy[name], /Claude Code/, `${paths[name]} should name Claude Code`);
+    assert.match(copy[name], /OpenAI Codex/, `${paths[name]} should name OpenAI Codex`);
     assert.match(
       copy[name],
-      /Codex[\s\S]{0,20}0\.149\.1(?:\+|\s+or newer)[\s\S]{0,120}(?:isolated\s+)?in-app chat\s+and\s+drafting/i,
-      `${paths[name]} should describe Codex's in-app chat and drafting boundary`
+      /(?:availability|installed)[\s\S]{0,100}(?:authentication|signed in)[\s\S]{0,140}(?:complete )?(?:readiness )?(?:check|probe)/i,
+      `${paths[name]} should gate selection on complete local readiness`
     );
+    assert.doesNotMatch(copy[name], /Gemini CLI|OpenCode|GitHub Copilot|Hermes Agent/);
   }
 
-  for (const name of ["readme", "install", "privacy", "architecture", "roadmap"]) {
-    assert.match(
-      copy[name],
-      /other (?:installed|detected)[\s\S]{0,100}(?:unverified|not selectable|fail closed)/i,
-      `${paths[name]} should keep other detected CLIs unverified and unselectable`
-    );
-  }
-
-  assert.match(copy.readme, /fails clearly when a workflow needs Claude/i);
-  assert.match(copy.install, /does not fall back to another\s+provider/i);
-  assert.match(copy.privacy, /does not silently switch providers/i);
-  assert.match(copy.architecture, /packaged app has no provider fallback/i);
-  assert.match(copy.roadmap, /packaged app has no provider fallback/i);
+  assert.match(copy.roadmap, /Claude Code and Codex are the only supported runtime choices/);
+  assert.match(copy.roadmap, /packaged app invokes the selected\s+installed CLI directly/i);
 
   assert.doesNotMatch(
     combined,
-    /in-app skill and chat execution currently needs\s+Claude|Codex remains supported as an outer agent|currently uses boundary-verified Claude Code and therefore Anthropic|show every other detected CLI as unsupported|Direct provider keys and managed AI remain explicit fallbacks|provider fallback remains a\s+separate Agent SDK path/i
+    /Codex (?:remains unavailable|task-tool and research work fails closed)|only (?:Claude|Claude Code)|needs Claude|Claude Code · full tasks|Codex · chat \+ drafting|(?:Claude Code|OpenAI Codex)[\s\S]{0,120}first-class|ACP verified|equal, complete CareerRat engines/i
   );
 });
 
@@ -244,23 +242,23 @@ test("website metadata is CareerRat-branded", async () => {
   }
 });
 
-test("website publishes canonical social metadata with the selected square CR icon", async () => {
+test("website publishes canonical social metadata with a large CareerRat sharing card", async () => {
   const layout = await readFile("apps/website/src/app/layout.tsx", "utf8");
 
   assert.match(layout, /metadataBase:\s*new URL\("https:\/\/careerrat\.com"\)/);
   assert.match(layout, /alternates:\s*\{\s*canonical:\s*"\/"\s*\}/s);
   assert.match(
     layout,
-    /openGraph:\s*\{[\s\S]*?url:\s*"\/"[\s\S]*?images:\s*\[\s*\{[\s\S]*?url:\s*"\/icon\.png"[\s\S]*?width:\s*512[\s\S]*?height:\s*512/s
+    /openGraph:\s*\{[\s\S]*?url:\s*"\/"[\s\S]*?images:\s*\[\s*\{[\s\S]*?url:\s*"\/opengraph-image\.png"[\s\S]*?width:\s*1200[\s\S]*?height:\s*630/s
   );
   assert.match(
     layout,
-    /twitter:\s*\{[\s\S]*?card:\s*"summary"[\s\S]*?images:\s*\[\s*\{[\s\S]*?url:\s*"\/icon\.png"[\s\S]*?width:\s*512[\s\S]*?height:\s*512/s
+    /twitter:\s*\{[\s\S]*?card:\s*"summary_large_image"[\s\S]*?images:\s*\[\s*\{[\s\S]*?url:\s*"\/opengraph-image\.png"[\s\S]*?width:\s*1200[\s\S]*?height:\s*630/s
   );
-  assert.doesNotMatch(layout, /summary_large_image/);
 
   const icon = await sharp("apps/website/src/app/icon.png").metadata();
   const appleIcon = await sharp("apps/website/src/app/apple-icon.png").metadata();
+  const socialCard = await sharp("apps/website/src/app/opengraph-image.png").metadata();
   assert.deepEqual(
     { width: icon.width, height: icon.height, format: icon.format },
     { width: 512, height: 512, format: "png" }
@@ -268,6 +266,10 @@ test("website publishes canonical social metadata with the selected square CR ic
   assert.deepEqual(
     { width: appleIcon.width, height: appleIcon.height, format: appleIcon.format },
     { width: 180, height: 180, format: "png" }
+  );
+  assert.deepEqual(
+    { width: socialCard.width, height: socialCard.height, format: socialCard.format },
+    { width: 1200, height: 630, format: "png" }
   );
 
   const favicon = await readFile("apps/website/src/app/favicon.ico");

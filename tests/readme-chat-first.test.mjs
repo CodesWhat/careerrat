@@ -21,10 +21,16 @@ test("README leads with the shipped chat-first Mac app", async () => {
 
 test("README states runtime, update, and Windows boundaries without overclaiming", async () => {
   const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+  const flattened = readme.replace(/\s+/g, " ");
 
-  assert.match(readme, /Claude Code 2\.1\.241\+[\s\S]*full in-app task tools and research/);
-  assert.match(readme, /Codex\s+0\.149\.1\+[\s\S]*in-app chat and drafting/);
-  assert.match(readme, /Claude Code and Codex\s+both work in the[\s\S]*terminal workspace flow/);
+  assert.match(flattened, /Claude Code/);
+  assert.match(flattened, /OpenAI Codex/);
+  assert.match(flattened, /only supported product runtime choices/i);
+  assert.match(flattened, /invokes the selected installed CLI directly/i);
+  assert.match(flattened, /same CareerRat-owned workflows, skills, and durable state/i);
+  assert.doesNotMatch(readme, /Hermes Agent|Gemini CLI|OpenCode|GitHub Copilot/);
+  assert.match(readme, /never falls back to or silently switches providers/);
+  assert.doesNotMatch(readme, /equal, complete CareerRat engines/i);
   assert.match(readme, /never downloads or installs the update/);
   assert.match(readme, /Automatic checks can be disabled in[\s\S]*Settings/);
   assert.match(readme, /SignPath Foundation/);

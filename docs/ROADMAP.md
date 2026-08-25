@@ -89,7 +89,7 @@ nurse, a driver, and an engineer each bring their own config.
   opt-in `.docx` path that auto-detects pandoc/LibreOffice and otherwise falls back
   to a built-in writer (`careerrat export <file.md> --pdf [--docx]`).
 - **Chat-first visual system**: a fixed desktop workspace with a persistent thread
-  rail, centered conversation, contextual side panel, consistent ink selection,
+  rail, centered conversation, contextual side panel, consistent neutral dark-gray selection,
   compact controls, and shared color, spacing, type, icon, and shape variables.
 - **Per-track learning memory** (`careerrat learnings`) — durable, private lessons per
   role family. The skills that learn from outcomes (interview debriefs, rejection and
@@ -265,15 +265,15 @@ nurse, a driver, and an engineer each bring their own config.
   supports native full screen, and preserves a 1100 by 680 minimum working size.
   First run lands in the onboarding conversation, external links open in the OS
   browser, and quitting cleanly shuts down every agent session.
-- **Installed AI runtime first** — onboarding and Settings detect the expanded coding-CLI
-  registry, select boundary-verified Claude Code 2.1.241 or newer for full in-app task tools
-  and research, and select Codex 0.149.1 or newer for isolated in-app chat and drafting.
-  Codex task-tool and research work fails closed. Other detected CLIs remain visible but
-  unverified and are not selectable. The packaged app has no provider fallback and never
-  silently switches engines. Terminal workspace-agent flows still support compatible outer
-  agents. External capabilities stay off until a concrete action needs one, then the app
-  explains and requests that specific permission. Workflows with no verified engine path
-  fail clearly or retain an explicit manual path.
+- **Provider-neutral installed AI runtime (v0.16 review checkpoint)**: CareerRat
+  owns its workflows and threads, so durable product state is provider-neutral.
+  Claude Code and Codex are the only supported product runtime choices and use
+  the same app-owned workflow contract. The packaged app invokes the selected
+  installed CLI directly and never falls back or silently switches engines. A
+  local runtime becomes `Ready` only after its executable, authentication, and
+  readiness check pass. Other detected adapters remain diagnostic-only until
+  the full promotion matrix passes. The v0.16 runtime boundary and packaged QA
+  gates passed; the publication steps in the checkpoint below remain open.
 - **Database-backed setup and sourcing** — onboarding, settings, search setup, and the
   sourcing sweep all read and write the local database first: setup readiness
   (search-ready / gate-ready / apply-ready) is computed from stored facts and gates what
@@ -294,8 +294,8 @@ nurse, a driver, and an engineer each bring their own config.
 - **Live chat activity lines** — while CareerRat works on a chat request, each step shows
   as a small activity line (an icon, a plain-language label like "Reading files: resume.pdf"
   or "Searching the web", and a spinner that settles when the step finishes) instead of the
-  assistant narrating its own tool use in prose. Works on every AI connection, including the
-  most common one: chat turns through an installed Claude CLI now stream each step live.
+  assistant narrating its own tool use in prose. Direct and ACP adapters normalize each
+  engine's structured progress into the same activity rows.
 - **Fit-gap coaching** (`coach-gaps`) — when an evaluation lands at "review" with named fit
   risks, an explicit click gets a plan for closing the gaps, grounded only in evidence
   already on record or the current conversation. An honest "no close path yet" is a valid
@@ -306,6 +306,377 @@ nurse, a driver, and an engineer each bring their own config.
   a fictional demo candidate through the installed AI CLI, so malformed AI output is caught
   before it reaches a real job seeker mid-search.
 
+### Provider runtime parity checkpoint (August 25, 2026)
+
+This checkpoint consolidates `CLI-PARITY-EXEC-SUMMARY.html`,
+`RUNTIME-PARITY-PLAN.md`, the current branch audit, and live Codex canary
+evidence. The raw reviews are local evidence under `.internal/review/`; this
+section is the durable public plan. The branch passed release-candidate QA but
+is not published or deployed yet.
+
+#### Superseding v0.16 release ledger
+
+This ledger is the current source of truth. It supersedes narrower or earlier
+acceptance statements later in this roadmap without rewriting those historical
+records. v0.16 is not released or deployed.
+
+| Area | Current status | Evidence and remaining gate |
+| --- | --- | --- |
+| Supported runtime posture | Release-candidate QA passed | Claude Code and Codex are the only selectable product choices. Both use direct CareerRat-owned adapters and the same workflow contract; neither is described as the better provider. Both returned their own plain-English result in the signed package without fallback or a silent switch. |
+| Direct packaged runtime behavior | Packaged QA passed | The signed app invoked each selected installed CLI directly with isolated configuration and scoped CareerRat tools. Durable restart, errors, and runtime selection passed without a provider key fallback or engine switch. |
+| Installed-runtime cancellation | Packaged QA passed | Direct and ACP cancellation escalate from TERM to KILL after a bounded grace period and force-settle uncooperative children. The signed package passed cancellation and process-tree cleanup with no CareerRat or helper process left behind. |
+| ACP adapters | Diagnostic only | ACP adapters remain diagnostic-only. Native provider fetch must be proven disabled or independently policy-bound before any adapter can enter the picker, followed by the complete product and packaged matrix. |
+| Duplicate onboarding prompt repair | Packaged QA passed | A fresh realistic résumé produced one work-mode prompt and one next typed question. The same home, a restarted home, and a repaired historical completed home retained one copy of each prompt with no rendered or draft system messages. |
+| Requisition identity and search quality | Packaged QA passed | The signed app coordinated configured and AI-web lanes, examined 413 configured postings, and returned two distinct live US-remote roles with relevant New York City context. Foreign and non-NYC local rows were excluded, Ashby requisitions remained distinct, and local JD evidence was saved with visible partial-description badges. |
+| Strict no-submit application preparation | Packaged QA passed | The 127-test driver set is green. A real three-step Chromium form filled five fields, uploaded one file, clicked exactly two verified Next controls, and stopped on `Submit application` with `prepareOnly=true`, `submitClicked=false`, and no false Applied state. |
+| Packaging and release | Publication pending | The fresh macOS package built, passed Developer ID signature verification, and completed release-candidate desktop QA. The full repository and web suites, lint, Knip, builds, docs, website, audit, actionlint, and diff checks are green. Protected PRs, tag publication, hosted assets, production deployment, and installation of the released build remain. |
+
+The duplicate onboarding root fix has both required code paths. Completed homes
+run transcript repair before `ChatFirstApp` renders, and internal résumé-upload
+messages cannot clear or replay the current assistant question. Both persisted
+reproductions passed in the signed package after restart.
+
+##### Earlier checkpoint evidence (superseded where the ledger differs)
+
+- CareerRat-owned SQLite threads, context assembly, workflow state, and
+  write-back remain independent of any provider's session history.
+- Claude Code and Codex have fixed direct adapters with isolated working
+  directories, allowlisted environment, structured output, bounded capability
+  invocation, live activity, bounded forced cancellation, and clear errors.
+- Every conversational path now receives one shared plain-English voice
+  contract. Agent replies lead with the answer, use ordinary language, and keep
+  raw JSON, internal codes, command details, and tool narration out of chat.
+  The renderer also unwraps valid reply envelopes and hides machine-only output
+  when a runtime ignores the instruction.
+- The supported picker, website, README, docs, published agent contract, and
+  doctor output expose Claude Code and Codex, and no other runtime, as complete
+  CareerRat choices. Other discovered runtimes stay outside the product picker.
+- One runtime registry now owns support state, fixed invocation and sign-in
+  arguments, protocol, model selection, technical capabilities, and separate
+  product-acceptance evidence. Route selection, persisted verification, and the
+  frontend picker derive from it. A diagnostic adapter cannot become a product
+  runtime from an ACP handshake or a support flag alone.
+- In-app sign-in recovery is implemented for both supported engines. It starts
+  the runtime's real allowlisted flow, `claude auth login` or `codex login`,
+  without opening a generic terminal command or falling back to another
+  provider.
+- Hermes, Gemini CLI, OpenCode, and GitHub Copilot route through one ACP client
+  contract in the experimental adapter layer. Prompts stay off process
+  arguments, output is bounded, activity is normalized, and the app cancels
+  tool calls outside the requested capability. That protocol work is not a
+  product support claim.
+- Live local research smokes passed for Codex and Hermes. Hermes covered
+  completion, structured output, one approved-file read, public-web research,
+  and settled activity rows. Hermes has not passed the complete CareerRat
+  workflow matrix and remains excluded from the supported picker.
+- Internal readiness probes retain capability evidence for diagnostics. Missing
+  evidence resolves every capability to false, ACP readiness performs
+  initialize, authentication, and session creation, and exact path-bound probe
+  evidence is persisted through execution. The product picker does not expose
+  these internal tiers.
+- The shared `careerrat_scoped_tools` MCP server now exposes only the capability
+  requested for a call: DNS-pinned public fetch and/or one no-argument
+  `read_staged_input` tool bound to the copied upload. Codex attaches it with
+  per-call `-c` settings while continuing to disable shell, unified exec,
+  browser, computer, image-read, plugin, native skill-discovery, and multi-agent
+  features. ACP adapters receive the same server in `session/new`.
+- The focused ACP and installed-runtime boundary suite passes 110 tests. It
+  covers private URL rejection, caller-selected path rejection, symlink input,
+  alternate input, bounded size, missing metadata, per-call MCP attachment, and
+  the retained Codex disable list.
+- Earlier live installed-runtime acceptance covered both Claude Code and Codex:
+  readiness, completion, structured results, scoped public web, text/image/PDF
+  staged reads, outside and symlink denial, live activity, and ordinary
+  cancellation. The Codex run left `~/.codex/config.toml` byte-identical. The
+  focused runtime regressions cover a TERM-ignoring child for one-shot and
+  streaming calls, and signed-package process cleanup passed.
+
+##### Ingested CLI parity execution review
+
+- Do not add LiteLLM, the Vercel AI SDK, LangChain, or another model-provider
+  framework. CareerRat integrates installed coding-agent CLIs, not raw model
+  APIs. The portable layer is the existing runtime registry, canonical
+  `.agents/skills`, CareerRat-owned threads, and narrowly scoped MCP tools.
+- Codex already supports a per-invocation boundary by subtracting native
+  features with repeatable `--disable` flags, ignoring user config, using an
+  ephemeral read-only sandbox, and injecting app-owned MCP configuration with
+  `-c`. Public-web calls can therefore expose only CareerRat's guarded fetch
+  server without changing the user's global Codex configuration.
+- The earlier execution plan concluded that Codex had no remaining tool-boundary
+  gap. A live adversarial canary corrected that conclusion: read-only sandboxing
+  still read a UUID from a sibling directory when shell and unified exec were
+  enabled. With shell, unified exec, image read, and native skill discovery
+  disabled, Codex could read neither the in-workspace nor outside canary. That
+  evidence is why exact read now uses the no-path scoped MCP tool instead of
+  native filesystem access.
+- Codex live activity is structural JSONL progress plus a completed text result,
+  not text-delta streaming. `streamInstalledAI` has no production caller that
+  requests its legacy streaming mode. Remove stale comments and do not turn
+  text deltas into a parity requirement.
+- Keep native skill discovery disabled for bounded in-app calls until its
+  interaction with the isolated single-skill workspace is proven. CareerRat
+  already supplies the exact canonical skill body needed for each call, so
+  enabling a second discovery path is not required for parity.
+- Bring-your-own CLI is baseline compatibility, not a provider ranking. A CLI
+  appears in the primary picker only after the complete CareerRat acceptance
+  matrix passes. Every supported choice is presented as `Ready`, with no
+  weaker task-tools or chat-only tiers.
+
+##### Initial product support contract
+
+- Claude Code and Codex are the only supported runtime choices for v0.16. A user
+  can choose either and use the complete CareerRat product without switching
+  agents for a workflow.
+- Hermes is the next promotion candidate. It joins the supported set only after
+  passing the same end-to-end matrix, including skills, scoped read and public
+  web, cancellation, durable resume, sign-in recovery, desktop restart, job
+  search, and supervised application preparation.
+- Gemini CLI, OpenCode, GitHub Copilot, Qwen, Antigravity, Amp, Goose, Droid,
+  and custom commands remain diagnostic discoveries or future adapters. They
+  are not selectable or recommended merely because a binary is installed or an
+  ACP handshake succeeds.
+
+##### Future runtime-promotion gate
+
+- ACP read and web enforcement rejects ambiguous reported tool activity and
+  attaches the scoped server, but native provider fetch remains an unclosed
+  boundary. Hermes and every other future promotion candidate need that boundary
+  plus the complete matrix on an authenticated host before any public support
+  claim.
+
+##### Current v0.16 release blocker
+
+- Release publication is still pending. The protected feature-to-dev and
+  dev-to-main PRs, signed tag, hosted release assets, production website, and
+  installation of the released app must be verified before v0.16 is complete.
+
+##### Closed adversarial fix and verification queue
+
+These four findings were reproduced against the current implementation. None
+was counted as closed by the earlier focused parity count. Each now has a
+focused regression and passed its affected acceptance path.
+
+1. The non-ACP streaming path writes the raw user prompt to the child process
+   instead of the composed installed-runtime prompt. Fix it so Codex streaming
+   skill and staged-read calls receive the selected skill instructions and
+   staged-input directive, then lock that behavior with a stdin regression.
+2. A REVIEW approval action is not bound to the evaluation the user saw. Carry
+   the expected `evaluatedAt` through the action and require an exact match
+   before approval, including resumed actions, so a stale click cannot approve
+   a newer REVIEW verdict.
+3. The Codex schema normalizer turns an intentionally open object schema into
+   an empty strict object. Replace open result shapes with explicit closed
+   schemas or an equally lossless wire representation, and prove strategy
+   review proposal payloads survive normalization.
+4. Opening runtime settings currently probes every installed adapter, including
+   diagnostic-only runtimes. Probe only the supported Claude Code and Codex
+   entries; unsupported detections must remain passive and nonselectable.
+
+##### Execution queue
+
+| Order | Work | Status | Evidence required | Ship blocker |
+| --- | --- | --- | --- | --- |
+| 1 | Narrow website, README, docs, published agent contract, picker, and doctor output to the supported set | Implemented | Copy and UI tests expose Claude Code and Codex as uniform `Ready` choices and exclude every unaccepted adapter | Yes |
+| 2 | Finish supported-runtime sign-in recovery from the app | Implemented | Claude Code and Codex start `claude auth login` and `codex login` respectively, with focused route and invocation coverage | Yes |
+| 3 | Close the four current adversarial runtime findings | Implemented | Composed streaming prompt, evaluation-bound REVIEW approval, lossless strict schemas, and passive unsupported detection each pass focused regressions | Yes |
+| 4 | Live Codex scoped-tool acceptance | Passed | Public research and staged text/PDF/image reads succeed; outside/sibling/symlink canaries remain unreadable; global Codex config is byte-identical | Yes |
+| 5 | Full promotion acceptance for Hermes, then other ACP adapters | Pending | Each candidate passes completion, every CareerRat skill family, structured output, read, web, activity, cancellation, resume, sign-in recovery, restart, search, and supervised apply | No for v0.16 core; yes before that runtime becomes selectable |
+| 6 | Consolidate adapter metadata | Implemented | Detection, auth, fixed argv, MCP attachment, output parsing, cancellation, technical capabilities, and product-acceptance evidence come from one registry entry per runtime; stale Claude-only streaming assumptions are removed | Yes |
+| 7 | Add later runtime adapters | Pending | Per-call or isolated-project attachment, native-tool suppression, authentication, cancellation, full workflow acceptance, and no global-config mutation | No for v0.16 core; yes before each adapter is selectable |
+| 8 | Finish packaged desktop QA | Passed | Fresh and returning homes passed setup, duplicate-prompt repair, picker, real skill calls, errors, restart, cancellation, search quality, strict no-submit application preparation, and no provider switching in the signed package | Yes |
+
+Detection is never a support claim. A protocol handshake proves protocol
+readiness, not every individual capability. Each selectable capability needs an
+adapter-owned boundary plus the evidence named above.
+
+### Search quality checkpoint (August 25, 2026)
+
+The live fictional-résumé acceptance run exposed a false-zero search: 360 jobs
+scanned, zero presented. Three independent audits compared the live pipeline,
+the pre-chat-first CareerRat search, and `santifer/career-ops`. The exact local
+evidence is under `.internal/review/search-quality-*.json`.
+
+#### Verified findings and closures
+
+- The chat-first Search button invoked only the deterministic configured-board
+  lane. It now coordinates every executable lane behind one action, including
+  deterministic sources and the installed-runtime AI web lane, with explicit
+  per-lane configured, attempted, succeeded, failed, and skipped state.
+- A fresh profile has only a small runnable source subset. The 77 provider
+  modules are a catalog, not 77 active sources. Browser and URL-query entries
+  are not attempted by the deterministic sweep, and the live run used five
+  broad feeds with zero company ATS boards.
+- Completed onboarding searches now reuse only an identical search-input
+  fingerprint. Search-relevant targeting, profile, source, mode, and purpose
+  changes supersede stale work; AI prompts carry their own candidate-input
+  fingerprint; active runs have a ten-minute lease; and failed detached work is
+  recorded durably. Prompt-cache and source-watermark writes are excluded from
+  deterministic invalidation.
+- Superseding a live deterministic run now fences the old worker at every
+  network and write boundary. A stale worker cannot advance watermarks, replace
+  newer source config, persist offers, or report completion. Watermarks mutate
+  the current source entry atomically, so a source approved while a scan is in
+  flight is preserved.
+- In the measured run, 336 of 360 rows failed the title gate before body-aware
+  fit scoring. The scanner now canonicalizes same-run duplicates before gates,
+  ranks across all sources independent of arrival order, permits occupationally
+  adjacent engineering titles only when body evidence supports them, and emits
+  bounded metadata-only rejection samples with blocker/relevance counts.
+- One remote-only RSS feed lost its work-mode provenance. Domestic remote roles
+  labeled only `USA` or a US city/state were treated as local commute jobs. The
+  fix now preserves remote provenance, accepts US regions for home-country
+  remote scope, passes 115 focused scanner tests, and recovered four real
+  domestic remote rows in replay.
+- The live coordinated rerun passed locality, ranking, liveness, stale-run
+  recovery, and tracker integrity, but exposed an AI-capture boundary bug: the
+  model could omit the JD or label its own short summary complete. AI results
+  now pass through CareerRat's guarded canonical job resolver before write-back.
+  Canonical bodies replace model summaries, deferred excerpts stay visibly
+  partial, empty unreadable roles and soft-404 pages are not persisted, and
+  canonical URLs are deduped again. Complete descriptions are retained through
+  a 64 KiB UTF-8 safety bound; a body that reaches that bound is explicitly
+  partial instead of being mislabeled complete. Source receipts come from
+  app-owned recovery even when the runtime emits no tool trace or every result
+  is already known.
+- Deterministic and AI hydration now use ordered four-worker pools. The
+  presentation limit is applied before expensive deterministic hydration, AI
+  output is schema-capped at 40 roles, and one run shares exact-URL and
+  provider-board reads. Cancellation reaches DNS-pinned public and provider
+  fetches and a cancelled lane writes no rows or false completion.
+- Parallel discovery lanes now reconcile at the shared persistence
+  transaction. If both lanes find the same normalized company and role, the
+  winning lane writes the row and JD artifact, the losing lane reports zero
+  new, and the combined result counts that role once.
+- Cross-lane identity no longer collapses two real requisitions merely because
+  their company and title match. Canonical URL and provider-qualified
+  requisition ID win; company, role, and location are the fallback only when
+  neither stronger key exists. Distinct NYC and US-remote openings now survive,
+  while exact URL and requisition duplicates still reconcile once.
+- Starting Search now reads the persisted AI route from the existing runtime
+  config endpoint. It does not synchronously re-probe every installed CLI on
+  each click; explicit Settings refresh and sign-in remain the probe boundary.
+- Setup no longer launches another search after every onboarding answer. It
+  starts one useful baseline search at minimum readiness, then coalesces one
+  final refresh when setup completes and the search inputs changed. Graduation
+  starts a visible `research-boards` thread, continues into visible company
+  proposals, and keeps every ATS source write behind a Track/Skip decision. The
+  proposal transcript, counts, and detail dialog dedupe retry and reload copies.
+- A résumé home address no longer silently chooses remote, hybrid, or on-site
+  work. Setup stays incomplete until the candidate explicitly confirms work
+  modes; the confirmed profile write carries that fact durably.
+- Board discovery now returns one validated `source_review` artifact instead of
+  a Markdown table, bookkeeping ledger, and one protocol block per source. Chat
+  shows one compact result with the four strongest sources and a single review
+  action; the dedicated review surface retains every proposed, borderline, and
+  rejected source with confirm-first writes.
+- Evaluation display fields now pass semantic copy validation before persistence.
+  Questions, drafting notes, and self-correction residue get one provider-neutral
+  correction retry and then a safe manual-review result. Generic job pages prefer
+  schema.org `JobPosting.description`, retaining the full JD and compensation
+  without source-site navigation, related-job, question, or footer noise.
+
+#### Implementation order
+
+| Order | Work | Status | Acceptance |
+| --- | --- | --- | --- |
+| 1 | Preserve remote-source work mode and US-region locality | Implemented | Domestic remote rows survive; foreign remote and non-NYC local rows remain excluded |
+| 2 | Fingerprint and lease sourcing runs; recover stale workers; invalidate stale prompts | Implemented | Targeting/source changes create a fresh coalesced run; dead runs recover without a restart |
+| 3 | Replace deterministic-only Search with one executable-lane coordinator | Implemented | Deterministic and installed-runtime AI-web lanes expose configured/executable/consented/succeeded/failed/skipped state, discover in parallel, reconcile overlapping roles transactionally, and share one visible result refresh |
+| 4 | Enqueue a coalesced fresh run after targeting, source approval, or successful board discovery | Implemented | Onboarding starts one early baseline and one changed-input refresh at completion, never one run per answer; final company approval and confirmed board addition start the expanded sweep without a hidden second click |
+| 5 | Normalize and dedupe all same-run candidates before global scoring/ranking | Implemented | Source order cannot let a weaker duplicate win; adjacent titles can reach body fit without flooding the inbox |
+| 6 | Persist bounded rejection diagnostics and honest source health | Implemented | Empty results explain unique gate samples and actual lane coverage without storing every rejected body |
+| 7 | Make AI JD capture app-owned and canonical | Implemented | Every survivor is re-read through the guarded resolver; full bodies replace summaries, soft-404 and unreadable rows stay out, canonical URLs re-dedupe, the 64 KiB safety bound marks capped bodies partial, and source receipts survive duplicate-only runs |
+| 8 | Thread watermarks into fetch windows and revision-protect source writes | Partially implemented | Revision-protected writes now prevent stale workers and concurrent source changes from overwriting each other; provider-specific repeat-fetch windows remain |
+| 9 | Add asynchronous checkpointed reverse-ATS discovery | Pending | Broad discovery finds employers outside the watchlist without blocking onboarding or the first useful results |
+
+CareerOps provides useful patterns, not a drop-in configuration. Borrow its
+separation of fast configured scans from checkpointed reverse-ATS discovery,
+fresh per-run source loading, bounded concurrency, and explicit liveness. Do
+not copy its personalized AI/ML-heavy company list or imply its zero-AI scanner
+executes the separate agent-owned `search_queries` lane.
+
+### Code review remediation checkpoint (August 25, 2026)
+
+The verified review is archived locally at
+`.internal/review/CODE-REVIEW-FINDINGS.md`. Its fabricated finder output was
+discarded before handoff; the findings below were rechecked against the named
+code paths. The refuted `call-ai` `outputName` report is intentionally excluded.
+
+#### Release-blocking gate integrity
+
+1. Restrict `appSetFields` to explicit non-gate fields so `/api/data/app/fields`
+   cannot write `evaluation.gate` or another apply-authorizing field.
+2. Stop accepting caller-authored verified delivery evidence on
+   `/api/data/comm/send`. Only the connected executor may create a verified send;
+   supervised confirmation and user reports retain their weaker provenance.
+3. Gate every authenticated application preparation before opening or filling a
+   browser tab, not only LinkedIn Easy Apply. Extend the consent platform set to
+   every supported ATS.
+
+#### Apply-path correctness
+
+1. Route Deep Ingest evidence through the canonical evidence firewall instead
+   of raw SQL.
+2. Make packet and evaluation excluded-company cuts share one matcher and the
+   same company-plus-title input.
+3. Serialize live apply operations per application so two clicks cannot operate
+   the same tab concurrently.
+4. Verify Orca select results by the acted-on ref, not the first matching label.
+5. Make Orca checkbox operations honor both checked and unchecked states.
+6. Treat an honestly negative required checkbox as satisfied when its default
+   unchecked state is already correct, instead of reporting a false field-change
+   blocker.
+
+#### Web and contract correctness
+
+1. Preserve `worked: false` with nullish fallback semantics in mock-interview
+    feedback.
+2. Apply the update-toggle write response directly, surface rejections, and
+    clear the external-push guard after the write settles.
+3. Add a busy guard to the cart's “Apply to N jobs” mission action.
+4. Add the documented explicit user-approved REVIEW path, or narrow the
+    contract if product policy rejects it. KEEP remains the automatic gate.
+5. Enforce `authenticated_search` consent at execution time as well as source
+    enablement.
+6. Keep non-conflicting scheduling slots and ask for new availability only when
+    every proposed slot conflicts.
+
+P0 items 1 through 3 block every release. Items 4 through 15 block the v0.16 QA
+restart unless a narrower product decision explicitly removes the affected
+surface. Cleanup findings about the 4,378-line intent function, duplicate route
+helpers, mixed dependency injection, and sequential scanners remain ranked
+maintenance work, not correctness fixes to mix into this pass.
+
+All 15 confirmed correctness findings are closed on the v0.16 runtime-parity
+branch. Focused regression evidence passes 506 backend and domain assertions
+plus 63 web assertions. Coverage includes gate-forgery rejection, trusted send
+provenance, pre-navigation apply consent, evidence validation, shared exclusion
+matching, per-application browser serialization, exact Orca ref verification,
+both checkbox states, false-value preservation, update-toggle rollback, stale
+REVIEW approval invalidation, authenticated search enforcement, and partial
+scheduling conflicts. The cleanup-only findings remain in the maintenance
+queue.
+
+### Security queue checkpoint (August 25, 2026)
+
+- CodeQL path-injection alerts 119 through 121 were dismissed as test-only. They
+  are confined to the loopback-only
+  fixture server. Its canonical-root, traversal, prefix-sibling, symlink, NUL,
+  and malformed-URI boundaries have five passing regression tests.
+- The Docker base image is pinned by digest and the image installs only root
+  production dependencies. Its clean build and help-command smoke passed. Main
+  and dev protection now require pull-request branches to be up to date; the
+  live main ruleset matches the checked-in guard.
+- The repository-age Scorecard alert was dismissed because repositories under
+  90 days are explicitly unscorable, not because maintenance was waived. Recheck
+  after September 23, 2026. The missing OpenSSF Best Practices badge was
+  dismissed as governance follow-up, not a code vulnerability.
+- Property-based fuzzing now exercises ACP permission decisions, isolated-read
+  containment, and the public/private URL boundary. Keep the Scorecard alert
+  open until the next main-branch scan recognizes the new fast-check coverage.
+- Alerts 108, 109, and 111 remain open only until a main-branch Scorecard run can
+  observe the live protection and the two staged repository fixes.
+
 ## Release status (v0.15.0, updated August 24, 2026)
 
 **v0.15.0 is the current release line.** It finishes the chat-first desktop
@@ -315,7 +686,7 @@ the desktop app and public website. The release also adds worldwide-remote
 location handling, retained Deep ingest and mock-interview state, whole-section
 profile editing, the full in-app engine picker, and a compact final-submit gate.
 Since v0.11.0 the repo runs the strict flow: feature PRs land on the active dev
-branch (`dev/v0.15` for this cycle), `main`
+branch (`dev/v0.16` for the current cycle), `main`
 advances only through a promotion merge immediately before each cut, and the tag
 fires the whole pipeline — `desktop-release.yml` builds, signs, notarizes, and
 uploads the DMG, publishing the release then fires `publish.yml` (npm) and the
@@ -344,7 +715,7 @@ documented in `docs/RELEASE.md`'s "One-time CI signing setup" section is done;
 the pipeline still fails fast with a clear list if a secret is ever removed or
 rotated away.
 
-Stale branch cleanup is done. `origin` is now just `main`. The branches
+At the v0.15 cut, stale branch cleanup reduced `origin` to `main`. The branches
 `fix/v0.7-publish`, `dev/v0.7`, `archive/dev-2026-07`, and
 `release/careerrat-0.5.2` were deleted after verifying each had zero commits
 absent from main (the 0.5.2 one is still permanently reachable via tag
@@ -360,8 +731,8 @@ rather than exposing it. Any doc or instruction that still refers to
 
 ### Landed on main since v0.10.0
 
-Thirty-three PRs, all merged, `origin` back to just `main` with every branch and
-worktree cleaned up. The first sixteen (#106 through #123) are below; the rest (#126
+Thirty-three PRs, all merged, with the v0.15 release branches and worktrees
+cleaned up. The first sixteen (#106 through #123) are below; the rest (#126
 through #145) came out of the August 20 queue and are recorded lane by lane under
 [The queue](#the-queue-opened-august-20-2026), since what each one turned out to be
 matters more than that it merged.
@@ -925,6 +1296,11 @@ same release contract:
   server credentials or global MCP configuration; permit Codex only for isolated in-app chat
   and drafting; and reject Codex task-tool or research work plus every in-app spawn from other
   unverified adapters, with the actual capability error and recovery path.
+
+The August 25 provider runtime parity checkpoint supersedes that graded runtime
+posture for v0.16. The August 13 bullet stays unchanged as the record of what
+that acceptance pass actually proved.
+
 - **Résumé intake matrix** — verify PDF, DOCX, text, retry, restart, and docked-upload recovery;
   failed retries must not create duplicate uploads.
 - **Plain-language permissions** — avoid implementation-mode choices. Ask for browser,
@@ -967,9 +1343,10 @@ same release contract:
   through the selected runtime, and routes interview-prep intents/results back into that history.
   The remaining work is natural-language entity/action resolution, inline
   workflow progress and results, executor wiring, and complete skill-to-screen parity.
-- **Bring-your-own authenticated CLI** — use a supported installed agent as the normal AI
-  runtime. Be precise about the graded capability of every adapter. The packaged app never
-  switches to a direct-provider key. Managed AI remains a parked future convenience.
+- **Bring-your-own authenticated CLI**: use a supported installed agent as the
+  normal AI runtime. Direct and ACP adapters expose the same capability-shaped
+  contract, and the packaged app never switches to a different engine or a
+  direct-provider key. Managed AI remains a parked future convenience.
 - **First-day outcome** — carry a new user from résumé through targets/gates and the interview
   into source setup and one strictly filtered search with a small, useful review queue.
 - **QA remediation, web-first** — preserve the completed candidate-truth, local-runtime,
@@ -1013,13 +1390,6 @@ extra surface area.
 - **Voice layer** — browser speech input/output, voice-extended interview prep, and
   post-interview voice debriefs. Text conversation and adaptive setup are now current work;
   voice remains deferred until that interaction model is proven.
-- **Additional installed CLI adapters**: Claude Code has the verified full task
-  boundary, and Codex has isolated chat and drafting. Gemini CLI, Qwen, OpenCode,
-  Copilot, Hermes Agent, and other runners remain detected but unverified until
-  provider-specific config isolation, native-tool suppression, cancellation, and
-  disposable-task smoke tests pass. CareerRat loads the one canonical skill body
-  from `.agents/skills/`; adapters own only detection, auth, fixed invocation,
-  output parsing, cancellation, and honest capability declarations.
 - **Cleanup and maintenance skill** — a shared housekeeping workflow for stale
   screenshots, browser traces, temp captures, detached logs, orphaned generated
   artifacts, and other maintenance debris. It should preview first, stay
@@ -1033,6 +1403,11 @@ extra surface area.
 
 ## Principles
 
+- **Runtime-neutral by default.** CareerRat runs on the supported agent CLI you
+  already have. Real capability gaps appear as preflight evidence in that
+  runtime's own terms, never as a provider ranking or a surprise mid-task
+  refusal. Capability differences are ours to close, not the user's to work
+  around.
 - **Config, not code, holds your preferences.** The code stays field-neutral;
   exclusions, comp floors, role families, and board choices live in your config.
 - **Your data is local and private.** Candidate files and workspace data are

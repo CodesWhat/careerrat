@@ -312,6 +312,27 @@ test("previewWorkspaceIntent: this job resolves to the explicitly open saved job
   });
 });
 
+test("previewWorkspaceIntent: a job-thread re-evaluation request stays bound to its open job", () => {
+  const repoRoot = tempRepo();
+  const context = { pathname: "/jobs", jobId: "app-qventus" };
+
+  const result = previewWorkspaceIntent({
+    text: "Re-evaluate Qventus now using the saved profile and full saved job description.",
+    context,
+    repoRoot,
+    env: {},
+  });
+
+  assert.deepEqual(result.action, {
+    label: "Evaluate this saved job",
+    intent: {
+      type: "job.evaluate-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobId: "app-qventus" },
+    },
+  });
+});
+
 test("previewWorkspaceIntent: a supervised fill request resolves to the open application", () => {
   const repoRoot = tempRepo();
   const context = { pathname: "/jobs", jobId: "app-curri" };
@@ -1256,6 +1277,35 @@ test("previewWorkspaceIntent: Profile phrasings become confirm-first canonical s
       },
     });
   }
+});
+
+test("previewWorkspaceIntent: adding target roles preserves the current target set", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({
+    text: "Add Senior Software Engineer, Senior Frontend Engineer, and Senior Full Stack Engineer to my target roles, keeping existing staff roles.",
+    repoRoot,
+    env: {},
+  });
+  assert.deepEqual(result.action, {
+    label:
+      "Add target roles Senior Software Engineer, Senior Frontend Engineer, Senior Full Stack Engineer",
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        change: {
+          kind: "profile",
+          section: "targets",
+          op: "append",
+          values: [
+            "Senior Software Engineer",
+            "Senior Frontend Engineer",
+            "Senior Full Stack Engineer",
+          ],
+        },
+      },
+    },
+  });
 });
 
 test("previewWorkspaceIntent: a comp-floor-to-current-salary phrasing flags compReference instead of a number", () => {

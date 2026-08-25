@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { buildSearchSources } from "../src/core/profile/generate-search-sources.mjs";
+import { feedItemsToOffers } from "../src/core/providers/rss.mjs";
 import {
   buildLocationFilter,
   filterAndDedupeOffers,
@@ -210,4 +211,103 @@ test("worldwide remote scope keeps remote roles globally while local work stays 
     "Boston Hybrid Worldwide",
     "London Remote-Friendly Hybrid Worldwide",
   ]);
+});
+
+test("NYC plus US-remote policy handles office labels and multisite postings without widening local work", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "New York, NY",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: true,
+      onsite: false,
+      relocation: [],
+    },
+  };
+  const result = qualifyByLocation(
+    profile,
+    [
+      offer("nyc-office", "Plaid Backend", "New York City Office"),
+      offer("nyc-direct", "Addition Wealth", "New York, NY"),
+      offer("nyc-hybrid", "NYC Hybrid", "New York, NY (Hybrid)"),
+      offer("remote-us", "Remote US", "Remote · United States"),
+      offer(
+        "remote-nyc-multisite",
+        "Remote NYC Multisite",
+        "Remote · United States · New York City Office · New York"
+      ),
+      offer(
+        "nyc-multisite",
+        "NYC Multisite",
+        "San Francisco HQ · New York City Office · New York · United States"
+      ),
+      offer("sf-local", "San Francisco Only", "San Francisco, CA (Hybrid)"),
+      offer("seattle-local", "Seattle Only", "Seattle Office"),
+      offer("west-coast-multisite", "West Coast Multisite", "San Francisco HQ · Seattle Office"),
+    ],
+    { generatedFilter: false }
+  );
+
+  assert.deepEqual(result.kept.map((row) => row.company).sort(), [
+    "Addition Wealth",
+    "NYC Hybrid",
+    "NYC Multisite",
+    "Plaid Backend",
+    "Remote NYC Multisite",
+    "Remote US",
+  ]);
+  assert.deepEqual(result.filteredLocation.map((row) => row.company).sort(), [
+    "San Francisco Only",
+    "Seattle Only",
+    "West Coast Multisite",
+  ]);
+});
+
+test("remote-only RSS provenance keeps a USA-scoped role eligible", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "New York, NY",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: true,
+      onsite: false,
+      relocation: [],
+    },
+  };
+  const offers = feedItemsToOffers(
+    [
+      {
+        title: "Senior Software Engineer, Platform at Qventus",
+        link: "https://remotevibecodingjobs.com/jobs/qventus-platform",
+        guid: null,
+        isoDate: null,
+        description: "Company: Qventus\nLocation: USA\nType: Full-time",
+        categories: [],
+      },
+      {
+        title: "Senior Software Engineer, Backend at Affirm",
+        link: "https://remotevibecodingjobs.com/jobs/affirm-backend",
+        guid: null,
+        isoDate: null,
+        description: "Company: Affirm\nLocation: Las Vegas, NV\nType: Full-time",
+        categories: [],
+      },
+    ],
+    {
+      source: {
+        provider: "RemoteVibeCodingJobs",
+        label: "Remote Vibe Coding Jobs",
+        rssUrl: "https://remotevibecodingjobs.com/feed.xml",
+      },
+    }
+  );
+  const result = qualifyByLocation(profile, offers, { generatedFilter: false });
+
+  assert.deepEqual(
+    result.kept.map((row) => row.company),
+    ["Qventus", "Affirm"]
+  );
+  assert.equal(result.filteredLocation.length, 0);
 });

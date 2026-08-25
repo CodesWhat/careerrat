@@ -471,7 +471,10 @@ test("job-thread turn persists both sides and grounds bounded AI in canonical ap
   const routes = await boot(repoRoot, {
     callAIImpl: async (options) => {
       calls.push(options);
-      return aiReply({ reply: "Lead with the migration result, then name the tradeoff." });
+      return aiReply({
+        reply: "Lead with the migration result, then name the tradeoff.",
+        answerMode: null,
+      });
     },
   });
 
@@ -509,7 +512,10 @@ test("job-thread turn unwraps a nested JSON reply before it reaches the chat bub
   });
   const routes = await boot(repoRoot, {
     callAIImpl: async () =>
-      aiReply({ reply: JSON.stringify({ reply: "I can prepare and fill the form safely." }) }),
+      aiReply({
+        reply: JSON.stringify({ reply: "I can prepare and fill the form safely." }),
+        answerMode: null,
+      }),
   });
 
   const turn = await invoke(routes, "POST", "/api/chat-first/job-thread/turn", {

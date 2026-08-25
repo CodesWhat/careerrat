@@ -4,6 +4,47 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-08-25
+
+Release status: the signed macOS package passed release-candidate acceptance,
+and the repository, docs, website, security, and packaging gates are green. The
+release is not published or deployed yet.
+
+### Added
+
+- Claude Code and Codex are the only supported v0.16 product runtime choices. CareerRat invokes either installed CLI directly through an app-owned adapter, uses the same workflows and durable state for both, and never falls back to another provider. Other detected CLIs remain diagnostic until they pass the full product boundary and packaged acceptance matrix.
+- Job search now combines deterministic job boards with bounded AI discovery, saves full job descriptions and source receipts, respects country-wide remote and New York City hybrid targeting, and reconciles overlapping results into one durable job.
+- The desktop and website include the new CareerRat wordmark, favicon, and social sharing image. Public Windows distribution remains pending a verified installer build and SignPath-backed Authenticode signing.
+
+### Changed
+
+- The chat-first shell is now the sole product path. It uses compact activity, natural assistant bubbles, focused right-side editing, restrained confirmation controls, app-shaped menus, and a fixed desktop-first layout that can still maximize or enter full screen.
+- CareerRat chooses runtimes by verified capabilities instead of provider names. Runtime definitions now separate technical adapter support from explicit product acceptance, so a detected binary or successful handshake cannot silently advertise incomplete workflows.
+- Onboarding starts the first useful search as soon as targeting is ready, keeps one durable conversation, opens Deep ingest as its own resumable thread, and speaks to candidates in plain English throughout.
+- Selected navigation, rows, tabs, providers, filters, switches, and checkboxes now share one neutral dark-gray fill. Ink remains a text and outline color, selection has no persistent accent glow, and keyboard focus remains visible.
+- Board discovery now returns one validated review object and renders one compact source summary with a dedicated review window instead of a Markdown table, bookkeeping ledger, and a wall of inline actions.
+
+### Fixed
+
+- Reloading a saved conversation no longer exposes internal `careerrat:confirm` protocol blocks. Valid confirmations are rebuilt as normal controls, while malformed or stale protocol text stays hidden.
+- Repeated search requests, progress receipts, stale running cards, and activity links now collapse into one current search result instead of filling the transcript.
+- Onboarding turn scheduling no longer starts a second agent turn when the current reply already asks the next question, including questions followed by response instructions. Completed homes repair exact, prefaced, and prematurely stacked prompt repeats before rendering, while preserving distinct questions and answered turns. A résumé location no longer silently chooses remote, hybrid, or on-site preferences.
+- Parallel deterministic and AI search lanes now reconcile in one transaction, stale workers cannot overwrite newer source configuration or completion state, hydration is bounded and cancellable, and search no longer re-probes every installed CLI on each click.
+- Distinct requisitions with the same company and title now survive when their URL, provider requisition ID, or location differs; exact URL and requisition duplicates still collapse once.
+- Evaluation fields reject drafting residue and self-corrections before persistence, retry once with either supported runtime, and fall back to manual review. Generic job capture now prefers structured JobPosting descriptions so full compensation and JD copy remain without source-site navigation or footer noise.
+- Supervised application automation now accepts only a validated application entry point, re-checks every redirect by full origin before filling or uploading, preserves manual review after automation consent is withdrawn, and still never presses the final Submit button.
+- Every editable permission switch now atomically updates its required provider scopes and consent, with the exact covered services shown in Settings, so a switch cannot appear on while the selected workflow remains blocked.
+- Provider selection, routing, and persistence now require the complete accepted capability contract. Unsupported ACP adapters cannot become selectable through handshake evidence or a single support flag.
+- Installed-runtime cancellation escalates from TERM to KILL on a bounded deadline, force-settles uncooperative children, and uses the same cleanup path for direct and ACP calls without leaving the request hanging.
+
+### Release verification
+
+- A fresh signed package passed new-candidate and returning-candidate onboarding, durable restart, Claude Code and Codex selection, runtime errors, forced cancellation, and process-cleanup QA without switching providers.
+- A real coordinated search returned two live US-remote roles, retained New York City travel context, rejected foreign and non-NYC local results, preserved distinct requisitions, saved local JD evidence, and labeled both partial descriptions in the Jobs list.
+- Source research renders one compact review card and decision window. Historical raw tables recover into that UI, while malformed output fails closed to a clear retry message.
+- Supervised application QA filled and uploaded through a real three-step form, clicked only the two verified Next controls, and stopped on `Submit application` with `prepareOnly=true` and `submitClicked=false`.
+- The full repository suite passed 3,737 tests with 15 intentional skips, the web suite passed 611 tests, and lint, Knip, builds, docs, website, security audit, workflow lint, signing, and package verification passed. PR review, publication, production deployment, and released-app installation remain pending.
+
 ## [0.15.0] - 2026-08-24
 
 ### Added

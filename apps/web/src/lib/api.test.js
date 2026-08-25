@@ -3,6 +3,7 @@ import {
   applyOnSite,
   completeDiscovery,
   finishOnboarding,
+  getRuntimeConfig,
   markCommSent,
   openDeepIngestThread,
   promoteSourced,
@@ -40,6 +41,46 @@ describe("finishOnboarding", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/onboard/finish", {
       method: "POST",
       body: JSON.stringify({}),
+      headers: { "content-type": "application/json" },
+    });
+  });
+});
+
+describe("getSearchSourceStatus", () => {
+  it("reads the existing provider-neutral search source preflight", async () => {
+    const api = await import("./api.js");
+    expect(api.getSearchSourceStatus).toBeTypeOf("function");
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ deterministicSources: { attempted: 2 } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.getSearchSourceStatus();
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/search/sources", {
+      headers: { "content-type": "application/json" },
+    });
+  });
+});
+
+describe("getRuntimeConfig", () => {
+  it("reads persisted AI route readiness without probing installed runtimes", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ai: { available: true, route: "installed" } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getRuntimeConfig();
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/runtime/config", {
       headers: { "content-type": "application/json" },
     });
   });

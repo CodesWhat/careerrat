@@ -6,6 +6,52 @@ import {
 } from "./first-run-controller.js";
 
 describe("chat-first onboarding controller", () => {
+  it("trusts API support and selectability for future runtimes while hiding diagnostics", async () => {
+    const controller = await import("./first-run-controller.js");
+    const state = {
+      selectedId: "future-runtime",
+      runtimes: [
+        {
+          id: "hermes",
+          name: "Hermes Agent",
+          supported: false,
+          available: true,
+          ready: true,
+          selectable: true,
+          capabilityTier: "task_tools",
+          capabilities: { completion: true, taskTools: true, research: true },
+        },
+        {
+          id: "future-runtime",
+          name: "Future Runtime",
+          supported: true,
+          available: true,
+          ready: true,
+          selectable: true,
+          capabilityTier: "task_tools",
+          capabilities: { completion: true, taskTools: true, research: true },
+        },
+      ],
+    };
+
+    expect(
+      controller.firstRunRuntimeChoices(state).map((choice) => ({
+        id: choice.id,
+        selectable: choice.selectable,
+        presentationState: choice.presentationState,
+        presentationLabel: choice.presentationLabel,
+      }))
+    ).toEqual([
+      {
+        id: "future-runtime",
+        selectable: true,
+        presentationState: "ready",
+        presentationLabel: "Ready",
+      },
+    ]);
+    expect(controller.runtimeSelectionReady(state)).toBe(true);
+  });
+
   it("keeps a stale unavailable runtime selection on the engine stage", async () => {
     const controller = await import("./first-run-controller.js");
 
@@ -21,7 +67,17 @@ describe("chat-first onboarding controller", () => {
       controller.runtimeSelectionReady({
         selectedId: "codex",
         providerFallback: false,
-        runtimes: [{ id: "codex", available: true, ready: true, selectable: true }],
+        runtimes: [
+          {
+            id: "codex",
+            supported: true,
+            available: true,
+            ready: true,
+            selectable: true,
+            capabilityTier: "chat_drafting",
+            capabilities: { completion: true },
+          },
+        ],
       })
     ).toBe(true);
     expect(
@@ -40,26 +96,68 @@ describe("chat-first onboarding controller", () => {
     ).toBe(false);
   });
 
-  it("keeps every supported runtime in the first-run chooser", async () => {
+  it("keeps only supported runtimes in the picker and sorts them by name", async () => {
     const controller = await import("./first-run-controller.js");
 
     expect(typeof controller.firstRunRuntimeChoices).toBe("function");
     expect(
       controller.firstRunRuntimeChoices({
         runtimes: [
-          { id: "hermes", name: "Hermes Agent", available: true, ready: true },
-          { id: "codex", name: "Codex", available: false, ready: false },
-          { id: "claude", name: "Claude Code", available: true, ready: false },
-          { id: "opencode", name: "OpenCode", available: true, ready: true },
-          { id: "custom", name: "Custom", available: true, ready: true },
+          {
+            id: "claude",
+            name: "Claude Code",
+            supported: true,
+            available: true,
+            ready: true,
+            selectable: false,
+            capabilityTier: "detected_unverified",
+            capabilities: { completion: false },
+          },
+          {
+            id: "codex",
+            name: "Codex",
+            supported: true,
+            available: false,
+            ready: false,
+            selectable: false,
+            capabilityTier: "unavailable",
+            capabilities: { completion: false },
+          },
+          {
+            id: "hermes",
+            name: "Hermes Agent",
+            supported: false,
+            available: true,
+            ready: true,
+            selectable: true,
+            capabilityTier: "task_tools",
+            capabilities: { completion: true, taskTools: true, research: true },
+          },
+          {
+            id: "opencode",
+            name: "OpenCode",
+            supported: false,
+            available: true,
+            ready: true,
+            selectable: true,
+            capabilityTier: "chat_drafting",
+            capabilities: { completion: true },
+          },
+          {
+            id: "custom",
+            name: "Custom",
+            supported: false,
+            available: false,
+            ready: false,
+            selectable: false,
+            capabilityTier: "unavailable",
+            capabilities: { completion: false },
+          },
         ],
       })
     ).toEqual([
-      expect.objectContaining({ id: "claude", detected: true, ready: false }),
-      expect.objectContaining({ id: "codex", detected: false, ready: false }),
-      expect.objectContaining({ id: "hermes", detected: true, ready: true }),
-      expect.objectContaining({ id: "opencode", detected: true, ready: true }),
-      expect.objectContaining({ id: "custom", detected: true, ready: true }),
+      expect.objectContaining({ id: "claude", detected: true, selectable: false }),
+      expect.objectContaining({ id: "codex", detected: false, selectable: false }),
     ]);
   });
 
@@ -76,13 +174,17 @@ describe("chat-first onboarding controller", () => {
           {
             id: "claude",
             name: "Claude Code",
+            supported: true,
             available: true,
             ready: true,
             selectable: true,
+            capabilityTier: "task_tools",
+            capabilities: { completion: true, taskTools: true, research: true },
           },
           {
             id: "claude",
             name: "Duplicate",
+            supported: true,
             available: true,
             ready: true,
             selectable: true,
@@ -90,6 +192,7 @@ describe("chat-first onboarding controller", () => {
           {
             id: "codex",
             name: null,
+            supported: true,
             available: true,
             ready: false,
             selectable: false,
@@ -114,9 +217,12 @@ describe("chat-first onboarding controller", () => {
         {
           id: "codex",
           name: "Codex",
+          supported: true,
           available: true,
           ready: true,
           selectable: false,
+          capabilityTier: "detected_unverified",
+          capabilities: { completion: false },
           capabilityReason: "Detected, but cannot safely run CareerRat tools yet.",
         },
       ],
@@ -139,14 +245,17 @@ describe("chat-first onboarding controller", () => {
         {
           id: "claude",
           name: "Claude Code",
+          supported: true,
           available: true,
           ready: true,
           selectable: true,
-          toolExecutionSupported: true,
+          capabilityTier: "task_tools",
+          capabilities: { completion: true, taskTools: true, research: true },
         },
         {
           id: "codex",
           name: "Codex",
+          supported: true,
           detected: true,
           ready: true,
           selectable: true,
@@ -156,6 +265,7 @@ describe("chat-first onboarding controller", () => {
         {
           id: "gemini",
           name: "Gemini CLI",
+          supported: false,
           available: true,
           ready: false,
           selectable: false,
@@ -164,6 +274,7 @@ describe("chat-first onboarding controller", () => {
         {
           id: "opencode",
           name: "OpenCode",
+          supported: false,
           available: true,
           ready: true,
           selectable: false,
@@ -172,6 +283,7 @@ describe("chat-first onboarding controller", () => {
         {
           id: "goose",
           name: "Goose",
+          supported: false,
           available: false,
           ready: false,
           selectable: false,
@@ -191,34 +303,44 @@ describe("chat-first onboarding controller", () => {
       {
         id: "claude",
         detected: true,
-        presentationState: "task_tools",
-        presentationLabel: "Ready for task tools and research",
+        presentationState: "ready",
+        presentationLabel: "Ready",
       },
       {
         id: "codex",
         detected: true,
-        presentationState: "chat_drafting",
-        presentationLabel: "Ready for chat and drafting",
-      },
-      {
-        id: "gemini",
-        detected: true,
-        presentationState: "auth_required",
-        presentationLabel: "Auth required",
-      },
-      {
-        id: "opencode",
-        detected: true,
-        presentationState: "detected_unverified",
-        presentationLabel: "Detected not verified",
-      },
-      {
-        id: "goose",
-        detected: false,
-        presentationState: "unavailable",
-        presentationLabel: "Unavailable",
+        presentationState: "ready",
+        presentationLabel: "Ready",
       },
     ]);
+  });
+
+  it("does not promote provider-specific compatibility aliases into product support", async () => {
+    const controller = await import("./first-run-controller.js");
+    const state = {
+      selectedId: "claude",
+      runtimes: [
+        {
+          id: "claude",
+          name: "Claude Code",
+          supported: false,
+          available: true,
+          ready: true,
+          selectable: true,
+          tier: "tools",
+          toolExecutionSupported: true,
+          presentationState: "task_tools",
+          capabilities: ["task_tools", "isolated_completion"],
+        },
+      ],
+    };
+
+    expect(controller.runtimePresentation(state.runtimes[0])).toEqual({
+      state: "unavailable",
+      label: "Unavailable",
+    });
+    expect(controller.runtimeSelectionReady(state)).toBe(false);
+    expect(controller.firstRunRuntimeChoices(state)).toEqual([]);
   });
 
   it("uses the configured agent name from persisted onboarding state", async () => {

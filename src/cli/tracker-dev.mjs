@@ -309,7 +309,7 @@ export function createDevServer({
   // /api/chat/* so Quick Start / Continue Discovery can start or reconnect to
   // exactly one visible research-boards session. Company discovery stays on
   // the reviewed app-owned proposal path; search-jobs uses its dedicated route.
-  mountDiscoveryRoutes({ addRoute, repoRoot, env, chatRuntime });
+  mountDiscoveryRoutes({ addRoute, repoRoot, env, chatRuntime, workspaceAgentRuntime });
 
   // M3 of the paid-POC journey — the /search surface over the existing
   // deterministic (non-AI) ATS-board sweep. Its HTTP surface (run/read the

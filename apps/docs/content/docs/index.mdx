@@ -3,10 +3,10 @@ title: CareerRat Docs
 description: Agentic job-search workspace — find, vet, tailor, track, and prep for the right roles.
 ---
 
-CareerRat is a local, skill-driven job-search workspace. A coding agent (Claude
-Code, Codex, or any AGENTS.md-aware tool) runs inside the CareerRat workspace and
-drives a set of skills that cover every step of the job-search loop — from
-sourcing and vetting to tailoring, tracking, and interview prep.
+CareerRat is a local, skill-driven job-search workspace. A supported local AI
+CLI runs inside the CareerRat workspace and drives a set of skills that cover
+every step of the job-search loop, from sourcing and vetting to tailoring,
+tracking, and interview prep.
 
 **The agent is the runtime. The CLI is the front door and validated helper
 surface.** You paste a job posting (or a recruiter email, or a link) into the
@@ -24,14 +24,16 @@ install it with Homebrew:
 brew install --cask codeswhat/tap/careerrat
 ```
 
-You still need an AI coding CLI on your PATH (Claude Code or Codex); see
-[Install & First Run](/getting-started/install) for both commands.
+You still need a supported AI coding CLI on your PATH. Claude Code and OpenAI
+Codex both run the complete CareerRat product. Local availability,
+authentication, and the complete readiness check decide whether an engine is
+`Ready`. See [Install & First Run](/getting-started/install) for install links.
 
 **On any other platform**, use npm (requires Node.js 24 or newer):
 
 ```bash
 npm install -g careerrat
-careerrat start claude   # or: careerrat start codex
+careerrat start
 ```
 
 Either path scaffolds your workspace, boots the local app at
@@ -78,3 +80,8 @@ what makes them yours.
 CareerRat-hosted account or data service. Relevant context sent through your
 selected AI runtime follows that provider's privacy and retention terms. Comp
 inputs marked private never appear in outbound application artifacts.
+
+**Provider-neutral continuity.** CareerRat owns the workflows and threads in its
+local data. Switching a selected engine does not make a provider's session
+history the source of truth, and the app never silently falls back to another
+provider.

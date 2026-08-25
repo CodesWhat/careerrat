@@ -93,15 +93,38 @@ const ONBOARD_STATE = {
   setupProgress: { complete: false, completedCount: 0, total: 1, items: [] },
 };
 
+const FULL_RUNTIME_CAPABILITIES = {
+  completion: true,
+  structuredOutput: true,
+  appWorkflows: true,
+  exactRead: true,
+  publicWeb: true,
+  liveActivity: true,
+  resumable: true,
+  taskTools: true,
+  research: true,
+};
+
 function createApi(draft = { transcript: [] }) {
   return {
     createCompanyProposals: vi.fn().mockResolvedValue({ ok: true }),
     extractResumeAi: vi.fn(),
     extractResumeDocx: vi.fn(),
     findChatBySkill: vi.fn().mockResolvedValue({ chatId: "chat-1", state: "idle" }),
+    finishOnboarding: vi.fn().mockResolvedValue({ ok: true }),
     getInstalledAiRuntimes: vi.fn().mockResolvedValue({
       selectedId: "claude",
-      runtimes: [{ id: "claude", available: true, ready: true, selectable: true }],
+      runtimes: [
+        {
+          id: "claude",
+          supported: true,
+          available: true,
+          ready: true,
+          selectable: true,
+          capabilityTier: "task_tools",
+          capabilities: FULL_RUNTIME_CAPABILITIES,
+        },
+      ],
     }),
     getOnboardingDraft: vi.fn().mockResolvedValue({ draft }),
     getOnboardState: vi.fn().mockResolvedValue(ONBOARD_STATE),
@@ -155,8 +178,18 @@ function rerender(module, api) {
   return module.FirstRunController({ api, inWorkspace: false });
 }
 
-function assistantPayload(text) {
-  return JSON.stringify({ message: { content: [{ type: "text", text }] } });
+function assistantPayload(text, extra = {}) {
+  return JSON.stringify({ ...extra, message: { content: [{ type: "text", text }] } });
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, reject, resolve };
 }
 
 function twoBlockReply() {
@@ -178,6 +211,90 @@ beforeEach(() => {
 });
 
 describe("FirstRunController chat event reconciliation", () => {
+  it("commits onboarding before releasing a completed setup into the workspace", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    const onComplete = vi.fn();
+    api.getOnboardState.mockResolvedValue({
+      data: {
+        modes: { agent_name: "Paul" },
+        setup: { readiness: { search_ready: true } },
+        sourcing: {
+          firstSearchRun: { run: { status: "completed" } },
+          sourceSetup: { deterministicSources: { attempted: 5 } },
+        },
+      },
+      setupProgress: { complete: true, completedCount: 1, total: 1, items: [] },
+    });
+
+    hooks.resetRender();
+    module.FirstRunController({ api, inWorkspace: false, onComplete });
+    await flushEffects();
+
+    expect(api.finishOnboarding).toHaveBeenCalledOnce();
+    expect(onComplete).toHaveBeenCalledOnce();
+    expect(api.finishOnboarding.mock.invocationCallOrder[0]).toBeLessThan(
+      onComplete.mock.invocationCallOrder[0]
+    );
+
+    hooks.resetRender();
+    module.FirstRunController({ api, inWorkspace: false, onComplete });
+    await flushEffects();
+    expect(api.finishOnboarding).toHaveBeenCalledOnce();
+    expect(onComplete).toHaveBeenCalledOnce();
+  });
+
+  it("does not restart a completed baseline search after every unfinished onboarding answer", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    api.getOnboardState.mockResolvedValue({
+      data: {
+        modes: { agent_name: "Paul" },
+        setup: { readiness: { search_ready: true } },
+        sourcing: {
+          firstSearchRun: {
+            inputsChanged: true,
+            run: { status: "completed" },
+          },
+          sourceSetup: { deterministicSources: { attempted: 5 } },
+        },
+      },
+      setupProgress: { complete: false, completedCount: 7, total: 8, items: [] },
+    });
+
+    await bootController(module, api, { startInterview: false });
+    sse.calls.at(-1).options.onEvent("chat_state", JSON.stringify({ state: "idle" }), {});
+    await flushEffects();
+
+    expect(api.startFirstSearchRun).not.toHaveBeenCalled();
+  });
+
+  it("refreshes changed search inputs once when onboarding becomes complete", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    api.startFirstSearchRun.mockResolvedValue({ ok: true });
+    api.getOnboardState.mockResolvedValue({
+      data: {
+        modes: { agent_name: "Paul" },
+        setup: { readiness: { search_ready: true } },
+        sourcing: {
+          firstSearchRun: {
+            inputsChanged: true,
+            run: { status: "completed" },
+          },
+          sourceSetup: { deterministicSources: { attempted: 5 } },
+        },
+      },
+      setupProgress: { complete: true, completedCount: 8, total: 8, items: [] },
+    });
+
+    await bootController(module, api, { startInterview: false });
+    sse.calls.at(-1).options.onEvent("chat_state", JSON.stringify({ state: "idle" }), {});
+    await flushEffects();
+
+    expect(api.startFirstSearchRun).toHaveBeenCalledOnce();
+  });
+
   it("does not skip the picker when a fresh install auto-selected its only safe runtime", async () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi({ transcript: [] });
@@ -200,9 +317,12 @@ describe("FirstRunController chat event reconciliation", () => {
           {
             id: "claude",
             name: "Claude Code",
+            supported: true,
             available: true,
             ready: true,
             selectable: true,
+            capabilityTier: "task_tools",
+            capabilities: FULL_RUNTIME_CAPABILITIES,
           },
         ],
       })
@@ -212,9 +332,12 @@ describe("FirstRunController chat event reconciliation", () => {
           {
             id: "claude",
             name: "Claude Code",
+            supported: true,
             available: true,
             ready: true,
             selectable: true,
+            capabilityTier: "task_tools",
+            capabilities: FULL_RUNTIME_CAPABILITIES,
           },
         ],
       });
@@ -332,6 +455,64 @@ describe("FirstRunController chat event reconciliation", () => {
     ).toEqual(["chat-chat-1-event-2", "chat-chat-1-event-6"]);
   });
 
+  it("keeps the server-provided binary answer mode on the assistant message", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    let view = await bootController(module, api);
+
+    sse.calls
+      .at(-1)
+      .options.onEvent(
+        "assistant",
+        assistantPayload("Do you require sponsorship?", { answerMode: "yes-no" }),
+        { lastEventId: "2" }
+      );
+    view = rerender(module, api);
+
+    expect(view.props.messages[0]).toMatchObject({
+      text: "Do you require sponsorship?",
+      answerMode: "yes-no",
+    });
+  });
+
+  it("restores canonical binary answer metadata when plain text cannot infer it", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi({
+      transcript: [
+        {
+          id: "sponsorship",
+          role: "assistant",
+          text: "I need to confirm sponsorship. Reply yes or no.",
+          metadata: { answerMode: "yes-no" },
+          blocks: [
+            {
+              kind: "candidate_patch",
+              summary: "Search focus",
+              payload: {
+                doc: "profile",
+                patch: { candidate: { domain: "developer infrastructure" } },
+              },
+              status: "saving",
+            },
+          ],
+        },
+      ],
+    });
+
+    let view = await bootController(module, api, { startInterview: false });
+    await flushEffects();
+    view = rerender(module, api);
+
+    expect(view.props.messages[0]).toMatchObject({
+      text: "I need to confirm sponsorship. Reply yes or no.",
+      answerMode: "yes-no",
+    });
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("profile", {
+      candidate: { domain: "developer infrastructure" },
+    });
+    expect(api.sendChatMessage).not.toHaveBeenCalled();
+  });
+
   it("deduplicates full SSE replay against the persisted transcript", async () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi({
@@ -365,6 +546,264 @@ describe("FirstRunController chat event reconciliation", () => {
     ]);
   });
 
+  it("collapses unanswered duplicate prompts already persisted by an interrupted setup turn", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi({
+      transcript: [
+        { id: "linkedin", role: "user", text: "https://linkedin.com/in/example" },
+        { id: "github-1", role: "assistant", text: "What’s your GitHub profile URL?" },
+        { id: "github-2", role: "assistant", text: "What’s your GitHub profile URL?" },
+        { id: "github", role: "user", text: "https://github.com/example" },
+        {
+          id: "portfolio-1",
+          role: "assistant",
+          text: "What’s your portfolio URL, if you have one?",
+        },
+        { id: "portfolio-2", role: "assistant", text: "Do you have a portfolio URL?" },
+      ],
+    });
+
+    const view = await bootController(module, api);
+
+    expect(view.props.messages.map((message) => message.id)).toEqual([
+      "linkedin",
+      "github-2",
+      "github",
+      "portfolio-2",
+    ]);
+    expect(
+      api.saveOnboardingDraft.mock.calls.at(-1)[0].transcript.map((message) => message.id)
+    ).toEqual(["linkedin", "github-2", "github", "portfolio-2"]);
+  });
+
+  it("collapses prefaced and prematurely stacked onboarding questions from historical transcripts", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi({
+      transcript: [
+        {
+          id: "linkedin-preface",
+          role: "assistant",
+          text: "Got it — software engineering, focused on backend infrastructure. What’s your LinkedIn profile URL?",
+        },
+        {
+          id: "linkedin-system",
+          role: "user",
+          text: "[SYSTEM] Candidate details saved. Continue with the next gap.",
+        },
+        { id: "linkedin-plain", role: "assistant", text: "What’s your LinkedIn profile URL?" },
+        { id: "linkedin-answer", role: "user", text: "https://linkedin.com/in/example" },
+        {
+          id: "exclusions",
+          role: "assistant",
+          text: "Are there any role families or seniority levels you want to exclude?",
+        },
+        {
+          id: "salary-premature",
+          role: "assistant",
+          text: "What’s the minimum base salary a fully remote role needs to offer?",
+        },
+        {
+          id: "exclusions-answer",
+          role: "user",
+          text: "Exclude people management and frontend-only roles.",
+        },
+        {
+          id: "salary-preface",
+          role: "assistant",
+          text: "Saved those exclusions. What’s the minimum base salary a fully remote role needs to offer?",
+        },
+        {
+          id: "salary-plain",
+          role: "assistant",
+          text: "What’s the minimum base salary a fully remote role needs to offer?",
+        },
+        { id: "salary-answer", role: "user", text: "$180,000 base" },
+      ],
+    });
+
+    const view = await bootController(module, api);
+
+    expect(view.props.messages.map((message) => message.id)).toEqual([
+      "linkedin-plain",
+      "linkedin-answer",
+      "exclusions",
+      "exclusions-answer",
+      "salary-plain",
+      "salary-answer",
+    ]);
+  });
+
+  it("preserves interrupted candidate and evidence writes when a later prompt was also persisted", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const candidateTurn = [
+      "I found your search focus.",
+      "```careerrat:confirm",
+      '{"kind":"candidate_patch","summary":"Search focus","payload":{"doc":"profile","patch":{"candidate":{"domain":"Developer infrastructure"}}}}',
+      "```",
+      "Which company types do you prefer?",
+    ].join("\n");
+    const evidenceTurn = [
+      "I found a useful accomplishment.",
+      "```careerrat:confirm",
+      '{"kind":"evidence_claim","summary":"Production launch","payload":{"claim":"Launched a production platform","evidence":"Resume: Acme platform role"}}',
+      "```",
+      "Which achievement should we discuss next?",
+    ].join("\n");
+    const api = createApi({
+      transcript: [
+        {
+          id: "candidate-write",
+          role: "assistant",
+          text: candidateTurn,
+          blocks: [{ status: "saving" }],
+        },
+        { id: "salary-question", role: "assistant", text: "What minimum salary should I use?" },
+        { id: "salary-answer", role: "user", text: "$200,000 base." },
+        {
+          id: "evidence-write",
+          role: "assistant",
+          text: evidenceTurn,
+          blocks: [{ status: "saving" }],
+        },
+        { id: "location-question", role: "assistant", text: "Are you open to remote roles?" },
+      ],
+    });
+
+    const view = await bootController(module, api, { startInterview: false });
+
+    expect(view.props.messages.map((message) => message.id)).toEqual([
+      "candidate-write",
+      "salary-question",
+      "salary-answer",
+      "evidence-write",
+      "location-question",
+    ]);
+  });
+
+  it("preserves distinct unanswered role and salary questions", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi({
+      transcript: [
+        { id: "roles-question", role: "assistant", text: "Which roles are you targeting?" },
+        { id: "salary-question", role: "assistant", text: "What salary are you targeting?" },
+      ],
+    });
+
+    const view = await bootController(module, api, { startInterview: false });
+
+    expect(view.props.messages.map((message) => message.id)).toEqual([
+      "roles-question",
+      "salary-question",
+    ]);
+  });
+
+  it("reparses a restored assistant turn so confirmation fences never return as chat copy", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const raw = [
+      "```careerrat:confirm",
+      '{"kind":"candidate_patch","summary":"Search focus","payload":{"doc":"profile","patch":{"candidate":{"domain":"developer infrastructure and B2B SaaS"}}}}',
+      "```",
+      "```careerrat:confirm",
+      '{"kind":"candidate_patch","summary":"Remote across the US or hybrid in New York City","payload":{"doc":"profile","patch":{"location":{"remote":true,"remote_scope":"home-country","hybrid":true,"onsite":false}}}}',
+      "```",
+      "Are there kinds of companies whose values, size, business model, or local presence you especially like?",
+    ].join("\n");
+    const api = createApi({
+      transcript: [
+        {
+          id: "restored-confirmations",
+          role: "assistant",
+          text: raw,
+          blocks: [
+            {
+              kind: "candidate_patch",
+              summary: "Search focus",
+              payload: {
+                doc: "profile",
+                patch: {
+                  candidate: { domain: "developer infrastructure and B2B SaaS" },
+                },
+              },
+              status: "resolved",
+              resultSummary: "Saved",
+            },
+            {
+              kind: "candidate_patch",
+              summary: "Remote across the US or hybrid in New York City",
+              payload: {
+                doc: "profile",
+                patch: {
+                  location: {
+                    remote: true,
+                    remote_scope: "home-country",
+                    hybrid: true,
+                    onsite: false,
+                  },
+                },
+              },
+              status: "resolved",
+              resultSummary: "Saved",
+            },
+          ],
+        },
+      ],
+    });
+
+    const view = await bootController(module, api, { startInterview: false });
+
+    expect(view.props.messages[0].text).toBe(
+      "Are there kinds of companies whose values, size, business model, or local presence you especially like?"
+    );
+    expect(view.props.messages[0].text).not.toContain("careerrat:confirm");
+    expect(view.props.messages[0].blocks).toHaveLength(2);
+    expect(view.props.messages[0].blocks).toEqual([
+      expect.objectContaining({ status: "resolved", resultSummary: "Saved" }),
+      expect.objectContaining({ status: "resolved", resultSummary: "Saved" }),
+    ]);
+  });
+
+  it("retries an extracted profile write that was interrupted while saving", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const raw = [
+      "I found your search focus.",
+      "```careerrat:confirm",
+      '{"kind":"candidate_patch","summary":"Search focus","payload":{"doc":"profile","patch":{"candidate":{"domain":"Developer infrastructure"}}}}',
+      "```",
+      "What kind of company do you want next?",
+    ].join("\n");
+    const api = createApi({
+      transcript: [
+        {
+          id: "interrupted-profile-write",
+          role: "assistant",
+          text: raw,
+          blocks: [
+            {
+              kind: "candidate_patch",
+              summary: "Search focus",
+              payload: {
+                doc: "profile",
+                patch: { candidate: { domain: "Developer infrastructure" } },
+              },
+              status: "saving",
+            },
+          ],
+        },
+      ],
+    });
+
+    await bootController(module, api, { startInterview: false });
+    await flushEffects();
+    const view = rerender(module, api);
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("profile", {
+      candidate: { domain: "Developer infrastructure" },
+    });
+    expect(view.props.messages[0].blocks).toEqual([
+      expect.objectContaining({ status: "resolved", resultSummary: "Saved" }),
+    ]);
+  });
+
   it("saves a group of extracted profile facts without rendering per-fact controls", async () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi();
@@ -387,6 +826,94 @@ describe("FirstRunController chat event reconciliation", () => {
     expect(view.props.messages[0].options).toEqual([]);
     expect(api.sendChatMessage).toHaveBeenCalledTimes(1);
     expect(api.sendChatMessage.mock.calls[0][1]).toContain("profile sections");
+  });
+
+  it("does not ask the agent to repeat a next question already carried by the saved turn", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    let view = await bootController(module, api);
+    const reply = [
+      "Got it — software engineering, focused on backend/platform infrastructure.",
+      "```careerrat:confirm",
+      '{"kind":"candidate_patch","summary":"Your search field","payload":{"doc":"profile","patch":{"candidate":{"domain":"software engineering — backend and platform infrastructure"}}}}',
+      "```",
+      "What’s your LinkedIn profile URL?",
+      "Paste it here when you’re ready.",
+    ].join("\n");
+
+    sse.calls.at(-1).options.onEvent("assistant", assistantPayload(reply), { lastEventId: "2" });
+    view = rerender(module, api);
+    expect(view.props.messages[0].text).toContain("What’s your LinkedIn profile URL?");
+
+    await flushEffects();
+    view = rerender(module, api);
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("profile", {
+      candidate: {
+        domain: "software engineering — backend and platform infrastructure",
+      },
+    });
+    expect(view.props.messages[0].blocks).toEqual([
+      expect.objectContaining({ status: "resolved", resultSummary: "Saved" }),
+    ]);
+    expect(api.sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not request another turn when the saved assistant turn expects yes or no", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    await bootController(module, api);
+    const reply = [
+      "I saved your search focus.",
+      "```careerrat:confirm",
+      '{"kind":"candidate_patch","summary":"Your search field","payload":{"doc":"profile","patch":{"candidate":{"domain":"developer infrastructure"}}}}',
+      "```",
+      "I need to confirm sponsorship. Reply yes or no.",
+    ].join("\n");
+
+    sse.calls
+      .at(-1)
+      .options.onEvent("assistant", assistantPayload(reply, { answerMode: "yes-no" }), {
+        lastEventId: "2",
+      });
+    rerender(module, api);
+    await flushEffects();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("profile", {
+      candidate: { domain: "developer infrastructure" },
+    });
+    expect(api.sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not request another turn when a question arrives during an extracted profile save", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    const saved = deferred();
+    api.saveCandidateFile.mockReturnValue(saved.promise);
+    await bootController(module, api);
+    const subscription = sse.calls.at(-1);
+    const reply = [
+      "I found your search focus.",
+      "```careerrat:confirm",
+      '{"kind":"candidate_patch","summary":"Your search field","payload":{"doc":"profile","patch":{"candidate":{"domain":"developer infrastructure"}}}}',
+      "```",
+    ].join("\n");
+
+    subscription.options.onEvent("assistant", assistantPayload(reply), { lastEventId: "2" });
+    rerender(module, api);
+    await flushEffects();
+    expect(api.saveCandidateFile).toHaveBeenCalledOnce();
+
+    subscription.options.onEvent(
+      "assistant",
+      assistantPayload("Which companies do you want to avoid?"),
+      { lastEventId: "3" }
+    );
+    rerender(module, api);
+    saved.resolve({ ok: true });
+    await flushEffects();
+
+    expect(api.sendChatMessage).not.toHaveBeenCalled();
   });
 
   it("keeps successful extracted writes resolved when a later generated field is rejected", async () => {
@@ -735,6 +1262,63 @@ describe("FirstRunController chat event reconciliation", () => {
     );
   });
 
+  it("keeps one unanswered work-mode prompt when a resume upload triggers the same gap again", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    let view = await bootController(module, api);
+    const subscription = sse.calls.at(-1);
+
+    subscription.options.onEvent(
+      "assistant",
+      assistantPayload(
+        "Which work arrangements would you accept: fully remote, hybrid, on-site, or relocation? For remote, say whether that means your home country or worldwide. For hybrid, include the local area and maximum office days per week."
+      ),
+      { lastEventId: "2" }
+    );
+    view = rerender(module, api);
+
+    await view.props.onResumeFile({
+      name: "jordan-resume.md",
+      size: 42,
+      lastModified: 1,
+      text: vi.fn().mockResolvedValue("# Jordan Rivera\nBrooklyn, NY"),
+    });
+    view = rerender(module, api);
+
+    expect(view.props.messages.map((message) => message.text)).toEqual([
+      "Which work arrangements would you accept: fully remote, hybrid, on-site, or relocation? For remote, say whether that means your home country or worldwide. For hybrid, include the local area and maximum office days per week.",
+      "Dropped resume: jordan-resume.md",
+    ]);
+    expect(view.props.messages.filter((message) => message.role === "assistant")).toHaveLength(1);
+    expect(api.sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not restart the agent when a question arrives while a resume is being parsed", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    const parsed = deferred();
+    api.parseResumeText.mockReturnValue(parsed.promise);
+    const view = await bootController(module, api);
+
+    const upload = view.props.onResumeFile({
+      name: "jordan-resume.md",
+      size: 42,
+      lastModified: 1,
+      text: vi.fn().mockResolvedValue("# Jordan Rivera\nBrooklyn, NY"),
+    });
+    sse.calls
+      .at(-1)
+      .options.onEvent("assistant", assistantPayload("Which roles are you targeting?"), {
+        lastEventId: "2",
+      });
+    rerender(module, api);
+    parsed.resolve({ profileSeed: {}, evidenceSeed: { claims: [] } });
+
+    await upload;
+
+    expect(api.sendChatMessage).not.toHaveBeenCalled();
+  });
+
   it("does not keep a saved profile section blocked on the agent acknowledgement", async () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi();
@@ -753,5 +1337,52 @@ describe("FirstRunController chat event reconciliation", () => {
       cut_signals: ["Crypto"],
     });
     expect(api.sendChatMessage).toHaveBeenCalledOnce();
+  });
+
+  it("does not restart the agent when a whole-section edit leaves a visible question unanswered", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    let view = await bootController(module, api);
+
+    sse.calls
+      .at(-1)
+      .options.onEvent("assistant", assistantPayload("Which roles are you targeting?"), {
+        lastEventId: "2",
+      });
+    view = rerender(module, api);
+
+    await view.props.onSaveKnowledgeSection(
+      { id: "guardrails", label: "Guardrails" },
+      { signals: "Crypto" }
+    );
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("targeting", {
+      cut_signals: ["Crypto"],
+    });
+    expect(api.sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not restart the agent when a question arrives while a whole section is saving", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    const saved = deferred();
+    api.saveCandidateFile.mockReturnValueOnce(saved.promise);
+    const view = await bootController(module, api);
+
+    const saving = view.props.onSaveKnowledgeSection(
+      { id: "guardrails", label: "Guardrails" },
+      { signals: "Crypto" }
+    );
+    sse.calls
+      .at(-1)
+      .options.onEvent("assistant", assistantPayload("Which roles are you targeting?"), {
+        lastEventId: "2",
+      });
+    rerender(module, api);
+    saved.resolve({ ok: true });
+
+    await saving;
+
+    expect(api.sendChatMessage).not.toHaveBeenCalled();
   });
 });

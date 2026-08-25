@@ -713,6 +713,26 @@ describe("chat-first app controller", () => {
     });
   });
 
+  it("preserves explicit negative feedback instead of treating false as unreviewed", () => {
+    const mapped = mapMockSession({
+      id: "mock-negative-feedback",
+      currentQuestion: 2,
+      messages: [
+        { id: "q1", role: "assistant", kind: "question", questionNumber: 1, text: "Why now?" },
+        { id: "q2", role: "assistant", kind: "question", questionNumber: 2, text: "Why us?" },
+      ],
+      feedback: [
+        { questionNumber: 1, worked: false },
+        { questionNumber: 2, worked: false },
+      ],
+    });
+
+    expect(mapped.worked).toBe(false);
+    expect(mapped.previousFeedback.worked).toBe(false);
+    expect(mapped.turns[0].worked).toBe(false);
+    expect(mapped.turns[1].worked).toBe(false);
+  });
+
   it("keeps the backend's current question after feedback and maps supplied interview context", () => {
     expect(
       mapMockSession({

@@ -92,6 +92,10 @@
               "updatedAt": { "type": "string" }
             }
           }
+        },
+        "ai_prompts_input_fingerprint": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
         }
       }
     },

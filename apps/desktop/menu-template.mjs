@@ -1,3 +1,5 @@
+import { CAREERRAT_APP_NAME } from "./desktop-identity.mjs";
+
 const DEFAULT_ACTION = () => {};
 
 function action(actions, name) {
@@ -118,7 +120,7 @@ function helpMenu(platform, actions) {
 }
 
 export function buildCareerRatMenuTemplate({
-  appName = "CareerRat",
+  appName = CAREERRAT_APP_NAME,
   platform = process.platform,
   isDevelopment = false,
   actions = {},

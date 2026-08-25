@@ -1173,6 +1173,91 @@ describe("POST /api/onboard/finish", () => {
     assert.equal(calls[0].repoRoot, repoRoot);
   });
 
+  it("starts the visible board-discovery handoff after a new graduation commit", async () => {
+    const repoRoot = buildTempRoot();
+    const intents = [];
+    const routes = mountDirectRoutes(
+      repoRoot,
+      {},
+      {
+        finishOnboardingImpl() {
+          return { status: 200, body: { ok: true, handoff: { reused: false } } };
+        },
+        workspaceAgentRuntime: {
+          async executeIntent({ intent }) {
+            intents.push(intent);
+            return { messages: [] };
+          },
+        },
+      }
+    );
+
+    const response = await postJsonDirect(routes, "/api/onboard/finish", {});
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(intents, [
+      {
+        type: "source.discover",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: {
+          request:
+            "Continue post-onboarding source discovery with research-boards before company discovery.",
+        },
+      },
+    ]);
+  });
+
+  it("does not duplicate board discovery when graduation already has a workspace handoff", async () => {
+    const repoRoot = buildTempRoot();
+    let intentCalls = 0;
+    const routes = mountDirectRoutes(
+      repoRoot,
+      {},
+      {
+        finishOnboardingImpl() {
+          return { status: 200, body: { ok: true, handoff: { reused: true } } };
+        },
+        workspaceAgentRuntime: {
+          async executeIntent() {
+            intentCalls += 1;
+          },
+        },
+      }
+    );
+
+    const response = await postJsonDirect(routes, "/api/onboard/finish", {});
+
+    assert.equal(response.status, 200);
+    assert.equal(intentCalls, 0);
+  });
+
+  it("does not restart board discovery when graduation only repairs the onboarding transcript", async () => {
+    const repoRoot = buildTempRoot();
+    let intentCalls = 0;
+    const routes = mountDirectRoutes(
+      repoRoot,
+      {},
+      {
+        finishOnboardingImpl() {
+          return {
+            status: 200,
+            body: { ok: true, handoff: { reused: false, repaired: true } },
+          };
+        },
+        workspaceAgentRuntime: {
+          async executeIntent() {
+            intentCalls += 1;
+          },
+        },
+      }
+    );
+
+    const response = await postJsonDirect(routes, "/api/onboard/finish", {});
+
+    assert.equal(response.status, 200);
+    assert.equal(intentCalls, 0);
+  });
+
   it("commits a complete Paul transcript only after sources and the first search are ready", async () => {
     const repoRoot = buildTempRoot();
     const env = { ANTHROPIC_API_KEY: "sk-ant-onboarding-finish-test" };
@@ -1220,6 +1305,31 @@ describe("POST /api/onboard/finish", () => {
     });
     const kickoff = await postJsonDirect(routes, "/api/onboard/quick-start", {});
     assert.equal(kickoff.status, 202);
+
+    const configuredSources = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        ...configuredSources,
+        searches: [
+          ...(configuredSources.searches || []),
+          {
+            label: "Fresh target board",
+            source_type: "rss",
+            rssUrl: "https://example.test/fresh-targets.xml",
+            enabled: true,
+          },
+        ],
+      },
+    });
+    const stale = finishOnboarding({ repoRoot, env });
+    assert.equal(stale.status, 409);
+    assert.equal(stale.body.code, "ONBOARDING_NOT_READY");
+    assert.equal(stale.body.firstSearchRun.inputsChanged, true);
+
+    const refreshed = await postJsonDirect(routes, "/api/onboard/quick-start", {});
+    assert.equal(refreshed.status, 202);
 
     const result = finishOnboarding({
       repoRoot,

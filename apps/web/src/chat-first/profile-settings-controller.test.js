@@ -213,6 +213,24 @@ describe("profile settings controller mapping", () => {
     expect(
       model.permissions.find((row) => row.id === "authenticated_apply_preparation")?.description
     ).toBe("Scout fills authenticated forms, you press every submit");
+    expect(model.permissions.filter((row) => row.mutable)).toMatchObject([
+      {
+        id: "authenticated_search",
+        providerScope:
+          "Turning this on records consent for LinkedIn, Indeed, Wellfound, and Glassdoor.",
+      },
+      {
+        id: "authenticated_apply_preparation",
+        providerScope:
+          "Turning this on records consent for Greenhouse, Lever, Ashby, Workable, SmartRecruiters, LinkedIn, and external ATS sites.",
+      },
+      {
+        id: "mail_access",
+        name: "Read job-search email",
+        description: "reads recruiting updates and verification codes from connected mail",
+        providerScope: "Turning this on records consent for Gmail, Outlook, and webmail.",
+      },
+    ]);
     expect(model.engine.choices.map((choice) => choice.id)).toEqual(["codex", "custom"]);
     expect(model.permissions.map((row) => [row.id, row.enabled])).toEqual([
       ["draft_documents", true],
@@ -271,9 +289,84 @@ describe("profile settings controller mapping", () => {
   it("builds the existing automation config patch and keeps draft documents always on", () => {
     expect(permissionPatch("authenticated_apply_preparation", true)).toEqual({
       setup_mode: "advanced",
-      capabilities: { authenticated_apply_preparation: { enabled: true } },
+      consent: {
+        greenhouse: true,
+        lever: true,
+        ashby: true,
+        workable: true,
+        smartrecruiters: true,
+        linkedin: true,
+        external_ats: true,
+      },
+      capabilities: {
+        authenticated_apply_preparation: {
+          enabled: true,
+          platforms: {
+            greenhouse: true,
+            lever: true,
+            ashby: true,
+            workable: true,
+            smartrecruiters: true,
+            linkedin: true,
+            external_ats: true,
+          },
+        },
+      },
     });
     expect(permissionPatch("draft_documents", false)).toBeNull();
+  });
+
+  it("keeps shared provider consent while another enabled permission still needs it", () => {
+    const permissions = [
+      { id: "authenticated_search", enabled: true },
+      { id: "authenticated_apply_preparation", enabled: true },
+      { id: "mail_access", enabled: false },
+    ];
+
+    expect(permissionPatch("authenticated_search", false, permissions)).toMatchObject({
+      consent: {
+        linkedin: true,
+        indeed: false,
+        wellfound: false,
+        glassdoor: false,
+      },
+      capabilities: {
+        authenticated_search: {
+          enabled: false,
+          platforms: {
+            linkedin: false,
+            indeed: false,
+            wellfound: false,
+            glassdoor: false,
+          },
+        },
+      },
+    });
+    expect(permissionPatch("authenticated_apply_preparation", false, permissions)).toMatchObject({
+      consent: {
+        greenhouse: false,
+        lever: false,
+        ashby: false,
+        workable: false,
+        smartrecruiters: false,
+        linkedin: true,
+        external_ats: false,
+      },
+      capabilities: {
+        authenticated_apply_preparation: {
+          enabled: false,
+          platforms: {
+            greenhouse: false,
+            lever: false,
+            ashby: false,
+            workable: false,
+            smartrecruiters: false,
+            linkedin: false,
+            external_ats: false,
+          },
+        },
+      },
+    });
   });
 
   it("marks draft documents as an honest fixed capability instead of a switch", () => {

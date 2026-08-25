@@ -31,6 +31,7 @@
   --gray: #a5a5ab;
   --gray-dim: #9a9a92;
   --gray-warm: #c9c9c0;
+  --gray-selected: #474a4f;
   --line-warm: #e3e0d6;
   --line-warm-2: #d9d5c9;
   --line-cool: #c9d4dc;
@@ -112,8 +113,8 @@
   --scrim-soft: rgba(23, 23, 26, 0.42);
   --white-soft: rgba(255, 255, 255, 0.55);
 
-  /* selected means ink fill only; focus remains a separate sky ring */
-  --cf-selection-fill: var(--ink);
+  /* selected surfaces share one neutral fill; focus remains a separate sky ring */
+  --cf-selection-fill: var(--gray-selected);
   --cf-selection-foreground: var(--paper);
   --cf-selection-border: 0;
   --cf-selection-outline: 0;

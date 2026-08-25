@@ -4,6 +4,8 @@
 // tracker storage adapters or generated-file helpers. Generated tracker exports
 // remain compatibility artifacts; DB-mode scanner context comes from canonical
 // applications[] and sourced[] rows.
+
+import { addPostingIdentity, extractReqId } from "../scoring/sourced-identity.mjs";
 import { requireDb } from "./connection.mjs";
 
 const ROW_TABLES = new Set(["applications", "sourced"]);
@@ -34,33 +36,8 @@ function rowUrl(row = {}) {
 }
 
 function addReqId(set, rawUrl) {
-  const reqId = extractReqId(rawUrl);
+  const reqId = extractReqId(rawUrl).id;
   if (reqId) set.add(reqId);
-}
-
-function extractReqId(rawUrl = "") {
-  try {
-    const url = new URL(rawUrl);
-    const path = url.pathname;
-    const greenhouse = path.match(/\/jobs\/(\d+)/);
-    if (greenhouse) return `greenhouse:${greenhouse[1]}`;
-    const ashby = path.match(/\/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})(?:\/|$)/i);
-    if (ashby) return `ashby:${ashby[1].toLowerCase()}`;
-    const lever = path.match(/\/([^/]+)$/);
-    if (url.hostname === "jobs.lever.co" && lever) return `lever:${lever[1].toLowerCase()}`;
-    const apple = path.match(/\/details\/([0-9-]+)/);
-    if ((url.hostname === "apple.com" || url.hostname.endsWith(".apple.com")) && apple)
-      return `apple:${apple[1]}`;
-    const hiringCafe = path.match(/\/job\/([a-z0-9_-]+)/i);
-    if (url.hostname === "hiring.cafe" && hiringCafe)
-      return `hiringcafe:${hiringCafe[1].toLowerCase()}`;
-    const linkedIn = path.match(/\/jobs\/view\/(\d+)/);
-    if ((url.hostname === "linkedin.com" || url.hostname.endsWith(".linkedin.com")) && linkedIn)
-      return `linkedin:${linkedIn[1]}`;
-  } catch {
-    return null;
-  }
-  return null;
 }
 
 function toTrackerApp(row = {}) {
@@ -95,13 +72,14 @@ function toTrackerSourced(row = {}) {
   };
 }
 
-function addSeenRow(row, { seenUrls, seenReqIds, seenCompanyRoles }) {
+function addSeenRow(row, { seenUrls, seenReqIds, seenCompanyRoles, seenPostingKeys }) {
   const link = row.link || "";
   if (link) {
     seenUrls.add(link);
     addReqId(seenReqIds, link);
   }
   if (row.co && row.role) seenCompanyRoles.add(normalizeCompanyRoleKey(row.co, row.role));
+  addPostingIdentity(seenPostingKeys, row);
 }
 
 export function buildDbSeenSets({ repoRoot, env } = {}) {
@@ -113,11 +91,12 @@ export function buildDbSeenSets({ repoRoot, env } = {}) {
   const seenUrls = new Set();
   const seenReqIds = new Set();
   const seenCompanyRoles = new Set();
+  const seenPostingKeys = new Set();
   for (const row of [...apps, ...sourced]) {
-    addSeenRow(row, { seenUrls, seenReqIds, seenCompanyRoles });
+    addSeenRow(row, { seenUrls, seenReqIds, seenCompanyRoles, seenPostingKeys });
   }
 
-  return { seenUrls, seenReqIds, seenCompanyRoles, tracker };
+  return { seenUrls, seenReqIds, seenCompanyRoles, seenPostingKeys, tracker };
 }
 
 export function readDbScannerRows({ repoRoot, env } = {}) {

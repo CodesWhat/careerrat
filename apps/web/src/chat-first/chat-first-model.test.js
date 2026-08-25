@@ -229,6 +229,42 @@ describe("buildChatFirstView", () => {
     });
   });
 
+  it("keeps partial job-description capture status on the matching search result", () => {
+    const actualDashboard = buildDashboardViewModel({
+      sourced: [
+        {
+          id: "partial-jd",
+          company: "Partial Co",
+          role: "Platform Engineer",
+          status: "sourced",
+          fitScore: 88,
+          scanner: { bodyPartial: true },
+          artifacts: { jd: "workspace/jobs/partial-co-platform-engineer.md" },
+        },
+        {
+          id: "complete-jd",
+          company: "Complete Co",
+          role: "Staff Engineer",
+          status: "sourced",
+          fitScore: 86,
+          scanner: { bodyPartial: false },
+          artifacts: { jd: "workspace/jobs/complete-co-staff-engineer.md" },
+        },
+      ],
+      applications: [],
+      communications: [],
+    });
+
+    const view = buildChatFirstView(actualDashboard, {});
+
+    expect(view.browser.search).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "partial-jd", descriptionPartial: true }),
+        expect.objectContaining({ id: "complete-jd", descriptionPartial: false }),
+      ])
+    );
+  });
+
   it("uses durable thread state and maps every browser surface from canonical data", () => {
     const view = buildChatFirstView(dashboard, runtime);
 

@@ -33,8 +33,10 @@
 
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { PLAIN_ENGLISH_AGENT_VOICE } from "./agent-voice.mjs";
 import { resolveModelConfig } from "./ai-config.mjs";
 import { resolveAIRoute } from "./call-ai.mjs";
+import { CHAT_ANSWER_MODE_GUIDANCE } from "./chat-answer-mode.mjs";
 import { runInstalledRuntime } from "./installed-runtimes.mjs";
 import { createRuntimeToolPolicy } from "./runtime-tool-policy.mjs";
 import {
@@ -453,7 +455,7 @@ function declinedFieldsNote(declinedFields) {
 }
 
 function conversationalPosture(declinedFields) {
-  return `${CONVERSATIONAL_POSTURE} ${CONFIRM_BLOCK_GUIDANCE}${declinedFieldsNote(declinedFields)}`;
+  return `${CONVERSATIONAL_POSTURE} ${PLAIN_ENGLISH_AGENT_VOICE} ${CONFIRM_BLOCK_GUIDANCE} ${CHAT_ANSWER_MODE_GUIDANCE}${declinedFieldsNote(declinedFields)}`;
 }
 
 // `mode` defaults to "oneshot" so every existing call site (runSkillStream,

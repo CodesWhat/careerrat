@@ -23,7 +23,12 @@
 // read raw Anthropic SSE agree on framing.
 
 import { resolveModelConfig } from "./ai-config.mjs";
-import { detectInstalledRuntimes, runInstalledRuntime } from "./installed-runtimes.mjs";
+import {
+  detectInstalledRuntimes,
+  hasCompleteCareerRatCapabilities,
+  installedRuntimeCapabilities,
+  runInstalledRuntime,
+} from "./installed-runtimes.mjs";
 import { loadInstalledRuntimeSelection } from "./runtime-selection.mjs";
 import { appendUsageEvent } from "./usage-log.mjs";
 
@@ -64,7 +69,37 @@ export function resolveAIRoute(
       const runtime = selection.runtimeId
         ? inventory.find(({ id, available }) => id === selection.runtimeId && available)
         : inventory.find(({ available }) => available);
-      if (runtime) return { type: "installed", runtime };
+      if (runtime) {
+        const persistedEvidence =
+          selection.verification?.path === runtime.path
+            ? selection.verification.capabilities
+            : null;
+        const capabilityEvidence =
+          runtime.capabilitiesVerified === false
+            ? persistedEvidence
+            : runtime.capabilities || persistedEvidence;
+        const capabilityState = installedRuntimeCapabilities(runtime.id, {
+          available: runtime.available === true,
+          capabilityEvidence,
+        });
+        if (hasCompleteCareerRatCapabilities(capabilityState.capabilities, runtime.id)) {
+          return {
+            type: "installed",
+            runtime: {
+              ...runtime,
+              capabilities: capabilityState.capabilities,
+              capabilitiesVerified: true,
+              capabilityTier: capabilityState.capabilityTier,
+            },
+          };
+        }
+        return {
+          type: "none",
+          error:
+            `selected installed AI runtime "${runtime.id}" has no current capability ` +
+            "verification; re-check it in Settings",
+        };
+      }
       if (selection.runtimeId) {
         return {
           type: "none",

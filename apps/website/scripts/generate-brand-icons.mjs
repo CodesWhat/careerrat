@@ -47,6 +47,33 @@ function faviconSvg(size) {
   `);
 }
 
+function socialCardSvg() {
+  return Buffer.from(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+      ${typeStyle("-0.04em")}
+      <rect width="1200" height="630" fill="#edf5fb" />
+      <rect x="36" y="36" width="1128" height="558" rx="46" fill="#fdfcf7" />
+      <rect x="76" y="76" width="360" height="478" rx="42" fill="${SKY}" />
+      <text x="108" y="292" font-size="102" textLength="296" lengthAdjust="spacingAndGlyphs" fill="${INK}">Career</text>
+      <text x="108" y="415" font-size="124" textLength="270" lengthAdjust="spacingAndGlyphs" fill="${INK}">Rat.</text>
+
+      <rect x="500" y="91" width="172" height="43" rx="22" fill="#e6fa8d" />
+      <text x="524" y="121" font-size="18" letter-spacing="0.08em" fill="${INK}">LOCAL-FIRST</text>
+      <text x="500" y="223" font-size="66" fill="${INK}">Your AI CLI,</text>
+      <text x="500" y="296" font-size="66" fill="${INK}">working your</text>
+      <text x="500" y="369" font-size="66" fill="${INK}">job search.</text>
+      <text x="500" y="432" font-size="25" letter-spacing="-0.01em" fill="#55584a">Rate jobs. Build honest applications.</text>
+      <text x="500" y="466" font-size="25" letter-spacing="-0.01em" fill="#55584a">Track every outcome.</text>
+
+      <rect x="500" y="505" width="166" height="45" rx="23" fill="#edf5fb" stroke="#d7dee4" stroke-width="2" />
+      <text x="526" y="535" font-size="18" letter-spacing="0.02em" fill="${INK}">CLAUDE CODE</text>
+      <rect x="680" y="505" width="105" height="45" rx="23" fill="#edf5fb" stroke="#d7dee4" stroke-width="2" />
+      <text x="704" y="535" font-size="18" letter-spacing="0.02em" fill="${INK}">CODEX</text>
+      <text x="1030" y="537" font-size="19" text-anchor="end" letter-spacing="0" fill="#55584a">careerrat.com</text>
+    </svg>
+  `);
+}
+
 function icoFromPngs(images) {
   const directory = Buffer.alloc(6 + images.length * 16);
   directory.writeUInt16LE(0, 0);
@@ -78,5 +105,6 @@ const faviconImages = await Promise.all(
 await Promise.all([
   sharp(faviconSvg(512)).png().toFile(join(websiteDir, "src", "app", "icon.png")),
   sharp(faviconSvg(180)).png().toFile(join(websiteDir, "src", "app", "apple-icon.png")),
+  sharp(socialCardSvg()).png().toFile(join(websiteDir, "src", "app", "opengraph-image.png")),
   writeFile(join(websiteDir, "src", "app", "favicon.ico"), icoFromPngs(faviconImages)),
 ]);

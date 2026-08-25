@@ -3,9 +3,14 @@ title: The Agent Contract
 description: AGENTS.md — intent routing, the gate contract, artifact rules, and write-back invariants.
 ---
 
-`AGENTS.md` in the repo root is the agent's operating contract. Every agent
-runtime that reads it (Claude Code, Codex, or similar) operates under the same
-rules. The file is the source of truth; this page summarizes the key sections.
+`AGENTS.md` in the repo root is the agent's operating contract. Claude Code and
+Codex are the two supported product choices, and each uses a CareerRat-owned
+direct adapter to run the same contract. The selected installed CLI is invoked
+directly; CareerRat never silently switches to another provider. ACP adapters
+remain diagnostic-only until they pass the full product boundary and packaged
+acceptance matrix. The file is the source of truth; this page summarizes the key
+sections. CareerRat, not a provider's session history, owns the durable workflow
+and thread state.
 
 ## Intent routing
 
@@ -36,7 +41,9 @@ captured, and routed — nothing evaporates.
 can proceed without a KEEP verdict (or an explicit user-approved REVIEW).
 
 `apply-job` runs or verifies `evaluate-job` as step zero. It cannot skip this
-step, even when the user says "just apply."
+step, even when the user says "just apply." Supervised automation may fill and
+prepare a form, but it never clicks an advance that could confirm or submit the
+application. The user reviews the prepared form and performs the final submit.
 
 ## Data Write Contract
 

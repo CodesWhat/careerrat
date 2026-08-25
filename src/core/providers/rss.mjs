@@ -310,7 +310,7 @@ function parseLocationFromDescription(description) {
   return match ? match[1].trim() : null;
 }
 
-function feedDescriptionsArePreviews(source = {}) {
+function isRemoteVibeSource(source = {}) {
   const identity = [source.provider, source.label, source.id, source.rssUrl, source.url]
     .filter(Boolean)
     .join(" ")
@@ -369,13 +369,21 @@ function stableId(item) {
  */
 export function feedItemsToOffers(items, { source } = {}) {
   const sourceLabel = source?.label || source?.id || "rss";
-  const bodyPartial = feedDescriptionsArePreviews(source);
+  const remoteOnly = isRemoteVibeSource(source);
+  const bodyPartial = remoteOnly;
   return (Array.isArray(items) ? items : []).map((item) => {
     const url = item.link || item.guid || null;
     const rawTitle = item.title || "";
     const { company, role: _role } = parseCompanyFromTitle(rawTitle);
-    const location =
+    const parsedLocation =
       parseLocationFromDescription(item.description) || parseLocationFromTitle(rawTitle);
+    const location = remoteOnly
+      ? /\bremote\b/i.test(String(parsedLocation || ""))
+        ? parsedLocation
+        : parsedLocation
+          ? `${parsedLocation} (Remote)`
+          : "Remote"
+      : parsedLocation;
 
     return {
       title: rawTitle,

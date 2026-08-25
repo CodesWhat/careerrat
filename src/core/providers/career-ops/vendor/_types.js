@@ -25,6 +25,10 @@
  *                               providers omit it. Consumed by scan.mjs's
  *                               content_filter; an empty/absent value always
  *                               passes the filter.
+ * @property {boolean} [descriptionPartial] True only when a provider had to
+ *                               retain a bounded prefix rather than the full
+ *                               description. Consumers must preserve this as
+ *                               partial through canonical capture.
  * @property {number} [postedAt] Epoch ms when the posting was published.
  *                               Omitted when the source doesn't expose a
  *                               usable date. scan.mjs ignores it; consumers

@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "dependencies": {
+    "@agentclientprotocol/sdk": "1.4.0",
     "htmlparser2": "12.0.0",
     "jszip": "3.10.1",
     "mammoth": "1.12.1",

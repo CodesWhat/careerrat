@@ -44,19 +44,22 @@ const ENGINES = [
   {
     id: "claude",
     name: "Claude Code",
+    supported: true,
     detected: true,
     ready: true,
     selectable: true,
-    toolExecutionSupported: true,
-    recommended: true,
+    capabilityTier: "task_tools",
+    capabilities: { completion: true, taskTools: true, research: true },
   },
   {
     id: "codex",
     name: "Codex",
+    supported: true,
     detected: true,
     ready: true,
     selectable: false,
-    toolExecutionSupported: false,
+    capabilityTier: "detected_unverified",
+    capabilities: { completion: false },
   },
 ];
 
@@ -141,10 +144,10 @@ describe("FirstRunExperience", () => {
 
     expect(html).toContain("Pick your engine.");
     expect(html).toContain("We found 2 AI tools on this computer.");
-    expect(html).toContain("Each tool shows the capabilities CareerRat has actually verified.");
+    expect(html).toContain("Every choice shown here runs the complete CareerRat workflow.");
     expect(html).toContain("Claude Code");
-    expect(html).toContain("READY FOR TASK TOOLS AND RESEARCH");
-    expect(html).toContain("DETECTED NOT VERIFIED");
+    expect(html).toContain(">READY</span>");
+    expect(html).toContain("UNAVAILABLE");
     expect(html).not.toMatch(/not yet supported/i);
     expect(html).toContain('<fieldset class="cf-first-run__engine-choices">');
     expect(html).toContain(
@@ -164,16 +167,13 @@ describe("FirstRunExperience", () => {
   it("marks the configured engine as selected without a separate accent tile", async () => {
     const { FirstRunExperience } = await loadFirstRun();
     const html = renderToStaticMarkup(
-      <FirstRunExperience
-        stage="engine"
-        engines={[{ ...ENGINES[0], recommended: false, selected: true }]}
-      />
+      <FirstRunExperience stage="engine" engines={[{ ...ENGINES[0], selected: true }]} />
     );
 
     expect(html).toContain('aria-pressed="true"');
   });
 
-  it("collapses every missing runtime under a truthful not-installed inventory", async () => {
+  it("keeps unaccepted runtime adapters out of the engine inventory", async () => {
     const { FirstRunExperience } = await loadFirstRun();
     const html = renderToStaticMarkup(
       <FirstRunExperience
@@ -194,11 +194,10 @@ describe("FirstRunExperience", () => {
 
     expect(html).toContain("Claude Code");
     expect(html).toContain("Codex");
-    expect(html).toContain("NOT INSTALLED · 3");
-    expect(html).toContain("Gemini CLI");
-    expect(html).toContain("OpenCode");
-    expect(html).toContain("GitHub Copilot CLI");
-    expect(html).toContain("Install guide");
+    expect(html).not.toContain("NOT INSTALLED");
+    expect(html).not.toContain("Gemini CLI");
+    expect(html).not.toContain("OpenCode");
+    expect(html).not.toContain("GitHub Copilot CLI");
   });
 
   it("keeps sign-in-required engines inactive and routes setup through Settings", async () => {
@@ -213,16 +212,17 @@ describe("FirstRunExperience", () => {
         {
           id: "claude",
           name: "Claude Code",
+          supported: true,
           detected: true,
           ready: false,
           selectable: false,
-          toolExecutionSupported: true,
           status: "authentication_required",
           action: "start_sign_in",
         },
         {
           id: "codex",
           name: "Codex",
+          supported: true,
           detected: false,
           ready: false,
           status: "not_found",
@@ -293,24 +293,36 @@ describe("FirstRunExperience", () => {
         {
           id: "codex",
           name: "Codex",
+          supported: true,
           detected: true,
           ready: true,
           selectable: false,
+          selected: true,
+          capabilityTier: "detected_unverified",
+          capabilities: { completion: false },
           capabilityReason: "Detected, but CareerRat cannot safely use this CLI for tool runs yet.",
         },
       ],
       onChooseEngine: onSelectEngine,
     });
     const html = renderToStaticMarkup(tree);
+    const runtime = findElement(
+      tree,
+      (node) => node.type?.name === "DetectedEngine" && node.props.engine.id === "codex"
+    );
+    const runtimeView = runtime.type(runtime.props);
+    const start = findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node).includes("Start the interview")
+    );
 
     expect(html).toContain("cannot safely use this CLI");
-    expect(
-      findElement(tree, (node) => node.type === "button" && textOf(node).includes("Codex"))
-    ).toBe(null);
+    expect(runtimeView.type).toBe("article");
+    expect(start.props.disabled).toBe(true);
     expect(onSelectEngine).not.toHaveBeenCalled();
   });
 
-  it("shows chat-only providers as useful without claiming task-tool support", async () => {
+  it("does not expose internal capability tiers for a supported ready runtime", async () => {
     const { FirstRunExperience } = await loadFirstRun();
     const tree = FirstRunExperience({
       stage: "engine",
@@ -318,19 +330,20 @@ describe("FirstRunExperience", () => {
         {
           id: "codex",
           name: "Codex",
+          supported: true,
           detected: true,
           ready: true,
           selectable: true,
-          presentationState: "chat_drafting",
-          presentationLabel: "Ready for chat and drafting",
+          capabilityTier: "chat_drafting",
+          capabilities: { completion: true },
         },
       ],
     });
     const html = renderToStaticMarkup(tree);
 
-    expect(html).toContain("READY FOR CHAT AND DRAFTING");
-    expect(html).toContain("Task tools and research are not verified for this provider yet.");
-    expect(html).not.toMatch(/unsupported/i);
+    expect(html).toContain(">READY</span>");
+    expect(html).toContain("Ready to run the complete CareerRat workflow with Codex.");
+    expect(html).not.toMatch(/chat and drafting|task tools|capabilit/i);
   });
 
   it("keeps custom commands unavailable and collects CareerRat AI access interest inline", async () => {
@@ -347,8 +360,7 @@ describe("FirstRunExperience", () => {
     const hostedCard = findElement(tree, (node) => node.type?.name === "HostedInterestCard");
     const hostedCardView = hostedCard.type(hostedCard.props);
 
-    expect(html).toContain("Custom command");
-    expect(html).toContain("Unavailable until CareerRat can verify its tool boundary");
+    expect(html).not.toContain("Custom command");
     expect(html).toContain("CareerRat AI");
     expect(html).toContain("COMING SOON");
     const requestAccess = findElement(
@@ -755,6 +767,61 @@ describe("FirstRunExperience", () => {
     expect(onSubmitAnswer).toHaveBeenCalledWith("platform roles");
   });
 
+  it("offers compact Yes and No answers only for the current typed binary question", async () => {
+    const { FirstRunChat } = await loadFirstRun();
+    const onSubmitAnswer = vi.fn();
+    const tree = FirstRunChat({
+      agentName: "Paul",
+      messages: [
+        {
+          id: "binary",
+          role: "assistant",
+          text: "Are you authorized to work in the United States?",
+          answerMode: "yes-no",
+        },
+      ],
+      knowledge: [],
+      progress: { completed: 0, total: 6 },
+      submitting: true,
+      onSubmitAnswer,
+    });
+    const buttons = findElements(
+      tree,
+      (node) => node.type === "button" && ["Yes", "No"].includes(textOf(node))
+    );
+
+    expect(buttons.map(textOf)).toEqual(["Yes", "No"]);
+    expect(buttons.every((button) => button.props.disabled === true)).toBe(true);
+    buttons[0].props.onClick();
+    expect(onSubmitAnswer).toHaveBeenCalledWith("Yes");
+
+    const answered = renderToStaticMarkup(
+      <FirstRunChat
+        messages={[
+          {
+            id: "binary",
+            role: "assistant",
+            text: "Are you authorized to work in the United States?",
+            answerMode: "yes-no",
+          },
+          { id: "answer", role: "user", text: "Yes" },
+        ]}
+        knowledge={[]}
+        progress={{ completed: 0, total: 6 }}
+      />
+    );
+    const ordinary = renderToStaticMarkup(
+      <FirstRunChat
+        messages={[{ id: "open", role: "assistant", text: "Where do you want to work?" }]}
+        knowledge={[]}
+        progress={{ completed: 0, total: 6 }}
+      />
+    );
+
+    expect(answered).not.toContain("cf-first-run__binary-actions");
+    expect(ordinary).not.toContain("cf-first-run__binary-actions");
+  });
+
   it("uses isolated fixed desktop geometry and handoff colors", () => {
     const css = readFileSync(fileURLToPath(new URL("./first-run.css", import.meta.url)), "utf8");
 
@@ -788,5 +855,17 @@ describe("FirstRunExperience", () => {
       /\.cf-first-run__engine \.cf-first-run__engine-start\s*\{[^}]*color:\s*var\(--paper\)/s
     );
     expect(css).toMatch(/\.cf-first-run__engine-capability\s*\{[^}]*color:\s*var\(--ink-soft\)/s);
+  });
+
+  it("does not apply the cream hover surface to the selected engine", async () => {
+    const { FirstRunExperience } = await loadFirstRun();
+    const html = renderToStaticMarkup(
+      <FirstRunExperience stage="engine" engines={[{ ...ENGINES[0], selected: true }]} />
+    );
+    const css = readFileSync(fileURLToPath(new URL("./first-run.css", import.meta.url)), "utf8");
+
+    expect(html).toContain('class="cf-first-run__engine-choice is-selected"');
+    expect(css).toMatch(/button\.cf-first-run__engine-choice:not\(\.is-selected\):hover\s*\{/);
+    expect(css).not.toMatch(/button\.cf-first-run__engine-choice:hover\s*\{/);
   });
 });

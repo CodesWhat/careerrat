@@ -74,6 +74,7 @@ function createApi() {
       publicSyncPreference: { enabled, source: enabled ? "default" : "user", updatedAt: null },
     })),
     getSourceMaintenance: vi.fn().mockResolvedValue({ searches: [], companies: [] }),
+    saveCandidateFile: vi.fn().mockResolvedValue({ ok: true }),
     setAutomationSessionProvider: vi.fn().mockResolvedValue({ ok: true }),
     setPublicSyncPreference: vi.fn(async (nextEnabled) => {
       enabled = nextEnabled;
@@ -139,5 +140,89 @@ describe("ProfileSettingsController browser automation provider", () => {
     expect(api.setAutomationSessionProvider).toHaveBeenCalledWith("playwright");
     expect(api.getAutomationSettings).toHaveBeenCalledTimes(2);
     expect(settingsProps(renderController(module, api)).browserProviderBusy).toBe(false);
+  });
+});
+
+describe("ProfileSettingsController permission consent", () => {
+  it("does not revoke LinkedIn consent while another enabled permission still uses it", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getAutomationSettings.mockResolvedValue({
+      capabilities: [
+        { capability: "authenticated_search", enabled: true },
+        { capability: "authenticated_apply_preparation", enabled: true },
+        { capability: "mail_access", enabled: false },
+      ],
+    });
+
+    renderController(module, api);
+    await flushEffects();
+    const view = renderController(module, api);
+    await settingsProps(view).onPermissionChange("authenticated_search", false);
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith(
+      "automation",
+      expect.objectContaining({
+        consent: {
+          linkedin: true,
+          indeed: false,
+          wellfound: false,
+          glassdoor: false,
+        },
+      })
+    );
+  });
+});
+
+describe("ProfileSettingsController engine inventory", () => {
+  it("passes settings only accepted runtimes and excludes diagnostic adapters", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getInstalledAiRuntimes.mockResolvedValue({
+      selectedId: "hermes",
+      runtimes: [
+        {
+          id: "claude",
+          name: "Claude Code",
+          supported: true,
+          available: true,
+          ready: true,
+          selectable: false,
+          capabilityTier: "detected_unverified",
+          capabilities: { completion: false },
+        },
+        {
+          id: "codex",
+          name: "Codex",
+          supported: true,
+          available: false,
+          ready: false,
+          selectable: false,
+          capabilityTier: "unavailable",
+          capabilities: { completion: false },
+        },
+        {
+          id: "hermes",
+          name: "Hermes Agent",
+          supported: false,
+          available: true,
+          ready: true,
+          selectable: true,
+          capabilityTier: "task_tools",
+          capabilities: { completion: true, taskTools: true, research: true },
+        },
+      ],
+    });
+
+    renderController(module, api);
+    await flushEffects();
+    const choices = settingsProps(renderController(module, api)).engine.choices;
+
+    expect(choices.map((choice) => choice.id)).toEqual(["claude", "codex"]);
+    expect(choices.find((choice) => choice.id === "claude")).toMatchObject({
+      selectable: false,
+      presentationState: "unavailable",
+    });
+    expect(choices.find((choice) => choice.id === "hermes")).toBeUndefined();
   });
 });

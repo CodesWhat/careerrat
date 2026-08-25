@@ -254,6 +254,40 @@ test("HiringCafe Vercel security checkpoint is reported as a capture error", asy
   assert.match(snapshot.errors[0].error, /security checkpoint/i);
 });
 
+test("authenticated browser capture enforces consent before launching a session", async () => {
+  const seen = [];
+  let launches = 0;
+  const snapshot = await captureSearchSources({
+    repoRoot: "/repo",
+    sources: [
+      {
+        id: "linkedin-ai",
+        provider: "linkedin",
+        platform: "linkedin",
+        auth: true,
+        url: "https://www.linkedin.com/jobs/search/?keywords=applied%20ai",
+      },
+    ],
+    chromium: {
+      async launchPersistentContext() {
+        launches += 1;
+        throw new Error("browser must not launch while consent is closed");
+      },
+    },
+    mayRunImpl: (request) => {
+      seen.push(request);
+      return { allowed: false, reasons: ["authenticated_search on linkedin is off"] };
+    },
+  });
+
+  assert.equal(launches, 0);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].capability, "authenticated_search");
+  assert.equal(seen[0].platform, "linkedin");
+  assert.equal(snapshot.errors.length, 1);
+  assert.match(snapshot.errors[0].error, /authenticated_search on linkedin is off/);
+});
+
 test("ingests captured browser snapshot offers into DB sourced rows with JD artifacts", () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });

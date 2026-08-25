@@ -845,7 +845,21 @@ test("runSkillStream: a selected installed CLI bypasses the Agent SDK and stream
       approvedReadPaths: [upload],
       outputSchema: { type: "object", required: ["full_text"] },
       runtimeInventory: [
-        { id: "claude", name: "Claude Code", path: "/safe/claude", available: true },
+        {
+          id: "claude",
+          name: "Claude Code",
+          path: "/safe/claude",
+          available: true,
+          capabilities: {
+            completion: true,
+            structuredOutput: true,
+            appWorkflows: true,
+            exactRead: true,
+            publicWeb: true,
+            liveActivity: true,
+            resumable: true,
+          },
+        },
       ],
       runInstalledRuntimeImpl: async (input) => {
         calls.push(input);
@@ -905,6 +919,18 @@ test("buildPrompt: conversational mode includes the confirm-block fence syntax a
   assert.match(prompt, /candidate\.location.*string/i);
   assert.match(prompt, /role_buckets.*name.*priority.*titles/i);
   assert.match(prompt, /capability.*only when.*needed/i);
+});
+
+test("buildPrompt: every conversational skill turn uses Powell's plain-English voice", () => {
+  const prompt = buildPrompt({ skill: "ingest-profile", input: "hi", mode: "conversational" });
+  assert.match(prompt, /natural, conversational plain English/i);
+  assert.match(prompt, /short, direct sentences/i);
+  assert.match(prompt, /ordinary words/i);
+  assert.match(prompt, /contractions when they sound natural/i);
+  assert.match(prompt, /robotic headings/i);
+  assert.match(prompt, /raw JSON/i);
+  assert.match(prompt, /internal status or error codes/i);
+  assert.match(prompt, /tool narration/i);
 });
 
 test("buildPrompt: oneshot mode never gets the confirm-block guidance (byte-identical framing)", () => {

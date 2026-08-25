@@ -7,11 +7,10 @@
 // bounded/correction-retry helper POST /api/onboard/resume-ai(-stream) uses
 // (bounded-ai.mjs's runBoundedAI, structuredMode: "fallback" — see
 // onboard-route.mjs's runResumeExtractBounded), hard-dedupes survivors by
-// normalized company+title against BOTH the current batch and existing
-// sourced offers + tracker applications (reusing sourced-scanner.mjs's own
-// normalizeCompanyRoleKey/extractReqId and scan-context.mjs's
-// buildDbSeenSets — the exact machinery scan-sourced.mjs's deterministic
-// sweep already dedupes with), and persists survivors through the same DB
+// canonical posting URL or provider-qualified requisition ID against BOTH the
+// current batch and existing sourced offers + tracker applications (reusing
+// the same sourced-identity.mjs keys as the deterministic scanner and DB
+// persistence guard), and persists survivors through the same DB
 // write path the deterministic sweep uses
 // (sourced-persistence.mjs's captureAndPersistOffersIfDb, which both writes
 // the JD-body capture file under workspace/jobs/ and upserts the sourced
@@ -48,9 +47,15 @@ import {
 import { dbExists } from "../db/connection.mjs";
 import { buildDbSeenSets } from "../db/scan-context.mjs";
 import { candidateConfigGet } from "../db/verbs.mjs";
+import { hydrateJobOffer } from "../intake/resolve.mjs";
 import { computeAllows } from "../profile/modes.mjs";
+import {
+  addPostingIdentity,
+  extractReqId,
+  postingIdentityIsSeen,
+} from "../scoring/sourced-identity.mjs";
 import { captureAndPersistOffersIfDb } from "../scoring/sourced-persistence.mjs";
-import { extractReqId, normalizeCompanyRoleKey } from "../scoring/sourced-scanner.mjs";
+import { normalizeCompanyRoleKey } from "../scoring/sourced-scanner.mjs";
 import { buildSearchPromptContext, getSearchPrompts } from "./search-prompts.mjs";
 
 const AI_WEB_SEARCH_SCHEMA_PATH = "config/ai-web-search.schema.json";
@@ -72,6 +77,7 @@ const MANUAL_FALLBACK = Object.freeze({
 // (shouldn't happen; normalizeModes() already defaults it) falls back to the
 // standard cap rather than either extreme.
 const PROMPT_CAP_BY_MODE = Object.freeze({ lean: 1, standard: 3, full: 5 });
+const HYDRATION_CONCURRENCY = 4;
 
 // Sourced-row `gate` for an AI-web-search survivor. This mode's `candidate`
 // context (buildSearchPromptContext) never carries company-history or
@@ -106,6 +112,7 @@ function toScanOffer(role, { key, reqId }) {
     location: role.location || "",
     comp: role.comp_text || "",
     bodyText: role.body_text || "",
+    bodyPartial: role.body_partial === true,
     score: Number.isFinite(score) ? score : 0,
     fit: role.fit_bucket || "",
     gate: deriveGate(ruleFlags),
@@ -127,6 +134,13 @@ function throwPreconditionError(message, code) {
   throw err;
 }
 
+function throwIfSearchAborted(signal) {
+  if (!signal?.aborted) return;
+  const err = new Error("AI web search was cancelled.");
+  err.code = "AI_WEB_SEARCH_ABORTED";
+  throw err;
+}
+
 function safeToolError(content) {
   let text = "";
   if (typeof content === "string") text = content;
@@ -144,6 +158,46 @@ function safeToolError(content) {
   }
   const normalized = text.replace(/\s+/g, " ").trim();
   return normalized ? normalized.slice(0, 240) : "The web tool reported a failure.";
+}
+
+function sourceHost(url) {
+  try {
+    return new URL(url).hostname || url;
+  } catch {
+    return url;
+  }
+}
+
+function mergeSourceReceipts(toolTrace, recoveredSources) {
+  const byUrl = new Map();
+  for (const source of [
+    ...toolTrace.filter((item) => item.kind === "source").map(({ kind, ...item }) => item),
+    ...recoveredSources,
+  ]) {
+    const url = String(source?.url || "").trim();
+    if (!url) continue;
+    byUrl.set(url, {
+      ...(byUrl.get(url) || {}),
+      ...source,
+      url,
+      host: source.host || sourceHost(url),
+    });
+  }
+  return [...byUrl.values()];
+}
+
+async function mapBounded(items, concurrency, mapItem) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapItem(items[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
+  return results;
 }
 
 function normalizeQueryResults({ selected, queriesRun, toolTrace, fallbackError = null }) {
@@ -256,6 +310,9 @@ export async function runAiWebSearch({
   promptIds,
   onProgress,
   runSkillStream = defaultRunSkillStream,
+  fetchImpl = fetch,
+  resolveHost,
+  resolveJobUrlImpl,
   signal,
 } = {}) {
   if (!dbExists({ repoRoot, env })) {
@@ -313,6 +370,7 @@ export async function runAiWebSearch({
   // own comment on why search-jobs needs a per-call override here rather
   // than living in the embedded runtime's own default allowlist.
   const skillEnv = buildAiWebSearchEnv({ repoRoot, env });
+  const outputSchema = loadSchema(repoRoot);
   const toolCalls = new Map();
   const toolTrace = [];
 
@@ -320,7 +378,7 @@ export async function runAiWebSearch({
     // A disconnect that landed between retry attempts (see
     // runStructuredOneshot's attempt loop) — bail before spending another
     // model call on a client that's already gone.
-    if (signal?.aborted) return "";
+    throwIfSearchAborted(signal);
     let rawText = "";
     await runSkillStream({
       skill: AI_WEB_SEARCH_LABELS.skill,
@@ -331,6 +389,7 @@ export async function runAiWebSearch({
       env: skillEnv,
       signal,
       toolProfile: "chat",
+      outputSchema,
       onEvent: (evt) => {
         if (evt.type === "tool_use") {
           if (evt.data?.name === "WebSearch") {
@@ -385,7 +444,7 @@ export async function runAiWebSearch({
 
   const outcome = await runBoundedAI({
     labels: AI_WEB_SEARCH_LABELS,
-    schema: loadSchema(repoRoot),
+    schema: outputSchema,
     manual: MANUAL_FALLBACK,
     structuredMode: "fallback",
     maxRetries: 1,
@@ -394,6 +453,11 @@ export async function runAiWebSearch({
       return invokeAiWebSearch({ correction });
     },
   });
+
+  // runBoundedAI intentionally turns provider exceptions into a safe error
+  // envelope. A client disconnect is different: it must remain a terminal
+  // cancellation so the route cannot record the run as a normal completion.
+  throwIfSearchAborted(signal);
 
   if (!outcome.body.ok) {
     const message =
@@ -421,35 +485,128 @@ export async function runAiWebSearch({
     queriesRun: outcome.body.data?.queries_run,
     toolTrace,
   });
-  const { seenUrls, seenReqIds, seenCompanyRoles } = buildDbSeenSets({ repoRoot, env });
+  const { seenPostingKeys } = buildDbSeenSets({ repoRoot, env });
 
-  const survivors = [];
+  const preliminary = [];
+  const receiptOnly = [];
+  const preliminaryPostingKeys = new Set(seenPostingKeys);
+  let duplicates = 0;
+  let invalid = 0;
   for (const role of roles) {
-    if (!role?.company || !role?.title || !role?.url) continue;
+    if (!role?.company || !role?.title || !role?.url) {
+      invalid += 1;
+      continue;
+    }
     const key = normalizeCompanyRoleKey(role.company, role.title);
     const req = extractReqId(role.url);
-    const isDuplicate =
-      seenUrls.has(role.url) || (req.id && seenReqIds.has(req.id)) || seenCompanyRoles.has(key);
-    if (isDuplicate) continue;
-    seenUrls.add(role.url);
-    if (req.id) seenReqIds.add(req.id);
-    seenCompanyRoles.add(key);
-    survivors.push(toScanOffer(role, { key, reqId: req.id }));
+    const offer = toScanOffer(role, { key, reqId: req.id });
+    const isDuplicate = postingIdentityIsSeen(offer, preliminaryPostingKeys);
+    if (isDuplicate) {
+      duplicates += 1;
+      receiptOnly.push(offer);
+      continue;
+    }
+    addPostingIdentity(preliminaryPostingKeys, offer);
+    preliminary.push(offer);
+  }
+
+  const survivors = [];
+  const captureFailures = [];
+  const recoveredSources = [];
+  const hydrationInputs = [
+    ...preliminary.map((offer) => ({ offer, receiptOnly: false })),
+    ...receiptOnly.map((offer) => ({ offer, receiptOnly: true })),
+  ];
+  const resolutionCache = new Map();
+  const hydratedInputs = await mapBounded(
+    hydrationInputs,
+    HYDRATION_CONCURRENCY,
+    async ({ offer, receiptOnly: isReceiptOnly }) => {
+      throwIfSearchAborted(signal);
+      const hydrated = await hydrateJobOffer(offer, {
+        fetchImpl,
+        resolveHost,
+        resolveJobUrlImpl,
+        force: true,
+        rejectExpired: true,
+        signal,
+        resolutionCache,
+      });
+      throwIfSearchAborted(signal);
+      return { offer, receiptOnly: isReceiptOnly, hydrated };
+    }
+  );
+  for (const { offer, receiptOnly: isReceiptOnly, hydrated } of hydratedInputs) {
+    throwIfSearchAborted(signal);
+    const bodyText = String(hydrated?.bodyText || "").trim();
+    recoveredSources.push({
+      url: offer.url,
+      status:
+        hydrated?.bodyFetchStatus === "unavailable"
+          ? "failed"
+          : hydrated?.bodyPartial === true
+            ? "deferred"
+            : "completed",
+      ...(hydrated?.url && hydrated.url !== offer.url ? { canonicalUrl: hydrated.url } : {}),
+      ...(hydrated?.bodyFetchReason ? { error: hydrated.bodyFetchReason } : {}),
+    });
+    if (isReceiptOnly) continue;
+    if (!bodyText || hydrated?.bodyFetchStatus === "unavailable") {
+      captureFailures.push({
+        company: offer.company,
+        title: offer.title,
+        url: offer.url,
+        reason: hydrated?.bodyFetchReason || "The job description could not be read.",
+      });
+      continue;
+    }
+
+    const canonicalKey = normalizeCompanyRoleKey(hydrated.company, hydrated.title);
+    const canonicalReq = extractReqId(hydrated.url);
+    const canonicalOffer = { ...hydrated, key: canonicalKey, reqId: canonicalReq.id };
+    const canonicalDuplicate = postingIdentityIsSeen(canonicalOffer, seenPostingKeys);
+    if (canonicalDuplicate) {
+      duplicates += 1;
+      continue;
+    }
+    addPostingIdentity(seenPostingKeys, canonicalOffer);
+    survivors.push(canonicalOffer);
   }
 
   // A disconnect that lands after the model finished but before this point
-  // must not write a partial result — see the header comment on `signal`.
-  if (survivors.length && !signal?.aborted) {
-    captureAndPersistOffersIfDb({ repoRoot, env, offers: survivors, savedAt: new Date() });
-  }
+  // must not write a partial result or return a success-shaped summary.
+  throwIfSearchAborted(signal);
+  const persistedOffers = survivors.length
+    ? captureAndPersistOffersIfDb({
+        repoRoot,
+        env,
+        offers: survivors,
+        savedAt: new Date(),
+        dedupeCanonical: true,
+      })?.offers || []
+    : [];
+  duplicates += Math.max(0, survivors.length - persistedOffers.length);
 
   return {
     searched: selected.length,
     found: roles.length,
-    new: survivors.length,
-    duplicates: roles.length - survivors.length,
-    errors: [],
+    new: persistedOffers.length,
+    duplicates,
+    invalid,
+    partial: persistedOffers.filter((offer) => offer.bodyPartial === true).length,
+    unreadable: captureFailures.length,
+    errors: captureFailures.length
+      ? [
+          `${captureFailures.length} job description${captureFailures.length === 1 ? "" : "s"} could not be read and ${captureFailures.length === 1 ? "was" : "were"} not added.`,
+        ]
+      : [],
+    captureFailures: captureFailures.slice(0, 10),
+    offers: persistedOffers.map((offer) => ({
+      company: offer.company,
+      title: offer.title,
+      url: offer.url,
+    })),
     ...coverage,
-    sources: toolTrace.filter((item) => item.kind === "source").map(({ kind, ...item }) => item),
+    sources: mergeSourceReceipts(toolTrace, recoveredSources),
   };
 }

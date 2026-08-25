@@ -376,6 +376,29 @@ test("feedItemsToOffers: uses the structured Location line from the description"
   assert.equal(offers[0].location, "Canada (Remote)");
 });
 
+test("feedItemsToOffers: preserves remote-only source posture when a posting says only USA", () => {
+  const items = [
+    {
+      title: "Senior Software Engineer, Platform at Qventus",
+      link: "https://remotevibecodingjobs.com/jobs/qventus-platform",
+      guid: null,
+      isoDate: null,
+      description: "Company: Qventus\nLocation: USA\nType: Full-time",
+      categories: [],
+    },
+  ];
+
+  const offers = feedItemsToOffers(items, {
+    source: {
+      provider: "RemoteVibeCodingJobs",
+      label: "Remote Vibe Coding Jobs",
+      rssUrl: "https://remotevibecodingjobs.com/feed.xml",
+    },
+  });
+
+  assert.equal(offers[0].location, "USA (Remote)");
+});
+
 test("feedItemsToOffers: empty array input returns empty array", () => {
   assert.deepEqual(feedItemsToOffers([]), []);
 });

@@ -20,7 +20,9 @@ const CONFIG = {
 
 function refsOf(entries) {
   const refs = {};
-  for (const [ref, role, name, required = false] of entries) refs[ref] = { role, name, required };
+  for (const [ref, role, name, required = false, details = {}] of entries) {
+    refs[ref] = { role, name, required, ...details };
+  }
   return refs;
 }
 
@@ -233,6 +235,112 @@ test("Ashby detail pages open the Application tab before filling and uploading, 
   }
 });
 
+test("job-board listings open the explicit application form before reporting a supervised handoff", async () => {
+  const listingUrl = "https://jobs.example.test/jobs/platform-engineer";
+  const applicationUrl = "https://ats.example.test/apply/platform-engineer";
+  const listingPage = {
+    origin: listingUrl,
+    pageText: "Platform Engineer\nSmart Apply with profile\nApply for this position",
+    refs: refsOf([
+      ["e1", "link", "Smart Apply with profile", false],
+      ["e2", "link", "Apply for this position", false, { href: applicationUrl }],
+    ]),
+  };
+  const formPage = {
+    origin: applicationUrl,
+    pageText: "Application form\nSubmit application",
+    refs: refsOf([
+      ["e3", "textbox", "Full name", true],
+      ["e4", "button", "Submit application", false],
+    ]),
+  };
+  const { ops, log } = createFakeOps([listingPage, formPage]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-job-board-listing",
+    application: { id: "app-job-board-listing", link: listingUrl },
+    postingUrl: listingUrl,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.equal(result.state, "awaiting-submit");
+  assert.equal(result.currentUrl, applicationUrl);
+  assert.equal(result.session.filledCount, 1);
+  assert.deepEqual(
+    log.filter(({ op }) => op === "clickButton"),
+    [{ op: "clickButton", pageId: "page-1", ref: "e2" }]
+  );
+  assert.equal(
+    log.some(({ op, ref }) => op === "clickButton" && ["e1", "e4"].includes(ref)),
+    false
+  );
+});
+
+test("a generic Apply button is a manual handoff because it could submit immediately", async () => {
+  const listingUrl = "https://jobs.example.test/jobs/platform-engineer";
+  const confirmationPage = {
+    origin: `${listingUrl}/confirmation`,
+    pageText: "Thank you for applying",
+    refs: {},
+  };
+  const listingPage = {
+    origin: listingUrl,
+    pageText: "Platform Engineer\nApply now",
+    refs: refsOf([["e1", "button", "Apply now", false]]),
+  };
+  const { ops, log } = createFakeOps([listingPage, confirmationPage]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-one-click-apply",
+    application: { id: "app-one-click-apply", link: listingUrl },
+    postingUrl: listingUrl,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.match(result.reason, /use the site's Apply button, then resume preparation/i);
+  assert.equal(result.verified, false);
+  assert.equal(
+    log.some(({ op }) => op === "clickButton"),
+    false,
+    "CareerRat never clicks an Apply button whose result cannot be validated before the click"
+  );
+  assert.equal(
+    log.some(({ op }) => ["fillField", "selectOption", "toggleField", "upload"].includes(op)),
+    false
+  );
+});
+
+test("a listing with no application-form entry never reports awaiting submit", async () => {
+  const listingUrl = "https://jobs.example.test/jobs/platform-engineer";
+  const listingPage = {
+    origin: listingUrl,
+    pageText: "Platform Engineer\nShare\nSimilar jobs",
+    refs: refsOf([
+      ["e1", "button", "Share", false],
+      ["e2", "link", "Similar jobs", false],
+    ]),
+  };
+  const { ops } = createFakeOps([listingPage]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-listing-without-form",
+    application: { id: "app-listing-without-form", link: listingUrl },
+    postingUrl: listingUrl,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.match(result.reason, /couldn't find the application form/i);
+  assert.equal(result.session.filledCount, 0);
+});
+
 test("LinkedIn form preparation uses the supervised-preparation consent capability", async () => {
   const seen = [];
   const { ops } = createFakeOps([]);
@@ -254,6 +362,158 @@ test("LinkedIn form preparation uses the supervised-preparation consent capabili
   assert.equal(seen.length, 1);
   assert.equal(seen[0].capability, "authenticated_apply_preparation");
   assert.equal(seen[0].platform, "linkedin");
+});
+
+test("external ATS preparation checks consent before opening the application", async () => {
+  const seen = [];
+  const { ops, log } = createFakeOps([]);
+  const execute = makeDriver({
+    ops,
+    mayRunImpl: (request) => {
+      seen.push(request);
+      return {
+        allowed: false,
+        reasons: [
+          'capability "authenticated_apply_preparation" is disabled (enable: `careerrat automation enable authenticated_apply_preparation --write`)',
+          'platform "greenhouse" is off for authenticated_apply_preparation',
+        ],
+      };
+    },
+  });
+
+  const result = await execute({
+    applicationId: "app-greenhouse-consent",
+    application: { id: "app-greenhouse-consent" },
+    postingUrl: GREENHOUSE_URL,
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.equal(
+    result.reason,
+    "Application preparation for Greenhouse is off. Turn it on in Settings before CareerRat opens the form."
+  );
+  assert.doesNotMatch(result.reason, /authenticated_apply_preparation|careerrat automation|`/i);
+  assert.deepEqual(result.session.blockers, [result.reason]);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].capability, "authenticated_apply_preparation");
+  assert.equal(seen[0].platform, "greenhouse");
+  assert.equal(
+    log.some((entry) => entry.op === "openTab"),
+    false
+  );
+});
+
+test("a generic Apply redirect blocks an unexpected destination before touching its form", async () => {
+  const listingUrl = "https://jobs.example.test/jobs/platform-engineer";
+  const listingPage = {
+    origin: listingUrl,
+    pageText: "Platform Engineer\nApply now",
+    refs: refsOf([
+      [
+        "e1",
+        "link",
+        "Apply now",
+        false,
+        { href: "https://apply-redirect.example.test/platform-engineer" },
+      ],
+    ]),
+  };
+  const greenhouseForm = {
+    origin: GREENHOUSE_URL,
+    pageText: "Application form\nNext",
+    refs: refsOf([
+      ["e2", "textbox", "Full name", true],
+      ["e3", "button", "Resume", true],
+      ["e4", "button", "Next", false],
+    ]),
+  };
+  const seen = [];
+  const { ops, log } = createFakeOps([listingPage, greenhouseForm]);
+  const execute = makeDriver({
+    ops,
+    mayRunImpl: (request) => {
+      seen.push(request);
+      return { allowed: request.platform === "external_ats" };
+    },
+  });
+
+  const result = await execute({
+    applicationId: "app-destination-consent",
+    application: { id: "app-destination-consent", link: listingUrl },
+    postingUrl: listingUrl,
+    questionCapture: { state: "captured" },
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.equal(
+    result.reason,
+    "CareerRat followed Apply to an unexpected application site (https://job-boards.greenhouse.io instead of https://apply-redirect.example.test). It stopped before filling the form."
+  );
+  assert.equal(result.currentUrl, GREENHOUSE_URL);
+  assert.deepEqual(
+    seen.map(({ capability, platform }) => ({ capability, platform })),
+    [
+      { capability: "authenticated_apply_preparation", platform: "external_ats" },
+      { capability: "authenticated_apply_preparation", platform: "external_ats" },
+    ]
+  );
+  assert.deepEqual(
+    log.filter(({ op }) => ["fillField", "selectOption", "toggleField", "upload"].includes(op)),
+    []
+  );
+  assert.deepEqual(
+    log.filter(({ op }) => op === "clickButton"),
+    [{ op: "clickButton", pageId: "page-1", ref: "e1" }],
+    "the driver clicks only the listing's Apply link and never advances the destination form"
+  );
+});
+
+test("a generic Apply redirect never fills a different origin in the same external ATS bucket", async () => {
+  const listingUrl = "https://jobs.example.test/jobs/platform-engineer";
+  const advertisedApplicationUrl = "https://expected-ats.example.test/apply/platform-engineer";
+  const attackerUrl = "https://evil.example.test/collect-candidate-data";
+  const listingPage = {
+    origin: listingUrl,
+    pageText: "Platform Engineer\nApply now",
+    refs: refsOf([["e1", "link", "Apply now", false, { href: advertisedApplicationUrl }]]),
+  };
+  const attackerForm = {
+    origin: attackerUrl,
+    pageText: "Application form\nSubmit application",
+    refs: refsOf([
+      ["e2", "textbox", "Full name", true],
+      ["e3", "button", "Submit application", false],
+    ]),
+  };
+  const { ops, log } = createFakeOps([listingPage, attackerForm]);
+  const execute = makeDriver({
+    ops,
+    mayRunImpl: () => ({ allowed: true }),
+  });
+
+  const result = await execute({
+    applicationId: "app-unexpected-external-origin",
+    application: { id: "app-unexpected-external-origin", link: listingUrl },
+    postingUrl: listingUrl,
+    questionCapture: {
+      state: "captured",
+      answerableIds: ["rendered-full-name"],
+      excludedIds: [],
+    },
+    prepareOnly: true,
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.equal(result.currentUrl, attackerUrl);
+  assert.match(result.reason, /unexpected application site/i);
+  assert.deepEqual(
+    log.filter(({ op }) => ["fillField", "selectOption", "toggleField", "upload"].includes(op)),
+    []
+  );
+  assert.deepEqual(
+    log.filter(({ op }) => op === "clickButton"),
+    [{ op: "clickButton", pageId: "page-1", ref: "e1" }]
+  );
 });
 
 test("single-page flow fills resolvable fields and stops awaiting-submit, same as today", async () => {
@@ -295,6 +555,43 @@ test("single-page flow fills resolvable fields and stops awaiting-submit, same a
   for (const index of fillIndexes) {
     assert.equal(log[index - 1].op, "snapshot", "every field action re-snapshots first");
   }
+});
+
+test("a required checkbox with an honest No answer is explicitly left unchecked", async () => {
+  const snapshot = {
+    origin: GREENHOUSE_URL,
+    pageText: "Application form",
+    refs: refsOf([
+      ["e1", "checkbox", "I agree to relocate", true],
+      ["e2", "button", "Submit Application", false],
+    ]),
+  };
+  const { ops, log } = createFakeOps([snapshot]);
+  const execute = makeDriver({
+    ops,
+    candidateConfigGetImpl: () => ({
+      ...CONFIG,
+      "form-defaults": {
+        ...CONFIG["form-defaults"],
+        screening_answers: { "I agree to relocate": false },
+      },
+    }),
+  });
+
+  const result = await execute({
+    applicationId: "app-negative-checkbox",
+    application: { id: "app-negative-checkbox" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.equal(result.state, "awaiting-submit");
+  assert.deepEqual(result.session.unresolved, []);
+  assert.deepEqual(
+    log.filter((entry) => entry.op === "toggleField"),
+    [{ op: "toggleField", pageId: "page-1", ref: "e1", checked: false }]
+  );
 });
 
 test("LinkedIn Easy Apply: fills step 1, advances, fills step 2, ends awaiting-submit", async () => {
@@ -907,6 +1204,56 @@ test("a dead cached tab is dropped and reopened instead of poisoning every later
   );
 });
 
+test("concurrent preparation requests for one application share one live browser run", async () => {
+  let releaseSnapshot;
+  const snapshotGate = new Promise((resolve) => {
+    releaseSnapshot = resolve;
+  });
+  const log = [];
+  const snapshot = {
+    origin: GREENHOUSE_URL,
+    pageText: "Application form",
+    refs: refsOf([["e1", "button", "Submit Application", false]]),
+  };
+  const ops = {
+    async openTab() {
+      log.push("openTab");
+      return { pageId: "page-1" };
+    },
+    async snapshot() {
+      log.push("snapshot:start");
+      await snapshotGate;
+      log.push("snapshot:end");
+      return snapshot;
+    },
+    async fillField() {},
+    async selectOption() {},
+    async toggleField() {},
+    async clickButton() {},
+    async upload() {},
+  };
+  const execute = makeDriver({ ops });
+  const request = {
+    applicationId: "app-concurrent",
+    application: { id: "app-concurrent" },
+    postingUrl: GREENHOUSE_URL,
+    prepareOnly: true,
+  };
+
+  const first = execute(request);
+  await new Promise((resolve) => setImmediate(resolve));
+  const second = execute(request);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(log.filter((entry) => entry === "openTab").length, 1);
+  assert.equal(log.filter((entry) => entry === "snapshot:start").length, 1);
+
+  releaseSnapshot();
+  const [firstResult, secondResult] = await Promise.all([first, second]);
+  assert.equal(firstResult.state, "awaiting-submit");
+  assert.deepEqual(secondResult, firstResult);
+  assert.equal(log.filter((entry) => entry === "openTab").length, 1);
+});
+
 // ---------------------------------------------------------------------------
 // Generalized multi-step advancement: the loop above is no longer gated to
 // LinkedIn Easy Apply by URL. These fixtures drive it over a plain
@@ -1208,6 +1555,73 @@ test("an advance click that lands on a different hostname blocks, names the dest
   );
 });
 
+test("an advance click that downgrades HTTPS to HTTP blocks before touching the downgraded page", async () => {
+  const pageOne = {
+    origin: GREENHOUSE_URL,
+    pageText: "Basic info",
+    refs: refsOf([
+      ["e1", "textbox", "Phone Number", false],
+      ["e2", "button", "Continue", false],
+    ]),
+  };
+  const downgradedPage = {
+    origin: "http://job-boards.greenhouse.io/example/jobs/123/step-2",
+    pageText: "More information",
+    refs: refsOf([["e3", "textbox", "Phone Number", false]]),
+  };
+  const { ops, log } = createFakeOps([pageOne, downgradedPage]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-scheme-downgrade",
+    application: { id: "app-scheme-downgrade" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.match(result.reason, /left the application/);
+  assert.match(result.reason, /https:\/\/job-boards\.greenhouse\.io/);
+  assert.match(result.reason, /http:\/\/job-boards\.greenhouse\.io/);
+  assert.deepEqual(
+    log.filter(({ op }) => op === "fillField"),
+    [{ op: "fillField", pageId: "page-1", ref: "e1", value: "555-0100" }]
+  );
+});
+
+test("an advance click that changes ports blocks before touching the new origin", async () => {
+  const pageOne = {
+    origin: GREENHOUSE_URL,
+    pageText: "Basic info",
+    refs: refsOf([
+      ["e1", "textbox", "Phone Number", false],
+      ["e2", "button", "Continue", false],
+    ]),
+  };
+  const changedPortPage = {
+    origin: "https://job-boards.greenhouse.io:8443/example/jobs/123/step-2",
+    pageText: "More information",
+    refs: refsOf([["e3", "textbox", "Phone Number", false]]),
+  };
+  const { ops, log } = createFakeOps([pageOne, changedPortPage]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-port-change",
+    application: { id: "app-port-change" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.match(result.reason, /left the application/);
+  assert.match(result.reason, /https:\/\/job-boards\.greenhouse\.io:8443/);
+  assert.deepEqual(
+    log.filter(({ op }) => op === "fillField"),
+    [{ op: "fillField", pageId: "page-1", ref: "e1", value: "555-0100" }]
+  );
+});
+
 test("a same-host advance with a changed path still advances normally", async () => {
   // The regression guard: proves the hostname check isn't blocking every
   // advance, only ones that leave the host. Path and query differ (a real
@@ -1319,18 +1733,246 @@ test("prepare-only stops before a misleading Continue to Review control that sub
   );
 });
 
-test("prepare-only advances through an explicit Next step and stops at the submit handoff", async () => {
+test("prepare-only advances a proven non-final wizard step and stops at final Submit", async () => {
+  const detailsPage = {
+    origin: GREENHOUSE_URL,
+    pageText: "Step 1 of 2\nApplication details",
+    refs: refsOf([["e1", "button", "Next", false, { advanceSafe: true }]]),
+  };
+  const reviewPage = {
+    origin: `${GREENHOUSE_URL}?step=review`,
+    pageText: "Step 2 of 2\nReview your application",
+    refs: refsOf([["e2", "button", "Submit application", false]]),
+  };
+  const { ops, log } = createFakeOps([detailsPage, reviewPage]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-prepare-only-wizard",
+    application: { id: "app-prepare-only-wizard" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.equal(result.state, "awaiting-submit");
+  assert.equal(result.verified, false);
+  assert.equal(result.session.prepareOnly, true);
+  assert.equal(result.session.stepIndex, 2);
+  assert.deepEqual(
+    log.filter((entry) => entry.op === "clickButton"),
+    [{ op: "clickButton", pageId: "page-1", ref: "e1" }]
+  );
+});
+
+test("prepare-only chooses the proven Next control over an earlier unrelated Continue control", async () => {
+  const detailsPage = {
+    origin: GREENHOUSE_URL,
+    pageText: "Step 1 of 2\nApplication details",
+    refs: refsOf([
+      ["e1", "button", "Continue browsing jobs", false],
+      ["e2", "button", "Next", false, { advanceSafe: true }],
+    ]),
+  };
+  const reviewPage = {
+    origin: `${GREENHOUSE_URL}?step=review`,
+    pageText: "Step 2 of 2\nReview your application",
+    refs: refsOf([["e3", "button", "Submit application", false]]),
+  };
+  const { ops, log } = createFakeOps([detailsPage, reviewPage]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-prepare-only-exact-advance",
+    application: { id: "app-prepare-only-exact-advance" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.equal(result.state, "awaiting-submit");
+  assert.equal(result.session.stepIndex, 2);
+  assert.deepEqual(
+    log.filter((entry) => entry.op === "clickButton"),
+    [{ op: "clickButton", pageId: "page-1", ref: "e2" }]
+  );
+});
+
+test("prepare-only advances a LinkedIn Easy Apply Next step and stops at final Submit", async () => {
+  const contactPage = {
+    origin: EASY_APPLY_URL,
+    pageText: "Contact information",
+    refs: refsOf([["e1", "button", "Next", false, { advanceSafe: true }]]),
+  };
+  const reviewPage = {
+    origin: EASY_APPLY_URL,
+    pageText: "Review your application",
+    refs: refsOf([["e2", "button", "Submit application", false]]),
+  };
+  const { ops, log } = createFakeOps([contactPage, reviewPage]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-prepare-only-easy-apply",
+    application: { id: "app-prepare-only-easy-apply" },
+    postingUrl: EASY_APPLY_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.equal(result.state, "awaiting-submit");
+  assert.equal(result.session.prepareOnly, true);
+  assert.equal(result.session.stepIndex, 2);
+  assert.deepEqual(
+    log.filter((entry) => entry.op === "clickButton"),
+    [{ op: "clickButton", pageId: "page-1", ref: "e1" }]
+  );
+});
+
+test("prepare-only does not trust a LinkedIn Easy Apply Next button without structured progress evidence", async () => {
+  const applicationPage = {
+    origin: EASY_APPLY_URL,
+    pageText: "Application details",
+    refs: refsOf([["e1", "button", "Next", false]]),
+  };
+  const confirmationPage = {
+    origin: `${EASY_APPLY_URL}&submitted=true`,
+    pageText: "Thank you for applying",
+    refs: refsOf([]),
+  };
+  const { ops, log } = createFakeOps([applicationPage, confirmationPage]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-prepare-only-easy-apply-unknown",
+    application: { id: "app-prepare-only-easy-apply-unknown" },
+    postingUrl: EASY_APPLY_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.equal(result.state, "awaiting-submit");
+  assert.equal(result.currentUrl, EASY_APPLY_URL);
+  assert.equal(
+    log.some((entry) => entry.op === "clickButton"),
+    false
+  );
+});
+
+test("prepare-only ignores unrelated step copy that is not structural form progress", async () => {
+  const applicationPage = {
+    origin: GREENHOUSE_URL,
+    pageText: "Our interview process: Step 1 of 4\nApplication details",
+    refs: refsOf([["e1", "button", "Next", false]]),
+  };
+  const confirmationPage = {
+    origin: `${GREENHOUSE_URL}/confirmation`,
+    pageText: "Thank you for applying",
+    refs: refsOf([]),
+  };
+  const { ops, log } = createFakeOps([applicationPage, confirmationPage]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-prepare-only-unrelated-steps",
+    application: { id: "app-prepare-only-unrelated-steps" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.equal(result.state, "awaiting-submit");
+  assert.equal(
+    log.some((entry) => entry.op === "clickButton"),
+    false
+  );
+});
+
+test("prepare-only stops when a new required field appears in the fresh pre-click snapshot", async () => {
+  const readyPage = {
+    origin: GREENHOUSE_URL,
+    pageText: "Application details",
+    refs: refsOf([["e1", "button", "Next", false, { advanceSafe: true }]]),
+  };
+  const changedPage = {
+    origin: GREENHOUSE_URL,
+    pageText: "Application details\nNew required question",
+    refs: refsOf([
+      ["e1", "button", "Next", false, { advanceSafe: true }],
+      ["e2", "textbox", "New required question", true],
+    ]),
+  };
+  const { ops, log } = createFakeOps([readyPage]);
+  let snapshotCalls = 0;
+  ops.snapshot = async () => {
+    snapshotCalls += 1;
+    log.push({ op: "snapshot" });
+    return snapshotCalls <= 2 ? readyPage : changedPage;
+  };
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-prepare-only-fresh-required",
+    application: { id: "app-prepare-only-fresh-required" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.match(result.reason, /New required question/);
+  assert.equal(
+    log.some((entry) => entry.op === "clickButton"),
+    false
+  );
+});
+
+test("prepare-only stops when a required field appears during fill and remains in the pre-click snapshot", async () => {
+  const readyPage = {
+    origin: GREENHOUSE_URL,
+    pageText: "Application details",
+    refs: refsOf([["e1", "button", "Next", false, { advanceSafe: true }]]),
+  };
+  const changedPage = {
+    origin: GREENHOUSE_URL,
+    pageText: "Application details\nLate required question",
+    refs: refsOf([
+      ["e1", "button", "Next", false, { advanceSafe: true }],
+      ["e2", "textbox", "Late required question", true],
+    ]),
+  };
+  const { ops, log } = createFakeOps([readyPage]);
+  let snapshotCalls = 0;
+  ops.snapshot = async () => {
+    snapshotCalls += 1;
+    log.push({ op: "snapshot" });
+    return snapshotCalls === 1 ? readyPage : changedPage;
+  };
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-prepare-only-mid-fill-required",
+    application: { id: "app-prepare-only-mid-fill-required" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.match(result.reason, /Late required question/);
+  assert.equal(
+    log.some((entry) => entry.op === "clickButton"),
+    false
+  );
+});
+
+test("prepare-only stops before an explicit Next step because its submit behavior is unknown", async () => {
   const detailsPage = {
     origin: GREENHOUSE_URL,
     pageText: "Application details",
     refs: refsOf([["e1", "button", "Next", false]]),
   };
-  const reviewPage = {
-    origin: `${GREENHOUSE_URL}?step=review`,
-    pageText: "Review your application",
-    refs: refsOf([["e2", "button", "Submit application", false]]),
-  };
-  const { ops, log } = createFakeOps([detailsPage, reviewPage]);
+  const { ops, log } = createFakeOps([detailsPage]);
   const execute = makeDriver({ ops });
 
   const result = await execute({
@@ -1343,10 +1985,71 @@ test("prepare-only advances through an explicit Next step and stops at the submi
 
   assert.equal(result.state, "awaiting-submit");
   assert.equal(result.verified, false);
+  assert.equal(result.currentUrl, GREENHOUSE_URL);
   assert.equal(result.session.prepareOnly, true);
-  assert.deepEqual(
-    log.filter((entry) => entry.op === "clickButton"),
-    [{ op: "clickButton", pageId: "page-1", ref: "e1" }]
+  assert.equal(
+    log.some((entry) => entry.op === "clickButton"),
+    false
+  );
+});
+
+test("prepare-only never clicks a sole Next control that submits the application", async () => {
+  const applicationPage = {
+    origin: GREENHOUSE_URL,
+    pageText: "Application details",
+    refs: refsOf([["e1", "button", "Next", false]]),
+  };
+  const confirmationPage = {
+    origin: `${GREENHOUSE_URL}/confirmation`,
+    pageText: "Thank you for applying",
+    refs: refsOf([]),
+  };
+  const { ops, log } = createFakeOps([applicationPage, confirmationPage]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-prepare-only-next-submits",
+    application: { id: "app-prepare-only-next-submits" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.equal(result.state, "awaiting-submit");
+  assert.equal(result.verified, false);
+  assert.equal(result.currentUrl, GREENHOUSE_URL);
+  assert.equal(result.session.prepareOnly, true);
+  assert.equal(
+    log.some(({ op }) => op === "clickButton"),
+    false,
+    "prepare-only cannot discover that Next submits after the irreversible click"
+  );
+});
+
+test("prepare-only never reports an already-confirmed page as submitted or verified", async () => {
+  const confirmationPage = {
+    origin: `${GREENHOUSE_URL}/confirmation`,
+    pageText: "Thank you for applying",
+    refs: refsOf([]),
+  };
+  const { ops, log } = createFakeOps([confirmationPage]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-prepare-only-confirmed",
+    application: { id: "app-prepare-only-confirmed" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.equal(result.state, "awaiting-submit");
+  assert.equal(result.verified, false);
+  assert.equal(result.currentUrl, confirmationPage.origin);
+  assert.equal(result.session.prepareOnly, true);
+  assert.equal(
+    log.some(({ op }) => op === "screenshot"),
+    false
   );
 });
 
@@ -1390,6 +2093,51 @@ test("focusSession returns to the exact retained prepared page without opening o
   assert.equal(
     log.some((entry) => entry.op === "clickButton"),
     false
+  );
+});
+
+test("focusSession returns to a retained manual-review page after automation consent is turned off", async () => {
+  const reviewPage = {
+    origin: `${GREENHOUSE_URL}?step=review`,
+    pageText: "Review your application",
+    refs: refsOf([["e1", "button", "Submit application", false]]),
+  };
+  const { ops, log } = createFakeOps([reviewPage]);
+  let allowed = true;
+  const execute = makeDriver({
+    ops,
+    mayRunImpl: () => ({ allowed }),
+  });
+
+  const prepared = await execute({
+    applicationId: "app-focus-consent-off",
+    application: { id: "app-focus-consent-off" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+  assert.equal(prepared.state, "awaiting-submit");
+
+  allowed = false;
+  const focused = await execute({
+    applicationId: "app-focus-consent-off",
+    application: { id: "app-focus-consent-off" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+    focusSession: true,
+  });
+
+  assert.equal(focused.state, "awaiting-submit");
+  assert.equal(focused.session.focused, true);
+  assert.deepEqual(
+    log.filter((entry) => entry.op === "focusTab"),
+    [{ op: "focusTab", pageId: "page-1" }]
+  );
+  assert.equal(
+    log.filter((entry) => entry.op === "openTab").length,
+    1,
+    "focusing the retained page must not start new automation"
   );
 });
 

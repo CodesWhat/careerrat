@@ -244,8 +244,10 @@ try {
     pass("greenhouse.fetch() does not leak the raw content field into the normalized job");
   else fail("greenhouse.fetch() leaked raw content");
 
-  // Cap: a full JD body is ~10 KB of HTML; the stripped text is sliced so scan
-  // payloads stay sane (same rationale as alibaba's 4000-char cap).
+  // A normal full JD can exceed the old 4000-character preview cap. Preserve
+  // it through the provider so app-owned canonical captures keep the ending.
+  const longEnding = "Final sentence survives the provider normalization step.";
+  const longDescription = `${"x".repeat(5000)} ${longEnding}`;
   const longBody = await greenhouse.fetch(
     { name: "Acme", careers_url: "https://job-boards.greenhouse.io/acme" },
     {
@@ -255,15 +257,39 @@ try {
             id: 9,
             title: "Long",
             absolute_url: "https://job-boards.greenhouse.io/acme/jobs/9",
-            content: `&lt;p&gt;${"x".repeat(5000)}&lt;/p&gt;`,
+            content: `&lt;p&gt;${longDescription}&lt;/p&gt;`,
           },
         ],
       }),
     }
   );
-  if (longBody[0]?.description?.length === 4000 && /^x+$/.test(longBody[0].description))
-    pass("greenhouse.fetch() caps the stripped description at 4000 chars");
-  else fail(`greenhouse.fetch() capped length = ${longBody[0]?.description?.length}`);
+  if (longBody[0]?.description === longDescription && longBody[0]?.descriptionPartial !== true)
+    pass("greenhouse.fetch() preserves a complete description beyond 4000 chars");
+  else fail(`greenhouse.fetch() long body = ${JSON.stringify(longBody[0])}`);
+
+  // Truly oversized payloads still need a per-posting safety bound, but that
+  // bound must be typed as partial instead of silently masquerading as full.
+  const oversizedBody = await greenhouse.fetch(
+    { name: "Acme", careers_url: "https://job-boards.greenhouse.io/acme" },
+    {
+      fetchJson: async () => ({
+        jobs: [
+          {
+            id: 10,
+            title: "Oversized",
+            absolute_url: "https://job-boards.greenhouse.io/acme/jobs/10",
+            content: `&lt;p&gt;${"y".repeat(70_000)}&lt;/p&gt;`,
+          },
+        ],
+      }),
+    }
+  );
+  if (
+    oversizedBody[0]?.description?.length === 65_536 &&
+    oversizedBody[0]?.descriptionPartial === true
+  )
+    pass("greenhouse.fetch() marks a safety-capped description partial");
+  else fail(`greenhouse.fetch() oversized body = ${JSON.stringify(oversizedBody[0])}`);
 
   // Unit: contentToText contract on the shapes the API can produce.
   if (

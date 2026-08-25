@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import {
   chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -13,6 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   buildInstalledRuntimeChildEnv,
@@ -20,14 +23,17 @@ import {
   CHAT_SESSION_RUNTIME_TIMEOUT_MS,
   detectInstalledRuntimes,
   fetchInstalledRuntimePublicUrl,
+  hasCompleteCareerRatCapabilities,
   INSTALLED_RUNTIME_DEFINITIONS,
+  installedRuntimeCapabilities,
+  installedRuntimeSignInCommand,
   materializeIsolatedSkillCwd,
   ONE_SHOT_RUNTIME_TIMEOUT_MS,
   parseCustomCommandString,
   probeCustomRuntimeCommand,
   probeInstalledRuntime,
-  RUNTIME_STREAMING_UNSUPPORTED,
   RUNTIME_TOOL_PROFILE_UNSUPPORTED,
+  readInstalledRuntimeScopedFile,
   runInstalledRuntime,
   runInstalledRuntimeStream,
   runtimeSearchDirectories,
@@ -35,6 +41,10 @@ import {
   stopInstalledRuntimeSignIns,
   supportsInstalledRuntimeStreaming,
 } from "../src/core/ai/installed-runtimes.mjs";
+import {
+  runtimeProcessInvocation,
+  scheduleRuntimeProcessKill,
+} from "../src/core/ai/runtime-process.mjs";
 import {
   loadInstalledRuntimeSelection,
   writeInstalledRuntimeSelection,
@@ -93,6 +103,20 @@ function tempRoot() {
   return mkdtempSync(join(tmpdir(), "careerrat-installed-runtime-"));
 }
 
+const VERIFIED_CAPABILITIES = Object.freeze({
+  completion: true,
+  structuredOutput: true,
+  appWorkflows: true,
+  exactRead: true,
+  publicWeb: true,
+  liveActivity: true,
+  resumable: true,
+});
+
+function verifiedRuntime(runtime) {
+  return { ...runtime, capabilities: VERIFIED_CAPABILITIES };
+}
+
 function executable(path) {
   mkdirSync(join(path, ".."), { recursive: true });
   writeFileSync(path, "#!/bin/sh\nexit 0\n", "utf8");
@@ -131,6 +155,34 @@ test("runtime registry covers the supported installed CLI set", () => {
     assert.ok(definition.installUrl, `${definition.id} needs an installUrl`);
     assert.match(definition.installUrl, /^https:\/\//);
   }
+});
+
+test("each ACP adapter keeps its fixed argv in the runtime registry", () => {
+  const expected = {
+    gemini: ["--acp"],
+    opencode: ["acp"],
+    copilot: ["--acp", "--stdio"],
+    hermes: ["--ignore-rules", "acp"],
+  };
+  const definitions = INSTALLED_RUNTIME_DEFINITIONS.filter(({ protocol }) => protocol === "acp");
+  assert.deepEqual(
+    Object.fromEntries(definitions.map(({ id, acpArgs }) => [id, acpArgs])),
+    expected
+  );
+});
+
+test("supported adapters keep sign-in argv in the same runtime registry", () => {
+  assert.deepEqual(
+    Object.fromEntries(
+      INSTALLED_RUNTIME_DEFINITIONS.filter(({ supported }) => supported).map(
+        ({ id, signInArgs }) => [id, signInArgs]
+      )
+    ),
+    {
+      claude: ["auth", "login"],
+      codex: ["login"],
+    }
+  );
 });
 
 test("runtime search adds Finder-safe user and package-manager directories", () => {
@@ -187,7 +239,7 @@ test("detectInstalledRuntimes finds multiple CLIs outside the inherited PATH", (
   }
 });
 
-test("detected runtimes publish honest completion, task-tool, and research tiers", () => {
+test("detection publishes declared adapters as unverified until readiness runs", () => {
   const root = tempRoot();
   const binDir = join(root, "bin");
   executable(join(binDir, "claude"));
@@ -201,22 +253,20 @@ test("detected runtimes publish honest completion, task-tool, and research tiers
     });
     const byId = Object.fromEntries(inventory.map((runtime) => [runtime.id, runtime]));
     assert.deepEqual(byId.claude.capabilities, {
-      completion: true,
-      taskTools: true,
-      research: true,
-    });
-    assert.equal(byId.claude.capabilityTier, "task_tools");
-    assert.deepEqual(byId.codex.capabilities, {
-      completion: true,
-      taskTools: false,
-      research: false,
-    });
-    assert.equal(byId.codex.capabilityTier, "chat_drafting");
-    assert.deepEqual(byId.hermes.capabilities, {
       completion: false,
+      structuredOutput: false,
+      appWorkflows: false,
+      exactRead: false,
+      publicWeb: false,
+      liveActivity: false,
+      resumable: false,
       taskTools: false,
       research: false,
     });
+    assert.equal(byId.claude.capabilityTier, "detected_unverified");
+    assert.deepEqual(byId.codex.capabilities, byId.claude.capabilities);
+    assert.equal(byId.codex.capabilityTier, "detected_unverified");
+    assert.deepEqual(byId.hermes.capabilities, byId.codex.capabilities);
     assert.equal(byId.hermes.capabilityTier, "detected_unverified");
     assert.equal(byId.gemini.capabilityTier, "unavailable");
   } finally {
@@ -224,9 +274,63 @@ test("detected runtimes publish honest completion, task-tool, and research tiers
   }
 });
 
-test("auth probe exposes only bounded readiness state, never CLI account output", () => {
+test("diagnostic adapters cannot turn claimed probe evidence into accepted workflow capabilities", () => {
+  for (const definition of INSTALLED_RUNTIME_DEFINITIONS.filter(
+    ({ supported }) => supported !== true
+  )) {
+    const capabilities = installedRuntimeCapabilities(definition.id, {
+      capabilityEvidence: VERIFIED_CAPABILITIES,
+    }).capabilities;
+    assert.ok(
+      Object.values(definition.acceptedCapabilities).every((accepted) => accepted === false),
+      definition.id
+    );
+    assert.equal(hasCompleteCareerRatCapabilities(capabilities, definition.id), false);
+  }
+});
+
+test("declared adapter support stays unverified until the readiness probe supplies evidence", () => {
+  assert.deepEqual(
+    installedRuntimeCapabilities("hermes", { capabilityEvidence: {} }).capabilities,
+    {
+      completion: false,
+      structuredOutput: false,
+      appWorkflows: false,
+      exactRead: false,
+      publicWeb: false,
+      liveActivity: false,
+      resumable: false,
+      taskTools: false,
+      research: false,
+    }
+  );
+});
+
+test("execution rejects a runtime whose selected record has no verified completion evidence", async () => {
+  let called = false;
+  await assert.rejects(
+    runInstalledRuntime({
+      runtime: {
+        id: "hermes",
+        name: "Hermes",
+        path: "/safe/hermes",
+        capabilities: {},
+      },
+      prompt: "hello",
+      cwd: "/safe/task",
+      runAcpRuntimeImpl: async () => {
+        called = true;
+        return { text: "should not run" };
+      },
+    }),
+    { code: "RUNTIME_COMPLETION_UNSUPPORTED" }
+  );
+  assert.equal(called, false);
+});
+
+test("auth probe exposes only bounded readiness state, never CLI account output", async () => {
   const calls = [];
-  const ready = probeInstalledRuntime(
+  const ready = await probeInstalledRuntime(
     { id: "codex", path: "/safe/codex", available: true },
     {
       spawnSyncImpl(executablePath, args, options) {
@@ -241,10 +345,18 @@ test("auth probe exposes only bounded readiness state, never CLI account output"
     status: "ready",
     ready: true,
     action: null,
-    completionSupported: true,
-    toolExecutionSupported: false,
-    capabilityReason:
-      "Ready for chat and drafting. Task tools and research are not verified for this CLI yet.",
+    capabilities: {
+      completion: true,
+      structuredOutput: true,
+      appWorkflows: true,
+      exactRead: true,
+      publicWeb: true,
+      liveActivity: true,
+      resumable: true,
+      taskTools: true,
+      research: true,
+    },
+    capabilityReason: null,
   });
   assert.equal(JSON.stringify(ready).includes("morgan@example.com"), false);
   assert.equal(calls[1].executablePath, "/safe/codex");
@@ -255,7 +367,7 @@ test("auth probe exposes only bounded readiness state, never CLI account output"
   assert.equal(calls[1].options.shell, false);
   assert.ok(calls[1].options.timeout > 0);
 
-  const signedOut = probeInstalledRuntime(
+  const signedOut = await probeInstalledRuntime(
     { id: "claude", path: "/safe/claude", available: true },
     {
       spawnSyncImpl(_path, args) {
@@ -273,9 +385,334 @@ test("auth probe exposes only bounded readiness state, never CLI account output"
   assert.equal(JSON.stringify(signedOut).includes("secret"), false);
 });
 
-test("Claude readiness fails closed below the verified CLI boundary version", () => {
+test("Windows readiness probes launch detected Claude and Codex npm shims through fixed cmd argv", async () => {
+  const comspec = "C:\\Windows\\System32\\cmd.exe";
+  const cases = [
+    {
+      id: "claude",
+      path: "C:\\Users\\Taylor Smith\\AppData\\Roaming\\npm\\claude.cmd",
+      version: "2.1.241 (Claude Code)",
+    },
+    {
+      id: "codex",
+      path: "C:\\Users\\Taylor Smith\\AppData\\Roaming\\npm\\codex.BAT",
+      version: "codex-cli 0.149.1",
+    },
+  ];
+
+  for (const runtimeCase of cases) {
+    const calls = [];
+    const ready = await probeInstalledRuntime(
+      { id: runtimeCase.id, path: runtimeCase.path, available: true },
+      {
+        platform: "win32",
+        env: { COMSPEC: comspec },
+        spawnImpl(command, args, options) {
+          calls.push({ command, args, options });
+          const child = new EventEmitter();
+          child.pid = 4100 + calls.length;
+          child.stdout = new EventEmitter();
+          child.stderr = new EventEmitter();
+          child.kill = () => true;
+          queueMicrotask(() => {
+            child.stdout.emit(
+              "data",
+              Buffer.from(args.at(-1).includes("--version") ? runtimeCase.version : "signed in")
+            );
+            child.emit("close", 0, null);
+          });
+          return child;
+        },
+      }
+    );
+
+    assert.equal(ready.ready, true);
+    assert.ok(calls.length >= 2);
+    for (const call of calls) {
+      assert.equal(call.command, comspec);
+      assert.deepEqual(call.args.slice(0, 4), ["/d", "/s", "/v:off", "/c"]);
+      assert.equal(call.args.length, 5);
+      assert.match(call.args[4], new RegExp(`${runtimeCase.id}\\.(?:cmd|bat)`, "i"));
+      assert.equal(call.args[4].includes("Taylor Smith"), false);
+      assert.match(call.args[4], /Taylor\^ Smith/);
+      assert.equal(call.options.shell, false);
+      assert.equal(call.options.windowsVerbatimArguments, true);
+    }
+  }
+});
+
+test("Windows readiness timeout terminates the full cmd shim probe tree", async () => {
+  const treeCalls = [];
+  let spawnCount = 0;
+  const result = await probeInstalledRuntime(
+    {
+      id: "claude",
+      path: "C:\\Users\\Taylor\\AppData\\Roaming\\npm\\claude.cmd",
+      available: true,
+    },
+    {
+      platform: "win32",
+      env: { COMSPEC: "C:\\Windows\\System32\\cmd.exe", SystemRoot: "C:\\Windows" },
+      timeoutMs: 5,
+      spawnImpl() {
+        spawnCount += 1;
+        const child = new EventEmitter();
+        child.pid = 6200 + spawnCount;
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.kill = () => true;
+        if (spawnCount === 1) {
+          queueMicrotask(() => {
+            child.stdout.emit("data", Buffer.from("2.1.241 (Claude Code)"));
+            child.emit("close", 0, null);
+          });
+        }
+        return child;
+      },
+      treeKillImpl(command, args, options) {
+        treeCalls.push({ command, args, options });
+        return { status: 0 };
+      },
+      spawnSyncImpl() {
+        throw new Error("Windows readiness probes must not use spawnSync");
+      },
+    }
+  );
+
+  assert.equal(result.status, "probe_failed");
+  assert.deepEqual(treeCalls, [
+    {
+      command: "C:\\Windows\\System32\\taskkill.exe",
+      args: ["/pid", "6202", "/t", "/f"],
+      options: { shell: false, windowsHide: true, stdio: "ignore" },
+    },
+  ]);
+});
+
+test("Windows boundary probing honors cancellation before the provider turn can spawn", async () => {
+  for (const run of [runInstalledRuntime, runInstalledRuntimeStream]) {
+    const controller = new AbortController();
+    let spawnCount = 0;
+    const pending = run({
+      runtime: verifiedRuntime({
+        id: "claude",
+        path: "C:\\Users\\Taylor\\AppData\\Roaming\\npm\\claude.cmd",
+      }),
+      prompt: "do not run",
+      tools: ["WebSearch"],
+      platform: "win32",
+      env: { COMSPEC: "C:\\Windows\\System32\\cmd.exe", SystemRoot: "C:\\Windows" },
+      signal: controller.signal,
+      spawnImpl() {
+        spawnCount += 1;
+        const child = new EventEmitter();
+        child.pid = 7000 + spawnCount;
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.stdin = new EventEmitter();
+        child.stdin.end = () => {};
+        child.kill = () => true;
+        return child;
+      },
+      treeKillImpl: () => ({ status: 0 }),
+    });
+    queueMicrotask(() => controller.abort());
+
+    await assert.rejects(pending, { code: "RUNTIME_CANCELLED" });
+    assert.equal(spawnCount, 1);
+  }
+});
+
+test("Windows runtime execution safely wraps cmd and bat shims while leaving executables direct", async () => {
+  const comspec = "C:\\Windows\\System32\\cmd.exe";
+  const cases = [
+    {
+      id: "claude",
+      path: "C:\\Users\\Taylor Smith\\AppData\\Roaming\\npm\\claude.cmd",
+      stdout: JSON.stringify({ type: "result", subtype: "success", result: "Claude works" }),
+      expected: "Claude works",
+    },
+    {
+      id: "codex",
+      path: "C:\\Users\\Taylor Smith\\AppData\\Roaming\\npm\\codex.bat",
+      stdout: ndjson([
+        { type: "item.completed", item: { type: "agent_message", text: "Codex works" } },
+        { type: "turn.completed", usage: {} },
+      ]),
+      expected: "Codex works",
+    },
+  ];
+
+  for (const runtimeCase of cases) {
+    const calls = [];
+    const result = await runInstalledRuntime({
+      runtime: verifiedRuntime({ id: runtimeCase.id, path: runtimeCase.path }),
+      prompt: "hello",
+      model: "model & echo OWNED %PATH%!",
+      platform: "win32",
+      env: { COMSPEC: comspec },
+      spawnImpl(command, args, options) {
+        calls.push({ command, args, options });
+        return fakeInstalledChild({ stdout: runtimeCase.stdout });
+      },
+    });
+
+    assert.equal(result.text, runtimeCase.expected);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].command, comspec);
+    assert.deepEqual(calls[0].args.slice(0, 4), ["/d", "/s", "/v:off", "/c"]);
+    assert.equal(calls[0].args.length, 5);
+    assert.equal(calls[0].args[4].includes("model & echo OWNED %PATH%!"), false);
+    assert.match(calls[0].args[4], /\^\^\^&/);
+    assert.match(calls[0].args[4], /\^\^\^%/);
+    assert.equal(calls[0].options.shell, false);
+    assert.equal(calls[0].options.windowsVerbatimArguments, true);
+  }
+
+  const directCalls = [];
+  await runInstalledRuntime({
+    runtime: verifiedRuntime({ id: "claude", path: "C:\\Program Files\\Claude\\claude.exe" }),
+    prompt: "hello",
+    platform: "win32",
+    env: { COMSPEC: comspec },
+    spawnImpl(command, args, options) {
+      directCalls.push({ command, args, options });
+      return fakeInstalledChild({
+        stdout: JSON.stringify({ type: "result", subtype: "success", result: "direct" }),
+      });
+    },
+  });
+  assert.equal(directCalls[0].command, "C:\\Program Files\\Claude\\claude.exe");
+  assert.ok(directCalls[0].args.includes("--output-format"));
+  assert.equal(directCalls[0].options.shell, false);
+  assert.equal(directCalls[0].options.windowsVerbatimArguments, undefined);
+});
+
+test("Windows batch invocation distinguishes npm shims, plain batch files, and line-break injection", () => {
+  const plain = runtimeProcessInvocation("C:\\tools\\agent.bat", ["model & value"], {
+    platform: "win32",
+    env: { COMSPEC: "C:\\Windows\\System32\\cmd.exe" },
+  });
+  assert.match(plain.args.at(-1), /model\^&value|model\^ \^&\^ value/);
+  assert.equal(plain.args.at(-1).includes("^^^&"), false);
+
+  const npmShim = runtimeProcessInvocation(
+    "C:\\Users\\Taylor\\AppData\\Roaming\\npm\\agent.cmd",
+    ["model & value"],
+    {
+      platform: "win32",
+      env: { COMSPEC: "C:\\Windows\\System32\\cmd.exe" },
+    }
+  );
+  assert.match(npmShim.args.at(-1), /\^\^\^&/);
+
+  assert.throws(
+    () =>
+      runtimeProcessInvocation("C:\\tools\\agent.bat", ["safe\r\necho OWNED"], {
+        platform: "win32",
+      }),
+    /line breaks/i
+  );
+  assert.throws(
+    () => runtimeProcessInvocation("C:\\tools\\agent\nowned.bat", [], { platform: "win32" }),
+    /line breaks/i
+  );
+});
+
+test("Windows forced cleanup uses fixed taskkill argv for the entire runtime process tree", async () => {
+  const childSignals = [];
+  const treeCalls = [];
+  const child = {
+    pid: 4242,
+    killed: false,
+    kill(signal) {
+      childSignals.push(signal);
+      this.killed = true;
+      return true;
+    },
+  };
+
+  await new Promise((resolve) => {
+    scheduleRuntimeProcessKill(child, resolve, {
+      platform: "win32",
+      graceMs: 5,
+      env: { SystemRoot: "C:\\Windows" },
+      spawnSyncImpl(command, args, options) {
+        treeCalls.push({ command, args, options });
+        return { status: 0 };
+      },
+    });
+  });
+
+  assert.deepEqual(childSignals, []);
+  assert.deepEqual(treeCalls, [
+    {
+      command: "C:\\Windows\\System32\\taskkill.exe",
+      args: ["/pid", "4242", "/t", "/f"],
+      options: { shell: false, windowsHide: true, stdio: "ignore" },
+    },
+  ]);
+});
+
+test("Windows streaming execution launches a detected npm shim through fixed cmd argv", async () => {
   const calls = [];
-  const unsupported = probeInstalledRuntime(
+  const comspec = "C:\\Windows\\System32\\cmd.exe";
+  const result = await runInstalledRuntimeStream({
+    runtime: verifiedRuntime({
+      id: "claude",
+      path: "C:\\Users\\Taylor Smith\\AppData\\Roaming\\npm\\claude.cmd",
+    }),
+    prompt: "hello",
+    platform: "win32",
+    env: { COMSPEC: comspec },
+    spawnImpl(command, args, options) {
+      calls.push({ command, args, options });
+      return fakeStreamingChild({
+        chunks: [
+          `${JSON.stringify({
+            type: "result",
+            subtype: "success",
+            result: "stream works",
+            session_id: "session-1",
+          })}\n`,
+        ],
+      });
+    },
+  });
+
+  assert.equal(result.text, "stream works");
+  assert.equal(calls[0].command, comspec);
+  assert.deepEqual(calls[0].args.slice(0, 4), ["/d", "/s", "/v:off", "/c"]);
+  assert.equal(calls[0].options.shell, false);
+  assert.equal(calls[0].options.windowsVerbatimArguments, true);
+});
+
+test("an empty ACP handshake proves protocol readiness without workflow capability evidence", async () => {
+  const calls = [];
+  const ready = await probeInstalledRuntime(
+    { id: "hermes", name: "Hermes", path: "/safe/hermes", available: true },
+    {
+      spawnSyncImpl() {
+        throw new Error("ACP readiness must not use a launch-only version probe");
+      },
+      async probeAcpRuntimeImpl(input) {
+        calls.push(input);
+        return { ready: true, agentCapabilities: {}, agentInfo: { name: "Hermes" } };
+      },
+      cwd: "/safe/workspace",
+    }
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].cwd, "/safe/workspace");
+  assert.equal(hasCompleteCareerRatCapabilities(ready.capabilities), false);
+  assert.equal(ready.capabilities.taskTools, false);
+  assert.equal(ready.capabilities.research, false);
+});
+
+test("Claude readiness fails closed below the verified CLI boundary version", async () => {
+  const calls = [];
+  const unsupported = await probeInstalledRuntime(
     { id: "claude", path: "/safe/claude", available: true },
     {
       spawnSyncImpl(_path, args) {
@@ -288,15 +725,25 @@ test("Claude readiness fails closed below the verified CLI boundary version", ()
     status: "unsupported_capability",
     ready: false,
     action: null,
-    toolExecutionSupported: false,
+    capabilities: {
+      completion: true,
+      structuredOutput: true,
+      appWorkflows: true,
+      exactRead: false,
+      publicWeb: false,
+      liveActivity: true,
+      resumable: true,
+      taskTools: false,
+      research: false,
+    },
     capabilityReason: "Update Claude Code to 2.1.241 or newer for secure CareerRat tool runs.",
   });
   assert.deepEqual(calls, [["--version"]]);
 });
 
-test("Codex readiness requires the CLI version that supports the completion capsule controls", () => {
+test("Codex readiness requires the CLI version that supports the completion capsule controls", async () => {
   const calls = [];
-  const unsupported = probeInstalledRuntime(
+  const unsupported = await probeInstalledRuntime(
     { id: "codex", path: "/safe/codex", available: true },
     {
       spawnSyncImpl(_path, args) {
@@ -309,8 +756,18 @@ test("Codex readiness requires the CLI version that supports the completion caps
     status: "unsupported_capability",
     ready: false,
     action: null,
-    completionSupported: false,
-    capabilityReason: "Update Codex to 0.149.1 or newer for isolated chat and drafting.",
+    capabilities: {
+      completion: false,
+      structuredOutput: false,
+      appWorkflows: false,
+      exactRead: false,
+      publicWeb: false,
+      liveActivity: false,
+      resumable: false,
+      taskTools: false,
+      research: false,
+    },
+    capabilityReason: "Update Codex to 0.149.1 or newer for the complete CareerRat workflow.",
   });
   assert.deepEqual(calls, [["--version"]]);
 });
@@ -320,7 +777,7 @@ test("Skill-only Claude runs are completion-only and do not require the tool bou
   let spawned = false;
   try {
     const result = await runInstalledRuntime({
-      runtime: { id: "claude", name: "Claude Code", path: "/safe/claude" },
+      runtime: verifiedRuntime({ id: "claude", name: "Claude Code", path: "/safe/claude" }),
       prompt: "onboard",
       skill: "ingest-profile",
       repoRoot,
@@ -405,6 +862,56 @@ test("fixed invocation adapters pass prompts on stdin and never use a shell", ()
   assert.ok(codex.args.includes("--output-schema"));
   assert.equal(codex.args.at(-1), "-");
   assert.equal(codex.options.shell, false);
+});
+
+test("Codex public-web invocation uses supported per-call search and MCP config", () => {
+  const invocation = buildInstalledRuntimeInvocation({
+    runtimeId: "codex",
+    executablePath: "/safe/codex",
+    runtimeHostPath: "/safe/careerrat-runtime",
+    tools: ["WebSearch", "WebFetch"],
+  });
+
+  assert.equal(invocation.args.includes("--search"), false);
+  assert.ok(invocation.args.includes("--strict-config"));
+  const overrides = invocation.args.flatMap((arg, index, args) =>
+    arg === "-c" ? [args[index + 1]] : []
+  );
+  assert.ok(overrides.includes('web_search="live"'));
+  assert.ok(
+    overrides.includes('mcp_servers.careerrat_scoped_tools.command="/safe/careerrat-runtime"')
+  );
+  assert.ok(
+    overrides.includes(
+      `mcp_servers.careerrat_scoped_tools.args=${JSON.stringify([
+        new URL("../src/core/ai/installed-runtimes.mjs", import.meta.url).pathname,
+        "--careerrat-scoped-tools",
+        "--allow-public-web",
+      ])}`
+    )
+  );
+  assert.ok(overrides.includes('mcp_servers.careerrat_scoped_tools.enabled_tools=["fetch"]'));
+  assert.ok(overrides.includes("mcp_servers.careerrat_scoped_tools.required=true"));
+  assert.ok(
+    overrides.includes('mcp_servers.careerrat_scoped_tools.default_tools_approval_mode="approve"')
+  );
+  assert.ok(overrides.includes('mcp_servers.careerrat_scoped_tools.env.ELECTRON_RUN_AS_NODE="1"'));
+  for (const feature of [
+    "shell_tool",
+    "unified_exec",
+    "browser_use",
+    "browser_use_external",
+    "browser_use_full_cdp_access",
+    "computer_use",
+    "view_image",
+  ]) {
+    assert.ok(
+      invocation.args.some(
+        (arg, index, args) => arg === "--disable" && args[index + 1] === feature
+      ),
+      `Codex public web must leave ${feature} disabled`
+    );
+  }
 });
 
 test("claude exact-read invocation approves only the uploaded file and isolated skill", () => {
@@ -541,9 +1048,9 @@ test("claude web invocation replaces native WebFetch with the guarded CareerRat 
     assert.ok(visible.includes("Skill"));
     assert.equal(visible.includes("WebFetch"), false);
     const mcp = JSON.parse(invocation.args[invocation.args.indexOf("--mcp-config") + 1]);
-    assert.deepEqual(Object.keys(mcp.mcpServers), ["careerrat_public_web"]);
+    assert.deepEqual(Object.keys(mcp.mcpServers), ["careerrat_scoped_tools"]);
     const allowed = invocation.args[invocation.args.indexOf("--allowedTools") + 1];
-    assert.match(allowed, /mcp__careerrat_public_web__fetch/);
+    assert.match(allowed, /mcp__careerrat_scoped_tools__fetch/);
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
@@ -586,61 +1093,134 @@ test("CareerRat public-web fetch delegates public URLs to the DNS-pinned guarded
   assert.match(result.content[0].text, /Remote role/);
 });
 
-test("tool-bearing installed runs reject Codex before spawn even for the local-read profile", async () => {
-  let spawned = false;
-  await assert.rejects(
-    runInstalledRuntime({
-      runtime: { id: "codex", name: "Codex", path: "/safe/codex" },
-      prompt: "read the workspace",
-      skill: "resume-extract",
-      repoRoot: "/safe/workspace",
-      tools: ["Read"],
-      spawnImpl() {
-        spawned = true;
-        return fakeInstalledChild();
-      },
-    }),
-    { code: RUNTIME_TOOL_PROFILE_UNSUPPORTED }
-  );
-  assert.equal(spawned, false);
+test("CareerRat scoped read returns only the staged input and rejects alternate or unsafe inputs", () => {
+  const root = tempRoot();
+  const input = join(root, "resume.md");
+  const sibling = join(root, "private.md");
+  const alias = join(root, "alias.md");
+  writeFileSync(input, "approved resume evidence", "utf8");
+  writeFileSync(sibling, "private sibling", "utf8");
+  symlinkSync(sibling, alias);
+
+  try {
+    const accepted = readInstalledRuntimeScopedFile(input);
+    assert.equal(accepted.isError, undefined);
+    assert.deepEqual(accepted.content, [{ type: "text", text: "approved resume evidence" }]);
+
+    for (const rejected of [
+      readInstalledRuntimeScopedFile(input, { input: { path: sibling } }),
+      readInstalledRuntimeScopedFile(input, { input: { path: "../private.md" } }),
+      readInstalledRuntimeScopedFile(alias),
+      readInstalledRuntimeScopedFile(input, { maxBytes: 4 }),
+    ]) {
+      assert.equal(rejected.isError, true);
+      assert.match(rejected.content[0].text, /rejected/i);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
-test("newly added installed CLIs deliver the prompt on stdin with a fixed, shell-free argv", () => {
-  const hermes = buildInstalledRuntimeInvocation({
-    runtimeId: "hermes",
-    executablePath: "/safe/hermes",
+test("the scoped-tools child speaks MCP JSON-RPC for discovery, staged read, and rejection", async () => {
+  const root = tempRoot();
+  const stagedPath = join(root, "approved.txt");
+  writeFileSync(stagedPath, "approved staged input", "utf8");
+  const modulePath = fileURLToPath(
+    new URL("../src/core/ai/installed-runtimes.mjs", import.meta.url)
+  );
+  const child = spawn(
+    process.execPath,
+    [
+      modulePath,
+      "--careerrat-scoped-tools",
+      "--allow-public-web",
+      "--approved-read-file",
+      stagedPath,
+    ],
+    { stdio: ["pipe", "pipe", "pipe"], shell: false }
+  );
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk.toString("utf8");
   });
-  assert.equal(hermes.command, "/safe/hermes");
-  assert.deepEqual(hermes.args, ["-z"]);
-  assert.equal(hermes.stdin, true);
-  assert.equal(hermes.options.shell, false);
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk.toString("utf8");
+  });
 
-  const amp = buildInstalledRuntimeInvocation({
-    runtimeId: "amp",
-    executablePath: "/safe/amp",
-  });
-  assert.equal(amp.command, "/safe/amp");
-  assert.deepEqual(amp.args, ["-x"]);
-  assert.equal(amp.stdin, true);
-  assert.equal(amp.options.shell, false);
+  try {
+    child.stdin.write("not-json\n");
+    for (const message of [
+      { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } },
+      { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+      {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "read_staged_input", arguments: {} },
+      },
+      {
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: { name: "not_available", arguments: {} },
+      },
+      { jsonrpc: "2.0", id: 5, method: "ping", params: {} },
+    ]) {
+      child.stdin.write(`${JSON.stringify(message)}\n`);
+    }
 
-  const goose = buildInstalledRuntimeInvocation({
-    runtimeId: "goose",
-    executablePath: "/safe/goose",
-  });
-  assert.equal(goose.command, "/safe/goose");
-  assert.deepEqual(goose.args, ["run", "-i", "-"]);
-  assert.equal(goose.stdin, true);
-  assert.equal(goose.options.shell, false);
+    const deadline = Date.now() + 3000;
+    while (stdout.trim().split("\n").filter(Boolean).length < 5 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const replies = stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    assert.equal(replies.length, 5, stderr || stdout);
+    const byId = new Map(replies.map((reply) => [reply.id, reply]));
+    assert.equal(byId.get(1).result.serverInfo.name, "careerrat_scoped_tools");
+    assert.deepEqual(
+      byId
+        .get(2)
+        .result.tools.map(({ name }) => name)
+        .sort(),
+      ["fetch", "read_staged_input"]
+    );
+    assert.equal(byId.get(3).result.content[0].text, "approved staged input");
+    assert.equal(byId.get(4).error.code, -32601);
+    assert.deepEqual(byId.get(5).result, {});
+  } finally {
+    child.kill("SIGTERM");
+    await new Promise((resolve) => child.once("close", resolve));
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
-  const droid = buildInstalledRuntimeInvocation({
-    runtimeId: "droid",
-    executablePath: "/safe/droid",
-  });
-  assert.equal(droid.command, "/safe/droid");
-  assert.deepEqual(droid.args, ["exec"]);
-  assert.equal(droid.stdin, true);
-  assert.equal(droid.options.shell, false);
+test("Codex exact-read work still fails before spawn without one approved upload", async () => {
+  const repoRoot = tempRepoWithOneSkill("resume-extract");
+  let spawned = false;
+  try {
+    await assert.rejects(
+      runInstalledRuntime({
+        runtime: verifiedRuntime({ id: "codex", name: "Codex", path: "/safe/codex" }),
+        prompt: "read the workspace",
+        skill: "resume-extract",
+        repoRoot,
+        tools: ["Read"],
+        spawnImpl() {
+          spawned = true;
+          return fakeInstalledChild();
+        },
+      }),
+      { code: "RUNTIME_READ_BOUNDARY_INVALID" }
+    );
+    assert.equal(spawned, false);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
 });
 
 test("runtime sign-in starts the resolved CLI directly without a shell or terminal app", () => {
@@ -671,8 +1251,138 @@ test("runtime sign-in starts the resolved CLI directly without a shell or termin
   assert.deepEqual(calls[0].args, ["auth", "login"]);
   assert.equal(calls[0].options.shell, false);
   assert.equal(calls[0].options.windowsHide, true);
+  assert.equal(calls[0].options.detached, true);
   stopInstalledRuntimeSignIns();
   assert.deepEqual(calls.at(-1), { signal: "SIGTERM" });
+});
+
+test("runtime sign-in exposes only accepted product engines", () => {
+  assert.equal(installedRuntimeSignInCommand("claude"), "claude auth login");
+  assert.equal(installedRuntimeSignInCommand("codex"), "codex login");
+  for (const runtimeId of [
+    "gemini",
+    "opencode",
+    "copilot",
+    "qwen",
+    "antigravity",
+    "hermes",
+    "amp",
+    "goose",
+    "droid",
+  ]) {
+    assert.equal(installedRuntimeSignInCommand(runtimeId), null);
+  }
+});
+
+test("Codex sign-in uses the resolved executable with fixed argv", () => {
+  const calls = [];
+  const child = {
+    unref() {},
+    once() {},
+    kill() {},
+  };
+  const result = startInstalledRuntimeSignIn(
+    { id: "codex", path: "/safe/codex" },
+    {
+      spawnImpl(command, args, options) {
+        calls.push({ command, args, options });
+        return child;
+      },
+    }
+  );
+
+  assert.equal(result.signInCommand, "codex login");
+  assert.equal(calls[0].command, "/safe/codex");
+  assert.deepEqual(calls[0].args, ["login"]);
+  assert.equal(calls[0].options.shell, false);
+  stopInstalledRuntimeSignIns();
+});
+
+test("Windows sign-in launches a detected npm shim through the same fixed cmd boundary", () => {
+  const calls = [];
+  const comspec = "C:\\Windows\\System32\\cmd.exe";
+  const child = {
+    unref() {},
+    once() {},
+    kill() {},
+  };
+  startInstalledRuntimeSignIn(
+    {
+      id: "codex",
+      path: "C:\\Users\\Taylor Smith\\AppData\\Roaming\\npm\\codex.cmd",
+    },
+    {
+      platform: "win32",
+      env: { COMSPEC: comspec },
+      spawnImpl(command, args, options) {
+        calls.push({ command, args, options });
+        return child;
+      },
+    }
+  );
+
+  assert.equal(calls[0].command, comspec);
+  assert.deepEqual(calls[0].args.slice(0, 4), ["/d", "/s", "/v:off", "/c"]);
+  assert.match(calls[0].args[4], /codex\.cmd/i);
+  assert.equal(calls[0].options.shell, false);
+  assert.equal(calls[0].options.detached, false);
+  assert.equal(calls[0].options.windowsVerbatimArguments, true);
+  stopInstalledRuntimeSignIns();
+});
+
+test("Windows sign-in timeout and explicit stop terminate the whole cmd shim process tree", async () => {
+  const treeCalls = [];
+  let nextPid = 5000;
+  const spawnSyncImpl = (command, args, options) => {
+    treeCalls.push({ command, args, options });
+    return { status: 0 };
+  };
+  const spawnImpl = () => ({
+    pid: nextPid++,
+    unref() {},
+    once() {},
+    kill() {
+      throw new Error("Windows cleanup must use taskkill for the process tree");
+    },
+  });
+  const runtime = {
+    id: "codex",
+    path: "C:\\Users\\Taylor\\AppData\\Roaming\\npm\\codex.cmd",
+  };
+  const options = {
+    platform: "win32",
+    env: { COMSPEC: "C:\\Windows\\System32\\cmd.exe", SystemRoot: "C:\\Windows" },
+    spawnImpl,
+    spawnSyncImpl,
+  };
+
+  startInstalledRuntimeSignIn(runtime, options);
+  stopInstalledRuntimeSignIns();
+  await new Promise((resolve) => setTimeout(resolve, 275));
+
+  startInstalledRuntimeSignIn(runtime, { ...options, timeoutMs: 5 });
+  await new Promise((resolve) => setTimeout(resolve, 275));
+  stopInstalledRuntimeSignIns();
+
+  assert.deepEqual(
+    treeCalls.map(({ command, args, options: callOptions }) => ({
+      command,
+      args,
+      options: callOptions,
+    })),
+    [
+      {
+        command: "C:\\Windows\\System32\\taskkill.exe",
+        args: ["/pid", "5000", "/t", "/f"],
+        options: { shell: false, windowsHide: true, stdio: "ignore" },
+      },
+      {
+        command: "C:\\Windows\\System32\\taskkill.exe",
+        args: ["/pid", "5001", "/t", "/f"],
+        options: { shell: false, windowsHide: true, stdio: "ignore" },
+      },
+    ]
+  );
 });
 
 test("installed runtime selection persists under the active private CareerRat home", () => {
@@ -683,6 +1393,7 @@ test("installed runtime selection persists under the active private CareerRat ho
       runtimeId: null,
       providerFallback: false,
       customCommand: null,
+      verification: null,
     });
     writeInstalledRuntimeSelection({
       repoRoot: root,
@@ -694,7 +1405,25 @@ test("installed runtime selection persists under the active private CareerRat ho
       runtimeId: "codex",
       providerFallback: false,
       customCommand: null,
+      verification: null,
     });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("installed runtime selection rejects adapters that have not passed product acceptance", () => {
+  const root = tempRoot();
+  try {
+    assert.throws(
+      () =>
+        writeInstalledRuntimeSelection({
+          repoRoot: root,
+          env: {},
+          runtimeId: "hermes",
+        }),
+      /unsupported installed AI runtime: hermes/
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -723,7 +1452,7 @@ process.stdin.on("end", () => {
   chmodSync(executablePath, 0o755);
   try {
     const result = await runInstalledRuntime({
-      runtime: { id: "claude", path: executablePath },
+      runtime: verifiedRuntime({ id: "claude", path: executablePath }),
       prompt: "PROMPT_SECRET",
       outputSchema: { type: "object" },
       timeoutMs: 2000,
@@ -760,7 +1489,7 @@ process.stdin.on("end", () => {
   chmodSync(executablePath, 0o755);
   try {
     const result = await runInstalledRuntime({
-      runtime: { id: "codex", path: executablePath },
+      runtime: verifiedRuntime({ id: "codex", path: executablePath }),
       prompt: "classify",
       outputSchema: {
         type: "object",
@@ -788,6 +1517,74 @@ process.stdin.on("end", () => {
   }
 });
 
+test("Codex adapter rejects unconstrained object output instead of silently making it empty-only", async () => {
+  const root = tempRoot();
+  const executablePath = join(root, "codex");
+  executable(executablePath);
+  try {
+    await assert.rejects(
+      runInstalledRuntime({
+        runtime: verifiedRuntime({ id: "codex", path: executablePath }),
+        prompt: "classify",
+        outputSchema: {
+          type: "object",
+          required: ["proposal"],
+          properties: { proposal: { type: "object" } },
+        },
+        timeoutMs: 2000,
+      }),
+      (error) => error?.code === "RUNTIME_OUTPUT_SCHEMA_UNSUPPORTED"
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("ACP adapter runs a staged CareerRat skill through protocol stdin instead of provider argv", async () => {
+  const repoRoot = tempRepoWithOneSkill(
+    "answer-question",
+    "Use only the supplied evidence. Marker: ACP_SKILL_CONTEXT.\n"
+  );
+  let call;
+  let isolatedCwd;
+  try {
+    const result = await runInstalledRuntime({
+      runtime: verifiedRuntime({ id: "hermes", name: "Hermes Agent", path: "/safe/hermes" }),
+      prompt: "Answer the screening question.",
+      skill: "answer-question",
+      repoRoot,
+      tools: ["Skill"],
+      outputSchema: {
+        type: "object",
+        properties: { answer: { type: "string" } },
+        required: ["answer"],
+      },
+      runAcpRuntimeImpl: async (options) => {
+        call = options;
+        isolatedCwd = options.cwd;
+        return {
+          text: '{"answer":"done"}',
+          usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7 },
+          model: null,
+          sessionId: "acp-1",
+          runtimeId: "hermes",
+        };
+      },
+    });
+    assert.equal(result.text, '{"answer":"done"}');
+    assert.equal(result.runtimeId, "hermes");
+    assert.equal(call.runtime.path, "/safe/hermes");
+    assert.deepEqual(call.tools, []);
+    assert.notEqual(call.cwd, repoRoot);
+    assert.match(call.prompt, /ACP_SKILL_CONTEXT/);
+    assert.match(call.prompt, /"required":\["answer"\]/);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+  assert.ok(isolatedCwd);
+  assert.equal(existsSync(isolatedCwd), false);
+});
+
 test("installed runtime failures distinguish nonzero exit, timeout, and cancellation", async () => {
   const root = tempRoot();
   const failedPath = join(root, "failed-claude");
@@ -803,7 +1600,7 @@ test("installed runtime failures distinguish nonzero exit, timeout, and cancella
   try {
     await assert.rejects(
       runInstalledRuntime({
-        runtime: { id: "claude", path: failedPath },
+        runtime: verifiedRuntime({ id: "claude", path: failedPath }),
         prompt: "hello",
         timeoutMs: 2000,
       }),
@@ -815,7 +1612,7 @@ test("installed runtime failures distinguish nonzero exit, timeout, and cancella
 
     await assert.rejects(
       runInstalledRuntime({
-        runtime: { id: "claude", path: hangingPath },
+        runtime: verifiedRuntime({ id: "claude", path: hangingPath }),
         prompt: "hello",
         timeoutMs: 20,
       }),
@@ -826,7 +1623,7 @@ test("installed runtime failures distinguish nonzero exit, timeout, and cancella
     controller.abort();
     await assert.rejects(
       runInstalledRuntime({
-        runtime: { id: "claude", path: hangingPath },
+        runtime: verifiedRuntime({ id: "claude", path: hangingPath }),
         prompt: "hello",
         timeoutMs: 2000,
         signal: controller.signal,
@@ -838,11 +1635,193 @@ test("installed runtime failures distinguish nonzero exit, timeout, and cancella
   }
 });
 
+test("installed runtime cancellation escalates to SIGKILL when the CLI ignores SIGTERM", async () => {
+  function termIgnoringChild(signals) {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = new EventEmitter();
+    child.stdin.end = () => {};
+    child.kill = (signal) => {
+      signals.push(signal);
+      if (signal === "SIGKILL") queueMicrotask(() => child.emit("close", null, "SIGKILL"));
+    };
+    return child;
+  }
+
+  for (const run of [runInstalledRuntime, runInstalledRuntimeStream]) {
+    const signals = [];
+    const controller = new AbortController();
+    const pending = run({
+      runtime: verifiedRuntime({ id: "claude", path: "/safe/claude" }),
+      prompt: "hello",
+      timeoutMs: 2000,
+      signal: controller.signal,
+      spawnImpl: () => termIgnoringChild(signals),
+    });
+
+    controller.abort();
+    await assert.rejects(pending, (error) => error.code === "RUNTIME_CANCELLED");
+    assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+  }
+});
+
+test("installed runtime cancellation stays authoritative when the killed child emits an error", async () => {
+  for (const run of [runInstalledRuntime, runInstalledRuntimeStream]) {
+    const controller = new AbortController();
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = new EventEmitter();
+    child.stdin.end = () => queueMicrotask(() => controller.abort());
+    child.kill = () => {
+      queueMicrotask(() => child.emit("error", new Error("process terminated")));
+      return true;
+    };
+
+    await assert.rejects(
+      run({
+        runtime: verifiedRuntime({ id: "claude", path: "/safe/claude" }),
+        prompt: "hello",
+        timeoutMs: 2000,
+        signal: controller.signal,
+        spawnImpl: () => child,
+      }),
+      (error) => error.code === "RUNTIME_CANCELLED"
+    );
+  }
+});
+
+test("installed runtime cancellation suppresses late output and activity callbacks", async () => {
+  function lateOutputChild(controller, payload) {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = new EventEmitter();
+    child.stdin.end = () => queueMicrotask(() => controller.abort());
+    child.kill = (signal) => {
+      if (signal === "SIGTERM") queueMicrotask(() => child.stdout.emit("data", payload));
+      if (signal === "SIGKILL") queueMicrotask(() => child.emit("close", null, "SIGKILL"));
+      return true;
+    };
+    return child;
+  }
+
+  const oneShotController = new AbortController();
+  const outputEvents = [];
+  await assert.rejects(
+    runInstalledRuntime({
+      runtime: verifiedRuntime({ id: "claude", path: "/safe/claude" }),
+      prompt: "hello",
+      signal: oneShotController.signal,
+      onEvent: (event) => outputEvents.push(event),
+      spawnImpl: () => lateOutputChild(oneShotController, Buffer.from("late")),
+    }),
+    { code: "RUNTIME_CANCELLED" }
+  );
+  assert.deepEqual(outputEvents, []);
+
+  const streamController = new AbortController();
+  const messages = [];
+  const lateResult = Buffer.from(
+    `${JSON.stringify({ type: "result", subtype: "success", result: "late" })}\n`
+  );
+  await assert.rejects(
+    runInstalledRuntimeStream({
+      runtime: verifiedRuntime({ id: "claude", path: "/safe/claude" }),
+      prompt: "hello",
+      signal: streamController.signal,
+      onMessage: (message) => messages.push(message),
+      spawnImpl: () => lateOutputChild(streamController, lateResult),
+    }),
+    { code: "RUNTIME_CANCELLED" }
+  );
+  assert.deepEqual(messages, []);
+
+  const bufferedController = new AbortController();
+  const bufferedMessages = [];
+  const bufferedChild = lateOutputChild(bufferedController, Buffer.alloc(0));
+  bufferedChild.stdin.end = () => {
+    bufferedChild.stdout.emit(
+      "data",
+      Buffer.from(JSON.stringify({ type: "result", subtype: "success", result: "late" }))
+    );
+    bufferedController.abort();
+  };
+  bufferedChild.kill = (signal) => {
+    if (signal === "SIGTERM") queueMicrotask(() => bufferedChild.emit("close", null, "SIGTERM"));
+    return true;
+  };
+  await assert.rejects(
+    runInstalledRuntimeStream({
+      runtime: verifiedRuntime({ id: "claude", path: "/safe/claude" }),
+      prompt: "hello",
+      signal: bufferedController.signal,
+      onMessage: (message) => bufferedMessages.push(message),
+      spawnImpl: () => bufferedChild,
+    }),
+    { code: "RUNTIME_CANCELLED" }
+  );
+  assert.deepEqual(bufferedMessages, []);
+});
+
+test("installed runtime preserves the first stop cause when a later abort races cleanup", async () => {
+  function stoppedChild({ onStart, controller }) {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = new EventEmitter();
+    child.stdin.end = () => onStart(child);
+    child.kill = (signal) => {
+      if (signal === "SIGKILL") queueMicrotask(() => child.emit("close", null, "SIGKILL"));
+      return true;
+    };
+    setTimeout(() => controller.abort(), 30).unref?.();
+    return child;
+  }
+
+  for (const run of [runInstalledRuntime, runInstalledRuntimeStream]) {
+    const timeoutController = new AbortController();
+    await assert.rejects(
+      run({
+        runtime: verifiedRuntime({ id: "claude", path: "/safe/claude" }),
+        prompt: "hello",
+        timeoutMs: 5,
+        signal: timeoutController.signal,
+        spawnImpl: () =>
+          stoppedChild({
+            controller: timeoutController,
+            onStart() {},
+          }),
+      }),
+      (error) => error.code === "RUNTIME_TIMEOUT"
+    );
+
+    const overflowController = new AbortController();
+    await assert.rejects(
+      run({
+        runtime: verifiedRuntime({ id: "claude", path: "/safe/claude" }),
+        prompt: "hello",
+        timeoutMs: 2000,
+        signal: overflowController.signal,
+        spawnImpl: () =>
+          stoppedChild({
+            controller: overflowController,
+            onStart(child) {
+              child.stdout.emit("data", Buffer.alloc(10 * 1024 * 1024 + 1));
+            },
+          }),
+      }),
+      (error) => error.code === "RUNTIME_OUTPUT_LIMIT"
+    );
+  }
+});
+
 test("runInstalledRuntime surfaces a redacted Claude JSON failure from stdout on nonzero exit", async () => {
   const exposedCredential = "sk-ant-api03-should-not-escape";
   await assert.rejects(
     runInstalledRuntime({
-      runtime: { id: "claude", path: "/safe/claude" },
+      runtime: verifiedRuntime({ id: "claude", path: "/safe/claude" }),
       prompt: "hello",
       timeoutMs: 2000,
       spawnImpl: () =>
@@ -986,6 +1965,25 @@ test("probeCustomRuntimeCommand reports ok:false when the process emits an error
   assert.ok(result.error.includes("EACCES"));
 });
 
+test("probeCustomRuntimeCommand routes Windows cmd shims through the fixed launcher", async () => {
+  const calls = [];
+  const result = await probeCustomRuntimeCommand({
+    command: '"C:\\Users\\Taylor Smith\\AppData\\Roaming\\npm\\custom-agent.cmd" --probe',
+    platform: "win32",
+    env: { COMSPEC: "C:\\Windows\\System32\\cmd.exe" },
+    spawnImpl(command, args, options) {
+      calls.push({ command, args, options });
+      return fakeInstalledChild({ stdout: "ack" });
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(calls[0].command, "C:\\Windows\\System32\\cmd.exe");
+  assert.deepEqual(calls[0].args.slice(0, 4), ["/d", "/s", "/v:off", "/c"]);
+  assert.equal(calls[0].options.shell, false);
+  assert.equal(calls[0].options.windowsVerbatimArguments, true);
+});
+
 test("probeCustomRuntimeCommand times out a hanging command using the caller-supplied timeoutMs", async () => {
   const root = tempRoot();
   const hangingPath = join(root, "hanging-custom-agent");
@@ -1050,16 +2048,18 @@ test("buildInstalledRuntimeInvocation: a claude call with a materialized skill t
   assert.equal(withoutSkill.args[noSkillSettings + 1], "");
 });
 
-test("materializeIsolatedSkillCwd: copies exactly the named skill into an isolated .claude/skills/<skill>, nothing else from the project", () => {
+test("materializeIsolatedSkillCwd exposes one canonical skill to Claude and provider-neutral discovery", () => {
   const repoRoot = tempRepoWithOneSkill("research-company", "Trigger word PROBE.\n");
   let isolated;
   try {
     isolated = materializeIsolatedSkillCwd({ repoRoot, skill: "research-company" });
     assert.ok(isolated, "expected an isolated cwd path");
-    const skillMdPath = join(isolated, ".claude", "skills", "research-company", "SKILL.md");
-    assert.ok(existsSync(skillMdPath));
+    const claudeSkill = join(isolated, ".claude", "skills", "research-company", "SKILL.md");
+    const canonicalSkill = join(isolated, ".agents", "skills", "research-company", "SKILL.md");
+    assert.ok(existsSync(claudeSkill));
+    assert.ok(existsSync(canonicalSkill));
+    assert.equal(readFileSync(claudeSkill, "utf8"), readFileSync(canonicalSkill, "utf8"));
     assert.equal(existsSync(join(isolated, "CLAUDE.md")), false);
-    assert.equal(existsSync(join(isolated, ".agents")), false);
   } finally {
     if (isolated) rmSync(isolated, { recursive: true, force: true });
     rmSync(repoRoot, { recursive: true, force: true });
@@ -1126,7 +2126,7 @@ test("runInstalledRuntime scrubs server secrets from a completion-only Claude ch
   const seenEnvs = [];
   try {
     await runInstalledRuntime({
-      runtime: { id: "claude", path: "/safe/claude" },
+      runtime: verifiedRuntime({ id: "claude", path: "/safe/claude" }),
       prompt: "onboard",
       skill: "ingest-profile",
       repoRoot,
@@ -1193,7 +2193,7 @@ process.stdin.on("end", () => {
   let capturedIsolatedCwd = null;
   try {
     const result = await runInstalledRuntime({
-      runtime: { id: "claude", path: executablePath },
+      runtime: verifiedRuntime({ id: "claude", path: executablePath }),
       prompt: "run research-company",
       skill: "research-company",
       repoRoot,
@@ -1252,7 +2252,7 @@ process.stdin.on("end", () => {
   chmodSync(executablePath, 0o755);
   try {
     const result = await runInstalledRuntime({
-      runtime: { id: "claude", path: executablePath },
+      runtime: verifiedRuntime({ id: "claude", path: executablePath }),
       prompt: "run resume-extract",
       skill: "resume-extract",
       repoRoot,
@@ -1281,7 +2281,7 @@ test("runInstalledRuntime rejects broad Glob/Grep tools before spawning Claude",
   try {
     await assert.rejects(
       runInstalledRuntime({
-        runtime: { id: "claude", path: "/safe/claude" },
+        runtime: verifiedRuntime({ id: "claude", path: "/safe/claude" }),
         prompt: "run evaluate-job",
         skill: "evaluate-job",
         repoRoot,
@@ -1322,7 +2322,7 @@ process.stdin.on("end", () => {
   chmodSync(executablePath, 0o755);
   try {
     const result = await runInstalledRuntime({
-      runtime: { id: "claude", path: executablePath },
+      runtime: verifiedRuntime({ id: "claude", path: executablePath }),
       prompt: "no skill given",
       cwd: root,
       timeoutMs: 5000,
@@ -1355,11 +2355,46 @@ process.stdin.on("end", () => {
 // evaluate-job/tailor-application/resume-extract.
 // ---------------------------------------------------------------------------
 
-test("runInstalledRuntime fails closed for a non-claude runtime + the restricted chat tool profile, before any spawn (codex)", async () => {
+test("runInstalledRuntime maps Codex public-web work to supported search and MCP config", async () => {
+  const repoRoot = tempRepoWithOneSkill("research-company");
+  const calls = [];
+  try {
+    const result = await runInstalledRuntime({
+      runtime: verifiedRuntime({ id: "codex", path: "/safe/codex" }),
+      prompt: "research this company",
+      skill: "research-company",
+      repoRoot,
+      cwd: repoRoot,
+      tools: ["WebSearch", "WebFetch", "Skill"],
+      spawnImpl(command, args, options) {
+        calls.push({ command, args, options });
+        return fakeInstalledChild({
+          stdout: ndjson([
+            {
+              type: "item.completed",
+              item: { type: "agent_message", text: "research complete" },
+            },
+            { type: "turn.completed", usage: { input_tokens: 8, output_tokens: 2 } },
+          ]),
+        });
+      },
+    });
+    assert.equal(result.text, "research complete");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].args.includes("--search"), false);
+    assert.ok(calls[0].args.includes('web_search="live"'));
+    assert.ok(calls[0].args.includes("mcp_servers.careerrat_scoped_tools.required=true"));
+    assert.equal(calls[0].options.shell, false);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("runInstalledRuntime fails closed for a runtime without a verified adapter", async () => {
   let spawnCalls = 0;
   await assert.rejects(
     runInstalledRuntime({
-      runtime: { id: "codex", path: "/safe/codex" },
+      runtime: { id: "qwen", path: "/safe/qwen" },
       prompt: "research this company",
       tools: ["WebSearch", "WebFetch", "Skill"],
       spawnImpl: () => {
@@ -1367,26 +2402,35 @@ test("runInstalledRuntime fails closed for a non-claude runtime + the restricted
         throw new Error("spawn must never be reached for an unsupported chat tool profile");
       },
     }),
-    (error) => error.code === RUNTIME_TOOL_PROFILE_UNSUPPORTED && error.runtimeId === "codex"
+    (error) => error.code === "RUNTIME_COMPLETION_UNSUPPORTED" && error.runtimeId === "qwen"
   );
   assert.equal(spawnCalls, 0, "the spawn was invoked despite the guard");
 });
 
-test("runInstalledRuntime fails closed for another non-claude runtime + the restricted chat tool profile (opencode) — proves the guard is general, not codex-specific", async () => {
-  let spawnCalls = 0;
+test("runInstalledRuntime preserves a probe downgrade and rejects web work before execution", async () => {
+  let called = false;
   await assert.rejects(
     runInstalledRuntime({
-      runtime: { id: "opencode", path: "/safe/opencode" },
-      prompt: "research this company",
-      tools: ["WebSearch", "WebFetch", "Skill"],
-      spawnImpl: () => {
-        spawnCalls++;
-        throw new Error("spawn must never be reached for an unsupported chat tool profile");
+      runtime: {
+        id: "hermes",
+        name: "Hermes",
+        path: "/safe/hermes",
+        capabilities: {
+          ...VERIFIED_CAPABILITIES,
+          publicWeb: false,
+        },
+      },
+      prompt: "research",
+      cwd: "/safe/task",
+      tools: ["WebSearch"],
+      runAcpRuntimeImpl: async () => {
+        called = true;
+        return { text: "should not run" };
       },
     }),
-    (error) => error.code === RUNTIME_TOOL_PROFILE_UNSUPPORTED && error.runtimeId === "opencode"
+    (error) => error.code === RUNTIME_TOOL_PROFILE_UNSUPPORTED && error.capability === "publicWeb"
   );
-  assert.equal(spawnCalls, 0, "the spawn was invoked despite the guard");
+  assert.equal(called, false);
 });
 
 test("runInstalledRuntime: claude + the same restricted chat tool profile is unaffected, and still builds --tools/--allowedTools", async () => {
@@ -1394,7 +2438,7 @@ test("runInstalledRuntime: claude + the same restricted chat tool profile is una
   const repoRoot = tempRepoWithOneSkill("research-company");
   try {
     const result = await runInstalledRuntime({
-      runtime: { id: "claude", path: "/safe/claude" },
+      runtime: verifiedRuntime({ id: "claude", path: "/safe/claude" }),
       prompt: "research this company",
       skill: "research-company",
       repoRoot,
@@ -1416,7 +2460,7 @@ test("runInstalledRuntime: claude + the same restricted chat tool profile is una
     const allowed = args[args.indexOf("--allowedTools") + 1];
     assert.match(allowed, /WebSearch/);
     assert.doesNotMatch(allowed, /Skill\(research-company\)/);
-    assert.match(allowed, /mcp__careerrat_public_web__fetch/);
+    assert.match(allowed, /mcp__careerrat_scoped_tools__fetch/);
     assert.doesNotMatch(allowed, /WebFetch/);
     assert.equal(result.text, "ok");
   } finally {
@@ -1424,22 +2468,81 @@ test("runInstalledRuntime: claude + the same restricted chat tool profile is una
   }
 });
 
-test("runInstalledRuntime: codex still rejects a local-read tool profile before spawn", async () => {
-  let spawned = false;
-  await assert.rejects(
-    runInstalledRuntime({
-      runtime: { id: "codex", path: "/safe/codex" },
-      prompt: "evaluate this job",
-      skill: "evaluate-job",
+test("runInstalledRuntime stages one approved upload for Codex exact-read work", async () => {
+  const repoRoot = tempRepoWithOneSkill("resume-extract");
+  const uploadDir = join(repoRoot, "workspace", "intake", "resume-uploads");
+  const upload = join(uploadDir, "resume.pdf");
+  mkdirSync(uploadDir, { recursive: true });
+  writeFileSync(upload, "resume evidence", "utf8");
+  const calls = [];
+  let writtenPrompt = "";
+  try {
+    const result = await runInstalledRuntime({
+      runtime: verifiedRuntime({ id: "codex", path: "/safe/codex" }),
+      prompt: "extract this resume",
+      skill: "resume-extract",
+      repoRoot,
       tools: ["Read", "Skill"],
-      spawnImpl() {
-        spawned = true;
-        return fakeInstalledChild();
+      approvedReadPaths: [upload],
+      spawnImpl(command, args, options) {
+        const stagedUpload = join(options.cwd, "input", "resume.pdf");
+        calls.push({ command, args, options, stagedUpload, staged: existsSync(stagedUpload) });
+        const child = fakeInstalledChild();
+        child.stdin.end = (value) => {
+          writtenPrompt = String(value);
+          queueMicrotask(() => {
+            child.stdout.emit(
+              "data",
+              Buffer.from(
+                ndjson([
+                  {
+                    type: "item.completed",
+                    item: { type: "agent_message", text: "resume extracted" },
+                  },
+                  { type: "turn.completed" },
+                ])
+              )
+            );
+            child.emit("close", 0, null);
+          });
+        };
+        return child;
       },
-    }),
-    { code: RUNTIME_TOOL_PROFILE_UNSUPPORTED }
-  );
-  assert.equal(spawned, false);
+    });
+    assert.equal(result.text, "resume extracted");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].staged, true);
+    assert.match(writtenPrompt, /read_staged_input/);
+    assert.doesNotMatch(writtenPrompt, /input[/\\]resume\.pdf/);
+    assert.equal(calls[0].args.includes("--sandbox"), true);
+    assert.equal(calls[0].args.includes("read-only"), true);
+    for (const feature of ["shell_tool", "unified_exec", "view_image"]) {
+      assert.ok(
+        calls[0].args.some(
+          (arg, index, args) => arg === "--disable" && args[index + 1] === feature
+        ),
+        `Codex exact read must not re-enable ${feature}`
+      );
+    }
+    const overrides = calls[0].args.flatMap((arg, index, args) =>
+      arg === "-c" ? [args[index + 1]] : []
+    );
+    assert.ok(
+      overrides.some((value) => value?.startsWith("mcp_servers.careerrat_scoped_tools.command=")),
+      "Codex exact read must use the scoped CareerRat MCP server"
+    );
+    assert.ok(
+      overrides.includes('mcp_servers.careerrat_scoped_tools.enabled_tools=["read_staged_input"]')
+    );
+    assert.equal(overrides.includes('web_search="live"'), false);
+    assert.equal(
+      overrides.some((value) => value?.includes("--allow-public-web")),
+      false
+    );
+    assert.equal(existsSync(calls[0].options.cwd), false);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
 });
 
 test("runInstalledRuntime treats Skill-only Codex work as an isolated completion", async () => {
@@ -1453,7 +2556,7 @@ test("runInstalledRuntime treats Skill-only Codex work as an isolated completion
   let spawnedCwd = null;
   try {
     const result = await runInstalledRuntime({
-      runtime: { id: "codex", name: "Codex", path: "/safe/codex" },
+      runtime: verifiedRuntime({ id: "codex", name: "Codex", path: "/safe/codex" }),
       prompt: "Draft the answer.",
       skill: "answer-question",
       repoRoot,
@@ -1502,7 +2605,7 @@ test("runInstalledRuntime rejects an unverified completion adapter before spawn"
   let spawned = false;
   await assert.rejects(
     runInstalledRuntime({
-      runtime: { id: "hermes", name: "Hermes Agent", path: "/safe/hermes" },
+      runtime: { id: "qwen", name: "Qwen Code", path: "/safe/qwen" },
       prompt: "Draft an answer.",
       tools: [],
       spawnImpl() {
@@ -1524,13 +2627,60 @@ test("runInstalledRuntime rejects an unverified completion adapter before spawn"
 // parsed line, hermetic — no real CLI spawned.
 // ---------------------------------------------------------------------------
 
-test("supportsInstalledRuntimeStreaming is true only for claude, the sole registry entry with streamingSupported", () => {
-  assert.equal(supportsInstalledRuntimeStreaming("claude"), true);
+test("supportsInstalledRuntimeStreaming follows each adapter's live-activity capability", () => {
+  const liveRuntimes = ["claude", "codex", "hermes", "gemini", "opencode", "copilot"];
+  for (const id of liveRuntimes) assert.equal(supportsInstalledRuntimeStreaming(id), true, id);
   for (const { id } of INSTALLED_RUNTIME_DEFINITIONS) {
-    if (id === "claude") continue;
+    if (liveRuntimes.includes(id)) continue;
     assert.equal(supportsInstalledRuntimeStreaming(id), false, `${id} must not support streaming`);
   }
   assert.equal(supportsInstalledRuntimeStreaming("not-a-real-runtime"), false);
+});
+
+test("runInstalledRuntimeStream routes ACP tool activity through the shared stream contract", async () => {
+  const repoRoot = tempRepoWithOneSkill("research-company");
+  const received = [];
+  let call;
+  try {
+    const result = await runInstalledRuntimeStream({
+      runtime: verifiedRuntime({ id: "opencode", path: "/safe/opencode", name: "OpenCode" }),
+      prompt: "research CareerRat",
+      skill: "research-company",
+      repoRoot,
+      tools: ["WebSearch", "WebFetch", "Skill"],
+      onMessage: (message) => received.push(message),
+      runAcpRuntimeImpl: async (options) => {
+        call = options;
+        options.onMessage({
+          type: "assistant",
+          session_id: "acp-2",
+          message: {
+            content: [
+              {
+                type: "tool_use",
+                id: "search-1",
+                name: "WebSearch",
+                input: { query: "CareerRat" },
+              },
+            ],
+          },
+        });
+        return {
+          text: "Research complete",
+          usage: { inputTokens: 8, outputTokens: 2, totalTokens: 10 },
+          model: null,
+          sessionId: "acp-2",
+          runtimeId: "opencode",
+        };
+      },
+    });
+    assert.equal(result.text, "Research complete");
+    assert.deepEqual(call.tools, ["WebSearch", "WebFetch"]);
+    assert.notEqual(call.cwd, repoRoot);
+    assert.equal(received[0].message.content[0].name, "WebSearch");
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
 });
 
 test("buildInstalledRuntimeInvocation: streaming:true swaps --output-format json for stream-json --verbose on claude only", () => {
@@ -1553,20 +2703,262 @@ test("buildInstalledRuntimeInvocation: streaming:true swaps --output-format json
   assert.equal(nonStreaming.args.includes("--verbose"), false);
 });
 
-test("runInstalledRuntimeStream rejects with RUNTIME_STREAMING_UNSUPPORTED before spawning for a runtime with no streaming mode", async () => {
-  let spawnCalls = 0;
-  await assert.rejects(
-    runInstalledRuntimeStream({
-      runtime: { id: "codex", path: "/safe/codex", name: "Codex" },
-      prompt: "hello",
-      spawnImpl: () => {
-        spawnCalls++;
-        throw new Error("spawn must never be reached for an unsupported streaming runtime");
+test("runInstalledRuntimeStream normalizes Codex activity and resolves its terminal turn", async () => {
+  const received = [];
+  const calls = [];
+  const result = await runInstalledRuntimeStream({
+    runtime: verifiedRuntime({ id: "codex", path: "/safe/codex", name: "Codex" }),
+    prompt: "research CareerRat",
+    tools: ["WebSearch", "WebFetch", "Skill"],
+    onMessage: (message) => received.push(message),
+    spawnImpl(command, args, options) {
+      calls.push({ command, args, options });
+      return fakeStreamingChild({
+        chunks: [
+          ndjson([
+            { type: "thread.started", thread_id: "thread-1" },
+            { type: "turn.started" },
+            {
+              type: "item.started",
+              item: { id: "search-1", type: "web_search", query: "CareerRat" },
+            },
+            {
+              type: "item.completed",
+              item: {
+                id: "search-1",
+                type: "web_search",
+                query: "CareerRat",
+                status: "completed",
+              },
+            },
+            {
+              type: "item.completed",
+              item: { id: "message-1", type: "agent_message", text: "Research complete" },
+            },
+            {
+              type: "turn.completed",
+              usage: { input_tokens: 12, output_tokens: 3 },
+            },
+          ]),
+        ],
+      });
+    },
+  });
+
+  assert.equal(result.text, "Research complete");
+  assert.deepEqual(result.usage, { input_tokens: 12, output_tokens: 3 });
+  assert.equal(result.sessionId, "thread-1");
+  assert.equal(result.runtimeId, "codex");
+  assert.equal(calls[0].args.includes("--search"), false);
+  assert.ok(calls[0].args.includes('web_search="live"'));
+  assert.ok(calls[0].args.includes("mcp_servers.careerrat_scoped_tools.required=true"));
+  assert.deepEqual(received, [
+    {
+      type: "assistant",
+      session_id: "thread-1",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            id: "search-1",
+            name: "WebSearch",
+            input: { query: "CareerRat" },
+          },
+        ],
       },
-    }),
-    (error) => error.code === RUNTIME_STREAMING_UNSUPPORTED && error.runtimeId === "codex"
-  );
-  assert.equal(spawnCalls, 0, "the spawn was invoked despite the capability gate");
+    },
+    {
+      type: "user",
+      session_id: "thread-1",
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "search-1",
+            content: "Search completed for CareerRat",
+            is_error: false,
+          },
+        ],
+      },
+    },
+  ]);
+});
+
+test("runInstalledRuntimeStream normalizes Codex CareerRat fetch activity", async () => {
+  const received = [];
+  const result = await runInstalledRuntimeStream({
+    runtime: verifiedRuntime({ id: "codex", path: "/safe/codex", name: "Codex" }),
+    prompt: "fetch CareerRat",
+    tools: ["WebFetch"],
+    onMessage: (message) => received.push(message),
+    spawnImpl() {
+      return fakeStreamingChild({
+        chunks: [
+          ndjson([
+            { type: "thread.started", thread_id: "thread-fetch" },
+            {
+              type: "item.started",
+              item: {
+                id: "fetch-1",
+                type: "mcp_tool_call",
+                server: "careerrat_scoped_tools",
+                tool: "fetch",
+                arguments: { url: "https://example.com/job" },
+                result: null,
+                error: null,
+                status: "in_progress",
+              },
+            },
+            {
+              type: "item.completed",
+              item: {
+                id: "fetch-1",
+                type: "mcp_tool_call",
+                server: "careerrat_scoped_tools",
+                tool: "fetch",
+                arguments: { url: "https://example.com/job" },
+                result: { content: [{ type: "text", text: "large page body omitted" }] },
+                error: null,
+                status: "completed",
+              },
+            },
+            {
+              type: "item.completed",
+              item: { id: "message-1", type: "agent_message", text: "Fetched" },
+            },
+            { type: "turn.completed" },
+          ]),
+        ],
+      });
+    },
+  });
+
+  assert.equal(result.text, "Fetched");
+  assert.deepEqual(received, [
+    {
+      type: "assistant",
+      session_id: "thread-fetch",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            id: "fetch-1",
+            name: "WebFetch",
+            input: { url: "https://example.com/job" },
+          },
+        ],
+      },
+    },
+    {
+      type: "user",
+      session_id: "thread-fetch",
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "fetch-1",
+            content: "Fetched https://example.com/job",
+            is_error: false,
+          },
+        ],
+      },
+    },
+  ]);
+});
+
+test("runInstalledRuntimeStream gives Codex only the selected CareerRat skill workspace", async () => {
+  const repoRoot = tempRepoWithOneSkill("research-company", "Marker: CODEX_SKILL_SCOPE.\n");
+  let spawnedCwd = null;
+  let spawnedCanonical = null;
+  let skillVisible = false;
+  let receivedPrompt = null;
+  try {
+    const result = await runInstalledRuntimeStream({
+      runtime: verifiedRuntime({ id: "codex", path: "/safe/codex", name: "Codex" }),
+      prompt: "research CareerRat",
+      skill: "research-company",
+      repoRoot,
+      cwd: repoRoot,
+      tools: ["WebSearch", "WebFetch", "Skill"],
+      spawnImpl(_command, _args, options) {
+        spawnedCwd = options.cwd;
+        spawnedCanonical = realpathSync(options.cwd);
+        skillVisible = existsSync(
+          join(options.cwd, ".agents", "skills", "research-company", "SKILL.md")
+        );
+        const child = fakeStreamingChild({
+          chunks: [
+            ndjson([
+              { type: "thread.started", thread_id: "thread-scope" },
+              {
+                type: "item.completed",
+                item: { id: "message-1", type: "agent_message", text: "Scoped" },
+              },
+              { type: "turn.completed" },
+            ]),
+          ],
+        });
+        const end = child.stdin.end;
+        child.stdin.end = (value) => {
+          receivedPrompt = String(value || "");
+          end.call(child.stdin, value);
+        };
+        return child;
+      },
+    });
+    assert.equal(result.text, "Scoped");
+    assert.notEqual(spawnedCanonical, realpathSync(repoRoot));
+    assert.equal(skillVisible, true);
+    assert.match(receivedPrompt, /CODEX_SKILL_SCOPE/);
+  } finally {
+    assert.equal(spawnedCwd ? existsSync(spawnedCwd) : null, false);
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("runInstalledRuntimeStream tells Codex to use its staged-read tool", async () => {
+  const repoRoot = tempRepoWithOneSkill("resume-extract", "Marker: CODEX_READ_SCOPE.\n");
+  const uploadDir = join(repoRoot, "workspace", "intake", "resume-uploads");
+  const upload = join(uploadDir, "resume.pdf");
+  mkdirSync(uploadDir, { recursive: true });
+  writeFileSync(upload, "resume", "utf8");
+  let receivedPrompt = null;
+  try {
+    const result = await runInstalledRuntimeStream({
+      runtime: verifiedRuntime({ id: "codex", path: "/safe/codex", name: "Codex" }),
+      prompt: "extract this resume",
+      skill: "resume-extract",
+      repoRoot,
+      cwd: repoRoot,
+      tools: ["Read", "Skill"],
+      approvedReadPaths: [upload],
+      spawnImpl() {
+        const child = fakeStreamingChild({
+          chunks: [
+            ndjson([
+              { type: "thread.started", thread_id: "thread-read" },
+              {
+                type: "item.completed",
+                item: { id: "message-1", type: "agent_message", text: "Read" },
+              },
+              { type: "turn.completed" },
+            ]),
+          ],
+        });
+        const end = child.stdin.end;
+        child.stdin.end = (value) => {
+          receivedPrompt = String(value || "");
+          end.call(child.stdin, value);
+        };
+        return child;
+      },
+    });
+    assert.equal(result.text, "Read");
+    assert.match(receivedPrompt, /CODEX_READ_SCOPE/);
+    assert.match(receivedPrompt, /read_staged_input/);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
 });
 
 test("runInstalledRuntimeStream re-verifies Claude's boundary version before a chat spawn", async () => {
@@ -1575,7 +2967,7 @@ test("runInstalledRuntimeStream re-verifies Claude's boundary version before a c
   try {
     await assert.rejects(
       runInstalledRuntimeStream({
-        runtime: { id: "claude", name: "Claude Code", path: "/safe/claude" },
+        runtime: verifiedRuntime({ id: "claude", name: "Claude Code", path: "/safe/claude" }),
         prompt: "research",
         skill: "research-company",
         repoRoot,
@@ -1613,7 +3005,7 @@ test("runInstalledRuntimeStream: a text-only turn calls onMessage once per NDJSO
   ];
   const received = [];
   const result = await runInstalledRuntimeStream({
-    runtime: { id: "claude", path: "/safe/claude" },
+    runtime: verifiedRuntime({ id: "claude", path: "/safe/claude" }),
     prompt: "hi",
     timeoutMs: 2000,
     onMessage: (message) => received.push(message),
@@ -1648,7 +3040,7 @@ test("runInstalledRuntimeStream scrubs server secrets while retaining HOME-based
   };
   try {
     await runInstalledRuntimeStream({
-      runtime: { id: "claude", path: "/safe/claude" },
+      runtime: verifiedRuntime({ id: "claude", path: "/safe/claude" }),
       prompt: "onboard",
       skill: "ingest-profile",
       repoRoot,
@@ -1723,7 +3115,7 @@ test("runInstalledRuntimeStream: a turn with two tool calls (one isError result)
   ];
   const received = [];
   const result = await runInstalledRuntimeStream({
-    runtime: { id: "claude", path: "/safe/claude" },
+    runtime: verifiedRuntime({ id: "claude", path: "/safe/claude" }),
     prompt: "research this",
     timeoutMs: 2000,
     onMessage: (message) => received.push(message),
@@ -1761,7 +3153,7 @@ test("runInstalledRuntimeStream buffers a JSON object split across two stdout ch
   const chunks = [whole.slice(0, splitPoint), whole.slice(splitPoint)];
   const received = [];
   const result = await runInstalledRuntimeStream({
-    runtime: { id: "claude", path: "/safe/claude" },
+    runtime: verifiedRuntime({ id: "claude", path: "/safe/claude" }),
     prompt: "hi",
     timeoutMs: 2000,
     onMessage: (message) => received.push(message),
@@ -1782,7 +3174,7 @@ test("runInstalledRuntimeStream skips a malformed line mid-stream without crashi
   ];
   const received = [];
   const result = await runInstalledRuntimeStream({
-    runtime: { id: "claude", path: "/safe/claude" },
+    runtime: verifiedRuntime({ id: "claude", path: "/safe/claude" }),
     prompt: "hi",
     timeoutMs: 2000,
     onMessage: (message) => received.push(message),
@@ -1795,7 +3187,7 @@ test("runInstalledRuntimeStream skips a malformed line mid-stream without crashi
 test("runInstalledRuntimeStream rejects with RUNTIME_EXIT on a nonzero exit, same shape as runInstalledRuntime", async () => {
   await assert.rejects(
     runInstalledRuntimeStream({
-      runtime: { id: "claude", path: "/safe/claude" },
+      runtime: verifiedRuntime({ id: "claude", path: "/safe/claude" }),
       prompt: "hi",
       timeoutMs: 2000,
       spawnImpl: () =>
@@ -1815,7 +3207,7 @@ test("runInstalledRuntimeStream rejects with RUNTIME_EXIT on a nonzero exit, sam
 test("runInstalledRuntimeStream rejects with RUNTIME_RESULT_MISSING when the process exits 0 with no terminal result line", async () => {
   await assert.rejects(
     runInstalledRuntimeStream({
-      runtime: { id: "claude", path: "/safe/claude" },
+      runtime: verifiedRuntime({ id: "claude", path: "/safe/claude" }),
       prompt: "hi",
       timeoutMs: 2000,
       spawnImpl: () =>

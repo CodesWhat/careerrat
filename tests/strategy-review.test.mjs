@@ -453,19 +453,42 @@ test("draftStrategyReview passes through a schema-shaped AI recommendation set a
     env: {},
     force: true,
     now: new Date("2026-08-15T12:00:00.000Z"),
-    runAI: async () => ({
-      body: {
-        ok: true,
-        ai: { engine: { id: "claude", label: "Claude Code" } },
-        data: {
-          headline: "Ten candidate recommendations, capped at eight.",
-          findings: [
-            { id: "f1", title: "Remote-first roles convert best", evidence: "4 of 5 advanced." },
-          ],
-          recommendations,
+    runAI: async ({ schema }) => {
+      const proposalSchema = schema.properties.recommendations.items.properties.proposal;
+      assert.equal(proposalSchema.additionalProperties, false);
+      assert.deepEqual(Object.keys(proposalSchema.properties).sort(), [
+        "amount",
+        "body",
+        "company",
+        "family",
+        "id",
+        "ids",
+        "patch",
+        "priority",
+        "signal",
+        "text",
+        "title",
+        "toStatus",
+      ]);
+      assert.deepEqual(Object.keys(proposalSchema.properties.patch.properties).sort(), [
+        "fit_floor",
+        "high_min",
+        "med_min",
+      ]);
+      return {
+        body: {
+          ok: true,
+          ai: { engine: { id: "claude", label: "Claude Code" } },
+          data: {
+            headline: "Ten candidate recommendations, capped at eight.",
+            findings: [
+              { id: "f1", title: "Remote-first roles convert best", evidence: "4 of 5 advanced." },
+            ],
+            recommendations,
+          },
         },
-      },
-    }),
+      };
+    },
   });
 
   assert.equal(draft.state, "drafted");

@@ -441,7 +441,7 @@ describe("ChatFirstWorkspace", () => {
     expect(html).toContain('data-slot="context"');
   });
 
-  it("keeps selected conversation rows pure ink with no glow or focus surround", () => {
+  it("keeps selected conversation rows neutral gray with no glow or focus surround", () => {
     const foundation = readFileSync(
       fileURLToPath(new URL("./app-foundation.css", import.meta.url)),
       "utf8"
@@ -473,7 +473,8 @@ describe("ChatFirstWorkspace", () => {
     const profileTab =
       profile.match(/\.cf-profile__tabs button\[aria-current="page"\]\s*\{([^}]*)\}/)?.[1] || "";
 
-    expect(foundation).toMatch(/--cf-selection-fill:\s*var\(--ink\)/);
+    expect(foundation).toMatch(/--gray-selected:\s*#474a4f/);
+    expect(foundation).toMatch(/--cf-selection-fill:\s*var\(--gray-selected\)/);
     expect(foundation).toMatch(/--cf-selection-foreground:\s*var\(--paper\)/);
     expect(foundation).toMatch(/--cf-selection-border:\s*0/);
     expect(foundation).toMatch(/--cf-selection-outline:\s*0/);
@@ -567,6 +568,26 @@ describe("ChatFirstWorkspace", () => {
     expect(css).toMatch(
       /\.chat-first-needs \.chat-first-pill--outline\s*\{[^}]*padding:\s*5px 13px[^}]*border-color:\s*var\(--line-warm\)/s
     );
+  });
+
+  it("right-aligns the collapsed Needs You actions", () => {
+    const css = readFileSync(fileURLToPath(new URL("./chat-first.css", import.meta.url)), "utf8");
+    const actionsRule = css.match(/\.chat-first-need-card__actions\s*\{([^}]*)\}/)?.[1] || "";
+
+    expect(actionsRule).toMatch(/justify-content:\s*flex-end/);
+  });
+
+  it("gives the Go Deeper pickaxe the same small palette badge as its thread", () => {
+    const html = markup(<NeedsYouPanel />);
+    const css = readFileSync(fileURLToPath(new URL("./chat-first.css", import.meta.url)), "utf8");
+    const iconRule = css.match(/\.chat-first-deep-card__icon-badge svg\s*\{([^}]*)\}/)?.[1] || "";
+
+    expect(html).toContain(
+      'class="chat-first-thread-card__icon-badge chat-first-thread-card__icon-badge--lime chat-first-deep-card__icon-badge"'
+    );
+    expect(html).toMatch(/chat-first-deep-card__icon-badge[^>]*><svg[^>]*data-icon="pickaxe"/);
+    expect(iconRule).toMatch(/width:\s*14px/);
+    expect(iconRule).toMatch(/height:\s*14px/);
   });
 
   it("leaves component-owned control colors out of the global button reset", () => {

@@ -142,10 +142,17 @@ export function firstSearchStatus(state) {
   return firstSearchRun?.run?.status ?? firstSearchRun?.status ?? "not_started";
 }
 
+export function firstSearchInputsChanged(state) {
+  const firstSearchRun =
+    state?.data?.sourcing?.firstSearchRun ?? state?.sourcing?.firstSearchRun ?? null;
+  return firstSearchRun?.inputsChanged === true;
+}
+
 export function setupCanGraduate(state) {
   return (
     setupIsComplete(state) &&
     deterministicSourceCount(state) > 0 &&
+    !firstSearchInputsChanged(state) &&
     ["running", "completed"].includes(firstSearchStatus(state))
   );
 }

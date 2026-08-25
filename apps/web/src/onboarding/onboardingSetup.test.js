@@ -12,6 +12,7 @@ import {
   detailLineFor,
   engineDetailLine,
   evidenceDetailLine,
+  firstSearchInputsChanged,
   guardrailsDetailLine,
   quickFactsDetailLine,
   resumeDetailLine,
@@ -196,6 +197,25 @@ describe("setupCanGraduate", () => {
       ).toBe(true);
     }
   );
+
+  it("keeps onboarding active when completed search inputs changed", () => {
+    const state = {
+      ...completedCandidate,
+      data: {
+        ...completedCandidate.data,
+        sourcing: {
+          sourceSetup: { deterministicSources: { attempted: 2 } },
+          firstSearchRun: {
+            status: "completed",
+            inputsChanged: true,
+            run: { status: "completed" },
+          },
+        },
+      },
+    };
+    expect(firstSearchInputsChanged(state)).toBe(true);
+    expect(setupCanGraduate(state)).toBe(false);
+  });
 
   it("does not graduate a failed or explicitly paused search setup", () => {
     for (const status of ["failed", "paused"]) {

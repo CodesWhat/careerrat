@@ -8,6 +8,7 @@
   "properties": {
     "roles": {
       "type": "array",
+      "maxItems": 40,
       "items": {
         "type": "object",
         "required": [

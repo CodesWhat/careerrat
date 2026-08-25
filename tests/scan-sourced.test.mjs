@@ -235,6 +235,180 @@ test("runSourcedScan returns the documented summary shape from a stubbed fetch",
   }
 });
 
+test("partial-offer hydration uses a bounded worker pool and preserves output order", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    const companies = Array.from({ length: 9 }, (_, index) => `Company ${index}`);
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: companies.map((company, index) => ({
+          provider: "Remote Vibe Coding Jobs",
+          source_type: "rss",
+          label: `Remote Vibe Coding Jobs ${company} feed`,
+          rssUrl: `https://example.test/jobs-${index}.xml`,
+          enabled: true,
+        })),
+      },
+    });
+    let active = 0;
+    let maxActive = 0;
+    let hydrated = 0;
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: false,
+      fetchImpl: async (url) => {
+        const index = Number(String(url).match(/jobs-(\d+)\.xml/)?.[1]);
+        return rssResponse({
+          company: companies[index],
+          title: `Staff Platform Engineer ${index}`,
+          url: `https://jobs.example.test/role-${index}`,
+        });
+      },
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      hydrateOfferImpl: async (offer) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        active -= 1;
+        hydrated += 1;
+        return { ...offer, bodyText: `Full body for ${offer.company}`, bodyPartial: false };
+      },
+    });
+
+    assert.equal(summary.new, 9);
+    assert.equal(hydrated, 9);
+    assert.ok(maxActive <= 4, `expected at most four hydrations, saw ${maxActive}`);
+    assert.deepEqual(
+      summary.offers.map(({ company }) => company),
+      companies
+    );
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("the presentation limit is applied before expensive partial-offer hydration", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    const companies = Array.from({ length: 8 }, (_, index) => `Limited ${index}`);
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: companies.map((company, index) => ({
+          provider: "Remote Vibe Coding Jobs",
+          source_type: "rss",
+          label: `Remote Vibe Coding Jobs ${company} feed`,
+          rssUrl: `https://example.test/limited-${index}.xml`,
+          enabled: true,
+        })),
+      },
+    });
+    let hydrated = 0;
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: false,
+      limit: 3,
+      fetchImpl: async (url) => {
+        const index = Number(String(url).match(/limited-(\d+)\.xml/)?.[1]);
+        return rssResponse({
+          company: companies[index],
+          title: `Staff Platform Engineer ${index}`,
+          url: `https://jobs.example.test/limited-role-${index}`,
+        });
+      },
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      hydrateOfferImpl: async (offer) => {
+        hydrated += 1;
+        return { ...offer, bodyText: "Full role body", bodyPartial: false };
+      },
+    });
+
+    assert.equal(summary.new, 3);
+    assert.equal(summary.overflow, 5);
+    assert.equal(hydrated, 3);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("false-zero summaries split title blockers from relevance and bound safe rejection samples", async () => {
+  const repoRoot = tempRepo();
+  const rejected = [
+    "Sales Engineer",
+    "Finance Manager",
+    "Account Executive",
+    "Product Marketing Manager",
+    "Registered Nurse",
+    "Data Scientist",
+  ];
+  try {
+    const configPath = writeSourcedScanConfig(repoRoot, {
+      title_filter: { positive: ["Staff Platform Engineer"], negative: ["Sales"] },
+    });
+    const summary = await runSourcedScan({
+      repoRoot,
+      configPath,
+      write: false,
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify(
+            rejected.map((title, index) => ({
+              text: title,
+              hostedUrl: `https://jobs.lever.co/acme/rejected-${index}`,
+              categories: { location: "Remote - US" },
+              descriptionPlain: `PRIVATE-CANDIDATE-DATA ${"full body ".repeat(200)}`,
+            }))
+          ),
+          { status: 200 }
+        ),
+    });
+
+    assert.equal(summary.new, 0);
+    assert.equal(summary.reasonCounts.title, 6);
+    assert.equal(summary.reasonCounts.titleBlocker, 1);
+    assert.equal(summary.reasonCounts.titleRelevance, 5);
+    assert.deepEqual(Object.keys(summary.rejectionSamples), [
+      "title",
+      "seniority",
+      "location",
+      "age",
+      "salary",
+      "eligibility",
+      "duplicate",
+      "invalid",
+      "expired",
+      "overflow",
+    ]);
+    assert.equal(summary.rejectionSamples.title.length, 3);
+    assert.deepEqual(
+      summary.rejectionSamples.title.map((sample) => sample.kind),
+      ["blocker", "relevance", "relevance"]
+    );
+    assert.ok(
+      summary.rejectionSamples.title.every(
+        (sample) =>
+          typeof sample.company === "string" &&
+          typeof sample.title === "string" &&
+          typeof sample.location === "string" &&
+          typeof sample.reason === "string" &&
+          !("url" in sample) &&
+          !("bodyText" in sample) &&
+          !("description" in sample)
+      )
+    );
+    assert.doesNotMatch(JSON.stringify(summary.rejectionSamples), /PRIVATE-CANDIDATE-DATA/);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("write:true captures JD artifacts without writing generated scan-result files", async () => {
   const repoRoot = tempRepo();
   try {
@@ -488,7 +662,7 @@ test("DB mode write:true persists scan offers through sourcedUpsertBatch and exp
   }
 });
 
-test("DB mode exposes the first company batch before a later company finishes", async () => {
+test("DB mode waits for every source before persisting the globally ranked result", async () => {
   const repoRoot = tempRepo();
   const betaResponse = deferred();
   const betaRequested = deferred();
@@ -534,17 +708,18 @@ test("DB mode exposes the first company batch before a later company finishes", 
       .map((row) => JSON.parse(row.data));
     assert.deepEqual(
       midScanRows.map((row) => row.company),
-      ["Acme"],
-      "the first completed company must already be visible while the second fetch is pending"
+      [],
+      "no early source may persist before the global qualification and ranking pass"
     );
 
-    const tracker = JSON.parse(
-      readFileSync(userPath({ repoRoot }, "workspace/tracker.json"), "utf8")
-    );
-    assert.deepEqual(
-      tracker.sourced.map((row) => row.company),
-      ["Acme"]
-    );
+    const trackerPath = userPath({ repoRoot }, "workspace/tracker.json");
+    if (existsSync(trackerPath)) {
+      const tracker = JSON.parse(readFileSync(trackerPath, "utf8"));
+      assert.deepEqual(
+        tracker.sourced.map((row) => row.company),
+        []
+      );
+    }
 
     betaResponse.resolve(
       leverResponse({
@@ -566,7 +741,54 @@ test("DB mode exposes the first company batch before a later company finishes", 
   }
 });
 
-test("incremental company batches preserve cross-batch dedup and final batch summary parity", async () => {
+test("global same-run dedupe selects the richer cross-source copy regardless of source order", async () => {
+  const repoRoot = tempRepo();
+  const weak = { name: "Acme", careers_url: "https://jobs.lever.co/weak" };
+  const rich = { name: "Acme", careers_url: "https://jobs.lever.co/rich" };
+  try {
+    const fetchImpl = async (url) => {
+      const isRich = String(url).includes("/rich");
+      return new Response(
+        JSON.stringify([
+          {
+            text: "Staff Platform Engineer",
+            hostedUrl: `https://jobs.lever.co/acme/canonical${isRich ? "" : "?source=preview"}`,
+            categories: { location: "Remote - US" },
+            descriptionPlain: isRich
+              ? "Own a distributed platform and mentor engineers. ".repeat(20)
+              : "Short preview.",
+            ...(isRich ? { salaryRange: "$210,000 - $250,000" } : {}),
+          },
+        ]),
+        { status: 200 }
+      );
+    };
+
+    for (const trackedCompanies of [
+      [weak, rich],
+      [rich, weak],
+    ]) {
+      const configPath = writeSourcedScanConfig(repoRoot, { tracked_companies: trackedCompanies });
+      const summary = await runSourcedScan({
+        repoRoot,
+        configPath,
+        fetchImpl,
+        write: false,
+      });
+
+      assert.equal(summary.new, 1);
+      assert.equal(summary.duplicates, 1);
+      assert.deepEqual(
+        summary.offers.map((offer) => offer.url),
+        ["https://jobs.lever.co/acme/canonical"]
+      );
+    }
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("global collection preserves cross-source dedupe and final summary parity", async () => {
   const repoRoot = tempRepo();
   try {
     candidateSetupInitialize({ repoRoot });
@@ -649,7 +871,7 @@ test("incremental company batches preserve cross-batch dedup and final batch sum
         errors: [],
         offers: [{ company: "Acme", title: "Applied AI Engineer", url: sharedUrl }],
       },
-      "the ordered incremental result must match the former whole-scan filter/dedup result"
+      "the collected result must match a whole-scan filter/dedup pass"
     );
 
     const db = openDb({ repoRoot });
@@ -769,6 +991,10 @@ test("DB RSS scan replaces a feed preview with the canonical ATS job body before
   const repoRoot = tempRepo();
   const aggregatorUrl = "https://remotevibecodingjobs.com/jobs/acme-staff-engineer";
   const atsUrl = "https://job-boards.greenhouse.io/acme/jobs/123456";
+  const canonicalEnding =
+    "Final responsibility: preserve this complete sentence in the local job capture.";
+  const canonicalBody = `${"Complete canonical job description with platform ownership. ".repeat(90)}${canonicalEnding}`;
+  assert.ok(canonicalBody.length > 4000);
   try {
     candidateSetupInitialize({ repoRoot });
     sourceConfigPut({
@@ -806,7 +1032,7 @@ test("DB RSS scan replaces a feed preview with the canonical ATS job body before
                 title: "Staff Engineer",
                 absolute_url: atsUrl,
                 location: { name: "United States (Remote)" },
-                content: `<p>${"Complete canonical job description. ".repeat(30)}</p>`,
+                content: `<p>${canonicalBody}</p>`,
               },
             ],
           }),
@@ -830,6 +1056,7 @@ test("DB RSS scan replaces a feed preview with the canonical ATS job body before
     const jdText = readFileSync(userPath({ repoRoot }, summary.offers[0].artifacts.jd), "utf8");
     assert.match(jdText, /partial: false/);
     assert.match(jdText, /Complete canonical job description/);
+    assert.match(jdText, new RegExp(canonicalEnding.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     const frontmatterEnd = jdText.indexOf("\n---", 4);
     const frontmatter = parseYaml(jdText.slice(4, frontmatterEnd));
     assert.equal(frontmatter.source, atsUrl);
@@ -839,7 +1066,7 @@ test("DB RSS scan replaces a feed preview with the canonical ATS job body before
   }
 });
 
-test("search-source watermarks advance only after each source finishes", async () => {
+test("search-source watermarks wait until the full scan is durably persisted", async () => {
   const repoRoot = tempRepo();
   const secondResponse = deferred();
   const secondRequested = deferred();
@@ -894,7 +1121,11 @@ test("search-source watermarks advance only after each source finishes", async (
     await secondRequested.promise;
 
     const midScan = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
-    assert.match(midScan.searches[0].recency.lastRunAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(
+      midScan.searches[0].recency.lastRunAt,
+      undefined,
+      "a fetched source must not advance before the run's offers are durable"
+    );
     assert.equal(
       midScan.searches[1].recency.lastRunAt,
       undefined,
@@ -916,6 +1147,99 @@ test("search-source watermarks advance only after each source finishes", async (
     assert.match(completed.searches[1].recency.lastRunAt, /^\d{4}-\d{2}-\d{2}T/);
   } finally {
     secondResponse.resolve(new Response("", { status: 200 }));
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("a post-fetch failure leaves the source watermark and sourced rows untouched", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({ repoRoot, name: "search-sources", data: searchSourcesFixture() });
+    let activeChecks = 0;
+
+    await assert.rejects(
+      runSourcedScan({
+        repoRoot,
+        write: true,
+        fetchImpl: rssFetchStub(),
+        resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+        assertActive: () => {
+          activeChecks += 1;
+          if (activeChecks === 4) throw new Error("cancelled after fetch");
+        },
+      }),
+      /cancelled after fetch/
+    );
+
+    const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    assert.equal(
+      stored.searches[0].recency.lastRunAt,
+      undefined,
+      "a failed run must retry the fetched interval"
+    );
+    assert.equal(
+      openDb({ repoRoot }).prepare("SELECT COUNT(*) AS count FROM sourced").get().count,
+      0
+    );
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("a successful no-op source advances while a failed sibling remains retryable", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            label: "Empty RSS",
+            source_type: "rss",
+            rssUrl: "https://example.test/empty.xml",
+            enabled: true,
+            recency: { mode: "since-last-run" },
+          },
+          {
+            label: "Broken RSS",
+            source_type: "rss",
+            rssUrl: "https://example.test/broken.xml",
+            enabled: true,
+            recency: { mode: "since-last-run" },
+          },
+        ],
+      },
+    });
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: true,
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      fetchImpl: async (url) => {
+        if (String(url).endsWith("/empty.xml")) {
+          return new Response("<rss><channel><title>No current roles</title></channel></rss>", {
+            status: 200,
+          });
+        }
+        throw new Error("provider unavailable");
+      },
+    });
+
+    assert.equal(summary.new, 0);
+    assert.equal(summary.errors.length, 1);
+    const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    assert.match(stored.searches[0].recency.lastRunAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(stored.searches[1].recency.lastRunAt, undefined);
+    assert.equal(
+      openDb({ repoRoot }).prepare("SELECT COUNT(*) AS count FROM sourced").get().count,
+      0
+    );
+  } finally {
     closeAll();
     rmSync(repoRoot, { recursive: true, force: true });
   }

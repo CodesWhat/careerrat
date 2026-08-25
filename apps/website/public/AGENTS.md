@@ -11,13 +11,14 @@
 
 A chat-first, local-first job-search tracker. It helps one person rate, apply to, and track
 roles — from their own data, on their own machine, driven by their own AI agent (you). It
-isn't a site you log into; it's a set of skills you run locally. No cloud, no account, no
-telemetry. Free to self-host, MIT licensed, zero runtime dependencies.
+isn't a site you log into; it's a set of skills you run locally. There is no CareerRat account
+or hosted candidate database. Workspace state stays local, the selected CLI uses its provider,
+and the local app has no telemetry. CareerRat is free to self-host and MIT licensed.
 
 ## Requirements
 
 - Node.js >= 24
-- A coding-agent CLI on PATH — Claude Code or Codex (CareerRat runs *through* you):
+- A supported coding-agent CLI on PATH, Claude Code or Codex (CareerRat runs *through* you):
   - Claude Code: `npm install -g @anthropic-ai/claude-code` (<https://claude.com/claude-code>)
   - Codex: `npm install -g @openai/codex` (<https://github.com/openai/codex>)
 
@@ -54,11 +55,13 @@ This file only gets you to the front door — don't improvise procedures it cove
 
 ## The skills
 
-`apply-job` · `calendar-sync` · `company-health` · `configure` · `discover-companies` ·
-`email-comms` · `evaluate-job` · `ingest-mail` · `ingest-messages` · `ingest-profile` ·
-`interview-prep` · `optimize-linkedin` · `reevaluate-strategy` · `relationship-sourcing` ·
-`research-boards` · `research-comp` · `research-company` · `schedule-meeting` ·
-`search-jobs` · `setup-searches` · `sync-status` · `tailor-application` · `track-outcomes`
+`answer-question` · `apply-job` · `calendar-sync` · `coach-gaps` · `company-health` ·
+`configure` · `discover-companies` · `email-comms` · `evaluate-job` · `ingest-mail` ·
+`ingest-messages` · `ingest-profile` · `intake-extract` · `interview-prep` ·
+`optimize-linkedin` · `reevaluate-strategy` · `relationship-sourcing` · `report-issue` ·
+`research-boards` · `research-comp` · `research-company` · `resume-extract` ·
+`schedule-meeting` · `search-jobs` · `setup-searches` · `sync-status` ·
+`tailor-application` · `track-outcomes`
 
 ## Rules — read before acting for the user
 
@@ -67,16 +70,15 @@ This file only gets you to the front door — don't improvise procedures it cove
 - **ASK before** sending any outbound message (email, LinkedIn) on the user's behalf.
 - **ALWAYS run the owning skill** instead of improvising — skills are the how-to, AGENTS.md
   is the contract.
-- The user's data **stays on their machine**. Never upload a resume, evidence, or tracker
-  data anywhere.
+- Candidate state stays in the local workspace. When a workflow invokes the selected CLI,
+  send only the context it needs and follow the documented provider and privacy boundary.
 
 ## Tool notes
 
 - **Claude Code** reads `CLAUDE.md`, not `AGENTS.md`. If you saved this file locally, add
   `@AGENTS.md` to the top of your `CLAUDE.md` so it gets ingested. Once CareerRat is
   installed, its repo already wires `CLAUDE.md → AGENTS.md` for you.
-- **Codex, Cursor, Gemini CLI, VS Code** read `AGENTS.md` directly (VS Code needs the
-  `chat.useAgentsMdFile` setting enabled).
+- **Codex** reads `AGENTS.md` directly.
 
 ## Keeping current
 

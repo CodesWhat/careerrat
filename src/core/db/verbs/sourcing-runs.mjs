@@ -12,6 +12,7 @@ export const SOURCING_RUN_STATUSES = Object.freeze({
 
 const PURPOSES = new Set(["first-search", "manual-search", "ai-web-search"]);
 const TERMINAL_STATUSES = new Set([SOURCING_RUN_STATUSES.COMPLETED, SOURCING_RUN_STATUSES.FAILED]);
+const SOURCING_RUN_LEASE_MS = 10 * 60 * 1000;
 
 function clone(value) {
   if (value == null) return value;
@@ -95,7 +96,7 @@ function nextTimestampIso(afterIso) {
   return new Date(chosenMs).toISOString();
 }
 
-function normalizeMetadata({ metadata, trigger, retryOf } = {}) {
+function normalizeMetadata({ metadata, trigger, retryOf, recoveredFrom, inputFingerprint } = {}) {
   const data =
     metadata && typeof metadata === "object" && !Array.isArray(metadata) ? clone(metadata) : {};
   if (typeof trigger === "string" && trigger.trim()) {
@@ -103,6 +104,12 @@ function normalizeMetadata({ metadata, trigger, retryOf } = {}) {
   }
   if (retryOf) {
     data.retryOf = String(retryOf);
+  }
+  if (recoveredFrom) {
+    data.recoveredFrom = String(recoveredFrom);
+  }
+  if (inputFingerprint) {
+    data.inputFingerprint = String(inputFingerprint);
   }
   return data;
 }
@@ -137,6 +144,55 @@ function updateRun(db, run) {
   return runById(db, run.id);
 }
 
+export function assertSourcingRunActiveInDb(db, id) {
+  const runId = assertRunId(id, "assertSourcingRunActiveInDb");
+  const current = storedRunById(db, runId);
+  if (!current) {
+    throw makeError(`sourcing run not found: ${runId}`, "NOT_FOUND");
+  }
+  const latest = latestRunForPurpose(db, current.purpose);
+  if (current.status !== SOURCING_RUN_STATUSES.RUNNING || latest?.id !== runId) {
+    const code =
+      current.error?.code === "SOURCING_RUN_SUPERSEDED"
+        ? "SOURCING_RUN_SUPERSEDED"
+        : "SOURCING_RUN_INACTIVE";
+    throw makeError(`sourcing run is no longer active: ${runId}`, code);
+  }
+  return current;
+}
+
+export function sourcingRunAssertActive({ repoRoot, env, id } = {}) {
+  const db = requireDb({ repoRoot, env });
+  return { ok: true, run: clone(assertSourcingRunActiveInDb(db, id)) };
+}
+
+function inputFingerprint(run) {
+  return String(run?.metadata?.inputFingerprint || "").trim();
+}
+
+function sameInputs(run, requestedFingerprint) {
+  const requested = String(requestedFingerprint || "").trim();
+  if (!requested) return true;
+  return inputFingerprint(run) === requested;
+}
+
+function runningLeaseExpired(run, nowMs = Date.now()) {
+  const updatedMs = Date.parse(run?.updated_at || "");
+  return Number.isFinite(updatedMs) && nowMs - updatedMs > SOURCING_RUN_LEASE_MS;
+}
+
+function failRun(db, current, error) {
+  const now = nextTimestampIso(current.updated_at);
+  return updateRun(db, {
+    ...clone(current),
+    status: SOURCING_RUN_STATUSES.FAILED,
+    completed_at: now,
+    updated_at: now,
+    summary: null,
+    error: normalizeError(error),
+  });
+}
+
 export function sourcingRunLatest({ repoRoot, env, purpose = "first-search" } = {}) {
   const normalizedPurpose = assertPurpose(purpose);
   const db = requireDb({ repoRoot, env });
@@ -155,21 +211,44 @@ export function sourcingRunStart({
   purpose = "first-search",
   id,
   metadata,
+  inputFingerprint,
   retryFailed = false,
   trigger,
 } = {}) {
   const normalizedPurpose = assertPurpose(purpose);
   const db = requireDb({ repoRoot, env });
   return withTransaction(db, () => {
-    const latest = latestRunForPurpose(db, normalizedPurpose);
+    let latest = latestRunForPurpose(db, normalizedPurpose);
+    let recoveredFrom = null;
     if (latest?.status === SOURCING_RUN_STATUSES.RUNNING) {
-      return { ok: true, reused: true, run: latest };
+      if (runningLeaseExpired(latest)) {
+        recoveredFrom = latest.id;
+        latest = failRun(db, latest, {
+          code: "SOURCING_RUN_LEASE_EXPIRED",
+          message: "The previous sourcing run stopped reporting progress and was recovered.",
+        });
+      } else if (sameInputs(latest, inputFingerprint)) {
+        return { ok: true, reused: true, run: latest };
+      } else {
+        latest = failRun(db, latest, {
+          code: "SOURCING_RUN_SUPERSEDED",
+          message: "The sourcing inputs changed while this run was active.",
+        });
+      }
     }
     if (normalizedPurpose === "first-search") {
-      if (latest?.status === SOURCING_RUN_STATUSES.COMPLETED) {
+      if (
+        latest?.status === SOURCING_RUN_STATUSES.COMPLETED &&
+        sameInputs(latest, inputFingerprint)
+      ) {
         return { ok: true, reused: true, run: latest };
       }
-      if (latest?.status === SOURCING_RUN_STATUSES.FAILED && retryFailed !== true) {
+      if (
+        latest?.status === SOURCING_RUN_STATUSES.FAILED &&
+        retryFailed !== true &&
+        sameInputs(latest, inputFingerprint) &&
+        latest.id !== recoveredFrom
+      ) {
         return { ok: true, reused: true, run: latest };
       }
     }
@@ -189,6 +268,8 @@ export function sourcingRunStart({
       metadata: normalizeMetadata({
         metadata,
         trigger,
+        inputFingerprint,
+        recoveredFrom,
         retryOf:
           normalizedPurpose === "first-search" &&
           retryFailed === true &&
@@ -267,15 +348,6 @@ export function sourcingRunFail({ repoRoot, env, id, error } = {}) {
     if (TERMINAL_STATUSES.has(current.status)) {
       throw makeError(`sourcing run is already ${current.status}: ${runId}`, "CONFLICT");
     }
-    const now = nextTimestampIso(current.updated_at);
-    const next = {
-      ...clone(current),
-      status: SOURCING_RUN_STATUSES.FAILED,
-      completed_at: now,
-      updated_at: now,
-      summary: null,
-      error: normalizeError(error),
-    };
-    return { ok: true, run: updateRun(db, next) };
+    return { ok: true, run: failRun(db, current, error) };
   });
 }

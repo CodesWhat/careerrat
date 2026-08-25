@@ -331,7 +331,7 @@
   min-height: 26px;
   padding: 3px 11px;
   border: 1.5px solid var(--line-warm);
-  border-radius: 9px;
+  border-radius: var(--r-pill);
   background: var(--white);
   color: var(--ink-soft);
   font-size: 12px;
@@ -385,7 +385,7 @@
   cursor: pointer;
 }
 
-.cf-job-row:hover {
+.cf-job-row:not(.cf-job-row--selected):hover {
   background: var(--cream-light);
 }
 
@@ -403,7 +403,7 @@
 }
 
 .cf-job-row--selected :is(.cf-job-row__role, .cf-job-row__meta, .cf-job-row__stage) {
-  color: var(--gray-dim);
+  color: var(--cf-selection-foreground);
 }
 
 .cf-job-row__check {
@@ -445,6 +445,16 @@
   background: var(--lime);
   font-size: 9.5px;
   font-weight: 800;
+}
+
+.cf-capture-badge {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+  color: var(--ink-soft);
+  background: var(--lilac-tint);
+  font-size: var(--fs-micro);
+  font-weight: 700;
 }
 
 .cf-job-row__role,

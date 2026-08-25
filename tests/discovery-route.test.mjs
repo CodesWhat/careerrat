@@ -70,6 +70,7 @@ function bootServer({
     batchId: "batch-current",
     pendingCount: 0,
   }),
+  workspaceAgentRuntime,
 } = {}) {
   const routes = new Map();
   function addRoute(method, path, handler) {
@@ -83,6 +84,7 @@ function bootServer({
     prepareQuickStart,
     loadAgentGuidance,
     companyDiscoveryCadenceImpl,
+    workspaceAgentRuntime,
   });
 
   return { server: { routes }, chatRuntime };
@@ -327,6 +329,62 @@ test("POST /api/discovery/complete durably resolves an explicit discovery step",
   assert.equal(body.ok, true);
   assert.equal(body.completion.added, true);
   assert.deepEqual(body.completion.completedDiscoverySteps, ["research-boards"]);
+});
+
+test("POST /api/discovery/complete continues from board research into confirm-first company discovery", async () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-discovery-company-handoff-"));
+  roots.push(repoRoot);
+  const intents = [];
+  const { server } = await bootServer({
+    repoRoot,
+    workspaceAgentRuntime: {
+      async executeIntent({ intent }) {
+        intents.push(intent);
+        return { messages: [] };
+      },
+    },
+  });
+
+  const { status, body } = await postJson(server, "/api/discovery/complete", {
+    step: "research-boards",
+  });
+
+  assert.equal(status, 200);
+  assert.equal(body.ok, true);
+  assert.deepEqual(intents, [
+    {
+      type: "company.discover",
+      entity: { type: "workspace", id: "workspace-main" },
+      input: {
+        request: "Continue post-onboarding discovery from approved job boards.",
+      },
+    },
+  ]);
+});
+
+test("POST /api/discovery/complete retries company discovery after completion was already recorded", async () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-discovery-company-retry-"));
+  roots.push(repoRoot);
+  const first = await bootServer({ repoRoot });
+  await postJson(first.server, "/api/discovery/complete", { step: "research-boards" });
+
+  let intentCalls = 0;
+  const retry = await bootServer({
+    repoRoot,
+    workspaceAgentRuntime: {
+      async executeIntent() {
+        intentCalls += 1;
+        return { messages: [] };
+      },
+    },
+  });
+  const { status, body } = await postJson(retry.server, "/api/discovery/complete", {
+    step: "research-boards",
+  });
+
+  assert.equal(status, 200);
+  assert.equal(body.completion.added, false);
+  assert.equal(intentCalls, 1);
 });
 
 test("POST /api/discovery/next returns 501 when no AI route can start the handoff", async () => {
