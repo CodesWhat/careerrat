@@ -146,6 +146,10 @@ test("website uses the approved text mark, natural chat colors, and house footer
   const page = await readFile("apps/website/src/app/page.tsx", "utf8");
   const styles = await readFile("apps/website/src/app/globals.css", "utf8");
   const iconBuild = await readFile("apps/website/scripts/generate-brand-icons.mjs", "utf8");
+  // The footer is the shared CodesWhat house pattern (brand-peer band, product
+  // left / CodesWhat pill right) and lives in its own component, not inline
+  // in page.tsx.
+  const footer = await readFile("apps/website/src/components/Footer.tsx", "utf8");
 
   assert.match(page, /className="brand-mark"[\s\S]*Career[\s\S]*Rat\./);
   assert.doesNotMatch(page, /🐀|chat-activity(?:-pending)?\.(?:png|gif)/);
@@ -155,9 +159,10 @@ test("website uses the approved text mark, natural chat colors, and house footer
     /\.chat-demo__user\s*\{[^}]*color:\s*var\(--ink\)[^}]*background:\s*var\(--tint-cool-2\)/s
   );
   assert.doesNotMatch(styles, /\.chat-demo__user\s*\{[^}]*background:\s*var\(--ink\)/s);
-  assert.match(page, /className="codeswhat-badge"/);
-  assert.match(page, /CODE_SIGNING_POLICY\.md/);
-  assert.match(page, />\s*Code signing policy\s*<\/a>/);
+  assert.match(page, /<Footer \/>/);
+  assert.match(footer, /className="codeswhat-badge"/);
+  assert.match(footer, /CODE_SIGNING_POLICY\.md/);
+  assert.match(footer, /label:\s*"Code signing policy"/);
   assert.match(styles, /\.codeswhat-badge\s*\{[^}]*background:\s*var\(--cream\)/s);
   assert.doesNotMatch(
     styles,

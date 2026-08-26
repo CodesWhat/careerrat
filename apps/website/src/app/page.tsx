@@ -1,4 +1,3 @@
-import Image from "next/image";
 import {
   ArrowRight,
   ClipboardList,
@@ -8,6 +7,7 @@ import {
   Radar,
   Target,
 } from "lucide-react";
+import { Footer } from "@/components/Footer";
 import { TrackedCtaLink } from "@/components/TrackedCtaLink";
 
 const RELEASE_URL = "https://github.com/CodesWhat/careerrat/releases/latest";
@@ -237,29 +237,7 @@ export default function Home() {
         </section>
       </main>
 
-      <footer className="footer">
-        <div className="footer__links">
-          <span className="footer__brand">CareerRat</span>
-          <a href="/docs">Docs</a>
-          <a href="https://github.com/CodesWhat/careerrat">GitHub</a>
-          <a href="https://github.com/CodesWhat/careerrat/releases">Releases</a>
-          <a href="https://github.com/CodesWhat/careerrat/blob/main/docs/CODE_SIGNING_POLICY.md">
-            Code signing policy
-          </a>
-          <a href="https://github.com/CodesWhat/careerrat/blob/main/LICENSE">MIT License</a>
-        </div>
-        <a
-          className="codeswhat-badge"
-          href="https://codeswhat.com"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="A CodesWhat project"
-        >
-          <Image src="/codeswhat-logo.png" alt="" width={20} height={20} />
-          <span>A CodesWhat project</span>
-        </a>
-        <span className="footer__copyright">© 2026 CodesWhat</span>
-      </footer>
+      <Footer />
     </div>
   );
 }
