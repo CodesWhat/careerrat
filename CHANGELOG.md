@@ -4,6 +4,27 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.2] - 2026-08-25
+
+### Added
+
+- A Mac with no supported AI tool now gets a plain-English Claude setup path inside CareerRat. It explains the paid-plan requirement, links to Scott's disclosed Claude referral, runs Anthropic's official native installer in an in-app progress console, walks the user through browser sign-in, and checks automatically until Claude Code is ready.
+
+### Changed
+
+- Empty first run now recommends one beginner path instead of showing a zero-runtime warning, a disabled interview action, and duplicate install cards. Codex remains available under “I already use another AI tool.”
+
+### Fixed
+
+- An installed but signed-out Claude Code or Codex can start sign-in directly from the engine picker instead of sending the user into Settings.
+- The guided installer action keeps readable light text over its dark fill across the shared first-run button styles.
+
+### Release verification
+
+- The fixed macOS setup launcher runs one fixed official install command with `shell:false`, streams redacted progress into CareerRat, propagates launch and exit failures, and never accepts user-authored shell input. Unsupported, already-installed, non-desktop, and non-macOS requests fail closed.
+- Focused UI, controller, route, and process-boundary tests pass. The full repository and web suites, production build, and changed-file lint pass.
+- Real browser QA at the desktop layout covered the beginner screen, the collapsed Codex path, the in-app installer console, and the successful recheck transition into a ready Claude engine.
+
 ## [0.16.1] - 2026-08-25
 
 ### Changed

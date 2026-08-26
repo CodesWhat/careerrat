@@ -105,6 +105,15 @@ describe("FirstRunExperience", () => {
     expect(avatarRule).toMatch(/background:\s*var\(--cf-selection-avatar-surface\)/);
   });
 
+  it("keeps the guided installer action readable over its ink fill", () => {
+    const css = readFileSync(fileURLToPath(new URL("./first-run.css", import.meta.url)), "utf8");
+    const rule =
+      css.match(/\.cf-first-run__engine\s+\.cf-first-run__guided-action\s*\{([^}]*)\}/)?.[1] || "";
+
+    expect(rule).toMatch(/background:\s*var\(--ink\)/);
+    expect(rule).toMatch(/color:\s*var\(--paper\)/);
+  });
+
   it("uses the fixed chat-first top bar and workspace frame during setup", async () => {
     const { FirstRunShell } = await loadFirstRun();
     const onOpenSettings = vi.fn();
@@ -200,11 +209,11 @@ describe("FirstRunExperience", () => {
     expect(html).not.toContain("GitHub Copilot CLI");
   });
 
-  it("keeps sign-in-required engines inactive and routes setup through Settings", async () => {
+  it("starts sign-in for an installed engine without sending a beginner into Settings", async () => {
     const { FirstRunExperience } = await loadFirstRun();
     const onSelectEngine = vi.fn();
     const onRetryEngine = vi.fn();
-    const onOpenSettings = vi.fn();
+    const onStartEngineSignIn = vi.fn();
     const tree = FirstRunExperience({
       stage: "engine",
       agentName: "Maya",
@@ -231,7 +240,7 @@ describe("FirstRunExperience", () => {
       error: "Runtime check failed.",
       onSelectEngine,
       onRetryEngine,
-      onOpenSettings,
+      onStartEngineSignIn,
     });
     const html = renderToStaticMarkup(tree);
 
@@ -239,8 +248,8 @@ describe("FirstRunExperience", () => {
     expect(html).toContain("AUTH REQUIRED");
     expect(html).toContain("Detected on this computer. Sign in before CareerRat can use it.");
     expect(html).not.toContain("account already signed in");
-    expect(html).toContain("Open setup");
-    expect(html).toContain("NOT INSTALLED · 1");
+    expect(html).toContain("Sign in");
+    expect(html).toContain("I already use another AI tool");
     expect(html).toContain("Install guide");
     expect(html).toContain("Runtime check failed.");
     expect(html).toContain("Check again");
@@ -254,16 +263,129 @@ describe("FirstRunExperience", () => {
       claudeView,
       (node) => node.type === "button" && textOf(node) === "Check again"
     );
-    const openSetup = findElement(
+    const signIn = findElement(
       claudeView,
-      (node) => node.type === "button" && textOf(node) === "Open setup"
+      (node) => node.type === "button" && textOf(node) === "Sign in"
     );
     expect(claudeView.props["aria-disabled"]).toBeUndefined();
-    openSetup.props.onClick();
+    signIn.props.onClick();
     retry.props.onClick();
     expect(onRetryEngine).toHaveBeenCalledWith("claude");
-    expect(onOpenSettings).toHaveBeenCalledWith("claude");
+    expect(onStartEngineSignIn).toHaveBeenCalledWith("claude");
     expect(onSelectEngine).not.toHaveBeenCalled();
+  });
+
+  it("gives a first-time user a plain-English Claude setup path", async () => {
+    const { FirstRunExperience } = await loadFirstRun();
+    const onStartGuidedSetup = vi.fn();
+    const onRefreshEngines = vi.fn();
+    const tree = FirstRunExperience({
+      stage: "engine",
+      engines: [
+        {
+          id: "claude",
+          name: "Claude Code",
+          supported: true,
+          detected: false,
+          ready: false,
+          installUrl: "https://code.claude.com/docs/en/quickstart",
+        },
+        {
+          id: "codex",
+          name: "Codex",
+          supported: true,
+          detected: false,
+          ready: false,
+          installUrl: "https://developers.openai.com/codex/cli/",
+        },
+      ],
+      onStartGuidedSetup,
+      onRefreshEngines,
+    });
+    const html = renderToStaticMarkup(tree);
+
+    expect(html).toContain("Let’s get CareerRat ready.");
+    expect(html).not.toContain("We found 0 AI tools");
+    expect(html).toContain("New to AI tools? We’ll walk you through it.");
+    expect(html).toContain("Claude Code needs a paid Claude plan. Pro is enough");
+    expect(html).toContain("Get Claude through Scott’s referral");
+    expect(html).toContain('href="https://claude.ai/referral/rOLHwxlsfA"');
+    expect(html).toContain("curl -fsSL https://claude.ai/install.sh | bash");
+    expect(html).toContain("Install inside CareerRat");
+    expect(html).toContain("Check setup");
+    expect(html).toContain("I already use another AI tool");
+    const alternateTools = html.match(
+      /<details class="cf-first-run__engine-missing">.*<\/details>/
+    )?.[0];
+    expect(alternateTools).toContain("Codex");
+    expect(alternateTools).not.toContain("Claude Code");
+    expect(html).not.toContain("CareerRat AI");
+    expect(html).not.toContain("Start the interview");
+    expect(html).not.toContain("every runtime CareerRat knows");
+
+    const guide = findElement(tree, (node) => node.type?.name === "ClaudeSetupGuide");
+    const guideView = guide.type(guide.props);
+    const start = findElement(
+      guideView,
+      (node) => node.type === "button" && textOf(node) === "Install inside CareerRat"
+    );
+    start.props.onClick();
+    expect(onStartGuidedSetup).toHaveBeenCalledWith("claude");
+  });
+
+  it("shows installation progress inside the CareerRat window", async () => {
+    const { FirstRunExperience } = await loadFirstRun();
+    const onRefreshEngines = vi.fn();
+    const tree = FirstRunExperience({
+      stage: "engine",
+      engines: [],
+      guidedSetup: {
+        runtimeId: "claude",
+        status: "installing",
+        lines: ["Downloading Claude Code…", "Installing…"],
+      },
+      onRefreshEngines,
+    });
+    const html = renderToStaticMarkup(tree);
+
+    expect(html).toContain("Installing inside CareerRat");
+    expect(html).toContain("Downloading Claude Code…");
+    expect(html).toContain("Installing…");
+    expect(html).toContain("CareerRat setup");
+
+    const guide = findElement(tree, (node) => node.type?.name === "ClaudeSetupGuide");
+    const checkSetup = findElement(
+      guide.type(guide.props),
+      (node) => node.type === "button" && textOf(node) === "Check setup"
+    );
+    checkSetup.props.onClick();
+    expect(onRefreshEngines).toHaveBeenCalledOnce();
+  });
+
+  it("offers a plain retry after the in-app installer fails", async () => {
+    const { FirstRunExperience } = await loadFirstRun();
+    const onStartGuidedSetup = vi.fn();
+    const tree = FirstRunExperience({
+      stage: "engine",
+      engines: [],
+      guidedSetup: {
+        runtimeId: "claude",
+        status: "failed",
+        lines: ["The download could not finish."],
+      },
+      onStartGuidedSetup,
+    });
+    const html = renderToStaticMarkup(tree);
+
+    expect(html).toContain("The download could not finish.");
+    expect(html).toContain("RETRY");
+    const guide = findElement(tree, (node) => node.type?.name === "ClaudeSetupGuide");
+    const retry = findElement(
+      guide.type(guide.props),
+      (node) => node.type === "button" && textOf(node) === "Try installation again"
+    );
+    retry.props.onClick();
+    expect(onStartGuidedSetup).toHaveBeenCalledWith("claude");
   });
 
   it("retries inventory discovery from the empty state", async () => {
@@ -274,9 +396,10 @@ describe("FirstRunExperience", () => {
       engines: [],
       onRefreshEngines,
     });
+    const guide = findElement(tree, (node) => node.type?.name === "ClaudeSetupGuide");
     const checkAgain = findElement(
-      tree,
-      (node) => node.type === "button" && textOf(node) === "Check again"
+      guide.type(guide.props),
+      (node) => node.type === "button" && textOf(node) === "Check setup"
     );
 
     expect(checkAgain).not.toBeNull();

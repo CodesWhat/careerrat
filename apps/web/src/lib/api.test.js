@@ -18,6 +18,7 @@ import {
   setAutomationSessionProvider,
   setPublicSyncPreference,
   setSourcedStatus,
+  startInstalledAiRuntimeGuidedSetup,
   streamResumeAi,
 } from "./api.js";
 
@@ -343,6 +344,78 @@ describe("streamResumeAi", () => {
       "/api/onboard/resume-ai-stream?name=r%C3%A9sum%C3%A9%202026.pdf",
       { method: "POST", body: file, signal }
     );
+  });
+});
+
+describe("startInstalledAiRuntimeGuidedSetup", () => {
+  it("streams the in-app installer console until setup finishes", async () => {
+    const encoder = new TextEncoder();
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            'data: {"type":"started","runtimeId":"claude"}\n\ndata: {"type":"output","message":"Installing Claude Code…"}\n\ndata: {"type":"done","runtimeId":"claude"}\n\n'
+          )
+        );
+        controller.close();
+      },
+    });
+    const fetchMock = vi.fn(async () => new Response(body, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const events = [];
+
+    const result = await startInstalledAiRuntimeGuidedSetup("claude", {
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(result).toEqual({ runtimeId: "claude" });
+    expect(events).toEqual([
+      { type: "started", runtimeId: "claude" },
+      { type: "output", message: "Installing Claude Code…" },
+      { type: "done", runtimeId: "claude" },
+    ]);
+    expect(fetchMock).toHaveBeenCalledWith("/api/settings/ai-runtime/guided-setup", {
+      method: "POST",
+      body: JSON.stringify({ runtimeId: "claude" }),
+      headers: { "content-type": "application/json" },
+      signal: undefined,
+    });
+  });
+
+  it("rejects an in-band installer failure after preserving its progress events", async () => {
+    const encoder = new TextEncoder();
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            'data: {"type":"output","message":"Downloading…"}\n\ndata: {"type":"error","code":"RUNTIME_GUIDED_SETUP_LAUNCH_FAILED","message":"Try again."}\n\n'
+          )
+        );
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(body, { status: 200 }))
+    );
+    const events = [];
+
+    await expect(
+      startInstalledAiRuntimeGuidedSetup("claude", {
+        onEvent: (event) => events.push(event),
+      })
+    ).rejects.toMatchObject({
+      code: "RUNTIME_GUIDED_SETUP_LAUNCH_FAILED",
+      message: "Try again.",
+    });
+    expect(events).toEqual([
+      { type: "output", message: "Downloading…" },
+      {
+        type: "error",
+        code: "RUNTIME_GUIDED_SETUP_LAUNCH_FAILED",
+        message: "Try again.",
+      },
+    ]);
   });
 });
 

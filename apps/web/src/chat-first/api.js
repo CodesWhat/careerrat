@@ -54,6 +54,7 @@ import {
   setPublicSyncPreference,
   startChat,
   startFirstSearchRun,
+  startInstalledAiRuntimeGuidedSetup,
   startInstalledAiRuntimeSignIn,
   startMockInterview,
   startSearchRun,
@@ -84,6 +85,8 @@ export const firstRunApi = Object.freeze({
   sendChatMessage,
   startChat,
   startFirstSearchRun,
+  startInstalledAiRuntimeGuidedSetup,
+  startInstalledAiRuntimeSignIn,
 });
 
 export const profileSettingsApi = Object.freeze({

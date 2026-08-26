@@ -219,6 +219,44 @@ export function startInstalledAiRuntimeSignIn(runtimeId) {
   });
 }
 
+export async function startInstalledAiRuntimeGuidedSetup(runtimeId, { onEvent, signal } = {}) {
+  const res = await fetch("/api/settings/ai-runtime/guided-setup", {
+    method: "POST",
+    body: JSON.stringify({ runtimeId }),
+    headers: { "content-type": "application/json" },
+    signal,
+  });
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => "");
+    let body = {};
+    if (text) {
+      try {
+        body = JSON.parse(text);
+      } catch {
+        body = { raw: text };
+      }
+    }
+    throw new ApiError(res.status, body);
+  }
+
+  let result = null;
+  let streamError = null;
+  await parseSseStream(res.body, {
+    onEvent(event) {
+      onEvent?.(event);
+      if (event?.type === "done") result = { runtimeId: event.runtimeId };
+      if (event?.type === "error") streamError = event;
+    },
+  });
+  if (streamError) {
+    const error = new Error(streamError.message || "Claude Code did not finish installing.");
+    error.code = streamError.code;
+    throw error;
+  }
+  if (!result) throw new Error("The Claude Code installer stopped before it finished.");
+  return result;
+}
+
 export function selectInstalledAiRuntime({ runtimeId, providerFallback = false } = {}) {
   return apiFetch("/api/settings/ai-runtime/select", {
     method: "POST",

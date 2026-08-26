@@ -19,6 +19,8 @@ function compactAssistantText(value) {
 
 const RESUME_ACCEPT = ".pdf,.docx,.txt,.md,image/*";
 const EMAIL_SHAPE_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const CLAUDE_REFERRAL_URL = "https://claude.ai/referral/rOLHwxlsfA";
+const CLAUDE_INSTALL_COMMAND = "curl -fsSL https://claude.ai/install.sh | bash";
 
 function firstFile(files) {
   return files?.[0] || null;
@@ -60,7 +62,13 @@ function engineDescription(engine) {
   return "This provider is not available on this computer.";
 }
 
-function DetectedEngine({ engine, submitting, onChooseEngine, onRetryEngine, onOpenSettings }) {
+function DetectedEngine({
+  engine,
+  submitting,
+  onChooseEngine,
+  onRetryEngine,
+  onStartEngineSignIn,
+}) {
   const selectable = engineSelectable(engine);
   const presentation = runtimePresentation(engine);
   const canCompleteSetup =
@@ -111,9 +119,9 @@ function DetectedEngine({ engine, submitting, onChooseEngine, onRetryEngine, onO
               className="cf-first-run__engine-action"
               type="button"
               disabled={submitting}
-              onClick={() => onOpenSettings?.(engine.id)}
+              onClick={() => onStartEngineSignIn?.(engine.id)}
             >
-              Open setup
+              Sign in
             </button>
           ) : null}
           {canRetry ? (
@@ -128,6 +136,102 @@ function DetectedEngine({ engine, submitting, onChooseEngine, onRetryEngine, onO
           ) : null}
         </span>
       ) : null}
+    </article>
+  );
+}
+
+function ClaudeSetupGuide({ guidedSetup, submitting, onStartGuidedSetup, onRefreshEngines }) {
+  const setupStatus = guidedSetup?.status || "idle";
+  const installing = setupStatus === "installing";
+  const installed = ["installed", "ready"].includes(setupStatus);
+  const failed = setupStatus === "failed";
+  const setupLines = safeArray(guidedSetup?.lines);
+  const actionLabel = installing
+    ? "Installing inside CareerRat…"
+    : installed
+      ? "Claude Code installed ✓"
+      : failed
+        ? "Try installation again"
+        : "Install inside CareerRat";
+  return (
+    <article className="cf-first-run__beginner-setup">
+      <div className="cf-first-run__beginner-heading">
+        <span className="cf-first-run__beginner-kicker">NO IDEA WHERE TO START?</span>
+        <h2>New to AI tools? We’ll walk you through it.</h2>
+        <p>You only need a Claude account and about two minutes.</p>
+      </div>
+      <ol className="cf-first-run__setup-steps">
+        <li>
+          <span className="cf-first-run__setup-number">1</span>
+          <div>
+            <strong>Get Claude</strong>
+            <p>Claude Code needs a paid Claude plan. Pro is enough; Max gives you more usage.</p>
+            <a href={CLAUDE_REFERRAL_URL} target="_blank" rel="noreferrer">
+              Get Claude through Scott’s referral
+            </a>
+          </div>
+        </li>
+        <li>
+          <span className="cf-first-run__setup-number">2</span>
+          <div>
+            <strong>Let CareerRat install Claude Code</strong>
+            <p>
+              {installing
+                ? "CareerRat is running Anthropic’s official installer below. You can stay in this window."
+                : installed
+                  ? "The install finished. CareerRat is checking it now."
+                  : "CareerRat can run Anthropic’s official installer here and show you exactly what it is doing."}
+            </p>
+            <code>{CLAUDE_INSTALL_COMMAND}</code>
+            <button
+              type="button"
+              className="cf-first-run__guided-action"
+              disabled={submitting || installing || installed}
+              onClick={() => onStartGuidedSetup?.("claude")}
+            >
+              {actionLabel}
+            </button>
+            {setupLines.length || installing || installed || failed ? (
+              <section className="cf-first-run__setup-console" aria-label="CareerRat setup">
+                <header>
+                  <span>CareerRat setup</span>
+                  <span>
+                    {installing ? "RUNNING" : installed ? "DONE" : failed ? "RETRY" : "READY"}
+                  </span>
+                </header>
+                <div className="cf-first-run__setup-console-output" role="log" aria-live="polite">
+                  {setupLines.length ? (
+                    <p>{setupLines.join("\n")}</p>
+                  ) : (
+                    <p>
+                      {installing ? "Starting the official installer…" : "Installation finished."}
+                    </p>
+                  )}
+                </div>
+              </section>
+            ) : null}
+          </div>
+        </li>
+        <li>
+          <span className="cf-first-run__setup-number">3</span>
+          <div>
+            <strong>Sign in and come back</strong>
+            <p>
+              {installed
+                ? "CareerRat will show a Sign in button. Claude opens your browser, then CareerRat notices when you are ready."
+                : "After installation, click Sign in. Claude opens your browser, then CareerRat checks the result for you."}
+            </p>
+            <button
+              type="button"
+              className="cf-first-run__engine-action"
+              disabled={submitting}
+              onClick={onRefreshEngines}
+            >
+              Check setup
+            </button>
+          </div>
+        </li>
+      </ol>
     </article>
   );
 }
@@ -220,7 +324,10 @@ export function EngineSelection({
   onStartInterview,
   onRetryEngine,
   onRefreshEngines,
+  onStartGuidedSetup,
+  onStartEngineSignIn,
   onOpenSettings,
+  guidedSetup,
   hostedInterest,
   onHostedInterestStart,
   onHostedInterestChange,
@@ -239,6 +346,11 @@ export function EngineSelection({
   const missingChoices = choices.filter(
     (engine) => engine.id !== "custom" && engine.detected !== true
   );
+  const alternateMissingChoices =
+    detectedChoices.length === 0
+      ? missingChoices.filter((engine) => engine.id !== "claude")
+      : missingChoices;
+  const needsFirstTool = detectedChoices.length === 0;
   const selectedEngine = detectedChoices.find(
     (engine) => engine.selected && engineSelectable(engine)
   );
@@ -246,11 +358,17 @@ export function EngineSelection({
     <section className="cf-first-run__engine" aria-labelledby="cf-engine-title">
       <div className="cf-first-run__engine-content">
         <div className="cf-first-run__engine-intro">
-          <h1 id="cf-engine-title">Pick your engine.</h1>
-          <p>
-            We found {detectedChoices.length} AI {detectedChoices.length === 1 ? "tool" : "tools"}{" "}
-            on this computer. Every choice shown here runs the complete CareerRat workflow.
-          </p>
+          <h1 id="cf-engine-title">
+            {needsFirstTool ? "Let’s get CareerRat ready." : "Pick your engine."}
+          </h1>
+          {needsFirstTool ? (
+            <p>CareerRat works with Claude Code or Codex. If you’re new to both, start below.</p>
+          ) : (
+            <p>
+              We found {detectedChoices.length} AI {detectedChoices.length === 1 ? "tool" : "tools"}{" "}
+              on this computer. Every choice shown here runs the complete CareerRat workflow.
+            </p>
+          )}
         </div>
         {error ? (
           <div className="cf-first-run__engine-error" role="alert">
@@ -258,7 +376,9 @@ export function EngineSelection({
           </div>
         ) : null}
         <fieldset className="cf-first-run__engine-choices">
-          <legend className="cf-first-run__engine-legend">Detected AI tools</legend>
+          <legend className="cf-first-run__engine-legend">
+            {needsFirstTool ? "Set up Claude" : "Detected AI tools"}
+          </legend>
           {detectedChoices.length > 0 ? (
             detectedChoices.map((engine) => (
               <DetectedEngine
@@ -267,30 +387,23 @@ export function EngineSelection({
                 submitting={submitting}
                 onChooseEngine={onChooseEngine}
                 onRetryEngine={onRetryEngine}
-                onOpenSettings={onOpenSettings}
+                onStartEngineSignIn={onStartEngineSignIn}
               />
             ))
           ) : (
-            <div className="cf-first-run__engine-empty">
-              <span>
-                No supported AI CLI was detected. Install Claude Code or Codex, then check again.
-              </span>
-              <button
-                className="cf-first-run__engine-action"
-                type="button"
-                disabled={submitting}
-                onClick={onRefreshEngines}
-              >
-                Check again
-              </button>
-            </div>
+            <ClaudeSetupGuide
+              guidedSetup={guidedSetup}
+              submitting={submitting}
+              onStartGuidedSetup={onStartGuidedSetup}
+              onRefreshEngines={onRefreshEngines}
+            />
           )}
         </fieldset>
-        {missingChoices.length > 0 ? (
+        {alternateMissingChoices.length > 0 ? (
           <details className="cf-first-run__engine-missing">
-            <summary>NOT INSTALLED · {missingChoices.length}</summary>
+            <summary>I already use another AI tool</summary>
             <div className="cf-first-run__engine-missing-list">
-              {missingChoices.map((engine) => (
+              {alternateMissingChoices.map((engine) => (
                 <div className="cf-first-run__engine-missing-row" key={engine.id}>
                   <span className="cf-first-run__engine-name">
                     <RuntimeIcon runtimeId={engine.id} name={engine.name} size={24} />
@@ -315,23 +428,27 @@ export function EngineSelection({
             </div>
           </details>
         ) : null}
-        <HostedInterestCard
-          hostedInterest={hostedInterest}
-          onHostedInterestStart={onHostedInterestStart}
-          onHostedInterestChange={onHostedInterestChange}
-          onHostedInterestSubmit={onHostedInterestSubmit}
-        />
-        <footer className="cf-first-run__engine-footer">
-          <button
-            type="button"
-            className="cf-first-run__engine-start"
-            disabled={!selectedEngine || submitting}
-            onClick={() => onStartInterview?.(selectedEngine.id)}
-          >
-            {submitting ? "Starting…" : "Start the interview"}
-            <span aria-hidden="true">→</span>
-          </button>
-        </footer>
+        {needsFirstTool ? null : (
+          <>
+            <HostedInterestCard
+              hostedInterest={hostedInterest}
+              onHostedInterestStart={onHostedInterestStart}
+              onHostedInterestChange={onHostedInterestChange}
+              onHostedInterestSubmit={onHostedInterestSubmit}
+            />
+            <footer className="cf-first-run__engine-footer">
+              <button
+                type="button"
+                className="cf-first-run__engine-start"
+                disabled={!selectedEngine || submitting}
+                onClick={() => onStartInterview?.(selectedEngine.id)}
+              >
+                {submitting ? "Starting…" : "Start the interview"}
+                <span aria-hidden="true">→</span>
+              </button>
+            </footer>
+          </>
+        )}
       </div>
     </section>
   );
