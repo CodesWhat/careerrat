@@ -327,13 +327,16 @@ remain the historical record for the underlying release.
 v0.16.2 closes the cold-start gap for someone who has never used an agentic CLI.
 When neither supported product choice is installed, CareerRat now recommends one
 plain-English Claude path, explains that a paid plan is required, discloses and
-links Scott's referral, and opens a guided macOS Terminal running Anthropic's
-official native installer. The Terminal waits for the user before installing,
-starts browser sign-in, and tells them exactly when to return to CareerRat.
+links Scott's referral, and runs Anthropic's official native installer inside
+the CareerRat window. A bounded progress console shows what is happening,
+reports a clear retry when installation fails, and keeps browser sign-in as the
+only handoff outside the app.
 
-The setup route is packaged-app-only, macOS-only, and Claude-only. It uses fixed
-AppleScript and shell input with `shell:false`; unsupported, already-installed,
-browser-only, and non-macOS requests fail closed. The picker starts sign-in
+The setup route is packaged-app-only, macOS-only, and Claude-only. It runs one
+fixed official command with `shell:false`, streams redacted output, propagates
+launch and nonzero-exit failures, and never accepts user-authored shell input;
+unsupported, already-installed, browser-only, and non-macOS requests fail
+closed. The picker starts sign-in
 directly for an installed but signed-out supported engine, checks automatically
 on a bounded timer, and keeps a manual **Check setup** action. Empty first run no
 longer shows a disabled interview button, a hosted-product card, or a duplicate
@@ -342,8 +345,8 @@ Claude install row. The Codex option remains under
 
 Focused UI, controller, route, and process-boundary coverage is green. Full
 repository and web suites, changed-file lint, and production builds pass. Real
-browser QA covered the desktop beginner screen, the collapsed Codex path,
-Terminal-open instructions, and promotion into a ready Claude engine after
+browser QA covered the desktop beginner screen, the collapsed Codex path, the
+in-app installer console, and promotion into a ready Claude engine after
 recheck.
 
 #### Superseding v0.16 release ledger

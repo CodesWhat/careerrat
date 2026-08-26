@@ -8,7 +8,7 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Added
 
-- A Mac with no supported AI tool now gets a plain-English Claude setup path inside CareerRat. It explains the paid-plan requirement, links to Scott's disclosed Claude referral, opens Terminal with Anthropic's official native installer, walks the user through browser sign-in, and checks automatically until Claude Code is ready.
+- A Mac with no supported AI tool now gets a plain-English Claude setup path inside CareerRat. It explains the paid-plan requirement, links to Scott's disclosed Claude referral, runs Anthropic's official native installer in an in-app progress console, walks the user through browser sign-in, and checks automatically until Claude Code is ready.
 
 ### Changed
 
@@ -17,13 +17,13 @@ All notable changes to CareerRat are documented here. This project follows
 ### Fixed
 
 - An installed but signed-out Claude Code or Codex can start sign-in directly from the engine picker instead of sending the user into Settings.
-- The guided Terminal action keeps readable light text over its dark fill across the shared first-run button styles.
+- The guided installer action keeps readable light text over its dark fill across the shared first-run button styles.
 
 ### Release verification
 
-- The fixed macOS setup launcher uses one allowlisted runtime, one fixed AppleScript target, a fixed official install command, and `shell:false`. Unsupported, already-installed, non-desktop, and non-macOS requests fail closed.
+- The fixed macOS setup launcher runs one fixed official install command with `shell:false`, streams redacted progress into CareerRat, propagates launch and exit failures, and never accepts user-authored shell input. Unsupported, already-installed, non-desktop, and non-macOS requests fail closed.
 - Focused UI, controller, route, and process-boundary tests pass. The full repository and web suites, production build, and changed-file lint pass.
-- Real browser QA at the desktop layout covered the beginner screen, the collapsed Codex path, Terminal-open instructions, and the successful recheck transition into a ready Claude engine.
+- Real browser QA at the desktop layout covered the beginner screen, the collapsed Codex path, the in-app installer console, and the successful recheck transition into a ready Claude engine.
 
 ## [0.16.1] - 2026-08-25
 

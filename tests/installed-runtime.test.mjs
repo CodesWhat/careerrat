@@ -1257,37 +1257,76 @@ test("runtime sign-in starts the resolved CLI directly without a shell or termin
   assert.deepEqual(calls.at(-1), { signal: "SIGTERM" });
 });
 
-test("guided Claude setup opens a fixed beginner script in macOS Terminal", () => {
+test("guided Claude setup runs the fixed installer and streams its output", async () => {
   const calls = [];
-  const child = { unref() {} };
-  const result = startInstalledRuntimeGuidedSetup("claude", {
+  const output = [];
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  const resultPromise = startInstalledRuntimeGuidedSetup("claude", {
     platform: "darwin",
+    onOutput: (line) => output.push(line),
     spawnImpl(command, args, options) {
       calls.push({ command, args, options });
+      queueMicrotask(() => {
+        child.emit("spawn");
+        child.stdout.emit("data", Buffer.from("Installing Claude Code…\n"));
+        child.stderr.emit("data", Buffer.from("Finishing setup\n"));
+        child.emit("close", 0, null);
+      });
       return child;
     },
   });
+  const result = await resultPromise;
 
   assert.equal(result.runtimeId, "claude");
   assert.equal(result.installCommand, "curl -fsSL https://claude.ai/install.sh | bash");
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].command, "/usr/bin/osascript");
+  assert.equal(calls[0].command, "/bin/sh");
+  assert.deepEqual(calls[0].args, ["-c", "curl -fsSL https://claude.ai/install.sh | bash"]);
   assert.equal(calls[0].options.shell, false);
-  assert.equal(calls[0].options.detached, true);
-  assert.equal(calls[0].options.stdio, "ignore");
-  const script = calls[0].args.join("\n");
-  assert.match(script, /curl -fsSL https:\/\/claude\.ai\/install\.sh \| bash/);
-  assert.match(script, /read -r/);
-  assert.match(script, /\$HOME\/\.local\/bin\/claude.*auth login/);
-  assert.match(script, /Return to CareerRat and click Check setup/);
-  assert.doesNotMatch(script, /referral\/rOLHwxlsfA/);
+  assert.deepEqual(calls[0].options.stdio, ["ignore", "pipe", "pipe"]);
+  assert.deepEqual(output, ["Installing Claude Code…", "Finishing setup"]);
+  assert.doesNotMatch(calls[0].args.join("\n"), /referral\/rOLHwxlsfA/);
 });
 
-test("guided runtime setup is limited to Claude on macOS", () => {
-  assert.throws(() => startInstalledRuntimeGuidedSetup("codex", { platform: "darwin" }), {
+test("guided Claude setup rejects when macOS cannot launch the installer", async () => {
+  const child = new EventEmitter();
+  child.unref = () => {};
+  const result = startInstalledRuntimeGuidedSetup("claude", {
+    platform: "darwin",
+    spawnImpl() {
+      queueMicrotask(() => child.emit("error", new Error("installer process could not start")));
+      return child;
+    },
+  });
+
+  await assert.rejects(result, {
+    code: "RUNTIME_GUIDED_SETUP_LAUNCH_FAILED",
+  });
+});
+
+test("guided Claude setup rejects when the installer exits unsuccessfully", async () => {
+  const child = new EventEmitter();
+  child.unref = () => {};
+  const result = startInstalledRuntimeGuidedSetup("claude", {
+    platform: "darwin",
+    spawnImpl() {
+      queueMicrotask(() => child.emit("close", 1, null));
+      return child;
+    },
+  });
+
+  await assert.rejects(result, {
+    code: "RUNTIME_GUIDED_SETUP_LAUNCH_FAILED",
+  });
+});
+
+test("guided runtime setup is limited to Claude on macOS", async () => {
+  await assert.rejects(startInstalledRuntimeGuidedSetup("codex", { platform: "darwin" }), {
     code: "RUNTIME_GUIDED_SETUP_UNSUPPORTED",
   });
-  assert.throws(() => startInstalledRuntimeGuidedSetup("claude", { platform: "win32" }), {
+  await assert.rejects(startInstalledRuntimeGuidedSetup("claude", { platform: "win32" }), {
     code: "RUNTIME_GUIDED_SETUP_UNSUPPORTED",
   });
 });

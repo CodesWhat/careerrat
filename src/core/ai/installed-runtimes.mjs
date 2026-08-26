@@ -1470,37 +1470,18 @@ export function installedRuntimeSignInCommand(runtimeId) {
 }
 
 export const CLAUDE_NATIVE_INSTALL_COMMAND = "curl -fsSL https://claude.ai/install.sh | bash";
+const GUIDED_SETUP_TIMEOUT_MS = 10 * 60 * 1000;
 
-function appleScriptString(value) {
-  return `"${String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
-}
-
-function claudeGuidedSetupShellScript() {
-  return [
-    "clear",
-    "printf '\\nCareerRat will set up Claude Code for you.\\n\\n'",
-    "printf 'This uses Anthropic’s official installer. Press Return when you are ready.\\n'",
-    "read -r",
-    `if ${CLAUDE_NATIVE_INSTALL_COMMAND}`,
-    "then",
-    "printf '\\nClaude Code is installed. A browser will open so you can sign in.\\n'",
-    'CLAUDE_BIN="$HOME/.local/bin/claude"',
-    'if [ ! -x "$CLAUDE_BIN" ]; then CLAUDE_BIN="$(command -v claude)"; fi',
-    'if [ -n "$CLAUDE_BIN" ]; then "$CLAUDE_BIN" auth login',
-    "else printf '\\nCareerRat could not find Claude after installation. Reopen CareerRat and try Check setup.\\n'",
-    "fi",
-    "printf '\\nReturn to CareerRat and click Check setup.\\n'",
-    "else",
-    "printf '\\nThe install did not finish. Check your internet connection and try again.\\n'",
-    "fi",
-    "printf '\\nPress Return to close this Terminal window.\\n'",
-    "read -r",
-  ].join("; ");
-}
-
-export function startInstalledRuntimeGuidedSetup(
+export async function startInstalledRuntimeGuidedSetup(
   runtimeId,
-  { spawnImpl = spawn, platform = process.platform } = {}
+  {
+    spawnImpl = spawn,
+    platform = process.platform,
+    onOutput,
+    onStart,
+    signal,
+    timeoutMs = GUIDED_SETUP_TIMEOUT_MS,
+  } = {}
 ) {
   if (runtimeId !== "claude" || platform !== "darwin") {
     throw runtimeError(
@@ -1509,32 +1490,80 @@ export function startInstalledRuntimeGuidedSetup(
     );
   }
 
-  const terminalCommand = claudeGuidedSetupShellScript();
-  const child = spawnImpl(
-    "/usr/bin/osascript",
-    [
-      "-e",
-      'tell application "Terminal"',
-      "-e",
-      "activate",
-      "-e",
-      `do script ${appleScriptString(terminalCommand)}`,
-      "-e",
-      "end tell",
-    ],
-    {
-      shell: false,
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-    }
-  );
-  child.unref?.();
-  return {
-    ok: true,
-    runtimeId,
-    installCommand: CLAUDE_NATIVE_INSTALL_COMMAND,
-  };
+  const child = spawnImpl("/bin/sh", ["-c", CLAUDE_NATIVE_INSTALL_COMMAND], {
+    shell: false,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+
+  return await new Promise((resolve, reject) => {
+    let settled = false;
+    let timer = null;
+
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener?.("abort", abort);
+      if (error) reject(error);
+      else
+        resolve({
+          ok: true,
+          runtimeId,
+          installCommand: CLAUDE_NATIVE_INSTALL_COMMAND,
+        });
+    };
+    const fail = (message, fields = {}) =>
+      finish(runtimeError(message, "RUNTIME_GUIDED_SETUP_LAUNCH_FAILED", fields));
+    const abort = () => {
+      child.kill?.("SIGTERM");
+      finish(runtimeError("Claude Code setup was cancelled.", "RUNTIME_GUIDED_SETUP_CANCELLED"));
+    };
+    const report = (chunk) => {
+      const message = safeRuntimeDiagnostic(chunk);
+      if (!message) return;
+      try {
+        onOutput?.(message);
+      } catch {
+        // The installer stays authoritative if its optional display callback closes.
+      }
+    };
+
+    child.stdout?.on("data", report);
+    child.stderr?.on("data", report);
+    child.once("spawn", () => {
+      try {
+        onStart?.();
+      } catch (error) {
+        child.kill?.("SIGTERM");
+        fail("CareerRat could not start the in-app installer.", { cause: error });
+      }
+    });
+    child.once("error", (error) => {
+      fail("CareerRat could not start the in-app installer.", { cause: error });
+    });
+    child.once("close", (status, closeSignal) => {
+      if (status === 0) {
+        finish();
+        return;
+      }
+      fail("The Claude Code installer did not finish successfully.", {
+        status,
+        signal: closeSignal,
+      });
+    });
+
+    timer = setTimeout(
+      () => {
+        child.kill?.("SIGTERM");
+        fail("The Claude Code installer took too long to finish.", { code: "ETIMEDOUT" });
+      },
+      Math.max(1, timeoutMs)
+    );
+    timer.unref?.();
+    signal?.addEventListener?.("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+  });
 }
 
 const ACTIVE_RUNTIME_SIGN_INS = new Map();

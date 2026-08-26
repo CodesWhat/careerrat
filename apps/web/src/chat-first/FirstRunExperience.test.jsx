@@ -105,7 +105,7 @@ describe("FirstRunExperience", () => {
     expect(avatarRule).toMatch(/background:\s*var\(--cf-selection-avatar-surface\)/);
   });
 
-  it("keeps the guided Terminal action readable over its ink fill", () => {
+  it("keeps the guided installer action readable over its ink fill", () => {
     const css = readFileSync(fileURLToPath(new URL("./first-run.css", import.meta.url)), "utf8");
     const rule =
       css.match(/\.cf-first-run__engine\s+\.cf-first-run__guided-action\s*\{([^}]*)\}/)?.[1] || "";
@@ -311,7 +311,7 @@ describe("FirstRunExperience", () => {
     expect(html).toContain("Get Claude through Scott’s referral");
     expect(html).toContain('href="https://claude.ai/referral/rOLHwxlsfA"');
     expect(html).toContain("curl -fsSL https://claude.ai/install.sh | bash");
-    expect(html).toContain("Open guided Terminal");
+    expect(html).toContain("Install inside CareerRat");
     expect(html).toContain("Check setup");
     expect(html).toContain("I already use another AI tool");
     const alternateTools = html.match(
@@ -327,26 +327,31 @@ describe("FirstRunExperience", () => {
     const guideView = guide.type(guide.props);
     const start = findElement(
       guideView,
-      (node) => node.type === "button" && textOf(node) === "Open guided Terminal"
+      (node) => node.type === "button" && textOf(node) === "Install inside CareerRat"
     );
     start.props.onClick();
     expect(onStartGuidedSetup).toHaveBeenCalledWith("claude");
   });
 
-  it("explains what to do after the guided Terminal opens", async () => {
+  it("shows installation progress inside the CareerRat window", async () => {
     const { FirstRunExperience } = await loadFirstRun();
     const onRefreshEngines = vi.fn();
     const tree = FirstRunExperience({
       stage: "engine",
       engines: [],
-      guidedSetup: { runtimeId: "claude", status: "terminal_open" },
+      guidedSetup: {
+        runtimeId: "claude",
+        status: "installing",
+        lines: ["Downloading Claude Code…", "Installing…"],
+      },
       onRefreshEngines,
     });
     const html = renderToStaticMarkup(tree);
 
-    expect(html).toContain("Terminal opened");
-    expect(html).toContain("Press Return");
-    expect(html).toContain("Finish sign-in in your browser");
+    expect(html).toContain("Installing inside CareerRat");
+    expect(html).toContain("Downloading Claude Code…");
+    expect(html).toContain("Installing…");
+    expect(html).toContain("CareerRat setup");
 
     const guide = findElement(tree, (node) => node.type?.name === "ClaudeSetupGuide");
     const checkSetup = findElement(
@@ -355,6 +360,32 @@ describe("FirstRunExperience", () => {
     );
     checkSetup.props.onClick();
     expect(onRefreshEngines).toHaveBeenCalledOnce();
+  });
+
+  it("offers a plain retry after the in-app installer fails", async () => {
+    const { FirstRunExperience } = await loadFirstRun();
+    const onStartGuidedSetup = vi.fn();
+    const tree = FirstRunExperience({
+      stage: "engine",
+      engines: [],
+      guidedSetup: {
+        runtimeId: "claude",
+        status: "failed",
+        lines: ["The download could not finish."],
+      },
+      onStartGuidedSetup,
+    });
+    const html = renderToStaticMarkup(tree);
+
+    expect(html).toContain("The download could not finish.");
+    expect(html).toContain("RETRY");
+    const guide = findElement(tree, (node) => node.type?.name === "ClaudeSetupGuide");
+    const retry = findElement(
+      guide.type(guide.props),
+      (node) => node.type === "button" && textOf(node) === "Try installation again"
+    );
+    retry.props.onClick();
+    expect(onStartGuidedSetup).toHaveBeenCalledWith("claude");
   });
 
   it("retries inventory discovery from the empty state", async () => {

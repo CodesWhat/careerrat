@@ -124,7 +124,7 @@ test("v0.16.2 docs record guided setup and preserve v0.16.0 release evidence", a
     assert.match(publicCopy, /Homebrew cask is 0\.16\.2/i);
     assert.match(publicCopy, /reports version 0\.16\.2/i);
     assert.match(publicCopy, /Scott's (?:disclosed )?referral/i);
-    assert.match(publicCopy, /Open guided Terminal/i);
+    assert.match(publicCopy, /Install inside CareerRat/i);
     assert.match(publicCopy, /passes Gatekeeper[^.]*launch and visual inspection/i);
     assert.match(
       publicCopy,

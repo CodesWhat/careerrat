@@ -384,9 +384,49 @@ button.cf-first-run__engine-choice:not(.is-selected):hover {
 }
 
 .cf-first-run__engine .cf-first-run__guided-action:disabled {
-  background: var(--line-cool-2);
-  color: var(--gray-dim);
+  background: var(--tint-cool-2);
+  color: var(--ink-soft);
   cursor: default;
+}
+
+.cf-first-run__setup-console {
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--gray-selected);
+  border-radius: var(--r-row);
+  background: var(--ink-deepest);
+  color: var(--paper);
+}
+
+.cf-first-run__setup-console header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 11px;
+  border-bottom: 1px solid var(--gray-selected);
+  color: var(--line-cool-2);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: var(--ls-eyebrow-wide);
+}
+
+.cf-first-run__setup-console .cf-first-run__setup-console-output {
+  max-height: 112px;
+  padding: 10px 12px;
+  overflow-y: auto;
+}
+
+.cf-first-run__setup-console p {
+  margin: 0 0 4px;
+  color: var(--paper);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.cf-first-run__setup-console p:last-child {
+  margin-bottom: 0;
 }
 
 .cf-first-run__engine-missing,

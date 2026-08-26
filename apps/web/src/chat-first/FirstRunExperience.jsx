@@ -141,7 +141,18 @@ function DetectedEngine({
 }
 
 function ClaudeSetupGuide({ guidedSetup, submitting, onStartGuidedSetup, onRefreshEngines }) {
-  const terminalOpen = guidedSetup?.status === "terminal_open";
+  const setupStatus = guidedSetup?.status || "idle";
+  const installing = setupStatus === "installing";
+  const installed = ["installed", "ready"].includes(setupStatus);
+  const failed = setupStatus === "failed";
+  const setupLines = safeArray(guidedSetup?.lines);
+  const actionLabel = installing
+    ? "Installing inside CareerRat…"
+    : installed
+      ? "Claude Code installed ✓"
+      : failed
+        ? "Try installation again"
+        : "Install inside CareerRat";
   return (
     <article className="cf-first-run__beginner-setup">
       <div className="cf-first-run__beginner-heading">
@@ -165,29 +176,50 @@ function ClaudeSetupGuide({ guidedSetup, submitting, onStartGuidedSetup, onRefre
           <div>
             <strong>Let CareerRat install Claude Code</strong>
             <p>
-              {terminalOpen
-                ? "Terminal opened. Press Return there to begin the official install."
-                : "We’ll open Terminal with Anthropic’s official installer ready. Read the message and press Return to begin."}
+              {installing
+                ? "CareerRat is running Anthropic’s official installer below. You can stay in this window."
+                : installed
+                  ? "The install finished. CareerRat is checking it now."
+                  : "CareerRat can run Anthropic’s official installer here and show you exactly what it is doing."}
             </p>
             <code>{CLAUDE_INSTALL_COMMAND}</code>
             <button
               type="button"
               className="cf-first-run__guided-action"
-              disabled={submitting || terminalOpen}
+              disabled={submitting || installing || installed}
               onClick={() => onStartGuidedSetup?.("claude")}
             >
-              {terminalOpen ? "Terminal opened" : "Open guided Terminal"}
+              {actionLabel}
             </button>
+            {setupLines.length || installing || installed || failed ? (
+              <section className="cf-first-run__setup-console" aria-label="CareerRat setup">
+                <header>
+                  <span>CareerRat setup</span>
+                  <span>
+                    {installing ? "RUNNING" : installed ? "DONE" : failed ? "RETRY" : "READY"}
+                  </span>
+                </header>
+                <div className="cf-first-run__setup-console-output" role="log" aria-live="polite">
+                  {setupLines.length ? (
+                    <p>{setupLines.join("\n")}</p>
+                  ) : (
+                    <p>
+                      {installing ? "Starting the official installer…" : "Installation finished."}
+                    </p>
+                  )}
+                </div>
+              </section>
+            ) : null}
           </div>
         </li>
         <li>
           <span className="cf-first-run__setup-number">3</span>
           <div>
-            <strong>Come back when you’re signed in</strong>
+            <strong>Sign in and come back</strong>
             <p>
-              {terminalOpen
-                ? "Finish sign-in in your browser, return to CareerRat, then check setup."
-                : "Claude will open your browser for sign-in. Return here when it finishes."}
+              {installed
+                ? "CareerRat will show a Sign in button. Claude opens your browser, then CareerRat notices when you are ready."
+                : "After installation, click Sign in. Claude opens your browser, then CareerRat checks the result for you."}
             </p>
             <button
               type="button"

@@ -388,7 +388,7 @@ export function FirstRunController({
 
   useEffect(() => {
     const runtimeId = String(guidedSetup?.runtimeId || "").trim();
-    if (!runtimeId || !["terminal_open", "sign_in_started"].includes(guidedSetup?.status)) return;
+    if (!runtimeId || !["installed", "sign_in_started"].includes(guidedSetup?.status)) return;
 
     let cancelled = false;
     let timer = null;
@@ -1032,12 +1032,38 @@ export function FirstRunController({
   async function startGuidedSetup(runtimeId) {
     setSubmitting(true);
     setEngineError(null);
+    setGuidedSetup({ runtimeId, status: "installing", lines: [] });
     try {
-      await api.startInstalledAiRuntimeGuidedSetup(runtimeId);
-      setGuidedSetup({ runtimeId, status: "terminal_open" });
+      await api.startInstalledAiRuntimeGuidedSetup(runtimeId, {
+        onEvent(event) {
+          if (event?.type !== "output") return;
+          const nextLines = cleanLines(event.message);
+          if (!nextLines.length) return;
+          setGuidedSetup((current) => ({
+            runtimeId,
+            status: "installing",
+            lines: [...list(current?.lines), ...nextLines].slice(-80),
+          }));
+        },
+      });
+      const nextRuntime = await api.getInstalledAiRuntimes();
+      setRuntimeState(nextRuntime);
+      const nextId = effectiveRuntimeId(nextRuntime, runtimeId) || effectiveRuntimeId(nextRuntime);
+      setPendingRuntimeId(nextId);
+      const runtime = list(nextRuntime?.runtimes).find((candidate) => candidate.id === runtimeId);
+      setGuidedSetup((current) => ({
+        runtimeId,
+        status: runtime?.ready === true && runtime?.selectable === true ? "ready" : "installed",
+        lines: list(current?.lines),
+      }));
     } catch (error) {
+      setGuidedSetup((current) => ({
+        runtimeId,
+        status: "failed",
+        lines: list(current?.lines),
+      }));
       setEngineError(
-        error?.body?.error || error?.message || "CareerRat could not open the setup Terminal."
+        error?.body?.error || error?.message || "CareerRat could not install Claude Code."
       );
     } finally {
       setSubmitting(false);

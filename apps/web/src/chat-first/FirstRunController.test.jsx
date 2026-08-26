@@ -417,7 +417,7 @@ describe("FirstRunController chat event reconciliation", () => {
     expect(view.props.engines).toEqual([]);
   });
 
-  it("opens the guided Claude installer and explains the next step", async () => {
+  it("runs the Claude installer inside CareerRat and keeps its readable progress", async () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi({ transcript: [] });
     api.getInstalledAiRuntimes.mockResolvedValue({
@@ -425,15 +425,25 @@ describe("FirstRunController chat event reconciliation", () => {
       providerFallback: false,
       runtimes: [],
     });
+    api.startInstalledAiRuntimeGuidedSetup.mockImplementation(async (_runtimeId, { onEvent }) => {
+      onEvent({ type: "started", runtimeId: "claude" });
+      onEvent({ type: "output", message: "Installing Claude Code…" });
+      onEvent({ type: "done", runtimeId: "claude" });
+      return { runtimeId: "claude" };
+    });
     let view = await bootController(module, api, { startInterview: false });
 
     await view.props.onStartGuidedSetup("claude");
     view = rerender(module, api);
 
-    expect(api.startInstalledAiRuntimeGuidedSetup).toHaveBeenCalledWith("claude");
+    expect(api.startInstalledAiRuntimeGuidedSetup).toHaveBeenCalledWith(
+      "claude",
+      expect.objectContaining({ onEvent: expect.any(Function) })
+    );
     expect(view.props.guidedSetup).toEqual({
       runtimeId: "claude",
-      status: "terminal_open",
+      status: "installed",
+      lines: ["Installing Claude Code…"],
     });
   });
 
@@ -493,13 +503,21 @@ describe("FirstRunController chat event reconciliation", () => {
         });
       let view = await bootController(module, api, { startInterview: false });
 
+      api.startInstalledAiRuntimeGuidedSetup.mockImplementation(async (_runtimeId, { onEvent }) => {
+        onEvent({ type: "done", runtimeId: "claude" });
+        return { runtimeId: "claude" };
+      });
       await view.props.onStartGuidedSetup("claude");
       view = rerender(module, api);
       await flushEffects();
       await vi.advanceTimersByTimeAsync(4_000);
       view = rerender(module, api);
 
-      expect(view.props.guidedSetup).toEqual({ runtimeId: "claude", status: "ready" });
+      expect(view.props.guidedSetup).toEqual({
+        runtimeId: "claude",
+        status: "ready",
+        lines: [],
+      });
       expect(view.props.engines[0]).toMatchObject({ id: "claude", selected: true, ready: true });
     } finally {
       vi.useRealTimers();

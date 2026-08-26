@@ -103,6 +103,39 @@ async function request(server, method, path, body) {
   return { status, body: JSON.parse(text) };
 }
 
+async function requestStream(server, method, path, body) {
+  const req = Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))]);
+  req.headers = body === undefined ? {} : { "content-type": "application/json" };
+  let status = null;
+  let text = "";
+  const res = {
+    writeHead(value) {
+      status = value;
+      return this;
+    },
+    flushHeaders() {},
+    on() {
+      return this;
+    },
+    write(value = "") {
+      text += value;
+      return true;
+    },
+    end(value = "") {
+      text += value;
+    },
+  };
+  const handler = server.routes.get(`${method} ${path}`);
+  assert.ok(handler, `missing ${method} ${path}`);
+  await handler(req, res);
+  const events = text
+    .split("\n\n")
+    .flatMap((frame) =>
+      frame.startsWith("data: ") ? [JSON.parse(frame.slice("data: ".length))] : []
+    );
+  return { status, events };
+}
+
 const INVENTORY = [
   {
     id: "claude",
@@ -595,8 +628,10 @@ test("desktop zero-runtime setup opens the allowlisted Claude guide", async () =
     probes: {},
     env: { CAREERRAT_DESKTOP_CLI_ONLY: "1" },
     platform: "darwin",
-    startGuidedSetupImpl: (runtimeId) => {
+    startGuidedSetupImpl: async (runtimeId, { onOutput, onStart }) => {
       started.push(runtimeId);
+      onStart();
+      onOutput("Installing Claude Code…");
       return {
         runtimeId,
         installCommand: "curl -fsSL https://claude.ai/install.sh | bash",
@@ -604,14 +639,78 @@ test("desktop zero-runtime setup opens the allowlisted Claude guide", async () =
     },
   });
 
+  const response = await requestStream(server, "POST", "/api/settings/ai-runtime/guided-setup", {
+    runtimeId: "claude",
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.events, [
+    {
+      type: "started",
+      runtimeId: "claude",
+      installCommand: "curl -fsSL https://claude.ai/install.sh | bash",
+    },
+    { type: "output", message: "Installing Claude Code…" },
+    { type: "done", runtimeId: "claude" },
+  ]);
+  assert.deepEqual(started, ["claude"]);
+});
+
+test("desktop zero-runtime setup reports an in-app installer launch failure", async () => {
+  const error = new Error("installer process could not start");
+  error.code = "RUNTIME_GUIDED_SETUP_LAUNCH_FAILED";
+  const server = boot({
+    inventory: INVENTORY.map((runtime) => ({ ...runtime, available: false, path: null })),
+    probes: {},
+    env: { CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+    platform: "darwin",
+    startGuidedSetupImpl: async () => {
+      throw error;
+    },
+  });
+
   const response = await request(server, "POST", "/api/settings/ai-runtime/guided-setup", {
     runtimeId: "claude",
   });
 
-  assert.equal(response.status, 202);
-  assert.equal(response.body.runtimeId, "claude");
-  assert.equal(response.body.installCommand, "curl -fsSL https://claude.ai/install.sh | bash");
-  assert.deepEqual(started, ["claude"]);
+  assert.equal(response.status, 500);
+  assert.equal(response.body.code, "RUNTIME_GUIDED_SETUP_LAUNCH_FAILED");
+  assert.equal(response.body.error, "CareerRat could not start the in-app Claude installer.");
+});
+
+test("desktop zero-runtime setup streams a clear retry when installation fails", async () => {
+  const error = new Error("installer exited 1");
+  error.code = "RUNTIME_GUIDED_SETUP_LAUNCH_FAILED";
+  const server = boot({
+    inventory: INVENTORY.map((runtime) => ({ ...runtime, available: false, path: null })),
+    probes: {},
+    env: { CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+    platform: "darwin",
+    startGuidedSetupImpl: async (_runtimeId, { onOutput, onStart }) => {
+      onStart();
+      onOutput("Downloading Claude Code…");
+      throw error;
+    },
+  });
+
+  const response = await requestStream(server, "POST", "/api/settings/ai-runtime/guided-setup", {
+    runtimeId: "claude",
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.events, [
+    {
+      type: "started",
+      runtimeId: "claude",
+      installCommand: "curl -fsSL https://claude.ai/install.sh | bash",
+    },
+    { type: "output", message: "Downloading Claude Code…" },
+    {
+      type: "error",
+      code: "RUNTIME_GUIDED_SETUP_LAUNCH_FAILED",
+      message: "Claude Code did not finish installing. Check your connection and try again.",
+    },
+  ]);
 });
 
 test("guided setup rejects unsupported, installed, and non-desktop requests", async () => {
