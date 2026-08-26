@@ -294,6 +294,10 @@ test("filterAnswerableQuestions excludes provider demographic metadata and manua
     true
   );
   assert.equal(classifySelfIdentificationQuestion("What is your veteran status?").excluded, true);
+  assert.deepEqual(
+    classifySelfIdentificationQuestion("Are you a person of transgender experience?"),
+    { excluded: true, reason: "gender" }
+  );
   assert.equal(
     classifySelfIdentificationQuestion("Why do you want to build with Acme AI?").excluded,
     false
@@ -316,6 +320,104 @@ test("filterAnswerableQuestions excludes provider demographic metadata and manua
   assert.ok(filtered.excluded.some((q) => /disability/i.test(q.label)));
   assert.ok(filtered.excluded.some((q) => /veteran/i.test(q.label)));
   assert.equal(filtered.demographicSectionPresent, true);
+});
+
+test("self-identification classifier covers standard voluntary demographic categories without catching ordinary eligibility questions", async () => {
+  const { classifySelfIdentificationQuestion } = await loadQuestionsModule();
+  const demographic = [
+    "Do you identify as LGBTQ+?",
+    "What is your religion?",
+    "Religious affiliation",
+    "What is your marital status?",
+    "What is your national origin?",
+    "Which age range are you in?",
+    "What is your date of birth?",
+    "Parental or caregiver status",
+    "Genetic information",
+  ];
+  const ordinary = [
+    "Are you at least 18 years old?",
+    "Are you authorized to work in your country of residence?",
+    "Do you have experience supporting LGBTQ+ customers?",
+    "Can you work on religious holidays?",
+    "Are you willing to travel nationally?",
+    "What is your favorite color?",
+  ];
+
+  for (const label of demographic) {
+    assert.equal(
+      classifySelfIdentificationQuestion(label).excluded,
+      true,
+      `expected demographic exclusion for: ${label}`
+    );
+  }
+  for (const label of ordinary) {
+    assert.equal(
+      classifySelfIdentificationQuestion(label).excluded,
+      false,
+      `expected ordinary question to remain answerable: ${label}`
+    );
+  }
+});
+
+test("new demographic categories are excluded before the bounded answer AI sees them", async () => {
+  const { filterAnswerableQuestions } = await loadQuestionsModule();
+  const { draftPacketAnswers } = await loadAnswersModule();
+  const filtered = filterAnswerableQuestions({
+    captures: [
+      {
+        questions: [
+          { id: "q-role", label: "Why are you interested in this role?", required: true },
+          { id: "q-lgbtq", label: "Do you identify as LGBTQ+?", required: false },
+          { id: "q-religion", label: "What is your religion?", required: false },
+          { id: "q-marital", label: "What is your marital status?", required: false },
+          { id: "q-origin", label: "What is your national origin?", required: false },
+          { id: "q-age", label: "Which age range are you in?", required: false },
+        ],
+      },
+    ],
+  });
+  const seenPrompts = [];
+
+  const result = await draftPacketAnswers({
+    context: PACKET_CONTEXT,
+    questions: { answerable: filtered.answerable, excluded: filtered.excluded },
+    call: async (options) => {
+      seenPrompts.push(options.messages.at(-1).content);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              answers: [
+                {
+                  questionId: "q-role",
+                  answer: "The role matches my confirmed workflow experience.",
+                  evidenceIds: ["ev-ai-001"],
+                },
+              ],
+            }),
+          },
+        ],
+        model: "claude-test",
+      };
+    },
+  });
+
+  assert.equal(seenPrompts.length, 1);
+  assert.match(seenPrompts[0], /Why are you interested in this role/);
+  assert.doesNotMatch(seenPrompts[0], /LGBTQ|religion|marital|national origin|age range/i);
+  assert.deepEqual(
+    result.answers.map((answer) => answer.questionId),
+    ["q-role"]
+  );
+  assert.deepEqual(result.excludedQuestionIds, [
+    "q-lgbtq",
+    "q-religion",
+    "q-marital",
+    "q-origin",
+    "q-age",
+  ]);
 });
 
 test("capturePacketQuestions persists question metadata and can reload it by application id", async () => {

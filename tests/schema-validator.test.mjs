@@ -76,6 +76,18 @@ function makeSearchSources(overrides = {}) {
   };
 }
 
+function makeVoluntaryDefaults(overrides = {}) {
+  return {
+    voluntary_self_identification: {
+      enabled: true,
+      default_action: "decline_when_available",
+      confirmed_at: "2026-08-26T12:00:00Z",
+      answers: {},
+      ...overrides,
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Profile — valid
 // ---------------------------------------------------------------------------
@@ -122,6 +134,116 @@ test("form defaults: final submission has no configurable setting", () => {
       (error) => error.path === "auto_submit" && /unexpected property/.test(error.message)
     ),
     JSON.stringify(removedSetting.errors)
+  );
+});
+
+test("form defaults: validates explicit voluntary self-identification consent", () => {
+  const result = validate(
+    {
+      voluntary_self_identification: {
+        enabled: true,
+        default_action: "decline_when_available",
+        confirmed_at: "2026-08-26T12:00:00Z",
+        answers: {
+          "race ethnicity": {
+            value: "Two or more races",
+            confirmed_at: "2026-08-26T12:00:00Z",
+          },
+        },
+      },
+    },
+    formDefaultsSchema
+  );
+  assert.equal(result.valid, true, JSON.stringify(result.errors));
+
+  const invalidAction = validate(
+    {
+      voluntary_self_identification: {
+        enabled: true,
+        default_action: "guess_from_profile",
+        confirmed_at: null,
+        answers: {},
+      },
+    },
+    formDefaultsSchema
+  );
+  assert.equal(invalidAction.valid, false);
+
+  const emptyConfirmation = validate(
+    {
+      voluntary_self_identification: {
+        enabled: true,
+        default_action: "leave_blank",
+        confirmed_at: "",
+        answers: {},
+      },
+    },
+    formDefaultsSchema
+  );
+  assert.equal(emptyConfirmation.valid, false);
+});
+
+test("form defaults: enabled voluntary defaults require a valid confirmation date-time", () => {
+  for (const confirmed_at of [null, "not-a-date"]) {
+    const result = validate(makeVoluntaryDefaults({ confirmed_at }), formDefaultsSchema);
+
+    assert.equal(result.valid, false, `accepted confirmed_at=${JSON.stringify(confirmed_at)}`);
+    assert.ok(
+      result.errors.some((error) => error.path === "voluntary_self_identification.confirmed_at"),
+      JSON.stringify(result.errors)
+    );
+  }
+
+  const disabled = validate(
+    makeVoluntaryDefaults({
+      enabled: false,
+      default_action: "leave_blank",
+      confirmed_at: null,
+    }),
+    formDefaultsSchema
+  );
+  assert.equal(disabled.valid, true, JSON.stringify(disabled.errors));
+});
+
+test("form defaults: exact voluntary answers require normalized question keys", () => {
+  const result = validate(
+    makeVoluntaryDefaults({
+      answers: {
+        "Race / Ethnicity?": {
+          value: "Decline to answer",
+          confirmed_at: "2026-08-26T12:00:00Z",
+        },
+      },
+    }),
+    formDefaultsSchema
+  );
+
+  assert.equal(result.valid, false);
+  assert.ok(
+    result.errors.some((error) => error.path === "voluntary_self_identification.answers"),
+    JSON.stringify(result.errors)
+  );
+});
+
+test("form defaults: exact voluntary answers require valid confirmation date-times", () => {
+  const result = validate(
+    makeVoluntaryDefaults({
+      answers: {
+        "race ethnicity": {
+          value: "Decline to answer",
+          confirmed_at: "not-a-date",
+        },
+      },
+    }),
+    formDefaultsSchema
+  );
+
+  assert.equal(result.valid, false);
+  assert.ok(
+    result.errors.some(
+      (error) => error.path === "voluntary_self_identification.answers.race ethnicity.confirmed_at"
+    ),
+    JSON.stringify(result.errors)
   );
 });
 
@@ -274,6 +396,17 @@ test("search-sources: searches item missing all of query/url/rssUrl → invalid 
     anyOfError,
     `expected anyOf error at searches[0], got: ${JSON.stringify(result.errors)}`
   );
+});
+
+test("conditional schemas evaluate the present branch when then or else is omitted", () => {
+  const elseOnly = { if: { const: "primary" }, else: { const: "fallback" } };
+  assert.equal(validate("primary", elseOnly).valid, true);
+  assert.equal(validate("fallback", elseOnly).valid, true);
+  assert.equal(validate("other", elseOnly).valid, false);
+
+  const thenOnly = JSON.parse('{"if":{"const":"primary"},"then":{"const":"primary"}}');
+  assert.equal(validate("other", thenOnly).valid, true);
+  assert.equal(validate("anything", { if: { const: "primary" } }).valid, true);
 });
 
 // ---------------------------------------------------------------------------

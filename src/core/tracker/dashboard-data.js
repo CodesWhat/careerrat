@@ -4000,6 +4000,17 @@ function manualReviewAction(row) {
   };
 }
 
+function reviewGateCleared(sourceRecord = {}) {
+  const gate = String(sourceRecord.evaluation?.gate || sourceRecord.gate || "").toLowerCase();
+  if (gate === "keep") return true;
+  const evaluatedAt = String(sourceRecord.evaluation?.evaluatedAt || "").trim();
+  return (
+    gate === "review" &&
+    Boolean(evaluatedAt) &&
+    String(sourceRecord.reviewApproval?.evaluatedAt || "").trim() === evaluatedAt
+  );
+}
+
 function defaultJobAction(row, sourceRecord = {}) {
   if (row.terminal) {
     return {
@@ -4017,7 +4028,7 @@ function defaultJobAction(row, sourceRecord = {}) {
   }
   if (row.source === "application") {
     if (row.stage === "reviewed-hold") {
-      const cleared = String(sourceRecord.evaluation?.gate || sourceRecord.gate || "") === "keep";
+      const cleared = reviewGateCleared(sourceRecord);
       return {
         state: "review",
         label: cleared ? "Prepare" : "Review",
@@ -4561,7 +4572,7 @@ function applicationJobRow(app, index, communications = [], now = new Date(), pr
   const displayStageLabel = advancedByHistory
     ? stageGroupLabel(stage)
     : stage === "reviewed-hold"
-      ? String(app.evaluation?.gate || app.gate || "").toLowerCase() === "keep"
+      ? reviewGateCleared(app)
         ? "Ready to apply"
         : "Needs review"
       : stageLabel(app.status || stage, "application");

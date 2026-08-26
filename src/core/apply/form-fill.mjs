@@ -6,6 +6,9 @@
  * Produces recipes/plans the agent executes.
  */
 
+import { classifySelfIdentificationQuestion } from "../packet/questions.mjs";
+import { CANDIDATE_DEFAULTS } from "../profile/candidate-defaults.mjs";
+
 // ---------------------------------------------------------------------------
 // CANONICAL_FIELDS
 // ---------------------------------------------------------------------------
@@ -534,6 +537,122 @@ function normalizeLabel(s) {
     .trim();
 }
 
+const VOLUNTARY_DECLINE_PATTERNS = [
+  /^(?:i )?prefer not to answer$/,
+  /^(?:i )?decline to self identify$/,
+  /^(?:i )?(?:do not|dont) (?:wish|want) to answer$/,
+];
+
+/**
+ * Return the original option only when exactly one option is a narrowly
+ * recognized self-identification decline. Anything broader or ambiguous is
+ * left unresolved for the candidate.
+ */
+export function uniqueVoluntaryDeclineOption(options = []) {
+  const matches = (Array.isArray(options) ? options : []).filter((option) => {
+    const label =
+      option && typeof option === "object" ? (option.label ?? option.name ?? "") : option;
+    const normalized = String(label)
+      .toLowerCase()
+      .replace(/[’']/g, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return VOLUNTARY_DECLINE_PATTERNS.some((pattern) => pattern.test(normalized));
+  });
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function resolveVoluntarySelfIdentification(field, formDefaults) {
+  const label = fieldLabel(field);
+  if (!classifySelfIdentificationQuestion(label).excluded) return null;
+
+  const settings = formDefaults?.voluntary_self_identification;
+  if (settings?.enabled !== true) {
+    return {
+      label,
+      canonicalField: "eeo",
+      value: null,
+      action: "skip",
+      reason: "voluntary_self_identification_disabled",
+    };
+  }
+
+  if (
+    typeof settings.confirmed_at !== "string" ||
+    !settings.confirmed_at.trim() ||
+    !Number.isFinite(Date.parse(settings.confirmed_at))
+  ) {
+    return {
+      label,
+      canonicalField: "eeo",
+      value: null,
+      action: "skip",
+      reason: "voluntary_self_identification_unconfirmed",
+    };
+  }
+
+  const normalized = normalizeLabel(label);
+  const saved = settings.answers?.[normalized];
+  const savedConfirmed =
+    typeof saved?.confirmed_at === "string" &&
+    saved.confirmed_at.trim() &&
+    Number.isFinite(Date.parse(saved.confirmed_at));
+  const savedValue = savedConfirmed ? compactValue(saved?.value) : null;
+  if (savedValue != null) {
+    return {
+      label,
+      canonicalField: "eeo",
+      value: savedValue,
+      action: "fill",
+      source: "form-defaults.voluntary_self_identification.answers",
+    };
+  }
+
+  if (settings.default_action !== "decline_when_available") {
+    return {
+      label,
+      canonicalField: "eeo",
+      value: null,
+      action: "skip",
+      reason: "voluntary_self_identification_leave_blank",
+    };
+  }
+
+  if (field?.type === "select") {
+    return {
+      label,
+      canonicalField: "eeo",
+      value: null,
+      action: "fill",
+      source: "form-defaults.voluntary_self_identification.default_action",
+      declinePolicy: true,
+    };
+  }
+
+  const option = uniqueVoluntaryDeclineOption(field?.options);
+  const optionLabel =
+    option && typeof option === "object" ? (option.label ?? option.name ?? null) : option;
+  if (field?.type === "radio" && optionLabel) {
+    return {
+      label,
+      canonicalField: "eeo",
+      value: optionLabel,
+      action: "fill",
+      source: "form-defaults.voluntary_self_identification.default_action",
+      declinePolicy: true,
+    };
+  }
+
+  return {
+    label,
+    canonicalField: "eeo",
+    value: null,
+    action: "skip",
+    reason: "voluntary_self_identification_decline_unavailable",
+  };
+}
+
 function fieldLabel(field) {
   if (typeof field === "string") return field;
   if (field && typeof field === "object") return field.label || field.name || field.question || "";
@@ -723,6 +842,17 @@ export function resolveScreeningAnswer(question, { formDefaults, profile, honest
 
   if (isCurrentCompLabel(normalized)) {
     return { action: "skip", value: null, reason: "private_current_compensation" };
+  }
+
+  const voluntary = resolveVoluntarySelfIdentification(question, formDefaults);
+  if (voluntary) {
+    return {
+      action: voluntary.action,
+      value: voluntary.value,
+      ...(voluntary.source ? { source: voluntary.source } : {}),
+      ...(voluntary.reason ? { reason: voluntary.reason } : {}),
+      ...(voluntary.declinePolicy ? { declinePolicy: true } : {}),
+    };
   }
 
   const configured = findConfiguredScreeningAnswer(normalized, formDefaults);
@@ -922,11 +1052,6 @@ export function mapFormDefaults(formDefaults, profile) {
     "";
   if (expectedBase !== "" && expectedBase != null) result.expected_base = expectedBase;
 
-  // eeo
-  if (fd.eeo_default != null && fd.eeo_default !== "") {
-    result.eeo = fd.eeo_default;
-  }
-
   return result;
 }
 
@@ -1060,6 +1185,9 @@ export function buildFillPlan({ fields = [], formDefaults, profile, honesty, por
     const label = fieldLabel(field);
     const normalized = normalizeLabel(label);
 
+    const voluntary = resolveVoluntarySelfIdentification(field, formDefaults);
+    if (voluntary) return voluntary;
+
     // Determine canonical field for metadata (without resolving value)
     let canonicalField = null;
     if (portal && PORTAL_RECIPES[portal]) {
@@ -1087,15 +1215,43 @@ export function buildFillPlan({ fields = [], formDefaults, profile, honesty, por
     }
 
     const fd = formDefaults || {};
+    const configuredAliases = Array.isArray(fd.option_aliases?.[canonicalField])
+      ? fd.option_aliases[canonicalField]
+      : [];
+    const defaultForm = CANDIDATE_DEFAULTS["form-defaults"];
+    const defaultSourceAliases =
+      canonicalField === "source" &&
+      normalizeLabel(value) === normalizeLabel(defaultForm.source) &&
+      !configuredAliases.length
+        ? defaultForm.option_aliases.source
+        : [];
+    const locationAliases =
+      canonicalField === "location"
+        ? [profile?.location?.home, ...(profile?.location?.relocation || [])]
+        : [];
+    const seenAliases = new Set([normalizeLabel(value)]);
+    const optionAliases = [...configuredAliases, ...defaultSourceAliases, ...locationAliases]
+      .map((alias) => String(alias || "").trim())
+      .filter((alias) => {
+        const normalizedAlias = normalizeLabel(alias);
+        if (!normalizedAlias || seenAliases.has(normalizedAlias)) return false;
+        seenAliases.add(normalizedAlias);
+        return true;
+      });
     const requiresConfirmation =
       (canonicalField === "current_employer" || canonicalField === "current_title") &&
       (fd.confirm_current_role === true || fd.confirm_current_disclosure === true)
         ? true
         : undefined;
 
-    return requiresConfirmation
-      ? { label, canonicalField, value, action: "fill", requiresConfirmation }
-      : { label, canonicalField, value, action: "fill" };
+    return {
+      label,
+      canonicalField,
+      value,
+      action: "fill",
+      ...(optionAliases.length ? { optionAliases } : {}),
+      ...(requiresConfirmation ? { requiresConfirmation } : {}),
+    };
   });
 }
 

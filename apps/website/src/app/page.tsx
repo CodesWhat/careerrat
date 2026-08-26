@@ -118,13 +118,13 @@ export default function Home() {
             <article className="step-card">
               <span className="step-card__number">02</span>
               <h3>Tell it what you want</h3>
-              <p>Drop your résumé, then answer a short interview about roles, comp floor, and dealbreakers.</p>
+              <p>Drop your résumé, then answer short questions in plain English, like what would make one job worth applying to before another.</p>
               <span className="status-pill">ROLES ✓ · GUARDRAILS ✓</span>
             </article>
             <article className="step-card">
               <span className="step-card__number">03</span>
               <h3>It hunts, you decide</h3>
-              <p>It sweeps boards, cuts the misses, ranks the rest, and preps applications. Nothing is sent without you.</p>
+              <p>Search opens when setup is ready. CareerRat ranks the matches and fills safe application fields. Voluntary questions stay blank by default; local Application defaults can choose a decline option when available. CAPTCHAs and Submit stay with you.</p>
               <span className="status-pill">SWEEP · 9 CUT · 12 RANKED</span>
             </article>
           </div>

@@ -181,28 +181,68 @@ function runningLeaseExpired(run, nowMs = Date.now()) {
   return Number.isFinite(updatedMs) && nowMs - updatedMs > SOURCING_RUN_LEASE_MS;
 }
 
-function failRun(db, current, error) {
+function failRun(db, current, error, { preserveUpdatedAt = false } = {}) {
   const now = nextTimestampIso(current.updated_at);
   return updateRun(db, {
     ...clone(current),
     status: SOURCING_RUN_STATUSES.FAILED,
     completed_at: now,
-    updated_at: now,
+    updated_at: preserveUpdatedAt ? current.updated_at : now,
     summary: null,
     error: normalizeError(error),
   });
 }
 
+function recoverExpiredRunForRead(db, run) {
+  if (run?.status !== SOURCING_RUN_STATUSES.RUNNING || !runningLeaseExpired(run)) return run;
+  return failRun(
+    db,
+    run,
+    {
+      code: "SOURCING_RUN_LEASE_EXPIRED",
+      message: "The previous sourcing run stopped reporting progress and was recovered.",
+    },
+    { preserveUpdatedAt: true }
+  );
+}
+
 export function sourcingRunLatest({ repoRoot, env, purpose = "first-search" } = {}) {
   const normalizedPurpose = assertPurpose(purpose);
   const db = requireDb({ repoRoot, env });
-  const run = latestRunForPurpose(db, normalizedPurpose);
-  return {
-    ok: true,
-    purpose: normalizedPurpose,
-    status: run?.status || SOURCING_RUN_STATUSES.NOT_STARTED,
-    run,
-  };
+  return withTransaction(db, () => {
+    const run = recoverExpiredRunForRead(db, latestRunForPurpose(db, normalizedPurpose));
+    return {
+      ok: true,
+      purpose: normalizedPurpose,
+      status: run?.status || SOURCING_RUN_STATUSES.NOT_STARTED,
+      run,
+    };
+  });
+}
+
+export function sourcingRunGet({ repoRoot, env, id, purpose } = {}) {
+  const runId = assertRunId(id, "sourcingRunGet");
+  const normalizedPurpose = purpose == null ? null : assertPurpose(purpose);
+  const db = requireDb({ repoRoot, env });
+  return withTransaction(db, () => {
+    let run = runById(db, runId);
+    if (!run) {
+      throw makeError(`sourcing run not found: ${runId}`, "NOT_FOUND");
+    }
+    if (normalizedPurpose && run.purpose !== normalizedPurpose) {
+      throw makeError(
+        `sourcing run ${runId} does not belong to ${normalizedPurpose}`,
+        "BAD_REQUEST"
+      );
+    }
+    run = recoverExpiredRunForRead(db, run);
+    return {
+      ok: true,
+      purpose: run.purpose,
+      status: run.status,
+      run,
+    };
+  });
 }
 
 export function sourcingRunStart({

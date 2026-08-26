@@ -92,6 +92,7 @@ export const CANDIDATE_DEFAULTS = Object.freeze({
   },
   "form-defaults": {
     source: "CareerRat",
+    option_aliases: { source: ["Other"], location: [] },
     work_authorization: "",
     requires_sponsorship: "",
     current_employer: null,
@@ -101,6 +102,12 @@ export const CANDIDATE_DEFAULTS = Object.freeze({
     github: null,
     portfolio: null,
     eeo_default: "Prefer not to answer",
+    voluntary_self_identification: {
+      enabled: false,
+      default_action: "leave_blank",
+      confirmed_at: null,
+      answers: {},
+    },
     screening_answers: {},
     document_formats: {
       default_packet_format: "pdf",

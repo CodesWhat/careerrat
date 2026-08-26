@@ -581,4 +581,29 @@ describe("chat-first onboarding controller", () => {
       { claim: "Led a migration", evidence: "Shipped across three teams" },
     ]);
   });
+
+  it("refuses a direct agent confirmation that targets voluntary self-identification", async () => {
+    const api = { saveCandidateFile: vi.fn() };
+
+    await expect(
+      applyFirstRunConfirmation(
+        {
+          kind: "candidate_patch",
+          payload: {
+            doc: "form-defaults",
+            patch: {
+              voluntary_self_identification: {
+                enabled: true,
+                default_action: "leave_blank",
+                confirmed_at: "2026-08-26T12:00:00Z",
+                answers: {},
+              },
+            },
+          },
+        },
+        { api, state: {} }
+      )
+    ).rejects.toThrow(/local application defaults/i);
+    expect(api.saveCandidateFile).not.toHaveBeenCalled();
+  });
 });

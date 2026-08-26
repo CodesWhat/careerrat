@@ -152,9 +152,11 @@ product source of truth. Generated packet source markdown and manifests remain
 internal artifacts; user-facing exports default to PDF. DOCX is generated only
 when an upload requirement requests it or a user explicitly selects it. EEO,
 disability, veteran, demographic, and other voluntary self-identification
-questions are excluded before answer drafting; the UI may show skipped metadata
-but must not generate answers for those prompts. Packet generation prepares
-materials only and does not submit applications automatically.
+questions are excluded from AI drafting. They stay blank by default and may be
+filled only from an explicit saved local policy or exact answer in **Profile >
+Application defaults**. That setting is redacted from agent context, so no model
+can infer or rewrite it. Packet generation prepares materials only and does not
+submit applications automatically.
 
 ### Bounded AI Layer
 

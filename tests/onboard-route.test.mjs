@@ -26,7 +26,6 @@ import { fileURLToPath } from "node:url";
 import { ApiError, extractResumeAi } from "../apps/web/src/lib/api.js";
 import {
   deepMerge,
-  finishOnboarding,
   mountOnboardRoutes,
   normalizeOnboardingDraft,
   readOnboardingDraft,
@@ -1306,24 +1305,30 @@ describe("POST /api/onboard/finish", () => {
     const kickoff = await postJsonDirect(routes, "/api/onboard/quick-start", {});
     assert.equal(kickoff.status, 202);
 
-    const configuredSources = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
-    sourceConfigPut({
-      repoRoot,
-      name: "search-sources",
+    await postJsonDirect(routes, "/api/onboard/candidate/targeting", {
       data: {
-        ...configuredSources,
-        searches: [
-          ...(configuredSources.searches || []),
+        role_buckets: [
           {
-            label: "Fresh target board",
-            source_type: "rss",
-            rssUrl: "https://example.test/fresh-targets.xml",
-            enabled: true,
+            name: "Backend and platform",
+            priority: "primary",
+            titles: ["Staff Backend Engineer", "Staff Platform Engineer"],
           },
         ],
+        cut_signals: ["adtech"],
+        company_preferences: {
+          confirmed: true,
+          industries: ["fintech"],
+          organization_types: ["large corporations"],
+        },
       },
     });
-    const stale = finishOnboarding({ repoRoot, env });
+    await postJsonDirect(routes, "/api/onboard/candidate/profile", {
+      data: {
+        location: { home: "New York, NY", remote: true, hybrid: true },
+      },
+    });
+
+    const stale = await postJsonDirect(routes, "/api/onboard/finish", {});
     assert.equal(stale.status, 409);
     assert.equal(stale.body.code, "ONBOARDING_NOT_READY");
     assert.equal(stale.body.firstSearchRun.inputsChanged, true);
@@ -1331,15 +1336,11 @@ describe("POST /api/onboard/finish", () => {
     const refreshed = await postJsonDirect(routes, "/api/onboard/quick-start", {});
     assert.equal(refreshed.status, 202);
 
-    const result = finishOnboarding({
-      repoRoot,
-      env,
-      now: new Date("2026-08-14T20:30:00.000Z"),
-    });
+    const result = await postJsonDirect(routes, "/api/onboard/finish", {});
 
     assert.equal(result.status, 200);
     assert.equal(result.body.ok, true);
-    assert.equal(result.body.draft.finishedAt, "2026-08-14T20:30:00.000Z");
+    assert.match(result.body.draft.finishedAt, /^\d{4}-\d{2}-\d{2}T/);
     assert.deepEqual(
       workspaceThreadRead({ repoRoot, env }).messages.map((message) => message.text),
       [

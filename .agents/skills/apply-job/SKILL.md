@@ -15,7 +15,7 @@ a JD URL with clear application intent.
 | File | Purpose |
 | --- | --- |
 | `application-limits` config (`candidate/application-limits.yml` only in legacy/export mode) | Per-company caps and cooldowns (step-zero gate) |
-| `candidate/form-defaults.yml` | `expected_base` (primary salary form value), applicant contact facts |
+| Agent-visible application defaults | Sanitized `expected_base`, applicant contact facts, and screening answers supplied by CareerRat. Never read raw `candidate/form-defaults.yml`. |
 | `candidate/targeting.yml` | `excluded_companies`, `cut_signals`, `fit_bands`, `role_buckets[].priority` (OE bucket policy) |
 | `candidate/profile.yml` | `compensation.expected_base` (fallback when `form-defaults.yml#expected_base` absent), `compensation.oe_min_base`, `compensation.oe_max_base`, `candidate.toolchain`, contact facts |
 | `candidate/honesty.yml` | `tools.confirmed`, `claims.do_not_fabricate`, education policy |
@@ -195,14 +195,15 @@ flow. When halting on one of these blockers:
 
 ## STEP 7 — Fill
 
-Read applicant facts from `candidate/form-defaults.yml`:
+Use the sanitized agent-visible application defaults supplied by CareerRat:
 
 - `name`, `email`, `phone`, `location`, `linkedin`, `github`, `portfolio`
 - `work_authorization`, `requires_sponsorship`
 - `expected_base` — use this for any salary form field. **Never read or echo `profile.compensation.current_base` in any form field.**
-- `current_employer`, `current_title` — these are pre-reviewed onboarding/form-default values. Fill them without per-application interruption unless `candidate/form-defaults.yml` sets `confirm_current_role: true` / `confirm_current_disclosure: true`, the page asks for a different/new disclosure, or the value is missing.
-- `eeo_default` — use for EEO/demographic fields when present.
+- `current_employer`, `current_title` — these are pre-reviewed onboarding/form-default values. Fill them without per-application interruption unless the sanitized defaults set `confirm_current_role: true` / `confirm_current_disclosure: true`, the page asks for a different/new disclosure, or the value is missing.
 - `screening_answers` — exact pre-reviewed answers for recurring custom questions.
+
+The deterministic application filler, not this skill, owns voluntary self-identification. Its local resolver receives the private policy and exact answers without placing either in agent context. Never read, request, log, or update those settings, and never draft or infer a demographic answer. Treat the app-owned fill plan as final for those controls.
 
 Navigate to the application URL using the session browser. Keep the provider on `auto`
 unless the user explicitly changes it; CareerRat resolves the current session browser
@@ -215,7 +216,7 @@ interaction to confirm page state.
 
 **Field confirmation before fill:** call `buildFillPlan` with `formDefaults`, `profile`, and `honesty`. Treat `requiresConfirmation: true` as a hard pause, but do not create a pause just because a field is custom or unfamiliar. The resolver now fills configured `screening_answers`, routine availability/location questions, and honesty-backed tool yes/no questions before returning `skip`.
 
-**Screening answer posture:** answer as the candidate from local context. Use `candidate/form-defaults.yml`, `candidate/profile.yml`, `candidate/honesty.yml`, `candidate/evidence.yml`, generated tailored artifacts, and the JD. If the answer is directly supported, fill it in first person and continue. Do not stop on vague/ordinary prompts like "Why are you interested?", "Years of experience?", "Are you open to travel?", or "Describe relevant experience" when the evidence/profile already supports a truthful answer. Stop only when the answer would require fabricating, guessing a number/date/security clearance/tool depth, revealing private current compensation, contradicting `honesty.yml`, or making a materially new disclosure that is not in onboarding data.
+**Screening answer posture:** answer as the candidate from the sanitized application defaults, `candidate/profile.yml`, `candidate/honesty.yml`, `candidate/evidence.yml`, generated tailored artifacts, and the JD. If the answer is directly supported, fill it in first person and continue. Voluntary self-identification questions are never screening prompts and stay outside packet/AI drafting. Do not stop on vague/ordinary prompts like "Why are you interested?", "Years of experience?", "Are you open to travel?", or "Describe relevant experience" when the evidence/profile already supports a truthful answer. Stop only when the answer would require fabricating, guessing a number/date/security clearance/tool depth, revealing private current compensation, contradicting `honesty.yml`, or making a materially new disclosure that is not in onboarding data.
 
 **Known ATS form patterns (domain-general — apply regardless of ATS platform):**
 

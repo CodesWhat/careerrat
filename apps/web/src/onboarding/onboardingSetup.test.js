@@ -20,9 +20,11 @@ import {
   SETUP_ITEM_LABELS,
   SETUP_ITEM_ORDER,
   setupCanGraduate,
+  setupCanRelease,
   setupCompletedCount,
   setupDisclosureRows,
   setupIsComplete,
+  setupNeedsVoluntaryDefaults,
   setupProgressFromState,
   setupTotal,
 } from "./onboardingSetup.js";
@@ -227,6 +229,64 @@ describe("setupCanGraduate", () => {
         })
       ).toBe(false);
     }
+  });
+});
+
+describe("setupCanRelease", () => {
+  const graduatedCandidate = {
+    setupProgress: { complete: true },
+    data: {
+      setup: { readiness: { search_ready: true } },
+      sourcing: {
+        sourceSetup: { deterministicSources: { attempted: 2 } },
+        firstSearchRun: { status: "completed", run: { status: "completed" } },
+      },
+    },
+  };
+
+  it("requires a parseable voluntary-form confirmation timestamp", () => {
+    expect(
+      setupCanRelease({
+        ...graduatedCandidate,
+        data: {
+          ...graduatedCandidate.data,
+          "form-defaults": {
+            voluntary_self_identification: { confirmed_at: "not-a-date" },
+          },
+        },
+      })
+    ).toBe(false);
+    expect(
+      setupCanRelease({
+        ...graduatedCandidate,
+        data: {
+          ...graduatedCandidate.data,
+          "form-defaults": {
+            voluntary_self_identification: { confirmed_at: "2026-08-26T18:00:00.000Z" },
+          },
+        },
+      })
+    ).toBe(true);
+  });
+
+  it("routes every completed existing workspace through the local upgrade before search release", () => {
+    const completedWithoutSearch = {
+      setupProgress: { complete: true },
+      data: {
+        setup: { readiness: { search_ready: true } },
+        "form-defaults": {
+          voluntary_self_identification: { confirmed_at: null },
+        },
+      },
+    };
+
+    expect(setupNeedsVoluntaryDefaults(completedWithoutSearch)).toBe(true);
+    expect(
+      setupNeedsVoluntaryDefaults({
+        ...completedWithoutSearch,
+        setupProgress: { complete: false },
+      })
+    ).toBe(false);
   });
 });
 

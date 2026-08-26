@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../lib/api.js";
 import {
+  classifyDurableSearchRun,
   jobSearchCapabilities,
   runAiWebSearchLane,
   runCoordinatedJobSearch,
@@ -17,6 +18,60 @@ function manualSearchSpies() {
     setSearchRun: vi.fn(),
   };
 }
+
+describe("classifyDurableSearchRun", () => {
+  it("classifies completed configured-source errors as a partial failed lane", () => {
+    const run = {
+      status: "completed",
+      summary: {
+        new: 2,
+        errors: [{ company: "Acme", error: "careers page timed out" }],
+      },
+    };
+
+    expect(classifyDurableSearchRun("deterministic", { run })).toEqual({
+      status: "failed",
+      partial: true,
+      error: "1 configured source couldn't be searched.",
+      failedPromptIds: [],
+      run,
+    });
+  });
+
+  it("recovers exact failed prompt ids from a durable AI failure", () => {
+    const run = {
+      status: "failed",
+      error: {
+        message: "second query timed out",
+        failedPromptIds: ["p2"],
+      },
+    };
+
+    expect(classifyDurableSearchRun("aiWeb", { run })).toEqual({
+      status: "failed",
+      partial: false,
+      error: "second query timed out",
+      failedPromptIds: ["p2"],
+      run,
+    });
+  });
+
+  it("classifies a durable AI disconnect as a cancelled skipped lane", () => {
+    const run = {
+      status: "failed",
+      error: { code: "AI_WEB_SEARCH_ABORTED", message: "AI web search was cancelled." },
+    };
+
+    expect(classifyDurableSearchRun("aiWeb", { run })).toEqual({
+      status: "skipped",
+      reason: "cancelled",
+      partial: false,
+      error: null,
+      failedPromptIds: [],
+      run,
+    });
+  });
+});
 
 describe("runJobsPageSearch", () => {
   it("accepts a terminal successful start response", async () => {
@@ -36,6 +91,53 @@ describe("runJobsPageSearch", () => {
     expect(startSearchRun).toHaveBeenCalledWith({ purpose: "manual-search" });
     expect(state.setSearchRun).toHaveBeenLastCalledWith(run);
     expect(getSourcingRun).not.toHaveBeenCalled();
+    expect(state.refetch).toHaveBeenCalledOnce();
+  });
+
+  it("passes the coordinated search execution id to the manual-search start", async () => {
+    const state = manualSearchSpies();
+    const run = { id: "run-correlated", status: "completed", summary: { new: 0 } };
+    const startSearchRun = vi.fn(async () => ({ ok: true, run }));
+
+    await runJobsPageSearch({
+      ...state,
+      startSearchRun,
+      searchExecutionId: "search-execution-shared",
+    });
+
+    expect(startSearchRun).toHaveBeenCalledWith({
+      purpose: "manual-search",
+      searchExecutionId: "search-execution-shared",
+    });
+  });
+
+  it("marks a completed deterministic run with source errors as partial without dropping results", async () => {
+    const state = manualSearchSpies();
+    const run = {
+      id: "run-partial",
+      status: "completed",
+      summary: {
+        new: 2,
+        errors: [{ company: "Acme", error: "careers page timed out" }],
+      },
+    };
+
+    const result = await runJobsPageSearch({
+      ...state,
+      startSearchRun: vi.fn(async () => ({ run, requestId: "request-partial" })),
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      partial: true,
+      error: "1 configured source couldn't be searched.",
+      run,
+      requestId: "request-partial",
+    });
+    expect(state.setSearchRun).toHaveBeenLastCalledWith(run);
+    expect(state.setSearchError).toHaveBeenLastCalledWith(
+      "1 configured source couldn't be searched."
+    );
     expect(state.refetch).toHaveBeenCalledOnce();
   });
 
@@ -92,10 +194,45 @@ describe("runJobsPageSearch", () => {
 
     expect(result).toEqual({ ok: true, run: terminalRun });
     expect(getSourcingRun.mock.calls).toEqual([
-      [{ purpose: "manual-search" }],
-      [{ purpose: "manual-search" }],
+      [{ purpose: "manual-search", id: "run-poll" }],
+      [{ purpose: "manual-search", id: "run-poll" }],
     ]);
     expect(state.setSearchRun.mock.calls).toEqual([[startingRun], [terminalRun]]);
+    expect(state.refetch).toHaveBeenCalledOnce();
+  });
+
+  it("keeps rows from a completed poll while reporting its source errors", async () => {
+    const state = manualSearchSpies();
+    const startingRun = { id: "run-poll-partial", status: "running" };
+    const terminalRun = {
+      id: "run-poll-partial",
+      status: "completed",
+      summary: {
+        new: 2,
+        errorCount: 2,
+        errors: [
+          { company: "Acme", error: "timed out" },
+          { company: "Globex", error: "unavailable" },
+        ],
+      },
+    };
+
+    const result = await runJobsPageSearch({
+      ...state,
+      startSearchRun: vi.fn(async () => ({ run: startingRun })),
+      getSourcingRun: vi.fn(async () => ({ run: terminalRun })),
+      pollIntervalMs: 0,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      partial: true,
+      error: "2 configured sources couldn't be searched.",
+      run: terminalRun,
+    });
+    expect(state.setSearchError).toHaveBeenLastCalledWith(
+      "2 configured sources couldn't be searched."
+    );
     expect(state.refetch).toHaveBeenCalledOnce();
   });
 
@@ -295,6 +432,40 @@ describe("runAiWebSearchLane", () => {
     expect(runAiWebSearchStream).toHaveBeenCalledOnce();
   });
 
+  it("drops stale retry prompt ids when targeting changes regenerate the prompt set", async () => {
+    const state = stateSpies();
+    const runAiWebSearchStream = vi.fn(async ({ onEvent }) => {
+      onEvent({ type: "done", data: { searched: 2, found: 0, new: 0, duplicates: 0, errors: [] } });
+    });
+
+    await runAiWebSearchLane({
+      ...state,
+      promptIds: ["old-prompt-2"],
+      getSearchPrompts: vi.fn(async () => ({
+        data: {
+          prompts: [{ id: "old-prompt-1", text: "old search" }],
+          inputFingerprint: "targeting-new",
+          savedInputFingerprint: "targeting-old",
+        },
+      })),
+      generateSearchPrompts: vi.fn(async () => ({
+        data: { prompts: [{ text: "fresh search one" }, { text: "fresh search two" }] },
+      })),
+      saveSearchPrompts: vi.fn(async () => ({
+        data: {
+          prompts: [
+            { id: "fresh-prompt-1", text: "fresh search one" },
+            { id: "fresh-prompt-2", text: "fresh search two" },
+          ],
+        },
+      })),
+      runAiWebSearchStream,
+    });
+
+    expect(runAiWebSearchStream).toHaveBeenCalledOnce();
+    expect(runAiWebSearchStream.mock.calls[0][0]).not.toHaveProperty("promptIds");
+  });
+
   it("moves running to results, records activity/counts, and refetches", async () => {
     const state = stateSpies();
     const refetch = vi.fn();
@@ -332,6 +503,24 @@ describe("runAiWebSearchLane", () => {
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ promptIds: ["p2"] }));
   });
 
+  it("passes the coordinated search execution id into the AI stream request", async () => {
+    const state = stateSpies();
+    const run = vi.fn(async ({ onEvent }) => {
+      onEvent({ type: "done", data: { searched: 1, found: 0, new: 0, duplicates: 0, errors: [] } });
+    });
+
+    await runAiWebSearchLane({
+      ...state,
+      ...freshPromptsStub(),
+      searchExecutionId: "search-execution-shared",
+      runAiWebSearchStream: run,
+    });
+
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({ searchExecutionId: "search-execution-shared" })
+    );
+  });
+
   it("surfaces in-band errors as error state without refetching", async () => {
     const state = stateSpies();
     const refetch = vi.fn();
@@ -367,10 +556,51 @@ describe("runAiWebSearchLane", () => {
       runAiWebSearchStream: async ({ onEvent }) => onEvent({ type: "done", data: done }),
     });
 
-    expect(result).toEqual({ ok: false, error: "query timed out", data: done });
+    expect(result).toEqual({
+      ok: false,
+      error: "query timed out",
+      failedPromptIds: ["p1"],
+      data: done,
+    });
     expect(state.setCounts).toHaveBeenLastCalledWith(done);
     expect(state.setStatus).toHaveBeenLastCalledWith("error");
     expect(state.setError).toHaveBeenLastCalledWith("query timed out");
+  });
+
+  it("keeps successful AI prompt results while returning exact failed prompt ids", async () => {
+    const state = stateSpies();
+    const refetch = vi.fn();
+    const done = {
+      searched: 2,
+      found: 2,
+      new: 1,
+      duplicates: 1,
+      errors: ["second query timed out"],
+      failedPromptIds: ["p2"],
+      queryResults: [
+        { promptId: "p1", status: "completed" },
+        { promptId: "p2", status: "failed", error: "second query timed out" },
+      ],
+    };
+
+    const result = await runAiWebSearchLane({
+      ...state,
+      ...freshPromptsStub(),
+      refetch,
+      runAiWebSearchStream: async ({ onEvent }) => onEvent({ type: "done", data: done }),
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      partial: true,
+      error: "second query timed out",
+      failedPromptIds: ["p2"],
+      data: done,
+    });
+    expect(state.setCounts).toHaveBeenLastCalledWith(done);
+    expect(state.setStatus).toHaveBeenLastCalledWith("results");
+    expect(state.setError).toHaveBeenLastCalledWith("second query timed out");
+    expect(refetch).toHaveBeenCalledOnce();
   });
 
   it("routes a thrown stream failure through resolveErrorCopy, never the raw server string", async () => {
@@ -634,6 +864,7 @@ describe("runCoordinatedJobSearch", () => {
     expect(refetch).not.toHaveBeenCalled();
     expect(states.at(-1)).toMatchObject({
       status: "error",
+      reason: "no-configured-lane",
       lanes: {
         deterministic: { configured: true, executable: false, status: "skipped" },
         aiWeb: {
@@ -659,17 +890,131 @@ describe("runCoordinatedJobSearch", () => {
     });
 
     expect(result).toMatchObject({ ok: true, partial: true });
+    expect(result.retry).toEqual({ aiWeb: true });
     expect(refetch).toHaveBeenCalledOnce();
     expect(setSearchState).toHaveBeenLastCalledWith(
       expect.objectContaining({
         status: "complete",
-        summary: expect.stringContaining("1 search lane finished"),
+        summary: expect.stringContaining("1 lane needs retry"),
         lanes: {
           deterministic: expect.objectContaining({ status: "succeeded" }),
           aiWeb: expect.objectContaining({ status: "failed", error: "AI search timed out" }),
         },
       })
     );
+  });
+
+  it("marks a partly failed AI lane while preserving its successful results and retry ids", async () => {
+    const states = [];
+    const result = await runCoordinatedJobSearch({
+      capabilities,
+      runDeterministic: vi.fn(async () => ({ ok: true, run: { summary: { new: 2 } } })),
+      runAiWeb: vi.fn(async () => ({
+        ok: true,
+        partial: true,
+        error: "second query timed out",
+        failedPromptIds: ["p2"],
+        data: { new: 1 },
+      })),
+      setSearchState: (state) => states.push(state),
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      partial: true,
+      failedPromptIds: ["p2"],
+      retry: { aiPromptIds: ["p2"] },
+    });
+    expect(states.at(-1)).toMatchObject({
+      status: "complete",
+      summary: "2 search lanes finished · 1 lane needs retry · 3 new",
+      lanes: {
+        deterministic: { status: "succeeded" },
+        aiWeb: {
+          status: "failed",
+          partial: true,
+          error: "second query timed out",
+          failedPromptIds: ["p2"],
+          result: { data: { new: 1 } },
+        },
+      },
+    });
+  });
+
+  it("marks a completed deterministic lane with summary errors as partial", async () => {
+    const states = [];
+    const result = await runCoordinatedJobSearch({
+      capabilities,
+      runDeterministic: vi.fn(async () => ({
+        ok: true,
+        run: {
+          status: "completed",
+          summary: {
+            new: 2,
+            errorCount: 1,
+            errors: [{ company: "Acme", error: "careers page timed out" }],
+          },
+        },
+      })),
+      runAiWeb: vi.fn(async () => ({ ok: true, data: { new: 1 } })),
+      setSearchState: (state) => states.push(state),
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      partial: true,
+      retry: { deterministic: true },
+    });
+    expect(states.at(-1)).toMatchObject({
+      status: "complete",
+      summary: "2 search lanes finished · 1 lane needs retry · 3 new",
+      lanes: {
+        deterministic: {
+          status: "failed",
+          partial: true,
+          error: "1 configured source couldn't be searched.",
+        },
+        aiWeb: { status: "succeeded" },
+      },
+    });
+  });
+
+  it("retries exact failed AI prompts without rerunning a successful deterministic lane", async () => {
+    const runDeterministic = vi.fn(async () => ({ ok: true }));
+    const runAiWeb = vi.fn(async () => ({ ok: true, data: { new: 1 } }));
+
+    const result = await runCoordinatedJobSearch({
+      capabilities,
+      retry: { aiPromptIds: ["p2"] },
+      runDeterministic,
+      runAiWeb,
+    });
+
+    expect(runDeterministic).not.toHaveBeenCalled();
+    expect(runAiWeb).toHaveBeenCalledWith(expect.objectContaining({ retryPromptIds: ["p2"] }));
+    expect(result).toMatchObject({
+      ok: true,
+      partial: false,
+      lanes: {
+        deterministic: { status: "succeeded", reason: "already-succeeded" },
+        aiWeb: { status: "succeeded" },
+      },
+    });
+  });
+
+  it("reruns deterministic search too when both lanes need retry", async () => {
+    const runDeterministic = vi.fn(async () => ({ ok: true }));
+    const runAiWeb = vi.fn(async () => ({ ok: true }));
+
+    await runCoordinatedJobSearch({
+      capabilities,
+      retry: { deterministic: true, aiPromptIds: ["p2"] },
+      runDeterministic,
+      runAiWeb,
+    });
+
+    expect(runDeterministic).toHaveBeenCalledOnce();
+    expect(runAiWeb).toHaveBeenCalledWith(expect.objectContaining({ retryPromptIds: ["p2"] }));
   });
 
   it("shares cancellation with both lanes and does not refetch after abort", async () => {
@@ -696,6 +1041,7 @@ describe("runCoordinatedJobSearch", () => {
     expect(setSearchState).toHaveBeenLastCalledWith(
       expect.objectContaining({
         status: "idle",
+        reason: "cancelled",
         lanes: {
           deterministic: expect.objectContaining({ status: "skipped" }),
           aiWeb: expect.objectContaining({ status: "skipped" }),

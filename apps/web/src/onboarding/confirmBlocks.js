@@ -87,6 +87,13 @@ const KIND_VALIDATORS = {
     const payload = block?.payload;
     if (!isPlainObject(payload)) return false;
     if (!CANDIDATE_PATCH_DOCS.has(payload.doc)) return false;
+    if (
+      payload.doc === "form-defaults" &&
+      isPlainObject(payload.patch) &&
+      Object.hasOwn(payload.patch, "voluntary_self_identification")
+    ) {
+      return false;
+    }
     return isPlainObject(payload.patch) && Object.keys(payload.patch).length > 0;
   },
   // Generic evidence-claim capture kind — the interview's only way to seed

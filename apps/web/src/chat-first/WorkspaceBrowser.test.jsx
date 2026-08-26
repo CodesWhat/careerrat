@@ -7,6 +7,27 @@ async function loadBrowser() {
   return import("./WorkspaceBrowser.jsx");
 }
 
+function textOf(node) {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(textOf).join("");
+  return textOf(node.props?.children);
+}
+
+function findElement(node, predicate) {
+  if (!node || typeof node !== "object") return null;
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findElement(child, predicate);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (typeof node.type === "function") return findElement(node.type(node.props), predicate);
+  if (predicate(node)) return node;
+  return findElement(node.props?.children, predicate);
+}
+
 const JOBS = [
   {
     id: "tyrell",
@@ -187,11 +208,10 @@ describe("WorkspaceBrowser", () => {
     firstRow.props.children[0].props.onChange();
     expect(onToggleSelection).toHaveBeenCalledWith("tyrell");
 
-    const filterBar = searchButtons[2].type(searchButtons[2].props);
-    const sourceControl = filterBar.props.children.find(
-      (child) => child?.props?.label === "Source"
+    const sourceSelect = findElement(
+      search,
+      (node) => node.type === "select" && node.props["aria-label"] === "Filter by source"
     );
-    const sourceSelect = sourceControl.type(sourceControl.props);
     sourceSelect.props.onChange({ target: { value: "greenhouse" } });
     expect(onFilter).toHaveBeenCalledWith("source", "greenhouse");
 
@@ -292,6 +312,328 @@ describe("WorkspaceBrowser", () => {
     expect(html).toContain("AI web search: running");
     expect(html).not.toContain("Sweep boards");
     expect(source).not.toContain("setTimeout");
+  });
+
+  it("shows the failed lane's real error and retries the coordinated search", async () => {
+    const { SearchToolbar } = await loadBrowser();
+    const onRunSweep = vi.fn();
+    const sourceSweep = {
+      status: "complete",
+      summary: "1 search lane finished · 1 failed",
+      lanes: {
+        deterministic: { label: "Configured sources", status: "succeeded" },
+        aiWeb: {
+          label: "AI web search",
+          status: "failed",
+          error: "AI search timed out",
+        },
+      },
+    };
+    const tree = SearchToolbar({ sourceSweep, onRunSweep });
+    const html = renderToStaticMarkup(tree);
+    const children = Array.isArray(tree.props.children)
+      ? tree.props.children
+      : [tree.props.children];
+    const retry = children.find(
+      (child) => child?.type === "button" && child.props.children?.at?.(-1) === "Retry search"
+    );
+
+    expect(html).toContain("AI web search: AI search timed out");
+    expect(html).not.toContain("AI web search: failed");
+    expect(retry).toBeTruthy();
+    retry.props.onClick();
+    expect(onRunSweep).toHaveBeenCalledOnce();
+  });
+
+  it("treats a top-level search error without lane data as a retry state", async () => {
+    const { SearchPanel } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <SearchPanel
+        jobs={[]}
+        filterJobs={[]}
+        onboardingHandoff
+        sourceSweep={{ status: "error", summary: "Saved search state could not be loaded." }}
+      />
+    );
+
+    expect(html).toContain("Retry search");
+    expect(html).toContain("Search needs attention");
+    expect(html).toContain("Search didn&#x27;t finish. Review the error above, then retry.");
+    expect(html).not.toContain("Start your first job search");
+    expect(html).not.toContain("Search for jobs to start building your list.");
+  });
+
+  it("replaces technical lane errors with candidate-safe retry copy", async () => {
+    const { SearchToolbar } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <SearchToolbar
+        sourceSweep={{
+          status: "error",
+          summary: "0 search lanes finished · 1 failed",
+          lanes: {
+            aiWeb: {
+              label: "AI web search",
+              status: "failed",
+              error:
+                "Error: ECONNREFUSED at /Users/person/code/careerrat/src/core/search/run.mjs:74",
+            },
+          },
+        }}
+      />
+    );
+
+    expect(html).toContain("AI web search: AI web search couldn&#x27;t finish. Try again.");
+    expect(html).toContain("Retry search");
+    expect(html).not.toContain("ECONNREFUSED");
+    expect(html).not.toContain("/Users/person");
+  });
+
+  it("does not claim an empty failed search has nothing to triage", async () => {
+    const { SearchPanel } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <SearchPanel
+        jobs={[]}
+        sourceSweep={{
+          status: "error",
+          summary: "0 search lanes finished · 1 failed",
+          lanes: {
+            deterministic: {
+              label: "Configured sources",
+              status: "failed",
+              error: "Greenhouse could not be reached",
+            },
+          },
+        }}
+      />
+    );
+
+    expect(html).toContain("Configured sources: Greenhouse could not be reached");
+    expect(html).toContain("Retry search");
+    expect(html).not.toContain("No jobs need triage right now.");
+  });
+
+  it("distinguishes initial idle, clean zero, cancelled, and missing-source searches", async () => {
+    const { SearchPanel } = await loadBrowser();
+    const renderEmptySearch = (sourceSweep, props = {}) =>
+      renderToStaticMarkup(
+        <SearchPanel jobs={[]} filterJobs={[]} sourceSweep={sourceSweep} {...props} />
+      );
+
+    expect(renderEmptySearch({ status: "idle", summary: "Ready to search" })).toContain(
+      "Search for jobs to start building your list."
+    );
+    expect(
+      renderEmptySearch({ status: "complete", summary: "0 new · 0 qualified · 8 scanned" })
+    ).toContain("No new matches this time.");
+    expect(
+      renderEmptySearch({
+        status: "idle",
+        reason: "cancelled",
+        summary: "Stopped before completion.",
+        lanes: {
+          deterministic: {
+            label: "Configured sources",
+            status: "skipped",
+            reason: "cancelled",
+          },
+        },
+      })
+    ).toContain("Search cancelled. Run it again whenever you&#x27;re ready.");
+
+    const onOpenSourceHealth = vi.fn();
+    const noSources = SearchPanel({
+      jobs: [],
+      filterJobs: [],
+      sourceSweep: {
+        status: "error",
+        reason: "no-configured-lane",
+        summary: "Nothing can run yet.",
+      },
+      onOpenSourceHealth,
+    });
+    const setupButton = findElement(
+      noSources,
+      (node) => node.type === "button" && textOf(node) === "Review source health"
+    );
+
+    expect(renderToStaticMarkup(noSources)).toContain("No search sources are ready yet.");
+    expect(setupButton).toBeTruthy();
+    setupButton.props.onClick();
+    expect(onOpenSourceHealth).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    [{ status: "hydrating" }, "LOADING SAVED SEARCH"],
+    [{ status: "idle", summary: "Ready to search" }, "READY TO SEARCH"],
+    [{ status: "running" }, "SEARCHING"],
+    [{ status: "complete" }, "NO NEW MATCHES"],
+    [
+      {
+        status: "idle",
+        summary: "Search cancelled.",
+        lanes: { deterministic: { status: "skipped", reason: "cancelled" } },
+      },
+      "SEARCH CANCELLED",
+    ],
+    [{ status: "error", summary: "Search could not be loaded." }, "SEARCH NEEDS ATTENTION"],
+  ])("labels an empty Search list honestly for %#", async (sourceSweep, expected) => {
+    const { SearchPanel } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <SearchPanel jobs={[]} filterJobs={[]} sourceSweep={sourceSweep} />
+    );
+
+    expect(html).toContain(expected);
+    expect(html).not.toContain("FOUND · NEEDS TRIAGE");
+  });
+
+  it("keeps the triage eyebrow only when jobs are actually present", async () => {
+    const { SearchPanel } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <SearchPanel jobs={JOBS} filterJobs={JOBS} sourceSweep={{ status: "complete" }} />
+    );
+
+    expect(html).toContain("FOUND · NEEDS TRIAGE");
+  });
+
+  it("explains the first-search handoff in plain English for every initial state", async () => {
+    const { SearchPanel } = await loadBrowser();
+    const renderHandoff = (sourceSweep, jobs = [], selection = jobs.map((job) => job.id)) =>
+      renderToStaticMarkup(
+        <SearchPanel
+          jobs={jobs}
+          filterJobs={jobs}
+          selection={selection}
+          sourceSweep={sourceSweep}
+          onboardingHandoff
+        />
+      );
+
+    expect(renderHandoff({ status: "running" })).toContain(
+      "You&#x27;re all set. Your first job search is running now. Matches will appear here as they&#x27;re found."
+    );
+    expect(renderHandoff({ status: "running" })).toContain("Search is running");
+    expect(renderHandoff({ status: "idle" })).toContain(
+      "You&#x27;re all set. Start your first job search with Search for jobs above."
+    );
+    expect(
+      renderHandoff({ status: "complete" }, [
+        { id: "acme", company: "Acme", role: "Staff Engineer", fit: 88 },
+      ])
+    ).toContain(
+      "Your first match is ready. Review the selected job, then use Apply to 1 job on the right."
+    );
+    expect(
+      renderHandoff({
+        status: "error",
+        lanes: {
+          deterministic: { label: "Configured sources", status: "failed", error: "Timed out" },
+        },
+      })
+    ).toContain("Your setup is saved. The first search needs another try. Use Retry search above.");
+  });
+
+  it("surfaces hidden first-search results and an immediate show-matches action", async () => {
+    const { SearchPanel } = await loadBrowser();
+    const onClearFilters = vi.fn();
+    const tree = SearchPanel({
+      jobs: [],
+      filterJobs: JOBS,
+      selection: JOBS.map((job) => job.id),
+      sourceSweep: { status: "complete", summary: "2 matches ready · 0 new" },
+      onboardingHandoff: true,
+      onClearFilters,
+    });
+    const showMatches = findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "Show matches"
+    );
+
+    expect(renderToStaticMarkup(tree)).toContain(
+      "Your first 2 matches are ready. Review the selected jobs, then use Apply to 2 jobs on the right."
+    );
+    expect(showMatches).toBeTruthy();
+    showMatches.props.onClick();
+    expect(onClearFilters).toHaveBeenCalledOnce();
+  });
+
+  it("uses the selected cart count for the onboarding Apply label", async () => {
+    const { SearchPanel } = await loadBrowser();
+    const jobs = Array.from({ length: 5 }, (_, index) => ({
+      id: `job-${index + 1}`,
+      company: `Company ${index + 1}`,
+      role: "Staff Engineer",
+      fit: 85,
+    }));
+    const html = renderToStaticMarkup(
+      <SearchPanel
+        jobs={jobs}
+        filterJobs={jobs}
+        selection={jobs.slice(0, 4).map((job) => job.id)}
+        sourceSweep={{ status: "complete", summary: "5 matches ready" }}
+        onboardingHandoff
+      />
+    );
+
+    expect(html).toContain("Your first 5 matches are ready.");
+    expect(html).toContain("Apply to 4 jobs");
+    expect(html).not.toContain("Apply to 5 jobs");
+  });
+
+  it("offers a real clear action when filters hide existing jobs", async () => {
+    const { SearchPanel } = await loadBrowser();
+    const onClearFilters = vi.fn();
+    const tree = SearchPanel({
+      jobs: [],
+      filterJobs: JOBS,
+      query: "no matching company",
+      filters: { fit80: true, stage: "staff", source: "lever" },
+      sourceSweep: { status: "complete", summary: "0 new · 8 scanned" },
+      onClearFilters,
+    });
+    const clearButton = findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "Clear filters"
+    );
+
+    expect(renderToStaticMarkup(tree)).toContain("No jobs match these filters.");
+    expect(clearButton).toBeTruthy();
+    clearButton.props.onClick();
+    expect(onClearFilters).toHaveBeenCalledOnce();
+  });
+
+  it("keeps partial-search failure context and a clear-filters action together", async () => {
+    const { SearchPanel } = await loadBrowser();
+    const onClearFilters = vi.fn();
+    const tree = SearchPanel({
+      jobs: [],
+      filterJobs: JOBS,
+      filters: { fit80: true },
+      sourceSweep: {
+        status: "complete",
+        summary: "2 search lanes finished · 1 lane needs retry",
+        lanes: {
+          deterministic: { label: "Configured sources", status: "succeeded" },
+          aiWeb: {
+            label: "AI web search",
+            status: "failed",
+            partial: true,
+            error: "second query timed out",
+          },
+        },
+      },
+      onClearFilters,
+    });
+    const clearButton = findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "Clear filters"
+    );
+    const html = renderToStaticMarkup(tree);
+
+    expect(html).toContain("Search didn&#x27;t finish. Review the error above, then retry.");
+    expect(html).toContain("Jobs were found, but these filters hide them.");
+    expect(clearButton).toBeTruthy();
+    clearButton.props.onClick();
+    expect(onClearFilters).toHaveBeenCalledOnce();
   });
 
   it("toggles the horizontal pipeline between funnel and list contracts", async () => {
@@ -506,7 +848,8 @@ describe("WorkspaceBrowser", () => {
       />
     );
 
-    expect(html).toContain("No jobs need triage right now.");
+    expect(html).toContain("No jobs match these filters.");
+    expect(html).toContain("Clear filters");
     expect(html).toContain('<option value="new" selected="">New</option>');
     expect(html).toContain('<option value="reviewed">Reviewed</option>');
     expect(html).toContain('<option value="greenhouse">Greenhouse</option>');

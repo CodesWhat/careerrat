@@ -174,6 +174,63 @@ describe("ProfileSettingsController permission consent", () => {
   });
 });
 
+describe("ProfileSettingsController local application defaults", () => {
+  it("saves the voluntary-question policy locally while preserving private answers", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getOnboardState.mockResolvedValue({
+      data: {
+        "form-defaults": {
+          voluntary_self_identification: {
+            enabled: false,
+            default_action: "leave_blank",
+            confirmed_at: "2026-08-20T12:00:00.000Z",
+            answers: {
+              disability: {
+                value: "Saved private answer",
+                confirmed_at: "2026-08-19T12:00:00.000Z",
+              },
+            },
+          },
+        },
+      },
+      publicSyncPreference: { enabled: true, source: "default", updatedAt: null },
+    });
+
+    renderController(module, api);
+    await flushEffects();
+    let view = renderController(module, api);
+    settingsProps(view).onEditSection("application-defaults");
+
+    view = renderController(module, api);
+    expect(settingsProps(view).profileEditor).toMatchObject({
+      id: "application-defaults",
+      localOnly: true,
+    });
+    settingsProps(view).onEditorChange("policy", "decline_when_available");
+
+    view = renderController(module, api);
+    await settingsProps(view).onSaveEditor();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("form-defaults", {
+      voluntary_self_identification: {
+        enabled: true,
+        default_action: "decline_when_available",
+        confirmed_at: expect.any(String),
+        answers: {
+          disability: {
+            value: "Saved private answer",
+            confirmed_at: "2026-08-19T12:00:00.000Z",
+          },
+        },
+      },
+    });
+    const saved = api.saveCandidateFile.mock.calls[0][1].voluntary_self_identification;
+    expect(Number.isNaN(Date.parse(saved.confirmed_at))).toBe(false);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+});
+
 describe("ProfileSettingsController engine inventory", () => {
   it("passes settings only accepted runtimes and excludes diagnostic adapters", async () => {
     const module = await import("./ProfileSettingsController.jsx");

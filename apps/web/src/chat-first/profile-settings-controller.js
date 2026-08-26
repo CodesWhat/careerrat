@@ -46,6 +46,14 @@ const REMOTE_SCOPE_OPTIONS = [
   { value: "worldwide", label: "Remote worldwide" },
 ];
 
+const VOLUNTARY_FORM_POLICY_OPTIONS = [
+  { value: "leave_blank", label: "Leave these blank (default)" },
+  {
+    value: "decline_when_available",
+    label: "Choose the form's decline option when available",
+  },
+];
+
 const PERMISSION_PLATFORMS = Object.freeze({
   authenticated_search: ["linkedin", "indeed", "wellfound", "glassdoor"],
   authenticated_apply_preparation: [
@@ -198,6 +206,18 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
   const agentName = data.modes?.agent_name || "Paul";
   const publicSyncPreference = onboard?.publicSyncPreference || {};
   const runtimeSupport = runtimePresentation(runtime || {});
+  const voluntarySelfIdentification = data["form-defaults"]?.voluntary_self_identification || {};
+  const voluntaryFormPolicy =
+    voluntarySelfIdentification.enabled === true &&
+    voluntarySelfIdentification.default_action === "decline_when_available"
+      ? "decline_when_available"
+      : "leave_blank";
+  const preservedVoluntaryAnswers =
+    voluntarySelfIdentification.answers &&
+    typeof voluntarySelfIdentification.answers === "object" &&
+    !Array.isArray(voluntarySelfIdentification.answers)
+      ? { ...voluntarySelfIdentification.answers }
+      : {};
 
   return {
     agentName,
@@ -225,6 +245,11 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
         `Sweeps ${cadenceLabel(cadence)}`,
         `Shows only fit ${displayedFitFloor}+`,
       ],
+      applicationDefaults: {
+        action: VOLUNTARY_FORM_POLICY_OPTIONS.find((option) => option.value === voluntaryFormPolicy)
+          .label,
+        localNotice: `Local only on this computer. This setting never goes through ${agentName}.`,
+      },
       editors: {
         targets: {
           id: "targets",
@@ -354,6 +379,23 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
             }),
           ],
         },
+        "application-defaults": {
+          id: "application-defaults",
+          title: "Application defaults",
+          localOnly: true,
+          description:
+            "Choose how CareerRat handles optional voluntary form questions. This stays local on this computer.",
+          preservedAnswers: preservedVoluntaryAnswers,
+          fields: [
+            field(
+              "policy",
+              "Voluntary self-identification questions",
+              "select",
+              voluntaryFormPolicy,
+              { options: VOLUNTARY_FORM_POLICY_OPTIONS }
+            ),
+          ],
+        },
       },
     },
     engine: {
@@ -416,7 +458,12 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
   };
 }
 
-export function profileSectionSavePlan(section, values = {}, editor = {}) {
+export function profileSectionSavePlan(
+  section,
+  values = {},
+  editor = {},
+  { now = () => new Date() } = {}
+) {
   if (section === "targets") {
     const existingBuckets = list(editor?.roleBuckets);
     const roleBuckets = existingBuckets.length
@@ -521,6 +568,29 @@ export function profileSectionSavePlan(section, values = {}, editor = {}) {
           keep_signals: lines(values.keepSignals),
           fit_bands: { fit_floor: fitFloor },
           search_preferences: { cadence: { mode: cadence } },
+        },
+      },
+    ];
+  }
+  if (section === "application-defaults") {
+    const declineWhenAvailable = values.policy === "decline_when_available";
+    const preservedAnswers =
+      editor?.preservedAnswers &&
+      typeof editor.preservedAnswers === "object" &&
+      !Array.isArray(editor.preservedAnswers)
+        ? { ...editor.preservedAnswers }
+        : {};
+    return [
+      {
+        kind: "candidate",
+        name: "form-defaults",
+        patch: {
+          voluntary_self_identification: {
+            enabled: declineWhenAvailable,
+            default_action: declineWhenAvailable ? "decline_when_available" : "leave_blank",
+            confirmed_at: now().toISOString(),
+            answers: preservedAnswers,
+          },
         },
       },
     ];

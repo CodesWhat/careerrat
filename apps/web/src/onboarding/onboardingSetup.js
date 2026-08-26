@@ -157,6 +157,23 @@ export function setupCanGraduate(state) {
   );
 }
 
+function voluntaryDefaultsConfirmed(state) {
+  const confirmedAt = state?.data?.["form-defaults"]?.voluntary_self_identification?.confirmed_at;
+  return (
+    typeof confirmedAt === "string" &&
+    confirmedAt.trim().length > 0 &&
+    Number.isFinite(Date.parse(confirmedAt))
+  );
+}
+
+export function setupNeedsVoluntaryDefaults(state) {
+  return setupIsComplete(state) && !voluntaryDefaultsConfirmed(state);
+}
+
+export function setupCanRelease(state) {
+  return setupCanGraduate(state) && voluntaryDefaultsConfirmed(state);
+}
+
 export function setupDisclosureRows({ state, runtime } = {}) {
   const data = state?.data ?? {};
   const profile = data.profile ?? {};

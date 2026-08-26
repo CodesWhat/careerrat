@@ -70,6 +70,19 @@ import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB — same cap the other route modules use.
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+function searchExecutionIdFromBody(body) {
+  if (body?.searchExecutionId == null || body.searchExecutionId === "") return undefined;
+  if (
+    typeof body.searchExecutionId !== "string" ||
+    !/^[A-Za-z0-9:_-]{1,128}$/.test(body.searchExecutionId)
+  ) {
+    const error = new Error("searchExecutionId must be a short identifier");
+    error.status = 400;
+    throw error;
+  }
+  return body.searchExecutionId;
+}
+
 function queryParam(req, name) {
   const url = new URL(req.url, "http://127.0.0.1");
   return url.searchParams.get(name);
@@ -401,6 +414,13 @@ export function mountSearchRoutes({
     const promptIds = Array.isArray(body?.promptIds)
       ? body.promptIds.map((id) => String(id)).filter(Boolean)
       : undefined;
+    let searchExecutionId;
+    try {
+      searchExecutionId = searchExecutionIdFromBody(body);
+    } catch (err) {
+      sendJson(res, err.status || 400, { ok: false, error: { message: err.message } });
+      return;
+    }
 
     if (aiWebSearchRunning) {
       sendJson(res, 409, {
@@ -458,6 +478,7 @@ export function mountSearchRoutes({
         metadata: {
           promptIds: requested.map((prompt) => prompt.id),
           prompts: requested.map((prompt) => ({ id: prompt.id, text: prompt.text })),
+          ...(searchExecutionId ? { searchExecutionId } : {}),
         },
         trigger: promptIds?.length ? "retry-failed" : "jobs-search",
       });
@@ -484,6 +505,7 @@ export function mountSearchRoutes({
         input: {
           purpose: "ai-web-search",
           promptIds: requested.map((prompt) => prompt.id),
+          ...(searchExecutionId ? { searchExecutionId } : {}),
         },
         sources: { promptCount: requested.length },
       });

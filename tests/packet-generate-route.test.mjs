@@ -79,7 +79,10 @@ function importTrackerFixture(repoRoot, applications) {
   );
 }
 
-function seedPacketReadyApp(repoRoot, { sourceResume = true, packetGate = "keep" } = {}) {
+function seedPacketReadyApp(
+  repoRoot,
+  { sourceResume = true, packetGate = "keep", evaluatedAt, reviewApproval } = {}
+) {
   const jdPath = writeWorkspaceFile(
     repoRoot,
     "jobs/acme-applied-ai-engineer.md",
@@ -132,7 +135,11 @@ function seedPacketReadyApp(repoRoot, { sourceResume = true, packetGate = "keep"
       status: "reviewed-hold",
       fitBasis: "evaluated",
       fitBucket: "high",
-      evaluation: { gate: packetGate },
+      evaluation: {
+        gate: packetGate,
+        ...(evaluatedAt ? { evaluatedAt } : {}),
+      },
+      ...(reviewApproval ? { reviewApproval } : {}),
       artifacts: {
         jd: jdPath,
         packetQuestionsSource: questionsPath,
@@ -299,6 +306,34 @@ async function postJson(server, path, payload) {
   });
   const body = await res.json().catch(() => ({}));
   return { status: res.status, body };
+}
+
+async function requestPacketGeneration(repoRoot) {
+  let resumeCalls = 0;
+  let coverCalls = 0;
+  const server = await bootServer(
+    repoRoot,
+    validPacketCalls({
+      packetResumeCall: async () => {
+        resumeCalls += 1;
+        return validPacketResumeCall();
+      },
+      packetCoverLetterCall: async () => {
+        coverCalls += 1;
+        return validPacketCoverLetterCall();
+      },
+    })
+  );
+  try {
+    const response = await postJson(server, "/api/packet/generate", {
+      appId: "app-packet",
+      applyIntent: false,
+      formats: [],
+    });
+    return { ...response, resumeCalls, coverCalls };
+  } finally {
+    await closeServer(server);
+  }
 }
 
 async function getJson(server, path) {
@@ -1165,38 +1200,74 @@ test("POST /api/packet/export delegates packaging to workspace-main when mounted
   }
 });
 
-test("POST /api/packet/generate: requires a persisted KEEP before starting AI", async () => {
+test("packet generation gate: current REVIEW approval generates", async () => {
   const repoRoot = tempRepo();
-  seedPacketReadyApp(repoRoot, { packetGate: "review" });
-  let resumeCalls = 0;
-  let coverCalls = 0;
-  const server = await bootServer(
-    repoRoot,
-    validPacketCalls({
-      packetResumeCall: async () => {
-        resumeCalls += 1;
-        return validPacketResumeCall();
-      },
-      packetCoverLetterCall: async () => {
-        coverCalls += 1;
-        return validPacketCoverLetterCall();
-      },
-    })
-  );
-  try {
-    const generated = await postJson(server, "/api/packet/generate", {
-      appId: "app-packet",
-      applyIntent: false,
-      formats: [],
-    });
-    assert.equal(generated.status, 409);
-    assert.equal(generated.body.code, "PACKET_GATE_REQUIRED");
-    assert.match(generated.body.error.message, /KEEP evaluation is required/i);
-    assert.equal(resumeCalls, 0);
-    assert.equal(coverCalls, 0);
-  } finally {
-    await closeServer(server);
-  }
+  const evaluatedAt = "2026-08-25T12:00:00.000Z";
+  seedPacketReadyApp(repoRoot, {
+    packetGate: "review",
+    evaluatedAt,
+    reviewApproval: {
+      evaluatedAt,
+      approvedAt: "2026-08-25T12:01:00.000Z",
+    },
+  });
+
+  const generated = await requestPacketGeneration(repoRoot);
+
+  assert.notEqual(generated.body.code, "PACKET_GATE_REQUIRED");
+  assert.equal(generated.status, 200);
+  assert.equal(generated.body.ok, true);
+  assert.equal(generated.resumeCalls, 1);
+  assert.match(generated.body.data.sources.resume, /Northwind Digital/);
+});
+
+test("packet generation gate: REVIEW without approval is rejected before generation", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot, {
+    packetGate: "review",
+    evaluatedAt: "2026-08-25T12:00:00.000Z",
+  });
+
+  const generated = await requestPacketGeneration(repoRoot);
+
+  assert.equal(generated.status, 409);
+  assert.equal(generated.body.code, "PACKET_GATE_REQUIRED");
+  assert.equal(generated.resumeCalls, 0);
+  assert.equal(generated.coverCalls, 0);
+});
+
+test("packet generation gate: REVIEW approval for another evaluation is rejected", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot, {
+    packetGate: "review",
+    evaluatedAt: "2026-08-25T12:00:00.000Z",
+    reviewApproval: {
+      evaluatedAt: "2026-08-24T12:00:00.000Z",
+      approvedAt: "2026-08-24T12:01:00.000Z",
+    },
+  });
+
+  const generated = await requestPacketGeneration(repoRoot);
+
+  assert.equal(generated.status, 409);
+  assert.equal(generated.body.code, "PACKET_GATE_REQUIRED");
+  assert.equal(generated.resumeCalls, 0);
+  assert.equal(generated.coverCalls, 0);
+});
+
+test("packet generation gate: KEEP behavior still generates", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot, {
+    packetGate: "keep",
+    evaluatedAt: "2026-08-25T12:00:00.000Z",
+  });
+
+  const generated = await requestPacketGeneration(repoRoot);
+
+  assert.equal(generated.status, 200);
+  assert.equal(generated.body.ok, true);
+  assert.equal(generated.resumeCalls, 1);
+  assert.match(generated.body.data.sources.resume, /Northwind Digital/);
 });
 
 test("POST /api/packet/generate: standalone tailoring ignores saved application questions", async () => {

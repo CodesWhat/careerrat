@@ -487,29 +487,37 @@ export function skillChatFromWorkspaceResult(result) {
   const messages = list(result?.data?.messages).length
     ? list(result.data.messages)
     : list(result?.messages);
-  const artifact = [...messages]
-    .reverse()
-    .flatMap((message) => list(message?.artifacts))
-    .find(
-      (candidate) =>
-        ["research_chat", "board_discovery_chat"].includes(candidate?.kind) &&
-        VISIBLE_SKILLS.has(candidate?.skill) &&
-        cleanString(candidate?.chatId, 500)
-    );
+  const artifact = list(messages.at(-1)?.artifacts).find(
+    (candidate) =>
+      ["research_chat", "board_discovery_chat"].includes(candidate?.kind) &&
+      VISIBLE_SKILLS.has(candidate?.skill) &&
+      cleanString(candidate?.chatId, 500)
+  );
   return artifact ? { ...artifact, id: `skill:${artifact.skill}` } : null;
 }
 
-export async function resolveSkillChatSession(api, thread) {
+export async function resolveSkillChatSession(api, thread, inFlight) {
   const skill = cleanString(thread?.skill, 100);
   if (!skill) throw new Error("Research thread is missing its skill.");
-  const live = await api.findChatBySkill(skill);
-  if (live?.chatId) return live;
+  const existing = inFlight?.get(skill);
+  if (existing) return existing;
+  const resolution = (async () => {
+    const live = await api.findChatBySkill(skill);
+    if (live?.chatId) return live;
+    try {
+      return await api.startChat(skill);
+    } catch (error) {
+      const chatId = error?.status === 409 ? cleanString(error?.body?.chatId, 500) : "";
+      if (chatId) return { chatId, skill, state: "running" };
+      throw error;
+    }
+  })();
+  if (!inFlight) return resolution;
+  inFlight.set(skill, resolution);
   try {
-    return await api.startChat(skill);
-  } catch (error) {
-    const chatId = error?.status === 409 ? cleanString(error?.body?.chatId, 500) : "";
-    if (chatId) return { chatId, skill, state: "running" };
-    throw error;
+    return await resolution;
+  } finally {
+    if (inFlight.get(skill) === resolution) inFlight.delete(skill);
   }
 }
 
@@ -523,7 +531,7 @@ export function skillChatEventNeedsHydration(type) {
 
 export function skillChatStreamUrl(thread) {
   const chatId = cleanString(thread?.chatId, 500);
-  if (!chatId) return null;
+  if (!chatId || thread?.state === "closed") return null;
   return `/api/chat/events?id=${encodeURIComponent(chatId)}&after=${Number(thread?.streamAfter || 0)}`;
 }
 

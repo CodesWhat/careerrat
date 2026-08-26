@@ -11,6 +11,7 @@ import {
 } from "../src/core/db/verbs.mjs";
 import {
   candidateConfigSource,
+  loadAgentCandidateConfig,
   loadCandidateConfig,
   loadCandidateDoc,
 } from "../src/core/profile/config-store.mjs";
@@ -103,4 +104,66 @@ test("loadCandidateDoc reads DB application limits instead of stale compatibilit
   assert.equal(limits.companies.length, 1);
   assert.equal(limits.companies[0].company, "SQLite Limits");
   assert.deepEqual(limits.companies[0].cap, { max: 2, window_days: 60 });
+});
+
+test("loadAgentCandidateConfig strips voluntary self-identification from legacy YAML", () => {
+  const repoRoot = tempRepo();
+  mkdirSync(join(repoRoot, "candidate"), { recursive: true });
+  writeFileSync(
+    join(repoRoot, "candidate/form-defaults.yml"),
+    `${stringifyYaml({
+      expected_base: 180000,
+      screening_answers: { "travel up to 10": "Yes" },
+      voluntary_self_identification: {
+        enabled: true,
+        default_action: "decline_when_available",
+        confirmed_at: "2026-08-26T12:00:00Z",
+        answers: {
+          "race ethnicity": {
+            value: "private legacy answer",
+            confirmed_at: "2026-08-26T12:00:00Z",
+          },
+        },
+      },
+    })}\n`
+  );
+
+  const config = loadAgentCandidateConfig({ repoRoot });
+  assert.equal(config.mode, "legacy");
+  assert.equal(config["form-defaults"].expected_base, 180000);
+  assert.equal(config["form-defaults"].screening_answers["travel up to 10"], "Yes");
+  assert.equal(Object.hasOwn(config["form-defaults"], "voluntary_self_identification"), false);
+  assert.doesNotMatch(JSON.stringify(config), /private legacy answer/);
+});
+
+test("loadAgentCandidateConfig strips voluntary self-identification from DB config", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+  candidateConfigPatch({
+    repoRoot,
+    name: "form-defaults",
+    patch: {
+      expected_base: 190000,
+      screening_answers: { "travel up to 10": "No" },
+      voluntary_self_identification: {
+        enabled: true,
+        default_action: "leave_blank",
+        confirmed_at: "2026-08-26T12:00:00Z",
+        answers: {
+          "race ethnicity": {
+            value: "private database answer",
+            confirmed_at: "2026-08-26T12:00:00Z",
+          },
+        },
+      },
+    },
+  });
+
+  const config = loadAgentCandidateConfig({ repoRoot });
+  assert.equal(config.mode, "db");
+  assert.equal(config["form-defaults"].expected_base, 190000);
+  assert.equal(config["form-defaults"].screening_answers["travel up to 10"], "No");
+  assert.equal(Object.hasOwn(config["form-defaults"], "voluntary_self_identification"), false);
+  assert.doesNotMatch(JSON.stringify(config), /private database answer/);
 });

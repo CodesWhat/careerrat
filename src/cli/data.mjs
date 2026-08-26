@@ -108,6 +108,7 @@ import {
   sourceWatermarkUpsert,
 } from "../core/db/verbs.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
+import { sanitizeCandidateConfigForAgent } from "../core/profile/config-store.mjs";
 import { loadTrackerData, validateTrackerData } from "../core/tracker/tracker-data.mjs";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -605,13 +606,21 @@ function cmdCandidate(sub, rest) {
     case "init":
       return printResult(candidateSetupInitialize(pathCtx));
     case "get":
-      return printResult(candidateConfigGet(pathCtx));
+      return printResult(sanitizeCandidateConfigForAgent(candidateConfigGet(pathCtx)));
     case "patch": {
       const [name] = rest;
       if (!name) fail("candidate patch requires <name>");
-      return printResult(
-        candidateConfigPatch({ ...pathCtx, name, patch: readPayload("candidate patch") })
-      );
+      const patch = readPayload("candidate patch");
+      if (
+        name === "form-defaults" &&
+        patch &&
+        typeof patch === "object" &&
+        !Array.isArray(patch) &&
+        Object.hasOwn(patch, "voluntary_self_identification")
+      ) {
+        fail("voluntary self-identification is managed only in local Application defaults");
+      }
+      return printResult(candidateConfigPatch({ ...pathCtx, name, patch }));
     }
     case "evidence":
       return printResult(

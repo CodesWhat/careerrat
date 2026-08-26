@@ -1372,7 +1372,7 @@ describe("ConversationPanel", () => {
 });
 
 describe("SubmitGateModal", () => {
-  it("makes the user's final submit explicit and leaves EEO questions blank", () => {
+  it("makes final submit explicit and describes the local voluntary-question boundary", () => {
     const html = markup(
       <SubmitGateModal
         open
@@ -1402,8 +1402,8 @@ describe("SubmitGateModal", () => {
     expect(html).toContain("Submit to E Corp · Staff Software Engineer");
     expect(html).toContain("WHAT PAUL FILLED");
     expect(html).toContain("3 application questions answered");
-    expect(html).toContain("Demographic / EEO questions");
-    expect(html).toContain("left blank for you · never auto-answered");
+    expect(html).toContain("Voluntary form questions");
+    expect(html).toContain("uses only your local Application defaults · otherwise left blank");
     expect(html).toContain("Nothing sends until you press submit.");
     expect(html).toContain("Return to Greenhouse &amp; submit ↗");
   });

@@ -46,6 +46,10 @@ const PROFILE = {
   evidence: { roles: 6, promotions: 3, stories: 14 },
   writingStyle: { sampleCount: 2, description: "plain, direct, no buzzwords" },
   searchRules: ["72 boards scanned", "Sweeps daily at 7am", "Shows only fit 70+"],
+  applicationDefaults: {
+    action: "Leave these blank (default)",
+    localNotice: "Local only on this computer. This setting never goes through Paul.",
+  },
 };
 
 const PERMISSIONS = [
@@ -89,7 +93,58 @@ describe("ProfileSettings", () => {
     expect(html).toContain("$210k");
     expect(html).toContain("14 stories captured");
     expect(html).toContain("plain, direct, no buzzwords");
+    expect(html).toContain("APPLICATION DEFAULTS");
+    expect(html).toContain("Voluntary self-identification questions");
+    expect(html).toContain("Leave these blank (default)");
+    expect(html).toContain("Local only on this computer. This setting never goes through Paul.");
     expect(html).toContain("edit anything here");
+  });
+
+  it("keeps the application-defaults editor local and never shows saved sensitive answers", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const onAskAgent = vi.fn();
+    const tree = ProfileSettings({
+      agentName: "Paul",
+      activeTab: "profile",
+      profile: PROFILE,
+      profileEditor: {
+        id: "application-defaults",
+        title: "Application defaults",
+        localOnly: true,
+        description:
+          "Choose how CareerRat handles optional voluntary form questions. This stays local on this computer.",
+        preservedAnswers: {
+          disability: {
+            value: "A private saved answer",
+            confirmed_at: "2026-08-20T12:00:00.000Z",
+          },
+        },
+        fields: [
+          {
+            id: "policy",
+            label: "Voluntary self-identification questions",
+            type: "select",
+            options: [
+              { value: "leave_blank", label: "Leave these blank (default)" },
+              {
+                value: "decline_when_available",
+                label: "Choose the form's decline option when available",
+              },
+            ],
+          },
+        ],
+      },
+      editorValues: { policy: "leave_blank" },
+      onAskAgent,
+    });
+    const html = renderToStaticMarkup(tree);
+
+    expect(html).toContain("Application defaults");
+    expect(html).toContain("This stays local on this computer");
+    expect(html).toContain("Leave these blank (default)");
+    expect(html).toContain("Choose the form&#x27;s decline option when available");
+    expect(html).not.toContain("Ask Paul instead");
+    expect(html).not.toContain("A private saved answer");
   });
 
   it("opens a whole-section editor instead of an inline approval list", async () => {
@@ -406,6 +461,46 @@ describe("ProfileSettings", () => {
       (node) => node.type === "select" && node.props.id === "cf-browser-automation-provider"
     ).props.onChange({ target: { value: "playwright" } });
     expect(onBrowserProviderChange).toHaveBeenCalledWith("playwright");
+  });
+
+  it("shows Playwright readiness without exposing profile paths or blanket sign-in setup", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const html = renderToStaticMarkup(
+      <ProfileSettings
+        activeTab="settings"
+        permissions={PERMISSIONS}
+        technicalDetailsOpen
+        browser={{
+          providerId: "playwright",
+          provider: "Playwright persistent profile",
+          effectiveProviderId: "playwright",
+          effectiveProvider: "Playwright persistent profile",
+          presenceStatus: "ready",
+          presenceDetail:
+            "no persistent profiles yet (/Users/person/.careerrat/board-profiles). Sign in once per platform",
+          automaticFillSupported: true,
+          options: [
+            {
+              id: "playwright",
+              label: "Playwright persistent profile",
+              needs: "a one-time interactive login per platform (persistent profile reused after)",
+              automatedApply: true,
+            },
+          ],
+          playwright: {
+            ready: true,
+            detail: "Playwright and Chromium are installed.",
+          },
+        }}
+      />
+    );
+
+    expect(html).toContain("Ready");
+    expect(html).toMatch(/opens a supervised browser when a workflow needs it/i);
+    expect(html).not.toMatch(
+      /\/Users\/person|\.careerrat|board-profiles|sign in once per platform/i
+    );
+    expect(html).not.toMatch(/create profile|check browser|sign in to platforms/i);
   });
 
   it("keeps supported engines visible when they need setup without a Use action", async () => {

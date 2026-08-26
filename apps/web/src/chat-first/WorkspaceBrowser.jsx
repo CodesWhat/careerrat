@@ -1,3 +1,4 @@
+import { errorState } from "../lib/errorCopy.js";
 import {
   buildCartView,
   fitBarWidth,
@@ -27,6 +28,55 @@ function buttonLabel(label, count) {
 
 function EmptyPanel({ children }) {
   return <div className="cf-browser__empty">{children}</div>;
+}
+
+function failedSearchLanes(sourceSweep) {
+  return Object.values(sourceSweep?.lanes || {}).filter(
+    (lane) => lane && typeof lane === "object" && lane.status === "failed"
+  );
+}
+
+function searchWasCancelled(sourceSweep) {
+  if (sourceSweep?.reason === "cancelled") return true;
+  if (/search cancelle?d/i.test(String(sourceSweep?.summary || ""))) return true;
+  return Object.values(sourceSweep?.lanes || {}).some(
+    (lane) => lane && typeof lane === "object" && lane.reason === "cancelled"
+  );
+}
+
+function searchHasNoConfiguredLane(sourceSweep) {
+  if (sourceSweep?.reason === "no-configured-lane") return true;
+  return /no (?:enabled|configured) search (?:sources?|lanes?)/i.test(
+    String(sourceSweep?.summary || "")
+  );
+}
+
+function searchNeedsRetry(sourceSweep) {
+  if (failedSearchLanes(sourceSweep).length > 0) return true;
+  return sourceSweep?.status === "error" && !searchHasNoConfiguredLane(sourceSweep);
+}
+
+function candidateSafeLaneError(lane) {
+  const fallback = `${lane.label || "This search"} couldn't finish. Try again.`;
+  const raw =
+    typeof lane.error === "string" ? lane.error.trim() : String(lane.error?.message || "").trim();
+  if (!raw) return fallback;
+
+  const translated = errorState(new Error(raw), fallback).message;
+  if (translated !== fallback) return translated;
+
+  const exposesRuntimeDetails =
+    raw.length > 160 ||
+    raw.includes("\n") ||
+    /(?:\b(?:EACCES|ECONN(?:REFUSED|RESET)|ENOENT|ERR_[A-Z0-9_]+|SQLITE(?:_[A-Z]+)?)\b|(?:Error|TypeError|ReferenceError|SyntaxError):|\/(?:Users|home|private|tmp|var)\/|[A-Za-z]:\\|file:\/\/|https?:\/\/|(?:^|\s)at\s+\S+|(?:^|\s)(?:apps|src)\/|\.[cm]?[jt]sx?(?::\d+)?\b|[{}[\]<>])/i.test(
+      raw
+    );
+  return exposesRuntimeDetails ? fallback : raw;
+}
+
+function laneStatusCopy(lane) {
+  if (lane.status !== "failed") return `${lane.label}: ${lane.status}`;
+  return `${lane.label}: ${candidateSafeLaneError(lane)}`;
 }
 
 export function BrowserTabs({
@@ -67,30 +117,35 @@ export function BrowserTabs({
 
 export function SearchToolbar({ sourceSweep = {}, onRunSweep, onOpenSourceHealth }) {
   const running = sourceSweep?.status === "running";
+  const hydrating = sourceSweep?.status === "hydrating";
+  const busy = running || hydrating;
   const lanes = Object.values(sourceSweep?.lanes || {}).filter(
     (lane) => lane && typeof lane === "object"
   );
+  const needsRetry = searchNeedsRetry(sourceSweep);
   return (
-    <div className="cf-search__sweep" aria-live="polite" aria-busy={running}>
-      {running ? (
+    <div className="cf-search__sweep" aria-live="polite" aria-busy={busy}>
+      {busy ? (
         <span className="cf-search__sweep-running">
           <SpinnerIcon className="cf-search__spinner" />
-          Searching for jobs…
+          {hydrating ? "Loading saved search…" : "Searching for jobs…"}
         </span>
       ) : (
         <button type="button" className="cf-button cf-button--lime" onClick={() => onRunSweep?.()}>
           <RadarIcon />
-          Search for jobs
+          {needsRetry ? "Retry search" : "Search for jobs"}
         </button>
       )}
       <span className="cf-search__sweep-copy">
-        {running
-          ? sourceSweep?.detail || "Searching for jobs that match your preferences"
-          : sourceSweep?.summary || "Ready to search"}
+        {hydrating
+          ? sourceSweep?.detail || "Loading your saved search"
+          : running
+            ? sourceSweep?.detail || "Searching for jobs that match your preferences"
+            : sourceSweep?.summary || "Ready to search"}
       </span>
       {lanes.length ? (
         <span className="cf-search__lane-status" role="status" aria-label="Search lane status">
-          {lanes.map((lane) => `${lane.label}: ${lane.status}`).join(" · ")}
+          {lanes.map(laneStatusCopy).join(" · ")}
         </span>
       ) : null}
       <button
@@ -139,12 +194,12 @@ function FilterSelect({ label, value = "all", options, onChange }) {
   );
 }
 
-function FilterBar({ jobs = [], query = "", filters = {}, onQueryChange, onFilter }) {
+function FilterBar({ jobs = [], eyebrow, query = "", filters = {}, onQueryChange, onFilter }) {
   const stages = filterChoices(jobs, (job) => job?.stage || job?.stageLabel || job?.status);
   const sources = filterChoices(jobs, (job) => job?.sourceLabel || job?.channel || job?.source);
   return (
     <div className="cf-search__filters">
-      <span className="cf-eyebrow">FOUND · NEEDS TRIAGE</span>
+      <span className="cf-eyebrow">{eyebrow}</span>
       <label className="cf-search__query">
         <span className="cf-sr-only">Search sourced jobs</span>
         <SearchIcon />
@@ -265,6 +320,7 @@ export function SearchPanel({
   filterJobs = jobs,
   selection = [],
   sourceSweep = {},
+  onboardingHandoff = false,
   locationPolicy = {},
   query = "",
   filters = {},
@@ -273,9 +329,66 @@ export function SearchPanel({
   onToggleSelection,
   onRunSweep,
   onOpenSourceHealth,
+  onClearFilters,
 }) {
   const selected = new Set(selectionIds(selection));
   const rows = safeArray(jobs);
+  const unfilteredRows = safeArray(filterJobs);
+  const filtersHideJobs = rows.length === 0 && unfilteredRows.length > 0;
+  const noConfiguredLane = searchHasNoConfiguredLane(sourceSweep);
+  const cancelled = searchWasCancelled(sourceSweep);
+  const hydrating = sourceSweep?.status === "hydrating";
+  const needsRetry = searchNeedsRetry(sourceSweep);
+  const completed = ["complete", "completed"].includes(sourceSweep?.status);
+  const availableCart = buildCartView(unfilteredRows);
+  const selectedCart = buildCartView(selectedJobs(unfilteredRows, selection));
+  const eyebrow = rows.length
+    ? "FOUND · NEEDS TRIAGE"
+    : filtersHideJobs
+      ? "MATCHES HIDDEN BY FILTERS"
+      : hydrating
+        ? "LOADING SAVED SEARCH"
+        : needsRetry
+          ? "SEARCH NEEDS ATTENTION"
+          : noConfiguredLane
+            ? "SEARCH SETUP NEEDED"
+            : cancelled
+              ? "SEARCH CANCELLED"
+              : sourceSweep?.status === "running"
+                ? "SEARCHING"
+                : completed
+                  ? "NO NEW MATCHES"
+                  : "READY TO SEARCH";
+  const onboardingTitle = needsRetry
+    ? "Search needs attention"
+    : hydrating
+      ? "Loading your search"
+      : sourceSweep?.status === "running"
+        ? "Search is running"
+        : availableCart.count > 0
+          ? "Next step"
+          : completed
+            ? "Search again"
+            : "Start search";
+  const onboardingCopy = needsRetry
+    ? "Your setup is saved. The first search needs another try. Use Retry search above."
+    : hydrating
+      ? "Your setup is saved. CareerRat is loading the search already in progress."
+      : sourceSweep?.status === "running"
+        ? "You're all set. Your first job search is running now. Matches will appear here as they're found."
+        : availableCart.count > 0
+          ? `Your first ${
+              availableCart.count === 1 ? "match is" : `${availableCart.count} matches are`
+            } ready. ${
+              selectedCart.count > 0
+                ? `Review the selected ${selectedCart.count === 1 ? "job" : "jobs"}, then use ${
+                    selectedCart.applyLabel
+                  } on the right.`
+                : "Select the jobs you want. The Apply action will appear on the right."
+            }`
+          : completed
+            ? "You're all set. The first search finished without a match. Use Search for jobs to try again."
+            : "You're all set. Start your first job search with Search for jobs above.";
   return (
     <section className="cf-browser__panel" role="tabpanel" aria-label="Search">
       <SearchToolbar
@@ -283,9 +396,25 @@ export function SearchPanel({
         onRunSweep={onRunSweep}
         onOpenSourceHealth={onOpenSourceHealth}
       />
+      {onboardingHandoff ? (
+        <div className="cf-search__onboarding-handoff" role="status">
+          <strong>{onboardingTitle}</strong>
+          <span>{onboardingCopy}</span>
+          {filtersHideJobs ? (
+            <button
+              type="button"
+              className="cf-button cf-button--lime cf-search__show-matches"
+              onClick={() => onClearFilters?.()}
+            >
+              Show matches
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <LocationScope policy={locationPolicy} />
       <FilterBar
         jobs={filterJobs}
+        eyebrow={eyebrow}
         query={query}
         filters={filters}
         onQueryChange={onQueryChange}
@@ -302,7 +431,46 @@ export function SearchPanel({
             />
           ))
         ) : (
-          <EmptyPanel>No jobs need triage right now.</EmptyPanel>
+          <EmptyPanel>
+            {needsRetry ? (
+              <>
+                Search didn't finish. Review the error above, then retry.
+                {filtersHideJobs ? (
+                  <>
+                    {" "}
+                    Jobs were found, but these filters hide them.{" "}
+                    <button type="button" className="cf-link" onClick={() => onClearFilters?.()}>
+                      Clear filters
+                    </button>
+                  </>
+                ) : null}
+              </>
+            ) : filtersHideJobs ? (
+              <>
+                No jobs match these filters.{" "}
+                <button type="button" className="cf-link" onClick={() => onClearFilters?.()}>
+                  Clear filters
+                </button>
+              </>
+            ) : noConfiguredLane ? (
+              <>
+                No search sources are ready yet.{" "}
+                <button type="button" className="cf-link" onClick={() => onOpenSourceHealth?.()}>
+                  Review source health
+                </button>
+              </>
+            ) : cancelled ? (
+              "Search cancelled. Run it again whenever you're ready."
+            ) : completed ? (
+              "No new matches this time."
+            ) : hydrating ? (
+              "Loading saved search…"
+            ) : sourceSweep?.status === "running" ? (
+              "Searching for matches…"
+            ) : (
+              "Search for jobs to start building your list."
+            )}
+          </EmptyPanel>
         )}
       </div>
     </section>
@@ -693,6 +861,7 @@ export function WorkspaceBrowser({
   cartJobs = jobs,
   selection = [],
   sourceSweep = {},
+  onboardingHandoff = false,
   locationPolicy = {},
   pipeline = {},
   files = [],
@@ -708,6 +877,7 @@ export function WorkspaceBrowser({
   onToggleSelection,
   onRunSweep,
   onOpenSourceHealth,
+  onClearFilters,
   onQueryChange,
   onFilter,
   onStageSelect,
@@ -780,6 +950,8 @@ export function WorkspaceBrowser({
             filterJobs={cartJobs}
             selection={selection}
             sourceSweep={sourceSweep}
+            onboardingHandoff={onboardingHandoff}
+            agentName={agentName}
             locationPolicy={locationPolicy}
             query={query}
             filters={filters}
@@ -788,6 +960,7 @@ export function WorkspaceBrowser({
             onToggleSelection={onToggleSelection}
             onRunSweep={onRunSweep}
             onOpenSourceHealth={onOpenSourceHealth}
+            onClearFilters={onClearFilters}
           />
         )}
       </main>

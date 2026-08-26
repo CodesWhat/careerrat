@@ -198,16 +198,50 @@ function questionFromConfirmationGap(gap) {
   return quoted ? quoted[1] : "";
 }
 
-function suppliedQuestionAnswerPairs(text) {
-  return cleanText(text)
-    .split(/\s*(?:;|\r?\n)\s*/)
-    .flatMap((segment) => {
-      const delimiter = segment.match(/:\s+/);
-      if (!delimiter || delimiter.index == null) return [];
-      const question = cleanText(segment.slice(0, delimiter.index));
-      const answer = cleanText(segment.slice(delimiter.index + delimiter[0].length));
-      return question && answer ? [{ question, answer }] : [];
-    });
+function normalizeSuppliedScreeningAnswer(value) {
+  const answer = cleanText(value);
+  const withoutTerminalPunctuation = answer.replace(/[.,;!]+$/, "");
+  if (
+    withoutTerminalPunctuation === answer ||
+    !/^https?:\/\/\S+$/i.test(withoutTerminalPunctuation)
+  ) {
+    return answer;
+  }
+  try {
+    const parsed = new URL(withoutTerminalPunctuation);
+    return ["http:", "https:"].includes(parsed.protocol) ? withoutTerminalPunctuation : answer;
+  } catch {
+    return answer;
+  }
+}
+
+function suppliedScreeningAnswerPairs(text) {
+  const pairs = [];
+  const fragments = cleanText(text).split(/([;\r\n]+[^\S\r\n]*)/);
+  let separator = "";
+  for (const fragment of fragments) {
+    if (/^[;\r\n]+[^\S\r\n]*$/.test(fragment)) {
+      separator = fragment;
+      continue;
+    }
+    const segment = cleanText(fragment);
+    if (!segment) continue;
+    const delimiter = segment.match(/:\s+/);
+    if (!delimiter || delimiter.index == null) {
+      const current = pairs.at(-1);
+      if (current) current.answer += `${separator}${segment}`;
+      separator = "";
+      continue;
+    }
+    const question = cleanText(segment.slice(0, delimiter.index));
+    const answer = cleanText(segment.slice(delimiter.index + delimiter[0].length));
+    if (question && answer) pairs.push({ question, answer });
+    separator = "";
+  }
+  return pairs.map((pair) => ({
+    ...pair,
+    answer: normalizeSuppliedScreeningAnswer(pair.answer),
+  }));
 }
 
 function nonBlockingPacketGap(gap) {
@@ -244,10 +278,62 @@ function matchingAnswerConfirmationGaps(
   });
 }
 
-function resolveAnswerConfirmationGap(gaps, answer, options) {
+function resolveAnswerConfirmationGap(gaps, answer, options, confirmedAnswers = []) {
   const matches = matchingAnswerConfirmationGaps(gaps, answer, options);
   if (matches.length === 1) return { ...matches[0], ambiguous: false };
-  return { gap: null, index: -1, ambiguous: matches.length > 1 };
+  if (matches.length > 1) return { gap: null, index: -1, ambiguous: true };
+
+  const expectedId = cleanText(answer?.questionId);
+  const expectedQuestion = normalizeScreeningQuestionKey(answer?.question);
+  const current = confirmedAnswers
+    .map((entry, index) => ({ entry, index }))
+    .filter(({ entry }) => {
+      if (expectedId && cleanText(entry?.questionId) === expectedId) return true;
+      if (expectedId && !options?.allowQuestionFallback) return false;
+      return (
+        Boolean(expectedQuestion) &&
+        normalizeScreeningQuestionKey(entry?.question) === expectedQuestion
+      );
+    });
+  if (current.length !== 1) {
+    return { gap: null, index: -1, ambiguous: current.length > 1 };
+  }
+  const confirmed = current[0];
+  return {
+    gap: {
+      kind: "answers",
+      code: "ANSWER_ALREADY_CONFIRMED",
+      questionId: cleanText(confirmed.entry?.questionId) || null,
+      message: `Answer “${cleanText(confirmed.entry?.question)}”.`,
+    },
+    index: gaps.length + confirmed.index,
+    confirmed: true,
+    ambiguous: false,
+  };
+}
+
+export function matchSuppliedScreeningAnswers({ text, gaps, confirmedAnswers } = {}) {
+  const pairs = suppliedScreeningAnswerPairs(text);
+  if (!pairs.length || !Array.isArray(gaps)) return [];
+  const matched = pairs.map((pair) => {
+    const resolved = resolveAnswerConfirmationGap(
+      gaps,
+      { question: pair.question },
+      { allowQuestionFallback: true },
+      Array.isArray(confirmedAnswers) ? confirmedAnswers : []
+    );
+    const canonicalQuestion = questionFromConfirmationGap(resolved.gap);
+    if (resolved.ambiguous || resolved.index < 0 || !canonicalQuestion) return null;
+    return {
+      questionId: cleanText(resolved.gap?.questionId) || null,
+      question: canonicalQuestion,
+      answer: pair.answer,
+      gapIndex: resolved.index,
+    };
+  });
+  const indexes = new Set(matched.filter(Boolean).map((entry) => entry.gapIndex));
+  if (matched.some((entry) => !entry) || indexes.size !== matched.length) return [];
+  return matched;
 }
 
 export async function confirmOneOffScreeningAnswer({
@@ -285,7 +371,9 @@ export async function confirmOneOffScreeningAnswer({
   const application = readApplication({ repoRoot, env, applicationId });
   const manifest = application.packetManifest;
   const gaps = Array.isArray(manifest?.gaps) ? manifest.gaps : [];
-  const resolved = reviewedAnswers.map((entry) => resolveAnswerConfirmationGap(gaps, entry));
+  const resolved = reviewedAnswers.map((entry) =>
+    resolveAnswerConfirmationGap(gaps, entry, undefined, manifest?.confirmedAnswers)
+  );
   if (resolved.some((match) => match.ambiguous)) {
     const error = new Error("the packet has more than one open confirmation for this question");
     error.code = "ANSWER_CONFIRMATION_AMBIGUOUS";
@@ -309,8 +397,8 @@ export async function confirmOneOffScreeningAnswer({
     error.code = "ANSWER_CONFIRMATION_MISMATCH";
     throw error;
   }
-  const gapIndexes = new Set(resolved.map((match) => match.index));
-  if (gapIndexes.size !== resolved.length) {
+  const targetIndexes = new Set(resolved.map((match) => match.index));
+  if (targetIndexes.size !== resolved.length) {
     const error = new Error("each reviewed answer must match a different open packet confirmation");
     error.code = "ANSWER_CONFIRMATION_AMBIGUOUS";
     throw error;
@@ -330,7 +418,7 @@ export async function confirmOneOffScreeningAnswer({
     requireArtifact: true,
     replaceRendered: true,
   });
-  const remainingGaps = gaps.filter((_, index) => !gapIndexes.has(index));
+  const remainingGaps = gaps.filter((_, index) => !targetIndexes.has(index));
   const uploadReady = remainingGaps.every(nonBlockingPacketGap);
   const confirmedAt = now().toISOString();
   const confirmedAnswerMap = new Map(
@@ -418,7 +506,7 @@ export async function draftOneOffScreeningAnswers({
   }
 
   const application = readApplication({ repoRoot, env, applicationId });
-  const suppliedPairs = application ? suppliedQuestionAnswerPairs(text) : [];
+  const suppliedPairs = application ? suppliedScreeningAnswerPairs(text) : [];
   const capture = suppliedPairs.length
     ? {
         questions: suppliedPairs.map((pair, index) => ({
@@ -477,7 +565,8 @@ export async function draftOneOffScreeningAnswers({
             questionId: proposedQuestionId,
             question,
           },
-          { allowQuestionFallback: true }
+          { allowQuestionFallback: true },
+          application.packetManifest?.confirmedAnswers
         )
       : { gap: null, ambiguous: false };
     const canonicalQuestion = questionFromConfirmationGap(confirmation.gap) || question;
@@ -510,6 +599,7 @@ export async function draftOneOffScreeningAnswers({
     answers,
     excluded: capture.excluded || [],
     needsUser: answers.some((answer) => !answer.uploadReady),
+    userSupplied: suppliedPairs.length > 0,
     persisted: false,
     artifactPath,
     ai: drafted.ai || { used: false },
