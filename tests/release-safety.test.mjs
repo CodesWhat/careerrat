@@ -226,6 +226,25 @@ test("onboarding never re-asks a fact already present in canonical or pending st
   assert.match(skill, /inspect both saved candidate data and unresolved confirm blocks/i);
 });
 
+test("onboarding asks plain questions and illustrates abstract choices", async () => {
+  const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
+
+  assert.match(skill, /every candidate-facing question.*plain English/i);
+  assert.match(skill, /abstract choice.*two or three short.*examples/i);
+  assert.match(skill, /what would make one job worth applying to before another/i);
+  assert.match(skill, /kind of work.*schedule.*pay.*grow/i);
+  assert.match(skill, /what would make you skip a job right away/i);
+  assert.match(skill, /ask about each accepted arrangement one at a time/i);
+  assert.match(skill, /if they say yes, ask next.*match score/i);
+  assert.match(skill, /what base salary would you aim for when negotiating/i);
+  assert.match(skill, /what base salary should I enter when an application form requires one/i);
+  assert.match(skill, /salary, a bonus, and ownership in the company/i);
+  assert.doesNotMatch(skill, /What characteristics would make a role a priority\?/i);
+  assert.doesNotMatch(skill, /Below what fit score should roles auto-drop/i);
+  assert.doesNotMatch(skill, /core edge or differentiator/i);
+  assert.doesNotMatch(skill, /Ask about: `cash_over_equity` preference/i);
+});
+
 test("web onboarding does not collect job-board preferences it cannot save", async () => {
   const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
 
@@ -331,6 +350,17 @@ test("web onboarding writes ATS authorization defaults with schema-safe strings"
 
   assert.match(skill, /form-defaults work_authorization and requires_sponsorship are strings/i);
   assert.match(skill, /use yes or no, never booleans/i);
+});
+
+test("voluntary self-identification stays outside agent-owned skills", async () => {
+  const ingest = await readText(".agents/skills/ingest-profile/SKILL.md");
+  const apply = await readText(".agents/skills/apply-job/SKILL.md");
+
+  assert.match(ingest, /local Application defaults.*owns/i);
+  assert.match(ingest, /never ask for, read, or patch voluntary self-identification/i);
+  assert.match(apply, /deterministic application filler.*owns/i);
+  assert.match(apply, /never read, request, log, or update/i);
+  assert.doesNotMatch(apply, /Read applicant facts from `candidate\/form-defaults\.yml`/i);
 });
 
 test("web onboarding persists stated writing preferences without requiring sample files", async () => {

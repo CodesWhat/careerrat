@@ -652,6 +652,7 @@ async function startSearchRun({
   mode,
   retryFailed = false,
   trigger,
+  searchExecutionId,
 } = {}) {
   const pathCtx = { repoRoot, env };
   const config = candidateConfigGet(pathCtx);
@@ -706,6 +707,7 @@ async function startSearchRun({
     metadata: {
       deterministicSources,
       companyBoardResolution: prepared.companyBoardResolution,
+      ...(searchExecutionId ? { searchExecutionId } : {}),
     },
   });
 
@@ -902,6 +904,7 @@ export async function startManualSearchRun({
   repoRoot,
   env = process.env,
   fetchImpl = fetch,
+  searchExecutionId,
 } = {}) {
   return startSearchRun({
     repoRoot,
@@ -911,6 +914,7 @@ export async function startManualSearchRun({
     mode: "manual",
     retryFailed: false,
     trigger: "manual-search",
+    searchExecutionId,
   });
 }
 

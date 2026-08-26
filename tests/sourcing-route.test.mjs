@@ -168,6 +168,16 @@ async function postJson(server, path, payload) {
   return { status: res.status, body };
 }
 
+async function postRaw(server, path, { body, contentType }) {
+  const res = await fetch(`${baseUrl(server)}${path}`, {
+    method: "POST",
+    headers: { "content-type": contentType },
+    body,
+  });
+  const responseBody = await res.json().catch(() => ({}));
+  return { status: res.status, body: responseBody };
+}
+
 async function getJson(server, path) {
   const res = await fetch(`${baseUrl(server)}${path}`);
   const body = await res.json().catch(() => ({}));
@@ -391,11 +401,37 @@ test("POST /api/sourcing/search/start creates a manual-search run without using 
   seedDeterministicSources(repoRoot);
   const server = await bootServer(repoRoot, { fetchImpl: publicFetchStub() });
   try {
-    const { status, body } = await postJson(server, "/api/sourcing/search/start", {});
+    const { status, body } = await postJson(server, "/api/sourcing/search/start", {
+      searchExecutionId: "search-execution-direct",
+    });
     assert.equal(status, 202);
     assert.equal(body.run.purpose, "manual-search");
     assert.equal(body.run.status, "running");
+    assert.equal(body.run.metadata.searchExecutionId, "search-execution-direct");
     assertNoRuntimeHandoff(body);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/sourcing/search/start preserves declared JSON body client errors", async () => {
+  const repoRoot = tempRepo();
+  const server = await bootServer(repoRoot);
+  try {
+    const cases = [
+      { expected: 400, contentType: "application/json", body: "{" },
+      { expected: 415, contentType: "text/plain", body: "{}" },
+      {
+        expected: 413,
+        contentType: "application/json",
+        body: JSON.stringify({ value: "x".repeat(1024 * 1024) }),
+      },
+    ];
+    for (const entry of cases) {
+      const result = await postRaw(server, "/api/sourcing/search/start", entry);
+      assert.equal(result.status, entry.expected);
+      assert.equal(result.body.ok, false);
+    }
   } finally {
     await closeServer(server);
   }
@@ -450,13 +486,19 @@ test("product search buttons dispatch through workspace-main and return backgrou
     }),
   });
   try {
-    const manual = await postJson(server, "/api/sourcing/search/start", {});
+    const manual = await postJson(server, "/api/sourcing/search/start", {
+      searchExecutionId: "search-execution-workspace",
+    });
     assert.equal(manual.status, 202);
     assert.equal(manual.body.run.id, "manual-search-workspace-main");
     assert.deepEqual(intents[0], {
       type: "search.run",
       entity: { type: "workspace", id: "workspace-main" },
-      input: { purpose: "manual-search", retryFailed: false },
+      input: {
+        purpose: "manual-search",
+        retryFailed: false,
+        searchExecutionId: "search-execution-workspace",
+      },
     });
     await recorded;
     assert.equal(completions[0].status, "completed");
@@ -469,6 +511,26 @@ test("product search buttons dispatch through workspace-main and return backgrou
       entity: { type: "workspace", id: "workspace-main" },
       input: { purpose: "first-search", retryFailed: false },
     });
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("GET /api/sourcing/runs/latest can follow an exact older run id", async () => {
+  const repoRoot = tempRepo();
+  const older = sourcingRunStart({ repoRoot, purpose: "manual-search" }).run;
+  sourcingRunComplete({ repoRoot, id: older.id, summary: { new: 1 } });
+  const newer = sourcingRunStart({ repoRoot, purpose: "manual-search" }).run;
+  const server = await bootServer(repoRoot);
+  try {
+    const result = await getJson(
+      server,
+      `/api/sourcing/runs/latest?purpose=manual-search&id=${encodeURIComponent(older.id)}`
+    );
+    assert.equal(result.status, 200);
+    assert.equal(result.body.run.id, older.id);
+    assert.equal(result.body.run.status, "completed");
+    assert.notEqual(result.body.run.id, newer.id);
   } finally {
     await closeServer(server);
   }

@@ -16,6 +16,7 @@ import {
   resolveFieldValue,
   resolveScreeningAnswer,
   submitGuard,
+  uniqueVoluntaryDeclineOption,
 } from "../src/core/apply/form-fill.mjs";
 
 // ---------------------------------------------------------------------------
@@ -230,9 +231,9 @@ describe("mapFormDefaults", () => {
     assert.equal(result.requires_sponsorship, "No");
   });
 
-  it("maps eeo from eeo_default", () => {
+  it("never treats legacy eeo_default as consent", () => {
     const result = mapFormDefaults(FORM_DEFAULTS_BASIC, PROFILE_FULL);
-    assert.equal(result.eeo, "Prefer not to answer");
+    assert.equal("eeo" in result, false);
   });
 
   it("maps source", () => {
@@ -442,6 +443,23 @@ describe("buildFillPlan", () => {
     assert.equal(firstNameStep.value, "Jane");
   });
 
+  it("carries candidate-configured dropdown aliases on the matching canonical field", () => {
+    const plan = buildFillPlan({
+      fields: ["Location", "How did you hear about us?"],
+      formDefaults: {
+        source: "Community event",
+        option_aliases: {
+          location: ["Metro City"],
+          source: ["Other"],
+        },
+      },
+      profile: PROFILE_FULL,
+    });
+
+    assert.deepEqual(plan[0].optionAliases, ["Metro City"]);
+    assert.deepEqual(plan[1].optionAliases, ["Other"]);
+  });
+
   it("returns skip for unknown labels", () => {
     const plan = buildFillPlan({
       fields,
@@ -452,6 +470,135 @@ describe("buildFillPlan", () => {
     assert.equal(unknownStep.action, "skip");
     assert.equal(unknownStep.canonicalField, null);
     assert.equal(unknownStep.value, null);
+  });
+
+  it("leaves voluntary self-identification blank unless explicitly enabled", () => {
+    const [step] = buildFillPlan({
+      fields: [{ label: "Race / Ethnicity", type: "select" }],
+      formDefaults: {
+        eeo_default: "Prefer not to answer",
+        screening_answers: { "race ethnicity": "White" },
+        voluntary_self_identification: {
+          enabled: false,
+          default_action: "decline_when_available",
+          confirmed_at: "2026-08-26T12:00:00Z",
+          answers: {},
+        },
+      },
+      profile: { candidate: { race: "White" } },
+    });
+
+    assert.deepEqual(step, {
+      label: "Race / Ethnicity",
+      canonicalField: "eeo",
+      value: null,
+      action: "skip",
+      reason: "voluntary_self_identification_disabled",
+    });
+  });
+
+  it("uses only an exact normalized saved self-identification question answer", () => {
+    const formDefaults = {
+      voluntary_self_identification: {
+        enabled: true,
+        default_action: "leave_blank",
+        confirmed_at: "2026-08-26T12:00:00Z",
+        answers: {
+          "race ethnicity": { value: "Two or more races", confirmed_at: "2026-08-26T12:00:00Z" },
+        },
+      },
+    };
+    const [exact, notExact] = buildFillPlan({
+      fields: [
+        { label: "Race / Ethnicity", type: "select" },
+        { label: "Please choose your race / ethnicity", type: "select" },
+      ],
+      formDefaults,
+    });
+
+    assert.equal(exact.action, "fill");
+    assert.equal(exact.value, "Two or more races");
+    assert.equal(exact.source, "form-defaults.voluntary_self_identification.answers");
+    assert.equal(notExact.action, "skip");
+  });
+
+  it("does not act on enabled self-identification settings without real confirmation", () => {
+    const [missing, invalid] = [null, "not-a-date"].map(
+      (confirmedAt) =>
+        buildFillPlan({
+          fields: [{ label: "Gender", type: "select" }],
+          formDefaults: {
+            voluntary_self_identification: {
+              enabled: true,
+              default_action: "decline_when_available",
+              confirmed_at: confirmedAt,
+              answers: {},
+            },
+          },
+        })[0]
+    );
+
+    assert.equal(missing.action, "skip");
+    assert.equal(missing.reason, "voluntary_self_identification_unconfirmed");
+    assert.equal(invalid.action, "skip");
+    assert.equal(invalid.reason, "voluntary_self_identification_unconfirmed");
+  });
+
+  it("uses decline_when_available only for one tight semantic radio option", () => {
+    const base = {
+      enabled: true,
+      default_action: "decline_when_available",
+      confirmed_at: "2026-08-26T12:00:00Z",
+      answers: {},
+    };
+    const [unique, ambiguous, absent] = buildFillPlan({
+      fields: [
+        {
+          label: "Gender",
+          type: "radio",
+          options: [
+            { label: "Woman", ref: "e1" },
+            { label: "Prefer not to answer", ref: "e2" },
+          ],
+        },
+        {
+          label: "Veteran status",
+          type: "radio",
+          options: [
+            { label: "Decline to self-identify", ref: "e3" },
+            { label: "I don't wish to answer", ref: "e4" },
+          ],
+        },
+        {
+          label: "Disability status",
+          type: "radio",
+          options: [{ label: "Prefer not to say", ref: "e5" }],
+        },
+      ],
+      formDefaults: { voluntary_self_identification: base },
+    });
+
+    assert.equal(unique.action, "fill");
+    assert.equal(unique.value, "Prefer not to answer");
+    assert.equal(unique.declinePolicy, true);
+    assert.equal(ambiguous.action, "skip");
+    assert.equal(absent.action, "skip");
+  });
+
+  it("accepts only the narrow decline phrases and requires exactly one", () => {
+    assert.equal(
+      uniqueVoluntaryDeclineOption(["Yes", "I do not wish to answer"]),
+      "I do not wish to answer"
+    );
+    assert.equal(
+      uniqueVoluntaryDeclineOption(["Yes", "I do not want to answer"]),
+      "I do not want to answer"
+    );
+    assert.equal(uniqueVoluntaryDeclineOption(["Yes", "Prefer not to say"]), null);
+    assert.equal(
+      uniqueVoluntaryDeclineOption(["Prefer not to answer", "Decline to self-identify"]),
+      null
+    );
   });
 
   it("never returns a submit action", () => {
@@ -566,6 +713,48 @@ describe("buildFillPlan", () => {
 // ---------------------------------------------------------------------------
 
 describe("resolveScreeningAnswer", () => {
+  it("does not let saved screening answers bypass voluntary self-identification policy", () => {
+    const labels = [
+      "Do you identify as LGBTQ+?",
+      "What is your religion?",
+      "What is your marital status?",
+      "What is your national origin?",
+      "Which age range are you in?",
+    ];
+
+    for (const label of labels) {
+      const answer = resolveScreeningAnswer(label, {
+        formDefaults: { screening_answers: { [label]: "private demographic answer" } },
+      });
+      assert.equal(answer.action, "skip", label);
+      assert.equal(answer.value, null, label);
+      assert.equal(answer.reason, "voluntary_self_identification_disabled", label);
+    }
+  });
+
+  it("resolves demographic answers only through the confirmed voluntary policy", () => {
+    const answer = resolveScreeningAnswer("Do you identify as LGBTQ+?", {
+      formDefaults: {
+        screening_answers: { "do you identify as lgbtq": "screening bypass" },
+        voluntary_self_identification: {
+          enabled: true,
+          default_action: "leave_blank",
+          confirmed_at: "2026-08-26T12:00:00Z",
+          answers: {
+            "do you identify as lgbtq": {
+              value: "Prefer not to answer",
+              confirmed_at: "2026-08-26T12:00:00Z",
+            },
+          },
+        },
+      },
+    });
+
+    assert.equal(answer.action, "fill");
+    assert.equal(answer.value, "Prefer not to answer");
+    assert.equal(answer.source, "form-defaults.voluntary_self_identification.answers");
+  });
+
   it("answers confirmed tool-experience questions from honesty.yml", () => {
     const answer = resolveScreeningAnswer("Do you have experience with Python?", {
       honesty: {

@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
 
+import { uniqueVoluntaryDeclineOption } from "./form-fill.mjs";
+
 // ---------------------------------------------------------------------------
 // Orca CLI plumbing
 // ---------------------------------------------------------------------------
@@ -77,6 +79,8 @@ const SAFE_ADVANCE_LABELS = new Set([
   "review",
   "review your application",
 ]);
+const OPTION_SNAPSHOT_ATTEMPTS = 5;
+const OPTION_SNAPSHOT_DELAY_MS = 250;
 
 function isExactAdvanceLabel(value) {
   return SAFE_ADVANCE_LABELS.has(normalizeText(value));
@@ -96,6 +100,7 @@ function snapshotNodes(snapshotText) {
       required: /\[.*\brequired\b.*\]/.test(tail),
       value: tail.match(/\]\s*:\s*(.*)$/)?.[1]?.trim() ?? "",
       stateKnown: /\]\s*:/.test(tail),
+      expanded: /\bexpanded=true\b/.test(tail),
     });
   }
   return nodes;
@@ -231,11 +236,19 @@ function normalizeSnapshot(raw = {}, probe = [], safeAdvanceLabels = []) {
       String(refs[control.ref].name || "").trim()
     );
     const state = probed.get(normalizeText(context.label));
+    const probedTypeahead = control.role === "combobox" && state?.typeahead === true;
+    const currentField = { ...refs[control.ref] };
+    if (probedTypeahead) {
+      delete currentField.stateKnown;
+      delete currentField.value;
+    }
     refs[control.ref] = {
-      ...refs[control.ref],
+      ...currentField,
       ...(placeholderName ? { name: context.label } : {}),
       required: refs[control.ref].required || context.required,
-      ...(control.role === "combobox" && placeholderName ? { typeahead: true } : {}),
+      ...(control.role === "combobox" && (placeholderName || state?.typeahead === true)
+        ? { typeahead: true }
+        : {}),
       ...(state?.stateKnown ? { stateKnown: true, value: String(state.value || "") } : {}),
     };
   }
@@ -247,11 +260,16 @@ const FORM_STATE_EXPRESSION = `JSON.stringify(Array.from(document.querySelectorA
   const controls = Array.from(root?.querySelectorAll("input, textarea, select, button, [role='combobox']") || []);
   const yesNo = controls.filter((control) => control.tagName === "BUTTON" && /^(yes|no)$/i.test((control.innerText || "").trim()));
   const valueControl = controls.find((control) => control.getAttribute("role") === "combobox" || ["INPUT", "TEXTAREA", "SELECT"].includes(control.tagName));
+  const displayScope = valueControl?.closest("[class*='control']") || valueControl?.parentElement;
+  const displayedValue = Array.from(displayScope?.querySelectorAll("[class*='single-value'], [class*='multi-value']") || []).map((node) => String(node.innerText || node.textContent || "").trim()).filter(Boolean).join(", ");
+  const typeahead = valueControl?.tagName === "INPUT" && valueControl.getAttribute("role") === "combobox";
+  const typedButUncommitted = typeahead && Boolean(String(valueControl?.value || "").trim()) && !displayedValue;
   return {
     label: (label.innerText || "").trim(),
     required: /required/i.test(String(label.className || "")) || controls.some((control) => control.required === true || control.getAttribute("aria-required") === "true"),
-    stateKnown: yesNo.length >= 2 || Boolean(valueControl),
-    value: String(valueControl?.value || ""),
+    stateKnown: yesNo.length >= 2 || Boolean(valueControl && !typedButUncommitted),
+    value: typeahead ? displayedValue : displayedValue || String(valueControl?.value || ""),
+    typeahead,
     yesNo: yesNo.map((control) => ({
       text: (control.innerText || "").trim(),
       pressed: control.getAttribute("aria-pressed") === "true",
@@ -281,10 +299,10 @@ function needsAdvanceSafetyProbe(raw = {}) {
 }
 
 function needsFormStateProbe(raw = {}) {
-  const text = String(raw.snapshot || "");
   return (
-    /LabelText[\s\S]*combobox "(?:Start typing|Type here|Search|Select|Choose)/i.test(text) ||
-    /LabelText[\s\S]*button "Yes"[\s\S]*button "No"/i.test(text)
+    Object.values(raw.refs || {}).some(
+      (entry) => String(entry?.role || "").toLowerCase() === "combobox"
+    ) || /LabelText[\s\S]*button "Yes"[\s\S]*button "No"/i.test(String(raw.snapshot || ""))
   );
 }
 
@@ -326,6 +344,80 @@ function optionMatch(entries, requested) {
   return cityPrefixes.length === 1 ? cityPrefixes[0] : null;
 }
 
+function optionsForField(raw, ref, label) {
+  const entries = Object.entries(raw.refs || {})
+    .filter(([, entry]) => String(entry?.role || "").toLowerCase() === "option")
+    .map(([optionRef, entry]) => ({ ref: optionRef, name: String(entry?.name || "") }));
+  if (!entries.length) return [];
+
+  const nodes = snapshotNodes(raw.snapshot);
+  let controlIndex = nodes.findIndex((node) => node.ref === ref && node.role === "combobox");
+  if (controlIndex < 0) {
+    const wanted = normalizeText(label);
+    const matches = nodes
+      .map((node, index) => ({ node, index }))
+      .filter(
+        ({ node }) => node.role === "combobox" && normalizeText(node.name) === wanted && wanted
+      );
+    if (matches.length === 1) controlIndex = matches[0].index;
+  }
+  if (controlIndex < 0) return entries;
+
+  let labelIndex = controlIndex - 1;
+  while (labelIndex >= 0 && nodes[labelIndex].role !== "labeltext") labelIndex -= 1;
+  if (labelIndex < 0) return entries;
+  let boundary = controlIndex + 1;
+  while (boundary < nodes.length && nodes[boundary].role !== "labeltext") {
+    boundary += 1;
+  }
+  const ownedRefs = new Set(
+    nodes
+      .slice(controlIndex + 1, boundary)
+      .filter((node) => node.role === "option" && node.ref)
+      .map((node) => node.ref)
+  );
+  return entries.filter((entry) => ownedRefs.has(entry.ref));
+}
+
+function comboboxRefForField(raw, label) {
+  const wanted = normalizeText(label);
+  if (!wanted) return null;
+  const matches = Object.entries(raw.refs || {}).filter(
+    ([, entry]) =>
+      String(entry?.role || "").toLowerCase() === "combobox" &&
+      normalizeText(entry?.name) === wanted
+  );
+  return matches.length === 1 ? matches[0][0] : null;
+}
+
+function comboboxIsExpanded(raw, ref, label) {
+  const nodes = snapshotNodes(raw.snapshot);
+  const direct = nodes.find((node) => node.ref === ref && node.role === "combobox");
+  if (direct) return direct.expanded;
+  const wanted = normalizeText(label);
+  const matches = nodes.filter(
+    (node) => node.role === "combobox" && normalizeText(node.name) === wanted && wanted
+  );
+  return matches.length === 1 && matches[0].expanded;
+}
+
+function typeaheadSelectionAttempts(value, optionAliases = []) {
+  return [value, ...(Array.isArray(optionAliases) ? optionAliases : [])]
+    .flatMap((candidate) => {
+      const requested = String(candidate || "").trim();
+      const withoutSentencePunctuation = requested.replace(/[.,;!]+$/, "").trim();
+      return [requested, withoutSentencePunctuation]
+        .filter(Boolean)
+        .map((query) => ({ query, match: requested }));
+    })
+    .filter(
+      (entry, index, entries) =>
+        entries.findIndex(
+          (item) => item.query.toLocaleLowerCase() === entry.query.toLocaleLowerCase()
+        ) === index
+    );
+}
+
 function selectedValueMatches(actual, expected) {
   const selected = normalizeText(actual);
   const wanted = normalizeText(expected);
@@ -333,6 +425,25 @@ function selectedValueMatches(actual, expected) {
   if (selected === wanted || selected.includes(wanted) || wanted.includes(selected)) return true;
   const city = normalizeText(String(expected || "").split(",")[0]);
   return Boolean(city && selected.startsWith(`${city} `));
+}
+
+function selectedField(snapshot, ref, label) {
+  const direct = snapshot.refs?.[ref];
+  const wanted = normalizeText(label);
+  if (
+    direct &&
+    String(direct?.role || "").toLowerCase() === "combobox" &&
+    (!wanted || normalizeText(direct?.name) === wanted)
+  ) {
+    return direct;
+  }
+  if (!wanted) return null;
+  const matches = Object.values(snapshot.refs || {}).filter(
+    (field) =>
+      String(field?.role || "").toLowerCase() === "combobox" &&
+      normalizeText(field?.name) === wanted
+  );
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function encodedDataExpression(value) {
@@ -396,6 +507,59 @@ export function createOrcaOps({ runOrcaImpl } = {}) {
       }
     }
     return normalizeSnapshot(raw, probe, safeAdvanceLabels);
+  }
+
+  async function dismissOpenOptions(pageId) {
+    try {
+      await runOrcaImpl(["keypress", "--page", pageId, "--key", "Escape", "--json"]);
+    } catch {
+      // The original field failure remains the actionable result.
+    }
+  }
+
+  async function scrollFieldIntoView(pageId, label) {
+    const input = encodedDataExpression({ label: normalizeText(label) });
+    await evaluate(
+      pageId,
+      `(() => { const input=${input}; const normalize=(value)=>String(value||"").toLowerCase().replace(/[^a-z0-9]+/g," ").replace(/\\s+/g," ").trim(); const fields=Array.from(document.querySelectorAll("[role='combobox']")); const matches=fields.filter((field)=>{const direct=field.getAttribute("aria-label")||"";const labelled=String(field.getAttribute("aria-labelledby")||"").split(/\\s+/).filter(Boolean).map((id)=>document.getElementById(id)?.innerText||"").join(" ");return normalize(direct||labelled)===input.label;}); if(matches.length!==1)return false; matches[0].scrollIntoView({block:"center",inline:"nearest"}); return true; })()`
+    );
+  }
+
+  async function openTypeaheadControl(pageId, label) {
+    const input = encodedDataExpression({ label: normalizeText(label) });
+    await evaluate(
+      pageId,
+      `(() => { const input=${input}; const normalize=(value)=>String(value||"").toLowerCase().replace(/[^a-z0-9]+/g," ").replace(/\\s+/g," ").trim(); const fields=Array.from(document.querySelectorAll("[role='combobox']")); const matches=fields.filter((field)=>{const direct=field.getAttribute("aria-label")||"";const labelled=String(field.getAttribute("aria-labelledby")||"").split(/\\s+/).filter(Boolean).map((id)=>document.getElementById(id)?.innerText||"").join(" ");return normalize(direct||labelled)===input.label;}); if(matches.length!==1)return false; const field=matches[0]; const control=field.closest(".select__control")||field; field.focus({preventScroll:true}); for(const type of ["pointerdown","mousedown","pointerup","mouseup","click"]){control.dispatchEvent(new MouseEvent(type,{bubbles:true,cancelable:true,view:window,button:0,buttons:type.includes("down")?1:0}));} return true; })()`
+    );
+  }
+
+  async function chooseExactOpenOption(pageId, value) {
+    const input = encodedDataExpression({ value: normalizeText(value) });
+    const result = await evaluate(
+      pageId,
+      `(() => { const input=${input}; const normalize=(value)=>String(value||"").toLowerCase().replace(/[^a-z0-9]+/g," ").replace(/\\s+/g," ").trim(); const options=Array.from(document.querySelectorAll("[role='option']")).filter((option)=>{const rect=option.getBoundingClientRect();const style=getComputedStyle(option);return rect.width>0&&rect.height>0&&style.visibility!=="hidden"&&style.display!=="none"&&normalize(option.innerText||option.textContent)===input.value;}); if(options.length!==1)return false; const option=options[0]; for(const type of ["pointerdown","mousedown","pointerup","mouseup","click"]){option.dispatchEvent(new MouseEvent(type,{bubbles:true,cancelable:true,view:window,button:0,buttons:type.includes("down")?1:0}));} return true; })()`
+    );
+    return result === true || String(result) === "true";
+  }
+
+  async function confirmedSelectedField(pageId, ref, label, expected) {
+    let field = null;
+    for (let attempt = 0; attempt < OPTION_SNAPSHOT_ATTEMPTS; attempt += 1) {
+      const after = await snapshot(pageId);
+      field = selectedField(after, ref, label);
+      if (field?.stateKnown === true && selectedValueMatches(field.value, expected)) return field;
+      if (attempt < OPTION_SNAPSHOT_ATTEMPTS - 1) {
+        await runOrcaImpl([
+          "wait",
+          "--page",
+          pageId,
+          "--timeout",
+          String(OPTION_SNAPSHOT_DELAY_MS),
+          "--json",
+        ]);
+      }
+    }
+    return field;
   }
 
   return {
@@ -484,50 +648,153 @@ export function createOrcaOps({ runOrcaImpl } = {}) {
         "--json",
       ]);
     },
-    async selectOption({ pageId, ref, value, typeahead = false }) {
+    async selectOption({ pageId, ref, label, value, typeahead = false, optionAliases = [] }) {
       if (!typeahead) {
+        const candidates = [value, ...(Array.isArray(optionAliases) ? optionAliases : [])]
+          .map((candidate) => String(candidate || "").trim())
+          .filter(
+            (candidate, index, entries) =>
+              candidate &&
+              entries.findIndex((entry) => normalizeText(entry) === normalizeText(candidate)) ===
+                index
+          );
+        let lastField = null;
+        let selectedAttemptRan = false;
+        let lastError = null;
+        for (const candidate of candidates) {
+          try {
+            await runOrcaImpl([
+              "select",
+              "--page",
+              pageId,
+              "--element",
+              `@${ref}`,
+              "--value",
+              candidate,
+              "--json",
+            ]);
+            selectedAttemptRan = true;
+            lastField = await confirmedSelectedField(pageId, ref, label, candidate);
+            if (lastField?.stateKnown && selectedValueMatches(lastField.value, candidate)) {
+              return { selectedValue: lastField.value };
+            }
+          } catch (error) {
+            lastError = error;
+          }
+        }
+        if (!selectedAttemptRan && lastError) throw lastError;
+        if (lastField?.stateKnown !== true) {
+          throw new Error("The field's selected value could not be confirmed.");
+        }
+        throw new Error(`The field still showed "${lastField.value || "blank"}" after selection.`);
+      }
+
+      let option = null;
+      const attempts = typeaheadSelectionAttempts(value, optionAliases);
+      await scrollFieldIntoView(pageId, label);
+      let optionsSnapshot = await runOrcaImpl(["snapshot", "--page", pageId, "--json"]);
+      let currentRef = comboboxRefForField(optionsSnapshot, label) || ref;
+      await runOrcaImpl(["click", "--page", pageId, "--element", `@${currentRef}`, "--json"]);
+      optionsSnapshot = await runOrcaImpl(["snapshot", "--page", pageId, "--json"]);
+      currentRef = comboboxRefForField(optionsSnapshot, label) || currentRef;
+      if (!comboboxIsExpanded(optionsSnapshot, currentRef, label)) {
+        await openTypeaheadControl(pageId, label);
+        optionsSnapshot = await runOrcaImpl(["snapshot", "--page", pageId, "--json"]);
+        currentRef = comboboxRefForField(optionsSnapshot, label) || currentRef;
+      }
+      const openOptions = optionsForField(optionsSnapshot, currentRef, label);
+      option = attempts
+        .map((attemptValue) => optionMatch(openOptions, attemptValue.match))
+        .find(Boolean);
+      for (const attemptValue of attempts) {
+        if (option) break;
         await runOrcaImpl([
-          "select",
+          "fill",
           "--page",
           pageId,
           "--element",
-          `@${ref}`,
+          `@${currentRef}`,
           "--value",
-          String(value),
+          attemptValue.query,
           "--json",
         ]);
-        const after = await snapshot(pageId);
-        const field = after.refs?.[ref];
-        if (field?.stateKnown && !selectedValueMatches(field.value, value)) {
-          throw new Error(`The field still showed "${field.value || "blank"}" after selection.`);
+        let options = [];
+        for (let attempt = 0; attempt < OPTION_SNAPSHOT_ATTEMPTS; attempt += 1) {
+          optionsSnapshot = await runOrcaImpl(["snapshot", "--page", pageId, "--json"]);
+          currentRef = comboboxRefForField(optionsSnapshot, label) || currentRef;
+          options = optionsForField(optionsSnapshot, currentRef, label);
+          option = optionMatch(options, attemptValue.match);
+          if (option) break;
+          if (attempt < OPTION_SNAPSHOT_ATTEMPTS - 1) {
+            await runOrcaImpl([
+              "wait",
+              "--page",
+              pageId,
+              "--timeout",
+              String(OPTION_SNAPSHOT_DELAY_MS),
+              "--json",
+            ]);
+          }
         }
-        return {};
       }
-
-      await runOrcaImpl([
-        "fill",
-        "--page",
-        pageId,
-        "--element",
-        `@${ref}`,
-        "--value",
-        String(value),
-        "--json",
-      ]);
-      await runOrcaImpl(["wait", "--page", pageId, "--selector", "[role='option']", "--json"]);
-      const optionsSnapshot = await runOrcaImpl(["snapshot", "--page", pageId, "--json"]);
-      const options = Object.entries(optionsSnapshot.refs || {})
-        .filter(([, entry]) => String(entry?.role || "").toLowerCase() === "option")
-        .map(([optionRef, entry]) => ({ ref: optionRef, name: String(entry?.name || "") }));
-      const option = optionMatch(options, value);
-      if (!option) throw new Error(`No unambiguous option matched "${value}".`);
-      await runOrcaImpl(["click", "--page", pageId, "--element", `@${option.ref}`, "--json"]);
-      const after = await snapshot(pageId);
-      const field = after.refs?.[ref];
+      if (!option) {
+        await dismissOpenOptions(pageId);
+        throw new Error(`No unambiguous option matched "${value}".`);
+      }
+      const selectedThroughDom = await chooseExactOpenOption(pageId, option.name);
+      if (!selectedThroughDom) {
+        await runOrcaImpl(["click", "--page", pageId, "--element", `@${option.ref}`, "--json"]);
+      }
+      const field = await confirmedSelectedField(pageId, ref, label, option.name);
       if (!field?.stateKnown || !selectedValueMatches(field.value, option.name)) {
+        await dismissOpenOptions(pageId);
         throw new Error(`The field did not keep the selected option "${option.name}".`);
       }
-      return {};
+      return { selectedValue: option.name };
+    },
+    async selectDeclineOption({ pageId, ref, label }) {
+      await scrollFieldIntoView(pageId, label);
+      let optionsSnapshot = await runOrcaImpl(["snapshot", "--page", pageId, "--json"]);
+      let currentRef = comboboxRefForField(optionsSnapshot, label) || ref;
+      await runOrcaImpl(["click", "--page", pageId, "--element", `@${currentRef}`, "--json"]);
+      optionsSnapshot = await runOrcaImpl(["snapshot", "--page", pageId, "--json"]);
+      currentRef = comboboxRefForField(optionsSnapshot, label) || currentRef;
+      if (!comboboxIsExpanded(optionsSnapshot, currentRef, label)) {
+        await openTypeaheadControl(pageId, label);
+        optionsSnapshot = await runOrcaImpl(["snapshot", "--page", pageId, "--json"]);
+        currentRef = comboboxRefForField(optionsSnapshot, label) || currentRef;
+      }
+      let option = null;
+      for (let attempt = 0; attempt < OPTION_SNAPSHOT_ATTEMPTS; attempt += 1) {
+        option = uniqueVoluntaryDeclineOption(optionsForField(optionsSnapshot, currentRef, label));
+        if (option) break;
+        if (attempt < OPTION_SNAPSHOT_ATTEMPTS - 1) {
+          await runOrcaImpl([
+            "wait",
+            "--page",
+            pageId,
+            "--timeout",
+            String(OPTION_SNAPSHOT_DELAY_MS),
+            "--json",
+          ]);
+          optionsSnapshot = await runOrcaImpl(["snapshot", "--page", pageId, "--json"]);
+          currentRef = comboboxRefForField(optionsSnapshot, label) || currentRef;
+        }
+      }
+      if (!option) {
+        await dismissOpenOptions(pageId);
+        throw new Error(`The "${label}" dropdown did not offer one unambiguous decline option.`);
+      }
+      const selectedThroughDom = await chooseExactOpenOption(pageId, option.name);
+      if (!selectedThroughDom) {
+        await runOrcaImpl(["click", "--page", pageId, "--element", `@${option.ref}`, "--json"]);
+      }
+      const field = await confirmedSelectedField(pageId, ref, label, option.name);
+      if (!field?.stateKnown || !selectedValueMatches(field.value, option.name)) {
+        await dismissOpenOptions(pageId);
+        throw new Error(`The field did not keep the selected option "${option.name}".`);
+      }
+      return { selectedValue: option.name };
     },
     async toggleField({ pageId, ref, checked }) {
       return runOrcaImpl([

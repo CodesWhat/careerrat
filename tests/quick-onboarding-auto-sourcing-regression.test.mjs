@@ -119,17 +119,17 @@ test("chat-first onboarding starts the local first search as soon as targeting i
   const firstRunController = stripJavaScriptComments(
     source("apps/web/src/chat-first/FirstRunController.jsx")
   );
-  const refreshOnboard = sliceBetween(
+  const advanceOnboard = sliceBetween(
     firstRunController,
-    "const refreshOnboard = useCallback(",
-    "\n\n  useEffect(",
+    "const advanceOnboard = useCallback(",
+    "\n\n  const refreshOnboard = useCallback(",
     "first-run search kickoff"
   );
-  assert.match(refreshOnboard, /readiness\?\.search_ready === true/);
-  assert.match(refreshOnboard, /\bfirstSearchStatus\(next\)/);
-  assert.match(refreshOnboard, /\bstartFirstSearchRun\(\)/);
-  assert.doesNotMatch(refreshOnboard, /\bstartSearchRun\b/);
-  assertNoForbiddenRuntime(refreshOnboard, "first-run search kickoff");
+  assert.match(advanceOnboard, /readiness\?\.search_ready === true/);
+  assert.match(advanceOnboard, /\bfirstSearchStatus\(next\)/);
+  assert.match(advanceOnboard, /\bstartFirstSearchRun\(/);
+  assert.doesNotMatch(advanceOnboard, /\bstartSearchRun\b/);
+  assertNoForbiddenRuntime(advanceOnboard, "first-run search kickoff");
 });
 
 test("DB-backed search readiness comes from source config, not generated YAML", () => {

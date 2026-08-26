@@ -4,6 +4,30 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.3] - 2026-08-26
+
+### Changed
+
+- Paul now uses ordinary language for candidate-facing setup and replaces the abstract priority prompt with “What would make one job worth applying to before another?” plus concrete examples.
+- Completing first run opens Search with an explicit running, matches-found, retry, or start state. The early location-aware search and the final targeting snapshot now resolve as one durable handoff instead of leaving a new user to guess where to go.
+- Claude Code and OpenAI Codex remain the two first-class product choices. Both run the same CareerRat-owned workflows and durable threads through direct adapters without fallback, silent provider switching, or copy that presents one as the better engine.
+- Profile now includes a local-only **Application defaults** editor for voluntary demographic and self-identification questions. They stay blank by default, or the candidate can choose the form's decline option when available; existing exact answers remain hidden and never enter Paul's context.
+- First run now pauses at that local-only Application defaults choice when setup is otherwise complete and no choice has been confirmed. Saving either option hands off to the workspace and does not ask again on reload.
+
+### Fixed
+
+- Search title matching no longer promotes adjacent roles because a target phrase appears only in the job-description body. Locality filtering keeps home-country remote work and New York City local work while excluding foreign remote and unrelated local roles.
+- Supervised application preparation recovers live Greenhouse typeaheads, waits for asynchronous choices to commit, fills safe confirmed fields, and uploads the generated résumé. Voluntary demographic answers are never inferred and use only the saved local Application defaults policy or an explicitly saved exact answer; CAPTCHAs and the final Submit control stay with the candidate.
+- Screening answers now preserve multiline and semicolon-separated text, regenerated prompts cannot accept stale answer IDs, and manager/individual-contributor equivalence is applied before broader title matching.
+
+### Release verification
+
+- The release-candidate repository suite passed 3,848 tests with 15 intentional skips; the web suite passed all 712 tests. Web, website, docs, and desktop production builds passed, desktop smoke returned `SMOKE OK`, lint completed with no errors, knip and placeholder lint passed, and `git diff --check` is clean.
+- A fresh desktop flow opened Search after setup and completed a locality-constrained search for home-country remote and New York City local roles. The successful result saved the full job description and a clean browser session reported zero errors and warnings.
+- A real public Greenhouse form filled 22 fields and attached one résumé with zero unresolved fields. The CAPTCHA was the sole blocker, Submit stayed untouched, and the application remained at Reviewed Hold with `submitted_at` and `applied_at` null.
+- A completed first-run setup with no confirmed voluntary-form policy showed only the local Application defaults dialog before any runtime or chat setup. Live passes covered both choices: **Leave them blank** saved the disabled blank policy, while **Choose decline when available** saved `enabled: true`, `default_action: decline_when_available`, a fresh `confirmed_at`, and `answers: {}`. Each handed off to the workspace, stayed dismissed after reload, and the current browser console reported zero errors and warnings.
+- A fresh Codex-backed desktop intake rendered Paul's revised priority question in plain English with concrete examples, exposed clickable Yes/No answers for the preceding binary question, restored the conversation after reload, and reported zero current-context console errors or warnings.
+
 ## [0.16.2] - 2026-08-25
 
 ### Added

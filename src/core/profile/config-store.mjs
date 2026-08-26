@@ -65,6 +65,34 @@ export function loadCandidateConfig({
   return out;
 }
 
+const AGENT_PRIVATE_FORM_DEFAULT_FIELDS = new Set([
+  "current_base",
+  "eeo_default",
+  "voluntary_self_identification",
+]);
+
+export function sanitizeCandidateConfigForAgent(config = {}) {
+  const formDefaults = config?.["form-defaults"];
+  if (!formDefaults || typeof formDefaults !== "object" || Array.isArray(formDefaults)) {
+    return { ...config };
+  }
+  return {
+    ...config,
+    "form-defaults": Object.fromEntries(
+      Object.entries(formDefaults).filter(
+        ([field]) => !AGENT_PRIVATE_FORM_DEFAULT_FIELDS.has(field)
+      )
+    ),
+  };
+}
+
+// Agent runtimes use this accessor instead of the canonical local-app view.
+// The app and deterministic application filler keep using loadCandidateConfig,
+// so voluntary form policy and answers never have to enter a model context.
+export function loadAgentCandidateConfig(options = {}) {
+  return sanitizeCandidateConfigForAgent(loadCandidateConfig(options));
+}
+
 export function loadLegacyCandidateConfig({
   repoRoot = DEFAULT_ROOT,
   env = process.env,

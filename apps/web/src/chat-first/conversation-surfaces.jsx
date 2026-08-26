@@ -1331,8 +1331,8 @@ export function SubmitGateModal({
             <div className="chat-first-gate-row chat-first-gate-row--blank">
               <strong>−</strong>
               <span>
-                <strong>Demographic / EEO questions</strong>
-                <small>left blank for you · never auto-answered</small>
+                <strong>Voluntary form questions</strong>
+                <small>uses only your local Application defaults · otherwise left blank</small>
               </span>
             </div>
           </div>

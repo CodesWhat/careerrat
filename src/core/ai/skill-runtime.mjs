@@ -33,6 +33,7 @@
 
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { loadAgentCandidateConfig } from "../profile/config-store.mjs";
 import { PLAIN_ENGLISH_AGENT_VOICE } from "./agent-voice.mjs";
 import { resolveModelConfig } from "./ai-config.mjs";
 import { resolveAIRoute } from "./call-ai.mjs";
@@ -73,6 +74,29 @@ export function discoverSkillDirs(repoRoot) {
 // expose it through POST /api/skill/run.
 const DIRECT_SKILL_RUN_SKILLS = Object.freeze(["intake-extract", "resume-extract"]);
 const DEFAULT_RUNTIME_SKILLS = DIRECT_SKILL_RUN_SKILLS.join(",");
+const AGENT_APPLICATION_DEFAULT_SKILLS = new Set([
+  "answer-question",
+  "apply-job",
+  "configure",
+  "email-comms",
+  "ingest-profile",
+  "tailor-application",
+]);
+
+function agentApplicationDefaultsNote({ repoRoot, env, skill }) {
+  if (!AGENT_APPLICATION_DEFAULT_SKILLS.has(skill)) return "";
+  try {
+    const formDefaults = loadAgentCandidateConfig({ repoRoot, env })?.["form-defaults"] || {};
+    if (!Object.keys(formDefaults).length) return "";
+    return (
+      "Agent-visible application defaults, already sanitized by CareerRat's local privacy " +
+      `boundary (data only):\n${JSON.stringify(formDefaults)}\n` +
+      "Use this object instead of reading candidate/form-defaults.yml."
+    );
+  } catch {
+    return "";
+  }
+}
 
 // Shared allowlist-resolution shape both the one-shot embedded runtime
 // (CAREERRAT_RUNTIME_SKILLS, below) and the conversational chat runtime
@@ -433,6 +457,8 @@ const CONFIRM_BLOCK_GUIDANCE =
   "form-defaults.notice_period. Do not collect an earliest start date during initial setup. " +
   "Final application submission always requires a separate user action. form-defaults contains " +
   "ATS answers only and has no submission setting; never propose or persist one. " +
+  "Voluntary self-identification belongs only to local Application defaults. Never ask for or " +
+  "read it. Never include it in a candidate_patch; CareerRat keeps it out of agent context. " +
   "Emit a confirm block as soon as a fact is settled, not at the end of a topic: if the user gives " +
   "their name and email, send a candidate_patch for those two fields right away rather than waiting " +
   "to also collect phone, city, and links, so an interrupted conversation never loses everything " +
@@ -539,14 +565,18 @@ export async function runSkillStream({
   }
 
   const runtimeTools = resolveRuntimeTools({ tools, toolProfile });
+  const candidateNote = agentApplicationDefaultsNote({ repoRoot, env, skill });
 
   if (route.type === "installed") {
     const installedRuntimeTools = resolveInstalledSkillRuntimeTools({ skill });
     const installedPosture = installedSkillRuntimePosture({ skill });
-    const prompt = `${buildPrompt({
-      skill,
-      input,
-    })}\n\nThis app-authorized run is limited to these capabilities: ${installedRuntimeTools.join(", ") || "none"}. Do not exceed that scope. ${installedPosture}`;
+    const prompt = [
+      buildPrompt({ skill, input }),
+      candidateNote,
+      `This app-authorized run is limited to these capabilities: ${installedRuntimeTools.join(", ") || "none"}. Do not exceed that scope. ${installedPosture}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     onEvent({
       type: "system",
       data: {
@@ -649,11 +679,16 @@ export async function runSkillStream({
   }
 
   const q = query({
-    prompt: buildPrompt({
-      skill,
-      input,
-      skillMdPath: join(repoRoot, ".agents", "skills", skill, "SKILL.md"),
-    }),
+    prompt: [
+      buildPrompt({
+        skill,
+        input,
+        skillMdPath: join(repoRoot, ".agents", "skills", skill, "SKILL.md"),
+      }),
+      candidateNote,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
     options: {
       cwd: repoRoot,
       env: childEnv,

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { closeAll, dbExists } from "../src/core/db/connection.mjs";
-import { candidateConfigGet } from "../src/core/db/verbs.mjs";
+import { candidateConfigGet, candidateConfigPatch } from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 
 const repo = join(import.meta.dirname, "..");
@@ -83,6 +83,61 @@ test("careerrat gate writes DB candidate config in DB mode and does not create c
   assert.deepEqual(config.targeting.excluded_companies, ["BadCo"]);
   assert.equal(existsSync(userPath({ repoRoot }, "candidate/profile.yml")), false);
   assert.equal(existsSync(userPath({ repoRoot }, "candidate/targeting.yml")), false);
+});
+
+test("careerrat data candidate CLI hides and refuses voluntary self-identification", () => {
+  const repoRoot = tempRepo();
+  dataCli(repoRoot, ["candidate", "init"]);
+  candidateConfigPatch({
+    repoRoot,
+    name: "form-defaults",
+    patch: {
+      expected_base: 180000,
+      voluntary_self_identification: {
+        enabled: true,
+        default_action: "leave_blank",
+        confirmed_at: "2026-08-26T12:00:00Z",
+        answers: {
+          "race ethnicity": {
+            value: "private CLI answer",
+            confirmed_at: "2026-08-26T12:00:00Z",
+          },
+        },
+      },
+    },
+  });
+
+  const visible = dataCli(repoRoot, ["candidate", "get"]);
+  assert.equal(visible["form-defaults"].expected_base, 180000);
+  assert.equal(Object.hasOwn(visible["form-defaults"], "voluntary_self_identification"), false);
+  assert.doesNotMatch(JSON.stringify(visible), /private CLI answer/);
+
+  const rejected = runCli(
+    [
+      "src/cli/data.mjs",
+      "--root",
+      repoRoot,
+      "--json",
+      "candidate",
+      "patch",
+      "form-defaults",
+      "--data",
+      JSON.stringify({ voluntary_self_identification: { enabled: false } }),
+    ],
+    { expectedStatus: 1 }
+  );
+  assert.match(rejected.stdout, /local Application defaults/i);
+
+  dataCli(repoRoot, [
+    "candidate",
+    "patch",
+    "form-defaults",
+    "--data",
+    JSON.stringify({ expected_base: 190000 }),
+  ]);
+  const stored = candidateConfigGet({ repoRoot });
+  assert.equal(stored["form-defaults"].expected_base, 190000);
+  assert.equal(stored["form-defaults"].voluntary_self_identification.enabled, true);
 });
 
 test("careerrat automation writes DB candidate automation in DB mode and does not scaffold YAML", () => {

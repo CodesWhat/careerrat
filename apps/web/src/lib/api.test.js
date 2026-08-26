@@ -4,6 +4,7 @@ import {
   completeDiscovery,
   finishOnboarding,
   getRuntimeConfig,
+  getSourcingRun,
   markCommSent,
   openDeepIngestThread,
   promoteSourced,
@@ -292,12 +293,16 @@ describe("runAiWebSearchStream", () => {
     await runAiWebSearchStream({
       onEvent: (event) => events.push(event),
       promptIds: ["p2"],
+      searchExecutionId: "search-execution-shared",
     });
 
     expect(fetchMock).toHaveBeenCalledWith("/api/search/ai-web-search/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ promptIds: ["p2"] }),
+      body: JSON.stringify({
+        promptIds: ["p2"],
+        searchExecutionId: "search-execution-shared",
+      }),
       signal: undefined,
     });
     expect(events).toEqual([
@@ -307,6 +312,24 @@ describe("runAiWebSearchStream", () => {
         data: { searched: 1, found: 1, new: 1, duplicates: 0, errors: [] },
       },
     ]);
+  });
+
+  it("requests an exact durable run when an id is supplied", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true, run: { id: "manual-running" } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getSourcingRun({ purpose: "manual-search", id: "manual-running" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sourcing/runs/latest?purpose=manual-search&id=manual-running",
+      expect.any(Object)
+    );
   });
 });
 

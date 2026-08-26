@@ -412,11 +412,14 @@ export async function streamResumeAi(file, { onEvent, signal } = {}) {
 // already in flight, other 4xx/5xx for no-AI/no-prompts/lean-downshift with
 // the API's standard error shape. Static preview has no run route at all —
 // same immediate-throw contract as streamResumeAi above.
-export async function runAiWebSearchStream({ onEvent, promptIds, signal } = {}) {
+export async function runAiWebSearchStream({ onEvent, promptIds, searchExecutionId, signal } = {}) {
   const res = await fetch("/api/search/ai-web-search/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...(Array.isArray(promptIds) ? { promptIds } : {}) }),
+    body: JSON.stringify({
+      ...(Array.isArray(promptIds) ? { promptIds } : {}),
+      ...(searchExecutionId ? { searchExecutionId } : {}),
+    }),
     signal,
   });
   if (!res.ok || !res.body) {
@@ -479,11 +482,14 @@ export function removeEvidenceClaim(id) {
   });
 }
 
-export function getSourcingRun({ purpose } = {}) {
+export function getSourcingRun({ purpose, id, signal } = {}) {
   const params = new URLSearchParams();
   if (purpose) params.set("purpose", purpose);
+  if (id) params.set("id", id);
   const query = params.toString();
-  return apiFetch(`/api/sourcing/runs/latest${query ? `?${query}` : ""}`);
+  return apiFetch(`/api/sourcing/runs/latest${query ? `?${query}` : ""}`, {
+    ...(signal ? { signal } : {}),
+  });
 }
 
 export function getSearchSourceStatus() {

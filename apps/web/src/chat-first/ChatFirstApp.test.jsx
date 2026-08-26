@@ -99,6 +99,649 @@ async function renderView(props = {}) {
 }
 
 describe("ChatFirstAppView", () => {
+  it("hydrates saved search state before exposing a new search action", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+
+    expect(module.initialVisibleSearchState({ getSourcingRun: vi.fn() })).toEqual({
+      status: "hydrating",
+      detail: "Loading your saved search",
+    });
+    expect(module.initialVisibleSearchState({})).toEqual({
+      status: "idle",
+      summary: "Ready to sweep configured sources",
+    });
+  });
+
+  it("keeps the Search launcher in a loading state while saved runs hydrate", async () => {
+    const html = await renderView({
+      view: {
+        ...VIEW,
+        counts: { ...VIEW.counts, search: 0 },
+        browser: { ...VIEW.browser, search: [] },
+      },
+      sourceSweep: { status: "hydrating", detail: "Loading your saved search" },
+    });
+
+    expect(html).toContain("loading search");
+    expect(html).not.toContain("start here");
+  });
+
+  it("shows persisted Search jobs after a dedupe-only final-input refresh", async () => {
+    const html = await renderView({
+      ui: { ...BASE_UI, browse: "search" },
+      sourceSweep: {
+        status: "complete",
+        metrics: { new: 0, qualified: 0, scanned: 358, sources: 5 },
+        summary: "0 new · 0 qualified · 358 scanned · 5 sources",
+      },
+    });
+
+    expect(html).toContain("1 match ready · 0 new · 358 scanned · 5 sources");
+    expect(html).not.toContain("0 qualified");
+  });
+
+  it("loads manual, onboarding, and AI search runs together", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const firstSearch = {
+      purpose: "first-search",
+      run: { id: "first-search-1", purpose: "first-search", status: "running" },
+    };
+    const aiWeb = {
+      purpose: "ai-web-search",
+      run: { id: "ai-web-search-1", purpose: "ai-web-search", status: "failed" },
+    };
+    const getSourcingRun = vi.fn(async ({ purpose }) =>
+      purpose === "manual-search"
+        ? { purpose, status: "not_started", run: null }
+        : purpose === "first-search"
+          ? firstSearch
+          : aiWeb
+    );
+
+    await expect(module.loadVisibleSearchRuns({ getSourcingRun })).resolves.toEqual({
+      deterministic: firstSearch,
+      aiWeb,
+    });
+    expect(getSourcingRun).toHaveBeenCalledTimes(3);
+    expect(getSourcingRun).toHaveBeenCalledWith({ purpose: "manual-search" });
+    expect(getSourcingRun).toHaveBeenCalledWith({ purpose: "first-search" });
+    expect(getSourcingRun).toHaveBeenCalledWith({ purpose: "ai-web-search" });
+  });
+
+  it("chooses the running deterministic run over an older completed manual run", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const manualSearch = {
+      purpose: "manual-search",
+      run: {
+        id: "manual-old",
+        purpose: "manual-search",
+        status: "completed",
+        updated_at: "2026-08-25T12:00:00.000Z",
+      },
+    };
+    const firstSearch = {
+      purpose: "first-search",
+      run: {
+        id: "first-running",
+        purpose: "first-search",
+        status: "running",
+        updated_at: "2026-08-25T11:00:00.000Z",
+      },
+    };
+    const getSourcingRun = vi.fn(async ({ purpose }) =>
+      purpose === "manual-search"
+        ? manualSearch
+        : purpose === "first-search"
+          ? firstSearch
+          : { purpose, run: null }
+    );
+
+    await expect(module.loadVisibleSearchRuns({ getSourcingRun })).resolves.toMatchObject({
+      deterministic: firstSearch,
+    });
+  });
+
+  it("chooses the newest terminal deterministic run instead of preferring manual by existence", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const manualSearch = {
+      purpose: "manual-search",
+      run: {
+        id: "manual-old",
+        purpose: "manual-search",
+        status: "completed",
+        updatedAt: "2026-08-25T12:00:00.000Z",
+      },
+    };
+    const firstSearch = {
+      purpose: "first-search",
+      run: {
+        id: "first-new",
+        purpose: "first-search",
+        status: "completed",
+        updatedAt: "2026-08-25T13:00:00.000Z",
+      },
+    };
+    const getSourcingRun = vi.fn(async ({ purpose }) =>
+      purpose === "manual-search"
+        ? manualSearch
+        : purpose === "first-search"
+          ? firstSearch
+          : { purpose, run: null }
+    );
+
+    await expect(module.loadVisibleSearchRuns({ getSourcingRun })).resolves.toMatchObject({
+      deterministic: firstSearch,
+    });
+  });
+
+  it("ignores a parked not-started manual placeholder when a real first search exists", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const manualSearch = {
+      purpose: "manual-search",
+      run: { status: "not_started", error: { message: "Add a search location." } },
+    };
+    const firstSearch = {
+      purpose: "first-search",
+      run: { id: "first-complete", purpose: "first-search", status: "completed" },
+    };
+    const getSourcingRun = vi.fn(async ({ purpose }) =>
+      purpose === "manual-search"
+        ? manualSearch
+        : purpose === "first-search"
+          ? firstSearch
+          : { purpose, run: null }
+    );
+
+    await expect(module.loadVisibleSearchRuns({ getSourcingRun })).resolves.toMatchObject({
+      deterministic: firstSearch,
+    });
+  });
+
+  it("hydrates a durable AI failure into a visible exact-prompt retry", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const deterministic = {
+      run: {
+        id: "manual-1",
+        purpose: "manual-search",
+        status: "completed",
+        metadata: { searchExecutionId: "search-execution-1" },
+        summary: { new: 3, scanned: 10, attemptedSources: 2 },
+      },
+    };
+    const aiWeb = {
+      run: {
+        id: "ai-1",
+        purpose: "ai-web-search",
+        status: "failed",
+        metadata: { searchExecutionId: "search-execution-1" },
+        error: {
+          message: "second query timed out",
+          failedPromptIds: ["p2"],
+        },
+      },
+    };
+
+    const hydrated = module.hydrateVisibleSearchRuns({ deterministic, aiWeb });
+
+    expect(hydrated).toMatchObject({
+      retry: { aiPromptIds: ["p2"], searchExecutionId: "search-execution-1" },
+      sourceSweep: {
+        status: "complete",
+        lanes: {
+          deterministic: { status: "succeeded" },
+          aiWeb: {
+            status: "failed",
+            error: "second query timed out",
+            failedPromptIds: ["p2"],
+          },
+        },
+      },
+    });
+
+    const runDeterministicLane = vi.fn(async () => ({ ok: true }));
+    const runAiLane = vi.fn(async () => ({ ok: true }));
+    await module.runChatFirstJobSearch({
+      api: {
+        getSearchSourceStatus: vi.fn(async () => ({
+          searches: { enabled: 1 },
+          deterministicSources: { attempted: 1 },
+        })),
+        getRuntimeConfig: vi.fn(async () => ({ ai: { available: true } })),
+      },
+      retry: hydrated.retry,
+      runDeterministicLane,
+      runAiLane,
+    });
+
+    expect(runDeterministicLane).not.toHaveBeenCalled();
+    expect(runAiLane).toHaveBeenCalledWith(expect.objectContaining({ promptIds: ["p2"] }));
+  });
+
+  it("does not combine an unrelated durable AI failure with a newer deterministic search", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const hydrated = module.hydrateVisibleSearchRuns({
+      deterministic: {
+        run: {
+          id: "manual-new",
+          purpose: "manual-search",
+          status: "completed",
+          metadata: { searchExecutionId: "search-execution-new" },
+          summary: { new: 2 },
+        },
+      },
+      aiWeb: {
+        run: {
+          id: "ai-old",
+          purpose: "ai-web-search",
+          status: "failed",
+          metadata: { searchExecutionId: "search-execution-old" },
+          error: { message: "stale AI failure", failedPromptIds: ["old-prompt"] },
+        },
+      },
+    });
+
+    expect(hydrated.retry).toBeNull();
+    expect(hydrated.sourceSweep.lanes).not.toHaveProperty("aiWeb");
+    expect(hydrated.sourceSweep.summary).not.toContain("retry");
+  });
+
+  it("does not attach a legacy AI failure to a deterministic search with an execution id", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const hydrated = module.hydrateVisibleSearchRuns({
+      deterministic: {
+        run: {
+          id: "manual-new",
+          purpose: "manual-search",
+          status: "completed",
+          metadata: { searchExecutionId: "search-execution-new" },
+          summary: { new: 2 },
+        },
+      },
+      aiWeb: {
+        run: {
+          id: "ai-legacy",
+          purpose: "ai-web-search",
+          status: "failed",
+          error: { message: "legacy stale failure", failedPromptIds: ["legacy-prompt"] },
+        },
+      },
+    });
+
+    expect(hydrated.retry).toBeNull();
+    expect(hydrated.sourceSweep.lanes).not.toHaveProperty("aiWeb");
+    expect(hydrated.sourceSweep.summary).not.toContain("retry");
+  });
+
+  it("keeps a current AI-only lane visible when the deterministic run has no execution id", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const hydrated = module.hydrateVisibleSearchRuns({
+      deterministic: {
+        run: {
+          id: "first-search-without-execution-id",
+          purpose: "first-search",
+          status: "completed",
+          completedAt: "2026-08-26T15:00:00.000Z",
+          summary: { new: 2 },
+        },
+      },
+      aiWeb: {
+        run: {
+          id: "ai-current",
+          purpose: "ai-web-search",
+          status: "failed",
+          completedAt: "2026-08-26T15:01:00.000Z",
+          metadata: { searchExecutionId: "search-execution-current" },
+          error: { message: "current AI lane failed", failedPromptIds: ["current-prompt"] },
+        },
+      },
+    });
+
+    expect(hydrated).toMatchObject({
+      retry: {
+        aiPromptIds: ["current-prompt"],
+        searchExecutionId: "search-execution-current",
+      },
+      sourceSweep: {
+        status: "complete",
+        lanes: {
+          deterministic: { status: "succeeded" },
+          aiWeb: { status: "failed", error: "current AI lane failed" },
+        },
+      },
+    });
+  });
+
+  it("hydrates a durable AI cancellation as skipped without offering retry", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const hydrated = module.hydrateVisibleSearchRuns({
+      deterministic: { run: null },
+      aiWeb: {
+        run: {
+          id: "ai-cancelled",
+          purpose: "ai-web-search",
+          status: "failed",
+          error: { code: "AI_WEB_SEARCH_ABORTED", message: "AI web search was cancelled." },
+        },
+      },
+    });
+
+    expect(hydrated.retry).toBeNull();
+    expect(hydrated.sourceSweep).toMatchObject({
+      status: "idle",
+      reason: "cancelled",
+      summary: "Search cancelled.",
+      lanes: { aiWeb: { status: "skipped", reason: "cancelled" } },
+    });
+  });
+
+  it("keeps a successful sibling lane when AI web search is cancelled", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const hydrated = module.hydrateVisibleSearchRuns({
+      deterministic: {
+        run: {
+          id: "manual-success",
+          purpose: "manual-search",
+          status: "completed",
+          metadata: { searchExecutionId: "search-execution-cancelled" },
+          summary: { new: 3, qualified: 2, scanned: 9, attemptedSources: 2 },
+        },
+      },
+      aiWeb: {
+        run: {
+          id: "ai-cancelled",
+          purpose: "ai-web-search",
+          status: "failed",
+          metadata: { searchExecutionId: "search-execution-cancelled" },
+          error: { code: "AI_WEB_SEARCH_ABORTED", message: "AI web search was cancelled." },
+        },
+      },
+    });
+
+    expect(hydrated.retry).toBeNull();
+    expect(hydrated.sourceSweep).toMatchObject({
+      status: "complete",
+      summary: "3 new · 2 qualified · 9 scanned · 2 sources",
+      lanes: {
+        deterministic: { status: "succeeded" },
+        aiWeb: { status: "skipped", reason: "cancelled" },
+      },
+    });
+  });
+
+  it("keeps a partial sibling result and its retry when AI web search is cancelled", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const hydrated = module.hydrateVisibleSearchRuns({
+      deterministic: {
+        run: {
+          id: "manual-partial",
+          purpose: "manual-search",
+          status: "completed",
+          metadata: { searchExecutionId: "search-execution-cancelled" },
+          summary: { new: 2, errorCount: 1 },
+        },
+      },
+      aiWeb: {
+        run: {
+          id: "ai-cancelled",
+          purpose: "ai-web-search",
+          status: "failed",
+          metadata: { searchExecutionId: "search-execution-cancelled" },
+          error: { code: "AI_WEB_SEARCH_ABORTED", message: "AI web search was cancelled." },
+        },
+      },
+    });
+
+    expect(hydrated.retry).toEqual({
+      deterministic: true,
+      searchExecutionId: "search-execution-cancelled",
+    });
+    expect(hydrated.sourceSweep).toMatchObject({
+      status: "complete",
+      summary: "1 search lane finished · 1 lane needs retry",
+      lanes: {
+        deterministic: { status: "failed", partial: true },
+        aiWeb: { status: "skipped", reason: "cancelled" },
+      },
+    });
+  });
+
+  it("keeps a failed sibling lane and its retry when AI web search is cancelled", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const hydrated = module.hydrateVisibleSearchRuns({
+      deterministic: {
+        run: {
+          id: "manual-failed",
+          purpose: "manual-search",
+          status: "failed",
+          metadata: { searchExecutionId: "search-execution-cancelled" },
+          error: { message: "configured sources failed" },
+        },
+      },
+      aiWeb: {
+        run: {
+          id: "ai-cancelled",
+          purpose: "ai-web-search",
+          status: "failed",
+          metadata: { searchExecutionId: "search-execution-cancelled" },
+          error: { code: "AI_WEB_SEARCH_ABORTED", message: "AI web search was cancelled." },
+        },
+      },
+    });
+
+    expect(hydrated.retry).toEqual({
+      deterministic: true,
+      searchExecutionId: "search-execution-cancelled",
+    });
+    expect(hydrated.sourceSweep).toMatchObject({
+      status: "error",
+      summary: "0 search lanes finished · 1 lane needs retry",
+      lanes: {
+        deterministic: { status: "failed", error: "configured sources failed" },
+        aiWeb: { status: "skipped", reason: "cancelled" },
+      },
+    });
+  });
+
+  it("shows both durable lanes while the correlated AI lane is still running", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const hydrated = module.hydrateVisibleSearchRuns({
+      deterministic: {
+        run: {
+          id: "manual-done",
+          purpose: "manual-search",
+          status: "completed",
+          metadata: { searchExecutionId: "search-execution-running" },
+          summary: { new: 2 },
+        },
+      },
+      aiWeb: {
+        run: {
+          id: "ai-running",
+          purpose: "ai-web-search",
+          status: "running",
+          metadata: { searchExecutionId: "search-execution-running" },
+        },
+      },
+    });
+
+    expect(hydrated.sourceSweep).toMatchObject({
+      status: "running",
+      lanes: {
+        deterministic: { status: "succeeded" },
+        aiWeb: { status: "running" },
+      },
+    });
+  });
+
+  it("follows every running durable purpose by exact id before reloading all purposes", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const loaded = {
+      deterministic: {
+        purpose: "manual-search",
+        run: { id: "manual-running", purpose: "manual-search", status: "running" },
+      },
+      aiWeb: {
+        purpose: "ai-web-search",
+        run: { id: "ai-running", purpose: "ai-web-search", status: "running" },
+      },
+    };
+    const terminalByPurpose = {
+      "manual-search": {
+        purpose: "manual-search",
+        run: { id: "manual-running", purpose: "manual-search", status: "completed" },
+      },
+      "first-search": { purpose: "first-search", run: null },
+      "ai-web-search": {
+        purpose: "ai-web-search",
+        run: { id: "ai-running", purpose: "ai-web-search", status: "completed" },
+      },
+    };
+    const getSourcingRun = vi.fn(async ({ purpose }) => terminalByPurpose[purpose]);
+
+    const followed = await module.followVisibleSearchRuns({
+      loaded,
+      getSourcingRun,
+      pollIntervalMs: 0,
+    });
+
+    expect(followed).toMatchObject({
+      aborted: false,
+      timedOut: false,
+      runs: {
+        deterministic: terminalByPurpose["manual-search"],
+        aiWeb: terminalByPurpose["ai-web-search"],
+      },
+    });
+    expect(getSourcingRun).toHaveBeenCalledWith({
+      purpose: "manual-search",
+      id: "manual-running",
+    });
+    expect(getSourcingRun).toHaveBeenCalledWith({
+      purpose: "ai-web-search",
+      id: "ai-running",
+    });
+    expect(getSourcingRun).toHaveBeenCalledWith({ purpose: "manual-search" });
+    expect(getSourcingRun).toHaveBeenCalledWith({ purpose: "first-search" });
+    expect(getSourcingRun).toHaveBeenCalledWith({ purpose: "ai-web-search" });
+  });
+
+  it("aborts an in-flight exact durable poll without reloading search purposes", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const controller = new AbortController();
+    const loaded = {
+      deterministic: {
+        purpose: "manual-search",
+        run: { id: "manual-running", purpose: "manual-search", status: "running" },
+      },
+      aiWeb: { purpose: "ai-web-search", run: null },
+    };
+    const getSourcingRun = vi.fn(
+      ({ signal }) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true }
+          );
+        })
+    );
+
+    const following = module.followVisibleSearchRuns({
+      loaded,
+      getSourcingRun,
+      signal: controller.signal,
+      pollIntervalMs: 0,
+    });
+    await vi.waitFor(() => expect(getSourcingRun).toHaveBeenCalledOnce());
+    controller.abort();
+
+    await expect(following).resolves.toMatchObject({ aborted: true, runs: loaded });
+    expect(getSourcingRun).toHaveBeenCalledWith({
+      purpose: "manual-search",
+      id: "manual-running",
+      signal: controller.signal,
+    });
+  });
+
+  it("removes each abort listener after a normal durable poll timer finishes", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const controller = new AbortController();
+    const addListener = vi.spyOn(controller.signal, "addEventListener");
+    const removeListener = vi.spyOn(controller.signal, "removeEventListener");
+    const loaded = {
+      deterministic: {
+        purpose: "manual-search",
+        run: { id: "manual-running", purpose: "manual-search", status: "running" },
+      },
+      aiWeb: { purpose: "ai-web-search", run: null },
+    };
+    let exactReads = 0;
+    const getSourcingRun = vi.fn(async ({ purpose, id }) => {
+      if (id) {
+        exactReads += 1;
+        return {
+          purpose,
+          run: {
+            id,
+            purpose,
+            status: exactReads < 3 ? "running" : "completed",
+          },
+        };
+      }
+      return purpose === "manual-search"
+        ? {
+            purpose,
+            run: { id: "manual-running", purpose, status: "completed" },
+          }
+        : { purpose, run: null };
+    });
+
+    await module.followVisibleSearchRuns({
+      loaded,
+      getSourcingRun,
+      signal: controller.signal,
+      pollIntervalMs: 0,
+    });
+
+    expect(addListener).toHaveBeenCalledTimes(3);
+    expect(removeListener).toHaveBeenCalledTimes(3);
+    for (let index = 0; index < addListener.mock.calls.length; index += 1) {
+      expect(removeListener.mock.calls[index][1]).toBe(addListener.mock.calls[index][1]);
+    }
+  });
+
+  it("hydrates configured-source summary errors as partial retry state", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const hydrated = module.hydrateVisibleSearchRuns({
+      deterministic: {
+        run: {
+          id: "manual-partial",
+          status: "completed",
+          summary: {
+            new: 2,
+            errorCount: 1,
+            errors: [{ company: "Acme", error: "careers page timed out" }],
+          },
+        },
+      },
+      aiWeb: { run: null },
+    });
+
+    expect(hydrated).toMatchObject({
+      retry: { deterministic: true },
+      sourceSweep: {
+        status: "complete",
+        lanes: {
+          deterministic: {
+            status: "failed",
+            partial: true,
+            error: "1 configured source couldn't be searched.",
+          },
+        },
+      },
+    });
+  });
+
   it("preflights source and AI capability before coordinating one user search", async () => {
     const module = await import("./ChatFirstApp.jsx");
     expect(module.runChatFirstJobSearch).toBeTypeOf("function");
@@ -138,6 +781,7 @@ describe("ChatFirstAppView", () => {
       runCoordinator,
       runDeterministicLane,
       runAiLane,
+      createSearchExecutionId: () => "search-execution-shared",
     });
 
     expect(api.getSearchSourceStatus).toHaveBeenCalledOnce();
@@ -147,10 +791,46 @@ describe("ChatFirstAppView", () => {
       expect.objectContaining({
         startSearchRun: api.startSearchRun,
         getSourcingRun: api.getSourcingRun,
+        searchExecutionId: "search-execution-shared",
         signal: controller.signal,
       })
     );
-    expect(runAiLane).toHaveBeenCalledWith(expect.objectContaining({ signal: controller.signal }));
+    expect(runAiLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        searchExecutionId: "search-execution-shared",
+        signal: controller.signal,
+      })
+    );
+  });
+
+  it("retries only the exact failed AI prompts through the chat-first search wrapper", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const api = {
+      getSearchSourceStatus: vi.fn(async () => ({
+        searches: { enabled: 2 },
+        deterministicSources: { attempted: 2 },
+      })),
+      getRuntimeConfig: vi.fn(async () => ({
+        ai: { available: true, route: "installed" },
+      })),
+      startSearchRun: vi.fn(),
+      getSourcingRun: vi.fn(),
+    };
+    const runDeterministicLane = vi.fn(async () => ({ ok: true }));
+    const runAiLane = vi.fn(async () => ({ ok: true, data: { new: 1 } }));
+
+    const result = await module.runChatFirstJobSearch({
+      api,
+      retry: { aiPromptIds: ["p2"] },
+      refetch: vi.fn(),
+      setSearchState: vi.fn(),
+      runDeterministicLane,
+      runAiLane,
+    });
+
+    expect(runDeterministicLane).not.toHaveBeenCalled();
+    expect(runAiLane).toHaveBeenCalledWith(expect.objectContaining({ promptIds: ["p2"] }));
+    expect(result).toMatchObject({ ok: true, partial: false });
   });
 
   it("routes new-shell navigation intents without sending retired href actions to the API", async () => {
@@ -327,6 +1007,83 @@ describe("ChatFirstAppView", () => {
     expect(filters).toBe(initialFilters);
   });
 
+  it("clears only Search query and filters while preserving other browser tabs", async () => {
+    const { resetBrowserSearchFilters } = await import("./ChatFirstApp.jsx");
+    let query = "platform engineer";
+    let filters = {
+      fit80: true,
+      comp: true,
+      remote: true,
+      stage: "new",
+      source: "greenhouse",
+      posted: "7d",
+      files: "Evidence",
+      people: "touch-due",
+    };
+
+    resetBrowserSearchFilters({
+      setQuery: (value) => {
+        query = value;
+      },
+      setBrowserFilters: (update) => {
+        filters = update(filters);
+      },
+    });
+
+    expect(query).toBe("");
+    expect(filters).toEqual({
+      fit80: false,
+      comp: false,
+      remote: false,
+      stage: "all",
+      source: "all",
+      posted: "all",
+      files: "Evidence",
+      people: "touch-due",
+    });
+  });
+
+  it("wires the filtered Search empty state to the app reset action", async () => {
+    const { ChatFirstAppView } = await import("./ChatFirstApp.jsx");
+    const clearSearchFilters = vi.fn();
+    const tree = ChatFirstAppView({
+      view: VIEW,
+      ui: { ...BASE_UI, browse: "search" },
+      composerValue: "",
+      query: "missing role",
+      browserFilters: {
+        fit80: true,
+        comp: false,
+        remote: false,
+        stage: "all",
+        source: "all",
+        posted: "all",
+        files: "All",
+        people: "all",
+      },
+      sourceSweep: { status: "complete", summary: "0 new · 1 scanned" },
+      actions: { clearSearchFilters },
+    });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) {
+        node.forEach(visit);
+        return;
+      }
+      if (typeof node.type === "function") {
+        visit(node.type(node.props));
+        return;
+      }
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+
+    buttons.find((button) => button.props.children === "Clear filters").props.onClick();
+    expect(clearSearchFilters).toHaveBeenCalledOnce();
+  });
+
   it("renders a rejected workspace intent error envelope as natural text", async () => {
     const { runChatFirstOperation } = await import("./ChatFirstApp.jsx");
     const failure = new ApiError(404, {
@@ -391,6 +1148,28 @@ describe("ChatFirstAppView", () => {
     expect(html).toContain("1 touch due");
     expect(html).toContain("next: Thu");
     expect(html).toContain("chat-first-browser-launcher--attention");
+  });
+
+  it("keeps first-run Search visibly actionable and labels its running state", async () => {
+    const railHtml = await renderView({
+      view: {
+        ...VIEW,
+        counts: { ...VIEW.counts, search: 0 },
+        browser: { ...VIEW.browser, search: [] },
+      },
+      sourceSweep: { status: "running", detail: "Scanning configured sources" },
+    });
+    const searchHtml = await renderView({
+      ui: { ...BASE_UI, browse: "search" },
+      onboardingHandoff: true,
+      sourceSweep: { status: "running", detail: "Scanning configured sources" },
+    });
+
+    expect(railHtml).toContain("searching now");
+    expect(railHtml).toContain("chat-first-browser-launcher--lime");
+    expect(searchHtml).toMatch(/aria-selected="true" class="cf-browser__tab"/);
+    expect(searchHtml).not.toMatch(/aria-selected="true"[^>]*disabled/);
+    expect(searchHtml).toContain("Your first job search is running now.");
   });
 
   it("routes a binary answer button through the same composer submit action", async () => {

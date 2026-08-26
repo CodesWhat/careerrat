@@ -73,6 +73,87 @@ test("website presents Claude Code and Codex as neutral direct runtime choices",
   );
 });
 
+test("website explains the first-run handoff and supervised apply boundary plainly", async () => {
+  const page = await readFile("apps/website/src/app/page.tsx", "utf8");
+
+  assert.match(page, /questions in plain English/i);
+  assert.match(page, /what would make one job worth applying to before another/i);
+  assert.match(page, /Search opens when setup is ready/i);
+  assert.match(page, /fills safe application fields/i);
+  assert.match(page, /Voluntary questions stay blank by default/i);
+  assert.match(page, /local Application defaults can choose a decline option when available/i);
+  assert.match(page, /CAPTCHAs and Submit stay with you/i);
+});
+
+test("public copy keeps local Application defaults and plain-English onboarding aligned", async () => {
+  const paths = {
+    readme: "README.md",
+    docsIndex: "apps/docs/content/docs/index.mdx",
+    applying: "apps/docs/content/docs/guides/applying.mdx",
+    agentContract: "apps/docs/content/docs/advanced/agent-contract.mdx",
+    browserAutomation: "apps/docs/content/docs/advanced/browser-automation.mdx",
+    architecture: "docs/ARCHITECTURE.md",
+    changelog: "CHANGELOG.md",
+    roadmap: "docs/ROADMAP.md",
+    acceptance: ".planning/QA-ACCEPTANCE.md",
+  };
+  const copy = Object.fromEntries(
+    await Promise.all(
+      Object.entries(paths).map(async ([name, path]) => [name, await readFile(path, "utf8")])
+    )
+  );
+
+  for (const name of ["readme", "docsIndex", "changelog", "roadmap"]) {
+    assert.match(
+      copy[name],
+      /what would make one job worth applying to before another/i,
+      `${paths[name]} should carry the concrete priority question`
+    );
+  }
+
+  for (const name of ["readme", "applying", "agentContract", "browserAutomation"]) {
+    assert.match(
+      copy[name],
+      /Profile\s*>\s*Application defaults/i,
+      `${paths[name]} should name the UI`
+    );
+    assert.match(copy[name], /local/i, `${paths[name]} should make the setting local-only`);
+    assert.match(
+      copy[name],
+      /(?:leave|keep)\s+(?:them\s+|these\s+)?blank|stay\s+blank\s+by\s+default/i,
+      `${paths[name]} should name the default`
+    );
+    assert.match(
+      copy[name],
+      /decline\s+option[\s\S]{0,80}when\s+(?:one\s+is\s+)?available|decline\s+when\s+available/i,
+      `${paths[name]} should name the only opt-in policy`
+    );
+    assert.match(copy[name], /never infer/i, `${paths[name]} should keep the inference boundary`);
+  }
+
+  assert.match(
+    copy.agentContract,
+    /may use ordinary Next or Continue controls[\s\S]{0,160}never activates a control that submits the application\s+or\s+confirms a submission/i
+  );
+
+  assert.match(copy.architecture, /excluded from AI drafting/i);
+  assert.match(copy.architecture, /explicit saved local policy or exact answer/i);
+  for (const name of ["roadmap", "acceptance"]) {
+    assert.match(
+      copy[name],
+      /(?:PASS:[^\n]*Application defaults|Application defaults[\s\S]{0,500}(?:implemented|now offers)|implemented[\s\S]{0,500}Application defaults)/i
+    );
+    assert.match(
+      copy[name],
+      /Application defaults[\s\S]{0,1200}(?:follow-up )?live (?:Greenhouse )?run[\s\S]{0,220}filled 22 fields[\s\S]{0,180}zero\s+unresolved fields/i
+    );
+    assert.doesNotMatch(
+      copy[name],
+      /Application defaults[\s\S]{0,500}(?:needs implementation plus fresh live acceptance|live (?:application )?retest[\s\S]{0,120}(?:is |remains )?pending)/i
+    );
+  }
+});
+
 test("website sections keep a calm vertical rhythm", async () => {
   const styles = await readFile("apps/website/src/app/globals.css", "utf8");
 

@@ -17,6 +17,8 @@
 // Orca-shaped and out of scope here, so this module produces text it already
 // understands instead of leaving upload targets undetectable under this provider.
 
+import { uniqueVoluntaryDeclineOption } from "./form-fill.mjs";
+
 const CONTROL_SELECTOR = "input, textarea, select, button, [role='button']";
 const MAX_PAGE_TEXT = 20_000;
 // Bounds every Playwright action selectOption() takes (native-select attempt,
@@ -933,19 +935,32 @@ export function createPlaywrightOps({
     // additive, but comfortably under the product's 15s ceiling (measured
     // worst case under 10s against a live Chromium fixture, see
     // tests/playwright-live-dropdowns.test.mjs).
-    async selectOption({ pageId, ref, value }) {
+    async selectOption({ pageId, ref, value, optionAliases = [] }) {
       const target = page(pageId);
       const { locator, name } = resolveRef(pageId, ref);
       const stringValue = String(value);
+      const candidateValues = [stringValue, ...(Array.isArray(optionAliases) ? optionAliases : [])]
+        .map((candidate) => String(candidate || "").trim())
+        .filter(
+          (candidate, index, candidates) =>
+            candidate &&
+            candidates.findIndex(
+              (other) => other.toLocaleLowerCase() === candidate.toLocaleLowerCase()
+            ) === index
+        );
 
-      for (const arg of [{ label: stringValue }, stringValue]) {
-        try {
-          const selected = await locator.selectOption(arg, { timeout: SELECT_OPTION_TIMEOUT_MS });
-          if (selected.length > 0) return;
-        } catch {
-          // Not a native <select> (or this particular match form didn't
-          // hit) — try the next form, then fall through to the combobox
-          // path below.
+      for (const candidateValue of candidateValues) {
+        for (const arg of [{ label: candidateValue }, candidateValue]) {
+          try {
+            const selected = await locator.selectOption(arg, {
+              timeout: SELECT_OPTION_TIMEOUT_MS,
+            });
+            if (selected.length > 0) return;
+          } catch {
+            // Not a native <select> (or this particular match form didn't
+            // hit) — try the next form, then fall through to the combobox
+            // path below.
+          }
         }
       }
 
@@ -964,14 +979,16 @@ export function createPlaywrightOps({
           .waitFor({ state: "visible", timeout: SELECT_OPTION_TIMEOUT_MS })
           .catch(() => {});
 
-        const confirmed = await matchClickAndConfirm({
-          locator,
-          optionsLocator,
-          stringValue,
-          attempts: 1,
-          settleDelayMs: 0,
-        });
-        if (confirmed) return;
+        for (const candidateValue of candidateValues) {
+          const confirmed = await matchClickAndConfirm({
+            locator,
+            optionsLocator,
+            stringValue: candidateValue,
+            attempts: 1,
+            settleDelayMs: 0,
+          });
+          if (confirmed) return;
+        }
       } catch {
         // fall through to the typing strategy below
       }
@@ -990,36 +1007,89 @@ export function createPlaywrightOps({
           // whole value in one burst doesn't reliably trigger its debounced
           // live-search either. TYPEAHEAD_KEY_DELAY_MS mirrors the paced
           // sequence measured to actually work against a live Ashby form.
-          await locator.pressSequentially(stringValue, {
-            timeout: SELECT_OPTION_TIMEOUT_MS,
-            delay: TYPEAHEAD_KEY_DELAY_MS,
-          });
-          await optionsLocator
-            .first()
-            .waitFor({ state: "visible", timeout: TYPEAHEAD_OPTIONS_TIMEOUT_MS })
-            .catch(() => {});
+          for (let index = 0; index < candidateValues.length; index += 1) {
+            const candidateValue = candidateValues[index];
+            if (index > 0) {
+              await locator.fill("", { timeout: SELECT_OPTION_TIMEOUT_MS });
+            }
+            await locator.pressSequentially(candidateValue, {
+              timeout: SELECT_OPTION_TIMEOUT_MS,
+              delay: TYPEAHEAD_KEY_DELAY_MS,
+            });
+            await optionsLocator
+              .first()
+              .waitFor({ state: "visible", timeout: TYPEAHEAD_OPTIONS_TIMEOUT_MS })
+              .catch(() => {});
 
-          const confirmed = await matchClickAndConfirm({
-            locator,
-            optionsLocator,
-            stringValue,
-            attempts: 2,
-            settleDelayMs: TYPEAHEAD_SETTLE_DELAY_MS,
-            // This strategy already typed stringValue into the control
-            // above, so its display value trivially "contains" the target
-            // text before any option is ever clicked — confirming on that
-            // would pass whether or not the click actually selected
-            // anything. Require real evidence instead: the display value
-            // changing, or the option list closing.
-            requireDisplayChange: true,
-          });
-          if (confirmed) return;
+            const confirmed = await matchClickAndConfirm({
+              locator,
+              optionsLocator,
+              stringValue: candidateValue,
+              attempts: 2,
+              settleDelayMs: TYPEAHEAD_SETTLE_DELAY_MS,
+              // This strategy already typed candidateValue into the control
+              // above, so its display value trivially "contains" the target
+              // text before any option is ever clicked — confirming on that
+              // would pass whether or not the click actually selected
+              // anything. Require real evidence instead: the display value
+              // changing, or the option list closing.
+              requireDisplayChange: true,
+            });
+            if (confirmed) return;
+          }
         }
       } catch {
         // fall through to the handoff error below
       }
 
       throw comboboxHandoffError(name);
+    },
+
+    async selectDeclineOption({ pageId, ref, label }) {
+      const target = page(pageId);
+      const { locator, name } = resolveRef(pageId, ref);
+      const nativeOptions = await locator
+        .evaluate((element) =>
+          element.tagName === "SELECT"
+            ? Array.from(element.options).map((option) => option.textContent || option.label || "")
+            : null
+        )
+        .catch(() => null);
+      if (Array.isArray(nativeOptions)) {
+        const option = uniqueVoluntaryDeclineOption(nativeOptions);
+        if (!option) {
+          throw new Error(
+            `The "${label || name}" dropdown did not offer one unambiguous decline option.`
+          );
+        }
+        const selected = await locator.selectOption(
+          { label: option },
+          { timeout: SELECT_OPTION_TIMEOUT_MS }
+        );
+        if (!selected.length) {
+          throw new Error(`The "${label || name}" dropdown did not keep its decline option.`);
+        }
+        return { selectedValue: option };
+      }
+
+      const optionsLocator = target.locator("[role='option']:visible");
+      await locator.click({ timeout: SELECT_OPTION_TIMEOUT_MS });
+      await optionsLocator
+        .first()
+        .waitFor({ state: "visible", timeout: SELECT_OPTION_TIMEOUT_MS })
+        .catch(() => {});
+      const option = uniqueVoluntaryDeclineOption(await optionsLocator.allTextContents());
+      if (!option) {
+        throw new Error(
+          `The "${label || name}" dropdown did not offer one unambiguous decline option.`
+        );
+      }
+      await clickOptionByExactText(optionsLocator, option, SELECT_OPTION_TIMEOUT_MS);
+      const displayValue = await readComboboxDisplayValue(locator);
+      if (!comboboxSelectionConfirmed(displayValue, option)) {
+        throw new Error(`The "${label || name}" dropdown did not keep its decline option.`);
+      }
+      return { selectedValue: option };
     },
 
     async toggleField({ pageId, ref, checked }) {

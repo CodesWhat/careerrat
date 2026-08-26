@@ -154,15 +154,21 @@ const TITLE_DOMAIN_FAMILIES = [
   ]),
   new Set(["finance", "financial", "fintech", "payment", "payments"]),
 ];
-const TITLE_SPECIALIZATIONS = [
-  "advocate",
-  "marketing",
-  "product",
-  "sales",
-  "security",
-  "solutions",
-  "success",
-  "support",
+const TITLE_ADJACENT_FAMILIES = [
+  new Set(["design", "front", "frontend", "ui"]),
+  ...TITLE_DOMAIN_FAMILIES,
+];
+const TITLE_SPECIALIZATION_FAMILIES = [
+  new Set(["advocate"]),
+  new Set(["gtm"]),
+  new Set(["marketing"]),
+  new Set(["product"]),
+  new Set(["revenue"]),
+  new Set(["sales"]),
+  new Set(["cybersecurity", "security"]),
+  new Set(["solution", "solutions"]),
+  new Set(["success"]),
+  new Set(["support"]),
 ];
 const TITLE_ENGINEERING_KINDS = new Set(["developer", "engineer", "engineering"]);
 const TITLE_SENIORITY_GROUPS = [new Set(["staff", "principal", "lead"]), new Set(["senior", "sr"])];
@@ -184,6 +190,12 @@ const TITLE_ADJACENCY_STOPWORDS = new Set([
   "vice",
 ]);
 
+function titleSpecializationsCompatible(actual, target) {
+  return TITLE_SPECIALIZATION_FAMILIES.every(
+    (family) => hasAny(actual, family) === hasAny(target, family)
+  );
+}
+
 function titleTokens(value) {
   return new Set(
     String(value || "")
@@ -200,6 +212,7 @@ function hasAny(tokens, values) {
 }
 
 function boundedRoleTitleEquivalent(actualTitle, targetTitle) {
+  if (MANAGEMENT_TITLE_RE.test(actualTitle) !== MANAGEMENT_TITLE_RE.test(targetTitle)) return false;
   const actual = titleTokens(actualTitle);
   const target = titleTokens(targetTitle);
   if (!hasAny(target, TITLE_ENGINEERING_KINDS) || !hasAny(actual, TITLE_ENGINEERING_KINDS)) {
@@ -208,11 +221,7 @@ function boundedRoleTitleEquivalent(actualTitle, targetTitle) {
 
   // Adjacent functions with an engineering-adjacent noun are still distinct
   // lanes unless the target explicitly names that specialization.
-  if (
-    TITLE_SPECIALIZATIONS.some(
-      (specialization) => actual.has(specialization) && !target.has(specialization)
-    )
-  ) {
+  if (!titleSpecializationsCompatible(actual, target)) {
     return false;
   }
 
@@ -238,17 +247,14 @@ function titleSeniorityCompatible(actual, target) {
 }
 
 function adjacentRoleTitleEquivalent(actualTitle, targetTitle) {
+  if (MANAGEMENT_TITLE_RE.test(actualTitle) !== MANAGEMENT_TITLE_RE.test(targetTitle)) return false;
   const actual = titleTokens(actualTitle);
   const target = titleTokens(targetTitle);
   if (!titleSeniorityCompatible(actual, target)) return false;
 
   if (hasAny(target, TITLE_ENGINEERING_KINDS)) {
     if (!hasAny(actual, TITLE_ENGINEERING_KINDS)) return false;
-    if (
-      TITLE_SPECIALIZATIONS.some(
-        (specialization) => actual.has(specialization) && !target.has(specialization)
-      )
-    ) {
+    if (!titleSpecializationsCompatible(actual, target)) {
       return false;
     }
     return true;
@@ -261,6 +267,35 @@ function adjacentRoleTitleEquivalent(actualTitle, targetTitle) {
       !TITLE_ENGINEERING_KINDS.has(value) &&
       actual.has(value)
   );
+}
+
+function adjacentTitleFamiliesCompatible(actualTitle, targetTitle) {
+  const familyFor = (title) => {
+    const words = titleTokens(title);
+    return TITLE_ADJACENT_FAMILIES.findIndex((family) => hasAny(words, family));
+  };
+  const targetFamily = familyFor(targetTitle);
+  if (targetFamily < 0) return true;
+  const actualFamily = familyFor(actualTitle);
+  return actualFamily < 0 || actualFamily === targetFamily;
+}
+
+function targetRoleTitleMatches(actualTitle, targetTitles) {
+  if (targetTitles.length === 0) return true;
+  const actual = String(actualTitle || "").toLowerCase();
+  return targetTitles.some((targetTitle) => {
+    const target = String(targetTitle || "").toLowerCase();
+    const targetHasDomain = TITLE_DOMAIN_FAMILIES.some((family) =>
+      hasAny(titleTokens(target), family)
+    );
+    return (
+      keywordMatches(actual, target) ||
+      boundedRoleTitleEquivalent(actual, target) ||
+      (!targetHasDomain &&
+        adjacentRoleTitleEquivalent(actual, target) &&
+        adjacentTitleFamiliesCompatible(actual, target))
+    );
+  });
 }
 
 function keywordMatches(text, term) {
@@ -612,10 +647,14 @@ function scoreSourcedOfferFromConfig(
       }
     }
   }
-  const allKeepTerms = [...keepSignals, ...bucketTitles.filter(Boolean)];
-  for (const term of allKeepTerms) {
+  for (const term of keepSignals) {
     if (keywordMatches(title, term) || keywordMatches(text, term)) {
       setBase(82, `matches keep signal: ${term}`);
+    }
+  }
+  for (const term of bucketTitles.filter(Boolean)) {
+    if (keywordMatches(title, term) || boundedRoleTitleEquivalent(title, term)) {
+      setBase(82, `matches target title: ${term}`);
     }
   }
 
@@ -696,6 +735,16 @@ function scoreSourcedOfferFromConfig(
   if (/\b(25\s*[-–]\s*50%|50%\+?|up to 50%|heavy travel|significant travel)\b/.test(text)) {
     add(-8, "travel burden");
     flag("travel");
+  }
+
+  // Evidence in the body can make an adjacent role worth a body read, but it
+  // cannot turn a different job family into a strong target-title match. This
+  // also protects a narrowed candidate profile from broader source filters
+  // generated earlier in onboarding.
+  if (!targetRoleTitleMatches(title, bucketTitles.filter(Boolean))) {
+    score = Math.min(score, 64);
+    reasons.unshift("outside target role titles");
+    flag("title-target-mismatch");
   }
 
   const clamped = Math.max(35, Math.min(95, Math.round(score)));
@@ -991,6 +1040,16 @@ export function filterAndDedupeOffers(
         continue;
       }
       titleRelevance = "adjacent-signal";
+    } else if (typeof titleFilter.classify === "function") {
+      rating = scoreSourcedOffer(offer, config);
+      if (rating.ruleFlags?.includes("title-target-mismatch")) {
+        filteredTitle.push({
+          ...offer,
+          qualificationKind: "relevance",
+          qualificationReason: "title-relevance-low",
+        });
+        continue;
+      }
     }
     const seniority = seniorityEligibility(offer, config);
     if (!seniority.eligible) {

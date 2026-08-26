@@ -1,11 +1,14 @@
 import { WORKSPACE_THREAD_ID } from "../core/agent/workspace-thread.mjs";
-import { sourcingRunFail } from "../core/db/verbs/sourcing-runs.mjs";
+import { sourcingRunFail, sourcingRunGet } from "../core/db/verbs/sourcing-runs.mjs";
 import {
   latestSourcingRunForUi,
   runFirstSearchInBackground,
   startFirstSearchRun,
   startManualSearchRun,
 } from "../core/onboarding/first-search-run.mjs";
+import { readJsonBodyCapped } from "./skill-run-route.mjs";
+
+const MAX_BODY_BYTES = 1024 * 1024;
 
 function sendJson(res, status, body) {
   res.writeHead(status, {
@@ -16,9 +19,11 @@ function sendJson(res, status, body) {
 }
 
 function errorStatus(err) {
+  if ([400, 413, 415].includes(err?.status)) return err.status;
   if (err?.code === "NO_DATABASE" || err?.code === "NOT_SEARCH_READY") return 409;
   if (err?.code === "BAD_REQUEST") return 400;
   if (err?.code === "CONFLICT") return 409;
+  if (err?.code === "NOT_FOUND") return 404;
   return 500;
 }
 
@@ -36,6 +41,24 @@ function sendRouteError(res, err) {
 function purposeFromUrl(req) {
   const requestUrl = new URL(req.url || "/", "http://127.0.0.1");
   return requestUrl.searchParams.get("purpose") || "first-search";
+}
+
+function idFromUrl(req) {
+  const requestUrl = new URL(req.url || "/", "http://127.0.0.1");
+  return requestUrl.searchParams.get("id") || null;
+}
+
+function searchExecutionIdFromBody(body) {
+  if (body?.searchExecutionId == null || body.searchExecutionId === "") return undefined;
+  if (
+    typeof body.searchExecutionId !== "string" ||
+    !/^[A-Za-z0-9:_-]{1,128}$/.test(body.searchExecutionId)
+  ) {
+    const error = new Error("searchExecutionId must be a short identifier");
+    error.code = "BAD_REQUEST";
+    throw error;
+  }
+  return body.searchExecutionId;
 }
 
 function startBackground({
@@ -67,12 +90,21 @@ function startBackground({
     });
 }
 
-async function startThroughWorkspace({ workspaceAgentRuntime, purpose, retryFailed }) {
+async function startThroughWorkspace({
+  workspaceAgentRuntime,
+  purpose,
+  retryFailed,
+  searchExecutionId,
+}) {
   const thread = await workspaceAgentRuntime.executeIntent({
     intent: {
       type: "search.run",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-      input: { purpose, retryFailed: retryFailed === true },
+      input: {
+        purpose,
+        retryFailed: retryFailed === true,
+        ...(searchExecutionId ? { searchExecutionId } : {}),
+      },
     },
   });
   if (!thread?.operationResult) {
@@ -95,7 +127,11 @@ export function mountSourcingRoutes({
 } = {}) {
   addRoute("GET", "/api/sourcing/runs/latest", (req, res) => {
     try {
-      const latest = latestSourcingRunForUi({ repoRoot, env, purpose: purposeFromUrl(req) });
+      const purpose = purposeFromUrl(req);
+      const id = idFromUrl(req);
+      const latest = id
+        ? sourcingRunGet({ repoRoot, env, purpose, id })
+        : latestSourcingRunForUi({ repoRoot, env, purpose });
       sendJson(res, 200, latest);
     } catch (err) {
       sendRouteError(res, err);
@@ -129,15 +165,18 @@ export function mountSourcingRoutes({
     }
   });
 
-  addRoute("POST", "/api/sourcing/search/start", async (_req, res) => {
+  addRoute("POST", "/api/sourcing/search/start", async (req, res) => {
     try {
+      const body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+      const searchExecutionId = searchExecutionIdFromBody(body);
       const result = workspaceAgentRuntime
         ? await startThroughWorkspace({
             workspaceAgentRuntime,
             purpose: "manual-search",
             retryFailed: false,
+            searchExecutionId,
           })
-        : await startManualSearchImpl({ repoRoot, env, fetchImpl });
+        : await startManualSearchImpl({ repoRoot, env, fetchImpl, searchExecutionId });
       if (!workspaceAgentRuntime?.startsSearchInBackground) {
         startBackground({
           repoRoot,

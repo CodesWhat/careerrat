@@ -19,11 +19,17 @@ const hooks = vi.hoisted(() => ({
 }));
 
 const apiMocks = vi.hoisted(() => ({ finishOnboarding: vi.fn(), getOnboardState: vi.fn() }));
+const firstRun = vi.hoisted(() => ({ props: null }));
 const routerState = vi.hoisted(() => ({ pathname: "/" }));
 const navigate = vi.hoisted(() => vi.fn());
 const COMPLETE_ONBOARD_STATE = {
   setupProgress: { complete: true },
   data: {
+    "form-defaults": {
+      voluntary_self_identification: {
+        confirmed_at: "2026-08-25T12:00:00.000Z",
+      },
+    },
     setup: { readiness: { search_ready: true } },
     sourcing: {
       sourceSetup: { deterministicSources: { attempted: 1 } },
@@ -89,8 +95,10 @@ vi.mock("./chat-first/dashboard-context.jsx", () => ({
 }));
 vi.mock("./chat-first/ChatFirstApp.jsx", () => ({ ChatFirstApp: () => "chat-first-app" }));
 vi.mock("./chat-first/FirstRunController.jsx", () => ({
-  FirstRunController: ({ inWorkspace }) =>
-    `first-run-controller:in-workspace=${String(inWorkspace)}`,
+  FirstRunController: (props) => {
+    firstRun.props = props;
+    return `first-run-controller:in-workspace=${String(props.inWorkspace)}`;
+  },
 }));
 vi.mock("./chat-first/ProfileSettingsController.jsx", () => ({
   ProfileSettingsController: () => "profile-settings-controller",
@@ -125,11 +133,72 @@ beforeEach(() => {
   apiMocks.finishOnboarding.mockReset().mockResolvedValue({ ok: true });
   apiMocks.getOnboardState.mockReset();
   routerState.pathname = "/";
+  firstRun.props = null;
   navigate.mockReset();
   delete globalThis.careerratDesktopApp;
 });
 
 describe("App chat-first flip", () => {
+  it("keeps a completed fresh setup gated until local application defaults are confirmed", async () => {
+    const module = await loadApp();
+    apiMocks.getOnboardState.mockResolvedValueOnce({
+      ...COMPLETE_ONBOARD_STATE,
+      data: {
+        ...COMPLETE_ONBOARD_STATE.data,
+        "form-defaults": {
+          voluntary_self_identification: {
+            enabled: false,
+            default_action: "leave_blank",
+            confirmed_at: null,
+            answers: {},
+          },
+        },
+      },
+    });
+
+    expect(renderApp(module)).toBe("");
+    await flushEffects();
+    const html = renderApp(module);
+
+    expect(html).toContain("first-run-controller:in-workspace=true");
+    expect(firstRun.props.initialOnboardState).toMatchObject({
+      setupProgress: { complete: true },
+      data: {
+        "form-defaults": {
+          voluntary_self_identification: { confirmed_at: null },
+        },
+      },
+    });
+    expect(apiMocks.finishOnboarding).not.toHaveBeenCalled();
+  });
+
+  it("keeps a completed workspace gated when its saved confirmation timestamp is malformed", async () => {
+    const module = await loadApp();
+    const malformedState = {
+      ...COMPLETE_ONBOARD_STATE,
+      data: {
+        ...COMPLETE_ONBOARD_STATE.data,
+        "form-defaults": {
+          voluntary_self_identification: {
+            enabled: false,
+            default_action: "leave_blank",
+            confirmed_at: "not-a-date",
+            answers: {},
+          },
+        },
+      },
+    };
+    apiMocks.getOnboardState.mockResolvedValueOnce(malformedState);
+
+    renderApp(module);
+    await flushEffects();
+    const html = renderApp(module);
+
+    expect(html).toContain("first-run-controller:in-workspace=true");
+    expect(firstRun.props.initialOnboardState).toBe(malformedState);
+    expect(apiMocks.finishOnboarding).not.toHaveBeenCalled();
+  });
+
   it("routes a native-menu request through React Router without resetting live renderer state", async () => {
     let routeRequest;
     const unsubscribe = vi.fn();
@@ -178,6 +247,10 @@ describe("App chat-first flip", () => {
   it("repairs the completed onboarding handoff before releasing the workspace", async () => {
     const module = await loadApp();
     apiMocks.getOnboardState.mockResolvedValueOnce(COMPLETE_ONBOARD_STATE);
+    apiMocks.finishOnboarding.mockResolvedValueOnce({
+      ok: true,
+      handoff: { reused: false },
+    });
 
     expect(renderApp(module)).toBe("");
     await flushEffects();
@@ -185,6 +258,42 @@ describe("App chat-first flip", () => {
 
     expect(apiMocks.finishOnboarding).toHaveBeenCalledOnce();
     expect(html).toContain("chat-first-app");
+    expect(navigate).toHaveBeenCalledWith("/", {
+      replace: true,
+      state: { browse: "search", onboardingComplete: true },
+    });
+  });
+
+  it("keeps a routine launch in the workspace when the onboarding handoff was already reused", async () => {
+    const module = await loadApp();
+    apiMocks.getOnboardState.mockResolvedValueOnce(COMPLETE_ONBOARD_STATE);
+    apiMocks.finishOnboarding.mockResolvedValueOnce({
+      ok: true,
+      handoff: { reused: true },
+    });
+
+    renderApp(module);
+    await flushEffects();
+    const html = renderApp(module);
+
+    expect(apiMocks.finishOnboarding).toHaveBeenCalledOnce();
+    expect(html).toContain("chat-first-app");
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("foregrounds Search as the unmistakable next step after onboarding completes", async () => {
+    const module = await loadApp();
+    apiMocks.getOnboardState.mockResolvedValueOnce({ setupProgress: { complete: false } });
+
+    renderApp(module);
+    await flushEffects();
+    renderApp(module);
+    firstRun.props.onComplete();
+
+    expect(navigate).toHaveBeenCalledWith("/", {
+      replace: true,
+      state: { browse: "search", onboardingComplete: true },
+    });
   });
 
   it("exposes the chat-first profile at /settings without gating it", async () => {

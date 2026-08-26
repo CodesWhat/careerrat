@@ -82,6 +82,175 @@ test("title filter recognizes bounded infrastructure-title equivalents without a
   assert.equal(filter("Account Executive, Platform"), false);
 });
 
+test("bounded title equivalence never crosses from staff IC to engineering management", () => {
+  const filter = buildTitleFilter({ positive: ["Platform Engineering Manager"] });
+
+  assert.equal(filter("Staff Platform Engineer"), false);
+});
+
+test("bounded title equivalence never crosses from engineering management to staff IC", () => {
+  const filter = buildTitleFilter({ positive: ["Staff Platform Engineer"] });
+
+  assert.equal(filter("Platform Engineering Manager"), false);
+});
+
+test("coarse scoring does not promote a GTM engineer from backend and platform evidence in the body", () => {
+  const result = scoreSourcedOffer(
+    {
+      company: "Anthropic",
+      title: "AI Engineer, GTM Claudification",
+      location: "Remote - United States",
+      comp: "$320,000 - $405,000 base",
+      bodyText: `${"Build autonomous agents for go-to-market sellers. ".repeat(8)}Work closely with platform engineering partners.`,
+    },
+    {
+      targeting: {
+        role_buckets: [
+          { name: "Platform", titles: ["Staff Platform Engineer", "Staff Backend Engineer"] },
+        ],
+        keep_signals: ["platform engineering"],
+      },
+      profile: {
+        compensation: { minimum_base: 190000 },
+        location: { home: "Brooklyn, NY", remote: true },
+      },
+    }
+  );
+
+  assert.equal(result.fit, "stretch");
+  assert.equal(result.gate, "review");
+  assert.ok(result.score < 65, `expected a sub-medium score, got ${result.score}`);
+  assert.ok(result.ruleFlags.includes("title-target-mismatch"));
+});
+
+test("coarse scoring does not treat a generic staff engineer as a platform title match", () => {
+  const result = scoreSourcedOffer(
+    {
+      company: "GenericCo",
+      title: "Staff Engineer",
+      location: "Remote - United States",
+      comp: "$220,000 - $280,000 base",
+      bodyText: `${"Lead high-impact projects across the engineering organization. ".repeat(7)}Partner with the platform engineering team.`,
+    },
+    {
+      targeting: {
+        role_buckets: [
+          { name: "Platform", titles: ["Staff Platform Engineer", "Staff Backend Engineer"] },
+        ],
+        keep_signals: ["platform engineering"],
+      },
+      profile: {
+        compensation: { minimum_base: 190000 },
+        location: { home: "Brooklyn, NY", remote: true },
+      },
+    }
+  );
+
+  assert.equal(result.fit, "stretch");
+  assert.ok(result.ruleFlags.includes("title-target-mismatch"));
+});
+
+test("stale generic source filters cannot admit an adjacent GTM title after targeting narrows", () => {
+  const titleFilter = buildTitleFilter({ positive: ["Software Engineer"] });
+  const config = {
+    targeting: {
+      role_buckets: [
+        { name: "Platform", titles: ["Staff Platform Engineer", "Staff Backend Engineer"] },
+      ],
+      keep_signals: ["platform engineering"],
+    },
+    profile: {
+      compensation: { minimum_base: 190000 },
+      location: { home: "Brooklyn, NY", remote: true },
+    },
+  };
+  const bodyText = `${"Build autonomous agents for go-to-market sellers. ".repeat(8)}Work closely with platform engineering partners.`;
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Anthropic",
+        title: "AI Engineer, GTM Claudification",
+        url: "https://jobs.example.test/gtm-ai-engineer",
+        location: "Remote - United States",
+        comp: "$320,000 - $405,000 base",
+        bodyText,
+      },
+      {
+        company: "PlatformCo",
+        title: "Staff Software Engineer, Infrastructure Foundations",
+        url: "https://jobs.example.test/infrastructure-foundations",
+        location: "Remote - United States",
+        comp: "$220,000 - $280,000 base",
+        bodyText: `${"Build reliable distributed infrastructure services. ".repeat(8)}Own platform engineering foundations.`,
+      },
+    ],
+    {
+      titleFilter,
+      locationFilter: () => true,
+      config,
+    }
+  );
+
+  assert.deepEqual(
+    result.kept.map((offer) => offer.company),
+    ["PlatformCo"]
+  );
+  assert.equal(result.filteredTitle.length, 1);
+  assert.equal(result.filteredTitle[0].company, "Anthropic");
+  assert.equal(result.filteredTitle[0].qualificationReason, "title-relevance-low");
+});
+
+test("stale exact source filters cannot admit a different title after targeting narrows", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "GTMCo",
+        title: "AI Engineer",
+        url: "https://jobs.example.test/ai-engineer",
+        location: "Remote - United States",
+        bodyText: "Partner with the platform engineering team. ".repeat(10),
+      },
+    ],
+    {
+      titleFilter: buildTitleFilter({ positive: ["AI Engineer"] }),
+      locationFilter: () => true,
+      config: {
+        targeting: {
+          role_buckets: [{ name: "Platform", titles: ["Staff Platform Engineer"] }],
+          keep_signals: ["platform engineering"],
+        },
+        profile: { location: { home: "Brooklyn, NY", remote: true } },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredTitle.length, 1);
+  assert.equal(result.filteredTitle[0].qualificationReason, "title-relevance-low");
+});
+
+test("management targets do not treat individual-contributor engineering titles as adjacent", () => {
+  const result = scoreSourcedOffer(
+    {
+      company: "SystemsCo",
+      title: "Senior Software Engineer",
+      location: "Remote - United States",
+      bodyText: "Build distributed systems and guide technical execution. ".repeat(10),
+    },
+    {
+      targeting: {
+        role_buckets: [{ name: "Management", titles: ["Engineering Manager"] }],
+        keep_signals: ["distributed systems"],
+      },
+      profile: { location: { home: "Brooklyn, NY", remote: true } },
+    }
+  );
+
+  assert.equal(result.fit, "stretch");
+  assert.ok(result.score < 65);
+  assert.ok(result.ruleFlags.includes("title-target-mismatch"));
+});
+
 test("location filter blocks foreign roles while allowing home, remote, and unknown-location roles", () => {
   const filter = buildLocationFilter({
     always_allow: ["New York"],
@@ -297,6 +466,105 @@ test("adjacent engineering titles need strong candidate evidence while blockers 
     result.filteredTitle.map((offer) => offer.qualificationReason),
     ["title-negative-blocker", "title-relevance-low"]
   );
+});
+
+test("frontend targeting does not admit a backend role as an adjacent engineering title", () => {
+  const config = {
+    targeting: {
+      role_buckets: [{ titles: ["Staff Frontend Engineer"] }],
+      keep_signals: ["accessibility systems"],
+    },
+    profile: { location: { home: "New York, NY", remote: true } },
+  };
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Acme",
+        title: "Staff Backend Engineer",
+        url: "https://jobs.example.test/backend",
+        location: "Remote - United States",
+        bodyText: "Build accessibility systems for a mature product platform. ".repeat(12),
+      },
+    ],
+    {
+      seenUrls: new Set(),
+      seenReqIds: new Set(),
+      seenCompanyRoles: new Set(),
+      titleFilter: buildTitleFilter({ positive: ["Staff Frontend Engineer"] }),
+      locationFilter: () => true,
+      config,
+    }
+  );
+
+  assert.deepEqual(result.kept, []);
+  assert.equal(result.filteredTitle[0]?.qualificationReason, "title-relevance-low");
+});
+
+test("specialized engineering targets reject adjacent roles missing that specialization", () => {
+  const config = {
+    targeting: {
+      role_buckets: [{ titles: ["Staff Security Engineer"] }],
+      keep_signals: ["security infrastructure"],
+    },
+    profile: { location: { home: "New York, NY", remote: true } },
+  };
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Acme",
+        title: "Staff Backend Engineer",
+        url: "https://jobs.example.test/backend-for-security-target",
+        location: "Remote - United States",
+        bodyText: "Build security infrastructure for a mature product platform. ".repeat(12),
+      },
+    ],
+    {
+      seenUrls: new Set(),
+      seenReqIds: new Set(),
+      seenCompanyRoles: new Set(),
+      titleFilter: buildTitleFilter({ positive: ["Staff Security Engineer"] }),
+      locationFilter: () => true,
+      config,
+    }
+  );
+
+  assert.deepEqual(result.kept, []);
+  assert.equal(result.filteredTitle[0]?.qualificationReason, "title-relevance-low");
+});
+
+test("specialization variants do not admit unrelated adjacent engineering roles", () => {
+  for (const targetTitle of ["Staff Solution Engineer", "Staff Cybersecurity Engineer"]) {
+    const result = filterAndDedupeOffers(
+      [
+        {
+          company: "Acme",
+          title: "Staff Backend Engineer",
+          url: `https://jobs.example.test/backend-for-${targetTitle.toLowerCase().replaceAll(" ", "-")}`,
+          location: "Remote - United States",
+          bodyText: "Build customer and security systems for a mature product platform. ".repeat(
+            12
+          ),
+        },
+      ],
+      {
+        seenUrls: new Set(),
+        seenReqIds: new Set(),
+        seenCompanyRoles: new Set(),
+        titleFilter: buildTitleFilter({ positive: [targetTitle] }),
+        locationFilter: () => true,
+        config: {
+          targeting: {
+            role_buckets: [{ titles: [targetTitle] }],
+            keep_signals: ["customer and security systems"],
+          },
+          profile: { location: { home: "New York, NY", remote: true } },
+        },
+      }
+    );
+
+    assert.deepEqual(result.kept, [], targetTitle);
+    assert.equal(result.filteredTitle[0]?.qualificationReason, "title-relevance-low", targetTitle);
+  }
 });
 
 test("dedupe keeps unrelated generic /jobs/<id> URLs from distinct domains", () => {

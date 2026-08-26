@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildSkillChatThreads,
   commitSkillChatCompletion,
@@ -616,6 +616,35 @@ describe("skill chat model", () => {
     ).toEqual(expect.objectContaining({ id: "skill:research-boards", chatId: "boards-live" }));
   });
 
+  it("does not reopen an old research thread after an unrelated foreground action", () => {
+    expect(
+      skillChatFromWorkspaceResult({
+        data: {
+          messages: [
+            {
+              role: "assistant",
+              kind: "action_result",
+              artifacts: [
+                {
+                  kind: "board_discovery_chat",
+                  chatId: "boards-finished",
+                  skill: "research-boards",
+                  title: "Job board discovery",
+                },
+              ],
+            },
+            {
+              role: "assistant",
+              kind: "action_result",
+              text: "Confirmed these screening answers.",
+              artifacts: [{ kind: "screening_answer_confirmed" }],
+            },
+          ],
+        },
+      })
+    ).toBeNull();
+  });
+
   it("reuses a live skill session and recreates only a missing durable runtime session", async () => {
     const liveApi = {
       findChatBySkill: async () => ({
@@ -659,6 +688,32 @@ describe("skill chat model", () => {
         { skill: "research-comp" }
       )
     ).resolves.toEqual({ chatId: "winner-chat", skill: "research-comp", state: "running" });
+  });
+
+  it("shares one in-flight session resolution across repeated hydration of the same thread", async () => {
+    let releaseFind;
+    const findPending = new Promise((resolve) => {
+      releaseFind = resolve;
+    });
+    const api = {
+      findChatBySkill: vi.fn(async () => {
+        await findPending;
+        return { chatId: null, state: "missing" };
+      }),
+      startChat: vi.fn(async (skill) => ({ chatId: "resumed-chat", skill, state: "idle" })),
+    };
+    const inFlight = new Map();
+
+    const first = resolveSkillChatSession(api, { skill: "research-boards" }, inFlight);
+    const repeated = resolveSkillChatSession(api, { skill: "research-boards" }, inFlight);
+    releaseFind();
+
+    await expect(Promise.all([first, repeated])).resolves.toEqual([
+      { chatId: "resumed-chat", skill: "research-boards", state: "idle" },
+      { chatId: "resumed-chat", skill: "research-boards", state: "idle" },
+    ]);
+    expect(api.findChatBySkill).toHaveBeenCalledOnce();
+    expect(api.startChat).toHaveBeenCalledOnce();
   });
 
   it("blocks a selected research-thread submit until its runtime session resolves", () => {
@@ -778,6 +833,7 @@ describe("skill chat model", () => {
 
   it("builds a resumable stream URL only after the runtime session resolves", () => {
     expect(skillChatStreamUrl({ chatId: null })).toBeNull();
+    expect(skillChatStreamUrl({ chatId: "finished-chat", state: "closed" })).toBeNull();
     expect(skillChatStreamUrl({ chatId: "chat/1", streamAfter: 42 })).toBe(
       "/api/chat/events?id=chat%2F1&after=42"
     );

@@ -15,6 +15,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_MODEL, DEFAULT_SMALL_FAST_MODEL } from "../src/core/ai/ai-config.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
+import { createRuntimeToolPolicy } from "../src/core/ai/runtime-tool-policy.mjs";
 import {
   buildChildEnv,
   buildPrompt,
@@ -47,6 +48,38 @@ function tempRepoWithSkill(skillNames = "test-skill") {
   mkdirSync(join(repoRoot, ".agents/skills/not-a-skill"), { recursive: true });
   return repoRoot;
 }
+
+test("runtime Grep denies roots containing private defaults while allowing ordinary candidate files", async () => {
+  const repoRoot = tempRepoWithSkill("evaluate-job");
+  try {
+    const policy = createRuntimeToolPolicy({
+      repoRoot,
+      skill: "evaluate-job",
+      tools: ["Grep"],
+    });
+
+    assert.equal(
+      (await policy.canUseTool("Grep", { path: join(repoRoot, "candidate") })).behavior,
+      "deny"
+    );
+    assert.equal(
+      (
+        await policy.canUseTool("Grep", {
+          path: join(repoRoot, "candidate/profile.yml"),
+        })
+      ).behavior,
+      "allow"
+    );
+    for (const path of [
+      join(repoRoot, "candidate/form-defaults.yml"),
+      join(repoRoot, "candidate/form-defaults.yml/private"),
+    ]) {
+      assert.equal((await policy.canUseTool("Grep", { path })).behavior, "deny", path);
+    }
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // discoverSkillDirs
@@ -645,6 +678,36 @@ test("runSkillStream: default caller gets app-safe runtime tools passed to query
       {}
     );
     assert.equal(secretRead.behavior, "deny");
+    const voluntaryDefaultsRead = await seenOptions.canUseTool(
+      "Read",
+      { file_path: join(repoRoot, "candidate/form-defaults.yml") },
+      {}
+    );
+    assert.equal(voluntaryDefaultsRead.behavior, "deny");
+    const candidateGrep = await seenOptions.canUseTool(
+      "Grep",
+      { path: join(repoRoot, "candidate"), pattern: "private demographic answer" },
+      {}
+    );
+    assert.equal(candidateGrep.behavior, "deny");
+    const ordinaryCandidateRead = await seenOptions.canUseTool(
+      "Read",
+      { file_path: join(repoRoot, "candidate/profile.yml") },
+      {}
+    );
+    assert.equal(ordinaryCandidateRead.behavior, "allow");
+    for (const file of ["profile.yml", "evidence.yml"]) {
+      const ordinaryCandidateGrep = await seenOptions.canUseTool(
+        "Grep",
+        { path: join(repoRoot, "candidate", file), pattern: "platform" },
+        {}
+      );
+      assert.equal(
+        ordinaryCandidateGrep.behavior,
+        "allow",
+        `file-scoped Grep remains available for ${file}`
+      );
+    }
     const outsideRead = await seenOptions.canUseTool("Read", { file_path: "/etc/passwd" }, {});
     assert.equal(outsideRead.behavior, "deny");
 
@@ -655,6 +718,56 @@ test("runSkillStream: default caller gets app-safe runtime tools passed to query
         `${broadTool} must not be available to a local-read runtime`
       );
     }
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("runSkillStream: agent candidate context exposes ordinary form defaults but never voluntary answers", async () => {
+  const repoRoot = tempRepoWithSkill("answer-question");
+  try {
+    mkdirSync(join(repoRoot, "candidate"), { recursive: true });
+    writeFileSync(
+      join(repoRoot, "candidate/form-defaults.yml"),
+      [
+        "expected_base: 180000",
+        "voluntary_self_identification:",
+        "  enabled: true",
+        "  default_action: decline_when_available",
+        '  confirmed_at: "2026-08-26T12:00:00Z"',
+        "  answers:",
+        "    race ethnicity:",
+        '      value: "private runtime answer"',
+        '      confirmed_at: "2026-08-26T12:00:00Z"',
+        "",
+      ].join("\n"),
+      "utf8"
+    );
+    let seenPrompt = "";
+    await runSkillStream({
+      skill: "answer-question",
+      feature: "application-answer",
+      action: "draft",
+      operation: "application.answer",
+      input: "Draft the answer.",
+      repoRoot,
+      env: {
+        ANTHROPIC_API_KEY: "sk-ant-test",
+        CAREERRAT_RUNTIME_SKILLS: "answer-question",
+      },
+      onEvent: () => {},
+      loadSdk: async () => ({
+        query: ({ prompt, options }) => {
+          seenPrompt = prompt;
+          return fakeSdk(SAMPLE_RUN).query({ options });
+        },
+      }),
+    });
+
+    assert.match(seenPrompt, /agent-visible application defaults/i);
+    assert.match(seenPrompt, /"expected_base":180000/);
+    assert.doesNotMatch(seenPrompt, /voluntary_self_identification/);
+    assert.doesNotMatch(seenPrompt, /private runtime answer/);
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
@@ -919,6 +1032,8 @@ test("buildPrompt: conversational mode includes the confirm-block fence syntax a
   assert.match(prompt, /candidate\.location.*string/i);
   assert.match(prompt, /role_buckets.*name.*priority.*titles/i);
   assert.match(prompt, /capability.*only when.*needed/i);
+  assert.match(prompt, /voluntary self-identification.*local Application defaults/i);
+  assert.match(prompt, /never include it in a candidate_patch/i);
 });
 
 test("buildPrompt: every conversational skill turn uses Powell's plain-English voice", () => {
@@ -926,6 +1041,8 @@ test("buildPrompt: every conversational skill turn uses Powell's plain-English v
   assert.match(prompt, /natural, conversational plain English/i);
   assert.match(prompt, /short, direct sentences/i);
   assert.match(prompt, /ordinary words/i);
+  assert.match(prompt, /abstract choice.*short, concrete examples/i);
+  assert.match(prompt, /do not make the user decode product or recruiting jargon/i);
   assert.match(prompt, /contractions when they sound natural/i);
   assert.match(prompt, /robotic headings/i);
   assert.match(prompt, /raw JSON/i);

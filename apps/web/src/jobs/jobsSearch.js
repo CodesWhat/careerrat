@@ -10,7 +10,9 @@ import { errorState } from "../lib/errorCopy.js";
 
 function unwrapRun(value) {
   if (!value || typeof value !== "object") return null;
-  if (value.run && typeof value.run === "object") return value.run;
+  if (Object.hasOwn(value, "run")) {
+    return value.run && typeof value.run === "object" ? value.run : null;
+  }
   return value;
 }
 
@@ -74,6 +76,140 @@ function resultCount(result, key) {
   const value = result?.data?.[key] ?? result?.run?.summary?.[key] ?? result?.summary?.[key];
   const count = Number(value);
   return Number.isFinite(count) && count > 0 ? count : 0;
+}
+
+function deterministicErrorCount(value) {
+  const summary = value?.run?.summary || value?.summary || value;
+  const errors = Array.isArray(summary?.errors) ? summary.errors : [];
+  const declared = Number(summary?.errorCount || 0);
+  return Math.max(errors.length, Number.isFinite(declared) ? declared : 0);
+}
+
+function configuredSourceFailureCopy(count) {
+  return count === 1
+    ? "1 configured source couldn't be searched."
+    : `${count} configured sources couldn't be searched.`;
+}
+
+function completedDeterministicResult(result, run) {
+  const classified = classifyDurableSearchRun("deterministic", { run });
+  if (!classified.partial) return result;
+  return {
+    ...(result && typeof result === "object" ? result : {}),
+    ok: true,
+    partial: true,
+    error: classified.error,
+    run,
+  };
+}
+
+function failedPromptIds(result) {
+  const ids = [
+    result?.failedPromptIds,
+    result?.data?.failedPromptIds,
+    result?.summary?.failedPromptIds,
+    result?.error?.failedPromptIds,
+    result?.run?.summary?.failedPromptIds,
+    result?.run?.error?.failedPromptIds,
+  ].find((candidate) => Array.isArray(candidate) && candidate.length > 0);
+  return Array.isArray(ids)
+    ? [...new Set(ids.map((id) => String(id || "").trim()).filter(Boolean))]
+    : [];
+}
+
+function inferredPartialLane(id, result) {
+  if (result?.partial === true) {
+    return {
+      error: laneError(result, `${SEARCH_LANES[id].label} partly failed.`),
+      failedPromptIds: failedPromptIds(result),
+    };
+  }
+  if (id === "deterministic") {
+    const count = deterministicErrorCount(result);
+    if (count > 0) {
+      return { error: configuredSourceFailureCopy(count), failedPromptIds: [] };
+    }
+  }
+  const promptIds = id === "aiWeb" ? failedPromptIds(result) : [];
+  if (promptIds.length > 0) {
+    return {
+      error: laneError(result, `${promptIds.length} AI search prompt failed.`),
+      failedPromptIds: promptIds,
+    };
+  }
+  return null;
+}
+
+export function classifyDurableSearchRun(id, value) {
+  const run = unwrapRun(value);
+  if (!run || run.status === "not_started") {
+    return { status: "idle", partial: false, error: null, failedPromptIds: [], run };
+  }
+  if (run.status === "running") {
+    return { status: "running", partial: false, error: null, failedPromptIds: [], run };
+  }
+  if (id === "aiWeb" && run.status === "failed" && run?.error?.code === "AI_WEB_SEARCH_ABORTED") {
+    return {
+      status: "skipped",
+      reason: "cancelled",
+      partial: false,
+      error: null,
+      failedPromptIds: [],
+      run,
+    };
+  }
+  if (run.status === "failed") {
+    return {
+      status: "failed",
+      partial: false,
+      error: laneError(run, `${SEARCH_LANES[id].label} failed.`),
+      failedPromptIds: failedPromptIds(run),
+      run,
+    };
+  }
+  const partial = inferredPartialLane(id, { run });
+  if (partial) {
+    return {
+      status: "failed",
+      partial: true,
+      error: partial.error,
+      failedPromptIds: partial.failedPromptIds,
+      run,
+    };
+  }
+  return { status: "succeeded", partial: false, error: null, failedPromptIds: [], run };
+}
+
+function retryRequest(value) {
+  const aiPromptIds = Array.isArray(value?.aiPromptIds)
+    ? [...new Set(value.aiPromptIds.map((id) => String(id || "").trim()).filter(Boolean))]
+    : [];
+  const deterministic = value?.deterministic === true;
+  const aiWeb = value?.aiWeb === true || aiPromptIds.length > 0;
+  return {
+    active: deterministic || aiWeb,
+    deterministic,
+    aiWeb,
+    aiPromptIds,
+  };
+}
+
+function retryDescriptor(outcomes) {
+  const retry = {};
+  const deterministic = outcomes.find(
+    (outcome) => outcome.id === "deterministic" && outcome.error && !outcome.aborted
+  );
+  if (deterministic) retry.deterministic = true;
+
+  const aiWeb = outcomes.find(
+    (outcome) => outcome.id === "aiWeb" && outcome.error && !outcome.aborted
+  );
+  if (aiWeb) {
+    const promptIds = failedPromptIds(aiWeb);
+    if (promptIds.length) retry.aiPromptIds = promptIds;
+    else retry.aiWeb = true;
+  }
+  return Object.keys(retry).length ? retry : null;
 }
 
 function normalizedIdentityPart(value) {
@@ -151,6 +287,7 @@ function reconciledNewCount(outcomes) {
 
 export async function runCoordinatedJobSearch({
   capabilities = {},
+  retry,
   runDeterministic,
   runAiWeb,
   refetch,
@@ -162,6 +299,19 @@ export async function runCoordinatedJobSearch({
     aiWeb: initialLaneState("aiWeb", capabilities.aiWeb),
   };
   const runners = { deterministic: runDeterministic, aiWeb: runAiWeb };
+  const requestedRetry = retryRequest(retry);
+  if (requestedRetry.active) {
+    for (const id of Object.keys(lanes)) {
+      const requested =
+        id === "deterministic" ? requestedRetry.deterministic : requestedRetry.aiWeb;
+      if (lanes[id].status === "running" && !requested) {
+        lanes = {
+          ...lanes,
+          [id]: { ...lanes[id], status: "succeeded", reason: "already-succeeded" },
+        };
+      }
+    }
+  }
   const runnable = Object.keys(lanes).filter(
     (id) => lanes[id].status === "running" && typeof runners[id] === "function"
   );
@@ -181,6 +331,7 @@ export async function runCoordinatedJobSearch({
   if (!runnable.length) {
     const state = {
       status: "error",
+      reason: "no-configured-lane",
       summary: "No configured search lane is available. Review source and AI settings.",
     };
     publish(state);
@@ -198,6 +349,9 @@ export async function runCoordinatedJobSearch({
         const result = await runners[id]({
           signal,
           onLaneState: (patch) => updateLane(id, patch),
+          ...(id === "aiWeb" && requestedRetry.aiPromptIds.length
+            ? { retryPromptIds: requestedRetry.aiPromptIds }
+            : {}),
         });
         if (signal?.aborted || result?.aborted) return { id, result, aborted: true };
         if (result?.ok === false) {
@@ -205,9 +359,13 @@ export async function runCoordinatedJobSearch({
             id,
             result,
             error: laneError(result, `${SEARCH_LANES[id].label} failed.`),
+            failedPromptIds: failedPromptIds(result),
           };
         }
-        return { id, result, ok: true };
+        const partial = inferredPartialLane(id, result);
+        return partial
+          ? { id, result, ok: true, partial: true, ...partial }
+          : { id, result, ok: true };
       } catch (error) {
         if (signal?.aborted || error?.name === "AbortError") return { id, aborted: true };
         return { id, error: error?.message || `${SEARCH_LANES[id].label} failed.` };
@@ -222,22 +380,37 @@ export async function runCoordinatedJobSearch({
         [id]: { ...lanes[id], status: "skipped", reason: "cancelled" },
       };
     }
-    publish({ status: "idle", summary: "Search cancelled." });
+    publish({ status: "idle", reason: "cancelled", summary: "Search cancelled." });
     return { ok: false, aborted: true };
   }
 
   for (const outcome of outcomes) {
     lanes = {
       ...lanes,
-      [outcome.id]: outcome.ok
-        ? { ...lanes[outcome.id], status: "succeeded", result: outcome.result }
-        : {
-            ...lanes[outcome.id],
-            status: outcome.aborted ? "skipped" : "failed",
-            ...(outcome.aborted
-              ? { reason: "cancelled" }
-              : { error: outcome.error || `${SEARCH_LANES[outcome.id].label} failed.` }),
-          },
+      [outcome.id]:
+        outcome.ok && !outcome.partial
+          ? { ...lanes[outcome.id], status: "succeeded", result: outcome.result }
+          : outcome.ok
+            ? {
+                ...lanes[outcome.id],
+                status: "failed",
+                partial: true,
+                error: outcome.error,
+                ...(outcome.failedPromptIds?.length
+                  ? { failedPromptIds: outcome.failedPromptIds }
+                  : {}),
+                result: outcome.result,
+              }
+            : {
+                ...lanes[outcome.id],
+                status: outcome.aborted ? "skipped" : "failed",
+                ...(outcome.aborted
+                  ? { reason: "cancelled" }
+                  : { error: outcome.error || `${SEARCH_LANES[outcome.id].label} failed.` }),
+                ...(outcome.failedPromptIds?.length
+                  ? { failedPromptIds: outcome.failedPromptIds }
+                  : {}),
+              },
     };
   }
 
@@ -254,13 +427,17 @@ export async function runCoordinatedJobSearch({
     0
   );
   const finishedCopy = `${succeeded.length} search lane${succeeded.length === 1 ? "" : "s"} finished`;
-  const failedCopy = failed.length ? ` · ${failed.length} failed` : "";
   const newCopy = newCount ? ` · ${newCount} new` : "";
   const unreadableCopy = unreadableCount ? ` · ${unreadableCount} couldn't be added` : "";
   const partialDescriptionCopy = partialDescriptionCount
     ? ` · ${partialDescriptionCount} ${partialDescriptionCount === 1 ? "has" : "have"} a partial description`
     : "";
   const ok = succeeded.length > 0;
+  const nextRetry = retryDescriptor(outcomes);
+  const retryPromptIds = nextRetry?.aiPromptIds || [];
+  const failedCopy = failed.length
+    ? ` · ${failed.length} lane${failed.length === 1 ? "" : "s"} ${failed.length === 1 ? "needs" : "need"} retry`
+    : "";
   const state = {
     status: ok ? "complete" : "error",
     summary: `${finishedCopy}${failedCopy}${newCopy}${unreadableCopy}${partialDescriptionCopy}`,
@@ -269,6 +446,8 @@ export async function runCoordinatedJobSearch({
   return {
     ok,
     partial: ok && failed.length > 0,
+    ...(retryPromptIds.length ? { failedPromptIds: retryPromptIds } : {}),
+    ...(nextRetry ? { retry: nextRetry } : {}),
     lanes,
     results: Object.fromEntries(outcomes.map((outcome) => [outcome.id, outcome.result])),
   };
@@ -309,6 +488,7 @@ function sleep(ms, signal) {
 // a terminal status, times out, or the caller aborts.
 async function pollManualSearchRun({
   getSourcingRunFn,
+  runId,
   refetch,
   setSearchError,
   setSearchRun,
@@ -334,7 +514,13 @@ async function pollManualSearchRun({
     let polledRun = null;
     let pollError = null;
     try {
-      polledRun = unwrapRun(await getSourcingRunFn({ purpose: "manual-search" }));
+      polledRun = unwrapRun(
+        await getSourcingRunFn({
+          purpose: "manual-search",
+          ...(runId ? { id: runId } : {}),
+          ...(signal ? { signal } : {}),
+        })
+      );
     } catch (error) {
       pollError = error;
     }
@@ -360,8 +546,10 @@ async function pollManualSearchRun({
       setSearchError?.(message);
       return { ok: false, error: message, run: polledRun };
     }
+    const result = completedDeterministicResult({ ok: true, run: polledRun }, polledRun);
+    if (result.partial) setSearchError?.(result.error);
     await refetch?.();
-    return { ok: true, run: polledRun };
+    return result;
   }
 }
 
@@ -371,13 +559,17 @@ export async function runJobsPageSearch({
   refetch,
   setSearchError,
   setSearchRun,
+  searchExecutionId,
   signal,
   pollIntervalMs = 2500,
   pollTimeoutMs = 10 * 60 * 1000,
 } = {}) {
   try {
     setSearchError?.(null);
-    const result = await startSearchRunFn({ purpose: "manual-search" });
+    const result = await startSearchRunFn({
+      purpose: "manual-search",
+      ...(searchExecutionId ? { searchExecutionId } : {}),
+    });
     const run = unwrapRun(result);
     setSearchRun?.(run);
     if (run?.status === "failed") {
@@ -390,6 +582,7 @@ export async function runJobsPageSearch({
     if (run?.status === "running") {
       return await pollManualSearchRun({
         getSourcingRunFn,
+        runId: run.id,
         refetch,
         setSearchError,
         setSearchRun,
@@ -398,8 +591,10 @@ export async function runJobsPageSearch({
         pollTimeoutMs,
       });
     }
+    const completed = completedDeterministicResult(result, run);
+    if (completed?.partial) setSearchError?.(completed.error);
     await refetch?.();
-    return result;
+    return completed;
   } catch (error) {
     const message = describeJobsPageSearchError(error);
     setSearchError?.(message);
@@ -476,7 +671,11 @@ async function ensureFreshSearchPrompts({
     const saved = await saveSearchPromptsFn(
       generated.data.prompts.map((prompt) => ({ text: prompt.text }))
     );
-    return { ok: true, prompts: saved?.data?.prompts || generated.data.prompts };
+    return {
+      ok: true,
+      prompts: saved?.data?.prompts || generated.data.prompts,
+      regenerated: true,
+    };
   } catch (_error) {
     return { ok: false, error: AI_SEARCH_PREP_ERROR };
   }
@@ -507,6 +706,7 @@ export async function runAiWebSearchLane({
   generateSearchPrompts: generateSearchPromptsFn = generateSearchPrompts,
   saveSearchPrompts: saveSearchPromptsFn = saveSearchPrompts,
   promptIds,
+  searchExecutionId,
   refetch,
   signal,
   setStatus,
@@ -546,7 +746,8 @@ export async function runAiWebSearchLane({
 
   try {
     await runFn({
-      promptIds,
+      ...(!prep.regenerated && Array.isArray(promptIds) && promptIds.length ? { promptIds } : {}),
+      ...(searchExecutionId ? { searchExecutionId } : {}),
       signal,
       onEvent: (payload) => {
         if (!payload || typeof payload !== "object") return;
@@ -608,12 +809,24 @@ export async function runAiWebSearchLane({
     setCounts?.(doneData);
     setStatus?.("error");
     setError?.(message);
-    return { ok: false, error: message, data: doneData };
+    return { ok: false, error: message, failedPromptIds, data: doneData };
   }
+
+  const someQueriesFailed = failedPromptIds.length > 0;
+  const partialError = someQueriesFailed
+    ? doneData?.errors?.[0] ||
+      doneData?.queryResults?.find((item) => item?.status === "failed" && item?.error)?.error ||
+      `${failedPromptIds.length} AI search prompt failed.`
+    : null;
 
   setCounts?.(doneData);
   setElapsedMs?.(Date.now() - startedAt);
   setStatus?.("results");
+  if (partialError) setError?.(partialError);
   await refetch?.();
-  return { ok: true, data: doneData };
+  return {
+    ok: true,
+    ...(partialError ? { partial: true, error: partialError, failedPromptIds } : {}),
+    data: doneData,
+  };
 }
