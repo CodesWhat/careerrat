@@ -53,14 +53,14 @@ directly and never falls back to or silently switches providers. A runtime
 becomes `Ready` only after local availability, authentication, and its readiness
 check pass.
 
-v0.16.2 is the current public release. It carries the v0.16.0 provider-parity
-release and adds a beginner-friendly Claude setup path for a Mac with no AI tool.
-Protected PRs #217 and #218 merged for the v0.16.0 release, and the signed
-v0.16.0 tag points to the exact promotion merge on `main`. The GitHub release
-includes the signed, notarized, and stapled Mac DMG plus its SBOM;
-`careerrat@latest` is 0.16.2 on npm; and careerrat.com is running the production
-release. The Homebrew cask is 0.16.2. The released app installs at
-`/Applications/CareerRat.app`, reports version 0.16.2, passes Gatekeeper, and
+v0.16.3 is the current public release. It keeps Claude Code and OpenAI Codex as
+equal complete product choices, hands completed setup directly to a
+location-aware first search, keeps voluntary demographic defaults local, and
+strengthens supervised application filling without touching Submit. The GitHub
+release includes the signed, notarized, and stapled Mac DMG plus its SBOM;
+`careerrat@latest` is 0.16.3 on npm; and careerrat.com is running the production
+release. The Homebrew cask is 0.16.3. The released app installs at
+`/Applications/CareerRat.app`, reports version 0.16.3, passes Gatekeeper, and
 passed launch and visual inspection.
 
 The Windows x64 installer passed build, install, launch, export, and uninstall
