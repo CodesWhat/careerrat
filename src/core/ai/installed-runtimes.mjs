@@ -1469,6 +1469,74 @@ export function installedRuntimeSignInCommand(runtimeId) {
   return [definition.binaries[0], ...definition.signInArgs].join(" ");
 }
 
+export const CLAUDE_NATIVE_INSTALL_COMMAND = "curl -fsSL https://claude.ai/install.sh | bash";
+
+function appleScriptString(value) {
+  return `"${String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+}
+
+function claudeGuidedSetupShellScript() {
+  return [
+    "clear",
+    "printf '\\nCareerRat will set up Claude Code for you.\\n\\n'",
+    "printf 'This uses Anthropic’s official installer. Press Return when you are ready.\\n'",
+    "read -r",
+    `if ${CLAUDE_NATIVE_INSTALL_COMMAND}`,
+    "then",
+    "printf '\\nClaude Code is installed. A browser will open so you can sign in.\\n'",
+    'CLAUDE_BIN="$HOME/.local/bin/claude"',
+    'if [ ! -x "$CLAUDE_BIN" ]; then CLAUDE_BIN="$(command -v claude)"; fi',
+    'if [ -n "$CLAUDE_BIN" ]; then "$CLAUDE_BIN" auth login',
+    "else printf '\\nCareerRat could not find Claude after installation. Reopen CareerRat and try Check setup.\\n'",
+    "fi",
+    "printf '\\nReturn to CareerRat and click Check setup.\\n'",
+    "else",
+    "printf '\\nThe install did not finish. Check your internet connection and try again.\\n'",
+    "fi",
+    "printf '\\nPress Return to close this Terminal window.\\n'",
+    "read -r",
+  ].join("; ");
+}
+
+export function startInstalledRuntimeGuidedSetup(
+  runtimeId,
+  { spawnImpl = spawn, platform = process.platform } = {}
+) {
+  if (runtimeId !== "claude" || platform !== "darwin") {
+    throw runtimeError(
+      "Guided setup is only available for Claude Code on macOS.",
+      "RUNTIME_GUIDED_SETUP_UNSUPPORTED"
+    );
+  }
+
+  const terminalCommand = claudeGuidedSetupShellScript();
+  const child = spawnImpl(
+    "/usr/bin/osascript",
+    [
+      "-e",
+      'tell application "Terminal"',
+      "-e",
+      "activate",
+      "-e",
+      `do script ${appleScriptString(terminalCommand)}`,
+      "-e",
+      "end tell",
+    ],
+    {
+      shell: false,
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    }
+  );
+  child.unref?.();
+  return {
+    ok: true,
+    runtimeId,
+    installCommand: CLAUDE_NATIVE_INSTALL_COMMAND,
+  };
+}
+
 const ACTIVE_RUNTIME_SIGN_INS = new Map();
 const RUNTIME_SIGN_IN_TIMEOUT_MS = 10 * 60 * 1000;
 

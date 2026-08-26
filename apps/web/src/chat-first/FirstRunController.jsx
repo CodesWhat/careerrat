@@ -25,6 +25,8 @@ import {
 const INTERVIEW_SKILL = "ingest-profile";
 const PROFILE_BLOCK_KINDS = new Set(["authorization", "candidate_patch", "evidence_claim"]);
 const RESUME_AI_EXTENSIONS = new Set(["jpeg", "jpg", "pdf", "png", "webp"]);
+const GUIDED_SETUP_CHECK_DELAY_MS = 4_000;
+const GUIDED_SETUP_MAX_CHECKS = 150;
 
 function list(value) {
   return Array.isArray(value) ? value : [];
@@ -268,6 +270,7 @@ export function FirstRunController({
   const [editingKnowledgeSection, setEditingKnowledgeSection] = useState(null);
   const [knowledgeSaving, setKnowledgeSaving] = useState(false);
   const [engineError, setEngineError] = useState(null);
+  const [guidedSetup, setGuidedSetup] = useState(null);
   const [hostedInterest, setHostedInterest] = useState({
     status: "idle",
     email: "",
@@ -382,6 +385,42 @@ export function FirstRunController({
       cancelled = true;
     };
   }, [api, commitGraduation, updateMessages]);
+
+  useEffect(() => {
+    const runtimeId = String(guidedSetup?.runtimeId || "").trim();
+    if (!runtimeId || !["terminal_open", "sign_in_started"].includes(guidedSetup?.status)) return;
+
+    let cancelled = false;
+    let timer = null;
+    let checks = 0;
+    const checkSetup = async () => {
+      if (cancelled) return;
+      checks += 1;
+      try {
+        const nextRuntime = await api.getInstalledAiRuntimes();
+        if (cancelled) return;
+        setRuntimeState(nextRuntime);
+        const nextId =
+          effectiveRuntimeId(nextRuntime, runtimeId) || effectiveRuntimeId(nextRuntime);
+        setPendingRuntimeId(nextId);
+        const runtime = list(nextRuntime?.runtimes).find((candidate) => candidate.id === runtimeId);
+        if (runtime?.ready === true && runtime?.selectable === true) {
+          setGuidedSetup({ runtimeId, status: "ready" });
+          return;
+        }
+      } catch {
+        // The visible Check setup action reports errors. Background checks stay quiet.
+      }
+      if (!cancelled && checks < GUIDED_SETUP_MAX_CHECKS) {
+        timer = setTimeout(checkSetup, GUIDED_SETUP_CHECK_DELAY_MS);
+      }
+    };
+    timer = setTimeout(checkSetup, GUIDED_SETUP_CHECK_DELAY_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [api, guidedSetup?.runtimeId, guidedSetup?.status]);
 
   useEffect(() => {
     if (stage !== "chat" || startedRef.current) return;
@@ -990,6 +1029,34 @@ export function FirstRunController({
     }
   }
 
+  async function startGuidedSetup(runtimeId) {
+    setSubmitting(true);
+    setEngineError(null);
+    try {
+      await api.startInstalledAiRuntimeGuidedSetup(runtimeId);
+      setGuidedSetup({ runtimeId, status: "terminal_open" });
+    } catch (error) {
+      setEngineError(
+        error?.body?.error || error?.message || "CareerRat could not open the setup Terminal."
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function startEngineSignIn(runtimeId) {
+    setSubmitting(true);
+    setEngineError(null);
+    try {
+      await api.startInstalledAiRuntimeSignIn(runtimeId);
+      setGuidedSetup({ runtimeId, status: "sign_in_started" });
+    } catch (error) {
+      setEngineError(error?.body?.error || error?.message || "CareerRat could not start sign-in.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function submitHostedInterest() {
     const email = String(hostedInterest.email || "").trim();
     if (!email || hostedInterest.status === "submitting") return;
@@ -1025,6 +1092,7 @@ export function FirstRunController({
         selected: choice.id === pendingRuntimeId,
       }))}
       error={engineError}
+      guidedSetup={guidedSetup}
       messages={messages}
       knowledge={knowledge.items}
       progress={knowledge.progress}
@@ -1038,6 +1106,8 @@ export function FirstRunController({
       onStartInterview={startInterview}
       onRetryEngine={(runtimeId) => refreshRuntime(runtimeId)}
       onRefreshEngines={refreshEngines}
+      onStartGuidedSetup={startGuidedSetup}
+      onStartEngineSignIn={startEngineSignIn}
       onOpenSettings={openSettings}
       hostedInterest={hostedInterest}
       onHostedInterestStart={() =>

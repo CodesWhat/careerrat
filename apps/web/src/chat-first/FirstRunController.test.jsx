@@ -141,6 +141,8 @@ function createApi(draft = { transcript: [] }) {
     sendChatMessage: vi.fn().mockResolvedValue({ accepted: true }),
     startChat: vi.fn(),
     startFirstSearchRun: vi.fn(),
+    startInstalledAiRuntimeGuidedSetup: vi.fn().mockResolvedValue({ ok: true }),
+    startInstalledAiRuntimeSignIn: vi.fn().mockResolvedValue({ ok: true }),
   };
 }
 
@@ -413,6 +415,95 @@ describe("FirstRunController chat event reconciliation", () => {
     expect(api.getInstalledAiRuntimes).toHaveBeenCalledTimes(callsBeforeRetry + 1);
     expect(api.probeInstalledAiRuntime).not.toHaveBeenCalled();
     expect(view.props.engines).toEqual([]);
+  });
+
+  it("opens the guided Claude installer and explains the next step", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi({ transcript: [] });
+    api.getInstalledAiRuntimes.mockResolvedValue({
+      selectedId: null,
+      providerFallback: false,
+      runtimes: [],
+    });
+    let view = await bootController(module, api, { startInterview: false });
+
+    await view.props.onStartGuidedSetup("claude");
+    view = rerender(module, api);
+
+    expect(api.startInstalledAiRuntimeGuidedSetup).toHaveBeenCalledWith("claude");
+    expect(view.props.guidedSetup).toEqual({
+      runtimeId: "claude",
+      status: "terminal_open",
+    });
+  });
+
+  it("starts browser sign-in directly from the engine picker", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi({ transcript: [] });
+    api.getInstalledAiRuntimes.mockResolvedValue({
+      selectedId: null,
+      providerFallback: false,
+      runtimes: [
+        {
+          id: "claude",
+          name: "Claude Code",
+          supported: true,
+          available: true,
+          ready: false,
+          selectable: false,
+          status: "authentication_required",
+          action: "start_sign_in",
+        },
+      ],
+    });
+    let view = await bootController(module, api, { startInterview: false });
+
+    await view.props.onStartEngineSignIn("claude");
+    view = rerender(module, api);
+
+    expect(api.startInstalledAiRuntimeSignIn).toHaveBeenCalledWith("claude");
+    expect(view.props.guidedSetup).toEqual({
+      runtimeId: "claude",
+      status: "sign_in_started",
+    });
+  });
+
+  it("automatically notices when guided Claude setup becomes ready", async () => {
+    vi.useFakeTimers();
+    try {
+      const module = await import("./FirstRunController.jsx");
+      const api = createApi({ transcript: [] });
+      api.getInstalledAiRuntimes
+        .mockResolvedValueOnce({ selectedId: null, providerFallback: false, runtimes: [] })
+        .mockResolvedValue({
+          selectedId: "claude",
+          providerFallback: false,
+          runtimes: [
+            {
+              id: "claude",
+              name: "Claude Code",
+              supported: true,
+              available: true,
+              ready: true,
+              selectable: true,
+              capabilityTier: "task_tools",
+              capabilities: FULL_RUNTIME_CAPABILITIES,
+            },
+          ],
+        });
+      let view = await bootController(module, api, { startInterview: false });
+
+      await view.props.onStartGuidedSetup("claude");
+      view = rerender(module, api);
+      await flushEffects();
+      await vi.advanceTimersByTimeAsync(4_000);
+      view = rerender(module, api);
+
+      expect(view.props.guidedSetup).toEqual({ runtimeId: "claude", status: "ready" });
+      expect(view.props.engines[0]).toMatchObject({ id: "claude", selected: true, ready: true });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("reconnects from the last observed event after a posted answer", async () => {

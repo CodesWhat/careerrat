@@ -6,6 +6,7 @@ import {
   isSupportedInstalledRuntime,
   probeCustomRuntimeCommand,
   probeInstalledRuntime,
+  startInstalledRuntimeGuidedSetup,
   startInstalledRuntimeSignIn,
 } from "../core/ai/installed-runtimes.mjs";
 import {
@@ -204,7 +205,9 @@ export function mountInstalledRuntimeRoutes({
   detectImpl = detectInstalledRuntimes,
   probeImpl = probeInstalledRuntime,
   startSignInImpl = startInstalledRuntimeSignIn,
+  startGuidedSetupImpl = startInstalledRuntimeGuidedSetup,
   probeCustomImpl = probeCustomRuntimeCommand,
+  platform = process.platform,
 } = {}) {
   const inspect = (autoSelect = true) =>
     inspectInstalledRuntimeState({
@@ -348,6 +351,56 @@ export function mountInstalledRuntimeRoutes({
       });
     } catch {
       sendJson(res, 500, { ok: false, code: "RUNTIME_SIGN_IN_FAILED" });
+    }
+  });
+
+  addRoute("POST", "/api/settings/ai-runtime/guided-setup", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+    } catch (error) {
+      sendJson(res, error.status || 400, { ok: false, error: error.message });
+      return;
+    }
+    if (env.CAREERRAT_DESKTOP_CLI_ONLY !== "1" || platform !== "darwin") {
+      sendJson(res, 409, {
+        ok: false,
+        code: "RUNTIME_GUIDED_SETUP_UNAVAILABLE",
+        error: "Guided setup is available in the CareerRat app on macOS.",
+      });
+      return;
+    }
+    const runtimeId = String(body?.runtimeId || "").trim();
+    if (runtimeId !== "claude") {
+      sendJson(res, 409, {
+        ok: false,
+        code: "RUNTIME_GUIDED_SETUP_UNSUPPORTED",
+        error: "Guided setup is currently available for Claude Code.",
+      });
+      return;
+    }
+    const runtime = detectImpl({ env }).find(({ id }) => id === runtimeId);
+    if (runtime?.available) {
+      sendJson(res, 409, {
+        ok: false,
+        code: "RUNTIME_ALREADY_INSTALLED",
+        error: "Claude Code is already installed. Sign in instead.",
+      });
+      return;
+    }
+    try {
+      const started = startGuidedSetupImpl(runtimeId, { platform }) || {};
+      sendJson(res, 202, {
+        ok: true,
+        runtimeId,
+        installCommand: started.installCommand,
+      });
+    } catch (error) {
+      sendJson(res, 500, {
+        ok: false,
+        code: error?.code || "RUNTIME_GUIDED_SETUP_FAILED",
+        error: "CareerRat could not open the guided setup Terminal.",
+      });
     }
   });
 

@@ -41,8 +41,9 @@ The current macOS release is a signed and notarized Apple Silicon app for macOS
 12 or newer.
 
 1. [Download the latest `.dmg`](https://github.com/CodesWhat/careerrat/releases/latest).
-2. Install and sign in to a supported local AI CLI.
-3. Open CareerRat and choose a ready engine.
+2. Open CareerRat.
+3. Choose Claude Code or Codex if it is ready. If neither is installed, CareerRat
+   walks you through getting Claude, installing it in Terminal, and signing in.
 
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) and
 [OpenAI Codex](https://developers.openai.com/codex/cli/) are CareerRat's only
@@ -52,14 +53,14 @@ directly and never falls back to or silently switches providers. A runtime
 becomes `Ready` only after local availability, authentication, and its readiness
 check pass.
 
-v0.16.1 is the current public release. It carries the v0.16.0 provider-parity
-release with a small hosted-access alignment fix and calmer website spacing.
+v0.16.2 is the current public release. It carries the v0.16.0 provider-parity
+release and adds a beginner-friendly Claude setup path for a Mac with no AI tool.
 Protected PRs #217 and #218 merged for the v0.16.0 release, and the signed
 v0.16.0 tag points to the exact promotion merge on `main`. The GitHub release
 includes the signed, notarized, and stapled Mac DMG plus its SBOM;
-`careerrat@latest` is 0.16.1 on npm; and careerrat.com is running the production
-release. The Homebrew cask is 0.16.1. The released app installs at
-`/Applications/CareerRat.app`, reports version 0.16.1, passes Gatekeeper, and
+`careerrat@latest` is 0.16.2 on npm; and careerrat.com is running the production
+release. The Homebrew cask is 0.16.2. The released app installs at
+`/Applications/CareerRat.app`, reports version 0.16.2, passes Gatekeeper, and
 passed launch and visual inspection.
 
 The Windows x64 installer passed build, install, launch, export, and uninstall
@@ -72,6 +73,15 @@ resizable, maximizable, and supports full screen, with a minimum working size of
 1100 by 680. There is no mobile app or Intel Mac build.
 
 ## First run
+
+If CareerRat does not find Claude Code or Codex, it gives you one recommended
+Claude path in plain English. Claude Code needs a paid Claude plan. Pro is
+enough; Max provides more usage. You can
+[get Claude through Scott's referral](https://claude.ai/referral/rOLHwxlsfA),
+then click **Open guided Terminal** for Anthropic's official installer.
+Press Return there, finish sign-in in the browser, and return to CareerRat. The
+app checks for Claude in the background and also keeps a visible **Check setup**
+button. Already use Codex? Expand **I already use another AI tool** instead.
 
 Choose the available AI engine, then drop a PDF, DOCX, image, or text resume into
 the conversation, or just start talking. Paul fills in “What Paul knows” beside

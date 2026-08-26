@@ -37,6 +37,7 @@ import {
   runInstalledRuntime,
   runInstalledRuntimeStream,
   runtimeSearchDirectories,
+  startInstalledRuntimeGuidedSetup,
   startInstalledRuntimeSignIn,
   stopInstalledRuntimeSignIns,
   supportsInstalledRuntimeStreaming,
@@ -1254,6 +1255,41 @@ test("runtime sign-in starts the resolved CLI directly without a shell or termin
   assert.equal(calls[0].options.detached, true);
   stopInstalledRuntimeSignIns();
   assert.deepEqual(calls.at(-1), { signal: "SIGTERM" });
+});
+
+test("guided Claude setup opens a fixed beginner script in macOS Terminal", () => {
+  const calls = [];
+  const child = { unref() {} };
+  const result = startInstalledRuntimeGuidedSetup("claude", {
+    platform: "darwin",
+    spawnImpl(command, args, options) {
+      calls.push({ command, args, options });
+      return child;
+    },
+  });
+
+  assert.equal(result.runtimeId, "claude");
+  assert.equal(result.installCommand, "curl -fsSL https://claude.ai/install.sh | bash");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, "/usr/bin/osascript");
+  assert.equal(calls[0].options.shell, false);
+  assert.equal(calls[0].options.detached, true);
+  assert.equal(calls[0].options.stdio, "ignore");
+  const script = calls[0].args.join("\n");
+  assert.match(script, /curl -fsSL https:\/\/claude\.ai\/install\.sh \| bash/);
+  assert.match(script, /read -r/);
+  assert.match(script, /\$HOME\/\.local\/bin\/claude.*auth login/);
+  assert.match(script, /Return to CareerRat and click Check setup/);
+  assert.doesNotMatch(script, /referral\/rOLHwxlsfA/);
+});
+
+test("guided runtime setup is limited to Claude on macOS", () => {
+  assert.throws(() => startInstalledRuntimeGuidedSetup("codex", { platform: "darwin" }), {
+    code: "RUNTIME_GUIDED_SETUP_UNSUPPORTED",
+  });
+  assert.throws(() => startInstalledRuntimeGuidedSetup("claude", { platform: "win32" }), {
+    code: "RUNTIME_GUIDED_SETUP_UNSUPPORTED",
+  });
 });
 
 test("runtime sign-in exposes only accepted product engines", () => {

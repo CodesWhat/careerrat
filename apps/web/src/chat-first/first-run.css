@@ -276,6 +276,119 @@ button.cf-first-run__engine-choice:not(.is-selected):hover {
   font-size: 13px;
 }
 
+.cf-first-run__beginner-setup {
+  display: grid;
+  overflow: hidden;
+  border: 1.5px solid var(--line-cool);
+  border-radius: var(--r-card);
+  background: var(--white);
+  grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1.7fr);
+}
+
+.cf-first-run__beginner-heading {
+  padding: 28px;
+  background: var(--tint-cool);
+}
+
+.cf-first-run__beginner-kicker {
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: var(--ls-eyebrow-wide);
+}
+
+.cf-first-run__beginner-heading h2 {
+  margin: 12px 0 8px;
+  font-size: 25px;
+  line-height: 1.08;
+}
+
+.cf-first-run__beginner-heading p,
+.cf-first-run__setup-steps p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.cf-first-run__setup-steps {
+  display: grid;
+  margin: 0;
+  padding: 10px 26px;
+  list-style: none;
+}
+
+.cf-first-run__setup-steps li {
+  display: grid;
+  padding: 15px 0;
+  border-bottom: 1px solid var(--line-warm);
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.cf-first-run__setup-steps li:last-child {
+  border-bottom: 0;
+}
+
+.cf-first-run__setup-number {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--line-cool-2);
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 800;
+  place-items: center;
+}
+
+.cf-first-run__setup-steps li > div {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.cf-first-run__setup-steps strong {
+  font-size: 15px;
+}
+
+.cf-first-run__setup-steps a {
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 800;
+}
+
+.cf-first-run__setup-steps code {
+  max-width: 100%;
+  padding: 7px 10px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--canvas);
+  color: var(--ink-soft);
+  font-family: var(--font);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cf-first-run__engine .cf-first-run__guided-action {
+  padding: 9px 14px;
+  border: 0;
+  border-radius: var(--r-row);
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.cf-first-run__engine .cf-first-run__guided-action:disabled {
+  background: var(--line-cool-2);
+  color: var(--gray-dim);
+  cursor: default;
+}
+
 .cf-first-run__engine-missing,
 .cf-first-run__engine-special {
   width: 100%;
@@ -488,6 +601,7 @@ button.cf-first-run__engine-choice:not(.is-selected):hover {
 .cf-first-run__engine-action:focus-visible,
 .cf-first-run__hosted-trigger:focus-visible,
 .cf-first-run__hosted-form button:focus-visible,
+.cf-first-run__guided-action:focus-visible,
 .cf-first-run__engine-missing summary:focus-visible {
   outline: var(--cf-focus-ring-compact);
   outline-offset: 2px;

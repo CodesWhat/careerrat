@@ -219,6 +219,13 @@ export function startInstalledAiRuntimeSignIn(runtimeId) {
   });
 }
 
+export function startInstalledAiRuntimeGuidedSetup(runtimeId) {
+  return apiFetch("/api/settings/ai-runtime/guided-setup", {
+    method: "POST",
+    body: JSON.stringify({ runtimeId }),
+  });
+}
+
 export function selectInstalledAiRuntime({ runtimeId, providerFallback = false } = {}) {
   return apiFetch("/api/settings/ai-runtime/select", {
     method: "POST",

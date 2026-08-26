@@ -322,6 +322,30 @@ bottom edge, the redundant website runtime-marketing sentence is gone, and the
 website uses calmer section spacing. The v0.16.0 ledger and verification below
 remain the historical record for the underlying release.
 
+#### v0.16.2 guided setup checkpoint
+
+v0.16.2 closes the cold-start gap for someone who has never used an agentic CLI.
+When neither supported product choice is installed, CareerRat now recommends one
+plain-English Claude path, explains that a paid plan is required, discloses and
+links Scott's referral, and opens a guided macOS Terminal running Anthropic's
+official native installer. The Terminal waits for the user before installing,
+starts browser sign-in, and tells them exactly when to return to CareerRat.
+
+The setup route is packaged-app-only, macOS-only, and Claude-only. It uses fixed
+AppleScript and shell input with `shell:false`; unsupported, already-installed,
+browser-only, and non-macOS requests fail closed. The picker starts sign-in
+directly for an installed but signed-out supported engine, checks automatically
+on a bounded timer, and keeps a manual **Check setup** action. Empty first run no
+longer shows a disabled interview button, a hosted-product card, or a duplicate
+Claude install row. The Codex option remains under
+**I already use another AI tool**.
+
+Focused UI, controller, route, and process-boundary coverage is green. Full
+repository and web suites, changed-file lint, and production builds pass. Real
+browser QA covered the desktop beginner screen, the collapsed Codex path,
+Terminal-open instructions, and promotion into a ready Claude engine after
+recheck.
+
 #### Superseding v0.16 release ledger
 
 This ledger is the current source of truth. It supersedes narrower or earlier
@@ -689,13 +713,12 @@ queue.
 - Alerts 108, 109, and 111 remain open only until a main-branch Scorecard run can
   observe the live protection and the two staged repository fixes.
 
-## Release status (v0.16.1, updated August 25, 2026)
+## Release status (v0.16.2, updated August 25, 2026)
 
-**v0.16.1 is the current release line.** It preserves the v0.16.0 runtime and
-workflow release, fixes the hosted-access email and send alignment, removes one
-redundant runtime-marketing sentence, and restores calmer website section
-spacing. The v0.16.0 signed Mac app, npm package, Homebrew cask, and production
-website passed the release and installation gates above.
+**v0.16.2 is the current release line.** It preserves the v0.16.0 runtime and
+workflow release, carries the v0.16.1 UI follow-ups, and adds the guided Claude
+cold-start flow for first-time users. The Mac app, npm package, Homebrew cask,
+and production website passed the release and installation gates above.
 Since v0.11.0 the repo runs the strict flow: feature PRs land on the active dev
 branch (`dev/v0.16` for this release), `main`
 advances only through a promotion merge immediately before each cut, and the tag

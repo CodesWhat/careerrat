@@ -59,6 +59,8 @@ function boot({
   probes,
   env = { CAREERRAT_DESKTOP_SHELL: "1" },
   startSignInImpl,
+  startGuidedSetupImpl,
+  platform,
   probeCustomImpl,
   onProbe,
 }) {
@@ -74,6 +76,8 @@ function boot({
       return probes[runtime.id];
     },
     startSignInImpl,
+    startGuidedSetupImpl,
+    platform,
     probeCustomImpl,
   });
   return { routes, repoRoot, env };
@@ -581,6 +585,80 @@ test("sign-in rejects an unknown runtime id without starting a process", async (
 
   assert.equal(response.status, 400);
   assert.deepEqual(response.body, { ok: false, code: "RUNTIME_NOT_AVAILABLE" });
+  assert.deepEqual(started, []);
+});
+
+test("desktop zero-runtime setup opens the allowlisted Claude guide", async () => {
+  const started = [];
+  const server = boot({
+    inventory: INVENTORY.map((runtime) => ({ ...runtime, available: false, path: null })),
+    probes: {},
+    env: { CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+    platform: "darwin",
+    startGuidedSetupImpl: (runtimeId) => {
+      started.push(runtimeId);
+      return {
+        runtimeId,
+        installCommand: "curl -fsSL https://claude.ai/install.sh | bash",
+      };
+    },
+  });
+
+  const response = await request(server, "POST", "/api/settings/ai-runtime/guided-setup", {
+    runtimeId: "claude",
+  });
+
+  assert.equal(response.status, 202);
+  assert.equal(response.body.runtimeId, "claude");
+  assert.equal(response.body.installCommand, "curl -fsSL https://claude.ai/install.sh | bash");
+  assert.deepEqual(started, ["claude"]);
+});
+
+test("guided setup rejects unsupported, installed, and non-desktop requests", async () => {
+  const started = [];
+  const options = {
+    probes: {},
+    platform: "darwin",
+    startGuidedSetupImpl: (runtimeId) => started.push(runtimeId),
+  };
+  const unsupported = boot({
+    ...options,
+    inventory: INVENTORY.map((runtime) => ({ ...runtime, available: false, path: null })),
+    env: { CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+  });
+  const unsupportedResponse = await request(
+    unsupported,
+    "POST",
+    "/api/settings/ai-runtime/guided-setup",
+    { runtimeId: "codex" }
+  );
+  assert.equal(unsupportedResponse.status, 409);
+  assert.equal(unsupportedResponse.body.code, "RUNTIME_GUIDED_SETUP_UNSUPPORTED");
+
+  const installed = boot({
+    ...options,
+    inventory: INVENTORY,
+    env: { CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+  });
+  const installedResponse = await request(
+    installed,
+    "POST",
+    "/api/settings/ai-runtime/guided-setup",
+    { runtimeId: "claude" }
+  );
+  assert.equal(installedResponse.status, 409);
+  assert.equal(installedResponse.body.code, "RUNTIME_ALREADY_INSTALLED");
+
+  const browser = boot({
+    ...options,
+    inventory: INVENTORY.map((runtime) => ({ ...runtime, available: false, path: null })),
+    env: {},
+  });
+  const browserResponse = await request(browser, "POST", "/api/settings/ai-runtime/guided-setup", {
+    runtimeId: "claude",
+  });
+  assert.equal(browserResponse.status, 409);
+  assert.equal(browserResponse.body.code, "RUNTIME_GUIDED_SETUP_UNAVAILABLE");
   assert.deepEqual(started, []);
 });
 

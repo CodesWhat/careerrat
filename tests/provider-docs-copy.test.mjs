@@ -46,7 +46,7 @@ test("public setup docs expose the neutral direct Claude Code and Codex contract
   );
 });
 
-test("v0.16.1 docs record the hotfix and preserve v0.16.0 release evidence", async () => {
+test("v0.16.2 docs record guided setup and preserve v0.16.0 release evidence", async () => {
   const [changelog, roadmap, readme, install] = await Promise.all([
     readFile("CHANGELOG.md", "utf8"),
     readFile("docs/ROADMAP.md", "utf8"),
@@ -54,7 +54,11 @@ test("v0.16.1 docs record the hotfix and preserve v0.16.0 release evidence", asy
     readFile("apps/docs/content/docs/getting-started/install.mdx", "utf8"),
   ]);
 
-  assert.match(changelog, /^## \[0\.16\.1\] - 2026-08-25/m);
+  assert.match(changelog, /^## \[0\.16\.2\] - 2026-08-25/m);
+  assert.match(changelog, /plain-English Claude setup path/i);
+  assert.match(changelog, /Scott's disclosed Claude referral/i);
+  assert.match(changelog, /Anthropic's official native installer/i);
+  assert.match(changelog, /checks automatically until Claude Code is ready/i);
   assert.match(changelog, /hosted-access email field and send action/i);
   assert.match(changelog, /runtime-marketing sentence/i);
   assert.match(changelog, /calmer vertical spacing/i);
@@ -83,6 +87,10 @@ test("v0.16.1 docs record the hotfix and preserve v0.16.0 release evidence", asy
 
   assert.match(roadmap, /Superseding v0\.16 release ledger/i);
   assert.match(roadmap, /v0\.16\.1 hotfix checkpoint/i);
+  assert.match(roadmap, /v0\.16\.2 guided setup checkpoint/i);
+  assert.match(roadmap, /never used an agentic CLI/i);
+  assert.match(roadmap, /packaged-app-only, macOS-only, and Claude-only/i);
+  assert.match(roadmap, /I already use another AI tool/i);
   assert.match(roadmap, /hosted-access email and send controls/i);
   assert.match(roadmap, /website runtime-marketing sentence/i);
   assert.match(roadmap, /calmer section spacing/i);
@@ -104,7 +112,7 @@ test("v0.16.1 docs record the hotfix and preserve v0.16.0 release evidence", asy
   assert.doesNotMatch(roadmap, /Publication pending/i);
 
   for (const publicCopy of [readme, install]) {
-    assert.match(publicCopy, /v0\.16\.1 is the current public release/i);
+    assert.match(publicCopy, /v0\.16\.2 is the current public release/i);
     assert.match(publicCopy, /v0\.16\.0 provider-parity\s+release/i);
     assert.match(publicCopy, /protected PRs #217 and #218 merged/i);
     assert.match(
@@ -112,9 +120,11 @@ test("v0.16.1 docs record the hotfix and preserve v0.16.0 release evidence", asy
       /signed\s+v0\.16\.0 tag points to the exact promotion merge on `main`/i
     );
     assert.match(publicCopy, /signed, notarized, and stapled Mac DMG/i);
-    assert.match(publicCopy, /careerrat@latest` is 0\.16\.1/i);
-    assert.match(publicCopy, /Homebrew cask is 0\.16\.1/i);
-    assert.match(publicCopy, /reports version 0\.16\.1/i);
+    assert.match(publicCopy, /careerrat@latest` is 0\.16\.2/i);
+    assert.match(publicCopy, /Homebrew cask is 0\.16\.2/i);
+    assert.match(publicCopy, /reports version 0\.16\.2/i);
+    assert.match(publicCopy, /Scott's (?:disclosed )?referral/i);
+    assert.match(publicCopy, /Open guided Terminal/i);
     assert.match(publicCopy, /passes Gatekeeper[^.]*launch and visual inspection/i);
     assert.match(
       publicCopy,

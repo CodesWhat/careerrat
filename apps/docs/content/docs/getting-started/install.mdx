@@ -23,12 +23,18 @@ install it with Homebrew:
 brew install --cask codeswhat/tap/careerrat
 ```
 
-The app is not self-contained. Install and sign in to a supported local AI CLI:
+CareerRat needs one supported local AI tool. If neither is installed, the Mac app
+walks a first-time user through the Claude path itself:
 
-- `npm install -g @anthropic-ai/claude-code`
-  ([claude.com/claude-code](https://claude.com/claude-code))
-- `npm install -g @openai/codex`
-  ([developers.openai.com/codex/cli](https://developers.openai.com/codex/cli/))
+1. Get a paid Claude plan. Pro is enough; Max provides more usage. You can use
+   [Scott's disclosed referral](https://claude.ai/referral/rOLHwxlsfA).
+2. Click **Open guided Terminal**. CareerRat opens Anthropic's official native
+   installer and waits for you to press Return.
+3. Finish Claude sign-in in the browser and return to CareerRat. The app checks
+   automatically and also provides **Check setup**.
+
+Already use Codex? Expand **I already use another AI tool** and follow its
+[official install guide](https://developers.openai.com/codex/cli/).
 
 Claude Code and OpenAI Codex are the two supported product choices. Both run the
 same CareerRat-owned workflows and skills against the same durable local state.
@@ -36,14 +42,14 @@ The packaged app invokes the selected installed CLI directly and never falls
 back to or silently switches providers. A runtime becomes `Ready` only after
 local availability, authentication, and its readiness check pass.
 
-v0.16.1 is the current public release. It carries the v0.16.0 provider-parity
-release with a small hosted-access alignment fix and calmer website spacing.
+v0.16.2 is the current public release. It carries the v0.16.0 provider-parity
+release and adds a beginner-friendly Claude setup path for a Mac with no AI tool.
 Protected PRs #217 and #218 merged for the v0.16.0 release, and the signed
 v0.16.0 tag points to the exact promotion merge on `main`. The GitHub release
 includes the signed, notarized, and stapled Mac DMG plus its SBOM;
-`careerrat@latest` is 0.16.1 on npm; and careerrat.com is running the production
-release. The Homebrew cask is 0.16.1. The released app installs at
-`/Applications/CareerRat.app`, reports version 0.16.1, passes Gatekeeper, and
+`careerrat@latest` is 0.16.2 on npm; and careerrat.com is running the production
+release. The Homebrew cask is 0.16.2. The released app installs at
+`/Applications/CareerRat.app`, reports version 0.16.2, passes Gatekeeper, and
 passed launch and visual inspection.
 
 Open the app and it scaffolds your workspace, boots the local app at
