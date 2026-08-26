@@ -152,32 +152,32 @@ async function flushEffects() {
   for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
 }
 
-async function bootController(module, api, { startInterview = true } = {}) {
+async function bootController(module, api, { startInterview = true, controllerProps = {} } = {}) {
   hooks.resetRender();
-  module.FirstRunController({ api, inWorkspace: false });
+  module.FirstRunController({ api, inWorkspace: false, ...controllerProps });
   await flushEffects();
 
   hooks.resetRender();
-  module.FirstRunController({ api, inWorkspace: false });
+  module.FirstRunController({ api, inWorkspace: false, ...controllerProps });
   await flushEffects();
 
   hooks.resetRender();
-  const view = module.FirstRunController({ api, inWorkspace: false });
+  const view = module.FirstRunController({ api, inWorkspace: false, ...controllerProps });
   if (!startInterview || view.props.stage !== "engine") return view;
   const selectedEngine = view.props.engines.find((engine) => engine.selected);
   if (!selectedEngine) return view;
 
   await view.props.onStartInterview(selectedEngine.id);
   hooks.resetRender();
-  module.FirstRunController({ api, inWorkspace: false });
+  module.FirstRunController({ api, inWorkspace: false, ...controllerProps });
   await flushEffects();
   hooks.resetRender();
-  return module.FirstRunController({ api, inWorkspace: false });
+  return module.FirstRunController({ api, inWorkspace: false, ...controllerProps });
 }
 
-function rerender(module, api) {
+function rerender(module, api, controllerProps = {}) {
   hooks.resetRender();
-  return module.FirstRunController({ api, inWorkspace: false });
+  return module.FirstRunController({ api, inWorkspace: false, ...controllerProps });
 }
 
 function assistantPayload(text, extra = {}) {
@@ -213,6 +213,239 @@ beforeEach(() => {
 });
 
 describe("FirstRunController chat event reconciliation", () => {
+  it("renders the local upgrade choice on the first frame from the state App already loaded", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    const upgradeState = {
+      data: {
+        "form-defaults": {
+          voluntary_self_identification: {
+            enabled: false,
+            default_action: "leave_blank",
+            confirmed_at: null,
+            answers: {},
+          },
+        },
+        setup: { readiness: { search_ready: true } },
+        sourcing: {
+          firstSearchRun: { run: { status: "completed" } },
+          sourceSetup: { deterministicSources: { attempted: 5 } },
+        },
+      },
+      setupProgress: { complete: true, completedCount: 8, total: 8, items: [] },
+    };
+
+    const view = rerender(module, api, { initialOnboardState: upgradeState });
+
+    expect(view.props.stage).toBe("voluntary-defaults");
+    expect(view.props.voluntaryDefaultsRequired).toBe(true);
+    expect(api.initOnboard).not.toHaveBeenCalled();
+    expect(api.getInstalledAiRuntimes).not.toHaveBeenCalled();
+    expect(api.getOnboardingDraft).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      runtimeName: "ready",
+      runtimeState: {
+        selectedId: "claude",
+        runtimes: [
+          {
+            id: "claude",
+            ready: true,
+            selectable: true,
+            capabilityTier: "task_tools",
+            capabilities: FULL_RUNTIME_CAPABILITIES,
+          },
+        ],
+      },
+    },
+    {
+      runtimeName: "unavailable",
+      runtimeState: {
+        selectedId: null,
+        runtimes: [
+          {
+            id: "claude",
+            ready: false,
+            selectable: false,
+            available: false,
+          },
+        ],
+      },
+    },
+  ])(
+    "loads a completed upgrade before $runtimeName runtime setup and never requires AI",
+    async ({ runtimeState }) => {
+      const module = await import("./FirstRunController.jsx");
+      const api = createApi({ transcript: [] });
+      const upgradeState = {
+        data: {
+          "form-defaults": {
+            voluntary_self_identification: {
+              enabled: false,
+              default_action: "leave_blank",
+              confirmed_at: null,
+              answers: {},
+            },
+          },
+          setup: { readiness: { search_ready: true } },
+          sourcing: {
+            firstSearchRun: { run: { status: "completed" } },
+            sourceSetup: { deterministicSources: { attempted: 5 } },
+          },
+        },
+        setupProgress: { complete: true, completedCount: 8, total: 8, items: [] },
+      };
+      api.getOnboardState.mockResolvedValue(upgradeState);
+      api.getInstalledAiRuntimes.mockResolvedValue(runtimeState);
+
+      const view = await bootController(module, api, { startInterview: false });
+
+      expect(view.props.stage).toBe("voluntary-defaults");
+      expect(view.props.voluntaryDefaultsRequired).toBe(true);
+      expect(api.getInstalledAiRuntimes).not.toHaveBeenCalled();
+      expect(api.getOnboardingDraft).not.toHaveBeenCalled();
+      expect(api.selectInstalledAiRuntime).not.toHaveBeenCalled();
+      expect(api.findChatBySkill).not.toHaveBeenCalled();
+      expect(api.startChat).not.toHaveBeenCalled();
+    }
+  );
+
+  it("treats a malformed voluntary-form confirmation as an incomplete local upgrade", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi({ transcript: [] });
+    api.getOnboardState.mockResolvedValue({
+      data: {
+        "form-defaults": {
+          voluntary_self_identification: {
+            enabled: false,
+            default_action: "leave_blank",
+            confirmed_at: "not-a-date",
+            answers: {},
+          },
+        },
+        setup: { readiness: { search_ready: true } },
+        sourcing: {
+          firstSearchRun: { run: { status: "completed" } },
+          sourceSetup: { deterministicSources: { attempted: 5 } },
+        },
+      },
+      setupProgress: { complete: true, completedCount: 8, total: 8, items: [] },
+    });
+
+    const view = await bootController(module, api, { startInterview: false });
+
+    expect(view.props.stage).toBe("voluntary-defaults");
+    expect(view.props.voluntaryDefaultsRequired).toBe(true);
+    expect(api.finishOnboarding).not.toHaveBeenCalled();
+  });
+
+  it("collects the local voluntary-form policy before onboarding graduates", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    const onComplete = vi.fn();
+    const existingAnswers = {
+      "veteran status": {
+        value: "I don't wish to answer",
+        confirmed_at: "2026-08-20T12:00:00.000Z",
+      },
+    };
+    const readyState = {
+      data: {
+        modes: { agent_name: "Paul" },
+        "form-defaults": {
+          voluntary_self_identification: {
+            enabled: false,
+            default_action: "leave_blank",
+            confirmed_at: null,
+            answers: existingAnswers,
+          },
+        },
+        setup: { readiness: { search_ready: true } },
+        sourcing: {
+          firstSearchRun: { run: { status: "completed" } },
+          sourceSetup: { deterministicSources: { attempted: 5 } },
+        },
+      },
+      setupProgress: { complete: true, completedCount: 8, total: 8, items: [] },
+    };
+    const confirmedState = {
+      ...readyState,
+      data: {
+        ...readyState.data,
+        "form-defaults": {
+          voluntary_self_identification: {
+            enabled: false,
+            default_action: "leave_blank",
+            confirmed_at: "2026-08-26T16:00:00.000Z",
+            answers: existingAnswers,
+          },
+        },
+      },
+    };
+    api.getOnboardState.mockResolvedValueOnce(readyState).mockResolvedValue(confirmedState);
+
+    let view = await bootController(module, api, {
+      startInterview: false,
+      controllerProps: { onComplete },
+    });
+
+    expect(view.props.voluntaryDefaultsRequired).toBe(true);
+    expect(api.finishOnboarding).not.toHaveBeenCalled();
+
+    await view.props.onChooseVoluntaryDefaults("leave_blank");
+    view = rerender(module, api, { onComplete });
+
+    expect(api.saveCandidateFile).toHaveBeenCalledOnce();
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("form-defaults", {
+      voluntary_self_identification: {
+        enabled: false,
+        default_action: "leave_blank",
+        confirmed_at: expect.any(String),
+        answers: existingAnswers,
+      },
+    });
+    expect(
+      Date.parse(api.saveCandidateFile.mock.calls[0][1].voluntary_self_identification.confirmed_at)
+    ).not.toBeNaN();
+    expect(view.props.voluntaryDefaultsRequired).toBe(false);
+    expect(api.finishOnboarding).toHaveBeenCalledOnce();
+    expect(onComplete).toHaveBeenCalledOnce();
+    expect(api.sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("keeps the voluntary-defaults prompt open with the save failure", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    api.getOnboardState.mockResolvedValue({
+      data: {
+        "form-defaults": {
+          voluntary_self_identification: {
+            enabled: false,
+            default_action: "leave_blank",
+            confirmed_at: null,
+            answers: {},
+          },
+        },
+        setup: { readiness: { search_ready: true } },
+        sourcing: { firstSearchRun: { run: { status: "completed" } } },
+      },
+      setupProgress: { complete: true, completedCount: 8, total: 8, items: [] },
+    });
+    api.saveCandidateFile.mockRejectedValue(
+      new Error("That application default could not be saved.")
+    );
+
+    let view = await bootController(module, api, { startInterview: false });
+    await view.props.onChooseVoluntaryDefaults("leave_blank");
+    view = rerender(module, api);
+
+    expect(view.props.stage).toBe("voluntary-defaults");
+    expect(view.props.voluntaryDefaultsRequired).toBe(true);
+    expect(view.props.error).toBe("That application default could not be saved.");
+  });
+
   it("commits onboarding before releasing a completed setup into the workspace", async () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi();
@@ -220,6 +453,11 @@ describe("FirstRunController chat event reconciliation", () => {
     api.getOnboardState.mockResolvedValue({
       data: {
         modes: { agent_name: "Paul" },
+        "form-defaults": {
+          voluntary_self_identification: {
+            confirmed_at: "2026-08-25T12:00:00.000Z",
+          },
+        },
         setup: { readiness: { search_ready: true } },
         sourcing: {
           firstSearchRun: { run: { status: "completed" } },
@@ -235,6 +473,7 @@ describe("FirstRunController chat event reconciliation", () => {
 
     expect(api.finishOnboarding).toHaveBeenCalledOnce();
     expect(onComplete).toHaveBeenCalledOnce();
+    expect(rerender(module, api, { onComplete }).props.voluntaryDefaultsRequired).toBe(false);
     expect(api.finishOnboarding.mock.invocationCallOrder[0]).toBeLessThan(
       onComplete.mock.invocationCallOrder[0]
     );
@@ -252,6 +491,11 @@ describe("FirstRunController chat event reconciliation", () => {
     api.getOnboardState.mockResolvedValue({
       data: {
         modes: { agent_name: "Paul" },
+        "form-defaults": {
+          voluntary_self_identification: {
+            confirmed_at: "2026-08-25T12:00:00.000Z",
+          },
+        },
         setup: { readiness: { search_ready: true } },
         sourcing: {
           firstSearchRun: {
@@ -275,7 +519,7 @@ describe("FirstRunController chat event reconciliation", () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi();
     api.startFirstSearchRun.mockResolvedValue({ ok: true });
-    api.getOnboardState.mockResolvedValue({
+    const completeChangedState = {
       data: {
         modes: { agent_name: "Paul" },
         setup: { readiness: { search_ready: true } },
@@ -288,7 +532,28 @@ describe("FirstRunController chat event reconciliation", () => {
         },
       },
       setupProgress: { complete: true, completedCount: 8, total: 8, items: [] },
-    });
+    };
+    const unfinishedState = {
+      ...completeChangedState,
+      setupProgress: { complete: false, completedCount: 7, total: 8, items: [] },
+    };
+    const refreshedState = {
+      ...completeChangedState,
+      data: {
+        ...completeChangedState.data,
+        sourcing: {
+          ...completeChangedState.data.sourcing,
+          firstSearchRun: {
+            inputsChanged: false,
+            run: { status: "completed" },
+          },
+        },
+      },
+    };
+    api.getOnboardState
+      .mockResolvedValueOnce(unfinishedState)
+      .mockResolvedValueOnce(completeChangedState)
+      .mockResolvedValue(refreshedState);
 
     await bootController(module, api, { startInterview: false });
     sse.calls.at(-1).options.onEvent("chat_state", JSON.stringify({ state: "idle" }), {});
@@ -296,6 +561,271 @@ describe("FirstRunController chat event reconciliation", () => {
 
     expect(api.startFirstSearchRun).toHaveBeenCalledOnce();
   });
+
+  it("offers an explicit retry when completed setup restores a failed first search", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    const failedState = {
+      data: {
+        modes: { agent_name: "Paul" },
+        "form-defaults": {
+          voluntary_self_identification: {
+            confirmed_at: "2026-08-25T12:00:00.000Z",
+          },
+        },
+        setup: { readiness: { search_ready: true } },
+        sourcing: {
+          firstSearchRun: { run: { status: "failed" } },
+          sourceSetup: { deterministicSources: { attempted: 5 } },
+        },
+      },
+      setupProgress: { complete: true, completedCount: 8, total: 8, items: [] },
+    };
+    api.getOnboardState.mockResolvedValue(failedState);
+
+    const view = await bootController(module, api, { startInterview: false });
+
+    expect(api.startFirstSearchRun).not.toHaveBeenCalled();
+    expect(api.finishOnboarding).not.toHaveBeenCalled();
+    expect(view.props.onRetrySearch).toBeTypeOf("function");
+  });
+
+  it("does not retry a failed search during hidden incomplete-setup refreshes", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    const failedIncompleteState = {
+      data: {
+        modes: { agent_name: "Paul" },
+        setup: { readiness: { search_ready: true } },
+        sourcing: {
+          firstSearchRun: { run: { id: "first-search-failed", status: "failed" } },
+          sourceSetup: { deterministicSources: { attempted: 5 } },
+        },
+      },
+      setupProgress: { complete: false, completedCount: 5, total: 8, items: [] },
+    };
+    api.getOnboardState.mockResolvedValue(failedIncompleteState);
+    api.startFirstSearchRun.mockResolvedValue({ ok: true });
+
+    const view = await bootController(module, api, { startInterview: false });
+    sse.calls.at(-1).options.onEvent("chat_state", JSON.stringify({ state: "idle" }), {});
+    await flushEffects();
+
+    expect(api.startFirstSearchRun).not.toHaveBeenCalled();
+    expect(view.props.onRetrySearch).toBeUndefined();
+  });
+
+  it("keeps a saved profile edit successful when its follow-on search kickoff fails", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    let view = await bootController(module, api);
+    api.getOnboardState.mockResolvedValue({
+      data: {
+        modes: { agent_name: "Paul" },
+        setup: { readiness: { search_ready: true } },
+        sourcing: {
+          firstSearchRun: { run: { status: "not_started" } },
+          sourceSetup: { deterministicSources: { attempted: 5 } },
+        },
+      },
+      setupProgress: { complete: true, completedCount: 8, total: 8, items: [] },
+    });
+    api.startFirstSearchRun.mockRejectedValue(new Error("Search provider is temporarily down"));
+
+    await expect(
+      view.props.onSaveKnowledgeSection(
+        { id: "guardrails", label: "Guardrails" },
+        { signals: "Crypto" }
+      )
+    ).resolves.toBeUndefined();
+    view = rerender(module, api);
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("targeting", {
+      cut_signals: ["Crypto"],
+    });
+    expect(view.props.error).toMatch(/profile is saved.*first job search couldn't start/i);
+    expect(view.props.error).not.toMatch(/will retry/i);
+    expect(view.props.onRetrySearch).toBeTypeOf("function");
+  });
+
+  it("retries a failed completed-setup search directly and graduates when it starts", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    const onComplete = vi.fn();
+    const failedState = {
+      data: {
+        modes: { agent_name: "Paul" },
+        "form-defaults": {
+          voluntary_self_identification: {
+            confirmed_at: "2026-08-25T12:00:00.000Z",
+          },
+        },
+        setup: { readiness: { search_ready: true } },
+        sourcing: {
+          firstSearchRun: { run: { status: "failed" } },
+          sourceSetup: { deterministicSources: { attempted: 5 } },
+        },
+      },
+      setupProgress: { complete: true, completedCount: 8, total: 8, items: [] },
+    };
+    const runningState = {
+      ...failedState,
+      data: {
+        ...failedState.data,
+        sourcing: {
+          ...failedState.data.sourcing,
+          firstSearchRun: { run: { status: "running" } },
+        },
+      },
+    };
+    api.getOnboardState
+      .mockResolvedValueOnce(failedState)
+      .mockResolvedValueOnce(failedState)
+      .mockResolvedValueOnce(runningState);
+    api.startFirstSearchRun.mockResolvedValueOnce({ ok: true });
+
+    let view = await bootController(module, api, {
+      startInterview: false,
+      controllerProps: { onComplete },
+    });
+
+    expect(view.props.error).toMatch(/first job search couldn't start/i);
+    expect(view.props.error).not.toMatch(/will retry/i);
+    expect(view.props.onRetrySearch).toBeTypeOf("function");
+    expect(api.finishOnboarding).not.toHaveBeenCalled();
+
+    await view.props.onRetrySearch();
+    view = rerender(module, api, { onComplete });
+
+    expect(api.startFirstSearchRun).toHaveBeenCalledOnce();
+    expect(api.startFirstSearchRun).toHaveBeenCalledWith({ retry: true });
+    expect(api.finishOnboarding).toHaveBeenCalledOnce();
+    expect(onComplete).toHaveBeenCalledOnce();
+    expect(view.props.onRetrySearch).toBeUndefined();
+  });
+
+  it("keeps the refreshed failed search state and offers retry after kickoff resolves", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    const onComplete = vi.fn();
+    const notStartedState = {
+      data: {
+        modes: { agent_name: "Paul" },
+        "form-defaults": {
+          voluntary_self_identification: {
+            confirmed_at: "2026-08-25T12:00:00.000Z",
+          },
+        },
+        setup: { readiness: { search_ready: true } },
+        sourcing: {
+          firstSearchRun: { run: { status: "not_started" } },
+          sourceSetup: { deterministicSources: { attempted: 5 } },
+        },
+      },
+      setupProgress: { complete: true, completedCount: 8, total: 8, items: [] },
+    };
+    const failedState = {
+      ...notStartedState,
+      data: {
+        ...notStartedState.data,
+        sourcing: {
+          ...notStartedState.data.sourcing,
+          firstSearchRun: { run: { status: "failed" } },
+        },
+      },
+    };
+    api.getOnboardState.mockResolvedValueOnce(notStartedState).mockResolvedValue(failedState);
+    api.startFirstSearchRun.mockResolvedValue({ ok: true });
+
+    const view = await bootController(module, api, {
+      startInterview: false,
+      controllerProps: { onComplete },
+    });
+
+    expect(api.startFirstSearchRun).toHaveBeenCalledOnce();
+    expect(api.finishOnboarding).not.toHaveBeenCalled();
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(view.props.error).toBeTruthy();
+    expect(view.props.onRetrySearch).toBeTypeOf("function");
+  });
+
+  it.each([
+    {
+      failure: "refreshed state read",
+      arrangeRetryFailure(api, failedState) {
+        api.startFirstSearchRun.mockResolvedValueOnce({ ok: true });
+        api.getOnboardState
+          .mockResolvedValueOnce(failedState)
+          .mockRejectedValueOnce(new Error("State refresh failed"))
+          .mockResolvedValueOnce(failedState);
+      },
+    },
+    {
+      failure: "search start",
+      arrangeRetryFailure(api, failedState) {
+        api.startFirstSearchRun
+          .mockRejectedValueOnce(new Error("Retry search start failed"))
+          .mockResolvedValueOnce({ ok: true });
+        api.getOnboardState
+          .mockResolvedValueOnce(failedState)
+          .mockResolvedValueOnce(failedState)
+          .mockResolvedValueOnce(failedState);
+      },
+    },
+  ])(
+    "keeps retry visible after a $failure failure and graduates later",
+    async ({ arrangeRetryFailure }) => {
+      const module = await import("./FirstRunController.jsx");
+      const api = createApi();
+      const onComplete = vi.fn();
+      const failedState = {
+        data: {
+          modes: { agent_name: "Paul" },
+          "form-defaults": {
+            voluntary_self_identification: {
+              confirmed_at: "2026-08-25T12:00:00.000Z",
+            },
+          },
+          setup: { readiness: { search_ready: true } },
+          sourcing: {
+            firstSearchRun: { run: { status: "failed" } },
+            sourceSetup: { deterministicSources: { attempted: 5 } },
+          },
+        },
+        setupProgress: { complete: true, completedCount: 8, total: 8, items: [] },
+      };
+      const runningState = {
+        ...failedState,
+        data: {
+          ...failedState.data,
+          sourcing: {
+            ...failedState.data.sourcing,
+            firstSearchRun: { run: { status: "running" } },
+          },
+        },
+      };
+      arrangeRetryFailure(api, failedState);
+
+      let view = await bootController(module, api, {
+        startInterview: false,
+        controllerProps: { onComplete },
+      });
+
+      await expect(view.props.onRetrySearch()).resolves.toBeUndefined();
+      view = rerender(module, api, { onComplete });
+      expect(view.props.error).toBeTruthy();
+      expect(view.props.onRetrySearch).toBeTypeOf("function");
+      expect(api.finishOnboarding).not.toHaveBeenCalled();
+
+      api.getOnboardState.mockResolvedValueOnce(runningState);
+      await expect(view.props.onRetrySearch()).resolves.toBeUndefined();
+      view = rerender(module, api, { onComplete });
+
+      expect(api.finishOnboarding).toHaveBeenCalledOnce();
+      expect(onComplete).toHaveBeenCalledOnce();
+      expect(view.props.onRetrySearch).toBeUndefined();
+    }
+  );
 
   it("does not skip the picker when a fresh install auto-selected its only safe runtime", async () => {
     const module = await import("./FirstRunController.jsx");

@@ -1258,6 +1258,22 @@ button.cf-first-run__engine-choice:not(.is-selected):hover {
   cursor: default;
 }
 
+.cf-first-run__voluntary-defaults > p {
+  margin: 0 0 12px;
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.cf-first-run__voluntary-defaults .cf-first-run__editor-actions {
+  margin-top: 20px;
+}
+
+.cf-first-run__voluntary-defaults .cf-first-run__editor-actions button:last-child {
+  background: var(--ink);
+  color: var(--white);
+}
+
 .cf-first-run__engine-choice[aria-pressed="true"] {
   border: var(--cf-selection-border);
   color: var(--cf-selection-foreground);

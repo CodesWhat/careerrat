@@ -9,6 +9,42 @@ rate/apply, deterministic-provider, npm install, update/restart, and native Elec
 The broader native skill-to-screen build gate remains tracked separately in
 `SKILL-UX-AUDIT.md`.
 
+v0.16.3 release-candidate rerun: 2026-08-26
+
+- PASS: fresh desktop onboarding opened Search at completion and presented the running first-search
+  handoff instead of leaving the candidate to discover the next surface.
+- PASS: a locality-constrained sweep examined 358 postings with `Brooklyn, NY local + Home-country
+  remote`, excluded onsite work, returned one Remote US Bestow match, and saved its full job
+  description.
+- PASS, ORIGINAL BASELINE: a public Grafana Labs Greenhouse form filled 15 safe fields and attached
+  one résumé. Exactly three voluntary demographic questions had no saved candidate answer and stayed
+  unanswered. The browser stopped at the CAPTCHA, did not press Submit, and left the application at
+  Reviewed Hold with all applied/submitted timestamps null.
+- PASS: a fresh browser session reported zero console errors and zero warnings. The repository suite
+  passed 3,848 tests with 15 intentional skips, the web suite passed all 712 tests, and web, website,
+  docs, and desktop builds passed. Desktop smoke returned `SMOKE OK`; lint completed with no errors;
+  knip, placeholder lint, and `git diff --check` passed.
+- PASS: the current desktop bundle ran a fresh Codex-backed intake turn and rendered Paul's exact
+  plain-English question, “What would make one job worth applying to before another? For example,
+  interesting technical work, strong engineering practices, or room to grow.” The preceding
+  yes-or-no guardrail question also used concrete examples and rendered clickable Yes/No answers.
+  Reload restored the question and the clean browser context reported zero errors and warnings.
+- PASS: **Profile > Application defaults**
+  now offers exactly two local, user-owned choices for voluntary demographic and self-identification
+  questions: leave them blank, or choose the form's decline option when available. Existing
+  exact answers remain hidden and preserved. The policy and answers are redacted from Paul's context;
+  supervised apply may use only that saved policy or an explicitly saved exact answer and must never
+  infer one. Focused schema, form-fill, apply-driver, profile-model, and UI coverage passes. The
+  follow-up live Greenhouse run filled 22 fields, uploaded one résumé, and finished with zero
+  unresolved fields. The CAPTCHA was the sole blocker, Submit stayed untouched, and the application
+  remained `reviewed-hold` with `submitted_at` and `applied_at` null.
+- PASS: completed setup with `confirmed_at` null showed only the local Application defaults dialog,
+  without requiring runtime or chat setup. Separate live passes covered both choices: **Leave them
+  blank** saved the disabled blank policy, while **Choose decline when available** saved
+  `enabled: true`, `default_action: decline_when_available`, a fresh `confirmed_at`, and `answers: {}`.
+  Each handed off to the workspace, stayed dismissed after reload, and the current browser console
+  reported zero errors and warnings.
+
 This is the live execution ledger for the release gate in `docs/ROADMAP.md`. Status values are
 `NOT RUN`, `PASS`, `FAIL`, `FIXED`, or `DEFERRED`. Every failure needs reproduction evidence,
 severity, root cause, fix/test references, and a live retest before it becomes `FIXED`.

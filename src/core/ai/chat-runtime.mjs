@@ -49,13 +49,13 @@ import { randomUUID } from "node:crypto";
 import { dbExists } from "../db/connection.mjs";
 import {
   candidateArtifactExists,
-  candidateConfigGet,
   skillChatMessageAppend,
   skillChatThreadRead,
   skillChatThreadSetTurnState,
 } from "../db/verbs.mjs";
 import { parseSourceReviewOutput } from "../discovery/source-review-artifact.mjs";
 import { computeSetupProgress } from "../onboarding/setup-progress.mjs";
+import { loadAgentCandidateConfig } from "../profile/config-store.mjs";
 import { resolveAIRoute } from "./call-ai.mjs";
 import { parseChatAnswerMode } from "./chat-answer-mode.mjs";
 import {
@@ -101,7 +101,7 @@ const DURABLE_CHAT_PROMPT_CHAR_LIMIT = 64_000;
 // with no declines known rather than fail because this read couldn't run.
 function resolveDeclinedFieldKeys({ repoRoot, env }) {
   try {
-    const declinedFields = candidateConfigGet({ repoRoot, env })?.["form-defaults"]
+    const declinedFields = loadAgentCandidateConfig({ repoRoot, env })?.["form-defaults"]
       ?.declined_fields;
     if (!declinedFields || typeof declinedFields !== "object") return [];
     return Object.keys(declinedFields).filter((key) => declinedFields[key]);
@@ -117,7 +117,10 @@ function compactCandidateValue(value) {
   }
   if (value && typeof value === "object") {
     const entries = Object.entries(value)
-      .filter(([key]) => key !== "current_base")
+      .filter(
+        ([key]) =>
+          key !== "current_base" && key !== "eeo_default" && key !== "voluntary_self_identification"
+      )
       .map(([key, item]) => [key, compactCandidateValue(item)])
       .filter(([, item]) => item !== undefined);
     return entries.length ? Object.fromEntries(entries) : undefined;
@@ -129,7 +132,7 @@ function compactCandidateValue(value) {
 export function resolveCandidateChatContext({ repoRoot, env, skill } = {}) {
   if (skill !== "ingest-profile") return null;
   try {
-    const config = candidateConfigGet({ repoRoot, env });
+    const config = loadAgentCandidateConfig({ repoRoot, env });
     let sourceResumePresent = false;
     try {
       sourceResumePresent = candidateArtifactExists({

@@ -56,8 +56,26 @@ export function classifySelfIdentificationQuestion(label) {
   const patterns = [
     ["disability", /\b(disability|disabled|reasonable accommodation)\b/],
     ["veteran", /\b(veteran|armed forces|military status)\b/],
-    ["gender", /\b(gender|sex assigned|sexual orientation|pronouns?)\b/],
+    [
+      "gender",
+      /\b(gender|transgender|sex assigned|sexual orientation|pronouns?)\b|\b(?:identify(?: yourself)? as|consider yourself|are you(?: a member of)?) (?:lgbtq(?:ia)?|lgbt|lesbian|gay|bisexual|queer)\+?\b|^(?:lgbtq(?:ia)?|lgbt)(?:\+| identity| status)?\b/,
+    ],
     ["race_ethnicity", /\b(race|ethnicity|hispanic|latino|indigenous|asian|black|white)\b/],
+    [
+      "religion",
+      /\b(what is your religion|which religion do you identify with|religious affiliation|faith tradition|religious beliefs?)\b|^religion\b/,
+    ],
+    [
+      "marital_status",
+      /\b(marital status|civil status|relationship status)\b|\bare you (?:currently )?(?:married|single|divorced|widowed)\b/,
+    ],
+    ["national_origin", /\b(national origin|ethnic origin|country of origin)\b|^nationality\b/],
+    [
+      "age",
+      /\b(age range|age group|age bracket|what is your age|how old are you|date of birth|birth date)\b/,
+    ],
+    ["family_status", /\b(parental status|caregiver status|family status)\b/],
+    ["genetic_information", /\bgenetic information\b/],
     ["demographic", /\b(voluntary self-identification|self identification|demographic)\b/],
     ["eeo", /\b(eeo|equal employment|affirmative action)\b/],
   ];

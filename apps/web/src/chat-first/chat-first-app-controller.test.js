@@ -22,6 +22,7 @@ import {
   selectedSourcedDismissal,
   selectMockSession,
   sourceSweepPresentation,
+  sourceSweepWithAvailableMatches,
 } from "./chat-first-app-controller.js";
 
 describe("chat-first app controller", () => {
@@ -668,6 +669,19 @@ describe("chat-first app controller", () => {
     expect(
       sourceSweepPresentation({ status: "failed", error: { message: "Board access failed" } })
     ).toEqual({ status: "error", summary: "Board access failed" });
+  });
+
+  it("shows persisted matches instead of treating a dedupe-only refresh as zero useful jobs", () => {
+    const completed = sourceSweepPresentation({
+      status: "completed",
+      summary: { new: 0, qualified: 0, scanned: 358, attemptedSources: 5 },
+    });
+
+    expect(sourceSweepWithAvailableMatches(completed, 7)).toMatchObject({
+      status: "complete",
+      summary: "7 matches ready · 0 new · 358 scanned · 5 sources",
+    });
+    expect(sourceSweepWithAvailableMatches(completed, 0)).toBe(completed);
   });
 
   it("keeps provider and source labels exposed by durable sweep progress", () => {

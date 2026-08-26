@@ -349,6 +349,38 @@ browser QA covered the desktop beginner screen, the collapsed Codex path, the
 in-app installer console, and promotion into a ready Claude engine after
 recheck.
 
+#### Post-v0.16.2 search and browser recovery checkpoint
+
+The first external-user screenshots exposed two false blockers. A healthy bundled
+Playwright install was labeled **Not ready** until a persistent profile already existed,
+even though the apply driver creates that storage on demand and most public ATS forms do
+not require an account. Readiness now follows whether Playwright and Chromium can launch;
+Settings no longer exposes an internal profile path or tells every candidate to sign in
+to every platform. A site-specific login is requested only when the site actually requires
+one.
+
+The same session showed one successful search lane and one failed AI-web lane above a
+benign “No jobs need triage” empty state. The coordinator already retained the lane error,
+but the page discarded it. Failed lanes now show candidate-safe cause text and a working
+retry action, and an empty partial failure says the search did not finish instead of
+claiming there were no results to review. Partial AI runs retain their successful jobs and
+the exact failed prompt ids; retry reruns only those prompts and only reruns configured
+sources when that lane also failed. Completed configured-source runs with source errors are
+likewise partial, never clean success.
+
+Follow-up user feedback also showed that a completed setup still left the next move unclear.
+The app now opens the canonical Search surface as onboarding graduates, displays and follows
+the durable baseline search there before any manual search exists, retries a failed restored
+baseline, and keeps a successful profile save successful even when its follow-on search
+cannot start. Job-board and employer discovery remain later source expansion, not a hidden
+prerequisite for the first useful search.
+
+The real application path received the same correction. Optional “Continue with LinkedIn”
+or Google controls beside a usable public ATS form no longer turn the whole page into a login
+wall. CareerRat fills the ordinary form, never clicks OAuth or Submit, and stops for review.
+A true account wall with no usable application path still blocks and asks for supervised
+help.
+
 #### Superseding v0.16 release ledger
 
 This ledger is the current source of truth. It supersedes narrower or earlier
@@ -716,12 +748,14 @@ queue.
 - Alerts 108, 109, and 111 remain open only until a main-branch Scorecard run can
   observe the live protection and the two staged repository fixes.
 
-## Release status (v0.16.2, updated August 25, 2026)
+## Release status (v0.16.3, updated August 26, 2026)
 
-**v0.16.2 is the current release line.** It preserves the v0.16.0 runtime and
-workflow release, carries the v0.16.1 UI follow-ups, and adds the guided Claude
-cold-start flow for first-time users. The Mac app, npm package, Homebrew cask,
-and production website passed the release and installation gates above.
+**v0.16.3 is the current release line.** It preserves the v0.16.0 runtime and
+workflow release, the v0.16.1 UI follow-ups, and the v0.16.2 guided cold start,
+then closes the first-run search, locality, local demographic-default, chat,
+and supervised browser-apply gaps recorded below. The Mac app, npm package,
+Homebrew cask, and production website passed the release and installation gates
+above.
 Since v0.11.0 the repo runs the strict flow: feature PRs land on the active dev
 branch (`dev/v0.16` for this release), `main`
 advances only through a promotion merge immediately before each cut, and the tag
@@ -1274,6 +1308,81 @@ The current build order is:
    manual Submit, confirmation screenshot capture, and verified-only Applied write-back against a
    controlled local form. The broader original-skill rows stay active in the linked audit instead
    of being hidden by this gate.
+
+### v0.16.3 first-run and supervised-apply remediation (August 26, 2026)
+
+The August 26 user test found a real first-day usability failure: setup could complete while the
+next useful surface still looked disabled, so a new candidate had to ask Paul whether searching had
+started and where to find it. Treat this as a product defect, not a learning-curve problem.
+
+- **Plain-English onboarding** — Paul asks short, ordinary questions and avoids internal product or
+  recruiting jargon. When a question asks for an abstract preference, it includes two or three
+  concrete examples. “What specific characteristics would make a matching role a priority?” is
+  replaced by “What would make one job worth applying to before another? For example, the kind of
+  work, a schedule and pay that fit, or room to grow.”
+- **Obvious setup handoff** — completion opens Search directly. A session-scoped **Start here**
+  explanation says whether the first search is running, has matches, needs a retry, or finished with
+  no match. The Search navigation item remains available and says `searching now`, `retry search`,
+  `<N> need action`, or `start here` instead of presenting a gray zero-count dead end.
+- **One authoritative first search** — the early background sweep and the final targeting snapshot
+  must not compete in the UI or leave a newer `0 qualified` summary over useful persisted matches.
+  Setup only graduates against a search for the current candidate inputs, while Search describes the
+  actionable queue separately from how many rows were newly inserted by that one run.
+- **Recoverable search lanes** — configured-source and AI-web lanes persist partial failures,
+  correlate retries to the original run, keep successful matches visible, and retry only the failed
+  lane or failed prompts. Empty, cancelled, filtered-empty, source-missing, and failed states each
+  have a distinct plain-English recovery.
+- **Search quality** — target role titles are matched against the posting title, not incidental body
+  text. Broader or stale source filters cannot promote adjacent GTM/revenue roles into a platform or
+  backend queue, while bounded platform/infrastructure/backend equivalents remain eligible.
+- **Public application recovery** — ordinary public ATS forms remain usable when optional sign-in is
+  also present. Exact `Question: Answer` replies in the open job thread persist against unique live
+  packet gaps. A captcha is checked after safe fields and the tailored resume are prepared, then the
+  app stops before Submit with a clear human handoff. Voluntary demographic and self-identification
+  questions stay blank by default. The local-only **Profile > Application defaults** editor can keep
+  them blank or choose the form's decline option when available. Existing exact answers remain hidden,
+  are used only when explicitly saved, and never enter Paul's context.
+- **Durable background threads** — a completed board-discovery artifact cannot steal focus after an
+  unrelated foreground action. Skill-session lookup/start is single-flight, closed sessions do not
+  reopen SSE streams, and hydration does not race into 404 event streams plus 409 duplicate starts.
+
+The original remediation acceptance passed in the isolated native app. Fresh setup opened Search with
+the first-search handoff instead of leaving the candidate in the completed interview. A real
+locality-constrained sweep examined 358 postings with `Brooklyn, NY local + Home-country remote`,
+excluded onsite work, returned one Remote US Bestow match, and saved its full job description. A
+public Grafana Labs Greenhouse application then filled 15 safe fields, attached the generated résumé,
+and left exactly three voluntary demographic questions unanswered because the candidate had not saved
+answers for them. It stopped at the CAPTCHA with Submit untouched and every applied/submitted timestamp
+still null. A fresh browser session reported zero errors and warnings.
+
+The refreshed automated gate passed 3,848 repository tests with 15 intentional skips and all 712 web
+tests. Web, website, docs, and desktop builds passed; desktop smoke returned `SMOKE OK`; lint
+completed with no errors; knip, placeholder lint, and `git diff --check` passed. Older verification
+counts below remain historical evidence, not the v0.16.3 result.
+
+The follow-up requested after that run is implemented. **Profile > Application defaults** is a
+local-only whole-section editor with exactly two policy choices: leave voluntary demographic and
+self-identification questions blank, or choose the form's decline option when available. Existing
+exact answers remain hidden and preserved, and neither the policy nor those answers enter Paul's
+context. Focused schema, form-fill, apply-driver, profile-model, and UI coverage enforce that boundary.
+The original 15-field Greenhouse run above remains the historical baseline. The follow-up live run
+filled 22 fields, attached one résumé, and finished with zero unresolved fields. The CAPTCHA was the
+sole blocker, Submit stayed untouched, and the application remained `reviewed-hold` with
+`submitted_at` and `applied_at` null.
+
+First-run intake now owns the same local choice. Live QA started from otherwise-complete setup with
+`confirmed_at` null and verified that only the local Application defaults dialog appeared before the
+workspace, without requiring runtime or chat setup. Separate live passes covered both choices:
+**Leave them blank** saved the disabled blank policy, while **Choose decline when available** saved
+`enabled: true`, `default_action: decline_when_available`, a fresh `confirmed_at`, and `answers: {}`.
+Each handed off to the workspace, stayed dismissed after reload, and the current browser console
+reported zero errors and warnings.
+
+The final current-bundle desktop retest also cleared the revised Paul voice gate. A fresh
+Codex-backed intake rendered “What would make one job worth applying to before another?” with
+concrete examples (“interesting technical work, strong engineering practices, or room to grow”).
+The preceding guardrail question was equally plain, offered clickable Yes/No answers, restored
+cleanly after reload, and the fresh browser context reported zero errors and warnings.
 
 ### Product-surface acceptance sweep (updated August 17, 2026)
 

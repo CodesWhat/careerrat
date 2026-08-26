@@ -548,6 +548,7 @@ export function sourceSweepPresentation(value) {
   return {
     ...(run.id ? { id: run.id } : {}),
     status: "complete",
+    metrics: { new: fresh, qualified, scanned, sources },
     summary: [
       `${fresh} new`,
       `${qualified} qualified`,
@@ -557,6 +558,25 @@ export function sourceSweepPresentation(value) {
     ...(run.completedAt || run.completed_at
       ? { completedAt: run.completedAt || run.completed_at }
       : {}),
+  };
+}
+
+export function sourceSweepWithAvailableMatches(value, availableMatches) {
+  const count = Number(availableMatches);
+  if (value?.status !== "complete" || !Number.isFinite(count) || count <= 0 || !value?.metrics) {
+    return value;
+  }
+  const fresh = Number(value.metrics.new || 0);
+  const scanned = Number(value.metrics.scanned || 0);
+  const sources = Number(value.metrics.sources || 0);
+  return {
+    ...value,
+    summary: [
+      `${plural(count, "match", "matches")} ready`,
+      `${fresh} new`,
+      `${scanned} scanned`,
+      plural(sources, "source"),
+    ].join(" · "),
   };
 }
 

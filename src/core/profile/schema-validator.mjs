@@ -57,6 +57,14 @@ function validateNode(data, schema, path, errors) {
     }
   }
 
+  // --- const ---
+  if (schema.const !== undefined && !deepEqual(data, schema.const)) {
+    errors.push({
+      path,
+      message: `value ${JSON.stringify(data)} must equal ${JSON.stringify(schema.const)}`,
+    });
+  }
+
   // --- numeric range ---
   if (typeof data === "number" && Number.isFinite(data)) {
     if (typeof schema.minimum === "number" && data < schema.minimum) {
@@ -74,6 +82,15 @@ function validateNode(data, schema, path, errors) {
     }
     if (typeof schema.maxLength === "number" && data.length > schema.maxLength) {
       errors.push({ path, message: `must have at most ${schema.maxLength} characters` });
+    }
+    if (typeof schema.pattern === "string" && !new RegExp(schema.pattern).test(data)) {
+      errors.push({
+        path,
+        message: `must match pattern ${JSON.stringify(schema.pattern)}`,
+      });
+    }
+    if (schema.format === "date-time" && !isRfc3339DateTime(data)) {
+      errors.push({ path, message: "must be a valid date-time" });
     }
   }
 
@@ -103,6 +120,20 @@ function validateNode(data, schema, path, errors) {
         for (const [key, subschema] of Object.entries(schema.properties)) {
           if (key in data) {
             validateNode(data[key], subschema, joinPath(path, key), errors);
+          }
+        }
+      }
+
+      // propertyNames
+      if (schema.propertyNames !== undefined) {
+        for (const key of Object.keys(data)) {
+          const propertyErrors = [];
+          validateNode(key, schema.propertyNames, path, propertyErrors);
+          for (const error of propertyErrors) {
+            errors.push({
+              path,
+              message: `property name ${JSON.stringify(key)} ${error.message}`,
+            });
           }
         }
       }
@@ -162,6 +193,24 @@ function validateNode(data, schema, path, errors) {
       });
     }
   }
+
+  // --- allOf ---
+  if (schema.allOf !== undefined) {
+    for (const subschema of schema.allOf) {
+      validateNode(data, subschema, path, errors);
+    }
+  }
+
+  // --- if / then / else ---
+  if (schema.if !== undefined) {
+    const conditionErrors = [];
+    validateNode(data, schema.if, path, conditionErrors);
+    if (conditionErrors.length === 0) {
+      if (schema.then !== undefined) validateNode(data, schema.then, path, errors);
+    } else if (schema.else !== undefined) {
+      validateNode(data, schema.else, path, errors);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +232,47 @@ function checkType(value, typeSpec) {
     if (t === actual) return true;
   }
   return false;
+}
+
+function isRfc3339DateTime(value) {
+  const match = value.match(
+    /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:[Zz]|[+-](\d{2}):(\d{2}))$/
+  );
+  if (!match) return false;
+
+  const [
+    ,
+    yearText,
+    monthText,
+    dayText,
+    hourText,
+    minuteText,
+    secondText,
+    zoneHourText,
+    zoneMinuteText,
+  ] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const zoneHour = zoneHourText === undefined ? 0 : Number(zoneHourText);
+  const zoneMinute = zoneMinuteText === undefined ? 0 : Number(zoneMinuteText);
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+  return (
+    month >= 1 &&
+    month <= 12 &&
+    day >= 1 &&
+    day <= daysInMonth[month - 1] &&
+    hour <= 23 &&
+    minute <= 59 &&
+    second <= 60 &&
+    zoneHour <= 23 &&
+    zoneMinute <= 59
+  );
 }
 
 // ---------------------------------------------------------------------------

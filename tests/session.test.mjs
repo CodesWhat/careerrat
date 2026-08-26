@@ -2,13 +2,14 @@
 // `~/.careerrat/board-profiles` is the default for fresh installs. Controls
 // os.homedir() via the HOME env var, which Node honors on POSIX.
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, beforeEach, test } from "node:test";
 import {
   defaultProfileRoot,
   describeProviders,
+  detectSession,
   PROVIDER_PREFERENCE,
   profilePath,
   resolveSession,
@@ -92,6 +93,49 @@ test("automatic session setup uses bundled Playwright in a packaged desktop work
   assert.equal(session.descriptor.automatedApply, true);
 });
 
+test("Playwright is ready before any persistent profile exists when Chromium can launch", () => {
+  const home = tempHome();
+  const profileRoot = join(home, ".careerrat", "board-profiles");
+  assert.equal(existsSync(profileRoot), false);
+
+  const session = detectSession({
+    data: { session: { provider: "playwright", profile_root: profileRoot } },
+    env: {},
+    playwrightToolingDependencies: {
+      resolvePackage: () => "/modules/playwright/index.js",
+      loadPackage: () => ({
+        chromium: { executablePath: () => "/browsers/chromium/chrome" },
+      }),
+      pathExists: (path) => path === "/browsers/chromium/chrome",
+    },
+  });
+
+  assert.equal(session.presence.status, "ready");
+  assert.match(session.presence.detail, /opens.*when a workflow needs it/i);
+  assert.doesNotMatch(session.presence.detail, /sign in|per platform|\.careerrat|board-profiles/i);
+  assert.equal(existsSync(profileRoot), false, "readiness detection must not create a profile");
+});
+
+test("Playwright is not ready when its Chromium executable is missing", () => {
+  const session = detectSession({
+    data: { session: { provider: "playwright" } },
+    env: {},
+    playwrightToolingDependencies: {
+      resolvePackage: () => "/modules/playwright/index.js",
+      loadPackage: () => ({
+        chromium: { executablePath: () => "/browsers/chromium/chrome" },
+      }),
+      pathExists: () => false,
+    },
+  });
+
+  assert.equal(session.presence.status, "missing");
+  assert.equal(
+    session.presence.detail,
+    "Playwright is installed, but its Chromium executable is missing."
+  );
+});
+
 test("Orca remains the automatic packaged-desktop provider inside an Orca workspace", () => {
   const session = resolveSession({
     data: { session: { provider: "auto" } },
@@ -126,4 +170,13 @@ test("describeProviders leaves the concrete providers' automatedApply untouched 
   assert.equal(byId.extension, false);
   assert.equal(byId.orca, true);
   assert.equal(byId.playwright, true);
+});
+
+test("the Playwright provider describes on-demand browser use instead of blanket sign-in setup", () => {
+  const playwright = describeProviders({ env: {} }).find(
+    (provider) => provider.id === "playwright"
+  );
+
+  assert.match(playwright.needs, /when a workflow needs it/i);
+  assert.doesNotMatch(playwright.needs, /sign in|per platform|persistent profile/i);
 });

@@ -369,6 +369,12 @@ export async function applyFirstRunConfirmation(block, { api, state } = {}) {
     return "Work authorization saved";
   }
   if (block?.kind === "candidate_patch") {
+    if (
+      block.payload?.doc === "form-defaults" &&
+      Object.hasOwn(block.payload?.patch || {}, "voluntary_self_identification")
+    ) {
+      throw new Error("Voluntary self-identification is owned by local Application defaults");
+    }
     await api.saveCandidateFile(block.payload.doc, block.payload.patch);
     return "Saved";
   }

@@ -7,6 +7,7 @@ import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import {
   sourcingRunComplete,
   sourcingRunFail,
+  sourcingRunGet,
   sourcingRunLatest,
   sourcingRunProgress,
   sourcingRunStart,
@@ -308,4 +309,31 @@ test("stale running rows are failed and recovered instead of reused forever", ()
   );
   assert.equal(failedStale.status, "failed");
   assert.equal(failedStale.error.code, "SOURCING_RUN_LEASE_EXPIRED");
+});
+
+test("durable reads recover expired running rows without refreshing their recency", () => {
+  const repoRoot = tempRepo();
+  const staleAt = "2000-01-01T00:00:00.000Z";
+  const db = openDb({ repoRoot });
+  const markStale = (id) => {
+    const data = JSON.parse(db.prepare("SELECT data FROM sourcing_runs WHERE id = ?").get(id).data);
+    data.updated_at = staleAt;
+    db.prepare("UPDATE sourcing_runs SET data = ? WHERE id = ?").run(JSON.stringify(data), id);
+  };
+
+  const firstSearch = sourcingRunStart({ repoRoot, purpose: "first-search" });
+  markStale(firstSearch.run.id);
+  const latest = sourcingRunLatest({ repoRoot, purpose: "first-search" });
+
+  assert.equal(latest.status, "failed");
+  assert.equal(latest.run.error.code, "SOURCING_RUN_LEASE_EXPIRED");
+  assert.equal(latest.run.updated_at, staleAt);
+
+  const aiWeb = sourcingRunStart({ repoRoot, purpose: "ai-web-search" });
+  markStale(aiWeb.run.id);
+  const exact = sourcingRunGet({ repoRoot, purpose: "ai-web-search", id: aiWeb.run.id });
+
+  assert.equal(exact.status, "failed");
+  assert.equal(exact.run.error.code, "SOURCING_RUN_LEASE_EXPIRED");
+  assert.equal(exact.run.updated_at, staleAt);
 });

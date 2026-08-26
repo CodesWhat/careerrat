@@ -1886,6 +1886,69 @@ test("resolveCandidateChatContext includes saved evidence facts during onboardin
   }
 });
 
+test("resolveCandidateChatContext redacts voluntary self-identification settings", () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  try {
+    candidateSetupInitialize({ repoRoot });
+    candidateConfigPatch({
+      repoRoot,
+      name: "form-defaults",
+      patch: {
+        voluntary_self_identification: {
+          enabled: true,
+          default_action: "leave_blank",
+          confirmed_at: "2026-08-26T12:00:00Z",
+          answers: {
+            "race ethnicity": {
+              value: "private demographic answer",
+              confirmed_at: "2026-08-26T12:00:00Z",
+            },
+          },
+        },
+      },
+    });
+
+    const context = resolveCandidateChatContext({ repoRoot, skill: "ingest-profile" });
+    const serialized = JSON.stringify(context);
+    assert.doesNotMatch(serialized, /voluntary_self_identification/);
+    assert.doesNotMatch(serialized, /private demographic answer/);
+    assert.doesNotMatch(serialized, /eeo_default/);
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("resolveCandidateChatContext uses the sanitized legacy candidate surface", () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  try {
+    mkdirSync(join(repoRoot, "candidate"), { recursive: true });
+    writeFileSync(
+      join(repoRoot, "candidate/form-defaults.yml"),
+      [
+        "expected_base: 175000",
+        "voluntary_self_identification:",
+        "  enabled: true",
+        "  default_action: decline_when_available",
+        '  confirmed_at: "2026-08-26T12:00:00Z"',
+        "  answers:",
+        "    race ethnicity:",
+        '      value: "private legacy demographic answer"',
+        '      confirmed_at: "2026-08-26T12:00:00Z"',
+        "",
+      ].join("\n"),
+      "utf8"
+    );
+
+    const context = resolveCandidateChatContext({ repoRoot, skill: "ingest-profile" });
+    const serialized = JSON.stringify(context);
+    assert.equal(context["form-defaults"].expected_base, 175000);
+    assert.doesNotMatch(serialized, /voluntary_self_identification/);
+    assert.doesNotMatch(serialized, /private legacy demographic answer/);
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
 test("resolveCandidateChatContext carries the same exact 8-of-8 completion used by onboarding", () => {
   const repoRoot = tempRepoWithSkill("ingest-profile");
   try {

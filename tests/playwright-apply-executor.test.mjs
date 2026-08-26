@@ -965,6 +965,12 @@ function createFakeComboboxBrowser({
         comboboxValue = value;
         open = true; // the list appears as a side effect of typing, not a click
       },
+      async fill(value) {
+        assert.equal(value, "");
+        actions.push({ op: "comboboxClear", index });
+        filterText = "";
+        comboboxValue = "";
+      },
     };
   }
 
@@ -1095,6 +1101,98 @@ test("selectOption falls back to a custom combobox when the ref isn't a native <
     { op: "comboboxOpen", index: 1 },
     { op: "comboboxSelect", index: 1, label: "Canada" },
   ]);
+});
+
+test("selectOption uses a configured alias without provider-specific engine logic", async () => {
+  const { launchImpl, actions } = createFakeComboboxBrowser({
+    controls: COMBOBOX_FORM_CONTROLS,
+    comboboxIndex: 1,
+    options: ["LinkedIn", "Other"],
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  await ops.snapshot({ pageId });
+  await ops.selectOption({
+    pageId,
+    ref: "e2",
+    value: "Community event",
+    optionAliases: ["Other"],
+  });
+
+  assert.deepEqual(actions, [
+    { op: "comboboxOpen", index: 1 },
+    { op: "comboboxSelect", index: 1, label: "Other" },
+  ]);
+});
+
+test("selectOption retries a typed combobox with a configured alias", async () => {
+  const { launchImpl, actions } = createFakeComboboxBrowser({
+    controls: COMBOBOX_FORM_CONTROLS,
+    comboboxIndex: 1,
+    options: ["LinkedIn", "Other"],
+    openOnClick: false,
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  await ops.snapshot({ pageId });
+  await ops.selectOption({
+    pageId,
+    ref: "e2",
+    value: "Community event",
+    optionAliases: ["Other"],
+  });
+
+  assert.deepEqual(actions, [
+    { op: "comboboxFilter", index: 1, value: "Community event" },
+    { op: "comboboxClear", index: 1 },
+    { op: "comboboxFilter", index: 1, value: "Other" },
+    { op: "comboboxSelect", index: 1, label: "Other" },
+  ]);
+});
+
+test("selectDeclineOption chooses the one narrowly recognized option", async () => {
+  const { launchImpl, actions } = createFakeComboboxBrowser({
+    controls: COMBOBOX_FORM_CONTROLS,
+    comboboxIndex: 1,
+    options: ["Woman", "Prefer not to answer"],
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  await ops.snapshot({ pageId });
+  const result = await ops.selectDeclineOption({
+    pageId,
+    ref: "e2",
+    label: "Gender",
+  });
+
+  assert.equal(result.selectedValue, "Prefer not to answer");
+  assert.deepEqual(actions, [
+    { op: "comboboxOpen", index: 1 },
+    { op: "comboboxSelect", index: 1, label: "Prefer not to answer" },
+  ]);
+});
+
+test("selectDeclineOption refuses ambiguous decline options", async () => {
+  const { launchImpl, actions } = createFakeComboboxBrowser({
+    controls: COMBOBOX_FORM_CONTROLS,
+    comboboxIndex: 1,
+    options: ["Prefer not to answer", "Decline to self-identify"],
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  await ops.snapshot({ pageId });
+  await assert.rejects(
+    () => ops.selectDeclineOption({ pageId, ref: "e2", label: "Gender" }),
+    /did not offer one unambiguous decline option/
+  );
+  assert.equal(
+    actions.some(({ op }) => op === "comboboxSelect"),
+    false
+  );
 });
 
 test("selectOption prefers an exact option match over a substring match (P1 regression)", async () => {

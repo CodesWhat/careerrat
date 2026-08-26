@@ -62,6 +62,17 @@ function engineDescription(engine) {
   return "This provider is not available on this computer.";
 }
 
+function SearchRetryControl({ onRetrySearch, submitting }) {
+  if (!onRetrySearch) return null;
+  return (
+    <div className="cf-first-run__answer-options">
+      <button type="button" disabled={submitting} onClick={onRetrySearch}>
+        Retry search
+      </button>
+    </div>
+  );
+}
+
 function DetectedEngine({
   engine,
   submitting,
@@ -332,6 +343,7 @@ export function EngineSelection({
   onHostedInterestStart,
   onHostedInterestChange,
   onHostedInterestSubmit,
+  onRetrySearch,
 }) {
   const choices = safeArray(engines).filter(
     (engine) =>
@@ -372,7 +384,8 @@ export function EngineSelection({
         </div>
         {error ? (
           <div className="cf-first-run__engine-error" role="alert">
-            {error}
+            <span>{error}</span>
+            {SearchRetryControl({ onRetrySearch, submitting })}
           </div>
         ) : null}
         <fieldset className="cf-first-run__engine-choices">
@@ -809,6 +822,50 @@ export function KnowledgeSectionEditor({
   );
 }
 
+function VoluntaryDefaultsPrompt({ agentName, submitting, error, onChoose }) {
+  const titleId = "cf-first-run-voluntary-defaults-title";
+  return (
+    <div className="cf-first-run__editor-cover">
+      <section
+        className="cf-first-run__editor cf-first-run__voluntary-defaults"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+      >
+        <header>
+          <div>
+            <span>APPLICATION DEFAULTS</span>
+            <strong id={titleId}>Optional application questions</strong>
+          </div>
+        </header>
+        <p>
+          Some job applications ask optional demographic questions about race, gender, disability,
+          or veteran status. CareerRat can leave them blank, or choose the form’s decline option
+          when one is available.
+        </p>
+        <p>This choice stays on this computer and isn’t shared with {agentName}.</p>
+        {error ? (
+          <div className="cf-first-run__engine-error" role="alert">
+            <span>{error}</span>
+          </div>
+        ) : null}
+        <div className="cf-first-run__editor-actions">
+          <button type="button" disabled={submitting} onClick={() => onChoose?.("leave_blank")}>
+            Leave them blank
+          </button>
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={() => onChoose?.("decline_when_available")}
+          >
+            Choose decline when available
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export function FirstRunChat({
   agentName = "Paul",
   messages = [],
@@ -827,6 +884,7 @@ export function FirstRunChat({
   onSaveKnowledgeSection,
   onResumeFile,
   onDraftChange,
+  onRetrySearch,
   onSubmitAnswer,
 }) {
   const rows = safeArray(messages);
@@ -885,7 +943,8 @@ export function FirstRunChat({
             className="cf-first-run__composer-notice cf-first-run__composer-notice--error"
             role="alert"
           >
-            {error}
+            <span>{error}</span>
+            {SearchRetryControl({ onRetrySearch, submitting })}
           </div>
         ) : null}
         {resumeUploading ? (
@@ -933,6 +992,16 @@ export function FirstRunChat({
 }
 
 export function FirstRunExperience(props) {
+  if (props?.stage === "voluntary-defaults" || props?.voluntaryDefaultsRequired === true) {
+    return (
+      <VoluntaryDefaultsPrompt
+        agentName={props.agentName || "Paul"}
+        submitting={props.submitting}
+        error={props.error}
+        onChoose={props.onChooseVoluntaryDefaults}
+      />
+    );
+  }
   if (props?.stage === "chat") return FirstRunChat(props);
   return EngineSelection(props);
 }

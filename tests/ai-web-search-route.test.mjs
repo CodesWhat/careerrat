@@ -136,7 +136,7 @@ test("AI web-search route streams activity before done and emits heartbeat comme
         return { searched: 1, found: 2, new: 1, duplicates: 1, errors: [] };
       },
     });
-    await handler(request(), res);
+    await handler(request('{"searchExecutionId":"search-execution-ai"}'), res);
     assert.equal(res.status, 200);
     assert.match(res.chunks.join(""), /: ping\n\n/);
     assert.deepEqual(sseFrames(res), [
@@ -150,6 +150,7 @@ test("AI web-search route streams activity before done and emits heartbeat comme
     assert.equal(durable.status, "completed");
     assert.equal(durable.summary.new, 1);
     assert.deepEqual(durable.metadata.promptIds, ["p1"]);
+    assert.equal(durable.metadata.searchExecutionId, "search-execution-ai");
     assert.match(durable.metadata.inputFingerprint, /^[a-f0-9]{64}$/);
   } finally {
     globalThis.setInterval = originalSetInterval;

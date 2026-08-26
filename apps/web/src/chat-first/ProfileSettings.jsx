@@ -43,6 +43,7 @@ function ProfileGrid({ agentName, profile = {}, onEditSection, onOpenFiles }) {
   const writing = profile?.writingStyle || {};
   const compensation = profile?.compensation || {};
   const location = profile?.locationPolicy || {};
+  const applicationDefaults = profile?.applicationDefaults || {};
   return (
     <section className="cf-profile__grid" aria-label={`What ${agentName} knows`}>
       <article className="cf-profile__card">
@@ -125,6 +126,23 @@ function ProfileGrid({ agentName, profile = {}, onEditSection, onOpenFiles }) {
         <SectionHeading label="SEARCH RULES" onAction={() => onEditSection?.("search-rules")} />
         <div className="cf-profile__lines cf-profile__lines--strong">
           <Lines values={profile?.searchRules} fallback="Search rules will appear after setup." />
+        </div>
+      </article>
+      <article className="cf-profile__card">
+        <SectionHeading
+          label="APPLICATION DEFAULTS"
+          actionLabel="Edit application defaults"
+          onAction={() => onEditSection?.("application-defaults")}
+        />
+        <div className="cf-profile__lines cf-profile__lines--strong">
+          <strong>Voluntary self-identification questions</strong>
+          <span>{valueOrFallback(applicationDefaults.action, "Leave these blank (default)")}</span>
+          <span className="cf-profile__explanation">
+            {valueOrFallback(
+              applicationDefaults.localNotice,
+              `Local only on this computer. This setting never goes through ${agentName}.`
+            )}
+          </span>
         </div>
       </article>
     </section>
@@ -460,6 +478,23 @@ function browserPresenceLabel(status) {
   );
 }
 
+function browserProviderHelp(selectedProvider) {
+  if (selectedProvider?.id === "playwright") {
+    return "CareerRat opens a supervised browser when a workflow needs it.";
+  }
+  return selectedProvider?.needs || "Choose which supervised browser CareerRat uses.";
+}
+
+function browserPresenceDetail(browser, playwright) {
+  if (browser?.effectiveProviderId === "playwright" || browser?.providerId === "playwright") {
+    if (playwright?.ready || browser?.presenceStatus === "ready") {
+      return "CareerRat opens a supervised browser when a workflow needs it.";
+    }
+    return playwright?.detail || "The CareerRat browser is not available yet.";
+  }
+  return browser?.presenceDetail || "Browser readiness has not been checked yet.";
+}
+
 function TechnicalDetails({
   agentName,
   engine,
@@ -497,9 +532,7 @@ function TechnicalDetails({
               </option>
             ))}
           </select>
-          <small>
-            {selectedProvider?.needs || "Choose which supervised browser CareerRat uses."}
-          </small>
+          <small>{browserProviderHelp(selectedProvider)}</small>
         </div>
         <div className="cf-settings-dialog__technical-row">
           <div className="cf-settings-dialog__technical-heading">
@@ -516,7 +549,7 @@ function TechnicalDetails({
               ? ` · using ${browser.effectiveProvider}`
               : ""}
           </span>
-          <small>{browser?.presenceDetail || "Browser readiness has not been checked yet."}</small>
+          <small>{browserPresenceDetail(browser, playwright)}</small>
         </div>
         <div className="cf-settings-dialog__technical-row">
           <strong>Playwright</strong>
@@ -556,6 +589,9 @@ function ProfileSectionEditor({
           onSave?.();
         }}
       >
+        {editor?.description ? (
+          <p className="cf-settings-dialog__intro">{editor.description}</p>
+        ) : null}
         {safeArray(editor?.fields).map((field) => {
           const inputId = `cf-profile-editor-${field.id}`;
           if (field.type === "checkbox") {
@@ -610,9 +646,11 @@ function ProfileSectionEditor({
           );
         })}
         <div className="cf-settings-dialog__actions cf-profile-editor__actions">
-          <button type="button" disabled={busy} onClick={() => onAskAgent?.(editor?.id)}>
-            Ask {agentName} instead
-          </button>
+          {editor?.localOnly ? null : (
+            <button type="button" disabled={busy} onClick={() => onAskAgent?.(editor?.id)}>
+              Ask {agentName} instead
+            </button>
+          )}
           <button type="button" disabled={busy} onClick={onClose}>
             Cancel
           </button>

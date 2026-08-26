@@ -74,10 +74,14 @@ import {
 } from "../onboarding/first-search-run.mjs";
 import { evaluateAndPersistPacketGate } from "../packet/evaluate.mjs";
 import { exportPacketArtifacts } from "../packet/exports.mjs";
-import { generateApplicationPacket } from "../packet/generate-operation.mjs";
+import {
+  applicationPacketGatePasses,
+  generateApplicationPacket,
+} from "../packet/generate-operation.mjs";
 import {
   confirmOneOffScreeningAnswer,
   draftOneOffScreeningAnswers,
+  matchSuppliedScreeningAnswers,
   saveOneOffScreeningAnswer,
 } from "../packet/one-off-answer.mjs";
 import { capturePacketQuestions } from "../packet/questions.mjs";
@@ -856,6 +860,19 @@ function jobReferenceTokens(value) {
     .filter((token) => token && !JOB_REFERENCE_STOP_WORDS.has(token));
 }
 
+function jobIdentityMatchStrength(row, referenceTokens) {
+  const referenceSet = new Set(referenceTokens);
+  const compactReference = referenceTokens.join("");
+  const companyTokens = jobReferenceTokens(row.company);
+  const roleTokens = jobReferenceTokens(row.role);
+  return [companyTokens, roleTokens].filter((identityTokens) => {
+    if (!identityTokens.length) return false;
+    if (identityTokens.every((token) => referenceSet.has(token))) return true;
+    const compactIdentity = identityTokens.join("");
+    return compactIdentity.length >= 6 && compactReference.includes(compactIdentity);
+  }).length;
+}
+
 function resolveReferencedJobRequest({ repoRoot, env, jobReference }) {
   const tokens = jobReferenceTokens(jobReference);
   if (!tokens.length) {
@@ -891,10 +908,13 @@ function resolveReferencedJobRequest({ repoRoot, env, jobReference }) {
             .toLowerCase()
         )
     );
-  const matches = [...applications, ...sourced].filter((row) => {
-    const candidateTokens = new Set(jobReferenceTokens(`${row.company || ""} ${row.role || ""}`));
-    return tokens.every((token) => candidateTokens.has(token));
-  });
+  const rankedMatches = [...applications, ...sourced]
+    .map((row) => ({ row, strength: jobIdentityMatchStrength(row, tokens) }))
+    .filter((candidate) => candidate.strength > 0);
+  const strongestMatch = Math.max(0, ...rankedMatches.map((candidate) => candidate.strength));
+  const matches = rankedMatches
+    .filter((candidate) => candidate.strength === strongestMatch)
+    .map((candidate) => candidate.row);
   if (!matches.length) {
     throw actionError(
       `CareerRat could not find a saved job matching “${String(jobReference).trim()}”.`,
@@ -1696,12 +1716,7 @@ function blockingPacketGaps(gaps) {
 // so resumeSession still skips the REDUNDANT re-evaluate/re-generate work,
 // just never the safety checks themselves.
 function applicationApplySafetyBlockReason(application) {
-  const gate = String(application?.evaluation?.gate || "").toLowerCase();
-  const reviewApproved =
-    gate === "review" &&
-    Boolean(application?.evaluation?.evaluatedAt) &&
-    application.reviewApproval?.evaluatedAt === application.evaluation.evaluatedAt;
-  if (gate !== "keep" && !reviewApproved) {
+  if (!applicationPacketGatePasses(application)) {
     return "This application does not have a passing gate verdict on record.";
   }
   const manifest = application?.packetManifest;
@@ -2722,6 +2737,73 @@ export async function executeWorkspaceIntent({
             (answer) => answer.uploadReady && answer.confirmationRequired === true
           )
         : [];
+      if (
+        operation.userSupplied === true &&
+        applicationAnswers.length > 0 &&
+        applicationAnswers.length === (operation.answers || []).length &&
+        operation.needsUser !== true
+      ) {
+        const confirmation = await confirmScreeningAnswerImpl({
+          repoRoot,
+          env,
+          applicationId: operation.applicationId,
+          answers: applicationAnswers.map((entry) => ({
+            questionId: entry.questionId,
+            question: entry.question,
+            answer: entry.answer,
+          })),
+        });
+        const manifest = confirmation.packetManifest || {};
+        const uploadReady = manifest.uploadReady === true;
+        const gapCount = Number.isInteger(manifest.gapCount)
+          ? manifest.gapCount
+          : Array.isArray(manifest.gaps)
+            ? manifest.gaps.length
+            : 0;
+        return appendActionResult({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          text: uploadReady
+            ? `Confirmed ${confirmation.answers?.length > 1 ? "these answers" : "this answer"}. The application packet is ready to resume.`
+            : `Confirmed ${confirmation.answers?.length > 1 ? "these answers" : "this answer"}. ${gapCount} packet item${gapCount === 1 ? "" : "s"} still need review.`,
+          artifacts: [
+            {
+              kind: "screening_answer_confirmed",
+              title: "Application answer confirmed",
+              applicationId: confirmation.applicationId,
+              questionId: confirmation.questionId,
+              question: confirmation.question,
+              answer: confirmation.answer,
+              answers: confirmation.answers,
+              artifactPath: confirmation.artifactPath,
+            },
+          ],
+          metadata: {
+            state: "confirmed",
+            persisted: true,
+            uploadReady,
+            gapCount,
+            ...(uploadReady
+              ? {
+                  nextActions: [
+                    {
+                      label: "Resume supervised apply",
+                      intent: {
+                        type: "job.prepare-submit",
+                        entity: { type: "application", id: confirmation.applicationId },
+                        input: { resumeSession: true },
+                      },
+                    },
+                  ],
+                }
+              : {}),
+          },
+          operationResult: confirmation,
+          now,
+        });
+      }
       const applicationActions =
         applicationAnswers.length === 1
           ? [
@@ -5074,7 +5156,14 @@ export async function executeWorkspaceIntent({
               fetchImpl: searchFetchImpl,
               retryFailed: input.retryFailed === true,
             })
-          : await startManualSearchImpl({ repoRoot, env, fetchImpl: searchFetchImpl });
+          : await startManualSearchImpl({
+              repoRoot,
+              env,
+              fetchImpl: searchFetchImpl,
+              ...(input.searchExecutionId
+                ? { searchExecutionId: String(input.searchExecutionId) }
+                : {}),
+            });
       const run = operation?.run || {
         purpose,
         status: operation?.parked ? "not_started" : "failed",
@@ -8822,6 +8911,24 @@ function openJobId(context) {
   return String(context?.jobId || "").trim() || null;
 }
 
+function suppliedScreeningAnswerRequest({ repoRoot, env, text, context }) {
+  const applicationId = openJobId(context);
+  if (!applicationId) return null;
+  let application;
+  try {
+    application = applicationForIntent({ repoRoot, env, id: applicationId });
+  } catch (error) {
+    if (error?.code === "NOT_FOUND") return null;
+    throw error;
+  }
+  const matches = matchSuppliedScreeningAnswers({
+    text,
+    gaps: application.packetManifest?.gaps,
+    confirmedAnswers: application.packetManifest?.confirmedAnswers,
+  });
+  return matches.length ? { applicationId, questionText: String(text || "").trim() } : null;
+}
+
 function canonicalJobContext({ repoRoot, env, context }) {
   const id = openJobId(context);
   if (!id) return null;
@@ -8860,13 +8967,30 @@ export function previewWorkspaceIntent({ text, context, repoRoot, env = process.
   if (!trimmed) {
     return { action: null, answer: { label: "Ask the workspace agent." }, engineAvailable };
   }
-  const rule = ACTION_PREVIEW_RULES.find((candidate) => candidate.test(trimmed, context));
-  const action = rule
+  const suppliedScreening = suppliedScreeningAnswerRequest({
+    repoRoot,
+    env,
+    text: trimmed,
+    context,
+  });
+  const rule = suppliedScreening
+    ? null
+    : ACTION_PREVIEW_RULES.find((candidate) => candidate.test(trimmed, context));
+  const action = suppliedScreening
     ? {
-        label: typeof rule.label === "function" ? rule.label(trimmed, context) : rule.label,
-        intent: rule.intent(trimmed, context),
+        label: "Use these application answers",
+        intent: {
+          type: "screening.answer",
+          entity: { type: "application", id: suppliedScreening.applicationId },
+          input: { questionText: suppliedScreening.questionText },
+        },
       }
-    : null;
+    : rule
+      ? {
+          label: typeof rule.label === "function" ? rule.label(trimmed, context) : rule.label,
+          intent: rule.intent(trimmed, context),
+        }
+      : null;
   return { action, answer: { label: previewAnswerLabel(trimmed) }, engineAvailable };
 }
 

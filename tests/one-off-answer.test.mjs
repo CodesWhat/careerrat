@@ -40,6 +40,67 @@ test("normalizes recurring screening questions without treating job-specific ess
   assert.equal(isDurableScreeningQuestion("Why do you want to work at Acme?"), false);
 });
 
+test("normalizes terminal sentence punctuation off user-supplied URL answers", async () => {
+  const { matchSuppliedScreeningAnswers } = await import("../src/core/packet/one-off-answer.mjs");
+
+  assert.deepEqual(
+    matchSuppliedScreeningAnswers({
+      text: "LinkedIn URL: https://www.linkedin.com/in/riley-chen-careerrat-qa.\nWhy this role?: Strong fit.",
+      gaps: [
+        {
+          kind: "answers",
+          code: "ANSWER_CONFIRMATION_REQUIRED",
+          questionId: "q-linkedin",
+          message: "Answer “LinkedIn URL”.",
+        },
+        {
+          kind: "answers",
+          code: "ANSWER_CONFIRMATION_REQUIRED",
+          questionId: "q-why",
+          message: "Answer “Why this role?”.",
+        },
+      ],
+    }).map(({ gapIndex: _gapIndex, ...answer }) => answer),
+    [
+      {
+        questionId: "q-linkedin",
+        question: "LinkedIn URL",
+        answer: "https://www.linkedin.com/in/riley-chen-careerrat-qa",
+      },
+      { questionId: "q-why", question: "Why this role?", answer: "Strong fit." },
+    ]
+  );
+});
+
+test("preserves semicolon and newline continuation text in a supplied screening answer", async () => {
+  const { matchSuppliedScreeningAnswers } = await import("../src/core/packet/one-off-answer.mjs");
+
+  assert.deepEqual(
+    matchSuppliedScreeningAnswers({
+      text: [
+        "Why do you want to work here?: I like the product;",
+        "I can improve its infrastructure",
+        "and help the team scale.",
+      ].join("\n"),
+      gaps: [
+        {
+          kind: "answers",
+          code: "ANSWER_CONFIRMATION_REQUIRED",
+          questionId: "q-why",
+          message: "Answer “Why do you want to work here?”.",
+        },
+      ],
+    }).map(({ gapIndex: _gapIndex, ...answer }) => answer),
+    [
+      {
+        questionId: "q-why",
+        question: "Why do you want to work here?",
+        answer: "I like the product;\nI can improve its infrastructure\nand help the team scale.",
+      },
+    ]
+  );
+});
+
 test("drafts one-off questions without overwriting a tracked packet capture and logs the answer", async () => {
   const { draftOneOffScreeningAnswers } = await import("../src/core/packet/one-off-answer.mjs");
   const repoRoot = tempRepo();

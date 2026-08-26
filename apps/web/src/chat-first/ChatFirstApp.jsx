@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import { useLocation, useNavigate } from "react-router-dom";
 import { ArtifactViewerModal } from "../jobs/ArtifactViewerModal.jsx";
 import {
+  classifyDurableSearchRun,
   jobSearchCapabilities,
   runAiWebSearchLane,
   runCoordinatedJobSearch,
@@ -38,6 +39,7 @@ import {
   selectedSourcedDismissal,
   selectMockSession,
   sourceSweepPresentation,
+  sourceSweepWithAvailableMatches,
   startMockFromJobThread,
 } from "./chat-first-app-controller.js";
 import {
@@ -106,14 +108,278 @@ const DEFAULT_BROWSER_FILTERS = Object.freeze({
   people: "all",
 });
 
+const CLEARED_SEARCH_FILTERS = Object.freeze({
+  fit80: false,
+  comp: false,
+  remote: false,
+  stage: "all",
+  source: "all",
+  posted: "all",
+});
+
+export function initialVisibleSearchState(api = {}) {
+  if (typeof api?.getSourcingRun !== "function") return sourceSweepPresentation(null);
+  return { status: "hydrating", detail: "Loading your saved search" };
+}
+
+export async function loadVisibleSearchRuns({ getSourcingRun, signal } = {}) {
+  const request = (purpose) => getSourcingRun({ purpose, ...(signal ? { signal } : {}) });
+  const [manualSearch, firstSearch, aiWeb] = await Promise.all([
+    request("manual-search"),
+    request("first-search"),
+    request("ai-web-search"),
+  ]);
+  const deterministicRuns = [manualSearch, firstSearch].filter(
+    (value) => value?.run && value.run.status !== "not_started"
+  );
+  const running = deterministicRuns.filter((value) => value.run.status === "running");
+  const candidates = running.length ? running : deterministicRuns;
+  const deterministic = candidates.sort((left, right) => {
+    const timestamp = (value) => {
+      const run = value?.run || {};
+      for (const candidate of [
+        run.updatedAt,
+        run.updated_at,
+        run.startedAt,
+        run.started_at,
+        run.completedAt,
+        run.completed_at,
+      ]) {
+        const parsed = Date.parse(candidate || "");
+        if (Number.isFinite(parsed)) return parsed;
+      }
+      return 0;
+    };
+    return timestamp(right) - timestamp(left);
+  })[0];
+  return {
+    deterministic: deterministic || manualSearch,
+    aiWeb,
+  };
+}
+
+function durableSearchExecutionId(value) {
+  const id = value?.run?.metadata?.searchExecutionId ?? value?.metadata?.searchExecutionId;
+  return typeof id === "string" && id.trim() ? id.trim() : null;
+}
+
+function correlatedAiRun(deterministic, aiWeb) {
+  if (!aiWeb?.run || !deterministic?.run) return aiWeb;
+  const deterministicExecutionId = durableSearchExecutionId(deterministic);
+  const aiExecutionId = durableSearchExecutionId(aiWeb);
+  if (deterministicExecutionId && deterministicExecutionId !== aiExecutionId) {
+    return { ...aiWeb, status: "not_started", run: null };
+  }
+  return aiWeb;
+}
+
+function hydratedLane(id, classified) {
+  return {
+    label: id === "deterministic" ? "Configured sources" : "AI web search",
+    status: classified.status,
+    ...(classified.reason ? { reason: classified.reason } : {}),
+    ...(classified.partial ? { partial: true } : {}),
+    ...(classified.error ? { error: classified.error } : {}),
+    ...(classified.failedPromptIds.length ? { failedPromptIds: classified.failedPromptIds } : {}),
+  };
+}
+
+export function hydrateVisibleSearchRuns({ deterministic, aiWeb } = {}) {
+  const visibleAiWeb = correlatedAiRun(deterministic, aiWeb);
+  const sourceSweep = sourceSweepPresentation(deterministic);
+  const classified = {
+    deterministic: classifyDurableSearchRun("deterministic", deterministic),
+    aiWeb: classifyDurableSearchRun("aiWeb", visibleAiWeb),
+  };
+  const lanes = Object.fromEntries(
+    Object.entries(classified)
+      .filter(([, lane]) => lane.status !== "idle")
+      .map(([id, lane]) => [id, hydratedLane(id, lane)])
+  );
+  const failed = Object.entries(classified).filter(([, lane]) => lane.status === "failed");
+  const finished = Object.values(classified).filter(
+    (lane) => lane.status === "succeeded" || lane.partial
+  ).length;
+  const running = Object.values(classified).some((lane) => lane.status === "running");
+  const cancelled = Object.values(classified).some(
+    (lane) => lane.status === "skipped" && lane.reason === "cancelled"
+  );
+  const retry = {};
+  if (classified.deterministic.status === "failed") retry.deterministic = true;
+  if (classified.aiWeb.status === "failed") {
+    if (classified.aiWeb.failedPromptIds.length) {
+      retry.aiPromptIds = classified.aiWeb.failedPromptIds;
+    } else {
+      retry.aiWeb = true;
+    }
+  }
+  if (Object.keys(retry).length) {
+    const executionId =
+      durableSearchExecutionId(deterministic) || durableSearchExecutionId(visibleAiWeb);
+    if (executionId) retry.searchExecutionId = executionId;
+  }
+  if (running) {
+    const runningLabels = Object.entries(classified)
+      .filter(([, lane]) => lane.status === "running")
+      .map(([id]) => (id === "deterministic" ? "Configured sources" : "AI web search"));
+    return {
+      deterministic,
+      aiWeb: visibleAiWeb,
+      retry: Object.keys(retry).length ? retry : null,
+      sourceSweep: {
+        ...sourceSweep,
+        status: "running",
+        detail:
+          sourceSweep.status === "running"
+            ? sourceSweep.detail
+            : `${runningLabels.join(" and ")} running`,
+        lanes,
+      },
+    };
+  }
+  if (cancelled && finished === 0 && failed.length === 0) {
+    return {
+      deterministic,
+      aiWeb: visibleAiWeb,
+      retry: null,
+      sourceSweep: { status: "idle", reason: "cancelled", summary: "Search cancelled.", lanes },
+    };
+  }
+  if (!failed.length) {
+    const hasCompletedLane = Object.values(classified).some((lane) => lane.status === "succeeded");
+    return {
+      deterministic,
+      aiWeb: visibleAiWeb,
+      sourceSweep: {
+        ...(hasCompletedLane && sourceSweep.status === "idle"
+          ? { status: "complete", summary: `${finished} search lane finished` }
+          : sourceSweep),
+        ...(Object.keys(lanes).length ? { lanes } : {}),
+      },
+      retry: null,
+    };
+  }
+  const failedCopy = `${failed.length} lane${failed.length === 1 ? "" : "s"} ${
+    failed.length === 1 ? "needs" : "need"
+  } retry`;
+
+  return {
+    deterministic,
+    aiWeb: visibleAiWeb,
+    retry,
+    sourceSweep: {
+      ...sourceSweep,
+      status: finished > 0 ? "complete" : "error",
+      summary: `${finished} search lane${finished === 1 ? "" : "s"} finished · ${failedCopy}`,
+      lanes,
+    },
+  };
+}
+
+function waitForSearchPoll(ms, signal) {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    let settled = false;
+    let timer;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener?.("abort", finish);
+      resolve();
+    };
+    timer = setTimeout(finish, ms);
+    signal?.addEventListener?.("abort", finish, { once: true });
+  });
+}
+
+async function followExactSearchRun({
+  getSourcingRun,
+  id,
+  purpose,
+  signal,
+  pollIntervalMs,
+  pollTimeoutMs,
+}) {
+  const deadline = Date.now() + pollTimeoutMs;
+  let misses = 0;
+  for (;;) {
+    await waitForSearchPoll(pollIntervalMs, signal);
+    if (signal?.aborted) return { aborted: true };
+    if (Date.now() >= deadline) return { timedOut: true };
+    try {
+      const value = await getSourcingRun({ purpose, id, ...(signal ? { signal } : {}) });
+      const run = value?.run;
+      if (!run || run.id !== id) {
+        misses += 1;
+        if (misses < 3) continue;
+        throw new Error(`Search run ${id} could not be read.`);
+      }
+      misses = 0;
+      if (run.status !== "running") return { run };
+    } catch (error) {
+      misses += 1;
+      if (misses < 3) continue;
+      throw error;
+    }
+  }
+}
+
+export async function followVisibleSearchRuns({
+  loaded,
+  getSourcingRun,
+  signal,
+  pollIntervalMs = 2500,
+  pollTimeoutMs = 10 * 60 * 1000,
+} = {}) {
+  const running = [loaded?.deterministic, loaded?.aiWeb]
+    .map((value) => value?.run)
+    .filter((run) => run?.status === "running" && run.id && run.purpose);
+  if (!running.length) return { aborted: false, timedOut: false, runs: loaded };
+
+  const outcomes = await Promise.all(
+    running.map((run) =>
+      followExactSearchRun({
+        getSourcingRun,
+        id: run.id,
+        purpose: run.purpose,
+        signal,
+        pollIntervalMs,
+        pollTimeoutMs,
+      })
+    )
+  );
+  if (signal?.aborted || outcomes.some((outcome) => outcome.aborted)) {
+    return { aborted: true, timedOut: false, runs: loaded };
+  }
+  const runs = await loadVisibleSearchRuns({ getSourcingRun, signal });
+  return {
+    aborted: false,
+    timedOut: outcomes.some((outcome) => outcome.timedOut),
+    runs,
+  };
+}
+
+function createSearchExecutionId() {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return `search-${globalThis.crypto.randomUUID()}`;
+  }
+  return `search-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export async function runChatFirstJobSearch({
   api,
+  retry,
   refetch,
   setSearchState,
   signal,
   runCoordinator = runCoordinatedJobSearch,
   runDeterministicLane = runJobsPageSearch,
   runAiLane = runAiWebSearchLane,
+  createSearchExecutionId: createSearchExecutionIdFn = createSearchExecutionId,
 } = {}) {
   const [sourceStatusResult, runtimeConfigResult] = await Promise.allSettled([
     typeof api?.getSearchSourceStatus === "function"
@@ -136,8 +402,10 @@ export async function runChatFirstJobSearch({
     },
   });
 
-  return runCoordinator({
+  const searchExecutionId = retry?.searchExecutionId || createSearchExecutionIdFn();
+  const result = await runCoordinator({
     capabilities,
+    retry,
     refetch,
     setSearchState,
     signal,
@@ -145,6 +413,7 @@ export async function runChatFirstJobSearch({
       runDeterministicLane({
         startSearchRun: api.startSearchRun,
         getSourcingRun: api.getSourcingRun,
+        searchExecutionId,
         setSearchRun: (run) => {
           const presentation = sourceSweepPresentation(run);
           onLaneState?.({
@@ -159,8 +428,10 @@ export async function runChatFirstJobSearch({
         },
         signal: laneSignal,
       }),
-    runAiWeb: ({ signal: laneSignal, onLaneState }) =>
+    runAiWeb: ({ signal: laneSignal, onLaneState, retryPromptIds }) =>
       runAiLane({
+        ...(retryPromptIds?.length ? { promptIds: retryPromptIds } : {}),
+        searchExecutionId,
         signal: laneSignal,
         setStatus: () => undefined,
         setActivity: (detail) => {
@@ -174,6 +445,8 @@ export async function runChatFirstJobSearch({
         },
       }),
   });
+  if (!result?.retry) return result;
+  return { ...result, retry: { ...result.retry, searchExecutionId } };
 }
 const SKILL_CHAT_EVENT_TYPES = [
   "assistant",
@@ -224,19 +497,15 @@ export function dispatchChatFirstMessageIntent(
 export function revealSourcedTarget(id, { dispatch, setQuery, setBrowserFilters } = {}) {
   const targetId = String(id || "").trim();
   if (!targetId) return null;
-  setQuery?.("");
-  setBrowserFilters?.((current) => ({
-    ...current,
-    fit80: false,
-    comp: false,
-    remote: false,
-    stage: "all",
-    source: "all",
-    posted: "all",
-  }));
+  resetBrowserSearchFilters({ setQuery, setBrowserFilters });
   dispatch?.({ type: "selection.replace", ids: [targetId] });
   dispatch?.({ type: "browser.open", tab: "search" });
   return targetId;
+}
+
+export function resetBrowserSearchFilters({ setQuery, setBrowserFilters } = {}) {
+  setQuery?.("");
+  setBrowserFilters?.((current) => ({ ...current, ...CLEARED_SEARCH_FILTERS }));
 }
 
 export async function loadChatFirstNavigationArtifact({ api, entity, artifactKind, files = [] }) {
@@ -361,15 +630,29 @@ export async function runChatFirstOperation(
   }
 }
 
-function browserLaunchers(view) {
+function browserLaunchers(view, sourceSweep = {}) {
   const nextSchedule = list(view?.browser?.schedule).find((group) => list(group?.items).length);
   const nextDay = nextSchedule?.day
     ? `${String(nextSchedule.day).slice(0, 1).toUpperCase()}${String(nextSchedule.day)
         .slice(1, 3)
         .toLowerCase()}`
     : null;
+  const searchCount = Number(view?.counts?.search) || 0;
+  const searchFailed = Object.values(sourceSweep?.lanes || {}).some(
+    (lane) => lane?.status === "failed"
+  );
+  const searchMeta =
+    sourceSweep?.status === "hydrating"
+      ? "loading search"
+      : sourceSweep?.status === "running"
+        ? "searching now"
+        : searchFailed
+          ? "retry search"
+          : searchCount > 0
+            ? `${searchCount} need action`
+            : "start here";
   return [
-    { id: "search", label: "Search", meta: `${view.counts.search} need action`, tone: "lime" },
+    { id: "search", label: "Search", meta: searchMeta, tone: "lime" },
     { id: "pipeline", label: "Pipeline", meta: `${view.counts.pipeline} tracked` },
     { id: "files", label: "Files", meta: String(view.counts.files) },
     {
@@ -546,6 +829,7 @@ export function ChatFirstAppView({
   pipelineStage = null,
   browserFilters = DEFAULT_BROWSER_FILTERS,
   sourceSweep = {},
+  onboardingHandoff = false,
   deepIngest,
   mockSession,
   activeGate,
@@ -617,6 +901,10 @@ export function ChatFirstAppView({
 
   if (ui.browse) {
     const jobs = filterSearchJobs(view.browser.search, { ...browserFilters, query });
+    const visibleSourceSweep = sourceSweepWithAvailableMatches(
+      sourceSweep,
+      view.browser.search.length
+    );
     const pipeline = {
       ...view.browser.pipeline,
       jobs: filterPipelineJobs(view.browser.pipeline?.jobs, pipelineStage),
@@ -637,7 +925,8 @@ export function ChatFirstAppView({
             jobs={jobs}
             cartJobs={view.browser.search}
             selection={ui.selection}
-            sourceSweep={sourceSweep}
+            sourceSweep={visibleSourceSweep}
+            onboardingHandoff={onboardingHandoff}
             locationPolicy={view.locationPolicy}
             pipeline={pipeline}
             files={filterFiles(view.browser.files, browserFilters.files)}
@@ -653,6 +942,7 @@ export function ChatFirstAppView({
             onToggleSelection={actions.toggleSelection}
             onRunSweep={actions.runSweep}
             onOpenSourceHealth={actions.openSourceHealth}
+            onClearFilters={actions.clearSearchFilters}
             onQueryChange={actions.setQuery}
             onFilter={actions.filterBrowser}
             onStageSelect={actions.selectPipelineStage}
@@ -843,7 +1133,7 @@ export function ChatFirstAppView({
           deepIngestThread={view.deepIngestThread}
           skillThreads={view.skillChats}
           threads={view.threads}
-          browserLaunchers={browserLaunchers(view)}
+          browserLaunchers={browserLaunchers(view, sourceSweep)}
           archiveThreads={view.archivedThreads}
           archiveTotal={view.counts.archived}
           archiveOpen={ui.archiveOpen}
@@ -881,11 +1171,13 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   const [error, setError] = useState(null);
   const [engineDown, setEngineDown] = useState(false);
   const [technicalOpen, setTechnicalOpen] = useState(false);
-  const [sourceSweep, setSourceSweep] = useState(() => sourceSweepPresentation(null));
+  const [sourceSweep, setSourceSweep] = useState(() => initialVisibleSearchState(api));
+  const [onboardingHandoff, setOnboardingHandoff] = useState(false);
   const [newSearchIds, setNewSearchIds] = useState([]);
   const [sweepComparison, setSweepComparison] = useState(0);
   const sweepBaselineRef = useRef(null);
   const sweepAbortRef = useRef(null);
+  const sweepRetryRef = useRef(null);
   const missionExecutionRef = useRef(new Set());
   const [deepState, setDeepState] = useState(null);
   const [deepInputMode, setDeepInputMode] = useState(null);
@@ -899,6 +1191,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   const [gatePacket, setGatePacket] = useState(null);
   const [skillChatState, setSkillChatState] = useState(null);
   const skillChatCursorsRef = useRef(new Map());
+  const skillChatSessionResolutionRef = useRef(new Map());
 
   const baseView = useMemo(
     () => buildChatFirstView(dashboard.data || {}, dashboard.data?.chatFirst || {}),
@@ -920,7 +1213,11 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   const activeSkillChat = persistedSkillChat
     ? skillChatState?.id === persistedSkillChat.id
       ? { ...persistedSkillChat, ...skillChatState }
-      : { ...persistedSkillChat, messages: hydrateSkillChatMessages(persistedSkillChat) }
+      : {
+          ...persistedSkillChat,
+          chatId: null,
+          messages: hydrateSkillChatMessages(persistedSkillChat),
+        }
     : null;
   const rawGate = useMemo(
     () => findGate(view.missions, ui.gateId, view.jobDetails),
@@ -961,8 +1258,9 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   useEffect(() => {
     const next = location.state || {};
     if (next.browse) dispatch({ type: "browser.open", tab: next.browse });
+    if (next.onboardingComplete === true) setOnboardingHandoff(true);
     if (next.composerDraft) setComposerValue(String(next.composerDraft));
-    if (next.browse || next.composerDraft)
+    if (next.browse || next.composerDraft || next.onboardingComplete)
       navigate(location.pathname, { replace: true, state: null });
   }, [location.pathname, location.state, navigate]);
 
@@ -971,20 +1269,35 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     const controller = new AbortController();
     void (async () => {
       try {
-        const latest = await api.getSourcingRun({ purpose: "manual-search" });
-        if (controller.signal.aborted) return;
-        setSourceSweep(sourceSweepPresentation(latest));
-        if (latest?.run?.status !== "running") return;
-        await runJobsPageSearch({
-          startSearchRun: async () => latest,
+        const loaded = await loadVisibleSearchRuns({
           getSourcingRun: api.getSourcingRun,
-          refetch: dashboard.refetch,
-          setSearchRun: (run) => setSourceSweep(sourceSweepPresentation(run)),
-          setSearchError: (message) => {
-            if (message) setSourceSweep({ status: "error", summary: message });
-          },
           signal: controller.signal,
         });
+        if (controller.signal.aborted) return;
+        const hydrated = hydrateVisibleSearchRuns(loaded);
+        setSourceSweep(hydrated.sourceSweep);
+        sweepRetryRef.current = hydrated.retry;
+        const hasRunning = [loaded.deterministic, loaded.aiWeb].some(
+          (value) => value?.run?.status === "running"
+        );
+        if (!hasRunning) return;
+        const followed = await followVisibleSearchRuns({
+          loaded,
+          getSourcingRun: api.getSourcingRun,
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted || followed.aborted) return;
+        const completed = hydrateVisibleSearchRuns(followed.runs);
+        if (followed.timedOut) {
+          completed.sourceSweep = {
+            ...completed.sourceSweep,
+            status: "running",
+            detail: "Search is still running in the background. Reload later to see results.",
+          };
+        }
+        setSourceSweep(completed.sourceSweep);
+        sweepRetryRef.current = completed.retry;
+        await dashboard.refetch?.();
       } catch (cause) {
         if (!controller.signal.aborted) {
           setSourceSweep({ status: "error", summary: errorCopy(cause) });
@@ -1059,13 +1372,18 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       return;
     }
     let cancelled = false;
-    setSkillChatState({
-      ...persistedSkillChat,
-      messages: hydrateSkillChatMessages(persistedSkillChat),
-      cursor: 0,
-      streamAfter: 0,
+    setSkillChatState((current) => {
+      const sameThread = current?.id === persistedSkillChat.id;
+      const reuseSession = sameThread && current.state !== "closed";
+      return {
+        ...persistedSkillChat,
+        messages: hydrateSkillChatMessages(persistedSkillChat),
+        chatId: reuseSession ? current.chatId : null,
+        cursor: reuseSession ? current.cursor : 0,
+        streamAfter: reuseSession ? current.streamAfter : 0,
+      };
     });
-    void resolveSkillChatSession(api, persistedSkillChat)
+    void resolveSkillChatSession(api, persistedSkillChat, skillChatSessionResolutionRef.current)
       .then((session) => {
         if (cancelled) return;
         const cursor = skillChatCursorsRef.current.get(session.chatId) || 0;
@@ -1259,10 +1577,12 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     try {
       const result = await runChatFirstJobSearch({
         api,
+        retry: sweepRetryRef.current,
         refetch: dashboard.refetch,
         setSearchState: setSourceSweep,
         signal: controller.signal,
       });
+      if (!result?.aborted) sweepRetryRef.current = result?.retry || null;
       if (result?.ok) setSweepComparison((current) => current + 1);
       else if (!result?.timedOut) sweepBaselineRef.current = null;
     } finally {
@@ -1664,6 +1984,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     closeSourceReview: () => setSourceReview(null),
     runSweep,
     setQuery,
+    clearSearchFilters: () => resetBrowserSearchFilters({ setQuery, setBrowserFilters }),
     openSourceHealth: () => navigate("/settings", { state: { activeTab: "settings" } }),
     filterBrowser: (filter, value) => {
       if (ui.browse === "files") {
@@ -1904,6 +2225,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       pipelineStage={pipelineStage}
       browserFilters={browserFilters}
       sourceSweep={sourceSweep}
+      onboardingHandoff={onboardingHandoff}
       deepIngest={deepIngest}
       mockSession={mockSession}
       activeGate={activeGate}

@@ -1182,6 +1182,37 @@ test("a reviewed-hold application that has not cleared the gate uses needs-revie
   assert.equal(row.drawer.stage, "Needs review");
 });
 
+test("an explicitly approved current review verdict is ready for application preparation", () => {
+  const evaluatedAt = "2026-08-26T18:53:39.162Z";
+  const vm = buildDashboardViewModel({
+    applications: [
+      {
+        id: "review-approved",
+        company: "Approved Co",
+        role: "Platform Engineer",
+        status: "reviewed-hold",
+        base: "$190,000 - $220,000",
+        evaluation: { gate: "review", evaluatedAt },
+        reviewApproval: {
+          evaluatedAt,
+          approvedAt: "2026-08-26T18:54:00.000Z",
+        },
+      },
+    ],
+    sourced: [],
+    communications: [],
+    sources: [],
+  });
+
+  const row = vm.jobs.rows.find((candidate) => candidate.id === "review-approved");
+  assert.equal(row.stage, "reviewed-hold");
+  assert.equal(row.stageLabel, "Ready to apply");
+  assert.equal(row.drawer.stage, "Ready to apply");
+  assert.equal(row.action.label, "Prepare");
+  assert.match(row.action.summary, /ready for application preparation/i);
+  assert.doesNotMatch(row.action.summary, /pending review/i);
+});
+
 test("Network never hides approved contacts or companies behind arbitrary display caps", () => {
   const applications = Array.from({ length: 7 }, (_, index) => ({
     id: `app-${index}`,

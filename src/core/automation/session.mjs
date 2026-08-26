@@ -13,10 +13,10 @@
 //   2. extension  — Chrome extension (Claude-in-Chrome / Codex), which holds the
 //                   user's logins + password store.
 //   3. orca       — Orca's supervised embedded browser.
-//   4. playwright — a persistent Playwright profile the user signs into once per
-//                   platform (the scripts/capture-board-snapshot.mjs model).
+//   4. playwright — a persistent Playwright profile CareerRat creates on demand;
+//                   workflows surface authentication only when a site requires it.
 
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -109,7 +109,7 @@ export const PROVIDERS = {
     id: "playwright",
     label: "Playwright persistent profile",
     preferred: false,
-    needs: "a one-time interactive login per platform (persistent profile reused after)",
+    needs: "CareerRat opens a supervised browser when a workflow needs it",
     storesCreds: false,
     automatedApply: true,
   },
@@ -239,50 +239,30 @@ function detectChromeFamily() {
   return found;
 }
 
-// Best-effort presence probe for the playwright provider: count the per-platform
-// persistent profiles the user has signed into. Empty/absent => "not set up yet".
-function detectPlaywrightProfiles(profileRoot) {
-  if (!profileRoot || !existsSync(profileRoot)) {
-    return {
-      status: "missing",
-      signedIn: [],
-      detail: `no persistent profiles yet (${profileRoot}). Sign in once per platform`,
-    };
-  }
-  const signedIn = readdirSync(profileRoot, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
-    .map((e) => e.name)
-    .sort();
-  if (!signedIn.length) {
-    return {
-      status: "missing",
-      signedIn: [],
-      detail: `profile root exists but is empty (${profileRoot}). Sign in once per platform`,
-    };
-  }
-  return {
-    status: "ready",
-    signedIn,
-    detail: `${signedIn.length} signed-in profile(s): ${signedIn.join(", ")}`,
-  };
-}
-
 // detectSession — resolveSession() PLUS a best-effort, never-throwing presence
 // probe so `doctor`/`configure` can tell the user whether the session browser is
 // actually ready, not just which provider is configured. Status values:
-//   ready      — verifiable signal that the session browser is set up (playwright
-//                profiles exist).
+//   ready      — verifiable signal that the session browser can launch.
 //   unverified — a compatible browser is installed but the extension can't be seen
 //                from outside the browser; the user must confirm it in Chrome.
-//   missing    — nothing detected (no browser / no profiles).
+//   missing    — nothing launchable was detected.
 //   unknown    — the probe itself failed (informational only; never fatal).
 // This NEVER drives a browser and NEVER throws — doctor must not fail on it.
-export function detectSession({ data, env = process.env } = {}) {
+export function detectSession({ data, env = process.env, playwrightToolingDependencies } = {}) {
   const base = resolveSession({ data, env });
   let presence;
   try {
     if (base.provider === "playwright") {
-      presence = detectPlaywrightProfiles(base.profileRoot);
+      const tooling = detectPlaywrightTooling(playwrightToolingDependencies);
+      presence = tooling.ready
+        ? {
+            status: "ready",
+            detail: "Playwright opens a supervised browser when a workflow needs it.",
+          }
+        : {
+            status: "missing",
+            detail: tooling.detail,
+          };
     } else if (base.provider === "orca") {
       presence = env?.ORCA_WORKTREE_ID
         ? {

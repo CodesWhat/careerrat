@@ -40,6 +40,8 @@ function pathDecision({ repoRoot, skill, toolName, input }) {
 
   const canonicalRepo = nearestCanonicalPath(resolve(repoRoot));
   const target = nearestCanonicalPath(resolve(repoRoot, rawPath));
+  const candidateRoot = join(canonicalRepo, "candidate");
+  const privateFormDefaults = join(candidateRoot, "form-defaults.yml");
   const rel = relative(canonicalRepo, target);
   const segments = rel.split(/[\\/]+/).filter(Boolean);
   const leaf = basename(target).toLowerCase();
@@ -54,10 +56,19 @@ function pathDecision({ repoRoot, skill, toolName, input }) {
       `${toolName} cannot access credentials, internal state, or paths outside CareerRat`
     );
   }
+  if (
+    target === privateFormDefaults ||
+    (toolName === "Grep" &&
+      (isWithin(target, privateFormDefaults) || isWithin(privateFormDefaults, target)))
+  ) {
+    return deny(
+      `${toolName} cannot access raw application defaults; use CareerRat's sanitized candidate context`
+    );
+  }
 
   const allowedRoots = [
     join(canonicalRepo, ".agents", "skills", skill),
-    join(canonicalRepo, "candidate"),
+    candidateRoot,
     join(canonicalRepo, "workspace"),
     join(canonicalRepo, "config"),
     join(canonicalRepo, "templates"),

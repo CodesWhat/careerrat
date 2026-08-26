@@ -117,6 +117,14 @@ on a schedule," halt-on-captcha/2FA, local-only data — are the **Browser Autom
 Contract** in `AGENTS.md`. The capabilities activate phase by phase as their skills
 ship.
 
+Application preparation fills safe, confirmed fields and attaches approved
+documents. Voluntary demographic and self-identification fields stay blank by
+default. The local-only **Profile > Application defaults** editor can keep them
+blank or choose the form's decline option when available. Existing exact answers
+stay hidden and may be used only when explicitly saved; CareerRat never infers
+one. CareerRat halts on CAPTCHA or
+two-factor authentication and never presses the final submit control.
+
 `mail_access` has stricter mailbox-specific limits: for a verification-code flow,
 read only the one recent matching message needed for the current application or
 sign-in page. Generic `webmail` is limited to this verification-code flow; broader
@@ -131,8 +139,10 @@ Which provider drives the live session is itself a setting. `auto` is the
 candidate to understand their CLI or extension setup. It selects Orca inside an Orca
 workspace, bundled Playwright in the packaged desktop app, and the compatible extension
 otherwise. Explicit overrides are `extension`, `orca` (a supervised embedded browser
-available inside Orca workspaces), or `playwright` (a one-time interactive login per platform, persistent
-profile at `~/.careerrat/board-profiles/<platform>`). It's a *how-it-runs* choice and
+available inside Orca workspaces), or `playwright` (a supervised browser with persistent
+local storage created on demand). Public application forms need no setup. If a particular
+site requires an account, the candidate signs in when that site asks and CareerRat reuses
+that session. It's a *how-it-runs* choice and
 never affects `mayRun()` — provider does not gate whether a capability is allowed.
 Change it the same safe way as the toggles (dry-run by default, schema-validated,
 comment-preserving; first `--write` scaffolds the file):

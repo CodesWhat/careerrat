@@ -53,6 +53,274 @@ test("Orca focusTab switches to the retained supervised page", async () => {
   assert.deepEqual(commands, [["tab", "switch", "--page", "page-123", "--json"]]);
 });
 
+test("Orca selectDeclineOption chooses only one narrowly recognized option", async () => {
+  const commands = [];
+  let snapshotIndex = 0;
+  const snapshots = [
+    {
+      origin: "https://example.test/apply",
+      refs: { e1: { name: "Gender", role: "combobox" } },
+      snapshot: '- combobox "Gender" [expanded=false, ref=e1]',
+    },
+    {
+      origin: "https://example.test/apply",
+      refs: {
+        e1: { name: "Gender", role: "combobox" },
+        e2: { name: "Woman", role: "option" },
+        e3: { name: "Prefer not to answer", role: "option" },
+      },
+      snapshot: [
+        '- combobox "Gender" [expanded=true, ref=e1]',
+        '  - option "Woman" [ref=e2]',
+        '  - option "Prefer not to answer" [ref=e3]',
+      ].join("\n"),
+    },
+    {
+      origin: "https://example.test/apply",
+      refs: { e1: { name: "Gender", role: "combobox" } },
+      snapshot: '- combobox "Gender" [expanded=false, ref=e1]: Prefer not to answer',
+    },
+  ];
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      commands.push(args);
+      if (args[0] === "snapshot") {
+        return snapshots[Math.min(snapshotIndex++, snapshots.length - 1)];
+      }
+      if (args[0] === "eval") return { result: "[]" };
+      return {};
+    },
+  });
+
+  const result = await ops.selectDeclineOption({
+    pageId: "page-123",
+    ref: "e1",
+    label: "Gender",
+  });
+
+  assert.equal(result.selectedValue, "Prefer not to answer");
+  assert.equal(
+    commands.some((args) => args[0] === "click" && args.includes("@e3")),
+    true
+  );
+});
+
+test("Orca selectDeclineOption waits for an asynchronously rendered Greenhouse decline option", async () => {
+  const commands = [];
+  const label = "Disability Status";
+  let menuOpen = false;
+  let waited = false;
+  let selected = false;
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      commands.push(args);
+      if (args[0] === "click") {
+        if (args.includes("@e1")) menuOpen = true;
+        if (args.includes("@e3")) selected = true;
+        return {};
+      }
+      if (args[0] === "wait") {
+        waited = true;
+        return {};
+      }
+      if (args[0] === "snapshot") {
+        if (selected) {
+          return {
+            origin: "https://job-boards.greenhouse.io/example/jobs/123",
+            refs: { e4: { name: label, role: "combobox" } },
+            snapshot: `- combobox "${label}" [expanded=false, ref=e4]: I do not want to answer`,
+          };
+        }
+        return {
+          origin: "https://job-boards.greenhouse.io/example/jobs/123",
+          refs: {
+            e1: { name: label, role: "combobox" },
+            ...(menuOpen && waited
+              ? { e3: { name: "I do not want to answer", role: "option" } }
+              : {}),
+          },
+          snapshot: [
+            `- combobox "${label}" [expanded=${menuOpen}, ref=e1]`,
+            ...(menuOpen && waited ? ['  - option "I do not want to answer" [ref=e3]'] : []),
+          ].join("\n"),
+        };
+      }
+      if (args[0] === "eval") return { result: "false" };
+      return {};
+    },
+  });
+
+  const result = await ops.selectDeclineOption({
+    pageId: "page-greenhouse",
+    ref: "e1",
+    label,
+  });
+
+  assert.deepEqual(result, { selectedValue: "I do not want to answer" });
+  assert.equal(
+    commands.some((args) => args[0] === "wait"),
+    true
+  );
+});
+
+test("Orca selectDeclineOption reacquires a committed Greenhouse field after refs shift", async () => {
+  const label = "Race";
+  let selected = false;
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      if (args[0] === "click") {
+        if (args.includes("@e3")) selected = true;
+        return {};
+      }
+      if (args[0] === "snapshot") {
+        if (selected) {
+          return {
+            origin: "https://job-boards.greenhouse.io/example/jobs/123",
+            refs: {
+              e1: { name: "Remove I don't wish to answer", role: "button" },
+              e4: { name: label, role: "combobox" },
+            },
+            snapshot: [
+              '- button "Remove I don\'t wish to answer" [ref=e1]',
+              `- combobox "${label}" [expanded=false, required, ref=e4]: I don't wish to answer`,
+            ].join("\n"),
+          };
+        }
+        return {
+          origin: "https://job-boards.greenhouse.io/example/jobs/123",
+          refs: {
+            e1: { name: label, role: "combobox" },
+            e3: { name: "I don't wish to answer", role: "option" },
+          },
+          snapshot: [
+            `- combobox "${label}" [expanded=true, required, ref=e1]`,
+            '  - option "I don\'t wish to answer" [ref=e3]',
+          ].join("\n"),
+        };
+      }
+      if (args[0] === "eval") return { result: "false" };
+      return {};
+    },
+  });
+
+  const result = await ops.selectDeclineOption({
+    pageId: "page-greenhouse",
+    ref: "e1",
+    label,
+  });
+
+  assert.deepEqual(result, { selectedValue: "I don't wish to answer" });
+});
+
+test("Orca selectDeclineOption uses pointer events when a Greenhouse multi-select ignores CLI click", async () => {
+  const commands = [];
+  const label = "What gender identity do you most closely identify with?";
+  let selected = false;
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      commands.push(args);
+      if (args[0] === "snapshot") {
+        if (selected) {
+          return {
+            origin: "https://job-boards.greenhouse.io/example/jobs/123",
+            refs: { e4: { name: label, role: "combobox" } },
+            snapshot: `- combobox "${label}" [expanded=false, required, ref=e4]: I don't wish to answer`,
+          };
+        }
+        return {
+          origin: "https://job-boards.greenhouse.io/example/jobs/123",
+          refs: {
+            e1: { name: label, role: "combobox" },
+            e3: { name: "I don't wish to answer", role: "option" },
+          },
+          snapshot: [
+            `- combobox "${label}" [expanded=true, required, ref=e1]`,
+            '  - option "I don\'t wish to answer" [ref=e3]',
+          ].join("\n"),
+        };
+      }
+      if (args[0] === "eval") {
+        const expression = args[args.indexOf("--expression") + 1];
+        if (expression.includes("[role='option']")) {
+          selected = true;
+          return { result: "true" };
+        }
+        return { result: "false" };
+      }
+      return {};
+    },
+  });
+
+  const result = await ops.selectDeclineOption({
+    pageId: "page-greenhouse",
+    ref: "e1",
+    label,
+  });
+
+  assert.deepEqual(result, { selectedValue: "I don't wish to answer" });
+  assert.equal(
+    commands.some((args) => args[0] === "click" && args.includes("@e3")),
+    false,
+    "the Greenhouse option commits through the pointer-event fallback"
+  );
+});
+
+test("Orca typeahead selectOption uses pointer events when a Greenhouse multi-select ignores CLI click", async () => {
+  const commands = [];
+  const label = "Race";
+  const value = "Two or more races";
+  let selected = false;
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      commands.push(args);
+      if (args[0] === "snapshot") {
+        if (selected) {
+          return {
+            origin: "https://job-boards.greenhouse.io/example/jobs/123",
+            refs: { e4: { name: label, role: "combobox" } },
+            snapshot: `- combobox "${label}" [expanded=false, required, ref=e4]: ${value}`,
+          };
+        }
+        return {
+          origin: "https://job-boards.greenhouse.io/example/jobs/123",
+          refs: {
+            e1: { name: label, role: "combobox" },
+            e3: { name: value, role: "option" },
+          },
+          snapshot: [
+            `- combobox "${label}" [expanded=true, required, ref=e1]`,
+            `  - option "${value}" [ref=e3]`,
+          ].join("\n"),
+        };
+      }
+      if (args[0] === "eval") {
+        const expression = args[args.indexOf("--expression") + 1];
+        if (expression.includes("[role='option']")) {
+          selected = true;
+          return { result: "true" };
+        }
+        return { result: "false" };
+      }
+      return {};
+    },
+  });
+
+  const result = await ops.selectOption({
+    pageId: "page-greenhouse",
+    ref: "e1",
+    label,
+    value,
+    typeahead: true,
+  });
+
+  assert.deepEqual(result, { selectedValue: value });
+  assert.equal(
+    commands.some((args) => args[0] === "click" && args.includes("@e3")),
+    false,
+    "the confirmed exact option commits through the pointer-event fallback"
+  );
+});
+
 test("Orca snapshot marks one Next control safe only from structured form progress", async () => {
   const commands = [];
   const ops = createOrcaOps({
@@ -131,6 +399,100 @@ test("Orca snapshot binds progress proof only to an exact advance label", async 
   assert.equal(snapshot.refs.e2.advanceSafe, true);
 });
 
+test("Orca snapshot probes a named Greenhouse react-select instead of treating its blank state as unknowable", async () => {
+  const commands = [];
+  const label = "Are you currently eligible to work in your country of residence?";
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      commands.push(args);
+      if (args[0] === "snapshot") {
+        return {
+          origin: "https://job-boards.greenhouse.io/example/jobs/123",
+          refs: { e39: { name: label, role: "combobox" } },
+          snapshot: [
+            "- LabelText",
+            `  - StaticText "${label}"`,
+            "- generic",
+            '  - StaticText "Select..."',
+            `  - combobox "${label}" [expanded=false, required, ref=e39]`,
+          ].join("\n"),
+        };
+      }
+      if (args[0] === "eval") {
+        return {
+          result: JSON.stringify([{ label, stateKnown: true, value: "", typeahead: true }]),
+        };
+      }
+      return {};
+    },
+  });
+
+  const snapshot = await ops.snapshot({ pageId: "page-greenhouse" });
+
+  assert.deepEqual(snapshot.refs.e39, {
+    role: "combobox",
+    name: label,
+    required: true,
+    stateKnown: true,
+    value: "",
+    typeahead: true,
+  });
+  assert.equal(
+    commands.some((args) => args[0] === "eval"),
+    true,
+    "the DOM probe must run even when the combobox accessible name is the real field label"
+  );
+});
+
+test("Orca snapshot does not treat typed react-select search text as a committed selection", async () => {
+  const label = "Are you currently eligible to work in your country of residence?";
+  const displayScope = { querySelectorAll: () => [] };
+  const input = {
+    tagName: "INPUT",
+    value: "Yes",
+    required: true,
+    parentElement: displayScope,
+    closest: () => displayScope,
+    getAttribute: (name) => ({ role: "combobox", "aria-required": "true" })[name] ?? null,
+  };
+  const root = { querySelectorAll: () => [input] };
+  const labelNode = {
+    innerText: label,
+    className: "required-field-label",
+    parentElement: root,
+    closest: () => root,
+  };
+  const document = { querySelectorAll: () => [labelNode] };
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      if (args[0] === "snapshot") {
+        return {
+          origin: "https://job-boards.greenhouse.io/example/jobs/123",
+          refs: { e39: { name: label, role: "combobox" } },
+          snapshot: [
+            "- LabelText",
+            `  - StaticText "${label}"`,
+            "- generic",
+            '  - StaticText "Yes"',
+            `  - combobox "${label}" [expanded=true, required, ref=e39]: Yes`,
+          ].join("\n"),
+        };
+      }
+      if (args[0] === "eval") {
+        const expression = args[args.indexOf("--expression") + 1];
+        return { result: Function("document", `return ${expression}`)(document) };
+      }
+      return {};
+    },
+  });
+
+  const snapshot = await ops.snapshot({ pageId: "page-greenhouse" });
+
+  assert.equal(snapshot.refs.e39.typeahead, true);
+  assert.equal(snapshot.refs.e39.stateKnown, undefined);
+  assert.equal(snapshot.refs.e39.value, undefined);
+});
+
 test("Orca select verification reads the acted-on ref when labels are duplicated", async () => {
   const commands = [];
   const ops = createOrcaOps({
@@ -170,6 +532,893 @@ test("Orca select verification reads the acted-on ref when labels are duplicated
     "New York",
     "--json",
   ]);
+});
+
+test("Orca native selects retry candidate-configured aliases", async () => {
+  const commands = [];
+  let selected = "";
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      commands.push(args);
+      if (args[0] === "select") {
+        const value = args[args.indexOf("--value") + 1];
+        if (value === "Other") selected = value;
+        return {};
+      }
+      if (args[0] === "snapshot") {
+        return {
+          origin: "https://example.test/apply",
+          refs: { e1: { name: "How did you hear about us?", role: "combobox" } },
+          snapshot: `- combobox "How did you hear about us?" [ref=e1]: ${selected}`,
+        };
+      }
+      return {};
+    },
+  });
+
+  const result = await ops.selectOption({
+    pageId: "page-123",
+    ref: "e1",
+    label: "How did you hear about us?",
+    value: "CareerRat",
+    optionAliases: ["Other"],
+  });
+
+  assert.deepEqual(result, { selectedValue: "Other" });
+  assert.deepEqual(
+    commands
+      .filter((args) => args[0] === "select")
+      .map((args) => args[args.indexOf("--value") + 1]),
+    ["CareerRat", "Other"]
+  );
+});
+
+test("Orca select verification never reports success when the acted-on field has unknown state", async () => {
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      if (args[0] === "snapshot") {
+        return {
+          origin: "https://example.test/apply",
+          refs: { e1: { name: "Work authorization", role: "combobox" } },
+          snapshot: '- combobox "Work authorization" [required, ref=e1]',
+        };
+      }
+      if (args[0] === "eval") return { result: "[]" };
+      return {};
+    },
+  });
+
+  await assert.rejects(
+    ops.selectOption({
+      pageId: "page-123",
+      ref: "e1",
+      label: "Work authorization",
+      value: "Yes",
+    }),
+    /could not be confirmed/i
+  );
+});
+
+test("Orca verifies a Greenhouse react-select from its visible selected value after the input clears", async () => {
+  const commands = [];
+  const label = "Are you currently eligible to work in your country of residence?";
+  let optionsOpen = false;
+  let optionSnapshotCount = 0;
+  let selectedValue = "";
+  const fieldSnapshot = () => ({
+    origin: "https://job-boards.greenhouse.io/example/jobs/123",
+    refs: { [selectedValue ? "e44" : "e39"]: { name: label, role: "combobox" } },
+    snapshot: [
+      "- LabelText",
+      `  - StaticText "${label}"`,
+      "- generic",
+      `  - StaticText "${selectedValue || "Select..."}"`,
+      `  - combobox "${label}" [expanded=false, required, ref=${selectedValue ? "e44" : "e39"}]`,
+    ].join("\n"),
+  });
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      commands.push(args);
+      if (args[0] === "fill") {
+        optionsOpen = true;
+        return {};
+      }
+      if (args[0] === "wait" && args.includes("--selector")) {
+        throw new Error("this Orca version does not support wait --selector");
+      }
+      if (args[0] === "snapshot") {
+        if (optionsOpen) {
+          optionSnapshotCount += 1;
+          if (optionSnapshotCount === 1) {
+            return {
+              origin: fieldSnapshot().origin,
+              refs: {},
+              snapshot: '- combobox "Loading options" [expanded=true, ref=e39]',
+            };
+          }
+          return {
+            origin: fieldSnapshot().origin,
+            refs: { e50: { name: "Yes", role: "option" } },
+            snapshot: '- option "Yes" [ref=e50]',
+          };
+        }
+        return fieldSnapshot();
+      }
+      if (args[0] === "click") {
+        if (args.includes("@e39")) {
+          optionsOpen = true;
+          return {};
+        }
+        optionsOpen = false;
+        selectedValue = "Yes";
+        return {};
+      }
+      if (args[0] === "eval") {
+        const expression = args[args.indexOf("--expression") + 1];
+        return {
+          result: JSON.stringify([
+            {
+              label,
+              stateKnown: true,
+              value: expression.includes("single-value") ? selectedValue : "",
+              typeahead: true,
+            },
+          ]),
+        };
+      }
+      return {};
+    },
+  });
+
+  await ops.selectOption({
+    pageId: "page-greenhouse",
+    ref: "e39",
+    label,
+    value: "Yes",
+    typeahead: true,
+  });
+
+  assert.deepEqual(
+    commands
+      .filter((args) => ["fill", "click"].includes(args[0]))
+      .map((args) => [args[0], args[args.indexOf("--element") + 1]]),
+    [
+      ["click", "@e39"],
+      ["fill", "@e39"],
+      ["click", "@e50"],
+    ]
+  );
+  assert.equal(optionSnapshotCount, 2, "option discovery is a bounded snapshot poll");
+  assert.equal(
+    commands.some((args) => args.includes("--selector")),
+    false,
+    "the Orca typeahead path never emits the unsupported wait --selector option"
+  );
+});
+
+test("Orca typeahead reacquires a Greenhouse combobox after click renumbers every ref", async () => {
+  const commands = [];
+  const label = "Are you currently eligible to work in your country of residence?";
+  let scrolled = false;
+  let menuOpen = false;
+  let selected = false;
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      commands.push(args);
+      if (args[0] === "click") {
+        if (args.includes("@e36")) menuOpen = true;
+        if (args.includes("@e38")) {
+          menuOpen = false;
+          selected = true;
+        }
+        return {};
+      }
+      if (args[0] === "fill") {
+        throw new Error("the click-only menu was already ready and must not be typed into");
+      }
+      if (args[0] === "snapshot") {
+        if (selected) {
+          return {
+            origin: "https://job-boards.greenhouse.io/example/jobs/123",
+            refs: { e44: { name: label, role: "combobox" } },
+            snapshot: [
+              "- LabelText",
+              `  - StaticText "${label}"`,
+              "- generic",
+              '  - StaticText "Yes"',
+              `  - combobox "${label}" [expanded=false, required, ref=e44]`,
+            ].join("\n"),
+          };
+        }
+        if (!menuOpen) {
+          assert.equal(scrolled, true);
+          return {
+            origin: "https://job-boards.greenhouse.io/example/jobs/123",
+            refs: { e36: { name: label, role: "combobox" } },
+            snapshot: `- combobox "${label}" [expanded=false, required, ref=e36]`,
+          };
+        }
+        return {
+          origin: "https://job-boards.greenhouse.io/example/jobs/123",
+          refs: {
+            e36: { name: label, role: "combobox" },
+            e38: { name: "Yes", role: "option" },
+            e39: { name: "No", role: "option" },
+          },
+          snapshot: [
+            "- LabelText",
+            `  - StaticText "${label}"`,
+            "- generic",
+            `  - combobox "${label}" [expanded=true, required, ref=e36]`,
+            "  - listbox",
+            '    - option "Yes" [ref=e38]',
+            '    - option "No" [ref=e39]',
+          ].join("\n"),
+        };
+      }
+      if (args[0] === "eval") {
+        if (args[args.indexOf("--expression") + 1].includes("scrollIntoView")) {
+          scrolled = true;
+          return { result: "true" };
+        }
+        return {
+          result: JSON.stringify([
+            { label, stateKnown: true, value: selected ? "Yes" : "", typeahead: true },
+          ]),
+        };
+      }
+      return {};
+    },
+  });
+
+  const result = await ops.selectOption({
+    pageId: "page-greenhouse",
+    ref: "e35",
+    label,
+    value: "Yes",
+    typeahead: true,
+  });
+
+  assert.deepEqual(result, { selectedValue: "Yes" });
+  assert.deepEqual(
+    commands
+      .filter((args) => ["click", "fill"].includes(args[0]))
+      .map((args) => [args[0], args[args.indexOf("--element") + 1]]),
+    [
+      ["click", "@e36"],
+      ["click", "@e38"],
+    ]
+  );
+});
+
+test("Orca typeahead opens the exact Greenhouse control when a CLI click does not expand it", async () => {
+  const commands = [];
+  const label = "Are you currently eligible to work in your country of residence?";
+  let domOpened = false;
+  let selected = false;
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      commands.push(args);
+      if (args[0] === "click") {
+        if (args.includes("@e43")) selected = true;
+        return {};
+      }
+      if (args[0] === "snapshot") {
+        if (selected) {
+          return {
+            origin: "https://job-boards.greenhouse.io/example/jobs/123",
+            refs: { e50: { name: label, role: "combobox" } },
+            snapshot: [
+              "- LabelText",
+              `  - StaticText "${label}"`,
+              "- generic",
+              '  - StaticText "Yes"',
+              `  - combobox "${label}" [expanded=false, required, ref=e50]`,
+            ].join("\n"),
+          };
+        }
+        return {
+          origin: "https://job-boards.greenhouse.io/example/jobs/123",
+          refs: {
+            e40: { name: label, role: "combobox" },
+            ...(domOpened ? { e43: { name: "Yes", role: "option" } } : {}),
+          },
+          snapshot: [
+            "- LabelText",
+            `  - StaticText "${label}"`,
+            "- generic",
+            `  - combobox "${label}" [expanded=${domOpened}, required, ref=e40]`,
+            ...(domOpened ? ['  - option "Yes" [ref=e43]'] : []),
+          ].join("\n"),
+        };
+      }
+      if (args[0] === "eval") {
+        const expression = args[args.indexOf("--expression") + 1];
+        if (expression.includes('["pointerdown","mousedown"')) domOpened = true;
+        return {
+          result: expression.includes("scrollIntoView")
+            ? "true"
+            : JSON.stringify([
+                { label, stateKnown: true, value: selected ? "Yes" : "", typeahead: true },
+              ]),
+        };
+      }
+      if (args[0] === "fill" || args[0] === "wait") return {};
+      return {};
+    },
+  });
+
+  const result = await ops.selectOption({
+    pageId: "page-greenhouse",
+    ref: "e39",
+    label,
+    value: "Yes, I am legally authorized to work.",
+    typeahead: true,
+  });
+
+  assert.deepEqual(result, { selectedValue: "Yes" });
+  assert.equal(
+    commands.some(
+      (args) =>
+        args[0] === "eval" &&
+        args[args.indexOf("--expression") + 1].includes('["pointerdown","mousedown"')
+    ),
+    true
+  );
+});
+
+test("Orca typeahead uses the fresh ref while polling an asynchronous Greenhouse menu", async () => {
+  const commands = [];
+  const label = "Location (City)";
+  let menuOpen = false;
+  let typed = "";
+  let waited = false;
+  let selected = false;
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      commands.push(args);
+      if (args[0] === "click") {
+        if (args.includes("@e40")) menuOpen = true;
+        if (args.includes("@e52")) {
+          menuOpen = false;
+          selected = true;
+        }
+        return {};
+      }
+      if (args[0] === "fill") {
+        assert.equal(args[args.indexOf("--element") + 1], "@e40");
+        typed = args[args.indexOf("--value") + 1];
+        waited = false;
+        return {};
+      }
+      if (args[0] === "wait") {
+        waited = true;
+        return {};
+      }
+      if (args[0] === "snapshot") {
+        if (selected) {
+          return {
+            origin: "https://job-boards.greenhouse.io/example/jobs/123",
+            refs: { e60: { name: label, role: "combobox" } },
+            snapshot: [
+              "- LabelText",
+              `  - StaticText "${label}"`,
+              "- generic",
+              '  - StaticText "Brooklyn, New York, United States"',
+              `  - combobox "${label}" [expanded=false, required, ref=e60]`,
+            ].join("\n"),
+          };
+        }
+        if (!menuOpen) {
+          return {
+            origin: "https://job-boards.greenhouse.io/example/jobs/123",
+            refs: { e40: { name: label, role: "combobox" } },
+            snapshot: `- combobox "${label}" [expanded=false, required, ref=e40]`,
+          };
+        }
+        assert.equal(menuOpen, true);
+        const optionsReady = typed === "New York, New York, United States" && waited;
+        return {
+          origin: "https://job-boards.greenhouse.io/example/jobs/123",
+          refs: {
+            e40: { name: label, role: "combobox" },
+            ...(optionsReady
+              ? {
+                  e52: { name: "New York, New York, United States", role: "option" },
+                  e53: { name: "New York Mills, New York, United States", role: "option" },
+                }
+              : {}),
+          },
+          snapshot: [
+            "- LabelText",
+            `  - StaticText "${label}"`,
+            "- generic",
+            `  - combobox "${label}" [expanded=true, required, ref=e40]`,
+            ...(optionsReady
+              ? [
+                  '  - option "New York, New York, United States" [ref=e52]',
+                  '  - option "New York Mills, New York, United States" [ref=e53]',
+                ]
+              : []),
+          ].join("\n"),
+        };
+      }
+      if (args[0] === "eval") {
+        return {
+          result: JSON.stringify([
+            {
+              label,
+              stateKnown: true,
+              value: selected ? "New York, New York, United States" : "",
+              typeahead: true,
+            },
+          ]),
+        };
+      }
+      return {};
+    },
+  });
+
+  const result = await ops.selectOption({
+    pageId: "page-greenhouse",
+    ref: "e34",
+    label,
+    value: "Brooklyn, NY",
+    typeahead: true,
+    optionAliases: ["New York, New York, United States"],
+  });
+
+  assert.deepEqual(result, { selectedValue: "New York, New York, United States" });
+  assert.deepEqual(
+    commands.filter((args) => args[0] === "fill").map((args) => args[args.indexOf("--value") + 1]),
+    ["Brooklyn, NY", "New York, New York, United States"]
+  );
+  assert.equal(
+    commands.some(
+      (args) =>
+        args[0] === "wait" &&
+        args[args.indexOf("--timeout") + 1] === "250" &&
+        !args.includes("--selector")
+    ),
+    true
+  );
+});
+
+test("Orca uses a configured referral-source alias without product-specific engine logic", async () => {
+  const commands = [];
+  const label = "How did you hear about this opportunity at Grafana?";
+  let selected = false;
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      commands.push(args);
+      if (args[0] === "snapshot") {
+        if (selected) {
+          return {
+            origin: "https://job-boards.greenhouse.io/example/jobs/123",
+            refs: { e80: { name: label, role: "combobox" } },
+            snapshot: [
+              "- LabelText",
+              `  - StaticText "${label}"`,
+              "- generic",
+              '  - StaticText "Other"',
+              `  - combobox "${label}" [expanded=false, required, ref=e80]`,
+            ].join("\n"),
+          };
+        }
+        return {
+          origin: "https://job-boards.greenhouse.io/example/jobs/123",
+          refs: {
+            e41: { name: label, role: "combobox" },
+            e52: { name: "LinkedIn", role: "option" },
+            e53: { name: "Other", role: "option" },
+          },
+          snapshot: [
+            "- LabelText",
+            `  - StaticText "${label}"`,
+            "- generic",
+            `  - combobox "${label}" [expanded=true, required, ref=e41]`,
+            '  - option "LinkedIn" [ref=e52]',
+            '  - option "Other" [ref=e53]',
+          ].join("\n"),
+        };
+      }
+      if (args[0] === "click") {
+        if (args.includes("@e53")) selected = true;
+        return {};
+      }
+      if (args[0] === "eval") {
+        return {
+          result: JSON.stringify([
+            { label, stateKnown: true, value: selected ? "Other" : "", typeahead: true },
+          ]),
+        };
+      }
+      return {};
+    },
+  });
+
+  const result = await ops.selectOption({
+    pageId: "page-greenhouse",
+    ref: "e41",
+    label,
+    value: "Community event",
+    typeahead: true,
+    optionAliases: ["Other"],
+  });
+
+  assert.deepEqual(result, { selectedValue: "Other" });
+  assert.equal(
+    commands.some((args) => args[0] === "click" && args.includes("@e53")),
+    true
+  );
+  assert.equal(
+    commands.some((args) => args[0] === "fill"),
+    false
+  );
+});
+
+test("Orca typeahead waits for an asynchronous Greenhouse selection to become committed", async () => {
+  const commands = [];
+  const label = "Which of the following best describes you?";
+  let optionClicked = false;
+  let committed = false;
+  let commitWaits = 0;
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      commands.push(args);
+      if (args[0] === "click") {
+        if (args.includes("@e42")) optionClicked = true;
+        return {};
+      }
+      if (args[0] === "wait") {
+        if (optionClicked) {
+          commitWaits += 1;
+          committed = commitWaits >= 4;
+        }
+        return {};
+      }
+      if (args[0] === "snapshot") {
+        if (optionClicked) {
+          return {
+            origin: "https://job-boards.greenhouse.io/example/jobs/123",
+            refs: { e60: { name: label, role: "combobox" } },
+            snapshot: [
+              "- LabelText",
+              `  - StaticText "${label}"`,
+              "- generic",
+              `  - combobox "${label}" [expanded=false, required, ref=e60]`,
+            ].join("\n"),
+          };
+        }
+        return {
+          origin: "https://job-boards.greenhouse.io/example/jobs/123",
+          refs: {
+            e40: { name: label, role: "combobox" },
+            e42: { name: "I am a human being", role: "option" },
+          },
+          snapshot: [
+            "- LabelText",
+            `  - StaticText "${label}"`,
+            "- generic",
+            `  - combobox "${label}" [expanded=true, required, ref=e40]`,
+            '  - option "I am a human being" [ref=e42]',
+          ].join("\n"),
+        };
+      }
+      if (args[0] === "eval") {
+        return {
+          result: JSON.stringify([
+            {
+              label,
+              stateKnown: true,
+              value: committed ? "I am a human being" : "",
+              typeahead: true,
+            },
+          ]),
+        };
+      }
+      return {};
+    },
+  });
+
+  const result = await ops.selectOption({
+    pageId: "page-greenhouse",
+    ref: "e39",
+    label,
+    value: "I am a human being",
+    typeahead: true,
+  });
+
+  assert.deepEqual(result, { selectedValue: "I am a human being" });
+  assert.equal(
+    commands.some((args) => args[0] === "wait" && args[args.indexOf("--timeout") + 1] === "250"),
+    true
+  );
+});
+
+test("Orca typeahead waits past stale options from the previous Greenhouse query", async () => {
+  const commands = [];
+  const label =
+    "Do you now or in the future require visa sponsorship to continue working in your country of residence?";
+  let menuOpen = false;
+  let waited = false;
+  let selected = false;
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      commands.push(args);
+      if (args[0] === "click") {
+        if (args.includes("@e40")) menuOpen = true;
+        if (args.includes("@e44")) {
+          menuOpen = false;
+          selected = true;
+        }
+        return {};
+      }
+      if (args[0] === "fill") {
+        waited = false;
+        return {};
+      }
+      if (args[0] === "wait") {
+        waited = true;
+        return {};
+      }
+      if (args[0] === "snapshot") {
+        if (selected) {
+          return {
+            origin: "https://job-boards.greenhouse.io/example/jobs/123",
+            refs: { e50: { name: label, role: "combobox" } },
+            snapshot: [
+              "- LabelText",
+              `  - StaticText "${label}"`,
+              "- generic",
+              '  - StaticText "No"',
+              `  - combobox "${label}" [expanded=false, required, ref=e50]`,
+            ].join("\n"),
+          };
+        }
+        if (!menuOpen) {
+          return {
+            origin: "https://job-boards.greenhouse.io/example/jobs/123",
+            refs: { e40: { name: label, role: "combobox" } },
+            snapshot: `- combobox "${label}" [expanded=false, required, ref=e40]`,
+          };
+        }
+        const option = waited ? { ref: "e44", name: "No" } : { ref: "e43", name: "Yes" };
+        return {
+          origin: "https://job-boards.greenhouse.io/example/jobs/123",
+          refs: {
+            e40: { name: label, role: "combobox" },
+            [option.ref]: { name: option.name, role: "option" },
+          },
+          snapshot: [
+            "- LabelText",
+            `  - StaticText "${label}"`,
+            "- generic",
+            `  - combobox "${label}" [expanded=true, required, ref=e40]`,
+            `  - option "${option.name}" [ref=${option.ref}]`,
+          ].join("\n"),
+        };
+      }
+      if (args[0] === "eval") {
+        return {
+          result: JSON.stringify([
+            { label, stateKnown: true, value: selected ? "No" : "", typeahead: true },
+          ]),
+        };
+      }
+      return {};
+    },
+  });
+
+  const result = await ops.selectOption({
+    pageId: "page-greenhouse",
+    ref: "e39",
+    label,
+    value: "No",
+    typeahead: true,
+  });
+
+  assert.deepEqual(result, { selectedValue: "No" });
+  assert.equal(
+    commands.some((args) => args[0] === "wait"),
+    true
+  );
+  assert.equal(
+    commands.some((args) => args[0] === "click" && args.includes("@e43")),
+    false
+  );
+  assert.equal(
+    commands.some((args) => args[0] === "click" && args.includes("@e44")),
+    true
+  );
+});
+
+test("Orca typeahead clicks the matching option owned by the acted-on field", async () => {
+  const commands = [];
+  const label = "Work authorization";
+  let selected = false;
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      commands.push(args);
+      if (args[0] === "snapshot") {
+        if (selected) {
+          return {
+            origin: "https://example.test/apply",
+            refs: { e90: { name: label, role: "combobox" } },
+            snapshot: `- combobox "${label}" [required, ref=e90]: Yes`,
+          };
+        }
+        return {
+          origin: "https://example.test/apply",
+          refs: {
+            e70: { name: "Yes", role: "option" },
+            e80: { name: "Yes", role: "option" },
+          },
+          snapshot: [
+            "- LabelText",
+            '  - StaticText "Unrelated open picker"',
+            "- generic",
+            '  - combobox "Unrelated open picker" [expanded=true, ref=e60]',
+            "  - listbox",
+            '    - option "Yes" [ref=e70]',
+            "- LabelText",
+            `  - StaticText "${label}"`,
+            "- generic",
+            `  - combobox "${label}" [expanded=true, required, ref=e39]`,
+            "  - listbox",
+            '    - option "Yes" [ref=e80]',
+          ].join("\n"),
+        };
+      }
+      if (args[0] === "click") {
+        selected = args.includes("@e80");
+        return {};
+      }
+      if (args[0] === "eval") {
+        return {
+          result: JSON.stringify([{ label, stateKnown: true, value: selected ? "Yes" : "" }]),
+        };
+      }
+      return {};
+    },
+  });
+
+  await ops.selectOption({
+    pageId: "page-greenhouse",
+    ref: "e39",
+    label,
+    value: "Yes",
+    typeahead: true,
+  });
+
+  assert.equal(
+    commands.some((args) => args[0] === "click" && args.includes("@e80")),
+    true
+  );
+  assert.equal(
+    commands.some((args) => args[0] === "click" && args.includes("@e70")),
+    false
+  );
+});
+
+test("Orca typeahead retries terminal sentence punctuation without borrowing another picker's option", async () => {
+  const commands = [];
+  const label = "Country";
+  let typed = "";
+  let selected = false;
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      commands.push(args);
+      if (args[0] === "fill") {
+        typed = args[args.indexOf("--value") + 1];
+        return {};
+      }
+      if (args[0] === "snapshot") {
+        if (selected) {
+          return {
+            origin: "https://example.test/apply",
+            refs: { e90: { name: label, role: "combobox" } },
+            snapshot: `- combobox "${label}" [required, ref=e90]: +1`,
+          };
+        }
+        const fieldOptions = typed === "United States";
+        return {
+          origin: "https://example.test/apply",
+          refs: {
+            ...(fieldOptions ? { e80: { name: "United States +1", role: "option" } } : {}),
+            e70: { name: "United States +1", role: "option" },
+          },
+          snapshot: [
+            "- LabelText",
+            `  - StaticText "${label}"`,
+            "- generic",
+            `  - combobox "${label}" [expanded=true, required, ref=e39]`,
+            ...(fieldOptions ? ['    - option "United States +1" [ref=e80]'] : []),
+            "  - LabelText",
+            '    - StaticText "Phone"',
+            "  - generic",
+            '    - combobox "Search" [expanded=true, ref=e60]',
+            '      - option "United States +1" [ref=e70]',
+          ].join("\n"),
+        };
+      }
+      if (args[0] === "click") {
+        selected = args.includes("@e80");
+        return {};
+      }
+      if (args[0] === "eval") {
+        return {
+          result: JSON.stringify([{ label, stateKnown: true, value: selected ? "+1" : "" }]),
+        };
+      }
+      return {};
+    },
+  });
+
+  await ops.selectOption({
+    pageId: "page-greenhouse",
+    ref: "e39",
+    label,
+    value: "United States.",
+    typeahead: true,
+  });
+
+  assert.deepEqual(
+    commands.filter((args) => args[0] === "fill").map((args) => args[args.indexOf("--value") + 1]),
+    ["United States.", "United States"]
+  );
+  assert.equal(
+    commands.some((args) => args[0] === "click" && args.includes("@e80")),
+    true
+  );
+  assert.equal(
+    commands.some((args) => args[0] === "click" && args.includes("@e70")),
+    false
+  );
+});
+
+test("Orca typeahead closes an uncommitted picker when no owned option matches", async () => {
+  const commands = [];
+  const label = "Work authorization";
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      commands.push(args);
+      if (args[0] === "snapshot") {
+        return {
+          origin: "https://example.test/apply",
+          refs: { e70: { name: "Yes", role: "option" } },
+          snapshot: [
+            "- LabelText",
+            `  - StaticText "${label}"`,
+            "- generic",
+            `  - combobox "${label}" [expanded=true, required, ref=e39]`,
+            "- LabelText",
+            '  - StaticText "Unrelated picker"',
+            "- generic",
+            '  - combobox "Unrelated picker" [expanded=true, ref=e60]',
+            '    - option "Yes" [ref=e70]',
+          ].join("\n"),
+        };
+      }
+      return {};
+    },
+  });
+
+  await assert.rejects(
+    ops.selectOption({
+      pageId: "page-greenhouse",
+      ref: "e39",
+      label,
+      value: "Yes",
+      typeahead: true,
+    }),
+    /No unambiguous option matched/i
+  );
+
+  assert.equal(
+    commands.some((args) => args[0] === "keypress" && args[args.indexOf("--key") + 1] === "Escape"),
+    true
+  );
 });
 
 test("Orca toggleField honors both checked and unchecked states", async () => {
@@ -248,6 +1497,25 @@ const NATIVE_FILE_UPLOAD_SNAPSHOT = {
     '- button "Submit application" [ref=e7]',
   ].join("\n"),
   browserPageId: "page-123",
+};
+
+const LIVE_GREENHOUSE_UPLOAD_SNAPSHOT = {
+  origin: "https://job-boards.greenhouse.io/example/jobs/123",
+  refs: {
+    e29: { name: "Attach", role: "button" },
+    e30: { name: "Attach", role: "button" },
+    e31: { name: "Dropbox", role: "button" },
+  },
+  snapshot: [
+    '- group "Resume/CV*"',
+    "  - generic",
+    '    - button "Attach" [ref=e29]',
+    "    - LabelText",
+    '      - StaticText "Attach"',
+    '    - button "Attach" [ref=e30]: No file chosen',
+    '  - button "Dropbox" [ref=e31]',
+  ].join("\n"),
+  browserPageId: "page-greenhouse",
 };
 
 const ASHBY_CUSTOM_CONTROLS_SNAPSHOT = {
@@ -489,6 +1757,7 @@ test("Orca executor fills Ashby required custom controls and blocks on required 
         ["fill", "click", "focus", "keypress"].includes(args[0])
     ),
     [
+      ["click", "--page", "page-ashby", "--element", "@e32", "--json"],
       ["fill", "--page", "page-ashby", "--element", "@e32", "--value", "New York, NY", "--json"],
       ["click", "--page", "page-ashby", "--element", "@e50", "--json"],
       ["focus", "--page", "page-ashby", "--element", "@e35", "--json"],
@@ -517,6 +1786,12 @@ test("uploadTargetsFromSnapshot maps only explicit resume and cover-letter contr
 test("uploadTargetsFromSnapshot maps a native file input exposed by Orca as its label", () => {
   assert.deepEqual(uploadTargetsFromSnapshot(NATIVE_FILE_UPLOAD_SNAPSHOT), [
     { ref: "e6", kind: "resume", label: "Resume/CV", required: false },
+  ]);
+});
+
+test("uploadTargetsFromSnapshot maps the native input inside a live Greenhouse group with no ref", () => {
+  assert.deepEqual(uploadTargetsFromSnapshot(LIVE_GREENHOUSE_UPLOAD_SNAPSHOT), [
+    { ref: "e30", kind: "resume", label: "Resume/CV*", required: true },
   ]);
 });
 
@@ -558,10 +1833,15 @@ test("Orca executor opens one supervised tab and captures rendered questions bef
   assert.equal(result.session.provider, "orca");
   assert.equal(result.session.answerableCount, 3);
   assert.equal(result.session.excludedCount, 1);
-  assert.deepEqual(commands, [
+  assert.deepEqual(commands.slice(0, 2), [
     ["tab", "create", "--url", FORM_SNAPSHOT.origin, "--json"],
     ["snapshot", "--page", "page-123", "--json"],
   ]);
+  assert.equal(
+    commands.some((args) => args[0] === "eval"),
+    true,
+    "combobox state is probed before the captured questions are reported"
+  );
   assert.equal(captures.length, 1);
   assert.equal(captures[0].source, "rendered");
   assert.deepEqual(
@@ -593,6 +1873,16 @@ test("Orca executor opens one supervised tab and captures rendered questions bef
 test("Orca executor fills confirmed values, stops before submit, and verifies only from the live page", async () => {
   const commands = [];
   let confirmationMode = false;
+  let workAuthorizationValue = "";
+  const currentFormSnapshot = () => ({
+    ...FORM_SNAPSHOT,
+    snapshot: workAuthorizationValue
+      ? FORM_SNAPSHOT.snapshot.replace(
+          '- combobox "Work authorization" [expanded=false, required, ref=e3]',
+          `- combobox "Work authorization" [expanded=false, required, ref=e3]: ${workAuthorizationValue}`
+        )
+      : FORM_SNAPSHOT.snapshot,
+  });
   const runOrcaImpl = async (args) => {
     commands.push(args);
     if (args[0] === "tab") return { browserPageId: "page-123" };
@@ -604,10 +1894,15 @@ test("Orca executor fills confirmed values, stops before submit, and verifies on
             snapshot: 'StaticText "Thank you for applying"',
             browserPageId: "page-123",
           }
-        : FORM_SNAPSHOT;
+        : currentFormSnapshot();
     }
+    if (args[0] === "eval") return { result: "[]" };
     if (args[0] === "screenshot") return { data: "cG5n" };
-    if (["fill", "select"].includes(args[0])) return {};
+    if (args[0] === "select") {
+      workAuthorizationValue = args[args.indexOf("--value") + 1];
+      return {};
+    }
+    if (args[0] === "fill") return {};
     throw new Error(`unexpected command: ${args.join(" ")}`);
   };
   const execute = createOrcaApplyExecutor({
@@ -653,8 +1948,13 @@ test("Orca executor fills confirmed values, stops before submit, and verifies on
     .map((args, index) => (["fill", "select"].includes(args[0]) ? index : -1))
     .filter((index) => index >= 0);
   assert.equal(actionIndexes.length, 3);
-  for (const index of actionIndexes) {
-    assert.equal(commands[index - 1][0], "snapshot", "every browser action needs a fresh snapshot");
+  for (const [actionOffset, index] of actionIndexes.entries()) {
+    const previousAction = actionOffset === 0 ? -1 : actionIndexes[actionOffset - 1];
+    assert.equal(
+      commands.slice(previousAction + 1, index).some((args) => args[0] === "snapshot"),
+      true,
+      "every browser action needs a fresh snapshot"
+    );
   }
   assert.deepEqual(
     commands.filter((args) => ["fill", "select"].includes(args[0])),

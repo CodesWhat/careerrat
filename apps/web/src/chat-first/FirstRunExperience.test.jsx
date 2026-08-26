@@ -853,6 +853,125 @@ describe("FirstRunExperience", () => {
     expect(html).toContain("Reading resume.pdf");
   });
 
+  it("shows a direct search retry action beside a failed onboarding search", async () => {
+    const { FirstRunChat } = await loadFirstRun();
+    const onRetrySearch = vi.fn();
+    const tree = FirstRunChat({
+      agentName: "Paul",
+      messages: [],
+      knowledge: [],
+      progress: { completed: 8, total: 8 },
+      error: "Your profile is saved, but the first job search couldn't start.",
+      onRetrySearch,
+    });
+    const retry = findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "Retry search"
+    );
+
+    expect(retry).toBeTruthy();
+    retry.props.onClick();
+    expect(onRetrySearch).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the voluntary-form choice local and offers leave blank as the skip", async () => {
+    const { FirstRunExperience } = await loadFirstRun();
+    const onChooseVoluntaryDefaults = vi.fn();
+    const tree = FirstRunExperience({
+      stage: "chat",
+      agentName: "Paul",
+      messages: [],
+      knowledge: [],
+      progress: { completed: 8, total: 8 },
+      voluntaryDefaultsRequired: true,
+      onChooseVoluntaryDefaults,
+    });
+    const html = renderToStaticMarkup(tree);
+
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain("Optional application questions");
+    expect(html).toContain("race, gender, disability, or veteran status");
+    expect(html).toContain("This choice stays on this computer and isn’t shared with Paul.");
+
+    const promptElement = findElement(
+      tree,
+      (node) => node.type?.name === "VoluntaryDefaultsPrompt"
+    );
+    const prompt = promptElement.type(promptElement.props);
+    const leaveBlank = findElement(
+      prompt,
+      (node) => node.type === "button" && textOf(node) === "Leave them blank"
+    );
+    const decline = findElement(
+      prompt,
+      (node) => node.type === "button" && textOf(node) === "Choose decline when available"
+    );
+    leaveBlank.props.onClick();
+    decline.props.onClick();
+
+    expect(onChooseVoluntaryDefaults).toHaveBeenNthCalledWith(1, "leave_blank");
+    expect(onChooseVoluntaryDefaults).toHaveBeenNthCalledWith(2, "decline_when_available");
+  });
+
+  it("shows a voluntary-defaults save failure inside the blocking dialog", async () => {
+    const { FirstRunExperience } = await loadFirstRun();
+    const html = renderToStaticMarkup(
+      FirstRunExperience({
+        stage: "voluntary-defaults",
+        agentName: "Paul",
+        error: "That application default could not be saved.",
+      })
+    );
+
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("That application default could not be saved.");
+  });
+
+  it.each([
+    ["ready", [{ ...ENGINES[0], selected: true }]],
+    ["unavailable", [{ ...ENGINES[0], selected: false, ready: false, selectable: false }]],
+  ])(
+    "renders only the local upgrade dialog when the saved runtime is %s",
+    async (_name, engines) => {
+      const { FirstRunExperience } = await loadFirstRun();
+      const html = renderToStaticMarkup(
+        FirstRunExperience({
+          stage: "voluntary-defaults",
+          agentName: "Paul",
+          engines,
+          voluntaryDefaultsRequired: true,
+        })
+      );
+
+      expect(html).toContain("Optional application questions");
+      expect(html).not.toContain("Pick your engine");
+      expect(html).not.toContain("Let’s get CareerRat ready");
+      expect(html).not.toContain("setup conversation will continue here");
+    }
+  );
+
+  it("keeps search retry reachable from the engine stage without starting the interview", async () => {
+    const { FirstRunExperience } = await loadFirstRun();
+    const onRetrySearch = vi.fn();
+    const onStartInterview = vi.fn();
+    const tree = FirstRunExperience({
+      stage: "engine",
+      engines: [{ ...ENGINES[0], selected: true }],
+      error: "Your profile is saved, but the first job search couldn't start.",
+      onRetrySearch,
+      onStartInterview,
+    });
+    const retry = findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "Retry search"
+    );
+
+    expect(retry).toBeTruthy();
+    retry.props.onClick();
+    expect(onRetrySearch).toHaveBeenCalledOnce();
+    expect(onStartInterview).not.toHaveBeenCalled();
+  });
+
   it("presents assistant emphasis and headings without raw markdown controls", async () => {
     const { FirstRunChat } = await loadFirstRun();
     const html = renderToStaticMarkup(

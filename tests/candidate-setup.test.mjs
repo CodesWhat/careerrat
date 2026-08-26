@@ -565,6 +565,18 @@ describe("candidate setup DB readiness and document formats", () => {
     });
   });
 
+  it("defaults voluntary self-identification to disabled and blank", () => {
+    const repoRoot = buildDbRoot();
+    const config = candidateConfigGet({ repoRoot });
+
+    assert.deepEqual(config["form-defaults"].voluntary_self_identification, {
+      enabled: false,
+      default_action: "leave_blank",
+      confirmed_at: null,
+      answers: {},
+    });
+  });
+
   it("validates DOCX as a board-required export format and rejects unknown formats", () => {
     const schema = formDefaultsSchema();
 

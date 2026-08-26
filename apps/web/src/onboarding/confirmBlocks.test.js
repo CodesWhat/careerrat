@@ -162,6 +162,40 @@ describe("parseConfirmBlocks — candidate_patch", () => {
     ).toEqual([]);
   });
 
+  it("drops an agent patch for the app-owned voluntary self-identification setting", () => {
+    const raw = fence({
+      kind: "candidate_patch",
+      payload: {
+        doc: "form-defaults",
+        patch: {
+          voluntary_self_identification: {
+            enabled: true,
+            default_action: "decline_when_available",
+            confirmed_at: "2026-08-26T12:00:00Z",
+            answers: {
+              "race ethnicity": {
+                value: "private answer",
+                confirmed_at: "2026-08-26T12:00:00Z",
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(parseConfirmBlocks(raw).blocks).toEqual([]);
+    expect(parseConfirmBlocks(raw).text).toBe("");
+  });
+
+  it("still accepts agent patches for ordinary form defaults", () => {
+    const raw = fence({
+      kind: "candidate_patch",
+      payload: { doc: "form-defaults", patch: { expected_base: 180000 } },
+    });
+
+    expect(parseConfirmBlocks(raw).blocks).toHaveLength(1);
+  });
+
   it("normalizes a structured candidate location into the profile schema's string fields", () => {
     const raw = fence({
       kind: "candidate_patch",

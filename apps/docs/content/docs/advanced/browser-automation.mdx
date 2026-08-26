@@ -36,9 +36,11 @@ before each action, never uses hardcoded selectors, and stays confirm-first.
 
 **Automatic provider selection:** Orca's visible supervised browser is used inside an
 Orca workspace; bundled Playwright is selected in the packaged desktop app; the
-compatible extension session is selected otherwise. Playwright keeps persistent profiles
-at `~/.careerrat/board-profiles/<platform>`. If the selected provider cannot execute a
-workflow, CareerRat shows a supervised/manual handoff instead of claiming it ran.
+compatible extension session is selected otherwise. Playwright creates persistent local
+browser storage when a workflow first needs it. Public application forms open without a
+login; account-gated sites ask the candidate to sign in only when necessary. If the selected
+provider cannot execute a workflow, CareerRat shows a supervised/manual handoff instead of
+claiming it ran.
 
 Automatic is the default. Settings shows the effective browser and allows an explicit
 override without requiring the candidate to understand their CLI setup during onboarding.
@@ -81,8 +83,14 @@ careerrat automation session extension --write            # set provider
 - **Never on a schedule.** Automation runs only when you initiate it.
 - **Halt on CAPTCHA, 2FA, or unexpected interstitial.** The agent stops and tells
   you what it hit.
-- **Confirm before submitting.** Any outward-facing action (sending a message,
-  submitting a form) requires explicit confirmation, even in high-volume mode.
+- **Never infer voluntary demographic answers.** Race, gender identity,
+  disability, veteran status, and similar self-identification fields stay blank by
+  default. The local-only **Profile > Application defaults** editor can keep them
+  blank or choose the form's decline option when available. Existing exact answers
+  remain hidden and may be used only when the candidate explicitly saved them.
+- **Never submit an application.** CareerRat prepares the form and the candidate
+  presses the final submit control. Other outward-facing actions, such as sending
+  a message, require explicit confirmation.
 - **Capture artifacts are scratch.** Screenshots go to `workspace/captures/`
   (gitignored), never the repo root.
 - **No credential storage.** The session browser holds your logins. CareerRat does

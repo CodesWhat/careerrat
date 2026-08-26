@@ -8,8 +8,9 @@ import { useEventSource } from "../lib/sse.js";
 import {
   firstSearchInputsChanged,
   firstSearchStatus,
-  setupCanGraduate,
+  setupCanRelease,
   setupIsComplete,
+  setupNeedsVoluntaryDefaults,
 } from "../onboarding/onboardingSetup.js";
 import { firstRunApi } from "./api.js";
 import { FirstRunExperience, FirstRunShell } from "./FirstRunExperience.jsx";
@@ -27,9 +28,17 @@ const PROFILE_BLOCK_KINDS = new Set(["authorization", "candidate_patch", "eviden
 const RESUME_AI_EXTENSIONS = new Set(["jpeg", "jpg", "pdf", "png", "webp"]);
 const GUIDED_SETUP_CHECK_DELAY_MS = 4_000;
 const GUIDED_SETUP_MAX_CHECKS = 150;
+const FIRST_SEARCH_RETRY_ERROR =
+  "Your profile is saved, but the first job search couldn't start. Retry search.";
+const FIRST_SEARCH_PENDING_ERROR =
+  "Your profile is saved, but the first job search couldn't start yet.";
 
 function list(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function firstSearchFailureMessage(canRetry) {
+  return canRetry ? FIRST_SEARCH_RETRY_ERROR : FIRST_SEARCH_PENDING_ERROR;
 }
 
 function cleanLines(value) {
@@ -245,17 +254,23 @@ function effectiveRuntimeId(state, preferredId = state?.selectedId) {
   return runtimeSelectionReady({ ...state, selectedId: runtimeId }) ? runtimeId : null;
 }
 
+function preservedVoluntaryAnswers(state) {
+  const answers = state?.data?.["form-defaults"]?.voluntary_self_identification?.answers;
+  return answers && typeof answers === "object" && !Array.isArray(answers) ? { ...answers } : {};
+}
+
 export function FirstRunController({
   agentName = "Paul",
   onComplete,
   api = firstRunApi,
   inWorkspace = true,
+  initialOnboardState = null,
 }) {
   const navigate = useNavigate();
   const [stage, setStage] = useState("engine");
   const [runtimeState, setRuntimeState] = useState(null);
   const [pendingRuntimeId, setPendingRuntimeId] = useState(null);
-  const [onboardState, setOnboardState] = useState(null);
+  const [onboardState, setOnboardState] = useState(initialOnboardState);
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState("");
   const [chatId, setChatId] = useState(null);
@@ -270,6 +285,7 @@ export function FirstRunController({
   const [editingKnowledgeSection, setEditingKnowledgeSection] = useState(null);
   const [knowledgeSaving, setKnowledgeSaving] = useState(false);
   const [engineError, setEngineError] = useState(null);
+  const [firstSearchRetryAvailable, setFirstSearchRetryAvailable] = useState(false);
   const [guidedSetup, setGuidedSetup] = useState(null);
   const [hostedInterest, setHostedInterest] = useState({
     status: "idle",
@@ -308,7 +324,7 @@ export function FirstRunController({
 
   const commitGraduation = useCallback(
     async (next) => {
-      if (!setupCanGraduate(next)) return false;
+      if (!setupCanRelease(next)) return false;
       if (!graduationRef.current) {
         graduationRef.current = (async () => {
           await api.finishOnboarding();
@@ -329,53 +345,96 @@ export function FirstRunController({
     [api, onComplete]
   );
 
+  const advanceOnboard = useCallback(
+    async (next, { retryFailedSearch = false } = {}) => {
+      setOnboardState(next);
+      const searchStatus = firstSearchStatus(next);
+      const searchFailed = searchStatus === "failed";
+      if (searchFailed && !retryFailedSearch) {
+        const canRetryFromCompletedSetup = setupIsComplete(next);
+        setFirstSearchRetryAvailable(canRetryFromCompletedSetup);
+        setEngineError(firstSearchFailureMessage(canRetryFromCompletedSetup));
+        return next;
+      }
+      const shouldStartBaseline = searchStatus === "not_started" || searchFailed;
+      const shouldRefreshFinalSearch = setupIsComplete(next) && firstSearchInputsChanged(next);
+      if (
+        next?.data?.setup?.readiness?.search_ready === true &&
+        (shouldStartBaseline || shouldRefreshFinalSearch) &&
+        !searchStartingRef.current
+      ) {
+        searchStartingRef.current = true;
+        setFirstSearchRetryAvailable(false);
+        try {
+          await api.startFirstSearchRun(searchFailed ? { retry: true } : {});
+          const refreshed = await api.getOnboardState();
+          setOnboardState(refreshed);
+          if (firstSearchStatus(refreshed) === "failed") {
+            const canRetryFromCompletedSetup = setupIsComplete(refreshed);
+            setFirstSearchRetryAvailable(canRetryFromCompletedSetup);
+            setEngineError(firstSearchFailureMessage(canRetryFromCompletedSetup));
+            return refreshed;
+          }
+          await commitGraduation(refreshed);
+          return refreshed;
+        } catch {
+          const canRetryFromCompletedSetup = setupIsComplete(next);
+          setFirstSearchRetryAvailable(canRetryFromCompletedSetup);
+          setEngineError(firstSearchFailureMessage(canRetryFromCompletedSetup));
+          return next;
+        } finally {
+          searchStartingRef.current = false;
+        }
+      }
+      await commitGraduation(next);
+      return next;
+    },
+    [api, commitGraduation]
+  );
+
   const refreshOnboard = useCallback(async () => {
     const next = await api.getOnboardState();
-    setOnboardState(next);
-    const searchStatus = firstSearchStatus(next);
-    const shouldStartBaseline = searchStatus === "not_started";
-    const shouldRefreshFinalSearch = setupIsComplete(next) && firstSearchInputsChanged(next);
-    if (
-      next?.data?.setup?.readiness?.search_ready === true &&
-      (shouldStartBaseline || shouldRefreshFinalSearch) &&
-      !searchStartingRef.current
-    ) {
-      searchStartingRef.current = true;
-      try {
-        await api.startFirstSearchRun();
-        const refreshed = await api.getOnboardState();
-        setOnboardState(refreshed);
-        await commitGraduation(refreshed);
-        return refreshed;
-      } finally {
-        searchStartingRef.current = false;
-      }
+    return advanceOnboard(next);
+  }, [advanceOnboard, api]);
+
+  const retryFirstSearch = useCallback(async () => {
+    setSubmitting(true);
+    setEngineError(null);
+    setFirstSearchRetryAvailable(false);
+    try {
+      const next = await api.getOnboardState();
+      await advanceOnboard(next, { retryFailedSearch: true });
+    } catch {
+      setFirstSearchRetryAvailable(true);
+      setEngineError(FIRST_SEARCH_RETRY_ERROR);
+    } finally {
+      setSubmitting(false);
     }
-    await commitGraduation(next);
-    return next;
-  }, [api, commitGraduation]);
+  }, [advanceOnboard, api]);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
         await api.initOnboard();
-        const [nextRuntime, nextOnboard, savedDraft] = await Promise.all([
+        const nextOnboard = initialOnboardState ?? (await api.getOnboardState());
+        if (cancelled) return;
+        setOnboardState(nextOnboard);
+        if (setupNeedsVoluntaryDefaults(nextOnboard)) return;
+        const [nextRuntime, savedDraft] = await Promise.all([
           api.getInstalledAiRuntimes(),
-          api.getOnboardState(),
           api.getOnboardingDraft().catch(() => null),
         ]);
         if (cancelled) return;
         setRuntimeState(nextRuntime);
         setPendingRuntimeId(effectiveRuntimeId(nextRuntime));
-        setOnboardState(nextOnboard);
         const savedMessages = restoredMessages(savedDraft);
         updateMessages(savedMessages);
         const savedCursor = restoredChatCursor(savedDraft);
         cursorRef.current = savedCursor;
         setChatCursor(savedCursor);
         if (runtimeSelectionReady(nextRuntime) && savedMessages.length > 0) setStage("chat");
-        await commitGraduation(nextOnboard);
+        await advanceOnboard(nextOnboard);
       } catch (error) {
         if (cancelled) return;
         setEngineError(error?.message || "Setup could not start. Retry from the app.");
@@ -384,7 +443,7 @@ export function FirstRunController({
     return () => {
       cancelled = true;
     };
-  }, [api, commitGraduation, updateMessages]);
+  }, [advanceOnboard, api, initialOnboardState, updateMessages]);
 
   useEffect(() => {
     const runtimeId = String(guidedSetup?.runtimeId || "").trim();
@@ -996,6 +1055,28 @@ export function FirstRunController({
     }
   }
 
+  async function chooseVoluntaryDefaults(policy) {
+    if (!new Set(["leave_blank", "decline_when_available"]).has(policy)) return;
+    setSubmitting(true);
+    setEngineError(null);
+    try {
+      const declineWhenAvailable = policy === "decline_when_available";
+      await api.saveCandidateFile("form-defaults", {
+        voluntary_self_identification: {
+          enabled: declineWhenAvailable,
+          default_action: policy,
+          confirmed_at: new Date().toISOString(),
+          answers: preservedVoluntaryAnswers(onboardState),
+        },
+      });
+      await refreshOnboard();
+    } catch (error) {
+      setEngineError(error?.message || "That application default could not be saved.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function refreshRuntime(runtimeId) {
     setSubmitting(true);
     setEngineError(null);
@@ -1104,6 +1185,7 @@ export function FirstRunController({
   );
   const knowledge = buildFirstRunKnowledge(onboardState, runtime);
   const configuredAgentName = firstRunAgentName(onboardState, agentName);
+  const voluntaryDefaultsRequired = setupNeedsVoluntaryDefaults(onboardState);
   const openSettings = () =>
     navigate("/settings", {
       state: { activeTab: "settings", openEnginePicker: true },
@@ -1111,7 +1193,7 @@ export function FirstRunController({
 
   const experience = (
     <FirstRunExperience
-      stage={stage}
+      stage={voluntaryDefaultsRequired ? "voluntary-defaults" : stage}
       agentName={configuredAgentName}
       engines={firstRunRuntimeChoices(runtimeState).map((choice) => ({
         ...choice,
@@ -1128,6 +1210,7 @@ export function FirstRunController({
       resumeUploadingName={resumeUploadingName}
       editingKnowledgeSection={editingKnowledgeSection}
       knowledgeSaving={knowledgeSaving}
+      voluntaryDefaultsRequired={voluntaryDefaultsRequired}
       onChooseEngine={chooseEngine}
       onStartInterview={startInterview}
       onRetryEngine={(runtimeId) => refreshRuntime(runtimeId)}
@@ -1152,6 +1235,7 @@ export function FirstRunController({
         }))
       }
       onHostedInterestSubmit={submitHostedInterest}
+      onRetrySearch={firstSearchRetryAvailable ? retryFirstSearch : undefined}
       onChooseOption={chooseOption}
       onEditKnowledgeSection={(item) => {
         if (item?.id === "engine") {
@@ -1165,6 +1249,7 @@ export function FirstRunController({
       onSaveKnowledgeSection={commitKnowledgeSection}
       onDraftChange={setDraft}
       onSubmitAnswer={sendAnswer}
+      onChooseVoluntaryDefaults={chooseVoluntaryDefaults}
     />
   );
 

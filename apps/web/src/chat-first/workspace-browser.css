@@ -220,6 +220,32 @@
   background: var(--cream);
 }
 
+.cf-search__onboarding-handoff {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: 9px;
+  margin: 0 18px 10px;
+  padding: 11px 13px;
+  border: 1.5px solid var(--sky);
+  border-radius: 14px;
+  background: var(--canvas);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.cf-search__onboarding-handoff strong {
+  flex: none;
+  font-weight: 800;
+}
+
+.cf-search__show-matches {
+  flex: none;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
 .cf-search__sweep-running {
   display: inline-flex;
   align-items: center;

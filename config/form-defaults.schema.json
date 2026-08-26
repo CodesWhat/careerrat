@@ -6,6 +6,15 @@
   "additionalProperties": false,
   "properties": {
     "source": { "type": "string" },
+    "option_aliases": {
+      "description": "Candidate-configured alternate dropdown values, keyed by canonical application field.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "location": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "source": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
     "work_authorization": { "type": "string" },
     "requires_sponsorship": { "type": "string" },
     "current_employer": { "type": ["string", "null"] },
@@ -14,7 +23,52 @@
     "linkedin": { "type": ["string", "null"] },
     "github": { "type": ["string", "null"] },
     "portfolio": { "type": ["string", "null"] },
-    "eeo_default": { "type": "string" },
+    "eeo_default": {
+      "description": "Deprecated compatibility field. It is never consumed as self-identification consent.",
+      "type": "string",
+      "deprecated": true
+    },
+    "voluntary_self_identification": {
+      "description": "Explicit candidate-controlled defaults for voluntary demographic questions. Disabled by default.",
+      "type": "object",
+      "required": ["enabled", "default_action", "confirmed_at", "answers"],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": { "enabled": { "const": true } },
+            "required": ["enabled"]
+          },
+          "then": {
+            "properties": {
+              "confirmed_at": { "type": "string", "minLength": 1, "format": "date-time" }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "default_action": {
+          "type": "string",
+          "enum": ["leave_blank", "decline_when_available"]
+        },
+        "confirmed_at": { "type": ["string", "null"], "minLength": 1, "format": "date-time" },
+        "answers": {
+          "description": "Exact normalized question text mapped to a candidate-confirmed answer.",
+          "type": "object",
+          "propertyNames": { "pattern": "^[a-z0-9]+(?: [a-z0-9]+)*$" },
+          "additionalProperties": {
+            "type": "object",
+            "required": ["value", "confirmed_at"],
+            "additionalProperties": false,
+            "properties": {
+              "value": { "type": "string", "minLength": 1 },
+              "confirmed_at": { "type": "string", "minLength": 1, "format": "date-time" }
+            }
+          }
+        }
+      }
+    },
     "screening_answers": {
       "description": "Pre-reviewed answers for recurring custom application questions. Keys are normalized question text; values are the exact answer to fill.",
       "type": "object",

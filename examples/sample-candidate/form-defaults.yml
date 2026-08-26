@@ -1,4 +1,8 @@
 source: "LinkedIn"
+option_aliases:
+  source:
+    - "Other"
+  location: []
 work_authorization: "Yes"
 requires_sponsorship: "No"
 current_employer: "Pulsar Systems"
@@ -7,4 +11,10 @@ expected_base: 215000
 linkedin: "https://linkedin.com/in/rileychendev"
 github: "https://github.com/rileychendev"
 portfolio: "https://rileychen.dev"
+# Deprecated compatibility only. CareerRat never treats this as consent.
 eeo_default: "Prefer not to answer"
+voluntary_self_identification:
+  enabled: false
+  default_action: "leave_blank"
+  confirmed_at:
+  answers: {}

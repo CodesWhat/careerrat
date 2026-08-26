@@ -286,6 +286,129 @@ describe("profile settings controller mapping", () => {
     });
   });
 
+  it("maps the local voluntary-form policy without exposing its saved answers as profile copy", () => {
+    const model = buildProfileSettingsModel({
+      onboard: {
+        data: {
+          "form-defaults": {
+            voluntary_self_identification: {
+              enabled: true,
+              default_action: "decline_when_available",
+              confirmed_at: "2026-08-20T12:00:00.000Z",
+              answers: {
+                disability: {
+                  value: "A saved private answer",
+                  confirmed_at: "2026-08-18T12:00:00.000Z",
+                },
+                veteran: {
+                  value: "Another saved private answer",
+                  confirmed_at: "2026-08-19T12:00:00.000Z",
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(model.profile.applicationDefaults).toEqual({
+      action: "Choose the form's decline option when available",
+      localNotice: "Local only on this computer. This setting never goes through Paul.",
+    });
+    expect(model.profile.editors["application-defaults"]).toMatchObject({
+      id: "application-defaults",
+      title: "Application defaults",
+      localOnly: true,
+      preservedAnswers: {
+        disability: {
+          value: "A saved private answer",
+          confirmed_at: "2026-08-18T12:00:00.000Z",
+        },
+        veteran: {
+          value: "Another saved private answer",
+          confirmed_at: "2026-08-19T12:00:00.000Z",
+        },
+      },
+      fields: [
+        {
+          id: "policy",
+          label: "Voluntary self-identification questions",
+          type: "select",
+          value: "decline_when_available",
+          options: [
+            { value: "leave_blank", label: "Leave these blank (default)" },
+            {
+              value: "decline_when_available",
+              label: "Choose the form's decline option when available",
+            },
+          ],
+        },
+      ],
+    });
+    const publicCopy = JSON.stringify(model.profile.applicationDefaults);
+    expect(publicCopy).not.toMatch(/A saved private answer|Another saved private answer/);
+    expect(publicCopy).not.toContain("confirmed_at");
+  });
+
+  it("defaults voluntary form questions to blank and preserves saved answers in the local write", () => {
+    const editor = buildProfileSettingsModel({
+      onboard: {
+        data: {
+          "form-defaults": {
+            voluntary_self_identification: {
+              answers: {
+                gender: {
+                  value: "Saved locally",
+                  confirmed_at: "2026-08-20T12:00:00.000Z",
+                },
+              },
+            },
+          },
+        },
+      },
+    }).profile.editors["application-defaults"];
+
+    expect(editor.fields[0].value).toBe("leave_blank");
+    expect(
+      profileSectionSavePlan("application-defaults", { policy: "decline_when_available" }, editor, {
+        now: () => new Date("2026-08-26T17:00:00.000Z"),
+      })
+    ).toEqual([
+      {
+        kind: "candidate",
+        name: "form-defaults",
+        patch: {
+          voluntary_self_identification: {
+            enabled: true,
+            default_action: "decline_when_available",
+            confirmed_at: "2026-08-26T17:00:00.000Z",
+            answers: {
+              gender: {
+                value: "Saved locally",
+                confirmed_at: "2026-08-20T12:00:00.000Z",
+              },
+            },
+          },
+        },
+      },
+    ]);
+    expect(
+      profileSectionSavePlan("application-defaults", { policy: "leave_blank" }, editor, {
+        now: () => new Date("2026-08-26T17:01:00.000Z"),
+      })[0].patch.voluntary_self_identification
+    ).toEqual({
+      enabled: false,
+      default_action: "leave_blank",
+      confirmed_at: "2026-08-26T17:01:00.000Z",
+      answers: {
+        gender: {
+          value: "Saved locally",
+          confirmed_at: "2026-08-20T12:00:00.000Z",
+        },
+      },
+    });
+  });
+
   it("builds the existing automation config patch and keeps draft documents always on", () => {
     expect(permissionPatch("authenticated_apply_preparation", true)).toEqual({
       setup_mode: "advanced",

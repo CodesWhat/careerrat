@@ -53,14 +53,14 @@ directly and never falls back to or silently switches providers. A runtime
 becomes `Ready` only after local availability, authentication, and its readiness
 check pass.
 
-v0.16.2 is the current public release. It carries the v0.16.0 provider-parity
-release and adds a beginner-friendly Claude setup path for a Mac with no AI tool.
-Protected PRs #217 and #218 merged for the v0.16.0 release, and the signed
-v0.16.0 tag points to the exact promotion merge on `main`. The GitHub release
-includes the signed, notarized, and stapled Mac DMG plus its SBOM;
-`careerrat@latest` is 0.16.2 on npm; and careerrat.com is running the production
-release. The Homebrew cask is 0.16.2. The released app installs at
-`/Applications/CareerRat.app`, reports version 0.16.2, passes Gatekeeper, and
+v0.16.3 is the current public release. It keeps Claude Code and OpenAI Codex as
+equal complete product choices, hands completed setup directly to a
+location-aware first search, keeps voluntary demographic defaults local, and
+strengthens supervised application filling without touching Submit. The GitHub
+release includes the signed, notarized, and stapled Mac DMG plus its SBOM;
+`careerrat@latest` is 0.16.3 on npm; and careerrat.com is running the production
+release. The Homebrew cask is 0.16.3. The released app installs at
+`/Applications/CareerRat.app`, reports version 0.16.3, passes Gatekeeper, and
 passed launch and visual inspection.
 
 The Windows x64 installer passed build, install, launch, export, and uninstall
@@ -90,10 +90,16 @@ the conversation, or just start talking. Paul fills in “What Paul knows” bes
 the chat as it learns your target roles, location rules, compensation floor,
 dealbreakers, evidence, and honesty boundaries.
 
-Each profile section is editable as a whole. You can open its editor or ask Paul
-to change it in the conversation. Progress saves continuously. Once the minimum
-search profile is ready, CareerRat starts the first location-aware search while
-the rest of onboarding continues.
+Most profile sections are editable as a whole. You can open an editor or ask Paul
+to change them in the conversation. **Application defaults** is the exception: it
+stays local on this computer and never goes through Paul. Paul speaks in plain
+English. When it needs an abstract choice, it gives concrete examples instead of
+making you decode job-search jargon. For example: “What would make one job worth applying to before another?
+The kind of work, a schedule and pay that fit, or room to grow?” Progress saves
+continuously. Once the minimum search profile is ready, CareerRat starts the first
+location-aware search while the rest of onboarding continues. When setup finishes,
+the app opens Search and says clearly whether that search is running, found matches,
+needs a retry, or is ready to start.
 
 From there, ask it to find roles, evaluate a posting, tailor an application,
 prepare an interview, or pick up a saved thread. Tool work appears as compact
@@ -131,10 +137,14 @@ the [chat-first runtime](docs/CHAT_FIRST_RUNTIME.md).
   asked for or left out, never invented.
 - Authenticated browser, mail, calendar, and message access is opt-in when a
   specific workflow needs it.
+- Application automation fills safe, confirmed fields and can attach the
+  generated résumé. Voluntary demographic and self-identification questions stay
+  blank by default. In **Profile > Application defaults**, you can leave them
+  blank or choose the form's decline option when one is available. CareerRat
+  never infers an answer. Exact sensitive answers stay hidden in this editor,
+  and the setting never goes through Paul.
 - CAPTCHA, two-factor authentication, sensitive attestations, uncertainty, and
-  final submission stop for the user.
-- Application automation can prepare and fill supported forms. The user reviews
-  the result and presses Submit.
+  final submission stop for the user. CareerRat never presses Submit.
 - Durable state changes go through the same local domain layer whether they came
   from chat, a mission, or a focused view.
 

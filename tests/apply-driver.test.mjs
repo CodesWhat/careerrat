@@ -51,6 +51,10 @@ function createFakeOps(steps) {
       async selectOption(args) {
         log.push({ op: "selectOption", ...args });
       },
+      async selectDeclineOption(args) {
+        log.push({ op: "selectDeclineOption", ...args });
+        return { selectedValue: "Prefer not to answer" };
+      },
       async toggleField(args) {
         log.push({ op: "toggleField", ...args });
       },
@@ -174,6 +178,68 @@ test("native radio groups use default and reviewed answers, select only their in
   assert.deepEqual(result.session.unresolved, []);
   assert.deepEqual(log, ["e1", "e4"]);
   assert.deepEqual(selected, { workAuthorization: "Yes", sponsorship: "No" });
+});
+
+test("a confirmed canonical select option remains resolved when the widget displays a compact value", async () => {
+  let selectedCountry = "";
+  const snapshot = () => ({
+    origin: GREENHOUSE_URL,
+    pageText: "Application form\nSubmit application",
+    refs: {
+      e1: { role: "textbox", name: "First Name", required: true },
+      e2: {
+        role: "combobox",
+        name: "Country",
+        required: true,
+        typeahead: true,
+        stateKnown: true,
+        value: selectedCountry,
+      },
+      e3: { role: "button", name: "Submit application", required: false },
+    },
+  });
+  const log = [];
+  const execute = makeDriver({
+    ops: {
+      async openTab() {
+        return { pageId: "page-compact-select" };
+      },
+      async snapshot() {
+        return snapshot();
+      },
+      async fillField({ ref }) {
+        log.push({ op: "fillField", ref });
+      },
+      async selectOption({ ref, value }) {
+        log.push({ op: "selectOption", ref, value });
+        selectedCountry = "+1";
+        return { selectedValue: "United States +1" };
+      },
+      async clickButton() {
+        throw new Error("Submit must remain untouched");
+      },
+      async screenshot() {
+        throw new Error("No confirmation screenshot is expected before submit");
+      },
+    },
+    loadAnswerMapImpl: async () => new Map([["country", "United States."]]),
+  });
+
+  const result = await execute({
+    applicationId: "app-compact-select",
+    application: { id: "app-compact-select", link: GREENHOUSE_URL },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.equal(result.state, "awaiting-submit");
+  assert.equal(result.session.filledCount, 2);
+  assert.deepEqual(result.session.unresolved, []);
+  assert.deepEqual(log, [
+    { op: "fillField", ref: "e1" },
+    { op: "selectOption", ref: "e2", value: "United States." },
+  ]);
 });
 
 test("Ashby detail pages open the Application tab before filling and uploading, then stop before submit", async () => {
@@ -555,6 +621,166 @@ test("single-page flow fills resolvable fields and stops awaiting-submit, same a
   for (const index of fillIndexes) {
     assert.equal(log[index - 1].op, "snapshot", "every field action re-snapshots first");
   }
+});
+
+test("a Greenhouse captcha is the final handoff after safe fields and the resume are prepared", async () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-apply-driver-"));
+  try {
+    const resumePath = join(repoRoot, "workspace", "tailored", "resume.pdf");
+    mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
+    writeFileSync(resumePath, "fake resume");
+    const snapshot = {
+      origin: GREENHOUSE_URL,
+      pageText:
+        'Application form\nProtected by reCAPTCHA\n- button "Resume" [required, ref=e3]\nSubmit application',
+      refs: refsOf([
+        ["e1", "textbox", "Full Name", true],
+        ["e2", "textbox", "Race / Ethnicity", false],
+        ["e3", "button", "Resume", true],
+        ["e4", "button", "Submit Application", false],
+      ]),
+    };
+    const { ops, log } = createFakeOps([snapshot]);
+    const execute = makeDriver({ ops, repoRoot });
+
+    const result = await execute({
+      applicationId: "app-greenhouse-captcha",
+      application: {
+        id: "app-greenhouse-captcha",
+        link: GREENHOUSE_URL,
+        artifacts: { resumePdf: "workspace/tailored/resume.pdf" },
+      },
+      postingUrl: GREENHOUSE_URL,
+      questionCapture: { state: "captured" },
+      prepareOnly: true,
+    });
+
+    assert.equal(result.state, "blocked");
+    assert.match(result.reason, /complete the captcha/i);
+    assert.equal(result.session.filledCount, 1);
+    assert.equal(result.session.uploadedCount, 1);
+    assert.deepEqual(result.session.blockers, ["captcha"]);
+    assert.deepEqual(
+      log.filter((entry) => entry.op === "fillField"),
+      [{ op: "fillField", pageId: "page-1", ref: "e1", value: "Sam Rivera" }],
+      "the demographic field stays untouched"
+    );
+    assert.deepEqual(
+      log.filter((entry) => entry.op === "upload"),
+      [{ op: "upload", pageId: "page-1", ref: "e3", files: resumePath }]
+    );
+    assert.equal(
+      log.some((entry) => entry.op === "clickButton"),
+      false,
+      "CareerRat never tries to solve the captcha or click Submit"
+    );
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("explicit decline_when_available uses the strict decline selector for self-identification", async () => {
+  const snapshot = {
+    origin: GREENHOUSE_URL,
+    pageText: "Application form\nSubmit application",
+    refs: refsOf([
+      ["e1", "combobox", "Race / Ethnicity", false],
+      ["e2", "button", "Submit application", false],
+    ]),
+  };
+  const { ops, log } = createFakeOps([snapshot]);
+  const execute = makeDriver({
+    ops,
+    candidateConfigGetImpl: () => ({
+      ...CONFIG,
+      "form-defaults": {
+        ...CONFIG["form-defaults"],
+        eeo_default: "White",
+        voluntary_self_identification: {
+          enabled: true,
+          default_action: "decline_when_available",
+          confirmed_at: "2026-08-26T12:00:00Z",
+          answers: {},
+        },
+      },
+    }),
+  });
+
+  const result = await execute({
+    applicationId: "app-voluntary-decline",
+    application: { id: "app-voluntary-decline", link: GREENHOUSE_URL },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.equal(result.state, "awaiting-submit");
+  assert.equal(result.session.filledCount, 1);
+  assert.deepEqual(
+    log.filter(({ op }) => op === "selectDeclineOption"),
+    [
+      {
+        op: "selectDeclineOption",
+        pageId: "page-1",
+        ref: "e1",
+        label: "Race / Ethnicity",
+        typeahead: false,
+      },
+    ]
+  );
+  assert.equal(
+    log.some(({ op }) => op === "selectOption"),
+    false
+  );
+  assert.equal(
+    log.some(({ op }) => op === "clickButton"),
+    false
+  );
+});
+
+test("a provider without strict decline selection leaves the voluntary field cleanly unresolved", async () => {
+  const snapshot = {
+    origin: GREENHOUSE_URL,
+    pageText: "Application form\nSubmit application",
+    refs: refsOf([
+      ["e1", "combobox", "Race / Ethnicity", false],
+      ["e2", "button", "Submit application", false],
+    ]),
+  };
+  const { ops } = createFakeOps([snapshot]);
+  delete ops.selectDeclineOption;
+  const execute = makeDriver({
+    ops,
+    candidateConfigGetImpl: () => ({
+      ...CONFIG,
+      "form-defaults": {
+        ...CONFIG["form-defaults"],
+        voluntary_self_identification: {
+          enabled: true,
+          default_action: "decline_when_available",
+          confirmed_at: "2026-08-26T12:00:00Z",
+          answers: {},
+        },
+      },
+    }),
+  });
+
+  const result = await execute({
+    applicationId: "app-voluntary-decline-unsupported",
+    application: { id: "app-voluntary-decline-unsupported", link: GREENHOUSE_URL },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.equal(result.state, "awaiting-submit");
+  assert.deepEqual(result.session.unresolved, [
+    {
+      label: "Race / Ethnicity",
+      required: false,
+      reason: "The field changed before it could be filled.",
+    },
+  ]);
 });
 
 test("a required checkbox with an honest No answer is explicitly left unchecked", async () => {
@@ -1080,6 +1306,90 @@ test("saved question capture is refreshed when a newly rendered required field i
   );
 });
 
+test("saved question capture is refreshed when an answerable field is now demographic", async () => {
+  const step = {
+    origin: ASHBY_URL,
+    pageText: "Application questions",
+    refs: refsOf([
+      ["e1", "textbox", "Why this role?", true],
+      ["e2", "radio-group", "Are you a person of transgender experience?", false],
+    ]),
+  };
+  const { ops } = createFakeOps([step]);
+  const captures = [];
+  const execute = makeDriver({
+    ops,
+    captureQuestionsImpl: async (input) => {
+      captures.push(input);
+      return {
+        questions: input.questions.filter(
+          (question) => !/transgender experience/i.test(question.label)
+        ),
+        excluded: input.questions.filter((question) =>
+          /transgender experience/i.test(question.label)
+        ),
+        demographicSectionPresent: true,
+      };
+    },
+  });
+
+  const result = await execute({
+    applicationId: "app-upgraded-demographic-capture",
+    application: { id: "app-upgraded-demographic-capture" },
+    postingUrl: ASHBY_URL,
+    questionCapture: {
+      state: "captured",
+      answerableCount: 2,
+      excludedCount: 0,
+      answerableIds: [
+        "rendered-why-this-role",
+        "rendered-are-you-a-person-of-transgender-experience",
+      ],
+      excludedIds: [],
+    },
+  });
+
+  assert.equal(result.state, "questions-captured");
+  assert.equal(captures.length, 1);
+  assert.deepEqual(
+    captures[0].questions.map(({ id }) => id),
+    ["rendered-why-this-role", "rendered-are-you-a-person-of-transgender-experience"]
+  );
+});
+
+test("saved question capture is refreshed when an excluded field is now answerable", async () => {
+  const step = {
+    origin: ASHBY_URL,
+    pageText: "Application questions",
+    refs: refsOf([["e1", "textbox", "Why this role?", true]]),
+  };
+  const { ops } = createFakeOps([step]);
+  const captures = [];
+  const execute = makeDriver({
+    ops,
+    captureQuestionsImpl: async (input) => {
+      captures.push(input);
+      return { questions: input.questions, excluded: [], demographicSectionPresent: false };
+    },
+  });
+
+  const result = await execute({
+    applicationId: "app-upgraded-answerable-capture",
+    application: { id: "app-upgraded-answerable-capture" },
+    postingUrl: ASHBY_URL,
+    questionCapture: {
+      state: "captured",
+      answerableCount: 0,
+      excludedCount: 1,
+      answerableIds: [],
+      excludedIds: ["rendered-why-this-role"],
+    },
+  });
+
+  assert.equal(result.state, "questions-captured");
+  assert.equal(captures.length, 1);
+});
+
 test("saved question capture without ID arrays uses its persisted counts to detect new fields", async () => {
   const step = {
     origin: ASHBY_URL,
@@ -1201,6 +1511,221 @@ test("a dead cached tab is dropped and reopened instead of poisoning every later
   assert.ok(
     log.some((entry) => entry.op === "snapshot" && entry.pageId === "page-2"),
     "the retry ran against the fresh tab"
+  );
+});
+
+test("a retained tab that leaves the trusted application origin is reopened before confirmation or fill", async () => {
+  const trustedPage = {
+    origin: GREENHOUSE_URL,
+    pageText: "Application form",
+    refs: refsOf([["e1", "button", "Submit Application", false]]),
+  };
+  const unrelatedConfirmation = {
+    origin: "https://unrelated.example.test/confirmation",
+    pageText: "Your application has been submitted",
+    refs: {},
+  };
+  const log = [];
+  let pageCounter = 0;
+  let retainedPage = trustedPage;
+  const ops = {
+    async openTab({ url }) {
+      pageCounter += 1;
+      const pageId = `page-${pageCounter}`;
+      log.push({ op: "openTab", pageId, url });
+      return { pageId };
+    },
+    async snapshot({ pageId }) {
+      log.push({ op: "snapshot", pageId });
+      return pageId === "page-1" ? retainedPage : trustedPage;
+    },
+    async screenshot() {
+      log.push({ op: "screenshot" });
+      return { data: "", format: "png" };
+    },
+    async fillField() {},
+    async selectOption() {},
+    async toggleField() {},
+    async clickButton() {},
+    async upload() {},
+  };
+  const execute = makeDriver({ ops });
+  const intent = {
+    applicationId: "app-origin-recovery",
+    application: { id: "app-origin-recovery", link: GREENHOUSE_URL },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  };
+
+  const first = await execute(intent);
+  assert.equal(first.state, "awaiting-submit");
+
+  retainedPage = unrelatedConfirmation;
+  const second = await execute(intent);
+
+  assert.equal(second.state, "awaiting-submit");
+  assert.equal(second.currentUrl, GREENHOUSE_URL);
+  assert.equal(
+    log.filter((entry) => entry.op === "openTab").length,
+    2,
+    "an untrusted retained tab is replaced from the saved posting URL"
+  );
+  assert.equal(
+    log.some((entry) => entry.op === "screenshot"),
+    false,
+    "confirmation copy on an unrelated origin is never accepted"
+  );
+});
+
+test("a fresh tab that redirects off the requested posting origin blocks before any browser mutation", async () => {
+  const log = [];
+  const ops = {
+    async openTab({ url }) {
+      log.push({ op: "openTab", url });
+      return { pageId: "page-redirected" };
+    },
+    async snapshot({ pageId }) {
+      log.push({ op: "snapshot", pageId });
+      return {
+        origin: "https://untrusted.example.test/apply",
+        pageText: "Full name\nResume\nSubmit application",
+        refs: refsOf([
+          ["e1", "textbox", "Full name", true],
+          ["e2", "button", "Resume", true],
+          ["e3", "button", "Submit application", false],
+        ]),
+      };
+    },
+    async fillField(args) {
+      log.push({ op: "fillField", ...args });
+    },
+    async selectOption(args) {
+      log.push({ op: "selectOption", ...args });
+    },
+    async toggleField(args) {
+      log.push({ op: "toggleField", ...args });
+    },
+    async clickButton(args) {
+      log.push({ op: "clickButton", ...args });
+    },
+    async upload(args) {
+      log.push({ op: "upload", ...args });
+    },
+    async screenshot(args) {
+      log.push({ op: "screenshot", ...args });
+      return { data: "", format: "png" };
+    },
+  };
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-fresh-redirect",
+    application: { id: "app-fresh-redirect", link: GREENHOUSE_URL },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.match(result.reason, /unexpected application site/i);
+  assert.deepEqual(
+    log.map(({ op }) => op),
+    ["openTab", "snapshot"],
+    "the redirected origin is observed but never receives candidate data or uploads"
+  );
+});
+
+test("a trusted form that navigates away before a field mutation blocks without filling", async () => {
+  const log = [];
+  let snapshotCount = 0;
+  const ops = {
+    async openTab() {
+      log.push({ op: "openTab" });
+      return { pageId: "page-late-redirect" };
+    },
+    async snapshot() {
+      snapshotCount += 1;
+      log.push({ op: "snapshot" });
+      return {
+        origin: snapshotCount === 1 ? GREENHOUSE_URL : "https://untrusted.example.test/apply",
+        pageText: "Full name\nSubmit application",
+        refs: refsOf([
+          ["e1", "textbox", "Full name", true],
+          ["e2", "button", "Submit application", false],
+        ]),
+      };
+    },
+    async fillField(args) {
+      log.push({ op: "fillField", ...args });
+    },
+    async screenshot(args) {
+      log.push({ op: "screenshot", ...args });
+      return { data: "", format: "png" };
+    },
+  };
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-late-redirect",
+    application: { id: "app-late-redirect", link: GREENHOUSE_URL },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.equal(
+    result.reason,
+    "The application moved to an untrusted site (https://untrusted.example.test) before CareerRat could continue."
+  );
+  assert.deepEqual(result.session.blockers, ["untrusted application site"]);
+  assert.equal(
+    log.some(({ op }) => op === "fillField"),
+    false,
+    "the second snapshot is revalidated before the field receives candidate data"
+  );
+});
+
+test("a trusted form that navigates away before an advance blocks without clicking", async () => {
+  const log = [];
+  let snapshotCount = 0;
+  const trustedPage = {
+    origin: GREENHOUSE_URL,
+    pageText: "Application step 1 of 2\nNext",
+    refs: refsOf([["e1", "button", "Next", false]]),
+  };
+  const ops = {
+    async openTab() {
+      log.push({ op: "openTab" });
+      return { pageId: "page-pre-advance-redirect" };
+    },
+    async snapshot() {
+      snapshotCount += 1;
+      log.push({ op: "snapshot" });
+      if (snapshotCount < 3) return trustedPage;
+      return { ...trustedPage, origin: "https://untrusted.example.test/apply" };
+    },
+    async clickButton(args) {
+      log.push({ op: "clickButton", ...args });
+    },
+  };
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-pre-advance-redirect",
+    application: { id: "app-pre-advance-redirect", link: GREENHOUSE_URL },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.equal(
+    result.reason,
+    "The application moved to an untrusted site (https://untrusted.example.test) before CareerRat could continue."
+  );
+  assert.deepEqual(result.session.blockers, ["untrusted application site"]);
+  assert.equal(
+    log.some(({ op }) => op === "clickButton"),
+    false,
+    "the fresh pre-advance snapshot is revalidated before Next is clicked"
   );
 });
 
@@ -1457,21 +1982,17 @@ test("Workday-shaped multi-step flow: the account-creation blocker fires on whic
   );
 });
 
-test("a single-page ATS form with a social-login control blocks with an honest sign-in reason instead of clicking through to a third-party auth page", async () => {
-  // The exact risk the generalized loop introduced: this GREENHOUSE_URL page
-  // has both a fillable field and a "Continue with LinkedIn" control. Before
-  // the SSO guard, findAdvanceButtonRef would have matched "continue" and the
-  // loop would have clicked through to thirdPartyAuthPage and started trying
-  // to fill a real identity provider's page. Two independent fixture pages
-  // (rather than one reused snapshot) are used specifically so a regression
-  // that DID click through would show up as a genuine page-2 fill attempt,
-  // not just a fingerprint-stall false pass.
+test("a public ATS form ignores optional social login, fills normal fields, and still stops before submit", async () => {
+  // The SSO control is never a form-advance target, but it also must not stop
+  // the ordinary public form beside it from being prepared. Two independent
+  // fixture pages make any accidental OAuth click observable as navigation.
   const formPage = {
     origin: GREENHOUSE_URL,
     pageText: "Apply to this role",
     refs: refsOf([
       ["e1", "textbox", "First Name", true],
       ["e2", "button", "Continue with LinkedIn", false],
+      ["e3", "button", "Submit Application", false],
     ]),
   };
   const thirdPartyAuthPage = {
@@ -1489,8 +2010,9 @@ test("a single-page ATS form with a social-login control blocks with an honest s
     questionCapture: { state: "captured" },
   });
 
-  assert.equal(result.state, "blocked");
-  assert.match(result.reason, /third-party or account sign-in/);
+  assert.equal(result.state, "awaiting-submit");
+  assert.equal(result.session.filledCount, 1);
+  assert.deepEqual(result.session.blockers, []);
   assert.equal(result.currentUrl, GREENHOUSE_URL, "never navigated to the third-party auth page");
   assert.equal(
     log.some((entry) => entry.op === "clickButton"),
@@ -1499,8 +2021,118 @@ test("a single-page ATS form with a social-login control blocks with an honest s
   );
   assert.equal(
     log.some((entry) => entry.op === "fillField"),
+    true,
+    "the public application field is filled even though an optional social-login control exists"
+  );
+});
+
+test("a social-login wall with no usable application form blocks without clicking OAuth", async () => {
+  const loginPage = {
+    origin: GREENHOUSE_URL,
+    pageText: "Sign in to continue your application",
+    refs: refsOf([
+      ["e0", "textbox", "Email", true],
+      ["e1", "link", "Continue with LinkedIn", false],
+      ["e2", "link", "Sign in with Google", false],
+    ]),
+  };
+  const { ops, log } = createFakeOps([loginPage]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-sso-wall",
+    application: { id: "app-sso-wall" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.match(result.reason, /third-party or account sign-in/);
+  assert.equal(
+    log.some((entry) => entry.op === "clickButton"),
     false,
-    "the flow halts before even attempting to fill First Name: same over-blocking bias as the password/account-creation field gate"
+    "CareerRat never clicks a social-login control"
+  );
+  assert.equal(
+    log.some((entry) => entry.op === "fillField"),
+    false,
+    "an email-only account wall is not mistaken for a public application form"
+  );
+});
+
+test("a passwordless sign-in wall does not treat Remember me as application-form evidence", async () => {
+  const loginPage = {
+    origin: GREENHOUSE_URL,
+    pageText: "Sign in to continue your application",
+    refs: refsOf([
+      ["e0", "textbox", "Email", true],
+      ["e1", "checkbox", "Remember me", false],
+      ["e2", "button", "Continue with Google", false],
+      ["e3", "button", "Sign in", false],
+    ]),
+  };
+  const { ops, log } = createFakeOps([loginPage]);
+  const execute = makeDriver({
+    ops,
+    candidateConfigGetImpl: () => ({
+      ...CONFIG,
+      profile: { candidate: { ...CONFIG.profile.candidate, email: "sam@example.com" } },
+    }),
+  });
+
+  const result = await execute({
+    applicationId: "app-passwordless-wall",
+    application: { id: "app-passwordless-wall" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.match(result.reason, /third-party or account sign-in/);
+  assert.equal(
+    log.some((entry) => entry.op === "fillField" || entry.op === "toggleField"),
+    false,
+    "CareerRat never fills account-gate fields"
+  );
+  assert.equal(
+    log.some((entry) => entry.op === "clickButton"),
+    false,
+    "CareerRat never clicks passwordless sign-in controls"
+  );
+});
+
+test("a passwordless gate without named SSO is not mistaken for a ready application form", async () => {
+  const loginPage = {
+    origin: GREENHOUSE_URL,
+    pageText: "Enter your email to continue",
+    refs: refsOf([
+      ["e0", "textbox", "Email", true],
+      ["e1", "checkbox", "Remember me", false],
+      ["e2", "link", "Continue", false],
+    ]),
+  };
+  const { ops, log } = createFakeOps([loginPage]);
+  const execute = makeDriver({
+    ops,
+    candidateConfigGetImpl: () => ({
+      ...CONFIG,
+      profile: { candidate: { ...CONFIG.profile.candidate, email: "sam@example.com" } },
+    }),
+  });
+
+  const result = await execute({
+    applicationId: "app-passwordless-continue-wall",
+    application: { id: "app-passwordless-continue-wall" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.match(result.reason, /couldn't find the application form/);
+  assert.equal(
+    log.some((entry) => entry.op === "clickButton"),
+    false,
+    "a generic passwordless Continue link is never clicked"
   );
 });
 
@@ -2096,6 +2728,62 @@ test("focusSession returns to the exact retained prepared page without opening o
   );
 });
 
+test("focusSession refuses a retained tab that left the trusted application origin", async () => {
+  const trustedPage = {
+    origin: GREENHOUSE_URL,
+    pageText: "Review your application",
+    refs: refsOf([["e1", "button", "Submit application", false]]),
+  };
+  let retainedPage = trustedPage;
+  const log = [];
+  const ops = {
+    async openTab() {
+      log.push({ op: "openTab" });
+      return { pageId: "page-focus-origin" };
+    },
+    async snapshot() {
+      log.push({ op: "snapshot" });
+      return retainedPage;
+    },
+    async focusTab(args) {
+      log.push({ op: "focusTab", ...args });
+    },
+  };
+  const execute = makeDriver({ ops });
+
+  const prepared = await execute({
+    applicationId: "app-focus-origin",
+    application: { id: "app-focus-origin" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+  assert.equal(prepared.state, "awaiting-submit");
+
+  retainedPage = {
+    origin: "https://unrelated.example.test/confirmation",
+    pageText: "Your application has been submitted",
+    refs: {},
+  };
+  const focused = await execute({
+    applicationId: "app-focus-origin",
+    application: { id: "app-focus-origin" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+    focusSession: true,
+  });
+
+  assert.equal(focused.state, "unavailable");
+  assert.equal(focused.verified, false);
+  assert.match(focused.reason, /left the trusted application site/i);
+  assert.equal(
+    log.filter((entry) => entry.op === "openTab").length,
+    1,
+    "focus never reopens or accepts the unrelated page"
+  );
+});
+
 test("focusSession returns to a retained manual-review page after automation consent is turned off", async () => {
   const reviewPage = {
     origin: `${GREENHOUSE_URL}?step=review`,
@@ -2192,7 +2880,7 @@ test("prepare-only never clicks a plain Continue control that turns out to submi
   );
 });
 
-test("a snapshot with a malformed or missing origin does not throw and does not spuriously block", async () => {
+test("a fresh snapshot with an unverifiable origin blocks before advancing", async () => {
   const pageOne = {
     origin: undefined,
     pageText: "Basic info",
@@ -2213,14 +2901,11 @@ test("a snapshot with a malformed or missing origin does not throw and does not 
     questionCapture: { state: "captured" },
   });
 
-  assert.equal(
-    result.state,
-    "awaiting-submit",
-    "unparseable origins fall through to the fingerprint check, not a spurious block"
-  );
+  assert.equal(result.state, "blocked");
+  assert.match(result.reason, /couldn't verify where the application opened/i);
   assert.deepEqual(
     log.filter((entry) => entry.op === "clickButton"),
-    [{ op: "clickButton", pageId: "page-1", ref: "e1" }],
-    "the advance click still happens: an unparseable origin is not evidence of anything, so it never blocks on its own"
+    [],
+    "an unverifiable origin never receives an advance click"
   );
 });
