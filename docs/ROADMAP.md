@@ -748,12 +748,14 @@ queue.
 - Alerts 108, 109, and 111 remain open only until a main-branch Scorecard run can
   observe the live protection and the two staged repository fixes.
 
-## Release status (v0.16.2, updated August 25, 2026)
+## Release status (v0.16.3, updated August 26, 2026)
 
-**v0.16.2 is the current release line.** It preserves the v0.16.0 runtime and
-workflow release, carries the v0.16.1 UI follow-ups, and adds the guided Claude
-cold-start flow for first-time users. The Mac app, npm package, Homebrew cask,
-and production website passed the release and installation gates above.
+**v0.16.3 is the current release line.** It preserves the v0.16.0 runtime and
+workflow release, the v0.16.1 UI follow-ups, and the v0.16.2 guided cold start,
+then closes the first-run search, locality, local demographic-default, chat,
+and supervised browser-apply gaps recorded below. The Mac app, npm package,
+Homebrew cask, and production website passed the release and installation gates
+above.
 Since v0.11.0 the repo runs the strict flow: feature PRs land on the active dev
 branch (`dev/v0.16` for this release), `main`
 advances only through a promotion merge immediately before each cut, and the tag

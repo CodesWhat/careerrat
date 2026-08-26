@@ -112,17 +112,15 @@ test("v0.16.2 docs record guided setup and preserve v0.16.0 release evidence", a
   assert.doesNotMatch(roadmap, /Publication pending/i);
 
   for (const publicCopy of [readme, install]) {
-    assert.match(publicCopy, /v0\.16\.2 is the current public release/i);
-    assert.match(publicCopy, /v0\.16\.0 provider-parity\s+release/i);
-    assert.match(publicCopy, /protected PRs #217 and #218 merged/i);
-    assert.match(
-      publicCopy,
-      /signed\s+v0\.16\.0 tag points to the exact promotion merge on `main`/i
-    );
+    assert.match(publicCopy, /v0\.16\.3 is the current public release/i);
+    assert.match(publicCopy, /Claude Code and OpenAI Codex as\s+equal complete product choices/i);
+    assert.match(publicCopy, /location-aware first search/i);
+    assert.match(publicCopy, /voluntary demographic defaults local/i);
+    assert.match(publicCopy, /supervised application filling without touching Submit/i);
     assert.match(publicCopy, /signed, notarized, and stapled Mac DMG/i);
-    assert.match(publicCopy, /careerrat@latest` is 0\.16\.2/i);
-    assert.match(publicCopy, /Homebrew cask is 0\.16\.2/i);
-    assert.match(publicCopy, /reports version 0\.16\.2/i);
+    assert.match(publicCopy, /careerrat@latest` is 0\.16\.3/i);
+    assert.match(publicCopy, /Homebrew cask is 0\.16\.3/i);
+    assert.match(publicCopy, /reports version 0\.16\.3/i);
     assert.match(publicCopy, /Scott's (?:disclosed )?referral/i);
     assert.match(publicCopy, /Install inside CareerRat/i);
     assert.match(publicCopy, /passes Gatekeeper[^.]*launch and visual inspection/i);
