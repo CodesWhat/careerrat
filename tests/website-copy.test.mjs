@@ -220,6 +220,7 @@ test("website analytics uses the cookieless house PostHog posture, not Vercel An
     "NEXT_PUBLIC_POSTHOG_HOST",
     "NEXT_PUBLIC_POSTHOG_UI_HOST",
     "capture_pageview: false",
+    "capture_pageleave: true",
     "autocapture: false",
     "disable_session_recording: true",
     'persistence: "memory"',

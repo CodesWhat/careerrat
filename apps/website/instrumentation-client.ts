@@ -19,7 +19,12 @@ if (typeof window !== "undefined" && posthogConfig) {
     api_host: posthogConfig.apiHost,
     ui_host: posthogConfig.uiHost,
     capture_pageview: false,
-    capture_pageleave: false,
+    // posthog-js only emits $pageleave when this is an explicit true, or
+    // "if_capture_pageview" combined with capture_pageview enabled
+    // (posthog-js posthog-core.ts, _shouldCapturePageleave). capture_pageview
+    // is false above since pageviews are captured by hand, so the default
+    // would silently disable $pageleave too.
+    capture_pageleave: true,
     autocapture: false,
     rageclick: false,
     disable_session_recording: true,

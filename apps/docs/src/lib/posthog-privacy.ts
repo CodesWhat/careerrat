@@ -67,7 +67,7 @@ type EventInput = {
 };
 
 type SanitizedEvent = {
-  event: "$pageview" | "$web_vitals";
+  event: "$pageview" | "$pageleave" | "$web_vitals";
   properties: Record<string, boolean | number | string>;
   timestamp?: Date;
   uuid?: string;
@@ -154,9 +154,19 @@ export function sanitizeEvent(input: unknown): SanitizedEvent | null {
   const values = properties as Record<string, unknown>;
   const common = createCommonProperties(values);
   if (common === null) return null;
-  if (event === "$pageview") {
+  // posthog-js emits $pageleave itself once capture_pageleave is true, so it
+  // reaches before_send carrying PostHog's own raw properties rather than
+  // ours. It gets rebuilt through the same allowlist as $pageview: without
+  // this branch every $pageleave would be dropped silently by the final
+  // `return null` below, which is why flipping capture_pageleave alone fixes
+  // nothing. $pathname is added because PostHog's Web analytics Page /
+  // Entry page / Exit page tables key off it and nothing else; it is always
+  // set to the already-sanitized `path`, never the raw pathname, so it can
+  // never carry more than the event was already sending.
+  if (event === "$pageview" || event === "$pageleave") {
     return createSanitizedEvent(eventInput, event, {
       ...common,
+      $pathname: common.path,
       $current_url: `${PRODUCTION_ORIGIN}${common.path}`,
     });
   }
