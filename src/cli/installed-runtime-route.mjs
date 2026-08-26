@@ -1,4 +1,5 @@
 import {
+  CLAUDE_NATIVE_INSTALL_COMMAND,
   detectInstalledRuntimes,
   hasCompleteCareerRatCapabilities,
   installedRuntimeCapabilities,
@@ -6,6 +7,7 @@ import {
   isSupportedInstalledRuntime,
   probeCustomRuntimeCommand,
   probeInstalledRuntime,
+  startInstalledRuntimeGuidedSetup,
   startInstalledRuntimeSignIn,
 } from "../core/ai/installed-runtimes.mjs";
 import {
@@ -204,7 +206,9 @@ export function mountInstalledRuntimeRoutes({
   detectImpl = detectInstalledRuntimes,
   probeImpl = probeInstalledRuntime,
   startSignInImpl = startInstalledRuntimeSignIn,
+  startGuidedSetupImpl = startInstalledRuntimeGuidedSetup,
   probeCustomImpl = probeCustomRuntimeCommand,
+  platform = process.platform,
 } = {}) {
   const inspect = (autoSelect = true) =>
     inspectInstalledRuntimeState({
@@ -348,6 +352,115 @@ export function mountInstalledRuntimeRoutes({
       });
     } catch {
       sendJson(res, 500, { ok: false, code: "RUNTIME_SIGN_IN_FAILED" });
+    }
+  });
+
+  addRoute("POST", "/api/settings/ai-runtime/guided-setup", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+    } catch (error) {
+      sendJson(res, error.status || 400, { ok: false, error: error.message });
+      return;
+    }
+    if (env.CAREERRAT_DESKTOP_CLI_ONLY !== "1" || platform !== "darwin") {
+      sendJson(res, 409, {
+        ok: false,
+        code: "RUNTIME_GUIDED_SETUP_UNAVAILABLE",
+        error: "Guided setup is available in the CareerRat app on macOS.",
+      });
+      return;
+    }
+    const runtimeId = String(body?.runtimeId || "").trim();
+    if (runtimeId !== "claude") {
+      sendJson(res, 409, {
+        ok: false,
+        code: "RUNTIME_GUIDED_SETUP_UNSUPPORTED",
+        error: "Guided setup is currently available for Claude Code.",
+      });
+      return;
+    }
+    const runtime = detectImpl({ env }).find(({ id }) => id === runtimeId);
+    if (runtime?.available) {
+      sendJson(res, 409, {
+        ok: false,
+        code: "RUNTIME_ALREADY_INSTALLED",
+        error: "Claude Code is already installed. Sign in instead.",
+      });
+      return;
+    }
+    let closed = false;
+    let started = false;
+    let heartbeat = null;
+    const pendingOutput = [];
+    const controller = new AbortController();
+    res.on?.("close", () => {
+      closed = true;
+      controller.abort();
+    });
+
+    function emit(payload) {
+      if (closed || !started) return;
+      try {
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      } catch {
+        closed = true;
+        controller.abort();
+      }
+    }
+
+    function startStream() {
+      if (started || closed) return;
+      started = true;
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-store",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+      res.flushHeaders?.();
+      emit({
+        type: "started",
+        runtimeId,
+        installCommand: CLAUDE_NATIVE_INSTALL_COMMAND,
+      });
+      for (const message of pendingOutput.splice(0)) emit({ type: "output", message });
+      heartbeat = setInterval(() => emit({ type: "heartbeat" }), 10_000);
+      heartbeat.unref?.();
+    }
+
+    try {
+      await startGuidedSetupImpl(runtimeId, {
+        platform,
+        signal: controller.signal,
+        onStart: startStream,
+        onOutput(message) {
+          if (started) emit({ type: "output", message });
+          else pendingOutput.push(message);
+        },
+      });
+      startStream();
+      emit({ type: "done", runtimeId });
+    } catch (error) {
+      if (!started) {
+        sendJson(res, 500, {
+          ok: false,
+          code: error?.code || "RUNTIME_GUIDED_SETUP_FAILED",
+          error: "CareerRat could not start the in-app Claude installer.",
+        });
+        return;
+      }
+      emit({
+        type: "error",
+        code: error?.code || "RUNTIME_GUIDED_SETUP_FAILED",
+        message:
+          error?.code === "RUNTIME_GUIDED_SETUP_CANCELLED"
+            ? "Claude Code setup was cancelled."
+            : "Claude Code did not finish installing. Check your connection and try again.",
+      });
+    } finally {
+      clearInterval(heartbeat);
+      if (started && !closed) res.end();
     }
   });
 
