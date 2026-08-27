@@ -36,8 +36,8 @@ pre-push:
       run: npx biome check .
     - name: qlty
       # "changed" mode (diff vs origin/main) — CareerRat is pre-launch and
-      # carries a real doc/YAML backlog (.planning/, examples/, templates/)
-      # that a repo-wide run would fail on immediately. See
+      # carries a real doc/YAML backlog (examples/, templates/) that a
+      # repo-wide run would fail on immediately. See
       # scripts/qlty-check-gate.sh and .qlty/qlty.toml.
       run: ./scripts/qlty-check-gate.sh changed
     - name: knip

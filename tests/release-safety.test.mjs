@@ -104,11 +104,10 @@ test("product apps and archived prototypes are consolidated out of the repositor
       `${staleRoot}/ should not remain at the repository root`
     );
   }
-  for (const expected of [
-    "apps/website/package.json",
-    "apps/docs/package.json",
-    ".planning/archive/mockups/index.html",
-  ]) {
+  // The archived mockups moved to .planning/archive/mockups/, which stopped
+  // being tracked on 2026-08-27. A fresh clone has no untracked files, so
+  // asserting they exist would only ever pass on a developer's own machine.
+  for (const expected of ["apps/website/package.json", "apps/docs/package.json"]) {
     assert.equal(existsSync(join(root, expected)), true, `${expected} should exist`);
   }
   assert.equal(
