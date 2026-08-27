@@ -22,7 +22,13 @@ permissions: {}
 
 jobs:
   summon:
-    if: github.event.label.name == 'second-opinion'
+    # `state == 'open'` because a label can land on an already-closed PR,
+    # and the frozen reusable workflow fails loudly rather than no-opping
+    # (`Pull request #234 is closed`, 2026-08-27). Refusing to summon is
+    # the caller's job; the shared workflow is right to stay strict.
+    if: >-
+      github.event.label.name == 'second-opinion'
+      && github.event.pull_request.state == 'open'
     permissions:
       pull-requests: write
     uses: CodesWhat/.github/.github/workflows/greptile-summon.yml@01bf40b06b110946f12a49b82e407d77c6480df7 # frozen 2026-08-17
