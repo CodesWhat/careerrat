@@ -748,7 +748,30 @@ queue.
 - Alerts 108, 109, and 111 remain open only until a main-branch Scorecard run can
   observe the live protection and the two staged repository fixes.
 
-## Release status (v0.16.5, updated August 27, 2026)
+## Release status (v0.16.6 candidate, updated August 27, 2026)
+
+**v0.16.6 is the verified release candidate.** It fixes the AI web-search
+failure captured during final user QA. The installed runtime used to stop at
+120 seconds, the search layer then treated the empty result as invalid schema,
+and Paul exposed that internal diagnosis in chat. The fixed path gives Claude
+Code, Codex, and the BYOK/proxy route the same explicit eight-minute bound,
+stops immediately on real runtime failures instead of rerunning the search,
+refreshes the sourcing lease during JD capture, and keeps raw diagnostics in
+the internal sourcing ledger. Chat now offers Yes/No buttons only for genuinely
+binary questions.
+
+Real production-path verification passed on both supported runtimes. Claude
+Code 2.1.247 completed in 123.592 seconds with two roles, four recorded queries,
+two saved JDs, and no retry or error. Codex CLI 0.150.1 completed in 29.445
+seconds with one role, one recorded query, one saved JD, and no retry or error.
+Both runs used isolated workspaces, passed data verification, left the real
+databases unchanged, and cleaned up their processes and temporary data. The
+repository suite passed 3,865 tests with 15 intentional skips and no failures;
+the web suite passed all 778 tests; lint, Qlty, Knip, `git diff --check`, and the
+production builds passed. v0.16.5 remains the current public release until the
+signed v0.16.6 artifacts and distribution channels are live.
+
+### v0.16.5 public release verification
 
 **v0.16.5 is released and verified.** It closes the remaining
 candidate-visible raw-error paths found in the final v0.16.4 audit: guided

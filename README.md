@@ -64,6 +64,13 @@ validated application entry points, and signed in-app Mac updates from v0.16.4.
 It also closes the remaining raw-error paths in guided installation, expanded
 diagnostics, browser-workflow cards, Search status, and browser setup.
 
+v0.16.6 is the verified release candidate. It fixes AI web searches that ran
+past the old two-minute limit, keeps long searches alive while CareerRat saves
+their job descriptions, hides internal runtime and schema details, and shows
+Yes/No buttons only for questions that can actually be answered Yes or No. The
+public-version claims above stay on 0.16.5 until the signed v0.16.6 artifacts and
+distribution channels are live.
+
 The Windows x64 installer passed build, install, launch, export, and uninstall
 QA. A public Windows installer will ship only after SignPath Foundation signing
 is available; SignPath requires project reputation CareerRat does not yet have.

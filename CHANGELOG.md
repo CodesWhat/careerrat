@@ -4,6 +4,21 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.6] - 2026-08-27
+
+### Fixed
+
+- AI web search no longer stops at the old two-minute runtime limit and reports a misleading structured-output error. Claude Code and Codex now share an explicit eight-minute bound, and real runtime failures stop immediately instead of repeating the entire search as a schema retry.
+- Long searches keep their sourcing run alive while CareerRat reads and saves full job descriptions, so a completed model search cannot be marked failed during post-search capture.
+- Paul and the durable chat history show a plain-English retry message instead of model schemas, provider output, runtime codes, or parser details when AI search fails.
+- Yes/No buttons appear only for genuinely binary questions. Either-or questions stay as normal text responses, while binary questions with a short lead-in still get buttons.
+
+### Release verification
+
+- Claude Code 2.1.247 completed the production AI-search path in 123.592 seconds, beyond the removed 120-second cutoff, with two roles, four recorded queries, two saved job descriptions, and no retry or error.
+- Codex CLI 0.150.1 completed the same production path in 29.445 seconds with one role, one recorded query, one saved job description, and no retry or error. Both runs used isolated workspaces, passed data verification, and left the real CareerRat databases unchanged.
+- The repository suite passed 3,865 tests with 15 intentional skips and no failures. The full web suite passed all 778 tests. Lint, Qlty, Knip, `git diff --check`, and the production web, docs, website, and desktop staging builds passed.
+
 ## [0.16.5] - 2026-08-27
 
 ### Changed
