@@ -183,3 +183,37 @@ test("rejects unknown options, stale versions, and replayed resolutions", async 
     (error) => error.code === "CHOICE_ALREADY_RESOLVED"
   );
 });
+
+test("explicit replies cannot resolve an older prompt after a newer choice is pending", async () => {
+  const { createBinaryChoicePrompt, resolvePendingMessageChoice } = await import(
+    "../src/core/agent/choice-prompt.mjs"
+  );
+  const first = createBinaryChoicePrompt({
+    threadId: "workspace-main",
+    messageId: "assistant-first",
+    question: "Should I keep the first option?",
+  });
+  const latest = createBinaryChoicePrompt({
+    threadId: "workspace-main",
+    messageId: "assistant-latest",
+    question: "Should I keep the latest option?",
+  });
+  const messages = [
+    { id: "assistant-first", role: "assistant", metadata: { choicePrompt: first } },
+    { id: "assistant-latest", role: "assistant", metadata: { choicePrompt: latest } },
+  ];
+
+  assert.throws(
+    () =>
+      resolvePendingMessageChoice(messages, {
+        choice: { promptId: first.id, version: first.version, optionIds: ["yes"] },
+      }),
+    (error) => error.code === "STALE_CHOICE_PROMPT"
+  );
+  assert.deepEqual(
+    resolvePendingMessageChoice(messages, {
+      choice: { promptId: latest.id, version: latest.version, optionIds: ["yes"] },
+    }).resolution.optionIds,
+    ["yes"]
+  );
+});
