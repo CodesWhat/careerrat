@@ -2375,7 +2375,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         if (next !== current) skillChatCursorsRef.current.set(current.chatId, next.cursor);
         return next;
       });
-      if (skillChatEventNeedsHydration(type)) void dashboard.refetch();
+      if (skillChatEventNeedsHydration(type, raw)) void dashboard.refetch();
     },
     [dashboard.refetch]
   );
