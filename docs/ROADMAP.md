@@ -1521,6 +1521,61 @@ concrete examples (“interesting technical work, strong engineering practices, 
 The preceding guardrail question was equally plain, offered clickable Yes/No answers, restored
 cleanly after reload, and the fresh browser context reported zero errors and warnings.
 
+### v0.16.6 choice, coaching, and durable-navigation gate (August 27, 2026)
+
+The August 27 [chat-first choice audit](../.planning/CHAT-FIRST-CHOICE-AUDIT.md) found a new
+release-blocking class that the older product-surface acceptance sweep did not cover. Yes/No is
+the only structured answer mode that crosses the agent, API, durable thread, and UI today.
+Onboarding confirmations, Deep Ingest decisions, source and company proposals, ambiguity
+recovery, permissions, missions, mock-interview next steps, application answers, and model
+settings each use separate partial patterns. Some are click-only, some are text-only, and Deep
+Ingest can currently treat a typed decision as a new source. Navigation and reload can also lose
+the foreground choice while background work continues. The older sweep remains the record of
+what passed then; it is not evidence that this newly audited contract is closed.
+
+This gate blocks the next release until:
+
+1. **One typed choice contract** carries a stable prompt ID/version, binary/single/multi/confirm
+   mode, bounded options, text aliases, allowlisted action references, selection limits, and
+   pending/resolved/stale state through every agent reply, API response, durable message, and
+   renderer. Clicks and ordinary language resolve to the same normalized intent and idempotent
+   write. Model output cannot attach executable payloads or leak raw JSON into chat.
+2. **Career-coach expansion** turns a zero-result or over-narrow search into a plain-English
+   conversation about credible adjacent work. Paul explains the transferable evidence, offers
+   three to five role directions as a multi-select choice, accepts clicks or a typed combination,
+   and asks before changing targeting or rerunning search. No silent broadening.
+3. **Review queues become conversational** instead of repeated approve/deny walls. Deep Ingest,
+   source discovery, company discovery, and other proposal batches expose a small useful set,
+   multi-select where appropriate, one clear batch action, edit/talk-about paths, version-safe
+   retries, and a compact durable resolved summary.
+4. **Foreground state is durable** in URL state and saved drafts: active thread, workspace tab,
+   filters, open entity/review, application question, selections, and meaningful unsaved edits
+   restore after navigation, reload, app restart, retry, and background completion. A background
+   result updates status without hijacking the user's route, focus, or composer input.
+5. **Permissions appear where the task needs them** with the exact platform/action named and
+   server-owned consent copy. The user can click the inline confirmation or answer naturally;
+   both routes make the same reviewed setting change. No dead-end instruction to hunt through
+   generic Settings rows.
+6. **Provider-neutral model routing and Settings are first class.** Paul quality is Automatic,
+   Fast, Balanced, or Best, with a separate plain-English thinking-depth preference. Both are
+   clickable and naturally configurable, separate from automation `usage_mode`, and durable after
+   restart. Operation policy sends main Paul coaching to the strongest suitable model, while
+   bounded web search, extraction, and classification use faster/cheaper capable models. Claude
+   Code and Codex adapters map the neutral policy to their native per-run model/effort controls
+   without ranking providers or switching the user's runtime. The resolved route is recorded and
+   reused by background runs, retries, and resume. The dedicated model-routing audit owns the
+   exact adapter matrix and acceptance fixtures; this release gate owns the product requirement.
+7. **Accessibility and recovery share one contract.** Choice groups use semantic buttons or
+   native controls, `fieldset`/`legend`, visible focus, keyboard-complete single/multi selection,
+   and announced async success/error. Every dialog traps and restores focus, supports Escape, and
+   prevents background scroll. Stale, offline, cancelled, and already-resolved prompts recover in
+   plain English without duplicating a mutation.
+8. **Parity acceptance** proves every choice surface by click and equivalent text, asserts the same
+   normalized intent and one durable write, then repeats after reload, restart, stale-version
+   conflict, cancellation, offline recovery, and completion while another screen is active. Run
+   the coaching, evaluation, bounded helper, and search-routing fixtures on both Claude Code and
+   Codex with the selected provider held fixed.
+
 ### Product-surface acceptance sweep (updated August 17, 2026)
 
 The live result ledger is [`.planning/QA-ACCEPTANCE.md`](../.planning/QA-ACCEPTANCE.md); this
