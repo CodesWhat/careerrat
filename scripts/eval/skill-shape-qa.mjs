@@ -37,8 +37,8 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
-  buildInstalledRuntimeInvocation,
   detectInstalledRuntimes,
+  probeInstalledRuntime,
 } from "../../src/core/ai/installed-runtimes.mjs";
 import { coachingPlanSchema } from "../../src/core/coaching/schemas.mjs";
 import { validateCompanyHealth } from "../../src/core/db/verbs/company-health.mjs";
@@ -47,7 +47,7 @@ import { packetGateAiVerdictSchema } from "../../src/core/packet/schemas/packet-
 import { formatErrors, validate } from "../../src/core/profile/schema-validator.mjs";
 import { parseYaml } from "../../src/core/profile/yaml.mjs";
 import { buildSearchPromptContext } from "../../src/core/search/search-prompts.mjs";
-import { callInstalledClaudeForJson } from "./lib/installed-cli-call.mjs";
+import { callInstalledRuntimeForJson } from "./lib/installed-cli-call.mjs";
 import { SINGLE_ROLE_SCHEMA } from "./lib/single-role-schema.mjs";
 import { extractSection, loadSkillMd } from "./lib/skill-sections.mjs";
 
@@ -373,13 +373,22 @@ export function selectSkillShapeRuntimes(runtimes, requested = "all") {
   return requested === "all" ? supported : supported.filter((runtime) => runtime.id === requested);
 }
 
+export async function probeSkillShapeRuntimes(runtimes, { probe = probeInstalledRuntime } = {}) {
+  const verified = [];
+  for (const runtime of runtimes) {
+    const result = await probe(runtime);
+    if (!result?.ready) continue;
+    verified.push({ ...runtime, capabilities: result.capabilities });
+  }
+  return verified;
+}
+
 async function runLane(lane, { runtime, candidate }) {
   const skillMd = loadSkillMd(REPO_ROOT, lane.name);
   const prompt = lane.buildPrompt({ skillMd, candidate });
   let result;
   try {
-    result = await callInstalledClaudeForJson({
-      buildInvocation: buildInstalledRuntimeInvocation,
+    result = await callInstalledRuntimeForJson({
       runtime,
       prompt,
       schema: lane.schema,
@@ -427,7 +436,8 @@ async function main() {
     process.exit(1);
   }
 
-  const runtimes = selectSkillShapeRuntimes(detectInstalledRuntimes(), args.runtime);
+  const detectedRuntimes = selectSkillShapeRuntimes(detectInstalledRuntimes(), args.runtime);
+  const runtimes = await probeSkillShapeRuntimes(detectedRuntimes);
   if (runtimes.length === 0) {
     console.error(
       `STOP: no installed ${args.runtime === "all" ? "Claude Code or OpenAI Codex" : args.runtime} runtime is available. ` +

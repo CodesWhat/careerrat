@@ -7,10 +7,12 @@
 // manually or by dispatch, never in CI.
 import assert from "node:assert/strict";
 import test from "node:test";
+import { callInstalledRuntimeForJson } from "../scripts/eval/lib/installed-cli-call.mjs";
 import { SINGLE_ROLE_SCHEMA } from "../scripts/eval/lib/single-role-schema.mjs";
 import {
   LANES,
   parseSkillShapeQaArgs,
+  probeSkillShapeRuntimes,
   selectSkillShapeRuntimes,
 } from "../scripts/eval/skill-shape-qa.mjs";
 import { coachingPlanSchema } from "../src/core/coaching/schemas.mjs";
@@ -343,4 +345,52 @@ test("skill-shape-qa can target one supported runtime explicitly", () => {
     ["codex"]
   );
   assert.throws(() => parseSkillShapeQaArgs(["--runtime", "gemini"]), /claude, codex, or all/);
+});
+
+test("skill-shape-qa uses the production installed-runtime adapter for structured output", async () => {
+  const calls = [];
+  const result = await callInstalledRuntimeForJson({
+    runRuntime: async (options) => {
+      calls.push(options);
+      return { text: '{"fit_score":88}', usage: { output_items: 1 }, runtimeId: "codex" };
+    },
+    runtime: { id: "codex", path: "/usr/local/bin/codex" },
+    prompt: "Score this role.",
+    schema: { type: "object", properties: { fit_score: { type: "number" } } },
+    timeoutMs: 1_000,
+  });
+
+  assert.deepEqual(result.structured, { fit_score: 88 });
+  assert.deepEqual(result.usage, { output_items: 1 });
+  assert.deepEqual(calls[0], {
+    runtime: { id: "codex", path: "/usr/local/bin/codex" },
+    prompt: "Score this role.",
+    outputSchema: { type: "object", properties: { fit_score: { type: "number" } } },
+    tools: [],
+    timeoutMs: 1_000,
+  });
+});
+
+test("skill-shape-qa carries verified capabilities from the auth probe into live calls", async () => {
+  const runtimes = await probeSkillShapeRuntimes(
+    [
+      { id: "claude", path: "/claude", available: true, capabilities: { completion: false } },
+      { id: "codex", path: "/codex", available: true, capabilities: { completion: false } },
+    ],
+    {
+      probe: async (runtime) =>
+        runtime.id === "codex"
+          ? { ready: true, capabilities: { completion: true, structuredOutput: true } }
+          : { ready: false, status: "authentication_required" },
+    }
+  );
+
+  assert.deepEqual(runtimes, [
+    {
+      id: "codex",
+      path: "/codex",
+      available: true,
+      capabilities: { completion: true, structuredOutput: true },
+    },
+  ]);
 });
