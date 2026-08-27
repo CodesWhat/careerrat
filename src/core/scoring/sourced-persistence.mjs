@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { dbExists } from "../db/connection.mjs";
 import { buildDbSeenSets, readDbScannerRows } from "../db/scan-context.mjs";
+import { sourceConfigGet, sourceConfigMutate } from "../db/verbs/source-config.mjs";
 import { sourcedReconcilePolicyBatch, sourcedUpsertBatch } from "../db/verbs/sourced.mjs";
 import { readJobDescriptionArtifact } from "../jobs/job-description.mjs";
 import { userPath } from "../paths/workspace.mjs";
@@ -46,6 +47,7 @@ export function revalidatePersistedSourcedRows({
   config,
   now = new Date(),
   locationFilter,
+  policyDigest,
   guard,
 } = {}) {
   const empty = {
@@ -54,8 +56,16 @@ export function revalidatePersistedSourcedRows({
     unreadable: 0,
     hidden: 0,
     hiddenIds: [],
+    skipped: false,
   };
   if (!dbExists({ repoRoot, env })) return empty;
+  if (
+    policyDigest &&
+    sourceConfigGet({ repoRoot, env, name: "sourced-scan" }).data.policyRevalidation?.digest ===
+      policyDigest
+  ) {
+    return { ...empty, skipped: true };
+  }
 
   const activeRows = activeSourcedRows(readDbScannerRows({ repoRoot, env }));
   const rowsById = new Map(activeRows.map((row) => [String(row.id), row]));
@@ -95,13 +105,37 @@ export function revalidatePersistedSourcedRows({
   const reconciled = decisions.length
     ? sourcedReconcilePolicyBatch({ repoRoot, env, decisions, guard })
     : { hidden: 0, hiddenIds: [] };
+  if (policyDigest && unreadable === 0) {
+    sourceConfigMutate({
+      repoRoot,
+      env,
+      name: "sourced-scan",
+      guard,
+      mutate(current) {
+        return {
+          ...current,
+          policyRevalidation: {
+            digest: policyDigest,
+            checkedAt: (now instanceof Date ? now : new Date(now)).toISOString(),
+          },
+        };
+      },
+    });
+  }
   return {
     examined: activeRows.length,
     readable: offers.length,
     unreadable,
     hidden: reconciled.hidden,
     hiddenIds: reconciled.hiddenIds,
+    skipped: false,
   };
+}
+
+export function sourcedPolicyDigest({ config, locationPolicy } = {}) {
+  return createHash("sha256")
+    .update(JSON.stringify({ config: config || {}, locationPolicy: locationPolicy || null }))
+    .digest("hex");
 }
 
 function slug(value, fallback = "unknown") {

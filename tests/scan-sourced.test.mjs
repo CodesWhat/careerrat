@@ -1974,6 +1974,77 @@ test("a writable DB search hides stale sourced rows that fail the current compen
   }
 });
 
+test("writable searches skip unchanged saved-job policy revalidation", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: { compensation: { minimum_base: 100000 } },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "sourced-scan",
+      data: { title_filter: { positive: [], negative: [] }, tracked_companies: [] },
+    });
+    sourceConfigPut({ repoRoot, name: "search-sources", data: { searches: [] } });
+    const artifact = "workspace/jobs/policy-cache-example.md";
+    mkdirSync(userPath({ repoRoot }, "workspace/jobs"), { recursive: true });
+    writeFileSync(
+      userPath({ repoRoot }, artifact),
+      "---\ncompany: Policy Cache Co\nrole: Platform Engineer\npartial: false\n---\n\nBase salary range: $140,000 - $170,000 annually.\n"
+    );
+    sourcedUpsertBatch({
+      repoRoot,
+      rows: [
+        {
+          id: "sourced-policy-cache",
+          company: "Policy Cache Co",
+          role: "Platform Engineer",
+          status: "sourced",
+          link: "https://jobs.example.test/policy-cache",
+          loc: "USA (Remote)",
+          base: "$140,000 - $170,000",
+          fitScore: 80,
+          fitBucket: "high",
+          fitBasis: "triage",
+          gate: "review",
+          sourcedAt: "2026-08-27T12:00:00.000Z",
+          updatedAt: "2026-08-27T12:00:00.000Z",
+          artifacts: { jd: artifact },
+          scanner: { bodyPartial: false },
+        },
+      ],
+    });
+
+    const first = await runSourcedScan({ repoRoot, write: true });
+    assert.equal(first.revalidatedExisting.skipped, false);
+    assert.equal(first.revalidatedExisting.examined, 1);
+    assert.match(
+      sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.policyRevalidation.digest,
+      /^[a-f0-9]{64}$/
+    );
+
+    const second = await runSourcedScan({ repoRoot, write: true });
+    assert.equal(second.revalidatedExisting.skipped, true);
+    assert.equal(second.revalidatedExisting.examined, 0);
+
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: { compensation: { minimum_base: 200000 } },
+    });
+    const changedPolicy = await runSourcedScan({ repoRoot, write: true });
+    assert.equal(changedPolicy.revalidatedExisting.skipped, false);
+    assert.equal(changedPolicy.revalidatedExisting.examined, 1);
+    assert.equal(changedPolicy.revalidatedExisting.hidden, 1);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("DB mode merges board offers, filters their titles, and stamps board watermarks", async () => {
   const repoRoot = tempRepo();
   try {

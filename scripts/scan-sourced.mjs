@@ -41,6 +41,7 @@ import {
   captureAndPersistOffersIfDb,
   offersWithCapturedJobs,
   revalidatePersistedSourcedRows,
+  sourcedPolicyDigest,
   sourcedRowsFromScanOffers,
 } from "../src/core/scoring/sourced-persistence.mjs";
 import {
@@ -592,9 +593,20 @@ export async function runSourcedScan({
           config: candidateConfig,
           now: savedAt,
           locationFilter,
+          policyDigest: sourcedPolicyDigest({
+            config: candidateConfig,
+            locationPolicy: config.location_filter,
+          }),
           guard: writeGuard,
         })
-      : { examined: 0, readable: 0, unreadable: 0, hidden: 0, hiddenIds: [] };
+      : {
+          examined: 0,
+          readable: 0,
+          unreadable: 0,
+          hidden: 0,
+          hiddenIds: [],
+          skipped: false,
+        };
   const persistedOffers = write
     ? standaloneConfigMode
       ? offersWithCapturedJobs({ repoRoot, env, offers: filtered.kept, savedAt })
