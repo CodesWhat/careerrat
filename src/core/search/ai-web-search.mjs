@@ -99,6 +99,26 @@ function offerMeetsFitFloor(offer, fitFloor) {
   return Number.isFinite(score) && score >= fitFloor;
 }
 
+function canonicalRecoveryRejectionReason(offer, { config }) {
+  const qualification = requalifyCanonicalOffers([offer], { config });
+  if (qualification.filteredLocation.length) {
+    return "The canonical location violates the saved hard location filter.";
+  }
+  if (qualification.filteredSalary.length) {
+    return "The canonical compensation is below the saved hard salary floor.";
+  }
+  if (qualification.filteredSeniority.length) {
+    return "The canonical role violates the saved seniority filter.";
+  }
+  if (qualification.filteredAge.length) {
+    return "The canonical posting violates the saved freshness filter.";
+  }
+  if (qualification.filteredEligibility.length) {
+    return "The canonical role violates the saved work-eligibility filter.";
+  }
+  return null;
+}
+
 // Sourced-row `gate` for an AI-web-search survivor. This mode's `candidate`
 // context (buildSearchPromptContext) never carries company-history or
 // application-limit data (see the SKILL.md section's own note), so unlike
@@ -389,7 +409,7 @@ function freshnessRecoveryInstruction(rejections) {
   }));
   const rejectedSourceHosts = [...concentratedRejectedHosts(rejections)];
   return [
-    "CareerRat's canonical checker rejected every usable candidate from this saved prompt for liveness or posting-identity reasons.",
+    "CareerRat's canonical checker rejected every usable candidate from this saved prompt for liveness, posting-identity, or saved hard-filter reasons.",
     "Run one fresh replacement search on the same provider. Return different, currently active, posting-specific roles that still satisfy every original candidate boundary.",
     "Search employer-owned career pages and direct ATS postings first. Return candidates from at least two source hosts when the open web has them, with no more than one candidate from the same third-party host.",
     "Do not return any rejected URL below, another URL for the same rejected requisition, or a host listed in rejected_source_hosts. Do not loosen title, location, compensation, freshness, or fit requirements.",
@@ -853,17 +873,24 @@ export async function runAiWebSearch({
         continue;
       }
 
-      canonicalPromptIds.add(promptId);
       const canonicalKey = normalizeCompanyRoleKey(hydrated.company, hydrated.title);
       const canonicalReq = extractReqId(hydrated.url);
       const canonicalOffer = { ...hydrated, key: canonicalKey, reqId: canonicalReq.id };
       const canonicalDuplicate = postingIdentityIsSeen(canonicalOffer, seenPostingKeys);
       if (canonicalDuplicate) {
         duplicates += 1;
+        canonicalPromptIds.add(promptId);
         continue;
       }
       addPostingIdentity(seenPostingKeys, canonicalOffer);
       canonicalCandidates.push(canonicalOffer);
+      const recoveryRejection = canonicalRecoveryRejectionReason(canonicalOffer, { config });
+      if (recoveryRejection) {
+        if (!rejectionsByPrompt.has(promptId)) rejectionsByPrompt.set(promptId, []);
+        rejectionsByPrompt.get(promptId).push({ offer: canonicalOffer, reason: recoveryRejection });
+        continue;
+      }
+      canonicalPromptIds.add(promptId);
     }
 
     return { canonicalPromptIds, receiptPromptIds, rejectionsByPrompt };

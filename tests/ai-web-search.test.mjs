@@ -1503,6 +1503,80 @@ test("runAiWebSearch continues canonical freshness recovery until a second turn 
   assert.equal(result.presented, 1, JSON.stringify(result));
 });
 
+test("runAiWebSearch continues recovery when canonical hard gates erase the first replacement", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      compensation: { minimum_base: 85000 },
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Bar leadership", titles: ["Bar Manager"] }],
+      fit_bands: { fit_floor: 65 },
+    },
+  });
+  const inputs = [];
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      const call = inputs.length;
+      const url =
+        call === 1
+          ? "https://stale.example/jobs/expired"
+          : call === 2
+            ? "https://employer-one.example/jobs/below-floor"
+            : "https://employer-two.example/jobs/qualified";
+      emitAssistantJson(onEvent, {
+        roles: [
+          role({
+            company: `Hospitality ${call}`,
+            title: "Bar Manager",
+            location: "New York, NY",
+            url,
+          }),
+        ],
+        queries_run: [{ prompt_id: "p1", query: `query ${call}`, status: "completed" }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: async (url) => ({
+      bodyFetchStatus: "resolved",
+      url,
+      title: "Bar Manager",
+      location: "New York, NY",
+      bodyText: url.includes("expired")
+        ? fullJd("Expired posting")
+        : url.includes("below-floor")
+          ? fullJd("Base salary: $75,000 - $95,000 per year")
+          : fullJd("Base salary: $90,000 - $100,000 per year"),
+      liveness: url.includes("expired")
+        ? { result: "expired", reason: "Expired posting." }
+        : { result: "active", reason: "visible apply control" },
+    }),
+  });
+
+  assert.equal(inputs.length, 3);
+  assert.match(inputs[2], /below-floor/);
+  assert.match(inputs[2], /salary|compensation|hard filter/i);
+  assert.equal(result.presented, 1, JSON.stringify(result));
+  assert.deepEqual(result.reasonCounts, { salary: 1 });
+});
+
 test("runAiWebSearch caps canonical freshness recovery at two turns", async () => {
   const repoRoot = repo({ prompts: 1 });
   let calls = 0;
