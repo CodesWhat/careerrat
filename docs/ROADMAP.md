@@ -750,59 +750,92 @@ queue.
 - Alerts 108, 109, and 111 remain open only until a main-branch Scorecard run can
   observe the live protection and the two staged repository fixes.
 
-## Release status (v0.16.6 candidate, updated August 27, 2026)
+## Release status (v0.16.6 landing audit, updated August 27, 2026)
 
-**v0.16.6 remains an in-progress candidate. v0.16.5 is the current public
-release.** The earlier eight-minute AI-search timeout, runtime-failure handling,
-lease refresh, safe error copy, and binary-question work passed its own source
-and production-path checks. The local branch has since added the fixes below,
-so that earlier evidence does not qualify the current HEAD for promotion.
+**Landing verdict: v0.16.6 is a materially implemented source candidate, not a
+release candidate that is ready to promote. v0.16.5 remains the current public
+release.** The implementation revision audited here is `7bc4b3f`. It is 106
+commits from `dev/v0.16`, changes 209 files, and is 103 commits ahead of the
+remote PR branch. PR #243's approvals and checks cover remote revision
+`0bde4f9`, not this source tree.
 
-- **Duplicate onboarding follow-up** — a question followed by a short plain-English
-  consequence, such as the salary-floor explanation, remains the one unanswered
-  turn instead of causing Paul to ask it again. Draft repair keeps only the latest
-  duplicate copy. Short safety clarifications after a question also keep that
-  question pending until the candidate answers it.
-- **Canonical search qualification** — configured and AI-web candidates are
-  rechecked from the hydrated canonical posting before persistence. In-person and
-  office-day requirements, saved location scope, compensation floor, sponsorship,
-  saved fit bands, and AI review/cut gates now use canonical facts. Partial
-  configured-source previews defer body-dependent policy only in the coarse pass;
-  canonical requalification is mandatory. Run and per-company caps apply after
-  that gate so valid later candidates can backfill rejected previews.
-- **Partial-JD provenance** — a capped Remote Vibe body remains marked partial,
-  including in company proposal evidence. Following a canonical ATS posting can
-  replace it with a complete capture; handing application work to another URL does
-  not silently relabel the preview complete.
-- **Job identity and sibling warning** — RSS `Role at Company` titles now store a
-  clean company and role. Strong URL and requisition identity still keep distinct
-  openings separate, while a sourced role at a company with another active
-  application gets a visible review warning instead of being silently collapsed.
-- **Application answer review** — packet gaps are visible in the job thread and
-  right-side review, exact answers write through the typed screening-answer path,
-  and the paused mission resumes only after gaps clear. Form preparation asks for
-  its permission in place, states that the candidate still presses Submit, and
-  resumes the existing mission instead of spawning an orphan preparation action.
-  Saved North American locations can answer the matching location screen without
-  inventing unknown facts.
+This ledger supersedes every older v0.16.6 status or test count below. Older
+sections remain as dated implementation history, not current acceptance proof.
+The three `.planning` choice, durability, and model-routing audits are also
+dated input snapshots. Their open-at-audit-time verdicts do not override this
+ledger, and their implemented rows do not prove packaged acceptance.
 
-The repository suite passes 3,893 tests with 15 intentional skips and no failures,
-the full web suite passes all 791 tests, and the final search-focused group passes
-131 tests. This is source-tree evidence, not current packaged acceptance. The
-README and install guide still summarize the earlier timeout/Yes-No v0.16.6
-tranche while correctly naming v0.16.5 as public; the website still keeps safe
-form filling separate from the candidate-owned Submit action.
+### What counts as app evidence
 
-Current promotion gates are: run the complete repository and web suites, lint,
-analysis, and production builds from the final branch; build a new signed and
-notarized Mac candidate from that exact commit; then exercise a fresh isolated
-workspace with a selected installed CLI through realistic résumé onboarding,
-configured plus AI search, local JD and identity review, application-answer
-review, the permission handoff, mission resume, restart, and a real ATS
-preparation that stops at Submit without clicking it or recording a false
-application. Only after that evidence is attached should the exact commit be
-reviewed, tagged, and promoted through GitHub artifacts, the updater feed, npm,
-Homebrew, the website, and versioned docs.
+- `scripts/qa-live-runtime-search.mjs` is not a second search product. It creates
+  an isolated CareerRat database, selects and probes the real installed Claude
+  Code or Codex adapter, and calls the production `runAiWebSearch` pipeline. It
+  covers the production backend without clicking the packaged renderer.
+- Manual review opens the URLs that the production pipeline persisted and checks
+  the real title, employer, location, compensation, liveness, and application
+  entry. It is the external acceptance check for the same results, not another
+  implementation.
+- Source tests and builds prove source behavior only. A stale local `.app`, an
+  older installed app, a previous live receipt, or an approval on an older PR
+  revision does not qualify current HEAD.
+
+### Current implementation and acceptance ledger
+
+| Area | Current source | Verified now | Package / public truth | Status |
+| --- | --- | --- | --- | --- |
+| Chat-first shell and handoff UI | The new shell, side-panel editing, durable routes/drafts, exact review-batch restore, clickable and typed binary/multi-choice handling, background-operation ownership, resume intake, missions, Deep Ingest, mock interview, updater UI, and candidate-owned Submit boundary are implemented. The old standalone HTML product routes are retired. | Exact source web suite: 893/893. The repository suite: 4,106 pass, 15 intentional skips, 0 fail. Root production build passes. | The last visual desktop acceptance used an older 0.16.6 bundle. No package built from `7bc4b3f` has completed the full handoff click-through. | **Source green; exact package open** |
+| Choice and foreground-state contract | Typed exact labels and clicks now resolve through one durable path for automatic binary prompts and adjacent-role coaching; source/company batches restore by exact ID; URL state, drafts, and owned operations survive background work. | The focused choice/durability/foundation slice passes 73/73, and the web suite covers the current UI. | Missions, mock next steps, ambiguity recovery, contextual permissions, application answers, and Settings still have specialized paths. The all-surface click/text/reload/restart/accessibility matrix remains open. | **Partial; release blocker** |
+| Claude Code and Codex runtime parity | These are the two supported product choices. Both use CareerRat-owned adapters, schemas, scoped tools, provider-neutral model/effort policy, frozen execution plans, cancellation, and people-shaped usage-limit errors. No product copy ranks one above the other. | Direct adapter and focused provider/runtime/skill tests pass. Codex ran the exact current hospitality pipeline with `providerFallback:false`. | Claude's current live run is externally blocked by its weekly account cap until the provider reset. The safe quota copy still needs packaged UI acceptance. | **Source green; Claude live blocked** |
+| Search qualification | Canonical ATS identity now replaces model identity. Wrong titles/requisitions, expired/absent ATS requisitions, inactive hosted boards, locality violations across every listed location, full US state names, known-below-floor base pay, and variable-only compensation are handled before persistence. Same-provider recovery remains bounded and frozen to the selected runtime. | The adjacent intake/location/search/scanner slice passes 162/162. Exact Codex fixture searched all three saved prompts with no runtime or prompt failure. | Exact Codex acceptance is **red**: only two roles across two target buckets survived, below the required three roles. Four Seasons' Food and Beverage Operations Manager is manually verified active at $90k-$98k. Clemente Bar's Glassdoor Bar Manager remains SPA/login-deferred and cannot satisfy the all-live gate. Claude current-HEAD quality is unproven until its cap resets. | **Live red; release blocker** |
+| Search architecture and domain posture | Built-in job-board and ATS adapters form the reusable source catalog. Baselines are selected from saved roles; specialist boards and employer ATS sources are discovered and retained. Hospitality and engineering adapters remain implementation coverage, not product positioning. | Source generation, canonical qualification, agnostic public copy, and website-copy regressions pass. | Both hospitality and engineering fixtures must be rerun on current HEAD with both supported runtimes. Every counted acceptance role must be manually live, or browser/session verified when the public fetch is deferred. | **Architecture aligned; acceptance open** |
+| Career-coach behavior | Clean zero-result and clearly narrow searches hand back to Paul for evidence-grounded adjacent-role suggestions and separate confirmation before targeting changes. Paul copy is constrained to plain English. | Adjacent-role coaching and current UI regressions pass. | A fresh package still needs the tester flow: narrow hospitality search, clickable or natural-language adjacent choices, rerun, navigation away/back, restart, and durable continuation. | **Source green; package open** |
+| Skills and application workflow | CareerRat owns the workflow and threads. Evaluate, coach, search triage, company health, application answer review, artifacts, permission handoff, and supervised browser preparation have production code and source coverage. Browser preparation stops before Submit and must not create a false Applied record. | Current source suite passes. Earlier direct live skill-shape receipts covered both runtimes, but predate the newest search/runtime commits. | Run the current packaged app through the complete skill matrix and one real ATS preparation with no submit. Remaining operation-plan provenance and public-intel batch ownership stay open. | **Implemented; exact live/package open** |
+| Updates and desktop lifecycle | Update checks, download state, restart recovery, explicit install, and ordered shutdown are implemented and source-tested. | Native updater and desktop lifecycle tests pass in the repository suite. | `/Applications/CareerRat.app` is 0.16.5. The local 0.16.6 `.app`, DMG, ZIP, and feed predate 29 later commits and are stale. That stale app has a Developer ID signature but no accepted notarization/staple and Gatekeeper rejects it; the stale DMG also cannot qualify. The 0.16.6 signed/notarized update path has not run. | **Source green; package open** |
+| Website, docs, README, and distribution | The source copy is provider-neutral, domain-neutral, explains built-in plus discovered sources, and preserves the user-owned Submit boundary. README and changelog correctly call 0.16.5 public. | Website-copy tests and source builds pass. Repository favicon, app-icon, and OG-image assets match the deployed assets. | GitHub Releases, npm, Homebrew, and the installed app are 0.16.5. The deployed homepage still has older search/product copy, and the production install docs incorrectly display 0.16.3. Source website/docs changes are not deployed. | **Source current; public stale** |
+| macOS and Windows | macOS signing/notarization and native update machinery is retained. Windows packaging and verification exist without pretending unsigned distribution is trusted. | Source release guards and packaging tests pass. | No exact-HEAD macOS candidate exists. Public trusted Windows signing remains externally blocked on SignPath Foundation approval/reputation; unsigned Windows QA cannot close that gate. | **Distribution open; Windows signing blocked** |
+| Security and review | Current GitHub code-scanning, Dependabot, and secret-scanning queues each report zero open alerts. | Live GitHub API audit on August 27. | Final local changes are not on the reviewed PR revision. New CI and non-author approvals are required after the final push. | **Queues clear; review stale** |
+
+### Ordered next completion and release goal
+
+Run one new goal in this order. Do not skip forward and call a later green gate a
+release:
+
+1. Close the remaining all-surface typed-choice, accessibility, foreground-state,
+   and operation-plan provenance rows. Keep specialized UI only when it resolves
+   through the same durable intent and write contract.
+2. Make the exact hospitality search fixture return at least three distinct,
+   relevant roles across at least two saved buckets after canonical hard gates.
+   Deferred SPA/login rows count only after session-browser liveness verification.
+3. After Claude's provider cap resets, rerun hospitality and engineering on Claude
+   Code and Codex from one exact clean revision, with no fallback or silent
+   provider switch. Manually verify every acceptance URL.
+4. Run the complete source gates on that revision: repository and web suites,
+   lint, placeholder lint, analysis, dependency checks, and web/website/docs
+   production builds.
+5. Build a fresh signed, notarized, and stapled macOS candidate from the same
+   revision. Verify signature, Gatekeeper, package manifest, staged runtime, and
+   updater metadata before launching it.
+6. In a fresh isolated packaged workspace, select each supported CLI and drive a
+   realistic resume through onboarding, search, job review, coaching choices,
+   application-answer review, mission resume, navigation, reload, app restart,
+   and background completion. Confirm no route, focus, draft, or pending choice
+   is stolen or duplicated. Recheck the screenshot contract on that exact bundle:
+   selected-state glow and focus surround, sidebar/icon sizing, pills, composer
+   alignment, side-panel whole-section editing, job/source cards, activity density,
+   fixed-window/fullscreen behavior, empty-thread skeleton, and provider cards.
+7. Prepare one real ATS application in the supervised browser. Fill only known
+   facts, stop at Submit, do not click it, and do not record Applied.
+8. Prove 0.16.5-to-0.16.6 in-app update download, Later/restart recovery, and
+   explicit restart-and-install against the signed candidate.
+9. Update and deploy the website, versioned docs, README/changelog release state,
+   updater feed, npm, Homebrew, and Windows-status copy from the final revision.
+10. Push the complete branch to PR #243, wait for fresh required checks, obtain
+    current-revision approvals without weakening branch protection, merge through
+    protected `dev/v0.16` and `main`, sign the tag, publish artifacts, and fetch
+    every public surface to verify it.
+11. Install the public 0.16.6 build in `/Applications`, launch it, recheck
+    signature/Gatekeeper/update state, and run the short installed-app smoke. Only
+    then mark v0.16.6 released.
 
 ### v0.16.5 public release verification
 
@@ -1515,23 +1548,25 @@ workspace, without requiring runtime or chat setup. Separate live passes covered
 Each handed off to the workspace, stayed dismissed after reload, and the current browser console
 reported zero errors and warnings.
 
-The final current-bundle desktop retest also cleared the revised Paul voice gate. A fresh
+The historical pre-latest-commits desktop retest also cleared the revised Paul voice gate. A fresh
 Codex-backed intake rendered “What would make one job worth applying to before another?” with
 concrete examples (“interesting technical work, strong engineering practices, or room to grow”).
 The preceding guardrail question was equally plain, offered clickable Yes/No answers, restored
 cleanly after reload, and the fresh browser context reported zero errors and warnings.
 
-### v0.16.6 choice, coaching, and durable-navigation gate (August 27, 2026)
+### v0.16.6 choice, coaching, and durable-navigation implementation log (August 27, 2026)
 
 The August 27 [chat-first choice audit](../.planning/CHAT-FIRST-CHOICE-AUDIT.md) found a new
-release-blocking class that the older product-surface acceptance sweep did not cover. Yes/No is
-the only structured answer mode that crosses the agent, API, durable thread, and UI today.
+release-blocking class that the older product-surface acceptance sweep did not cover. At that
+audit point, Yes/No was the only structured answer mode that crossed the agent, API, durable
+thread, and UI.
 Onboarding confirmations, Deep Ingest decisions, source and company proposals, ambiguity
 recovery, permissions, missions, mock-interview next steps, application answers, and model
 settings each use separate partial patterns. Some are click-only, some are text-only, and Deep
 Ingest can currently treat a typed decision as a new source. Navigation and reload can also lose
 the foreground choice while background work continues. The older sweep remains the record of
-what passed then; it is not evidence that this newly audited contract is closed.
+what passed then; it is not evidence that this newly audited contract is closed. This section
+records the implementation sequence. The release-status ledger above owns current acceptance.
 
 Current implementation ledger, August 27:
 
@@ -1563,19 +1598,20 @@ Current implementation ledger, August 27:
   food-and-beverage/general-management, and event/venue operations titles; an $85k floor/$100k
   target; NYC-local plus US-remote geography; no pinned boards; a 65+ visible fit floor; and the
   optional-demographics decline policy. The strict canonical rerun now rejects archived, expired,
-  wrong-requisition, foreign/locality-invalid, and known-below-floor postings before display. Codex
-  completed all three prompts with zero fallback or prompt/runtime errors and presented five live,
-  correctly scoped roles with posting-specific links. Claude completed the same prompts and the new
-  same-provider freshness recovery, but presented only one live role after concentrating on stale
-  Culinary Agents pages; the replacement itself was expired. Claude therefore remains a release
-  blocker. Its current receipt is truthful rather than a false success, and source-diversity plus
-  deferred-SPA liveness work is active before this gate can close.
+  wrong-requisition, canonical-title-mismatched, foreign/locality-invalid, and known-below-floor
+  postings before display. On exact revision `7bc4b3f`, Codex completed all three prompts with zero
+  fallback or prompt/runtime errors but presented only two distinct roles across two buckets. One
+  is manually verified active; the other remains Glassdoor-SPA-deferred, so Codex is red against
+  the three-role all-live gate. Claude's exact current attempt is externally blocked by its weekly
+  account cap and produced no search turn; the app now maps that failure to provider-specific retry
+  guidance without leaking raw runtime text. Both runtimes therefore remain release-blocked for
+  different reasons.
 - The complementary engineering fixture covers Staff Platform/Backend and Developer
-  Infrastructure/Experience work across US remote and NYC hybrid. A green Claude rerun completed
-  all 3 prompts, found 5, persisted 3, and rejected 2 by location; Codex completed all 3 prompts,
-  found and persisted 17, and kept the requested locality shapes. The exact fixture and isolated
-  temporary-home harness live in `scripts/qa-live-runtime-search.mjs`; they never read or write
-  real candidate data.
+  Infrastructure/Experience work across US remote and NYC hybrid. Its earlier Claude and Codex
+  receipts predate the canonical identity, location, compensation, and retry fixes and are
+  historical only. Both runtimes must rerun the fixture on the final revision. The exact fixture
+  and isolated temporary-home harness live in `scripts/qa-live-runtime-search.mjs`; they never
+  read or write real candidate data.
 - Clean zero-result and clearly role-over-narrow searches now hand back to Paul for a
   provider-neutral `coach.deep` turn. He offers three to five evidence-grounded adjacent
   directions through the durable multi-select contract, accepts clicks or ordinary text, then
@@ -1603,7 +1639,8 @@ Current implementation ledger, August 27:
   packet-gap focus, and Deep Ingest paste/repo/proposal edits restore across reload and browser
   navigation. Invalid saved IDs fall back safely, background view refreshes do not rerun location
   hydration, and workspace tabs have keyboard-complete roving focus. An intentionally cleared job
-  selection stays cleared, and source/company review URLs reopen only the exact pending batch.
+  selection stays cleared, and source/company review URLs reopen the exact saved batch referenced
+  by the route, including a resolved historical batch instead of silently substituting the newest.
 - Generic Workspace Ask operation identity is also saved privately outside the route. Opening
   Settings no longer detaches the exact follower, and a hard reload in Settings can return to the
   workspace and resume the same operation, terminal result, or retry without stealing the restored
@@ -1659,11 +1696,11 @@ Current implementation ledger, August 27:
   cover evaluate-job, coach-gaps, search-jobs triage, and company-health using their production
   schemas and validators.
 
-- The latest focused provider/runtime/skill matrix is green at 214 tests with 2 intentional live-key
-  skips; the current web suite is green at 891 tests and production build. GitHub currently reports
-  zero open code-scanning, Dependabot, or secret-scanning alerts. The last full backend receipt
-  predates the newest recovery and UI commits, so it does not replace the clean exact-head,
-  packaged-app, live-provider, updater, Windows, and protected-PR gates below.
+- The focused provider/runtime/skill matrix remains green at 214 tests with 2 intentional live-key
+  skips. Exact revision `7bc4b3f` passes 4,106 repository tests with 15 intentional skips, all 893
+  web tests, and the root production build. GitHub reports zero open code-scanning, Dependabot, or
+  secret-scanning alerts. These source receipts do not replace the exact packaged-app,
+  live-provider, updater, Windows, and protected-PR gates below.
 
 This gate blocks the next release until:
 
@@ -1725,12 +1762,14 @@ This gate blocks the next release until:
     candidate on both supported runtimes, requires relevant live results or an evidence-backed
     zero-result explanation, and exercises adjacent-role coaching before any targeting expansion.
 
-### Product-surface acceptance sweep (updated August 17, 2026)
+### Product-surface acceptance sweep (historical baseline, updated August 17, 2026)
 
 The live result ledger is [`.planning/QA-ACCEPTANCE.md`](../.planning/QA-ACCEPTANCE.md); this
-section remains the release-level source of truth. All 103 recorded findings are fixed and
-live-retested. The broader skill-to-screen audit above remains active until every user-facing
-original skill has a coherent native path.
+section records the August 13-26 baseline. All 103 findings recorded in that sweep were fixed and
+retested against its then-current bundles. It is not the release-level source of truth for later
+v0.16.6 choice, durability, search, runtime, and UI changes; the landing ledger above owns current
+acceptance. The broader skill-to-screen audit remains active until every user-facing original skill
+has a coherent native path.
 
 Current verification: 2,615 repository tests passed with 5 intentional skips; 711 web tests passed;
 lint completed with no errors; web, website, docs, and desktop builds passed; and the final 545-file
@@ -1851,18 +1890,15 @@ that acceptance pass actually proved.
   AI verdict path. Phase 2+ remains open: the legacy axis (teach the deterministic scorer to
   read evidence, or a targeting-calibration variant), a comp-focused variant for below-floor
   comp verdicts, and feeding coaching outcomes into role-family learnings.
-- **Search-shape eval and tiered AI cost** — decompose the upstream Career Ops search
-  discipline (a cost-gated deterministic-first cascade where the model discovers leads but
-  never certifies them, and every web-sourced lead gets a mandatory liveness re-check)
-  against CareerRat's agent-mediated lanes, then run a staged eval: fixture-corpus
-  recall/precision, LLM-vs-deterministic triage agreement on the same labeled postings, and
-  a live dead-link pass. Port whichever discipline wins; the known gaps are that the AI
-  web-search lane re-derives fit in prose instead of calling the deterministic scorer and
-  persists survivors without a liveness re-check. In parallel, thread per-call model-tier
-  selection through the installed-CLI runtime path (the small-fast tier hint already works
-  for API-key users but is dropped when a subscription CLI runs the call) and pass the
-  orchestrator's computed context digest to fan-out subagents instead of re-reading config
-  per call. Plan and findings: `.planning/SEARCH-SHAPE-EVAL.md`.
+- **Search-shape eval and tiered AI cost** — the production AI lane now hydrates canonical
+  posting identity, liveness, location, compensation, sponsorship, and fit facts before
+  persistence. Installed Claude Code and Codex calls receive and retain the selected
+  per-operation model/effort plan across retries and durable resume. The remaining work is
+  acceptance quality, not the old missing boundary: run fixture-corpus recall/precision,
+  compare model and deterministic triage on the same labeled postings, require a live-link
+  pass for every counted result, and decide whether the model should call the deterministic
+  scorer instead of re-deriving fit. Passing the orchestrator's computed context digest to
+  fan-out subagents also remains open. Plan and findings: `.planning/SEARCH-SHAPE-EVAL.md`.
 - **Desktop public distribution** — completed August 14, 2026. The restored local Keychain profile
   and permanent `release:dmg` stage produce a signed, Apple-notarized, stapled, and
   Gatekeeper-approved DMG in one command. Runtime/path ownership, navigation, clean-device first
