@@ -506,10 +506,6 @@
   background: var(--cream-edge);
 }
 
-.chat-first-thread-card.is-active .chat-first-thread-card__icon-badge {
-  background: var(--cf-selection-avatar-surface);
-}
-
 .chat-first-thread-card__icon-badge svg {
   flex: none;
   width: 14px;

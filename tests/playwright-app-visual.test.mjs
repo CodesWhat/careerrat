@@ -134,7 +134,7 @@ test("real Chromium renders the built chat-first workspace without selection glo
       };
     });
     assert.deepEqual(selectedBadgeStyle, {
-      backgroundColor: "rgba(0, 0, 0, 0)",
+      backgroundColor: "rgb(217, 166, 244)",
       borderTopWidth: "0px",
       outlineStyle: "none",
       boxShadow: "none",
