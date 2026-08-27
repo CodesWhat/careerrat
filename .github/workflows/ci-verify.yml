@@ -1,7 +1,8 @@
 name: ci
 
-# Seven jobs. Four of them gate a merge. web-build, website-build, and the
-# Windows package smoke don't.
+# Eight jobs. Every job is declared as a required context in
+# scripts/protect-main.sh so deterministic product builds and real-browser
+# application preparation fail closed with the core test gates.
 #
 # structure-guards runs a fast fail-early subset: the checks that protect the
 # things unit tests can't reach. The retired static dashboard must stay gone,
@@ -18,15 +19,9 @@ name: ci
 # scripts/protect-main.sh's DESIRED block and in the live ruleset, and that
 # script's drift guard now holds the two in sync.
 #
-# web-build, website-build, and windows-package-smoke are the jobs below that
-# run without gating. qlty and knip are both in the required-context list, checked against the live
-# ruleset on 2026-08-20. This header used to name qlty and knip as non-gating
-# too, which was the exact failure it warns about one line down: a comment
-# describing a gate wrongly is the same problem protect-main.sh exists to
-# catch, written in prose instead of JSON, and prose has no drift guard.
-# Re-read the live ruleset (`gh api
-# repos/CodesWhat/careerrat/rulesets/18182960`) before editing this paragraph
-# rather than trusting what it currently says.
+# qlty and knip remain required as well. The desired list is source-controlled;
+# scripts/protect-main.sh's drift check proves whether GitHub's live ruleset has
+# caught up without mutating it from CI.
 
 on:
   pull_request:
@@ -104,10 +99,7 @@ jobs:
       - name: Web UI test suite
         run: npm --workspace apps/web test
 
-  # M7 — builds the apps/web SPA shell. Non-gating (not in the "Main branch
-  # protection" ruleset's required_status_checks) until the workspace is
-  # stable, the same "real, running, but not yet required" pattern
-  # codeql.yml's own header comment documents for code-scanning results.
+  # M7 — builds the apps/web SPA shell as its own required product gate.
   web-build:
     name: web-build
     runs-on: ubuntu-latest
@@ -140,8 +132,8 @@ jobs:
   # so on 2026-08-20 a TypeScript 6 bump made `baseUrl` a hard error and broke
   # the docs build on main with every in-repo check still green. The only
   # signal was the Vercel context, which fails on deploy quota so routinely
-  # that a real failure there reads as noise. Non-gating for now, same
-  # "running but not required" posture as web-build.
+  # that a real failure there reads as noise. This deterministic build is the
+  # required product gate instead.
   website-build:
     name: website-build
     runs-on: ubuntu-latest
@@ -200,6 +192,34 @@ jobs:
           path: apps/desktop/dist/CareerRat-*-win-x64-Setup.exe
           if-no-files-found: error
           retention-days: 7
+
+  # Exercises the real Chromium application-preparation boundary without any
+  # provider call, login, final Submit click, or Applied write. The fixtures
+  # cover the multi-step application and native dropdown/radio controls.
+  browser-application-prep:
+    name: browser-application-prep
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CAREERRAT_LIVE_BROWSER: "1"
+    steps:
+      - name: Harden the runner (audit Chromium and system dependency downloads)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Install dependencies
+        run: npm ci
+      - name: Install the real Chromium test browser
+        run: npx playwright install --with-deps chromium
+      - name: Verify application preparation stops before final Submit
+        run: node --test tests/playwright-live.test.mjs tests/playwright-live-dropdowns.test.mjs
 
   # Qlty (shell/Docker/Actions/YAML lint, secret + dependency scanning — see
   # .qlty/qlty.toml; Biome stays out of qlty and lints JS/JSON separately).

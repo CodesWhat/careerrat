@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { verifyLiveSearchReceiptDirectory } from "../../../scripts/lib/live-search-receipts.mjs";
 import {
   selectMacUpdateZip,
   verifyDesktopRelease,
@@ -8,11 +9,23 @@ import {
 } from "../release-verification.mjs";
 
 const desktopRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = join(desktopRoot, "..", "..");
 const pkg = JSON.parse(readFileSync(join(desktopRoot, "package.json"), "utf8"));
 const appPath = join(desktopRoot, "dist", "mac-arm64", `${pkg.build?.productName || "CareerRat"}.app`);
 const dmgPath = join(desktopRoot, "dist", `CareerRat-${pkg.version}-arm64.dmg`);
 const metadataPath = join(desktopRoot, "dist", "latest-mac.yml");
 let zipPath = null;
+
+try {
+  const evidence = verifyLiveSearchReceiptDirectory({ repoRoot });
+  console.log(
+    `PASS live-search release evidence ${evidence.combinations.join(", ")} from ${evidence.sourceRevision}`
+  );
+} catch (error) {
+  console.error(`Live-search release evidence failed: ${error?.message || String(error)}`);
+  process.exitCode = 1;
+}
+
 if (existsSync(join(desktopRoot, "dist"))) {
   try {
     zipPath = join(

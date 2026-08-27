@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +17,12 @@ import { readDbScannerRows } from "../src/core/db/scan-context.mjs";
 import { candidateConfigPatch, candidateSetupInitialize } from "../src/core/db/verbs.mjs";
 import { runAiWebSearch } from "../src/core/search/ai-web-search.mjs";
 import { saveSearchPrompts } from "../src/core/search/search-prompts.mjs";
+import {
+  buildLiveSearchReceipt,
+  LIVE_SEARCH_RECEIPT_DIRECTORY,
+  liveSearchReceiptFilename,
+  verifyLiveSearchReceiptForReview,
+} from "./lib/live-search-receipts.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const runtimeId = String(process.argv[2] || "").trim();
@@ -36,6 +43,36 @@ const env = {
   CAREERRAT_HOME: qaHome,
   CAREERRAT_DESKTOP_CLI_ONLY: "1",
 };
+const receiptDirectory = resolve(join(repoRoot, LIVE_SEARCH_RECEIPT_DIRECTORY));
+
+function currentSourceRevision() {
+  return execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  }).trim();
+}
+
+function assertCleanSourceRevision(expectedRevision) {
+  const currentRevision = currentSourceRevision();
+  if (currentRevision !== expectedRevision) {
+    throw new Error("The source revision changed while the live search was running.");
+  }
+  const status = execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  });
+  const receiptPrefix = `${LIVE_SEARCH_RECEIPT_DIRECTORY}/`;
+  const changedSourcePath = status
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => line.slice(3).split(" -> ").at(-1))
+    .find((path) => !String(path).startsWith(receiptPrefix));
+  if (changedSourcePath) {
+    throw new Error(
+      `Live-search evidence requires a clean source revision (${changedSourcePath}).`
+    );
+  }
+}
 
 function safeResult(result) {
   return {
@@ -234,6 +271,8 @@ const FIXTURES = {
 };
 
 try {
+  const sourceRevision = currentSourceRevision();
+  assertCleanSourceRevision(sourceRevision);
   const fixture = FIXTURES[fixtureId];
   candidateSetupInitialize({ repoRoot, env });
   candidateConfigPatch({
@@ -307,17 +346,23 @@ try {
       source: row.link,
     }));
   const usefulSet = presentedSetReceipt({ fixture, result, rows });
-  console.log(JSON.stringify({ summary: safeResult(result), usefulSet, rows }, null, 2));
-  if (
-    result.errors?.length ||
-    result.failedPromptIds?.length ||
-    rows.length === 0 ||
-    Number(result.presented || 0) < 1 ||
-    rows.some((row) => row.unverified !== true) ||
-    (fixtureId === "hospitality" &&
-      (usefulSet.presentedRoleCount < 3 || usefulSet.presentedBucketCount < 2))
-  )
-    process.exitCode = 1;
+  const summary = safeResult(result);
+  const receipt = buildLiveSearchReceipt({
+    sourceRevision,
+    runtimeId,
+    fixtureId,
+    providerFallback: false,
+    completedAt: new Date().toISOString(),
+    summary,
+    usefulSet,
+    rows,
+  });
+  verifyLiveSearchReceiptForReview(receipt);
+  assertCleanSourceRevision(sourceRevision);
+  mkdirSync(receiptDirectory, { recursive: true });
+  const receiptPath = join(receiptDirectory, liveSearchReceiptFilename(runtimeId, fixtureId));
+  writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
+  console.log(JSON.stringify({ summary, usefulSet, rows, receiptPath }, null, 2));
 } catch (error) {
   console.error(`[${runtimeId}/${fixtureId}] ${error?.message || String(error)}`);
   process.exitCode = 1;

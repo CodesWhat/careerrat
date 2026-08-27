@@ -246,6 +246,8 @@ jobs:
           fi
       - name: Install dependencies
         run: npm ci
+      - name: Verify current live-search receipts
+        run: npm run release:pretag
       - name: Build and stage the app without signing credentials
         run: npm run app:build && npm --workspace apps/desktop run stage
       - name: Verify required signing and notarization secrets are set

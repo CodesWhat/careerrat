@@ -48,7 +48,7 @@ test("real Chromium end-to-end: openTab -> snapshot -> fill/select/toggle/upload
   const profileDir = mkdtempSync(join(tmpdir(), "careerrat-live-profile-"));
   const resumeDir = mkdtempSync(join(tmpdir(), "careerrat-live-resume-"));
   const resumePath = join(resumeDir, "resume.pdf");
-  writeFileSync(resumePath, "%PDF-1.4 fake resume content for the live harness test\n");
+  writeFileSync(resumePath, "%PDF-1.4\nfake resume content for the live harness test\n%%EOF\n");
 
   const { url: baseUrl, close: closeServer } = await startFixtureServer(FIXTURE_DIR);
   // No launchImpl override — this is the real default launch path
@@ -164,7 +164,7 @@ test("real Chromium prepare-only driver advances structured steps and never clic
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-live-driver-root-"));
   const resumePath = join(repoRoot, "workspace", "tailored", "resume.pdf");
   mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
-  writeFileSync(resumePath, "%PDF-1.4 fake resume content for the live driver test\n");
+  writeFileSync(resumePath, "%PDF-1.4\nfake resume content for the live driver test\n%%EOF\n");
   const { url: baseUrl, close: closeServer } = await startFixtureServer(FIXTURE_DIR);
   const ops = createPlaywrightOps({ profileDir, headless: true });
   const clicked = [];
@@ -207,8 +207,8 @@ test("real Chromium prepare-only driver advances structured steps and never clic
       questionCapture: { state: "captured" },
       prepareOnly: true,
     });
-
     assert.equal(result.state, "awaiting-submit");
+    assert.notEqual(result.state, "applied");
     assert.equal(result.verified, false);
     assert.equal(result.session.prepareOnly, true);
     assert.equal(result.session.stepIndex, 3);
@@ -270,6 +270,7 @@ test("real Chromium snapshots and selects a native required radio fieldset witho
     const group = snapshot.refs[groupRef];
 
     assert.equal(result.state, "awaiting-submit");
+    assert.notEqual(result.state, "applied");
     assert.equal(result.verified, false);
     assert.equal(result.session.filledCount, 1);
     assert.deepEqual(result.session.unresolved, []);
@@ -351,6 +352,7 @@ test("real Chromium groups unwrapped native radios by form owner and name withou
       .map(([ref]) => ref);
 
     assert.equal(result.state, "awaiting-submit");
+    assert.notEqual(result.state, "applied");
     assert.equal(result.verified, false);
     assert.equal(result.session.filledCount, 2);
     assert.deepEqual(result.session.unresolved, []);
