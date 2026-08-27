@@ -44,8 +44,8 @@ private config, not hardcoded preferences.
 | ------- | ----------- |
 | `email-comms` | Draft, reply to, follow up on, summarize, and track job-search email and recruiter-message threads — including thank-yous, scheduling, negotiation, and cold outreach — while persisting full thread context in the CareerRat tracker. |
 | `schedule-meeting` | Handle recruiter / hiring-team scheduling threads — read the proposed slots, the candidate's timezone and availability, and any calendar context; draft a clear availability reply, prepare a calendar-ready hold, and write scheduling state back to the tracker. Confirm-first before any outbound reply or calendar write. |
-| `ingest-mail` | Read job-search email updates from Apple Mail on macOS or, with separate mail_access consent, Gmail/Outlook webmail through the session browser; fold recruiter replies and status changes into CareerRat tracker communication state. Opt-in, local-only, read-only. |
-| `ingest-messages` | Read in-platform DMs from LinkedIn and Wellfound via the session browser and fold them into tracker communications — the browser analog of ingest-mail. Opt-in, user-initiated, local-only. |
+| `ingest-mail` | CareerRat's in-app workflow reads job-search updates from Apple Mail on macOS or, with separate mail_access consent, Gmail/Outlook webmail; it captures relevant threads and source watermarks locally. The terminal skill provides the same workflow for external agents. Opt-in and read-only at the source. |
+| `ingest-messages` | CareerRat's in-app workflow reads LinkedIn and Wellfound DMs through the session browser and captures relevant threads and source watermarks locally. The terminal skill provides the same workflow for external agents. Opt-in, user-initiated, and read-only at the source. |
 
 ## Interview & outcomes
 
@@ -59,9 +59,9 @@ private config, not hardcoded preferences.
 
 | Skill | Description |
 | ------- | ----------- |
-| `optimize-linkedin` | Read the candidate's LinkedIn profile through the session browser, diff it against their targeting and evidence, and propose honest, evidence-backed rewrites of the headline / About / experience / skills / Featured — then, with a separate opt-in, write the approved edits back confirm-first per field. |
-| `sync-status` | Read application status from ATS dashboards via the session browser, normalize each raw label to the canonical tracker vocabulary, and hand real transitions to track-outcomes — which remains the only writer of workspace/tracker.json. Opt-in, user-initiated, read-only at the portal. |
-| `relationship-sourcing` | Find likely recruiters, hiring-team members, or warm contacts for tracked companies through the session browser, then capture candidate-reviewed leads into Network. Opt-in, user-initiated, local-only. |
+| `optimize-linkedin` | CareerRat's in-app workflow reads the candidate's LinkedIn profile and proposes honest, evidence-backed rewrites for review. Approval stays local; a separate opt-in and per-field confirmation are required before the terminal skill writes approved edits live. |
+| `sync-status` | CareerRat's in-app workflow reads saved ATS dashboards, normalizes each raw label, applies verified high-confidence advances atomically, and leaves regressions or low-confidence labels for review. Terminal agents route confirmed transitions through track-outcomes. Opt-in, user-initiated, and read-only at the portal. |
+| `relationship-sourcing` | CareerRat's in-app workflow finds likely recruiters, hiring-team members, or warm contacts through LinkedIn and Wellfound, then saves review-only leads in Network. The terminal skill provides the same workflow for external agents. Opt-in, user-initiated, and local-only. |
 
 ## Settings & calendar
 

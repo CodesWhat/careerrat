@@ -424,29 +424,29 @@ Ingest complete:
 
 ---
 
-## Conversational workspace path
+## In-app and terminal paths
 
-In the Ask workspace, one narrow piece of this skill is native: the app runs a
-typed `mail.sync-request` intent directly in `workspace-agent.mjs`, not this
-skill's mail-reading steps. A terminal or external-agent run still follows
-STEP 0 onward exactly as written, and all mail reading always happens there.
-The app never opens Apple Mail, Gmail, or Outlook itself.
+CareerRat's in-app path reads Apple Mail on macOS and, with the separate
+`mail_access` permission, Gmail and Outlook through its owned browser workflow.
+It captures relevant messages into `communications[]`, stores long bodies under
+`workspace/comms/`, and advances the matching source watermark. A terminal or
+external-agent run still follows STEP 0 onward exactly as written.
 
 - **Requesting a mail check** (`mail.sync-request`). "Check my email" or "any
   new recruiter emails?" offers a "Check for new mail" chip. The handler
-  returns a handoff card showing each source's real state: Apple Mail (listed
+  reports each source's real state: Apple Mail (listed
   only when the app runs on macOS, since it reads the local Mail app and needs
   no webmail consent), plus Gmail and Outlook with their `mayRun` consent
   state for the `mail_access` capability. Each row shows the last sweep time
   from that source's `sources[]` watermark ("Never checked" before a first
   run), and the card adds how many email threads are currently waiting on a
   reply. On a non-macOS host with both webmail platforms off, the request
-  refuses toward Settings instead. The intent reads no mail and changes no
-  tracker state; the only record it leaves is its own receipt message in the
-  Ask conversation, like every other workspace request.
-- **What stays here.** The actual mail reading (AppleScript, SQLite fallback,
-  or session-browser webmail), the STEP 5 match/skip review table, body pulls,
-  `communications[]` and watermark writes, and the track-outcomes handoff all
-  remain this skill's agent path. Recording a single recruiter email the
-  candidate reports themselves stays with email-comms
+  opens the contextual permission control instead. Otherwise, choosing the
+  action runs every allowed source and returns the captured count or a retry
+  blocker in the same Ask thread.
+- **Execution and recovery.** The app performs the allowed read when the chip is
+  chosen. Login, captcha, 2FA, and permission blockers return a visible retry
+  state without advancing the watermark. The terminal path keeps the detailed
+  STEP 5 match/skip review and the track-outcomes handoff. Recording a single
+  recruiter email the candidate reports themselves stays with email-comms
   (`communication.capture-inbound` and its sibling intents).

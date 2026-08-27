@@ -75,6 +75,24 @@ employer pages. Every source runs through the same scanner boundary. A credible
 AI result that lacks a readable full posting remains visibly unverified until
 Evaluate verifies liveness and captures the full description.
 
+### CareerRat-owned browser workflows
+
+The in-app browser workflows read permitted Apple Mail, Gmail, Outlook,
+LinkedIn, Wellfound, Greenhouse, Workday, Ashby, and Lever surfaces without
+delegating the product action to the selected agent CLI. Contextual permissions
+remain off by default and are checked per capability and platform. Login walls,
+captchas, 2FA, and other challenges return visible retry state without advancing
+the workflow watermark.
+
+Mail and message reads capture relevant communications locally. Relationship
+sourcing writes review-only leads. LinkedIn optimization writes proposal batches;
+approvals remain local until a separate `profile_apply` permission and per-field
+confirmation authorize a live edit. Status sync applies only `autoApplicable`
+results atomically, including stale portal-CTA cleanup, activity, and analytics.
+Regressions and low-confidence labels remain review-only. `track-outcomes` still
+owns candidate-reported outcome follow-up, coaching, learning capture, and
+strategy checks; the native portal poll does not invent that context.
+
 ### User layer
 
 Candidate facts, generated artifacts, and tracker state stay local:
@@ -89,10 +107,12 @@ the package.
 
 ## Intent router
 
-`AGENTS.md` in the repo root is the canonical intent router. It maps user intent to all 28 skills.
-The agent reads it first, then routes every paste or instruction
-through it. See [Agent Contract](/advanced/agent-contract) for the full routing
-table.
+`AGENTS.md` in the repo root is the canonical intent router. It maps user intent
+to 26 user-facing skills. `intake-extract` and `resume-extract` are backend-only
+helpers invoked by the Universal Intake and onboarding upload routes, not
+user-intent destinations. The agent reads the router first, then routes every
+paste or instruction through it. See
+[Agent Contract](/advanced/agent-contract) for the full routing table.
 
 `CLAUDE.md` points terminal Claude Code at the same rules, while
 AGENTS.md-aware terminal agents read the canonical router directly. In the app,

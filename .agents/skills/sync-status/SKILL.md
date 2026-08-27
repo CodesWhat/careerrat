@@ -1,6 +1,6 @@
 ---
 name: sync-status
-description: Read application status from ATS dashboards via the session browser, normalize each raw label to the canonical tracker vocabulary, and hand real transitions to track-outcomes — which remains the only writer of workspace/tracker.json. Opt-in, user-initiated, read-only at the portal.
+description: Read application status from ATS dashboards, normalize each raw label to the canonical tracker vocabulary, atomically apply verified in-app advances, and route external or candidate-reported outcomes through track-outcomes. Opt-in, user-initiated, read-only at the portal.
 metadata:
   tier_1_inputs:
     - consent verdict
@@ -176,7 +176,10 @@ the comm thread open after a portal-confirmed transition.
 
 ## RULES
 
-- This skill is **read-only at the portal** and **never writes `workspace/tracker.json`**. `track-outcomes` is the only writer of the tracker. Never fabricate a tracker mutation here.
+- This terminal or external-agent path is **read-only at the portal** and hands
+  tracker mutations to `track-outcomes`. The CareerRat in-app path uses the
+  canonical atomic status-sync DB verb described below. Never fabricate a
+  tracker mutation or hand-edit generated `workspace/tracker.json`.
 - Opt-in and OFF by default. Only poll platforms where `careerrat automation status --json` shows `status_polling` `allowed: true` for that platform. The `allowed` field encodes the three-part AND (global switch, platform switch, ToS consent) from `mayRun()` — never re-derive the predicate in prose.
 - Never run on a schedule or unattended. Always user-initiated with the agent in the loop.
 - Halt and ask on captcha, 2FA, login wall, or any unexpected interstitial. Never attempt to bypass an auth challenge.
@@ -190,20 +193,20 @@ the comm thread open after a portal-confirmed transition.
 
 ---
 
-## Conversational workspace path
+## In-app and terminal paths
 
-In the Ask workspace, three narrow pieces of this skill are native: the app runs
-typed intents directly in `workspace-agent.mjs`, not this skill's browser steps.
-A terminal or external-agent run still follows STEP 0 → 5 exactly as written,
-and the actual portal reading always happens there. The app never opens
-Greenhouse, Workday, Ashby, or Lever itself.
+CareerRat's in-app path reads Greenhouse, Workday, Ashby, and Lever through its
+owned browser workflow after the platform-specific `status_polling` permission
+passes. A terminal or external-agent run still follows STEP 0 → 5 exactly as
+written and hands confirmed transitions to `track-outcomes`.
 
 - **Requesting a status check** (`status.sync-request`). "Check my application
   statuses" offers a "Check portal statuses" chip. The handler checks `mayRun`
   for `status_polling` per platform: with every platform off it refuses and
-  points at Settings; otherwise it returns a handoff card showing each
-  platform's real consent state and how many in-flight applications map to it
-  by URL host. The read itself stays on this skill's agent path.
+  opens the contextual permission control; otherwise it reports each platform's
+  real consent state and how many in-flight applications map to it by URL host,
+  then runs the allowed in-app portal reads. Results return in the same Ask
+  thread as applied counts, review rows, or retry blockers.
 - **Recording one portal-observed update** (`status.record-portal`, offered as
   "Record this portal status update"). "Greenhouse says 'phone screen
   scheduled' for Acme" resolves the application, then runs the same
@@ -216,6 +219,10 @@ Greenhouse, Workday, Ashby, or Lever itself.
   application's current status and refuses stale proposals. No consent gate
   applies to these self-reports; the candidate saw the portal themselves. The
   note on every write says so: `Portal status reported by user: "<raw>"`.
-- **What stays here.** Live portal reads, the one-browser rule, batch sweeps
-  across many applications, and the batched `track-outcomes` handoff remain
-  this skill's agent path. STEP 5's confirmation-list contract is unchanged.
+- **Native write boundary.** An `autoApplicable` result uses CareerRat's atomic
+  status-sync writer to update the application, clear matching portal-check
+  actions and drafts, append the portal note and activity event, and refresh
+  analytics in one transaction. Regressions and low-confidence labels stay
+  review-only. `track-outcomes` remains the owner for candidate-reported
+  outcomes and the follow-up coaching, learning capture, and strategy checks
+  those reports can require; the native poll never invents those learnings.

@@ -24,7 +24,10 @@ targeting, fit-calibration, or channel-mix changes when outcome thresholds trip.
 
 ## Intent Router
 
-The root router in `AGENTS.md` and `CLAUDE.md` maps user intent to all 28 skills.
+The root router in `AGENTS.md` maps user intent to 26 user-facing skills;
+`CLAUDE.md` adds Claude-specific reminders without defining a second contract.
+`intake-extract` and `resume-extract` are backend-only helpers invoked by the
+Universal Intake and onboarding upload routes, not user-intent destinations.
 Routes are grouped below by cluster.
 
 ### Onboarding
@@ -68,7 +71,8 @@ Routes are grouped below by cluster.
 
 - Rejection, offer, status change, outcome update → `track-outcomes`
 - "Check my statuses", "sync my pipeline", poll ATS dashboards → `sync-status`
-  (opt-in browser automation; reads portals, hands transitions to `track-outcomes`)
+  (opt-in browser automation; applies verified advances atomically and leaves
+  regressions or low-confidence labels for review)
 - "Why am I getting filtered", strategy review, re-rank, or when outcome
   thresholds trip → `reevaluate-strategy`
 
@@ -101,6 +105,24 @@ escalate, or refresh a proposal. Local proposal errors stay local; they do not
 silently start chat or the full skill runtime.
 Confirmed company writes remain confirm-first source config or DB-owner work,
 not React state, generated tracker files, or model output.
+
+### CareerRat-owned browser workflows
+
+The in-app browser workflows read permitted Apple Mail, Gmail, Outlook,
+LinkedIn, Wellfound, Greenhouse, Workday, Ashby, and Lever surfaces without
+delegating the product action to the selected agent CLI. Contextual permissions
+remain off by default and are checked per capability and platform. Login walls,
+captchas, 2FA, and other challenges return visible retry state without advancing
+the workflow watermark.
+
+Mail and message reads capture relevant communications locally. Relationship
+sourcing writes review-only leads. LinkedIn optimization writes proposal batches;
+approvals remain local until a separate `profile_apply` permission and per-field
+confirmation authorize a live edit. Status sync applies only `autoApplicable`
+results atomically, including stale portal-CTA cleanup, activity, and analytics.
+Regressions and low-confidence labels remain review-only. `track-outcomes` still
+owns candidate-reported outcome follow-up, coaching, learning capture, and
+strategy checks; the native portal poll does not invent that context.
 
 Public company intelligence is a separate local data lane. Migration 009 creates
 `public_*` SQLite tables for company metadata, board metadata, careers-page scan
