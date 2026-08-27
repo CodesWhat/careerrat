@@ -226,5 +226,13 @@ export function startCompanyDiscoveryOperation({ appOperations, input = {} } = {
       "APP_OPERATION_UNAVAILABLE"
     );
   }
-  return appOperations.start({ kind: COMPANY_DISCOVERY_OPERATION_KIND, input });
+  return Promise.resolve(
+    appOperations.start({ kind: COMPANY_DISCOVERY_OPERATION_KIND, input })
+  ).then((started) => {
+    const requestDigest = String(started?.operation?.requestDigest || "").trim();
+    return {
+      ...started,
+      ...(requestDigest ? { batchId: companyDiscoveryBatchId(requestDigest) } : {}),
+    };
+  });
 }

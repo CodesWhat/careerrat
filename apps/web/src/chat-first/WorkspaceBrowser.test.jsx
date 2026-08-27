@@ -802,7 +802,7 @@ describe("WorkspaceBrowser", () => {
       jobs: [],
       filterJobs: JOBS,
       query: "no matching company",
-      filters: { fit80: true, stage: "staff", source: "lever" },
+      filters: { fit80: true, fitFloor: 65, stage: "staff", source: "lever" },
       sourceSweep: { status: "complete", summary: "0 new · 8 scanned" },
       onClearFilters,
     });
@@ -823,7 +823,7 @@ describe("WorkspaceBrowser", () => {
     const tree = SearchPanel({
       jobs: [],
       filterJobs: JOBS,
-      filters: { fit80: true },
+      filters: { fit80: true, fitFloor: 65 },
       sourceSweep: {
         status: "complete",
         summary: "2 search lanes finished · 1 lane needs retry",
@@ -1023,6 +1023,7 @@ describe("WorkspaceBrowser", () => {
           ],
           filters: {
             fit80: false,
+            fitFloor: 65,
             comp: true,
             remote: false,
             stage: "staff",
@@ -1035,7 +1036,7 @@ describe("WorkspaceBrowser", () => {
       />
     );
 
-    expect(html).toContain('aria-pressed="false">Fit 80+');
+    expect(html).toContain('aria-pressed="false">Fit 65+');
     expect(html).toContain('aria-pressed="true">Comp ✓');
     expect(html).toContain('aria-label="Filter by stage"');
     expect(html).toContain('aria-label="Filter by source"');

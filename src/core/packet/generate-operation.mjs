@@ -34,6 +34,7 @@ export async function generateApplicationPacket({
   resumeCall,
   packetAnswersCall,
   executionPlan,
+  signal,
 } = {}) {
   const applicationId = String(body.applicationId || body.appId || "").trim();
   if (!applicationId) {
@@ -60,5 +61,6 @@ export async function generateApplicationPacket({
     resumeCall,
     packetAnswersCall,
     executionPlan,
+    signal,
   });
 }

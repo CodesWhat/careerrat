@@ -117,11 +117,25 @@ async function apiBinaryFetch(path, options = {}, { retried = false } = {}) {
   return { blob, filename, path: artifactPath };
 }
 
+let workspaceRequestSequence = 0;
+
+function durableWorkspaceRequestId(value) {
+  const supplied = String(value || "").trim();
+  if (supplied) return supplied;
+  const random = globalThis.crypto?.randomUUID?.();
+  if (random) return `workspace-${random}`;
+  workspaceRequestSequence += 1;
+  return `workspace-${Date.now().toString(36)}-${workspaceRequestSequence.toString(36)}`;
+}
+
 // Commits a typed workspace intent classified from a free-text query.
-export function runWorkspaceIntent(type, entity, input = {}) {
+export function runWorkspaceIntent(type, entity, input = {}, { requestId } = {}) {
   return apiFetch("/api/workspace/intent", {
     method: "POST",
-    body: JSON.stringify({ intent: { type, entity, input } }),
+    body: JSON.stringify({
+      requestId: durableWorkspaceRequestId(requestId),
+      intent: { type, entity, input },
+    }),
   });
 }
 
@@ -130,13 +144,17 @@ export function runWorkspaceIntent(type, entity, input = {}) {
 // ---------------------------------------------------------------------------
 
 // POST /api/workspace/message — runWorkspaceAgentTurn. Committing the ANSWER
-// row: appends `text` to the one durable workspace thread and returns the
-// assistant's reply already appended (see workspace-agent.mjs's own
-// contract) — no separate poll is needed to see the reply.
-export function sendWorkspaceMessage(text, context, choice) {
+// row: starts a durable workspace operation. The caller follows the returned
+// operation id while the server appends the eventual reply to the one thread.
+export function sendWorkspaceMessage(text, context, choice, { requestId } = {}) {
   return apiFetch("/api/workspace/message", {
     method: "POST",
-    body: JSON.stringify({ text, ...(context ? { context } : {}), ...(choice ? { choice } : {}) }),
+    body: JSON.stringify({
+      requestId: durableWorkspaceRequestId(requestId),
+      text,
+      ...(context ? { context } : {}),
+      ...(choice ? { choice } : {}),
+    }),
   });
 }
 

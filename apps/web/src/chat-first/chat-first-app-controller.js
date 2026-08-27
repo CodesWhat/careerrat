@@ -6,6 +6,55 @@ function list(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function privateOperationId(value) {
+  const id = String(value || "").trim();
+  return /^app-operation-[a-z0-9-]{1,140}$/i.test(id) ? id : null;
+}
+
+export function workspaceOperationFromResponse(response) {
+  const operation = response?.operation || response?.data?.operation;
+  const id = privateOperationId(operation?.id);
+  if (!id) return null;
+  return {
+    id,
+    kind: String(operation?.kind || ""),
+    status: String(operation?.status || ""),
+  };
+}
+
+export function workspaceOperationIsActive(operation) {
+  return new Set(["queued", "running"]).has(String(operation?.status || ""));
+}
+
+export function workspaceOperationIsOwned(operation) {
+  return new Set(["workspace.message", "workspace.intent"]).has(String(operation?.kind || ""));
+}
+
+export function createWorkspaceRequestId(cryptoRef = globalThis.crypto) {
+  const id = cryptoRef?.randomUUID?.();
+  if (id) return `workspace-${id}`;
+  return `workspace-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+}
+
+export function workspaceOperationFailure(operation, retry) {
+  const id = privateOperationId(operation?.id);
+  const message = String(
+    operation?.error?.message || "CareerRat couldn't finish that work. Try it again."
+  );
+  const retryable = operation?.error?.retryable === true && id && typeof retry === "function";
+  return {
+    message,
+    action: retryable
+      ? {
+          label: "Try again",
+          retry: true,
+          onRetry: () => retry(id),
+        }
+      : null,
+    detail: operation?.error?.code ? String(operation.error.code) : null,
+  };
+}
+
 function firstCalendarExport(groups) {
   return list(groups)
     .flatMap((group) => list(group?.items))
@@ -259,9 +308,9 @@ export function resumeHydratedMission({ api, mission, inFlight }) {
   });
 }
 
-export async function commitComposerTurn({ api, text, preview, context, choice }) {
+export async function commitComposerTurn({ api, text, preview, context, choice, requestId }) {
   if (choice) {
-    const response = await api.sendWorkspaceMessage(text, context, choice);
+    const response = await api.sendWorkspaceMessage(text, context, choice, { requestId });
     return { kind: "message", response };
   }
   const commit = resolveComposerCommit(preview, text);
@@ -283,11 +332,11 @@ export async function commitComposerTurn({ api, text, preview, context, choice }
   }
   if (commit.kind === "intent") {
     const { type, entity, input } = commit.intent;
-    const response = await api.runWorkspaceIntent(type, entity, input || {});
+    const response = await api.runWorkspaceIntent(type, entity, input || {}, { requestId });
     return { kind: "intent", intent: commit.intent, response };
   }
   if (!commit.text) throw new Error("Write a message first");
-  const response = await api.sendWorkspaceMessage(commit.text, context);
+  const response = await api.sendWorkspaceMessage(commit.text, context, undefined, { requestId });
   return { kind: "message", response };
 }
 
@@ -311,7 +360,7 @@ export async function projectWorkspaceResultToJobThread({
   });
 }
 
-export async function commitJobThreadComposer({ api, applicationId, text, choice }) {
+export async function commitJobThreadComposer({ api, applicationId, text, choice, requestId }) {
   if (choice) return api.sendJobThreadTurn({ applicationId, text, choice });
   const context = { pathname: "/jobs", jobId: applicationId };
   const previewResponse = await api.previewWorkspaceQuery(text, context);
@@ -324,7 +373,8 @@ export async function commitJobThreadComposer({ api, applicationId, text, choice
     kind: "text",
     text,
   });
-  const result = await commitComposerTurn({ api, text, preview, context });
+  const result = await commitComposerTurn({ api, text, preview, context, requestId });
+  if (workspaceOperationFromResponse(result.response)) return result;
   await projectWorkspaceResultToJobThread({
     api,
     applicationId,
@@ -337,7 +387,7 @@ export async function commitJobThreadComposer({ api, applicationId, text, choice
   return result;
 }
 
-export async function confirmPacketGapAnswer({ api, applicationId, gap, answer }) {
+export async function confirmPacketGapAnswer({ api, applicationId, gap, answer, requestId }) {
   const id = String(applicationId || "").trim();
   const questionId = String(gap?.questionId || "").trim();
   const question = String(gap?.label || gap?.question || "").trim();
@@ -354,8 +404,10 @@ export async function confirmPacketGapAnswer({ api, applicationId, gap, answer }
   const response = await api.runWorkspaceIntent(
     "screening.answer-confirm",
     { type: "application", id },
-    { questionId, question, answer: cleanAnswer }
+    { questionId, question, answer: cleanAnswer },
+    { requestId }
   );
+  if (workspaceOperationFromResponse(response)) return response;
   await projectWorkspaceResultToJobThread({
     api,
     applicationId: id,

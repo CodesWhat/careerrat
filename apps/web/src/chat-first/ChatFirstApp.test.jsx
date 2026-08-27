@@ -951,6 +951,7 @@ describe("ChatFirstAppView", () => {
     const { filterSearchJobs } = await import("./browser-model.js");
     const initialFilters = {
       fit80: true,
+      fitFloor: 65,
       comp: true,
       remote: true,
       stage: "interview",
@@ -975,6 +976,7 @@ describe("ChatFirstAppView", () => {
 
     expect(filters).toEqual({
       fit80: false,
+      fitFloor: 65,
       comp: false,
       remote: false,
       stage: "all",
@@ -1024,6 +1026,7 @@ describe("ChatFirstAppView", () => {
     let query = "platform engineer";
     let filters = {
       fit80: true,
+      fitFloor: 65,
       comp: true,
       remote: true,
       stage: "new",
@@ -1045,6 +1048,7 @@ describe("ChatFirstAppView", () => {
     expect(query).toBe("");
     expect(filters).toEqual({
       fit80: false,
+      fitFloor: 65,
       comp: false,
       remote: false,
       stage: "all",
@@ -1065,6 +1069,7 @@ describe("ChatFirstAppView", () => {
       query: "missing role",
       browserFilters: {
         fit80: true,
+        fitFloor: 65,
         comp: false,
         remote: false,
         stage: "all",

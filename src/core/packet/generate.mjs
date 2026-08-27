@@ -408,6 +408,7 @@ export async function draftCoverLetterBlocks({
   call,
   runAI = runBoundedAI,
   executionPlan,
+  signal,
 } = {}) {
   // Built once so the same storyHints selection both goes into the prompt
   // and scopes validatePacketEvidenceIds's allowed `story:<id>` set below —
@@ -434,6 +435,7 @@ export async function draftCoverLetterBlocks({
     root: repoRoot,
     env,
     executionPlan,
+    signal,
   });
 
   // The packet lane never writes a degraded cover letter: an AI-call failure
@@ -618,6 +620,7 @@ export async function draftResumeProposal({
   call,
   runAI = runBoundedAI,
   executionPlan,
+  signal,
 } = {}) {
   // The packet lane never writes a degraded résumé: every failure path below
   // throws instead of falling back to the deterministic claims-list resume —
@@ -655,6 +658,7 @@ export async function draftResumeProposal({
       root: repoRoot,
       env,
       executionPlan,
+      signal,
     });
 
   let aiResult = await runResumeAI(baseMessages);
@@ -1152,6 +1156,7 @@ export async function generatePacket({
   resumeCall,
   packetAnswersCall,
   executionPlan,
+  signal,
 } = {}) {
   const id = cleanText(
     applicationId || appId || context?.applicationId || appFromContext(context).id
@@ -1206,6 +1211,7 @@ export async function generatePacket({
       context: packetContext,
       call: resumeCall,
       executionPlan,
+      signal,
     }),
     coverDraft({
       repoRoot,
@@ -1213,6 +1219,7 @@ export async function generatePacket({
       context: packetContext,
       call: coverLetterCall,
       executionPlan,
+      signal,
     }),
   ]);
   const answers = skipAnswers
@@ -1232,6 +1239,7 @@ export async function generatePacket({
         questions: capture,
         call: packetAnswersCall,
         executionPlan,
+        signal,
       });
   const sources = buildSourceArtifacts({
     context: packetContext,

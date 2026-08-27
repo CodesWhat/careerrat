@@ -313,7 +313,7 @@ function FilterBar({ jobs = [], eyebrow, query = "", filters = {}, onQueryChange
         aria-pressed={filters.fit80 === true}
         onClick={() => onFilter?.("fit80")}
       >
-        Fit 80+
+        {Number.isFinite(Number(filters.fitFloor)) ? `Fit ${Number(filters.fitFloor)}+` : "Fit"}
       </button>
       <FilterSelect
         label="Stage"

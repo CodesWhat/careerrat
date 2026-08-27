@@ -341,6 +341,46 @@ export function appOperationRetryStart({
   });
 }
 
+export function appOperationCompletedReplacementStart({
+  repoRoot,
+  env,
+  id,
+  ownerId,
+  leaseMs = 90_000,
+  now,
+} = {}) {
+  const operationId = required(id, "id");
+  const owner = required(ownerId, "ownerId");
+  const db = requireDb({ repoRoot, env });
+  return withTransaction(db, () => {
+    const previous = operationById(db, operationId);
+    if (!previous) throw makeError(`app operation not found: ${operationId}`, "NOT_FOUND");
+    const existingReplacement = retryByParent(db, operationId);
+    if (existingReplacement) {
+      return { ok: true, reused: true, operation: existingReplacement };
+    }
+    if (previous.status !== "completed") {
+      throw makeError(
+        "only completed app operations can have their result replaced",
+        "APP_OPERATION_RESULT_NOT_COMPLETED"
+      );
+    }
+    const replacement = queuedOperation({
+      kind: previous.kind,
+      requestDigest: previous.requestDigest,
+      request: previous.request,
+      executionPlan: previous.executionPlan,
+      ownerId: owner,
+      fence: previous.fence + 1,
+      retryOf: previous.id,
+      attempt: previous.attempt + 1,
+      leaseMs,
+      now: timestampAfter(now, previous.updatedAt),
+    });
+    return { ok: true, reused: false, operation: insertOperation(db, replacement) };
+  });
+}
+
 export function appOperationGet({ repoRoot, env, id } = {}) {
   const operationId = required(id, "id");
   const operation = operationById(requireDb({ repoRoot, env }), operationId);
@@ -480,7 +520,7 @@ export function appOperationFail({ repoRoot, env, id, ownerId, fence, error, now
   });
 }
 
-export function appOperationRecoverOrphans({ repoRoot, env, ownerId, now } = {}) {
+export function appOperationRecoverOrphans({ repoRoot, env, ownerId, recoveryError, now } = {}) {
   const owner = required(ownerId, "ownerId");
   const db = requireDb({ repoRoot, env });
   return withTransaction(db, () => {
@@ -491,6 +531,29 @@ export function appOperationRecoverOrphans({ repoRoot, env, ownerId, now } = {})
     const recovered = [];
     for (const current of rows) {
       const completedAt = timestampAfter(now, current.updatedAt);
+      const configuredError =
+        typeof recoveryError === "function" ? recoveryError(current) : recoveryError;
+      const safeError = configuredError
+        ? {
+            code: truncateUtf8(
+              required(configuredError.code || "APP_OPERATION_SERVER_RESTARTED", "error.code"),
+              128
+            ),
+            message: truncateUtf8(
+              required(
+                configuredError.message ||
+                  "CareerRat restarted before this work finished. Try it again.",
+                "error.message"
+              ),
+              3_500
+            ),
+            retryable: configuredError.retryable !== false,
+          }
+        : {
+            code: "APP_OPERATION_SERVER_RESTARTED",
+            message: "CareerRat restarted before this work finished. Try it again.",
+            retryable: true,
+          };
       recovered.push(
         updateOperation(db, {
           ...current,
@@ -502,11 +565,7 @@ export function appOperationRecoverOrphans({ repoRoot, env, ownerId, now } = {})
             message: "CareerRat restarted before this work finished.",
           },
           resultRef: null,
-          error: {
-            code: "APP_OPERATION_SERVER_RESTARTED",
-            message: "CareerRat restarted before this work finished. Try it again.",
-            retryable: true,
-          },
+          error: safeError,
           completedAt,
           updatedAt: completedAt,
         })

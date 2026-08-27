@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   appOperationComplete,
+  appOperationCompletedReplacementStart,
   appOperationFail,
   appOperationGet,
   appOperationHeartbeat,
@@ -8,7 +9,7 @@ import {
   appOperationRecoverOrphans,
   appOperationRetryStart,
   appOperationStart,
-} from "../db/verbs.mjs";
+} from "../db/verbs/app-operations.mjs";
 
 function makeError(message, code) {
   const error = new Error(message);
@@ -172,6 +173,14 @@ export function createAppOperationManager({
         }).operation;
       } catch (error) {
         const stopped = execution.shutdownRequested || controller.signal.aborted;
+        let normalizedError = null;
+        if (!stopped && typeof config.normalizeError === "function") {
+          try {
+            normalizedError = clone(config.normalizeError(error));
+          } catch {
+            normalizedError = null;
+          }
+        }
         const safeError = stopped
           ? {
               code: "APP_OPERATION_SERVER_STOPPED",
@@ -179,9 +188,14 @@ export function createAppOperationManager({
               retryable: true,
             }
           : {
-              code: String(error?.code || "APP_OPERATION_FAILED"),
-              message: String(error?.message || "CareerRat couldn't finish this work. Try again."),
-              retryable: error?.retryable !== false,
+              code: String(normalizedError?.code || error?.code || "APP_OPERATION_FAILED"),
+              message: String(
+                normalizedError?.message || "CareerRat couldn't finish this work. Try again."
+              ),
+              retryable:
+                normalizedError?.retryable == null
+                  ? error?.retryable !== false
+                  : normalizedError.retryable !== false,
             };
         try {
           return appOperationFail({
@@ -226,10 +240,29 @@ export function createAppOperationManager({
       ownerId,
       leaseMs,
     });
-    if (!started.reused && ["queued", "running"].includes(started.operation.status)) {
-      startWorker(started.operation, prepared.config);
+    let dispatched = started;
+    if (
+      started.reused &&
+      started.operation.status === "completed" &&
+      typeof prepared.config.isCompletedResultReusable === "function"
+    ) {
+      const reusable = await prepared.config.isCompletedResultReusable({
+        operation: deepFreeze(clone(started.operation)),
+        request: deepFreeze(clone(prepared.request)),
+      });
+      if (reusable !== true) {
+        dispatched = appOperationCompletedReplacementStart({
+          ...pathCtx,
+          id: started.operation.id,
+          ownerId,
+          leaseMs,
+        });
+      }
     }
-    return started;
+    if (!dispatched.reused && ["queued", "running"].includes(dispatched.operation.status)) {
+      startWorker(dispatched.operation, prepared.config);
+    }
+    return dispatched;
   }
 
   async function retry({ id } = {}) {
@@ -266,7 +299,14 @@ export function createAppOperationManager({
 
   function recoverOrphans() {
     try {
-      return appOperationRecoverOrphans({ ...pathCtx, ownerId }).recovered;
+      return appOperationRecoverOrphans({
+        ...pathCtx,
+        ownerId,
+        recoveryError(operation) {
+          const configured = kindRegistry.get(operation.kind)?.recoveryError;
+          return typeof configured === "function" ? configured(operation) : configured;
+        },
+      }).recovered;
     } catch (error) {
       if (error?.code === "NO_DATABASE") return [];
       throw error;

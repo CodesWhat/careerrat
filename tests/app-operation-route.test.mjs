@@ -211,6 +211,67 @@ test("manager start dedupes canonical requests and linked retries reuse the froz
   assert.deepEqual(plans[1], plans[0]);
 });
 
+test("a kind can replace a stale completed result with one coalesced child on the frozen plan", async () => {
+  const repoRoot = tempRepo();
+  let resultIsValid = true;
+  let selectedRuntime = "codex";
+  let calls = 0;
+  const plans = [];
+  const manager = createManager({
+    repoRoot,
+    ownerId: "completed-validity-owner",
+    kinds: {
+      "source-scan": {
+        parseRequest: parseEntityRequest,
+        resolveExecutionPlan: () => ({
+          runtimeId: selectedRuntime,
+          operation: "structured.extraction",
+        }),
+        isCompletedResultReusable({ operation, request }) {
+          assert.equal(operation.status, "completed");
+          assert.deepEqual(request, { entityId: "source-1" });
+          return resultIsValid;
+        },
+        async execute({ executionPlan }) {
+          calls += 1;
+          plans.push(executionPlan);
+          return { resultRef: { type: "source", id: "source-1" } };
+        },
+      },
+    },
+  });
+
+  const first = await manager.start({ kind: "source-scan", input: { entityId: "source-1" } });
+  const firstCompleted = await manager.wait(first.operation.id);
+  assert.equal(firstCompleted.status, "completed");
+
+  const validReuse = await manager.start({
+    kind: "source-scan",
+    input: { entityId: "source-1" },
+  });
+  assert.equal(validReuse.operation.id, first.operation.id);
+  assert.equal(calls, 1);
+
+  resultIsValid = false;
+  selectedRuntime = "claude";
+  const [replacement, duplicate] = await Promise.all([
+    manager.start({ kind: "source-scan", input: { entityId: "source-1" } }),
+    manager.start({ kind: "source-scan", input: { entityId: "source-1" } }),
+  ]);
+  assert.equal(duplicate.operation.id, replacement.operation.id);
+  assert.notEqual(replacement.operation.id, first.operation.id);
+  assert.equal(replacement.operation.retryOf, first.operation.id);
+  assert.equal(replacement.operation.attempt, 2);
+  assert.deepEqual(replacement.operation.executionPlan, first.operation.executionPlan);
+  const replacementCompleted = await manager.wait(replacement.operation.id);
+  assert.equal(replacementCompleted.status, "completed");
+  assert.equal(calls, 2);
+  assert.deepEqual(plans, [
+    { runtimeId: "codex", operation: "structured.extraction" },
+    { runtimeId: "codex", operation: "structured.extraction" },
+  ]);
+});
+
 test("manager normalizes an allowlisted kind before durable dedupe", async () => {
   const repoRoot = tempRepo();
   let executeCalls = 0;

@@ -8,6 +8,7 @@ import {
   deepIngestProposalDecision,
   deepIngestSourceCreate,
   deepIngestSourceGet,
+  deepIngestSourceRemove,
   deepIngestStateGet,
 } from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
@@ -314,6 +315,122 @@ test("a duplicate upload reuses source identity and cleans only the unlinked sta
   const sources = deepIngestStateGet({ repoRoot }).sources;
   assert.equal(sources.length, 1);
   assert.equal(sources[0].artifactPath, firstPath);
+  await manager.shutdown();
+});
+
+test("removing and re-adding the same paste replaces its stale completed scan once", async () => {
+  const repoRoot = tempRepo();
+  let scanCalls = 0;
+  const manager = createAppOperationManager({
+    repoRoot,
+    ownerId: "deep-paste-readd-owner",
+    kinds: kinds({
+      repoRoot,
+      async scanSource({ input }) {
+        scanCalls += 1;
+        return scanResult(input, `Paste scan ${scanCalls}`);
+      },
+    }),
+  });
+  const input = {
+    targetShape: "evidence",
+    sourceKind: "text",
+    text: "The same pasted evidence can be added again.",
+  };
+  const firstPrepared = lifecycle.prepareDeepIngestSourceScan({ repoRoot, input });
+  const first = await manager.start({
+    kind: lifecycle.DEEP_INGEST_SOURCE_SCAN_KIND,
+    input: firstPrepared.request,
+  });
+  await manager.wait(first.operation.id);
+  deepIngestSourceRemove({ repoRoot, sourceId: firstPrepared.source.id });
+
+  const nextPrepared = lifecycle.prepareDeepIngestSourceScan({ repoRoot, input });
+  assert.equal(nextPrepared.source.status, "scanning");
+  const [replacement, duplicate] = await Promise.all([
+    manager.start({
+      kind: lifecycle.DEEP_INGEST_SOURCE_SCAN_KIND,
+      input: nextPrepared.request,
+    }),
+    manager.start({
+      kind: lifecycle.DEEP_INGEST_SOURCE_SCAN_KIND,
+      input: nextPrepared.request,
+    }),
+  ]);
+  assert.equal(duplicate.operation.id, replacement.operation.id);
+  assert.notEqual(replacement.operation.id, first.operation.id);
+  assert.equal(replacement.operation.retryOf, first.operation.id);
+  assert.equal(replacement.operation.attempt, 2);
+  assert.deepEqual(replacement.operation.executionPlan, first.operation.executionPlan);
+  assert.equal((await manager.wait(replacement.operation.id)).status, "completed");
+  assert.equal(scanCalls, 2);
+  assert.equal(
+    deepIngestSourceGet({ repoRoot, sourceId: nextPrepared.source.id }).source.status,
+    "proposal_ready"
+  );
+  await manager.shutdown();
+});
+
+test("re-adding an owned upload rescans from and preserves the new attempt's artifact", async () => {
+  const repoRoot = tempRepo();
+  let scanCalls = 0;
+  const seenArtifactPaths = [];
+  const manager = createAppOperationManager({
+    repoRoot,
+    ownerId: "deep-upload-readd-owner",
+    kinds: kinds({
+      repoRoot,
+      async scanSource({ input }) {
+        scanCalls += 1;
+        seenArtifactPaths.push(input.artifactPath);
+        return scanResult(input, `Upload scan ${scanCalls}`);
+      },
+    }),
+  });
+  const firstPath = "workspace/deep-ingest/sources/readd-first.md";
+  const secondPath = "workspace/deep-ingest/sources/readd-second.md";
+  for (const path of [firstPath, secondPath]) {
+    const absolute = userPath({ repoRoot }, path);
+    mkdirSync(dirname(absolute), { recursive: true });
+    writeFileSync(absolute, "The same owned upload bytes.");
+  }
+  const sourceInput = (artifactPath) => ({
+    targetShape: "evidence",
+    sourceKind: "file",
+    fileName: "readd.md",
+    artifactPath,
+    ownedUpload: true,
+  });
+  const firstPrepared = lifecycle.prepareDeepIngestSourceScan({
+    repoRoot,
+    input: sourceInput(firstPath),
+  });
+  const first = await manager.start({
+    kind: lifecycle.DEEP_INGEST_SOURCE_SCAN_KIND,
+    input: firstPrepared.request,
+  });
+  await manager.wait(first.operation.id);
+  deepIngestSourceRemove({ repoRoot, sourceId: firstPrepared.source.id });
+  lifecycle.removeDeepIngestOwnedUploadArtifact({ repoRoot, artifactPath: firstPath });
+
+  const nextPrepared = lifecycle.prepareDeepIngestSourceScan({
+    repoRoot,
+    input: sourceInput(secondPath),
+  });
+  const replacement = await manager.start({
+    kind: lifecycle.DEEP_INGEST_SOURCE_SCAN_KIND,
+    input: nextPrepared.request,
+  });
+  assert.notEqual(replacement.operation.id, first.operation.id);
+  await manager.wait(replacement.operation.id);
+
+  const source = deepIngestSourceGet({ repoRoot, sourceId: nextPrepared.source.id }).source;
+  assert.equal(scanCalls, 2);
+  assert.deepEqual(seenArtifactPaths, [firstPath, secondPath]);
+  assert.equal(source.artifactPath, secondPath);
+  assert.equal(source.metadata.ownedUpload, true);
+  assert.equal(existsSync(userPath({ repoRoot }, secondPath)), true);
+  assert.equal(existsSync(userPath({ repoRoot }, firstPath)), false);
   await manager.shutdown();
 });
 

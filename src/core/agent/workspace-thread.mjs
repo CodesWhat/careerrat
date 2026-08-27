@@ -153,6 +153,24 @@ function readMessages(db) {
     .map((row) => JSON.parse(row.data));
 }
 
+function assertActiveOperation(db, attempt) {
+  if (!attempt) return;
+  const id = String(attempt.id || "").trim();
+  const ownerId = String(attempt.ownerId || "").trim();
+  const fence = Number(attempt.fence);
+  const row = id
+    ? db.prepare("SELECT status, owner_id, fence FROM app_operations WHERE id = ?").get(id)
+    : null;
+  if (
+    !row ||
+    !new Set(["queued", "running"]).has(row.status) ||
+    row.owner_id !== ownerId ||
+    row.fence !== fence
+  ) {
+    throw makeError("workspace result belongs to a stale operation", "STALE_WRITE");
+  }
+}
+
 export function workspaceMessagesForDisplay(messages) {
   const rows = Array.isArray(messages) ? messages : [];
   const onboarding = collapseUnansweredOnboardingPrompts(
@@ -335,6 +353,7 @@ export function workspaceMessageAppend({
   choice,
   now,
   id,
+  operationAttempt,
 } = {}) {
   const cleanRole = String(role || "").trim();
   const cleanKind = String(kind || "").trim();
@@ -354,6 +373,22 @@ export function workspaceMessageAppend({
 
   const result = withTransaction(db, () => {
     const thread = ensureThread(db, at);
+    assertActiveOperation(db, operationAttempt);
+    const existingRow = db
+      .prepare("SELECT data FROM workspace_messages WHERE id = ?")
+      .get(messageId);
+    if (existingRow) {
+      const existing = JSON.parse(existingRow.data);
+      if (
+        existing.threadId !== WORKSPACE_THREAD_ID ||
+        existing.role !== cleanRole ||
+        existing.kind !== cleanKind ||
+        existing.text !== cleanMessageText
+      ) {
+        throw makeError(`workspace message id already exists: ${messageId}`, "CONFLICT");
+      }
+      return { thread, message: existing, reused: true };
+    }
     const sequence = db
       .prepare(
         "SELECT coalesce(max(sequence), 0) + 1 AS next FROM workspace_messages WHERE thread_id = ?"
@@ -513,7 +548,14 @@ function intentText(intent) {
   return `${descriptions[intent.type]}.`;
 }
 
-export function workspaceIntentAppend({ repoRoot, env = process.env, intent, now, id } = {}) {
+export function workspaceIntentAppend({
+  repoRoot,
+  env = process.env,
+  intent,
+  now,
+  id,
+  operationAttempt,
+} = {}) {
   const normalized = normalizeWorkspaceIntent(intent);
   return workspaceMessageAppend({
     repoRoot,
@@ -525,5 +567,6 @@ export function workspaceIntentAppend({ repoRoot, env = process.env, intent, now
     entity: normalized.entity,
     now,
     id,
+    operationAttempt,
   });
 }

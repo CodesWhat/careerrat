@@ -48,6 +48,7 @@ import { createDeepIngestAppOperationKinds } from "../core/deep-ingest/app-opera
 import {
   COMPANY_DISCOVERY_OPERATION_KIND,
   createCompanyDiscoveryOperationKind,
+  startCompanyDiscoveryOperation,
 } from "../core/discovery/company-operation.mjs";
 import { resolveUserPaths } from "../core/paths/workspace.mjs";
 import { acquireWorkspaceRuntimeOwnership } from "../core/runtime/workspace-runtime-ownership.mjs";
@@ -87,7 +88,10 @@ import { mountSearchRoutes } from "./search-route.mjs";
 import { mountSkillRunRoute } from "./skill-run-route.mjs";
 import { mountSourcingRoutes } from "./sourcing-route.mjs";
 import { mountTrackOutcomeRoutes } from "./track-outcome-route.mjs";
-import { mountWorkspaceAgentRoutes } from "./workspace-agent-route.mjs";
+import {
+  createWorkspaceOperationKinds,
+  mountWorkspaceAgentRoutes,
+} from "./workspace-agent-route.mjs";
 import { mountWorkspaceExportRoutes } from "./workspace-export-route.mjs";
 
 const DEFAULT_ROOT = join(fileURLToPath(new URL("../..", import.meta.url)));
@@ -270,11 +274,20 @@ export function createDevServer({
     });
   });
 
-  const appOperations = mountAppOperationRoutes({
+  let appOperations;
+  appOperations = mountAppOperationRoutes({
     addRoute,
     repoRoot,
     env,
     kinds: {
+      ...createWorkspaceOperationKinds({
+        repoRoot,
+        env,
+        runTurnImpl: workspaceAgentRuntime.runTurn,
+        executeIntentImpl: workspaceAgentRuntime.executeIntent,
+        startCompanyDiscoveryOperationImpl: (input) =>
+          startCompanyDiscoveryOperation({ appOperations, input }),
+      }),
       [COMPANY_DISCOVERY_OPERATION_KIND]: createCompanyDiscoveryOperationKind({ repoRoot, env }),
       ...createDeepIngestAppOperationKinds({ repoRoot, env }),
       ...appOperationKinds,
@@ -321,6 +334,7 @@ export function createDevServer({
     runTurnImpl: workspaceAgentRuntime.runTurn,
     executeIntentImpl: workspaceAgentRuntime.executeIntent,
     captureIntakeImpl: workspaceAgentRuntime.captureIntake,
+    appOperations,
   });
   mountChatFirstRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
   mountWorkspaceExportRoutes({ addRoute, repoRoot, env });

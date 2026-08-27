@@ -263,6 +263,29 @@ function baseUrl(dev) {
   return `http://localhost:${dev.server.address().port}`;
 }
 
+async function runWorkspaceIntentOverHttp(dev, repoRoot, intent, requestId) {
+  const response = await fetch(`${baseUrl(dev)}/api/workspace/intent`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ requestId, intent }),
+  });
+  const started = await response.json();
+  assert.ok([200, 202].includes(response.status), JSON.stringify(started));
+  let operation = started.operation;
+  for (
+    let attempt = 0;
+    attempt < 100 && ["queued", "running"].includes(operation.status);
+    attempt += 1
+  ) {
+    await new Promise((resolve) => setImmediate(resolve));
+    operation = appOperationGet({ repoRoot, id: operation.id }).operation;
+  }
+  assert.equal(operation.status, "completed", JSON.stringify(operation.error));
+  const threadResponse = await fetch(`${baseUrl(dev)}/api/workspace/thread`);
+  assert.equal(threadResponse.status, 200);
+  return (await threadResponse.json()).data;
+}
+
 function rawRequest(dev, { path, method = "GET", headers = {}, body = "" }) {
   const { port } = dev.server.address();
   return new Promise((resolve, reject) => {
@@ -471,23 +494,20 @@ test("the production workspace runtime starts explicit board discovery with the 
   dev.startWatching();
   await new Promise((resolve) => dev.server.listen(0, resolve));
   try {
-    const res = await fetch(`${baseUrl(dev)}/api/workspace/intent`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        intent: {
-          type: "source.discover",
-          entity: { type: "workspace", id: "workspace-main" },
-          input: { request: "find more job boards" },
-        },
-      }),
-    });
-    assert.equal(res.status, 200);
-    const body = await res.json();
+    const body = await runWorkspaceIntentOverHttp(
+      dev,
+      repoRoot,
+      {
+        type: "source.discover",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: { request: "find more job boards" },
+      },
+      "api-server-source-discover"
+    );
     assert.equal(starts.length, 1);
     assert.equal(starts[0].skill, "research-boards");
     assert.match(starts[0].input, /Outbound-safe candidate context|Run research-boards/);
-    assert.equal(body.data.messages.at(-1).artifacts[0].chatId, "research-boards-live");
+    assert.equal(body.messages.at(-1).artifacts[0].chatId, "research-boards-live");
   } finally {
     teardown(dev, repoRoot);
   }
@@ -507,62 +527,52 @@ test("the production workspace runtime imports an explicitly confirmed board URL
   await new Promise((resolve) => dev.server.listen(0, resolve));
   const sourceUrl = "https://remoteok.com/remote-dev-jobs?order_by=date";
   try {
-    const res = await fetch(`${baseUrl(dev)}/api/workspace/intent`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        intent: {
-          type: "source.add",
-          entity: { type: "workspace", id: "workspace-main" },
-          input: { url: sourceUrl },
-        },
-      }),
-    });
-    assert.equal(res.status, 200);
-    const body = await res.json();
-    const result = body.data.messages.at(-1);
+    let body = await runWorkspaceIntentOverHttp(
+      dev,
+      repoRoot,
+      {
+        type: "source.add",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: { url: sourceUrl },
+      },
+      "api-server-source-add"
+    );
+    const result = body.messages.at(-1);
     assert.equal(result.artifacts[0].kind, "search_source");
     assert.equal(result.artifacts[0].target, sourceUrl);
     assert.equal(result.artifacts[0].added, true);
-    const duplicateRes = await fetch(`${baseUrl(dev)}/api/workspace/intent`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        intent: {
-          type: "source.add",
-          entity: { type: "workspace", id: "workspace-main" },
-          input: { url: sourceUrl },
-        },
-      }),
-    });
-    assert.equal(duplicateRes.status, 200);
-    const duplicateBody = await duplicateRes.json();
-    assert.equal(duplicateBody.data.messages.at(-1).artifacts[0].added, false);
-    const toggleRes = await fetch(`${baseUrl(dev)}/api/workspace/intent`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        intent: {
-          type: "source.set-enabled",
-          entity: { type: "workspace", id: "workspace-main" },
-          input: { selector: "RemoteOK", enabled: false },
-        },
-      }),
-    });
-    assert.equal(toggleRes.status, 200);
-    assert.equal((await toggleRes.json()).data.messages.at(-1).artifacts[0].enabled, false);
-    const queryRes = await fetch(`${baseUrl(dev)}/api/workspace/intent`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        intent: {
-          type: "source.query-add",
-          entity: { type: "workspace", id: "workspace-main" },
-          input: { query: "staff AI engineer" },
-        },
-      }),
-    });
-    assert.equal(queryRes.status, 200);
+    body = await runWorkspaceIntentOverHttp(
+      dev,
+      repoRoot,
+      {
+        type: "source.add",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: { url: sourceUrl },
+      },
+      "api-server-source-add-duplicate"
+    );
+    assert.equal(body.messages.at(-1).artifacts[0].added, false);
+    body = await runWorkspaceIntentOverHttp(
+      dev,
+      repoRoot,
+      {
+        type: "source.set-enabled",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: { selector: "RemoteOK", enabled: false },
+      },
+      "api-server-source-toggle"
+    );
+    assert.equal(body.messages.at(-1).artifacts[0].enabled, false);
+    await runWorkspaceIntentOverHttp(
+      dev,
+      repoRoot,
+      {
+        type: "source.query-add",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: { query: "staff AI engineer" },
+      },
+      "api-server-source-query-add"
+    );
     const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches;
     assert.equal(stored.length, 2);
     assert.equal(stored[0].url, sourceUrl);

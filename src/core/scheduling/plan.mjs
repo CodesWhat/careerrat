@@ -392,6 +392,7 @@ export async function planSchedulingReply({
   env = process.env,
   call,
   signal,
+  executionPlan,
   runBoundedAI = defaultRunBoundedAI,
 } = {}) {
   if (!communication?.id) throw new Error("planSchedulingReply: communication is required");
@@ -429,6 +430,7 @@ export async function planSchedulingReply({
     env,
     call,
     signal,
+    executionPlan,
     system: systemPrompt(),
     messages: [
       {

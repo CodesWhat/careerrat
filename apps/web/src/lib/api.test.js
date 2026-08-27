@@ -17,6 +17,7 @@ import {
   requestHostedInterest,
   retryDeepIngestSource,
   runAiWebSearchStream,
+  runWorkspaceIntent,
   scheduleInterview,
   sendChatMessage,
   sendWorkspaceMessage,
@@ -367,12 +368,46 @@ describe("sendWorkspaceMessage", () => {
     const context = { pathname: "/jobs", jobId: "app-temporal" };
     const choice = { promptId: "choice-1", version: 1, optionIds: ["yes"] };
 
-    await sendWorkspaceMessage("Yes", context, choice);
+    await sendWorkspaceMessage("Yes", context, choice, {
+      requestId: "workspace-message-test-1",
+    });
 
     expect(fetchMock).toHaveBeenCalledWith("/api/workspace/message", {
       method: "POST",
-      body: JSON.stringify({ text: "Yes", context, choice }),
+      body: JSON.stringify({
+        requestId: "workspace-message-test-1",
+        text: "Yes",
+        context,
+        choice,
+      }),
       headers: { "content-type": "application/json" },
+    });
+  });
+
+  it("gives direct typed intents an exact durable request identity", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true, operation: { id: "app-operation-intent-1" } }), {
+          status: 202,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await runWorkspaceIntent(
+      "settings.explain",
+      { type: "workspace", id: "workspace-main" },
+      {},
+      { requestId: "workspace-intent-test-1" }
+    );
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      requestId: "workspace-intent-test-1",
+      intent: {
+        type: "settings.explain",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: {},
+      },
     });
   });
 });
@@ -706,7 +741,23 @@ describe("chat-first workflow actions", () => {
     await applyOnSite({ id: "app-3" });
     await markCommSent({ id: "comm-1", at: "2026-08-09T17:30:00.000Z" });
 
-    const bodies = fetchMock.mock.calls.map(([path, options]) => [path, JSON.parse(options.body)]);
+    const parsedBodies = fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body));
+    expect(parsedBodies.map((body) => body.requestId)).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^workspace-/),
+        expect.stringMatching(/^workspace-/),
+        expect.stringMatching(/^workspace-/),
+        expect.stringMatching(/^workspace-/),
+        expect.stringMatching(/^workspace-/),
+        expect.stringMatching(/^workspace-/),
+        expect.stringMatching(/^workspace-/),
+      ])
+    );
+    expect(new Set(parsedBodies.map((body) => body.requestId)).size).toBe(7);
+    const bodies = fetchMock.mock.calls.map(([path, options]) => {
+      const { requestId: _requestId, ...body } = JSON.parse(options.body);
+      return [path, body];
+    });
     expect(bodies).toEqual([
       [
         "/api/workspace/intent",

@@ -20,6 +20,7 @@ import {
   commitJobThreadComposer,
   confirmPacketGapAnswer,
   createMissionAndStart,
+  createWorkspaceRequestId,
   downloadBinaryArtifact,
   downloadTextArtifact,
   enableApplicationPreparation,
@@ -48,6 +49,10 @@ import {
   sourceSweepPresentation,
   sourceSweepWithAvailableMatches,
   startMockFromJobThread,
+  workspaceOperationFailure,
+  workspaceOperationFromResponse,
+  workspaceOperationIsActive,
+  workspaceOperationIsOwned,
 } from "./chat-first-app-controller.js";
 import {
   artifactEmoji,
@@ -59,6 +64,7 @@ import {
   parseChatFirstForeground,
   readForegroundDraft,
   reconcileChatFirstForeground,
+  replaceForegroundOperation,
   resolveForegroundStorage,
   serializeChatFirstForeground,
   writeForegroundDraft,
@@ -190,6 +196,7 @@ export function foregroundReviewArtifact({ reviewKind, reviewId, messages } = {}
 }
 const DEFAULT_BROWSER_FILTERS = Object.freeze({
   fit80: true,
+  fitFloor: null,
   comp: false,
   remote: false,
   stage: "all",
@@ -1515,6 +1522,8 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   const dashboard = useDashboardSnapshot();
   const location = useLocation();
   const navigate = useNavigate();
+  const locationSearchRef = useRef(location.search);
+  locationSearchRef.current = location.search;
   const draftStorage = resolveForegroundStorage();
   const locationForeground = useMemo(
     () => parseChatFirstForeground(location.search),
@@ -1551,6 +1560,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   const sweepAbortRef = useRef(null);
   const sweepRetryRef = useRef(null);
   const missionExecutionRef = useRef(new Set());
+  const workspaceSubmissionRef = useRef(null);
   const [deepState, setDeepState] = useState(null);
   const [deepInputMode, setDeepInputMode] = useState(locationForeground.deepInputMode);
   const [deepInputValue, setDeepInputValue] = useState(() =>
@@ -1685,6 +1695,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       searchSelectionSeeded: ui.searchSelectionSeeded,
       composerChips: ui.composerChips,
       gateId: ui.gateId,
+      operationId: locationForeground.operationId,
       reviewKind,
       reviewId,
       packetGapId: packetAnswerGap?.id || null,
@@ -1711,7 +1722,20 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     ui.pipeView,
     ui.searchSelectionSeeded,
     ui.selection,
+    locationForeground.operationId,
   ]);
+
+  const replaceWorkspaceOperation = useCallback(
+    (nextId, expectedId) => {
+      const currentSearch = locationSearchRef.current;
+      const search = replaceForegroundOperation(currentSearch, nextId, { expectedId });
+      if (search === currentSearch) return false;
+      locationSearchRef.current = search;
+      navigate({ pathname: location.pathname, search }, { replace: true });
+      return true;
+    },
+    [location.pathname, navigate]
+  );
 
   const navigateForeground = useCallback(
     (patch, { replace = false } = {}) => {
@@ -1788,7 +1812,11 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     dispatch({ type: "foreground.hydrate", foreground: reconciled.state });
     setQuery(locationForeground.query);
     setPipelineStage(locationForeground.pipelineStage);
-    setBrowserFilters({ ...DEFAULT_BROWSER_FILTERS, ...locationForeground.filters });
+    setBrowserFilters({
+      ...DEFAULT_BROWSER_FILTERS,
+      ...locationForeground.filters,
+      fitFloor: baseViewRef.current.fitFloor,
+    });
     setDeepInputMode(reconciled.state.deepInputMode);
     setDeepInputValue(
       reconciled.state.deepInputMode
@@ -1882,8 +1910,18 @@ export function ChatFirstApp({ api = chatFirstApi }) {
 
   useEffect(() => {
     if (dashboard.loading || ui.searchSelectionSeeded || !baseView.browser.search.length) return;
-    dispatch({ type: "selection.seed-search", rows: baseView.browser.search });
-  }, [baseView.browser.search, dashboard.loading, ui.searchSelectionSeeded]);
+    dispatch({
+      type: "selection.seed-search",
+      rows: baseView.browser.search,
+      minimumFit: baseView.fitFloor,
+    });
+  }, [baseView.browser.search, baseView.fitFloor, dashboard.loading, ui.searchSelectionSeeded]);
+
+  useEffect(() => {
+    setBrowserFilters((current) =>
+      current.fitFloor === baseView.fitFloor ? current : { ...current, fitFloor: baseView.fitFloor }
+    );
+  }, [baseView.fitFloor]);
 
   useEffect(
     () => () => {
@@ -2151,6 +2189,47 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       });
   }, [api, dashboard.refetch, view]);
 
+  useEffect(() => {
+    const id = locationForeground.operationId;
+    if (!id || typeof api.getAppOperation !== "function") return;
+    let cancelled = false;
+    let timer = null;
+
+    const retry = async (failedId) => {
+      if (typeof api.retryAppOperation !== "function") return false;
+      const response = await api.retryAppOperation(failedId);
+      const operation = workspaceOperationFromResponse(response);
+      if (!operation) return false;
+      setError(null);
+      replaceWorkspaceOperation(operation.id);
+      return true;
+    };
+    const follow = async () => {
+      try {
+        const operation = await api.getAppOperation(id);
+        if (cancelled) return;
+        if (!workspaceOperationIsOwned(operation)) return;
+        if (workspaceOperationIsActive(operation)) {
+          timer = setTimeout(follow, 750);
+          return;
+        }
+        await dashboard.refetch?.();
+        if (cancelled) return;
+        if (operation?.status === "failed") {
+          setError(workspaceOperationFailure(operation, retry));
+        }
+        replaceWorkspaceOperation(null, id);
+      } catch (cause) {
+        if (!cancelled) setError(mappedControllerError(cause, follow));
+      }
+    };
+    void follow();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [api, dashboard.refetch, locationForeground.operationId, replaceWorkspaceOperation]);
+
   async function run(operation) {
     return runChatFirstOperation(operation, {
       refetch: dashboard.refetch,
@@ -2203,15 +2282,22 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       return;
     }
     if (activeJob?.applicationId && packetAnswerGap) {
+      if (workspaceSubmissionRef.current) return;
+      const requestId = createWorkspaceRequestId();
+      workspaceSubmissionRef.current = requestId;
       const result = await run(() =>
         confirmPacketGapAnswer({
           api,
           applicationId: activeJob.applicationId,
           gap: packetAnswerGap,
           answer: clean,
+          requestId,
         })
       );
+      if (workspaceSubmissionRef.current === requestId) workspaceSubmissionRef.current = null;
       if (result) {
+        const operation = workspaceOperationFromResponse(result);
+        if (operation) replaceWorkspaceOperation(operation.id);
         setComposerValue("");
         setPacketAnswerGap(null);
       }
@@ -2270,6 +2356,9 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         return;
       }
     }
+    if (workspaceSubmissionRef.current) return;
+    const requestId = createWorkspaceRequestId();
+    workspaceSubmissionRef.current = requestId;
     const result = await run(async () => {
       if (activeSkillChat?.chatId) {
         return api.sendChatMessage(activeSkillChat.chatId, clean, choice);
@@ -2286,6 +2375,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
           applicationId: activeJob.applicationId,
           text: clean,
           choice,
+          requestId,
         });
       }
       const contextId = ui.composerChips[0];
@@ -2297,8 +2387,12 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         preview: preview?.data || preview,
         context,
         choice,
+        requestId,
       });
     });
+    if (workspaceSubmissionRef.current === requestId) workspaceSubmissionRef.current = null;
+    const workspaceOperation = workspaceOperationFromResponse(result?.response || result);
+    if (workspaceOperation) replaceWorkspaceOperation(workspaceOperation.id);
     if (result) setComposerValue("");
     if (
       result?.intent?.input?.change?.op === "contextual-permission" &&
@@ -2767,11 +2861,18 @@ export function ChatFirstApp({ api = chatFirstApi }) {
           });
         }
         return run(async () => {
+          const requestId = createWorkspaceRequestId();
           const response = await api.runWorkspaceIntent(
             typedIntent.type,
             typedIntent.entity,
-            typedIntent.input || {}
+            typedIntent.input || {},
+            { requestId }
           );
+          const operation = workspaceOperationFromResponse(response);
+          if (operation) {
+            replaceWorkspaceOperation(operation.id);
+            return response;
+          }
           if (
             typedIntent.input?.change?.op === "contextual-permission" &&
             typedIntent.input.change.permission === "application-preparation" &&

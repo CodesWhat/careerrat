@@ -350,6 +350,21 @@ function sourceInputFromStored({ repoRoot, env, request }) {
   throw makeError(`Unsupported Deep Ingest source kind: ${request.sourceKind}`);
 }
 
+function completedSourceScanIsReusable({ repoRoot, env, operation, request }) {
+  const source = deepIngestSourceGet({ repoRoot, env, sourceId: request.sourceId }).source;
+  return Boolean(
+    source &&
+      source.status !== "scanning" &&
+      Number(source.version || 1) === request.sourceVersion &&
+      source.metadata?.sourceDigest === request.sourceDigest &&
+      source.targetShape === request.targetShape &&
+      source.sourceKind === request.sourceKind &&
+      operation.resultRef?.type === "deep-ingest-source" &&
+      operation.resultRef?.id === request.sourceId &&
+      Number(operation.resultRef?.version) === request.sourceVersion
+  );
+}
+
 function stableScannedResult({ request, storedSource, scanned }) {
   const chunks = (scanned.chunks || []).map((chunk, index) => ({
     ...chunk,
@@ -431,6 +446,9 @@ export function createDeepIngestAppOperationKinds({
     [DEEP_INGEST_SOURCE_SCAN_KIND]: {
       parseRequest(input) {
         return parsePreparedSourceRequest({ ...pathCtx, input });
+      },
+      isCompletedResultReusable({ operation, request }) {
+        return completedSourceScanIsReusable({ ...pathCtx, operation, request });
       },
       async execute({ request, signal, reportProgress }) {
         await reportProgress({

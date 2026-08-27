@@ -7,6 +7,7 @@ import {
   commitJobThreadComposer,
   confirmPacketGapAnswer,
   createMissionAndRun,
+  createWorkspaceRequestId,
   downloadBinaryArtifact,
   downloadTextArtifact,
   enableApplicationPreparation,
@@ -29,9 +30,78 @@ import {
   selectMockSession,
   sourceSweepPresentation,
   sourceSweepWithAvailableMatches,
+  workspaceOperationFailure,
+  workspaceOperationFromResponse,
+  workspaceOperationIsActive,
+  workspaceOperationIsOwned,
 } from "./chat-first-app-controller.js";
 
 describe("chat-first app controller", () => {
+  it("extracts only a private app-operation id from an accepted Ask response", () => {
+    expect(
+      workspaceOperationFromResponse({
+        ok: true,
+        operation: {
+          id: "app-operation-workspace-1",
+          kind: "workspace.message",
+          status: "running",
+        },
+      })
+    ).toEqual({
+      id: "app-operation-workspace-1",
+      kind: "workspace.message",
+      status: "running",
+    });
+    expect(workspaceOperationFromResponse({ operation: { id: "not-private" } })).toBeNull();
+  });
+
+  it("gives one composer submission a stable client request identity", () => {
+    expect(
+      createWorkspaceRequestId({ randomUUID: () => "12345678-1234-1234-1234-123456789abc" })
+    ).toBe("workspace-12345678-1234-1234-1234-123456789abc");
+  });
+
+  it("offers an exact linked retry only when the server says the failure is retryable", () => {
+    const retry = vi.fn();
+    const retryable = workspaceOperationFailure(
+      {
+        id: "app-operation-workspace-1",
+        error: {
+          code: "APP_OPERATION_SERVER_RESTARTED",
+          message: "CareerRat restarted before this answer finished. Try it again.",
+          retryable: true,
+        },
+      },
+      retry
+    );
+    expect(retryable).toMatchObject({
+      message: "CareerRat restarted before this answer finished. Try it again.",
+      action: { label: "Try again" },
+    });
+    retryable.action.onRetry();
+    expect(retry).toHaveBeenCalledWith("app-operation-workspace-1");
+
+    const uncertain = workspaceOperationFailure(
+      {
+        id: "app-operation-workspace-2",
+        error: {
+          code: "APP_OPERATION_OUTCOME_UNCERTAIN",
+          message: "CareerRat restarted while that action was running. Check whether it finished.",
+          retryable: false,
+        },
+      },
+      retry
+    );
+    expect(uncertain.action).toBeNull();
+  });
+
+  it("follows only queued or running operations without treating completion as navigation", () => {
+    expect(workspaceOperationIsActive({ status: "queued" })).toBe(true);
+    expect(workspaceOperationIsActive({ status: "running" })).toBe(true);
+    expect(workspaceOperationIsActive({ status: "completed" })).toBe(false);
+    expect(workspaceOperationIsActive({ status: "failed" })).toBe(false);
+  });
+
   it("recognizes only explicit mission commands valid for the durable mission state", () => {
     expect(resolveMissionTextCommand("pause mission", { id: "mission-1", status: "running" })).toBe(
       "pause"
@@ -227,14 +297,21 @@ describe("chat-first app controller", () => {
   it("runs plain main-chat answers through the durable workspace thread", async () => {
     const api = { sendWorkspaceMessage: vi.fn().mockResolvedValue({ data: { messages: [] } }) };
     const context = { pathname: "/jobs", jobId: "app-temporal" };
+    const requestId = "workspace-request-message-1";
 
     const result = await commitComposerTurn({
       api,
       text: "What should I do today?",
       context,
+      requestId,
     });
 
-    expect(api.sendWorkspaceMessage).toHaveBeenCalledWith("What should I do today?", context);
+    expect(api.sendWorkspaceMessage).toHaveBeenCalledWith(
+      "What should I do today?",
+      context,
+      undefined,
+      { requestId }
+    );
     expect(result.kind).toBe("message");
   });
 
@@ -251,15 +328,26 @@ describe("chat-first app controller", () => {
       },
     };
     const api = { runWorkspaceIntent: vi.fn().mockResolvedValue({ ok: true }) };
+    const requestId = "workspace-request-intent-1";
 
     const result = await commitComposerTurn({
       api,
       text: "Allow form preparation",
       preview: { action: { label: "Allow form preparation", intent } },
+      requestId,
     });
 
-    expect(api.runWorkspaceIntent).toHaveBeenCalledWith(intent.type, intent.entity, intent.input);
+    expect(api.runWorkspaceIntent).toHaveBeenCalledWith(intent.type, intent.entity, intent.input, {
+      requestId,
+    });
     expect(result).toEqual({ kind: "intent", intent, response: { ok: true } });
+  });
+
+  it("leaves non-workspace operation ids for their owning foreground controller", () => {
+    expect(workspaceOperationIsOwned({ kind: "workspace.message" })).toBe(true);
+    expect(workspaceOperationIsOwned({ kind: "workspace.intent" })).toBe(true);
+    expect(workspaceOperationIsOwned({ kind: "deep-ingest.analyze" })).toBe(false);
+    expect(workspaceOperationIsOwned({ kind: "company.discovery" })).toBe(false);
   });
 
   it("turns packet export paths into an observable receipt", () => {
@@ -562,12 +650,14 @@ describe("chat-first app controller", () => {
       questionId: "linkedin-profile",
       label: "LinkedIn Profile",
     };
+    const requestId = "workspace-request-screening-answer";
 
     await confirmPacketGapAnswer({
       api,
       applicationId: "app-hightouch",
       gap,
       answer: "https://www.linkedin.com/in/riley",
+      requestId,
     });
 
     expect(api.runWorkspaceIntent).toHaveBeenCalledWith(
@@ -577,7 +667,8 @@ describe("chat-first app controller", () => {
         questionId: "linkedin-profile",
         question: "LinkedIn Profile",
         answer: "https://www.linkedin.com/in/riley",
-      }
+      },
+      { requestId }
     );
     expect(api.appendJobThreadMessage).toHaveBeenNthCalledWith(1, {
       applicationId: "app-hightouch",
@@ -594,6 +685,32 @@ describe("chat-first app controller", () => {
         metadata: { state: "confirmed", persisted: true, gapCount: 1 },
       })
     );
+  });
+
+  it("does not invent a job-thread result while a packet-gap operation is still running", async () => {
+    const response = {
+      operation: {
+        id: "app-operation-workspace-gap-1",
+        kind: "workspace.intent",
+        status: "running",
+      },
+    };
+    const api = {
+      appendJobThreadMessage: vi.fn().mockResolvedValue({ ok: true }),
+      runWorkspaceIntent: vi.fn().mockResolvedValue(response),
+    };
+
+    await expect(
+      confirmPacketGapAnswer({
+        api,
+        applicationId: "app-hightouch",
+        gap: { questionId: "availability", label: "Availability" },
+        answer: "Two weeks",
+        requestId: "workspace-request-screening-running",
+      })
+    ).resolves.toEqual(response);
+
+    expect(api.appendJobThreadMessage).toHaveBeenCalledTimes(1);
   });
 
   it("resumes the paused mission that owns a packet instead of starting an orphan prepare action", async () => {

@@ -558,8 +558,16 @@ export function messagesSyncSources({ repoRoot, env, tracker }) {
   });
 }
 
-async function captureJobRequest({ repoRoot, env, jobUrl, resolveJobUrlImpl, fetchImpl, now }) {
-  const resolved = await resolveJobUrlImpl(jobUrl, { fetchImpl });
+async function captureJobRequest({
+  repoRoot,
+  env,
+  jobUrl,
+  resolveJobUrlImpl,
+  fetchImpl,
+  signal,
+  now,
+}) {
+  const resolved = await resolveJobUrlImpl(jobUrl, { fetchImpl, signal });
   const bodyText = String(resolved?.bodyText || "").trim();
   if (resolved?.bodyFetchStatus !== "resolved" || !bodyText) {
     throw actionError(
@@ -672,6 +680,7 @@ async function captureIntakeJobRequest({
   intakeId,
   resolveJobUrlImpl,
   fetchImpl,
+  signal,
   now,
 }) {
   const item = intakeOne({ repoRoot, env, id: intakeId });
@@ -692,6 +701,7 @@ async function captureIntakeJobRequest({
         jobUrl,
         resolveJobUrlImpl,
         fetchImpl,
+        signal,
         now,
       })),
       sourceIntakeId: item.id,
@@ -1580,6 +1590,7 @@ async function evaluateApplicationRequest({
   jobBody,
   jobUrl,
   executionPlan,
+  signal,
   evaluateJobImpl,
 }) {
   const application = applicationForIntent({ repoRoot, env, id: applicationId });
@@ -1591,6 +1602,7 @@ async function evaluateApplicationRequest({
     env,
     body,
     ...(executionPlan ? { executionPlan } : {}),
+    ...(signal ? { signal } : {}),
   });
   const evaluation = operation?.body?.data;
   if (operation?.status !== 200 || !operation?.body?.ok || !evaluation) {
@@ -1901,6 +1913,7 @@ async function prepareApplicationQuestions({
   applicationId,
   captureQuestionsImpl,
   fetchImpl,
+  signal,
 }) {
   const saved = questionCaptureFromApplication(application);
   if (saved) return saved;
@@ -1917,6 +1930,7 @@ async function prepareApplicationQuestions({
       source: "url",
       url,
       fetchImpl,
+      signal,
     });
     const questions = Array.isArray(capture?.questions) ? capture.questions : [];
     const excluded = Array.isArray(capture?.excluded) ? capture.excluded : [];
@@ -1935,6 +1949,7 @@ async function prepareApplicationQuestions({
       excludedIds: excluded.map((question) => String(question.id)),
     };
   } catch (error) {
+    if (signal?.aborted || error?.name === "AbortError") throw error;
     return siteRequiredQuestionCapture({
       attempted: true,
       reason: String(error?.message || "Automatic question capture failed.").slice(0, 500),
@@ -2100,6 +2115,7 @@ async function generateDocumentsWithQuestionFallback({
   applyIntent,
   force = false,
   executionPlan,
+  signal,
   generateDocumentsImpl,
 }) {
   const invoke = (nextApplyIntent) =>
@@ -2107,6 +2123,7 @@ async function generateDocumentsWithQuestionFallback({
       repoRoot,
       env,
       ...(executionPlan ? { executionPlan } : {}),
+      ...(signal ? { signal } : {}),
       body: {
         applicationId,
         applyIntent: nextApplyIntent,
@@ -2821,6 +2838,8 @@ async function applyConfirmedAdjacentRoles({
   startManualSearchImpl,
   onSearchStarted,
   searchFetchImpl,
+  resultMessageId,
+  operationAttempt,
   now,
 } = {}) {
   const confirmationPrompt = promptMessage?.metadata?.choicePrompt;
@@ -2836,7 +2855,7 @@ async function applyConfirmedAdjacentRoles({
     workspaceMessageAppend({
       repoRoot,
       env,
-      id: careerCoachMessageId("bad-selection", confirmationPromptId),
+      id: resultMessageId || careerCoachMessageId("bad-selection", confirmationPromptId),
       role: "assistant",
       kind: "agent_error",
       text: "I could not match that answer to the role directions. Your targets have not changed.",
@@ -2848,6 +2867,7 @@ async function applyConfirmedAdjacentRoles({
         source: "career-coach",
         careerCoach: { stage: "proposal-error", confirmationPromptId },
       },
+      operationAttempt,
       now,
     });
     return workspaceThreadRead({ repoRoot, env });
@@ -2891,7 +2911,7 @@ async function applyConfirmedAdjacentRoles({
   workspaceMessageAppend({
     repoRoot,
     env,
-    id: careerCoachMessageId("applied", confirmationPromptId),
+    id: resultMessageId || careerCoachMessageId("applied", confirmationPromptId),
     role: "assistant",
     kind: started ? "action_result" : "action_error",
     text,
@@ -2929,6 +2949,7 @@ async function applyConfirmedAdjacentRoles({
         searchState: run?.status || "failed",
       },
     },
+    operationAttempt,
     now,
   });
   return workspaceThreadRead({ repoRoot, env });
@@ -2941,6 +2962,8 @@ async function handleAdjacentRoleChoice({
   startManualSearchImpl,
   onSearchStarted,
   searchFetchImpl,
+  resultMessageId,
+  operationAttempt,
   now,
 } = {}) {
   if (!choiceResolution?.promptId) return null;
@@ -2956,7 +2979,7 @@ async function handleAdjacentRoleChoice({
         message.metadata.careerCoach.selectionPromptId === choiceResolution.promptId
     );
     if (existing) return current;
-    const messageId = careerCoachMessageId("confirm", choiceResolution.promptId);
+    const messageId = resultMessageId || careerCoachMessageId("confirm", choiceResolution.promptId);
     const selectedRoleIds = choiceResolution.optionIds || [];
     const choicePrompt = buildAdjacentRoleConfirmationPrompt({
       proposal: coach.proposal,
@@ -2982,6 +3005,7 @@ async function handleAdjacentRoleChoice({
         },
         choicePrompt,
       },
+      operationAttempt,
       now,
     });
     return workspaceThreadRead({ repoRoot, env });
@@ -2993,7 +3017,7 @@ async function handleAdjacentRoleChoice({
       workspaceMessageAppend({
         repoRoot,
         env,
-        id: careerCoachMessageId("declined", choiceResolution.promptId),
+        id: resultMessageId || careerCoachMessageId("declined", choiceResolution.promptId),
         role: "assistant",
         kind: "text",
         text: "Got it. I left your targets and search alone.",
@@ -3005,6 +3029,7 @@ async function handleAdjacentRoleChoice({
             proposalId: coach.proposal?.id || null,
           },
         },
+        operationAttempt,
         now,
       });
     }
@@ -3018,6 +3043,8 @@ async function handleAdjacentRoleChoice({
       startManualSearchImpl,
       onSearchStarted,
       searchFetchImpl,
+      resultMessageId,
+      operationAttempt,
       now,
     });
   }
@@ -3160,8 +3187,23 @@ function appendActionResult({
     artifacts,
     metadata: { intentMessageId: intentMessage.message.id, ...metadata },
     now,
+    id: intentMessage.resultMessageId,
+    operationAttempt: intentMessage.operationAttempt,
   });
   return { ...workspaceThreadRead({ repoRoot, env }), operationResult };
+}
+
+function operationExecutionPlan(plan, operation) {
+  if (!plan || typeof plan !== "object") return null;
+  if (plan.operation === operation) return plan;
+  return plan.operations?.[operation] || null;
+}
+
+function workspaceResultExists({ repoRoot, env, resultMessageId }) {
+  if (!resultMessageId) return false;
+  return workspaceThreadRead({ repoRoot, env }).messages.some(
+    (message) => message?.id === resultMessageId
+  );
 }
 
 function workflowActionMetadata(normalized, execution, retryLabel, extra = {}) {
@@ -3212,6 +3254,7 @@ const CONTEXTUAL_PERMISSIONS = Object.freeze({
   },
   "mail-checks": {
     capability: "mail_access",
+    platforms: ["gmail", "outlook"],
     label: "Recruiting email checks",
     allowLabel: "Allow email checks",
     typedCommand: "Allow email checks",
@@ -3334,6 +3377,7 @@ export async function executeWorkspaceIntent({
   startFirstSearchImpl = startFirstSearchRun,
   startManualSearchImpl = startManualSearchRun,
   createCompanyProposalsImpl = createCompanyProposalBatch,
+  startCompanyDiscoveryOperationImpl,
   decideCompanyProposalImpl = applyCompanyProposalDecision,
   getCompanyProposalBatchImpl = companyProposalBatchGet,
   companyDiscoveryCadenceImpl = companyDiscoveryCadenceState,
@@ -3364,12 +3408,29 @@ export async function executeWorkspaceIntent({
   stampStrategyReviewImpl = stampStrategyReview,
   callAIImpl = callAI,
   sendCommunicationImpl,
+  executionPlan,
+  signal,
+  intentMessageId,
+  resultMessageId,
+  operationAttempt,
   now = () => new Date(),
 } = {}) {
   let normalized = normalizeWorkspaceIntent(intent);
   if (!EXECUTABLE_INTENTS.has(normalized.type)) throw unsupported(normalized.type);
 
-  const intentMessage = workspaceIntentAppend({ repoRoot, env, intent: normalized, now });
+  const intentMessage = workspaceIntentAppend({
+    repoRoot,
+    env,
+    intent: normalized,
+    now,
+    id: intentMessageId,
+    operationAttempt,
+  });
+  intentMessage.operationAttempt = operationAttempt;
+  intentMessage.resultMessageId = resultMessageId;
+  if (workspaceResultExists({ repoRoot, env, resultMessageId })) {
+    return workspaceThreadRead({ repoRoot, env });
+  }
   try {
     normalized = resolveNaturalWorkspaceRequest({ repoRoot, env, intent: normalized });
     if (new Set(["job.prepare-submit", "job.apply"]).has(normalized.type)) {
@@ -3390,6 +3451,7 @@ export async function executeWorkspaceIntent({
       };
     }
     const input = normalized.input || {};
+    const selectedExecutionPlan = executionPlan || input.executionPlan;
     if (normalized.type === "screening.answer") {
       const questionText = String(input.questionText || "").trim();
       if (!questionText) {
@@ -3400,6 +3462,8 @@ export async function executeWorkspaceIntent({
         env,
         questionText,
         applicationId: normalized.entity.type === "application" ? normalized.entity.id : undefined,
+        executionPlan: operationExecutionPlan(selectedExecutionPlan, "application.drafting"),
+        signal,
       });
       const reusableAnswers = (operation.answers || []).filter(
         (answer) => answer.durable && answer.uploadReady
@@ -3835,6 +3899,7 @@ export async function executeWorkspaceIntent({
             intakeId,
             resolveJobUrlImpl,
             fetchImpl: searchFetchImpl,
+            signal,
             now,
           })
         : jobUrl
@@ -3844,6 +3909,7 @@ export async function executeWorkspaceIntent({
               jobUrl,
               resolveJobUrlImpl,
               fetchImpl: searchFetchImpl,
+              signal,
               now,
             })
           : jobId
@@ -3855,7 +3921,8 @@ export async function executeWorkspaceIntent({
         applicationId: captured.applicationId,
         jobBody: captured.bodyText,
         jobUrl: captured.jobUrl,
-        executionPlan: input.executionPlan,
+        executionPlan: operationExecutionPlan(selectedExecutionPlan, "application.judgment"),
+        signal,
         evaluateJobImpl,
       });
       const evaluationMetadata = {
@@ -3897,6 +3964,7 @@ export async function executeWorkspaceIntent({
             applicationId: captured.applicationId,
             captureQuestionsImpl,
             fetchImpl: searchFetchImpl,
+            signal,
           })
         : null;
       const { packet, questionCaptureDeferred } = await generateDocumentsWithQuestionFallback({
@@ -3905,7 +3973,8 @@ export async function executeWorkspaceIntent({
         applicationId: captured.applicationId,
         applyIntent,
         formats: ["pdf"],
-        executionPlan: input.executionPlan,
+        executionPlan: operationExecutionPlan(selectedExecutionPlan, "application.drafting"),
+        signal,
         generateDocumentsImpl,
       });
       const gaps = packetGapsForApplication(packet.gaps, evaluated.application, applyIntent);
@@ -3976,7 +4045,8 @@ export async function executeWorkspaceIntent({
         applicationId: normalized.entity.id,
         jobBody: input.jobBody,
         jobUrl: input.jobUrl,
-        executionPlan: input.executionPlan,
+        executionPlan: operationExecutionPlan(selectedExecutionPlan, "application.judgment"),
+        signal,
         evaluateJobImpl,
       });
       return appendActionResult({
@@ -4018,6 +4088,7 @@ export async function executeWorkspaceIntent({
             applicationId: normalized.entity.id,
             captureQuestionsImpl,
             fetchImpl: searchFetchImpl,
+            signal,
           })
         : null;
       const { packet: operation, questionCaptureDeferred } =
@@ -4027,7 +4098,8 @@ export async function executeWorkspaceIntent({
           applicationId: normalized.entity.id,
           applyIntent,
           formats: formats.length ? formats : ["pdf"],
-          executionPlan: input.executionPlan,
+          executionPlan: operationExecutionPlan(selectedExecutionPlan, "application.drafting"),
+          signal,
           generateDocumentsImpl,
         });
       const gaps = packetGapsForApplication(operation.gaps, application, applyIntent);
@@ -4391,6 +4463,47 @@ export async function executeWorkspaceIntent({
           ? { request: String(input.request).trim().slice(0, 500) }
           : {}),
       };
+      if (typeof startCompanyDiscoveryOperationImpl === "function") {
+        const started = await startCompanyDiscoveryOperationImpl(body);
+        const operation = started?.operation;
+        const operationId = String(operation?.id || "").trim();
+        const batchId = String(started?.batchId || operation?.resultRef?.id || "").trim();
+        const status = String(operation?.status || "").trim();
+        if (!operationId || !batchId || !status) {
+          throw actionError(
+            "CareerRat couldn't start company discovery. Try it again.",
+            "COMPANY_DISCOVERY_FAILED"
+          );
+        }
+        const artifact = {
+          kind: "company_discovery_operation",
+          title:
+            status === "completed" ? "Company discovery is ready" : "Company discovery is running",
+          operationId,
+          batchId,
+          status,
+          retryOf: operation.retryOf || null,
+          attempt: Number(operation.attempt || 1),
+        };
+        return appendActionResult({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          text:
+            status === "completed"
+              ? "Company discovery finished. Review the exact saved batch before tracking any boards."
+              : "Company discovery is running in the background. CareerRat will keep the exact result for review.",
+          artifacts: [artifact],
+          metadata: {
+            state: status,
+            operationId,
+            batchId,
+          },
+          operationResult: { operation: artifact },
+          now,
+        });
+      }
       const operation = await createCompanyProposalsImpl({
         repoRoot,
         env,
@@ -5308,22 +5421,21 @@ export async function executeWorkspaceIntent({
             throw error;
           }
           const platforms = definition.platforms || CAPABILITIES[definition.capability].platforms;
-          const capability = automationDoc.capabilities?.[definition.capability] || {};
-          const alreadyAllowed =
-            automationDoc.setup_mode === "advanced" &&
-            capability.enabled === true &&
-            platforms.every(
-              (platform) =>
-                capability.platforms?.[platform] === true &&
-                automationDoc.consent?.[platform] === true
-            );
+          const alreadyAllowed = platforms.every(
+            (platform) =>
+              mayRun({
+                capability: definition.capability,
+                platform,
+                data: automationDoc,
+              }).allowed
+          );
           patch = {
-            setup_mode: "advanced",
             consent: Object.fromEntries(platforms.map((platform) => [platform, true])),
             capabilities: {
               [definition.capability]: {
                 enabled: true,
                 platforms: Object.fromEntries(platforms.map((platform) => [platform, true])),
+                scoped_grants: Object.fromEntries(platforms.map((platform) => [platform, true])),
               },
             },
           };
@@ -6701,6 +6813,8 @@ export async function executeWorkspaceIntent({
         profile,
         calendarBusy: tracker.calendarBusy || [],
         instruction: String(input.instruction || "").trim(),
+        executionPlan: operationExecutionPlan(selectedExecutionPlan, "communication.drafting"),
+        signal,
         now,
       });
       const artifact = {
@@ -6807,7 +6921,15 @@ export async function executeWorkspaceIntent({
         skill: "email-comms",
         action: "draft",
         operation: "communication:draft",
-        aiOperation: "communication.drafting",
+        ...(operationExecutionPlan(selectedExecutionPlan, "communication.drafting")
+          ? {
+              executionPlan: operationExecutionPlan(
+                selectedExecutionPlan,
+                "communication.drafting"
+              ),
+            }
+          : { aiOperation: "communication.drafting" }),
+        signal,
       });
       const body = responseText(response);
       if (!body)
@@ -7462,7 +7584,8 @@ export async function executeWorkspaceIntent({
           repoRoot,
           env,
           applicationId: normalized.entity.id,
-          executionPlan: input.executionPlan,
+          executionPlan: operationExecutionPlan(selectedExecutionPlan, "application.judgment"),
+          signal,
           evaluateJobImpl,
         });
       }
@@ -7498,6 +7621,7 @@ export async function executeWorkspaceIntent({
         applicationId: normalized.entity.id,
         captureQuestionsImpl,
         fetchImpl: searchFetchImpl,
+        signal,
       });
 
       const { packet, questionCaptureDeferred } = await generateDocumentsWithQuestionFallback({
@@ -7506,7 +7630,8 @@ export async function executeWorkspaceIntent({
         applicationId: normalized.entity.id,
         applyIntent: true,
         formats: ["pdf"],
-        executionPlan: input.executionPlan,
+        executionPlan: operationExecutionPlan(selectedExecutionPlan, "application.drafting"),
+        signal,
         generateDocumentsImpl,
       });
       const gaps = packetGapsForApplication(packet.gaps, application, true);
@@ -7596,6 +7721,7 @@ export async function executeWorkspaceIntent({
         applicationId: normalized.entity.id,
         captureQuestionsImpl,
         fetchImpl: searchFetchImpl,
+        signal,
       });
     }
 
@@ -7607,7 +7733,8 @@ export async function executeWorkspaceIntent({
         applyIntent: true,
         formats: ["pdf"],
         force: true,
-        executionPlan: input.executionPlan,
+        executionPlan: operationExecutionPlan(selectedExecutionPlan, "application.drafting"),
+        signal,
         generateDocumentsImpl,
       });
       const gaps = packetGapsForApplication(packet.gaps, application, true);
@@ -7737,6 +7864,7 @@ export async function executeWorkspaceIntent({
       questionCapture,
       input: executorInput,
       prepareOnly: true,
+      signal,
       ...(input.focusSession === true ? { focusSession: true } : {}),
     });
     if (execution?.state === "questions-captured" && execution?.questionCaptureUpdated === true) {
@@ -7749,7 +7877,8 @@ export async function executeWorkspaceIntent({
         applyIntent: true,
         formats: ["pdf"],
         force: true,
-        executionPlan: input.executionPlan,
+        executionPlan: operationExecutionPlan(selectedExecutionPlan, "application.drafting"),
+        signal,
         generateDocumentsImpl,
       });
       const gaps = packetGapsForApplication(packet.gaps, application, true);
@@ -7822,6 +7951,7 @@ export async function executeWorkspaceIntent({
           prepareOnly: true,
         },
         prepareOnly: true,
+        signal,
         ...(input.focusSession === true ? { focusSession: true } : {}),
       });
     }
@@ -7988,6 +8118,10 @@ export async function executeWorkspaceIntent({
       "APPLICATION_PREPARATION_FAILED"
     );
   } catch (error) {
+    if (operationAttempt) {
+      error.workspaceThreadId = WORKSPACE_THREAD_ID;
+      throw error;
+    }
     const visibleError = visibleActionError(error, normalized.entity);
     workspaceMessageAppend({
       repoRoot,
@@ -9877,7 +10011,11 @@ export async function runWorkspaceAgentTurn({
   startManualSearchImpl = startManualSearchRun,
   onSearchStarted,
   searchFetchImpl = fetch,
+  executionPlan,
   signal,
+  userMessageId,
+  resultMessageId,
+  operationAttempt,
   now = () => new Date(),
 } = {}) {
   const jobContext = canonicalJobContext({ repoRoot, env, context });
@@ -9890,7 +10028,12 @@ export async function runWorkspaceAgentTurn({
     choice,
     ...(jobContext ? { metadata: { jobContext } } : {}),
     now,
+    id: userMessageId,
+    operationAttempt,
   });
+  if (workspaceResultExists({ repoRoot, env, resultMessageId })) {
+    return workspaceThreadRead({ repoRoot, env });
+  }
   const handledChoice = await handleAdjacentRoleChoice({
     repoRoot,
     env,
@@ -9898,17 +10041,37 @@ export async function runWorkspaceAgentTurn({
     startManualSearchImpl,
     onSearchStarted,
     searchFetchImpl,
+    resultMessageId,
+    operationAttempt,
     now,
   });
-  if (handledChoice) return handledChoice;
+  if (handledChoice) {
+    if (!resultMessageId || workspaceResultExists({ repoRoot, env, resultMessageId })) {
+      return handledChoice;
+    }
+    workspaceMessageAppend({
+      repoRoot,
+      env,
+      id: resultMessageId,
+      role: "assistant",
+      kind: "text",
+      text: "That choice is already saved.",
+      metadata: { source: "career-coach" },
+      operationAttempt,
+      now,
+    });
+    return workspaceThreadRead({ repoRoot, env });
+  }
   if (isSearchStatusQuestion(text)) {
     workspaceMessageAppend({
       repoRoot,
       env,
+      id: resultMessageId,
       role: "assistant",
       kind: "text",
       text: currentSearchStatusText({ repoRoot, env }),
       metadata: { source: "search-status" },
+      operationAttempt,
       now,
     });
     return workspaceThreadRead({ repoRoot, env });
@@ -9927,7 +10090,7 @@ export async function runWorkspaceAgentTurn({
       skill: "workspace-agent",
       action: "message",
       operation: "workspace:chat-turn",
-      aiOperation: "paul.conversation",
+      ...(executionPlan ? { executionPlan } : { aiOperation: "paul.conversation" }),
       signal,
     });
     const parsedReply = parseChatAnswerMode(responseText(response));
@@ -9952,11 +10115,17 @@ export async function runWorkspaceAgentTurn({
         ...(response?.executionPlan ? { executionPlan: response.executionPlan } : {}),
       },
       now,
+      id: resultMessageId,
+      operationAttempt,
     });
     return workspaceThreadRead({ repoRoot, env });
   } catch (error) {
     if (!error.code && /^no AI route configured:/i.test(String(error.message || ""))) {
       error.code = "NO_AI_ROUTE";
+    }
+    if (operationAttempt) {
+      error.workspaceThreadId = WORKSPACE_THREAD_ID;
+      throw error;
     }
     workspaceMessageAppend({
       repoRoot,
@@ -9988,6 +10157,7 @@ export function createWorkspaceAgentRuntime({
   startFirstSearchImpl = startFirstSearchRun,
   startManualSearchImpl = startManualSearchRun,
   createCompanyProposalsImpl = createCompanyProposalBatch,
+  startCompanyDiscoveryOperationImpl,
   decideCompanyProposalImpl = applyCompanyProposalDecision,
   getCompanyProposalBatchImpl = companyProposalBatchGet,
   companyDiscoveryCadenceImpl = companyDiscoveryCadenceState,
@@ -10136,6 +10306,7 @@ export function createWorkspaceAgentRuntime({
           startFirstSearchImpl,
           startManualSearchImpl,
           createCompanyProposalsImpl,
+          startCompanyDiscoveryOperationImpl,
           decideCompanyProposalImpl,
           getCompanyProposalBatchImpl,
           companyDiscoveryCadenceImpl,

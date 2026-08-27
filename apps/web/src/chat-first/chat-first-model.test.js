@@ -12,13 +12,17 @@ import {
   parseChatFirstForeground,
   readForegroundDraft,
   reconcileChatFirstForeground,
+  replaceForegroundOperation,
   resolveForegroundStorage,
   serializeChatFirstForeground,
   writeForegroundDraft,
 } from "./chat-first-model.js";
 
 const dashboard = {
-  settings: { profile: { candidate: "Riley", location: "Remote / hybrid / on-site - NYC" } },
+  settings: {
+    profile: { candidate: "Riley", location: "Remote / hybrid / on-site - NYC" },
+    targeting: { fitFloor: 65 },
+  },
   sourcedRoles: [{ id: "sourced-1", company: "Tyrell", role: "Staff Engineer", fit: 88 }],
   reviewHoldRoles: [{ detailId: "hold-1", company: "Aperture", role: "Platform Lead", fit: 84 }],
   allNextSteps: [
@@ -786,15 +790,19 @@ describe("buildChatFirstView", () => {
 });
 
 describe("chatFirstReducer", () => {
-  it("seeds high-fit search jobs once and preserves later user changes", () => {
+  it("seeds jobs at the saved fit floor once and preserves later user changes", () => {
     expect(
-      highFitSearchIds([
-        { id: "fit-field", fit: 88 },
-        { id: "score-field", fitScore: 91 },
-        { id: "below", fitScore: 79 },
-        { id: "pending", fitScore: null },
-      ])
-    ).toEqual(["fit-field", "score-field"]);
+      highFitSearchIds(
+        [
+          { id: "fit-field", fit: 88 },
+          { id: "score-field", fitScore: 91 },
+          { id: "saved-floor", fitScore: 65 },
+          { id: "below", fitScore: 64 },
+          { id: "pending", fitScore: null },
+        ],
+        65
+      )
+    ).toEqual(["fit-field", "score-field", "saved-floor"]);
 
     let state = createChatFirstState();
     state = chatFirstReducer(state, {
@@ -802,10 +810,12 @@ describe("chatFirstReducer", () => {
       rows: [
         { id: "fit-field", fit: 88 },
         { id: "score-field", fitScore: 91 },
-        { id: "below", fitScore: 79 },
+        { id: "saved-floor", fitScore: 65 },
+        { id: "below", fitScore: 64 },
       ],
+      minimumFit: 65,
     });
-    expect(state.selection).toEqual(["fit-field", "score-field"]);
+    expect(state.selection).toEqual(["fit-field", "score-field", "saved-floor"]);
     expect(state.searchSelectionSeeded).toBe(true);
 
     state = chatFirstReducer(state, { type: "selection.toggle", id: "fit-field" });
@@ -816,7 +826,7 @@ describe("chatFirstReducer", () => {
       rows: [{ id: "later-refresh", fitScore: 99 }],
     });
 
-    expect(state.selection).toEqual(["score-field"]);
+    expect(state.selection).toEqual(["score-field", "saved-floor"]);
   });
 
   it("replaces the browser selection for a grouped Needs You review", () => {
@@ -924,6 +934,7 @@ describe("chat-first foreground location", () => {
       packetGapId: "gap-1",
       deepEditId: "proposal-1",
       deepInputMode: "paste",
+      operationId: "app-operation-workspace-1",
       query: "staff platform",
       pipelineStage: "technical",
       filters: {
@@ -952,6 +963,7 @@ describe("chat-first foreground location", () => {
       packetGapId: "gap-1",
       deepEditId: "proposal-1",
       deepInputMode: "paste",
+      operationId: "app-operation-workspace-1",
       query: "staff platform",
       pipelineStage: "technical",
       filters: {
@@ -967,13 +979,50 @@ describe("chat-first foreground location", () => {
     });
   });
 
-  it("preserves the default Fit 80+ filter and an explicit show-all choice", () => {
+  it("preserves the saved-fit-floor filter override and an explicit show-all choice", () => {
     expect(parseChatFirstForeground("").filters.fit80).toBe(true);
     expect(parseChatFirstForeground("").filters.files).toBe("All");
     expect(serializeChatFirstForeground({ filters: { fit80: true, files: "All" } })).toBe("");
     const search = serializeChatFirstForeground({ filters: { fit80: false } });
     expect(search).toBe("?fit=all");
     expect(parseChatFirstForeground(search).filters.fit80).toBe(false);
+  });
+
+  it("keeps durable workspace work private in the URL without changing the active screen", () => {
+    const search = serializeChatFirstForeground({
+      activeThread: "job:app-1",
+      activeApplicationId: "app-1",
+      browse: "pipeline",
+      query: "platform",
+      operationId: "app-operation-workspace-1",
+    });
+
+    const foreground = parseChatFirstForeground(search);
+    expect(foreground).toMatchObject({
+      activeThread: "job:app-1",
+      activeApplicationId: "app-1",
+      browse: "pipeline",
+      query: "platform",
+      operationId: "app-operation-workspace-1",
+    });
+    expect(foregroundDraftKey(foreground)).toBe("careerrat:draft:browser:pipeline");
+
+    const cleared = replaceForegroundOperation(search, null, {
+      expectedId: "app-operation-workspace-1",
+    });
+    expect(parseChatFirstForeground(cleared)).toMatchObject({
+      activeThread: "job:app-1",
+      activeApplicationId: "app-1",
+      browse: "pipeline",
+      query: "platform",
+      operationId: null,
+    });
+    expect(replaceForegroundOperation(search, null, { expectedId: "app-operation-newer" })).toBe(
+      search
+    );
+    expect(replaceForegroundOperation(search, "app-operation-late", { expectedId: null })).toBe(
+      search
+    );
   });
 
   it("ignores malformed saved review targets", () => {

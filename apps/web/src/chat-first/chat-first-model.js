@@ -40,6 +40,11 @@ function reviewTarget(value) {
     : { reviewKind: null, reviewId: null };
 }
 
+function privateOperationId(value) {
+  const id = String(value || "").trim();
+  return /^app-operation-[a-z0-9-]{1,140}$/i.test(id) ? id : null;
+}
+
 export function parseChatFirstForeground(search = "") {
   const params = new URLSearchParams(String(search).replace(/^\?/, ""));
   const browse = params.get("browse");
@@ -60,6 +65,7 @@ export function parseChatFirstForeground(search = "") {
     packetGapId: params.get("answer") || null,
     deepEditId: params.get("edit") || null,
     deepInputMode: ["paste", "repo"].includes(deepInputMode) ? deepInputMode : null,
+    operationId: privateOperationId(params.get("work")),
     query: params.get("q") || "",
     pipelineStage: params.get("pipeline") || null,
     filters: {
@@ -96,6 +102,7 @@ export function serializeChatFirstForeground(foreground = {}) {
   if (["paste", "repo"].includes(foreground.deepInputMode)) {
     params.set("ingest", foreground.deepInputMode);
   }
+  setParam(params, "work", privateOperationId(foreground.operationId));
   setParam(params, "q", foreground.query);
   setParam(params, "pipeline", foreground.pipelineStage);
   const filters = foreground.filters || {};
@@ -111,6 +118,20 @@ export function serializeChatFirstForeground(foreground = {}) {
   setParam(params, "people", filters.people, "all");
   const value = params.toString();
   return value ? `?${value}` : "";
+}
+
+export function replaceForegroundOperation(search, nextId, options = {}) {
+  const foreground = parseChatFirstForeground(search);
+  if (
+    Object.hasOwn(options, "expectedId") &&
+    foreground.operationId !== privateOperationId(options.expectedId)
+  ) {
+    return search;
+  }
+  return serializeChatFirstForeground({
+    ...foreground,
+    operationId: privateOperationId(nextId),
+  });
 }
 
 export function foregroundDraftKey({ activeThread = "today", browse = false, packetGapId } = {}) {
@@ -677,6 +698,10 @@ export function buildChatFirstView(dashboardInput, runtimeInput) {
   const dashboard = dashboardInput || {};
   const runtime = runtimeInput || {};
   const agentName = runtime.agentName || "Paul";
+  const savedFitFloor = Number(dashboard.settings?.targeting?.fitFloor);
+  const fitFloor = Number.isFinite(savedFitFloor)
+    ? Math.max(0, Math.min(100, savedFitFloor))
+    : null;
   const allThreads = list(runtime.jobThreads).length
     ? list(runtime.jobThreads)
     : list(runtime.threads);
@@ -750,6 +775,7 @@ export function buildChatFirstView(dashboardInput, runtimeInput) {
   return {
     agentName,
     candidateName: dashboard.settings?.profile?.candidate || "",
+    fitFloor,
     locationPolicy: buildLocationPolicy(dashboard.settings?.profile?.location),
     mainThread: runtime.mainThread || { id: "workspace-main", messages: [] },
     skillChats: buildSkillChatThreads(runtime.mainThread, runtime.skillChats),
@@ -814,7 +840,7 @@ export function chatFirstReducer(state, action) {
       if (state.searchSelectionSeeded) return state;
       return {
         ...state,
-        selection: highFitSearchIds(action.rows),
+        selection: highFitSearchIds(action.rows, action.minimumFit),
         searchSelectionSeeded: true,
       };
     case "selection.toggle": {
@@ -892,14 +918,15 @@ export function chatFirstReducer(state, action) {
   }
 }
 
-export function highFitSearchIds(rows, minimumFit = 80) {
-  const floor = Number.isFinite(Number(minimumFit)) ? Number(minimumFit) : 80;
+export function highFitSearchIds(rows, minimumFit = null) {
+  const floor = minimumFit == null ? 0 : Number(minimumFit);
+  const safeFloor = Number.isFinite(floor) ? floor : 0;
   return [
     ...new Set(
       list(rows)
         .filter((row) => {
           const fit = Number(row?.fitScore ?? row?.fit);
-          return Number.isFinite(fit) && fit >= floor;
+          return Number.isFinite(fit) && fit >= safeFloor;
         })
         .map((row) => row?.id)
         .filter(Boolean)

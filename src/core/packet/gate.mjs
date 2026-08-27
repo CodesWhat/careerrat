@@ -176,6 +176,7 @@ export async function evaluatePacketGate({
   invoke,
   runAI = runBoundedAI,
   executionPlan,
+  signal,
 } = {}) {
   let request;
   try {
@@ -312,6 +313,7 @@ export async function evaluatePacketGate({
             ...(executionPlan ? { executionPlan } : { aiOperation: "application.judgment" }),
             root: repoRoot,
             env,
+            signal,
           }),
     });
 

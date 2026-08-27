@@ -1,10 +1,19 @@
+import { createHash } from "node:crypto";
+
 import {
   captureWorkspaceIntake,
   executeWorkspaceIntent,
   previewWorkspaceIntent,
   runWorkspaceAgentTurn,
 } from "../core/agent/workspace-agent.mjs";
-import { workspaceThreadOpen } from "../core/agent/workspace-thread.mjs";
+import {
+  normalizeWorkspaceIntent,
+  WORKSPACE_THREAD_ID,
+  workspaceThreadOpen,
+} from "../core/agent/workspace-thread.mjs";
+import { loadAIPreferences } from "../core/ai/ai-preferences.mjs";
+import { resolveAIRoute } from "../core/ai/call-ai.mjs";
+import { aiRuntimeIdForRoute, resolveAIExecutionPlan } from "../core/ai/operation-policy.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -37,6 +46,7 @@ const CONFLICT_CODES = new Set([
 function statusForError(error) {
   const explicitStatus = Number(error?.status);
   if (new Set([400, 404, 409, 422, 501, 502]).has(explicitStatus)) return explicitStatus;
+  if (error?.code === "APP_OPERATION_MANAGER_STOPPED") return 503;
   if (error?.code === "NO_DATABASE") return 409;
   if (error?.code === "NOT_FOUND") return 404;
   if (error?.code === "JOB_REFERENCE_NOT_FOUND") return 404;
@@ -140,14 +150,253 @@ function sendError(res, error) {
   });
 }
 
+function jsonObject(value, field) {
+  if (value == null) return undefined;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    const error = new Error(`${field} must be an object`);
+    error.code = "BAD_REQUEST";
+    throw error;
+  }
+  return JSON.parse(JSON.stringify(value));
+}
+
+function exactInput(input, allowed, label) {
+  const value = jsonObject(input, label);
+  if (!value) {
+    const error = new Error(`${label} is required`);
+    error.code = "BAD_REQUEST";
+    throw error;
+  }
+  if (Object.keys(value).some((key) => !allowed.includes(key))) {
+    const error = new Error(`${label} contains unsupported fields`);
+    error.code = "BAD_REQUEST";
+    throw error;
+  }
+  return value;
+}
+
+function requestId(value) {
+  const id = String(value || "").trim();
+  if (!/^[a-z0-9][a-z0-9._:-]{7,159}$/i.test(id)) {
+    const error = new Error("requestId must identify one composer submission");
+    error.code = "BAD_REQUEST";
+    throw error;
+  }
+  return id;
+}
+
+function operationMessageIds(kind, id) {
+  const digest = createHash("sha256").update(`${kind}:${id}`).digest("hex").slice(0, 32);
+  return {
+    userMessageId: `workspace-operation-user-${digest}`,
+    resultMessageId: `workspace-operation-result-${digest}`,
+  };
+}
+
+function parseWorkspaceMessageRequest(input) {
+  const body = exactInput(input, ["text", "context", "choice", "requestId"], "workspace message");
+  const text = String(body.text || "").trim();
+  if (!text) {
+    const error = new Error("message text is required");
+    error.code = "EMPTY_TEXT";
+    throw error;
+  }
+  const id = requestId(body.requestId);
+  return {
+    requestId: id,
+    text,
+    ...(body.context ? { context: jsonObject(body.context, "context") } : {}),
+    ...(body.choice ? { choice: jsonObject(body.choice, "choice") } : {}),
+    ...operationMessageIds("workspace.message", id),
+  };
+}
+
+function parseWorkspaceIntentRequest(input) {
+  const body = exactInput(input, ["intent", "requestId"], "workspace intent");
+  const id = requestId(body.requestId);
+  return {
+    requestId: id,
+    intent: normalizeWorkspaceIntent(body.intent),
+    ...operationMessageIds("workspace.intent", id),
+  };
+}
+
+function workspaceIntentPlanOperations(type) {
+  if (new Set(["source.discover", "company.discover"]).has(type)) return [];
+  if (new Set(["job.evaluate", "job.evaluate-request"]).has(type)) {
+    return ["application.judgment"];
+  }
+  if (new Set(["job.generate-documents", "job.tailor-request", "screening.answer"]).has(type)) {
+    return ["application.drafting"];
+  }
+  if (new Set(["job.prepare-request", "job.prepare-submit", "job.apply"]).has(type)) {
+    return ["application.judgment", "application.drafting"];
+  }
+  if (new Set(["communication.draft", "scheduling.prepare"]).has(type)) {
+    return ["communication.drafting"];
+  }
+  if (new Set(["coaching.plan", "strategy.review"]).has(type)) return ["coach.deep"];
+  if (
+    /^(?:research\.|company\.health|relationship\.|status\.|mail\.|messages\.|linkedin\.)/.test(
+      type
+    )
+  ) {
+    return ["research.web"];
+  }
+  return [];
+}
+
+function selectedExecutionPlans({ repoRoot, env, operations }) {
+  if (!operations.length) return null;
+  const route = resolveAIRoute(env, { repoRoot });
+  const runtimeId = aiRuntimeIdForRoute(route);
+  if (!runtimeId) {
+    const error = new Error(route.error || "Select a ready AI CLI before starting this work.");
+    error.code = "NO_AI_ROUTE";
+    throw error;
+  }
+  const preferences = loadAIPreferences({ repoRoot, env });
+  const plans = Object.fromEntries(
+    operations.map((operation) => [
+      operation,
+      resolveAIExecutionPlan({ operation, runtimeId, preferences }),
+    ])
+  );
+  return operations.length === 1
+    ? plans[operations[0]]
+    : { version: 1, runtimeId, operations: plans };
+}
+
+function resultReference(result, request) {
+  const messages = Array.isArray(result?.messages) ? result.messages : [];
+  const message = messages.find((candidate) => candidate?.id === request.resultMessageId);
+  return {
+    type: "workspace-message",
+    id: message?.id || request.resultMessageId,
+    threadId: WORKSPACE_THREAD_ID,
+  };
+}
+
+export const WORKSPACE_MESSAGE_OPERATION_KIND = "workspace.message";
+export const WORKSPACE_INTENT_OPERATION_KIND = "workspace.intent";
+
+function workspaceOperationError(error, kind) {
+  const code = String(error?.code || "WORKSPACE_AGENT_ERROR").slice(0, 128);
+  const messages = {
+    JOB_REFERENCE_AMBIGUOUS:
+      "I found more than one matching job. Open the job you mean and try that action again.",
+    JOB_REFERENCE_NOT_FOUND:
+      "I couldn't find that job. Open it in Jobs or paste its link, then try again.",
+    COMMUNICATION_REFERENCE_AMBIGUOUS:
+      "I found more than one matching conversation. Open the one you mean and try again.",
+    COMMUNICATION_REFERENCE_NOT_FOUND:
+      "I couldn't find that conversation. Open it from the job first, then try again.",
+    COMPANY_AMBIGUOUS:
+      "I found more than one matching company. Open the company or job you mean and try again.",
+    COMPANY_NOT_FOUND: "I couldn't identify that company. Name it directly and try again.",
+    APPLICATION_MISSION_ATTEMPT_REQUIRED:
+      "This application must continue through its supervised application run. Resume it from Needs You.",
+    APPLICATION_MISSION_ATTEMPT_STALE:
+      "That application run is no longer current. Resume the latest run from Needs You.",
+    NO_AI_ROUTE: "Choose a ready AI provider in Settings, then try again.",
+    SDK_NOT_INSTALLED:
+      "The selected AI provider isn't ready yet. Finish its setup, then try again.",
+  };
+  return {
+    code,
+    message:
+      messages[code] ||
+      (kind === WORKSPACE_MESSAGE_OPERATION_KIND
+        ? "CareerRat couldn't finish that reply. Your message is saved, so you can try again."
+        : "CareerRat couldn't finish that action. Nothing else was changed, so you can try again."),
+    retryable: error?.retryable !== false,
+  };
+}
+
+export function createWorkspaceOperationKinds({
+  repoRoot,
+  env = process.env,
+  runTurnImpl = runWorkspaceAgentTurn,
+  executeIntentImpl = executeWorkspaceIntent,
+  resolveExecutionPlanImpl,
+  startCompanyDiscoveryOperationImpl,
+} = {}) {
+  const resolvePlans =
+    resolveExecutionPlanImpl ||
+    (({ operations }) => selectedExecutionPlans({ repoRoot, env, operations }));
+  return {
+    [WORKSPACE_MESSAGE_OPERATION_KIND]: {
+      parseRequest: parseWorkspaceMessageRequest,
+      normalizeError: (error) => workspaceOperationError(error, WORKSPACE_MESSAGE_OPERATION_KIND),
+      resolveExecutionPlan: ({ request }) =>
+        resolvePlans({ operations: ["paul.conversation"], request }),
+      async execute({ operation, request, executionPlan, signal }) {
+        const result = await runTurnImpl({
+          repoRoot,
+          env,
+          text: request.text,
+          context: request.context,
+          choice: request.choice,
+          userMessageId: request.userMessageId,
+          resultMessageId: request.resultMessageId,
+          operationAttempt: {
+            id: operation.id,
+            ownerId: operation.ownerId,
+            fence: operation.fence,
+          },
+          executionPlan,
+          signal,
+          startCompanyDiscoveryOperationImpl,
+        });
+        return { resultRef: resultReference(result, request) };
+      },
+    },
+    [WORKSPACE_INTENT_OPERATION_KIND]: {
+      parseRequest: parseWorkspaceIntentRequest,
+      normalizeError: (error) => workspaceOperationError(error, WORKSPACE_INTENT_OPERATION_KIND),
+      resolveExecutionPlan: ({ request }) =>
+        resolvePlans({ operations: workspaceIntentPlanOperations(request.intent.type), request }),
+      recoveryError: {
+        code: "APP_OPERATION_OUTCOME_UNCERTAIN",
+        message:
+          "CareerRat restarted while that action was running. Check whether it finished before trying it again.",
+        retryable: false,
+      },
+      async execute({ operation, request, executionPlan, signal }) {
+        const result = await executeIntentImpl({
+          repoRoot,
+          env,
+          intent: request.intent,
+          intentMessageId: request.userMessageId,
+          resultMessageId: request.resultMessageId,
+          operationAttempt: {
+            id: operation.id,
+            ownerId: operation.ownerId,
+            fence: operation.fence,
+          },
+          executionPlan,
+          signal,
+          startCompanyDiscoveryOperationImpl,
+        });
+        return { resultRef: resultReference(result, request) };
+      },
+    },
+  };
+}
+
+function operationView(operation) {
+  if (!operation) return null;
+  const { request: _request, ownerId: _ownerId, fence: _fence, ...visible } = operation;
+  return visible;
+}
+
 export function mountWorkspaceAgentRoutes({
   addRoute,
   repoRoot,
   env = process.env,
-  executeIntentImpl = executeWorkspaceIntent,
-  runTurnImpl = runWorkspaceAgentTurn,
   captureIntakeImpl = captureWorkspaceIntake,
   previewIntentImpl = previewWorkspaceIntent,
+  appOperations,
 } = {}) {
   addRoute("GET", "/api/workspace/thread", (_req, res) => {
     try {
@@ -160,14 +409,21 @@ export function mountWorkspaceAgentRoutes({
   addRoute("POST", "/api/workspace/message", async (req, res) => {
     try {
       const body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
-      const data = await runTurnImpl({
-        repoRoot,
-        env,
-        text: body?.text,
-        context: body?.context,
-        choice: body?.choice,
+      if (!appOperations?.start) {
+        const error = new Error("Workspace operations are not available yet. Restart CareerRat.");
+        error.code = "APP_OPERATION_MANAGER_STOPPED";
+        throw error;
+      }
+      const started = await appOperations.start({
+        kind: WORKSPACE_MESSAGE_OPERATION_KIND,
+        input: body,
       });
-      sendJson(res, 200, { ok: true, data });
+      const active = ["queued", "running"].includes(started.operation.status);
+      sendJson(res, active ? 202 : 200, {
+        ok: true,
+        reused: started.reused,
+        operation: operationView(started.operation),
+      });
     } catch (error) {
       sendError(res, error);
     }
@@ -190,8 +446,21 @@ export function mountWorkspaceAgentRoutes({
   addRoute("POST", "/api/workspace/intent", async (req, res) => {
     try {
       const body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
-      const data = await executeIntentImpl({ repoRoot, env, intent: body?.intent });
-      sendJson(res, 200, { ok: true, data });
+      if (!appOperations?.start) {
+        const error = new Error("Workspace operations are not available yet. Restart CareerRat.");
+        error.code = "APP_OPERATION_MANAGER_STOPPED";
+        throw error;
+      }
+      const started = await appOperations.start({
+        kind: WORKSPACE_INTENT_OPERATION_KIND,
+        input: body,
+      });
+      const active = ["queued", "running"].includes(started.operation.status);
+      sendJson(res, active ? 202 : 200, {
+        ok: true,
+        reused: started.reused,
+        operation: operationView(started.operation),
+      });
     } catch (error) {
       sendError(res, error);
     }

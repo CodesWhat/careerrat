@@ -278,6 +278,7 @@ export function mayRun({
   const cfg = data || loadAutomation({ root, env }).data;
   const advancedMode = effectiveAutomationMode(cfg) === "advanced";
   const cap = cfg.capabilities?.[capability] || {};
+  const scopedGrant = cap.scoped_grants?.[platform] === true;
   const globalOn = cap.enabled === true;
   const platformOn = !!(cap.platforms && cap.platforms[platform] === true);
   const consentOn = !!(cfg.consent && cfg.consent[platform] === true);
@@ -295,9 +296,11 @@ export function mayRun({
       `ToS consent for "${platform}" not recorded (record: \`careerrat automation consent ${platform} --write\`)`
     );
 
-  if (!advancedMode) reasons.push("Basic mode keeps every external capability disabled");
+  if (!advancedMode && !scopedGrant) {
+    reasons.push("Basic mode keeps capabilities disabled until they are allowed in context");
+  }
 
-  const allowed = advancedMode && globalOn && platformOn && consentOn;
+  const allowed = (advancedMode || scopedGrant) && globalOn && platformOn && consentOn;
   return {
     allowed,
     reasons,

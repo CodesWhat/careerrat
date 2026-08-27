@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { after, test } from "node:test";
 
-import { mountWorkspaceAgentRoutes } from "../src/cli/workspace-agent-route.mjs";
+import {
+  createWorkspaceOperationKinds,
+  mountWorkspaceAgentRoutes,
+} from "../src/cli/workspace-agent-route.mjs";
 import {
   captureWorkspaceIntake,
   createWorkspaceAgentRuntime,
@@ -26,7 +29,7 @@ import {
   workspaceThreadOpen,
   workspaceThreadRead,
 } from "../src/core/agent/workspace-thread.mjs";
-import { CAPABILITY_KEYS } from "../src/core/automation/consent.mjs";
+import { CAPABILITY_KEYS, mayRun } from "../src/core/automation/consent.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { ALL_MIGRATIONS } from "../src/core/db/migrations.mjs";
 import {
@@ -61,9 +64,11 @@ import {
   researchRelPath,
   writeResearch,
 } from "../src/core/research/research-store.mjs";
+import { createAppOperationManager } from "../src/core/runtime/app-operation-manager.mjs";
 
 const cleanupRoots = [];
 let missionFixtureSequence = 0;
+let workspaceRequestSequence = 0;
 
 function tempRepo() {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-workspace-agent-"));
@@ -4458,6 +4463,57 @@ test("company discovery returns reviewable proposals in workspace-main without w
   assert.match(result.messages.at(-1).text, /beyond your focus examples/i);
 });
 
+test("production company discovery starts its durable owner and returns the exact operation and batch", async () => {
+  const repoRoot = tempRepo();
+  const starts = [];
+  let directCreates = 0;
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "company.discover",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { requestedCount: 8, request: "find more operations employers" },
+    },
+    companyDiscoveryCadenceImpl: () => ({ status: "due", due: true }),
+    startCompanyDiscoveryOperationImpl: async (input) => {
+      starts.push(input);
+      return {
+        reused: false,
+        batchId: "cpb_exact_batch",
+        operation: {
+          id: "app-operation-company-exact",
+          kind: "company.discovery",
+          status: "running",
+          retryOf: null,
+          attempt: 1,
+          resultRef: null,
+        },
+      };
+    },
+    createCompanyProposalsImpl: async () => {
+      directCreates += 1;
+      throw new Error("the workspace agent must not create a second company pipeline");
+    },
+  });
+
+  assert.deepEqual(starts, [{ requestedCount: 8, request: "find more operations employers" }]);
+  assert.equal(directCreates, 0);
+  const message = result.messages.at(-1);
+  assert.equal(message.kind, "action_result");
+  assert.deepEqual(message.artifacts[0], {
+    kind: "company_discovery_operation",
+    title: "Company discovery is running",
+    operationId: "app-operation-company-exact",
+    batchId: "cpb_exact_batch",
+    status: "running",
+    retryOf: null,
+    attempt: 1,
+  });
+  assert.equal(message.metadata.operationId, "app-operation-company-exact");
+  assert.equal(message.metadata.batchId, "cpb_exact_batch");
+});
+
 test("company.discover reopens a pending batch instead of creating a duplicate when asked twice", async () => {
   const repoRoot = tempRepo();
   let createCalls = 0;
@@ -8491,7 +8547,7 @@ test("settings.apply automation: contextual application permission writes the re
   const replay = await executeWorkspaceIntent({ repoRoot, env: {}, intent });
   const automation = candidateConfigGet({ repoRoot, env: {} }).automation;
 
-  assert.equal(automation.setup_mode, "advanced");
+  assert.notEqual(automation.setup_mode, "advanced");
   assert.equal(automation.capabilities.authenticated_apply_preparation.enabled, true);
   for (const platform of [
     "greenhouse",
@@ -8512,6 +8568,87 @@ test("settings.apply automation: contextual application permission writes the re
   assert.notEqual(settingsArtifact(first).changed, false);
   assert.equal(settingsArtifact(replay).changed, false);
   assert.match(replay.messages.at(-1).text, /already allowed/i);
+});
+
+test("a narrow contextual calendar grant cannot activate a dormant relationship capability", async () => {
+  const repoRoot = tempRepo();
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "automation",
+    patch: {
+      setup_mode: "basic",
+      consent: { linkedin: true },
+      capabilities: {
+        relationship_sourcing: { enabled: true, platforms: { linkedin: true } },
+      },
+    },
+  });
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        change: {
+          kind: "automation",
+          op: "contextual-permission",
+          permission: "apple-calendar-write",
+        },
+      },
+    },
+  });
+
+  const automation = candidateConfigGet({ repoRoot, env: {} }).automation;
+  assert.equal(automation.setup_mode, "basic");
+  assert.equal(automation.capabilities.relationship_sourcing.enabled, true);
+  assert.equal(automation.capabilities.relationship_sourcing.platforms.linkedin, true);
+  assert.equal(
+    mayRun({
+      capability: "relationship_sourcing",
+      platform: "linkedin",
+      data: automation,
+    }).allowed,
+    false
+  );
+  assert.equal(
+    mayRun({ capability: "calendar_sync", platform: "apple_calendar", data: automation }).allowed,
+    true
+  );
+});
+
+test("the email-check contextual grant stores Gmail and Outlook only", async () => {
+  const repoRoot = tempRepo();
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        change: {
+          kind: "automation",
+          op: "contextual-permission",
+          permission: "mail-checks",
+        },
+      },
+    },
+  });
+
+  const automation = candidateConfigGet({ repoRoot, env: {} }).automation;
+  assert.deepEqual(
+    Object.fromEntries(
+      ["gmail", "outlook", "webmail"].map((platform) => [
+        platform,
+        mayRun({ capability: "mail_access", platform, data: automation }).allowed,
+      ])
+    ),
+    { gmail: true, outlook: true, webmail: false }
+  );
+  assert.notEqual(automation.consent.webmail, true);
+  assert.notEqual(automation.capabilities.mail_access.platforms.webmail, true);
 });
 
 test("settings.apply automation: an unknown contextual permission fails closed", async () => {
@@ -9356,6 +9493,19 @@ test("relationship.source-request: an empty company throws RELATIONSHIP_SOURCING
 
 function mountDirect(repoRoot, executeIntentImpl, runTurnImpl, captureIntakeImpl) {
   const routes = new Map();
+  const appOperations = createAppOperationManager({
+    repoRoot,
+    env: {},
+    ownerId: `workspace-route-test-${++workspaceRequestSequence}`,
+    heartbeatMs: 60_000,
+    kinds: createWorkspaceOperationKinds({
+      repoRoot,
+      env: {},
+      ...(executeIntentImpl ? { executeIntentImpl } : {}),
+      ...(runTurnImpl ? { runTurnImpl } : {}),
+      resolveExecutionPlanImpl: () => null,
+    }),
+  });
   mountWorkspaceAgentRoutes({
     addRoute(method, path, handler) {
       routes.set(`${method} ${path}`, handler);
@@ -9365,19 +9515,30 @@ function mountDirect(repoRoot, executeIntentImpl, runTurnImpl, captureIntakeImpl
     executeIntentImpl,
     runTurnImpl,
     captureIntakeImpl,
+    appOperations,
   });
+  routes.appOperations = appOperations;
   return routes;
 }
 
 async function callDirect(routes, method, path, payload) {
   const handler = routes.get(`${method} ${path}`);
   assert.ok(handler, `expected mounted route for ${method} ${path}`);
+  const operationPayload =
+    payload &&
+    method === "POST" &&
+    new Set(["/api/workspace/message", "/api/workspace/intent"]).has(path)
+      ? {
+          ...payload,
+          requestId: payload.requestId || `workspace-route-request-${++workspaceRequestSequence}`,
+        }
+      : payload;
   const req = Readable.from(
-    payload === undefined ? [] : [Buffer.from(JSON.stringify(payload), "utf8")]
+    operationPayload === undefined ? [] : [Buffer.from(JSON.stringify(operationPayload), "utf8")]
   );
   req.method = method;
   req.url = path;
-  req.headers = payload === undefined ? {} : { "content-type": "application/json" };
+  req.headers = operationPayload === undefined ? {} : { "content-type": "application/json" };
   let status = 200;
   let responseBody = "";
   const res = {
@@ -9391,6 +9552,10 @@ async function callDirect(routes, method, path, payload) {
   };
   await handler(req, res);
   return { status, body: responseBody ? JSON.parse(responseBody) : {} };
+}
+
+function waitDirectOperation(routes, response) {
+  return routes.appOperations.wait(response.body.operation.id);
 }
 
 test("workspace agent routes expose the one thread and route button intents through it", async () => {
@@ -9419,10 +9584,13 @@ test("workspace agent routes expose the one thread and route button intents thro
       entity: { type: "application", id: "app-temporal" },
     },
   });
-  assert.equal(acted.status, 200);
+  assert.equal(acted.status, 202);
+  const operation = await waitDirectOperation(routes, acted);
+  assert.equal(operation.status, "completed", JSON.stringify(operation.error));
   assert.equal(seen.length, 1);
-  assert.equal(acted.body.data.thread.id, WORKSPACE_THREAD_ID);
-  assert.equal(acted.body.data.messages.length, 2);
+  const thread = workspaceThreadRead({ repoRoot, env: {} });
+  assert.equal(thread.thread.id, WORKSPACE_THREAD_ID);
+  assert.equal(thread.messages.length, 2);
 });
 
 test("POST /api/workspace/intent cannot bypass the durable application mission owner", async () => {
@@ -9441,12 +9609,13 @@ test("POST /api/workspace/intent cannot bypass the durable application mission o
     },
   });
 
-  assert.equal(response.status, 409);
-  assert.equal(response.body.ok, false);
-  assert.equal(response.body.code, "APPLICATION_MISSION_ATTEMPT_REQUIRED");
+  assert.equal(response.status, 202);
+  const operation = await waitDirectOperation(routes, response);
+  assert.equal(operation.status, "failed");
+  assert.equal(operation.error.code, "APPLICATION_MISSION_ATTEMPT_REQUIRED");
 });
 
-test("workspace action errors return actionable client statuses instead of server errors", async () => {
+test("workspace action errors persist on the exact operation instead of failing its start", async () => {
   const repoRoot = tempRepo();
   const cases = [
     ["JOB_URL_REQUIRED", 400],
@@ -9478,7 +9647,7 @@ test("workspace action errors return actionable client statuses instead of serve
     ["CALENDAR_WRITE_NOT_ALLOWED", 400],
   ];
 
-  for (const [code, expectedStatus] of cases) {
+  for (const [code] of cases) {
     const routes = mountDirect(repoRoot, async () => {
       const error = new Error(`job request failed: ${code}`);
       error.code = code;
@@ -9491,8 +9660,10 @@ test("workspace action errors return actionable client statuses instead of serve
         input: { jobUrl: "https://jobs.example.test/acme/role" },
       },
     });
-    assert.equal(response.status, expectedStatus, code);
-    assert.equal(response.body.code, code);
+    assert.equal(response.status, 202, code);
+    const operation = await waitDirectOperation(routes, response);
+    assert.equal(operation.status, "failed", code);
+    assert.equal(operation.error.code, code);
   }
 });
 
@@ -9504,7 +9675,7 @@ test("runtime transcript actions never point at retired page routes", () => {
   assert.doesNotMatch(source, /href:\s*[`'"]\/jobs\?/);
 });
 
-test("workspace ambiguity errors expose only structured candidate-safe match labels", async () => {
+test("workspace ambiguity failures return candidate-safe guidance without internal match records", async () => {
   const repoRoot = tempRepo();
   const routes = mountDirect(repoRoot, async () => {
     const error = new Error("internal ambiguity detail");
@@ -9525,14 +9696,16 @@ test("workspace ambiguity errors expose only structured candidate-safe match lab
     },
   });
 
-  assert.equal(response.status, 409);
-  assert.deepEqual(response.body.details.matches, [
-    { company: "Acme", role: "Senior AI Engineer" },
-    { company: "Acme", role: "Staff Platform Engineer" },
-  ]);
+  assert.equal(response.status, 202);
+  const operation = await waitDirectOperation(routes, response);
+  assert.equal(operation.status, "failed");
+  assert.equal(operation.error.code, "JOB_REFERENCE_AMBIGUOUS");
+  assert.match(operation.error.message, /more than one matching job/i);
+  assert.doesNotMatch(operation.error.message, /internal|Private|Hidden/i);
+  assert.equal("details" in operation.error, false);
 });
 
-test("workspace message route waits for the same agent turn and returns its durable reply", async () => {
+test("workspace message route returns before the same durable agent turn finishes", async () => {
   const repoRoot = tempRepo();
   const seen = [];
   const routes = mountDirect(repoRoot, undefined, async (input) => {
@@ -9547,7 +9720,9 @@ test("workspace message route waits for the same agent turn and returns its dura
     context: { pathname: "/jobs", jobId: "app-temporal" },
     choice: { promptId: "choice-1", version: 1, optionIds: ["yes"] },
   });
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 202);
+  const operation = await waitDirectOperation(routes, response);
+  assert.equal(operation.status, "completed", JSON.stringify(operation.error));
   assert.equal(seen.length, 1);
   assert.deepEqual(seen[0].context, { pathname: "/jobs", jobId: "app-temporal" });
   assert.deepEqual(seen[0].choice, {
@@ -9555,8 +9730,9 @@ test("workspace message route waits for the same agent turn and returns its dura
     version: 1,
     optionIds: ["yes"],
   });
-  assert.equal(response.body.data.thread.id, WORKSPACE_THREAD_ID);
-  assert.equal(response.body.data.messages.at(-1).text, "Same thread reply.");
+  const thread = workspaceThreadRead({ repoRoot, env: {} });
+  assert.equal(thread.thread.id, WORKSPACE_THREAD_ID);
+  assert.equal(thread.messages.at(-1).text, "Same thread reply.");
 });
 
 test("workspace intake route sends paste and link captures through the same serialized agent", async () => {
@@ -9784,7 +9960,7 @@ test("issue.record-filed accepts canonical CodesWhat/careerrat issue URLs and re
   }
 });
 
-test("workspace action errors map issue-report failure codes to 400", async () => {
+test("workspace action errors persist issue-report failure codes", async () => {
   const repoRoot = tempRepo();
   for (const code of ["ISSUE_REPORT_COMP_LEAK", "ISSUE_URL_INVALID"]) {
     const routes = mountDirect(repoRoot, async () => {
@@ -9799,8 +9975,10 @@ test("workspace action errors map issue-report failure codes to 400", async () =
         input: { description: "" },
       },
     });
-    assert.equal(response.status, 400, code);
-    assert.equal(response.body.code, code);
+    assert.equal(response.status, 202, code);
+    const operation = await waitDirectOperation(routes, response);
+    assert.equal(operation.status, "failed", code);
+    assert.equal(operation.error.code, code);
   }
 });
 
