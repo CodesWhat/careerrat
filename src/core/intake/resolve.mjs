@@ -353,12 +353,12 @@ async function resolvePlainFetch({
 
 function extractEmbeddedApplicationUrl(html, baseUrl) {
   const normalized = String(html || "")
+    .replace(/&quot;/gi, '"')
+    .replace(/&amp;/gi, "&")
     .replace(/\\u002f/gi, "/")
     .replace(/\\u0026/gi, "&")
     .replace(/\\\//g, "/")
-    .replace(/\\"/g, '"')
-    .replace(/&quot;/gi, '"')
-    .replace(/&amp;/gi, "&");
+    .replace(/\\"/g, '"');
   const current = normalizeComparableUrl(baseUrl);
   const destinations = new Map();
   for (const match of normalized.matchAll(

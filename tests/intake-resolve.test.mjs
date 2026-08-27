@@ -319,6 +319,23 @@ test("plain aggregator page: keeps its job body but hands application work to an
   assert.match(result.bodyText, /Build reliable distributed systems/);
 });
 
+test("plain aggregator page: decodes only one mixed escaping layer in an embedded application URL", async () => {
+  const aggregatorUrl = "https://remotevibecodingjobs.com/jobs/acme-staff-engineer";
+  const applicationUrl =
+    "https://www.linkedin.com/jobs/view/1234567890?ref=board\\u0026amp;recommended=true";
+  const html = `<html><body><h1>Staff Engineer</h1><p>${"Build reliable distributed systems and platform tooling. ".repeat(20)}</p><script>{"applyUrl":"${applicationUrl}"}</script></body></html>`;
+
+  const result = await resolveJobUrl(aggregatorUrl, {
+    fetchImpl: async () => htmlResponse(html, { finalUrl: aggregatorUrl }),
+    resolveHost: publicResolver,
+  });
+
+  assert.equal(
+    result.url,
+    "https://www.linkedin.com/jobs/view/1234567890?ref=board&amp;recommended=true"
+  );
+});
+
 test("plain aggregator page: rejects untrusted and private embedded application URLs", async () => {
   const aggregatorUrl = "https://remotevibecodingjobs.com/jobs/acme-staff-engineer";
   for (const applicationUrl of [

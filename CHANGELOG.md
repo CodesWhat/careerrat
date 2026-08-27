@@ -27,7 +27,7 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Release verification
 
-- The repository suite passed 3,855 tests with 15 intentional skips and zero failures after the recovery, locality, onboarding, application-link, and release-gate fixes. The web suite passed all 761 tests.
+- The repository suite passed 3,856 tests with 15 intentional skips and zero failures after the recovery, locality, onboarding, application-link, and release-gate fixes. The web suite passed all 761 tests.
 - A fresh Codex-backed desktop run completed resume intake, saved a remote-US and New York City hybrid profile with a two-day office limit, searched 358 listings across five sources, and retained four body-verified matches without admitting a five-day-office listing.
 - The real-browser application harness passed all 11 Chromium scenarios, including résumé upload, native selects, Greenhouse and Ashby comboboxes, multistep forms, failure handoff, and prepare-only mode. The final Submit control was never clicked.
 

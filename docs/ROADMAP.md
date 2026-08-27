@@ -799,7 +799,7 @@ candidate decode implementation details or leave the app.
   because examples follow it. A dedupe-only completion reports matches already
   saved instead of showing zero qualified after useful results reached the Jobs
   view.
-- **Acceptance evidence** — the repository suite passed 3,855 tests with 15
+- **Acceptance evidence** — the repository suite passed 3,856 tests with 15
   intentional skips, and the web suite passed all 761 tests. A fresh
   Codex-backed desktop run completed intake, saved
   remote-US plus New York City hybrid targeting with a two-day office limit,
