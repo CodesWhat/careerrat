@@ -140,24 +140,20 @@ function isFetchableSearchSource(source) {
   return ["ats", "board"].includes(source.source_type) && isBoardProviderSupported(source.provider);
 }
 
-function sameSearchSource(left, right) {
-  for (const field of ["id", "rssUrl", "url", "searchUrl"]) {
-    if (left?.[field] && right?.[field] && left[field] === right[field]) return true;
-  }
-  return (
-    String(left?.label || "")
-      .trim()
-      .toLowerCase() ===
-      String(right?.label || "")
-        .trim()
-        .toLowerCase() &&
-    String(left?.provider || "")
-      .trim()
-      .toLowerCase() ===
-      String(right?.provider || "")
-        .trim()
-        .toLowerCase()
-  );
+function normalizedIdentityValue(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+}
+
+function searchSourceFetchIdentity(source) {
+  return JSON.stringify({
+    sourceType: normalizedIdentityValue(source?.source_type),
+    provider: normalizedIdentityValue(source?.provider),
+    rssUrl: String(source?.rssUrl || "").trim(),
+    url: String(source?.url || "").trim(),
+    searchUrl: String(source?.searchUrl || "").trim(),
+  });
 }
 
 function persistSearchSourceWatermark({ pathCtx, source, savedAt, guard }) {
@@ -172,7 +168,8 @@ function persistSearchSourceWatermark({ pathCtx, source, savedAt, guard }) {
       return {
         ...current,
         [key]: current[key].map((entry) =>
-          sameSearchSource(entry, source) && isFetchableSearchSource(entry)
+          searchSourceFetchIdentity(entry) === searchSourceFetchIdentity(source) &&
+          isFetchableSearchSource(entry)
             ? {
                 ...entry,
                 recency: { ...(entry.recency || {}), lastRunAt: savedAt.toISOString() },
@@ -184,11 +181,15 @@ function persistSearchSourceWatermark({ pathCtx, source, savedAt, guard }) {
   });
 }
 
-function persistCompanySourceWatermark({ pathCtx, companyName, savedAt, guard }) {
+function companySourceFetchIdentity(company) {
+  return JSON.stringify({
+    provider: normalizedIdentityValue(company?.provider || company?.ats),
+    careersUrl: String(company?.careers_url || company?.careersUrl || "").trim(),
+  });
+}
+
+function persistCompanySourceWatermark({ pathCtx, companySource, savedAt, guard }) {
   if (!dbExists(pathCtx)) return null;
-  const target = String(companyName || "")
-    .trim()
-    .toLowerCase();
   return sourceConfigMutate({
     ...pathCtx,
     name: "sourced-scan",
@@ -197,9 +198,8 @@ function persistCompanySourceWatermark({ pathCtx, companyName, savedAt, guard })
       return {
         ...current,
         tracked_companies: (current.tracked_companies || []).map((company) =>
-          String(company?.name || "")
-            .trim()
-            .toLowerCase() === target
+          companySourceFetchIdentity(company) === companySourceFetchIdentity(companySource) &&
+          company?.enabled !== false
             ? { ...company, lastRunAt: savedAt.toISOString() }
             : company
         ),
@@ -464,7 +464,7 @@ export async function runSourcedScan({
     ensureActive();
     await acceptBatch(result, { kind: "company", label: company.name });
     if (write && !standaloneConfigMode && result.errors.length === 0) {
-      successfulCompanySources.push(company.name);
+      successfulCompanySources.push(company);
     }
   }
 
@@ -586,10 +586,10 @@ export async function runSourcedScan({
 
   if (write && !standaloneConfigMode) {
     ensureActive();
-    for (const companyName of successfulCompanySources) {
+    for (const companySource of successfulCompanySources) {
       persistCompanySourceWatermark({
         pathCtx,
-        companyName,
+        companySource,
         savedAt,
         guard: writeGuard,
       });

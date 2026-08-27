@@ -1419,6 +1419,127 @@ test("search-source watermarks wait until the full scan is durably persisted", a
   }
 });
 
+test("an in-flight scan never stamps a replacement source URL it did not fetch", async () => {
+  const repoRoot = tempRepo();
+  const response = deferred();
+  const requested = deferred();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            id: "venue-feed",
+            label: "Venue jobs",
+            source_type: "rss",
+            rssUrl: "https://example.test/old.xml",
+            enabled: true,
+            recency: { mode: "since-last-run" },
+          },
+        ],
+      },
+    });
+
+    const scan = runSourcedScan({
+      repoRoot,
+      write: true,
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      fetchImpl: async (url) => {
+        assert.equal(String(url), "https://example.test/old.xml");
+        requested.resolve();
+        return response.promise;
+      },
+    });
+    await requested.promise;
+
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            id: "venue-feed",
+            label: "Venue jobs",
+            source_type: "rss",
+            rssUrl: "https://example.test/new.xml",
+            enabled: true,
+            recency: { mode: "since-last-run" },
+          },
+        ],
+      },
+    });
+    response.resolve(
+      rssResponse({
+        company: "Venue Co",
+        title: "Event Operations Manager",
+        url: "https://example.test/jobs/event-ops",
+      })
+    );
+    await scan;
+
+    const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches[0];
+    assert.equal(stored.rssUrl, "https://example.test/new.xml");
+    assert.equal(stored.recency.lastRunAt, undefined);
+  } finally {
+    response.resolve(new Response("", { status: 200 }));
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("an in-flight company scan never stamps a replacement careers URL it did not fetch", async () => {
+  const repoRoot = tempRepo();
+  const response = deferred();
+  const requested = deferred();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    companyAtsUpsert({
+      repoRoot,
+      entry: { name: "Acme", careers_url: "https://jobs.lever.co/oldco" },
+    });
+
+    const scan = runSourcedScan({
+      repoRoot,
+      write: true,
+      fetchImpl: async (url) => {
+        assert.match(String(url), /api\.lever\.co\/v0\/postings\/oldco/);
+        requested.resolve();
+        return response.promise;
+      },
+    });
+    await requested.promise;
+
+    companyAtsUpsert({
+      repoRoot,
+      entry: { name: "Acme", careers_url: "https://jobs.lever.co/newco" },
+    });
+    response.resolve(
+      new Response(
+        JSON.stringify([
+          {
+            text: "Platform Engineer",
+            hostedUrl: "https://jobs.lever.co/oldco/role-1",
+            categories: { location: "Remote" },
+            descriptionPlain: "Build reliable infrastructure and developer tooling.",
+          },
+        ]),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+    await scan;
+
+    const stored = sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.tracked_companies[0];
+    assert.equal(stored.careers_url, "https://jobs.lever.co/newco");
+    assert.equal(stored.lastRunAt, undefined);
+  } finally {
+    response.resolve(new Response("[]", { status: 200 }));
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("a post-fetch failure leaves the source watermark and sourced rows untouched", async () => {
   const repoRoot = tempRepo();
   try {
