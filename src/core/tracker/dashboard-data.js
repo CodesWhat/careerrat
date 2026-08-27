@@ -5447,9 +5447,8 @@ export function buildDashboardViewModel(
       fitFloor,
     }),
     network: buildNetwork(trackerData, { now }),
-    // No limit: keep the full history so the "View all" drawer is complete; the
-    // dock view-model slices to DASHBOARD_ACTIVITY_LIMIT at render time.
-    activity: buildActivityPulse(activityEvents, { now, limit: null }),
+    // The app menu is a recent pulse; the complete durable history stays local.
+    activity: buildActivityPulse(activityEvents, { now }),
   };
 }
 

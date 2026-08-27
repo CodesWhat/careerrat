@@ -25,6 +25,29 @@ test("Dashboard adapterbuilds live UI state from tracker JSON", async () => {
   assert.ok(vm.jobs.sankey.nodes.length > 0);
 });
 
+test("Dashboard adapter limits Activity to the 12 most recent events without pruning history", () => {
+  const activityEvents = Array.from({ length: 15 }, (_, index) => ({
+    id: `event-${index + 1}`,
+    at: new Date(Date.UTC(2026, 7, 27, 12, index)).toISOString(),
+    title: `Activity ${index + 1}`,
+  }));
+
+  const vm = buildDashboardViewModel(
+    { applications: [], sourced: [], sources: [], communications: [] },
+    { now: new Date("2026-08-27T13:00:00.000Z"), activityEvents }
+  );
+
+  assert.equal(activityEvents.length, 15);
+  assert.equal(vm.activity.length, 12);
+  assert.deepEqual(
+    vm.activity.map((event) => event.id),
+    activityEvents
+      .slice(-12)
+      .reverse()
+      .map((event) => event.id)
+  );
+});
+
 test("Jobs Sankey uses canonical semantic stages and never numbered rounds", () => {
   const vm = buildDashboardViewModel(
     {
