@@ -623,6 +623,7 @@ function buildSettingsStatus(settings = {}) {
       workAuthorization: stringOrFallback(profile.workAuthorization),
     },
     targeting: {
+      fitFloor: Number.isFinite(Number(targeting.fitFloor)) ? Number(targeting.fitFloor) : null,
       primaryRoles: listOrEmpty(targeting.primaryRoles),
       excludedCompanies: listOrEmpty(targeting.excludedCompanies),
     },
@@ -656,6 +657,11 @@ function profileCompFromSettings(settings) {
     floorK: compK(profile.minimumBaseK),
     askK: compK(profile.targetBaseK) ?? compK(profile.expectedBaseK),
   };
+}
+
+function fitFloorFromSettings(settings) {
+  const fitFloor = Number(settings?.targeting?.fitFloor);
+  return Number.isFinite(fitFloor) ? Math.max(0, Math.min(100, fitFloor)) : null;
 }
 
 function objectList(value) {
@@ -1591,9 +1597,17 @@ function sourcedRoleIsActive(role) {
   return status !== "reviewed-hold" && !TERMINAL_STAGES.has(classifyStage(status));
 }
 
-function buildLatestRoles(trackerData) {
+function sourcedRoleMeetsFitFloor(role, fitFloor) {
+  if (!Number.isFinite(fitFloor)) return true;
+  if (role?.fitScore == null || role.fitScore === "") return true;
+  const score = Number(role?.fitScore);
+  return Number.isFinite(score) && score >= fitFloor;
+}
+
+function buildLatestRoles(trackerData, fitFloor) {
   const sourced = trackerData?.sourced || trackerData?.prospects || [];
   return [...sourced]
+    .filter((role) => sourcedRoleMeetsFitFloor(role, fitFloor))
     .sort((a, b) => Number(b.fitScore || 0) - Number(a.fitScore || 0))
     .slice(0, 3)
     .map((role) => ({
@@ -5278,7 +5292,10 @@ function buildJobsRail(rows) {
   };
 }
 
-function buildJobs(trackerData, { now = new Date(), activityEvents = [], profileComp = {} } = {}) {
+function buildJobs(
+  trackerData,
+  { now = new Date(), activityEvents = [], profileComp = {}, fitFloor = null } = {}
+) {
   const communications = trackerData?.communications || [];
   const applications = trackerData?.applications || [];
   const applicationRows = applications.map((app, index) =>
@@ -5295,7 +5312,8 @@ function buildJobs(trackerData, { now = new Date(), activityEvents = [], profile
       .filter((app) => app?.company && !TERMINAL_STAGES.has(classifyStage(app.status)))
       .map((app) => [normalizeName(app.company), app.company])
   );
-  const sourcedRows = (trackerData?.sourced || trackerData?.prospects || []).map((role, index) =>
+  const sourced = trackerData?.sourced || trackerData?.prospects || [];
+  const sourcedRows = sourced.map((role, index) =>
     sourcedJobRow(
       sourcedRoleWithCompanyWarning(role, activeApplicationCompanies),
       index,
@@ -5303,8 +5321,15 @@ function buildJobs(trackerData, { now = new Date(), activityEvents = [], profile
       profileComp
     )
   );
+  const visibleActiveSourcedIds = new Set(
+    sourced.flatMap((role, index) =>
+      sourcedRoleMeetsFitFloor(role, fitFloor) ? [role.id || `sourced-${index + 1}`] : []
+    )
+  );
   const activeRows = applicationRows.filter((row) => !row.terminal);
-  const activeSourcedRows = sourcedRows.filter((row) => !row.terminal);
+  const activeSourcedRows = sourcedRows.filter(
+    (row) => !row.terminal && visibleActiveSourcedIds.has(row.id)
+  );
   const terminalRows = [...applicationRows, ...sourcedRows].filter((row) => row.terminal);
   const rows = [...activeRows, ...activeSourcedRows, ...terminalRows];
   for (const row of rows) {
@@ -5356,10 +5381,10 @@ function buildReviewHoldRoles(trackerData) {
     }));
 }
 
-function buildSourcedRoles(trackerData) {
+function buildSourcedRoles(trackerData, fitFloor) {
   const sourced = trackerData?.sourced || trackerData?.prospects || [];
   return [...sourced]
-    .filter((role) => sourcedRoleIsActive(role))
+    .filter((role) => sourcedRoleIsActive(role) && sourcedRoleMeetsFitFloor(role, fitFloor))
     .sort((a, b) => Number(b.fitScore || 0) - Number(a.fitScore || 0))
     .map((role, index) => ({
       id: role.id || `sourced-${index + 1}`,
@@ -5385,6 +5410,7 @@ export function buildDashboardViewModel(
   } = {}
 ) {
   activeCandidateName = normalizeName(settings?.profile?.candidate || "");
+  const fitFloor = fitFloorFromSettings(settings);
   const allNextSteps = buildNextSteps(trackerData, now, { limit: null });
   const timeNextSteps = allNextSteps.slice(0, 3);
   // Story-enrichment prompts ("give me more context") append AFTER the 3 time-based
@@ -5392,7 +5418,7 @@ export function buildDashboardViewModel(
   // the time-based steps only — an enrichment ask should never become the headline.
   const enrichmentSteps = buildStoryEnrichmentSteps(trackerData);
   const nextSteps = [...timeNextSteps, ...enrichmentSteps];
-  const latestRoles = buildLatestRoles(trackerData);
+  const latestRoles = buildLatestRoles(trackerData, fitFloor);
   return {
     recency: {
       updatedAt: durableUpdatedAt(trackerData),
@@ -5410,7 +5436,7 @@ export function buildDashboardViewModel(
     nextSteps,
     allNextSteps,
     latestRoles,
-    sourcedRoles: buildSourcedRoles(trackerData),
+    sourcedRoles: buildSourcedRoles(trackerData, fitFloor),
     reviewHoldRoles: buildReviewHoldRoles(trackerData),
     calendar: buildCalendar(trackerData, { now, calendarProviderStatus }),
     strategy: buildStrategyInsights(trackerData, { now }),
@@ -5418,6 +5444,7 @@ export function buildDashboardViewModel(
       now,
       activityEvents,
       profileComp: profileCompFromSettings(settings),
+      fitFloor,
     }),
     network: buildNetwork(trackerData, { now }),
     // No limit: keep the full history so the "View all" drawer is complete; the

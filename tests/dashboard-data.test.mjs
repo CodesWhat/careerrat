@@ -1977,6 +1977,58 @@ test("Dashboard active sourced list excludes terminal and reviewed-hold rows", (
   );
 });
 
+test("Dashboard applies the saved fit floor to active sourced candidates only", () => {
+  const vm = buildDashboardViewModel(
+    {
+      applications: [
+        { id: "applied-low", company: "Applied Co", role: "Bar Manager", fitScore: 52 },
+      ],
+      sourced: [
+        {
+          id: "candidate-high",
+          company: "High Fit Co",
+          role: "Venue Operations Manager",
+          status: "sourced",
+          fitScore: 65,
+        },
+        {
+          id: "candidate-low",
+          company: "Low Fit Co",
+          role: "Events Manager",
+          status: "sourced",
+          fitScore: 58,
+        },
+        {
+          id: "archived-low",
+          company: "Archived Co",
+          role: "Events Manager",
+          status: "cut",
+          fitScore: 40,
+        },
+      ],
+      sources: [],
+      communications: [],
+    },
+    {
+      now: new Date("2026-08-27T12:00:00.000Z"),
+      settings: { targeting: { fitFloor: 65 } },
+    }
+  );
+
+  assert.deepEqual(
+    vm.sourcedRoles.map((role) => role.id),
+    ["candidate-high"]
+  );
+  assert.deepEqual(
+    vm.latestRoles.map((role) => role.detailId),
+    ["candidate-high"]
+  );
+  assert.ok(vm.jobs.rows.some((row) => row.id === "applied-low"));
+  assert.ok(vm.jobs.rows.some((row) => row.id === "candidate-high"));
+  assert.ok(vm.jobs.rows.some((row) => row.id === "archived-low"));
+  assert.ok(!vm.jobs.rows.some((row) => row.id === "candidate-low"));
+});
+
 test("Dashboard adapter warns sourced roles when the same company has an active application", () => {
   const vm = buildDashboardViewModel({
     applications: [

@@ -35,6 +35,7 @@ test("Dashboard settings snapshot exposes onboarding config without private curr
         messaging: { enabled: false },
       },
     },
+    targeting: { fit_bands: { fit_floor: 65 } },
     files: ["candidate/profile.yml", "candidate/automation.yml"],
   });
 
@@ -47,6 +48,7 @@ test("Dashboard settings snapshot exposes onboarding config without private curr
   assert.equal(snapshot.profile.workAuthorization, "Authorized; no sponsorship");
   assert.equal(snapshot.automation.sessionProvider, "Browser extension");
   assert.deepEqual(snapshot.automation.enabledCapabilities, ["Status polling"]);
+  assert.equal(snapshot.targeting.fitFloor, 65);
   assert.deepEqual(snapshot.files, ["candidate/profile.yml", "candidate/automation.yml"]);
   assert.doesNotMatch(JSON.stringify(snapshot), /123456|current_base|currentBase/);
 });

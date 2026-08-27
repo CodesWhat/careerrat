@@ -99,6 +99,8 @@ export function buildSettingsSnapshot({
   // Optional logo.dev publishable token (PRIVATE candidate config; never committed).
   // Absent → dashboard avatars stay initials chips. No hardcoded default.
   const logoToken = automation?.integrations?.logo_dev_token || automation?.logo_dev_token || "";
+  const configuredFitFloor = Number(targeting?.fit_bands?.fit_floor);
+  const fitFloor = Number.isFinite(configuredFitFloor) ? configuredFitFloor : 70;
 
   return {
     logoToken,
@@ -121,6 +123,7 @@ export function buildSettingsSnapshot({
       workAuthorization: workAuthorization(authorization),
     },
     targeting: {
+      fitFloor,
       primaryRoles: (targeting.role_buckets || [])
         .filter((bucket) => bucket && (!bucket.priority || bucket.priority === "primary"))
         .flatMap((bucket) => bucket.titles || [])
