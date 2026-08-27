@@ -1599,6 +1599,27 @@ describe("FirstRunController chat event reconciliation", () => {
     expect(api.sendChatMessage).not.toHaveBeenCalled();
   });
 
+  it("does not repeat a salary question followed by a short explanation", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    await bootController(module, api);
+    const reply = [
+      "```careerrat:confirm",
+      '{"kind":"candidate_patch","summary":"Search priorities","payload":{"doc":"targeting","patch":{"keep_signals":["strong pay"]}}}',
+      "```",
+      "What’s the lowest base salary you’d accept for any job? I’ll skip anything clearly below it.",
+    ].join("\n");
+
+    sse.calls.at(-1).options.onEvent("assistant", assistantPayload(reply), { lastEventId: "2" });
+    rerender(module, api);
+    await flushEffects();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("targeting", {
+      keep_signals: ["strong pay"],
+    });
+    expect(api.sendChatMessage).not.toHaveBeenCalled();
+  });
+
   it("does not request another turn when the saved assistant turn expects yes or no", async () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi();

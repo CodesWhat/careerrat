@@ -98,6 +98,25 @@ test("onboarding detects a question followed by examples as waiting for the user
   );
 });
 
+test("onboarding detects a question followed by a short consequence as waiting for the user", () => {
+  const salaryQuestion = {
+    id: "salary-question",
+    role: "assistant",
+    text: "What’s the lowest base salary you’d accept for any job? I’ll skip anything clearly below it.",
+    blocks: [{ kind: "candidate_patch", status: "resolved" }],
+  };
+
+  assert.equal(onboardingHasUnansweredTurn([salaryQuestion]), true);
+  assert.deepEqual(
+    collapseUnansweredOnboardingPrompts([
+      salaryQuestion,
+      { ...salaryQuestion, id: "salary-repeat-1", blocks: [] },
+      { ...salaryQuestion, id: "salary-repeat-2", blocks: [] },
+    ]).map((message) => message.id),
+    ["salary-repeat-2"]
+  );
+});
+
 test("onboarding draft read fills a stale browser transcript from canonical skill chat history", () => {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-onboarding-chat-draft-"));
   const env = {};

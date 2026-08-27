@@ -105,6 +105,7 @@ function onboardingAssistantPromptsUser(message) {
   return (
     trailingInstruction.length <= 360 &&
     (/^(?:for example|for instance|examples?\b|e\.g\.|such as)\b/i.test(trailingInstruction) ||
+      /^i(?:['’]ll| will)\s+skip\b/i.test(trailingInstruction) ||
       /\b(?:answer|choose|include|paste|pick|reply|select|send|share|say|tell|type|use)\b/i.test(
         trailingInstruction
       ))
