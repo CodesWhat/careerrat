@@ -236,7 +236,7 @@ test("known ATS (Greenhouse) board fetch fails -> falls through to a plain fetch
   assert.equal(result.liveness.result, "active");
 });
 
-test("an expired ATS redirect cannot canonicalize to an unrelated live posting", async () => {
+test("an exact Greenhouse requisition missing from its current board cannot canonicalize to an unrelated posting", async () => {
   const expiredUrl = "https://job-boards.greenhouse.io/gracioushospitality/jobs/5158318008";
   const boardUrl = "https://job-boards.greenhouse.io/gracioushospitality?error=true";
   const unrelatedUrl = "https://job-boards.greenhouse.io/gracioushospitality/jobs/4750317008";
@@ -267,7 +267,8 @@ test("an expired ATS redirect cannot canonicalize to an unrelated live posting",
 
   assert.equal(result.url, expiredUrl);
   assert.equal(result.liveness.result, "expired");
-  assert.equal(result.liveness.code, "expired_url");
+  assert.equal(result.liveness.code, "provider_posting_missing");
+  assert.match(result.liveness.reason, /current greenhouse board no longer lists requisition/i);
 });
 
 test("canonical ATS recovery cannot change a known requisition identity", async () => {
@@ -319,6 +320,41 @@ test("known ATS that's ALSO an SPA host (Ashby) with a failing board fetch -> de
     false,
     "an SPA-classified host must never fall through to a plain fetch"
   );
+});
+
+test("hydrateJobOffer rejects an exact ATS requisition missing from its successfully fetched current board", async () => {
+  const url = "https://jobs.ashbyhq.com/plaid/5aead7d6-6d97-484e-958b-8c3cb1ae766e";
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Plaid",
+      title: "Event Operations Manager",
+      url,
+      bodyText: "Unverified open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      rejectExpired: true,
+      resolveHost: publicResolver,
+      fetchImpl: async (requestedUrl) => {
+        assert.equal(new URL(String(requestedUrl)).hostname, "api.ashbyhq.com");
+        return jsonResponse({
+          jobs: [
+            {
+              id: "11111111-1111-4111-8111-111111111111",
+              title: "Different active role",
+              jobUrl: "https://jobs.ashbyhq.com/plaid/11111111-1111-4111-8111-111111111111",
+              descriptionPlain: LONG_ACTIVE_JD,
+            },
+          ],
+        });
+      },
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.equal(hydrated.bodyPartial, true);
+  assert.match(hydrated.bodyFetchReason, /current .*board|no longer lists/i);
 });
 
 test("non-ATS SPA-listed host (Wellfound) -> deferred without ever calling fetchImpl", async () => {

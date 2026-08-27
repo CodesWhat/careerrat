@@ -93,6 +93,7 @@ async function resolveJobUrlUncached(
       signal,
       resolutionCache,
     });
+    if (resolved?.liveness?.result === "expired") return resolved;
     if (resolved?.bodyText?.trim()) return resolved;
     providerResolution = resolved;
     // Known ATS, but this specific posting isn't on the company's current
@@ -273,7 +274,25 @@ async function resolveViaProviderBoard({
     const jobReqId = extractReqId(job.url);
     return jobReqId.id === targetReqId.id;
   });
-  if (!match) return null;
+  if (!match) {
+    if (!targetReqId.id) return null;
+    return {
+      bodyFetchStatus: "resolved",
+      url,
+      provider,
+      title: null,
+      company: fallbackCompanyFromUrl(url),
+      location: null,
+      comp: null,
+      bodyText: "",
+      bodyPartial: true,
+      liveness: {
+        result: "expired",
+        code: "provider_posting_missing",
+        reason: `The current ${provider} board no longer lists requisition ${targetReqId.value}.`,
+      },
+    };
+  }
 
   return {
     bodyFetchStatus: "resolved",
