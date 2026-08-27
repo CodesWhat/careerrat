@@ -336,9 +336,11 @@ const EARLY_CAREER_TITLE_RE = /\b(intern(ship)?|junior|jr\.?|entry[ -]level|grad
 const SENIOR_TITLE_RE = /\b(senior|sr\.?|staff|principal|distinguished|fellow)\b/i;
 const REMOTE_RE = /\b(remote|work from home|wfh|distributed)\b/i;
 const HYBRID_RE = /\bhybrid\b/i;
-const ONSITE_RE = /\b(on[ -]?site|in[ -]?office|office[ -]?based)\b/i;
+const ONSITE_RE = /\b(on[ -]?site|in[ -]?office|office[ -]?based|in[ -]?person)\b/i;
 const GLOBAL_REMOTE_RE = /\b(worldwide|anywhere|global)\b/i;
 const US_REMOTE_RE = /\b(united states|u\.?s\.?a?\.?|us[- ](?:only|based)|north america)\b/i;
+const US_BASED_CANDIDATE_RE =
+  /\b(?:all\s+)?candidates?\s+(?:must|required to)\s+be\s+(?:(?:based|located)\s+in\s+(?:the\s+)?(?:u\.?s\.?a?\.?|united states)|(?:u\.?s\.?a?\.?|united states)[ -]?based)\b/i;
 const FOREIGN_REMOTE_RE =
   /\b(de|ireland|united kingdom|uk|europe|emea|canada|india|asia|apac|australia|new zealand|singapore|germany|france|spain|portugal|poland|netherlands|sweden|norway|denmark|switzerland|israel|brazil|mexico)\b/i;
 const NO_SPONSORSHIP_RE =
@@ -346,9 +348,11 @@ const NO_SPONSORSHIP_RE =
 const US_STATE_RE =
   /(?:^|[,\s])(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC)(?:$|[,\s])/i;
 const EXPLICIT_ONSITE_BODY_RE =
-  /\b(?:fully|entirely|100%|strictly)\s+(?:on[ -]?site|in[ -]?office|office[ -]?based)\b|\b(?:on[ -]?site|in[ -]?office)\s+only\b/i;
-const OFFICE_CONTEXT_RE = /\b(?:office|on[ -]?site|in[ -]?office)\b/i;
+  /\b(?:fully|entirely|100%|strictly)\s+(?:on[ -]?site|in[ -]?office|office[ -]?based|in[ -]?person)\b|\b(?:on[ -]?site|in[ -]?office)\s+only\b|\b(?:location|workplace)\s*:\s*[^.\n]{0,80}\b(?:on[ -]?site|in[ -]?office|office[ -]?based|in[ -]?person)\b|\b(?:role|position|work)\s+(?:is|will be)\s+(?:fully\s+)?(?:on[ -]?site|in[ -]?office|office[ -]?based|in[ -]?person)\b|\bin[ -]?person\s+(?:role|position|work)\b/i;
+const OFFICE_CONTEXT_RE = /\b(?:office|on[ -]?site|in[ -]?office|in[ -]?person)\b/i;
 const REQUIRED_OFFICE_DAYS_RE = /\b(?:must|require(?:d|s)?|expect(?:ed|s)?|mandatory)\b/i;
+const DECLARATIVE_OFFICE_POSTURE_RE =
+  /\b(?:we|employees?|team(?: members)?)\s+(?:all\s+)?(?:work|commute|come|are)\b[^.\n]{0,80}\b(?:office|on[ -]?site|in[ -]?office|in[ -]?person)\b/i;
 const OFFICE_DAYS_RE =
   /\b(one|two|three|four|five|six|seven|[1-7])\s*days?\s*(?:\/\s*week|(?:per|a|each)\s+week)\b/gi;
 const OFFICE_DAY_WORDS = Object.freeze({
@@ -364,7 +368,12 @@ const OFFICE_DAY_WORDS = Object.freeze({
 function requiredOfficeDaysPerWeek(value) {
   let maximum = null;
   for (const sentence of String(value || "").split(/[.!?;\n]+/)) {
-    if (!OFFICE_CONTEXT_RE.test(sentence) || !REQUIRED_OFFICE_DAYS_RE.test(sentence)) continue;
+    if (
+      !OFFICE_CONTEXT_RE.test(sentence) ||
+      (!REQUIRED_OFFICE_DAYS_RE.test(sentence) && !DECLARATIVE_OFFICE_POSTURE_RE.test(sentence))
+    ) {
+      continue;
+    }
     for (const match of sentence.matchAll(OFFICE_DAYS_RE)) {
       const raw = match[1].toLowerCase();
       const days = OFFICE_DAY_WORDS[raw] || Number(raw);
@@ -404,6 +413,17 @@ const NEW_YORK_CITY_ALIASES = new Set([
   "bronx ny",
   "staten island ny",
 ]);
+const SAN_FRANCISCO_BAY_AREA_ALIASES = new Set([
+  "bay area",
+  "sf bay area",
+  "san francisco bay area",
+  "san francisco",
+  "san francisco ca",
+  "oakland",
+  "oakland ca",
+  "berkeley",
+  "berkeley ca",
+]);
 
 function normalizePlace(value) {
   const normalized = String(value || "")
@@ -411,7 +431,9 @@ function normalizePlace(value) {
     .replace(/\b(remote|hybrid|on[ -]?site|in[ -]?office)\b/g, " ")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
-  return NEW_YORK_CITY_ALIASES.has(normalized) ? "new york city" : normalized;
+  if (NEW_YORK_CITY_ALIASES.has(normalized)) return "new york city";
+  if (SAN_FRANCISCO_BAY_AREA_ALIASES.has(normalized)) return "san francisco bay area";
+  return normalized;
 }
 
 function coordinatesForPlace(value) {
@@ -511,11 +533,39 @@ function locationEligibility(offer, config) {
     (Array.isArray(profileLocation?.relocation) && profileLocation.relocation.length > 0) ||
     ["remote", "hybrid", "onsite"].some((mode) => typeof profileLocation?.[mode] === "boolean");
   if (!hasLocationPolicy) return { eligible: true };
-  if (!location) return { eligible: true, unknown: "location" };
 
   const officeDays = requiredOfficeDaysPerWeek(body);
+  const conditional = conditionalLocationPosture(body);
   const bodyOnsite = EXPLICIT_ONSITE_BODY_RE.test(body) || (officeDays != null && officeDays >= 4);
   const bodyHybrid = !bodyOnsite && officeDays != null && officeDays > 0;
+  if (!location && !conditional && !bodyOnsite && !bodyHybrid) {
+    return { eligible: true, unknown: "location" };
+  }
+  if (conditional) {
+    const home = String(profileLocation?.home || "").trim();
+    const hybridCommute = commuteEligibility(conditional.hybridNear, profileLocation);
+    const displayLocation = `Remote outside ${conditional.remoteOutside} · Hybrid near ${conditional.hybridNear}`;
+    if (conditional.usOnly && !homeLooksUs(home)) {
+      return { eligible: false, reason: "remote-region-mismatch" };
+    }
+    if (hybridCommute.eligible) {
+      if (profileLocation.hybrid !== true) {
+        return { eligible: false, reason: "hybrid-not-allowed" };
+      }
+      if (officeDaysExceedPreference(officeDays, profileLocation)) {
+        return { eligible: false, reason: "office-days-exceed-preference" };
+      }
+      return { ...hybridCommute, displayLocation };
+    }
+    if (profileLocation.remote !== true) {
+      return { eligible: false, reason: "remote-not-allowed" };
+    }
+    if (profileLocation.remote_scope !== "worldwide" && !homeLooksUs(home)) {
+      return { eligible: false, reason: "remote-region-unverified" };
+    }
+    return { eligible: true, displayLocation };
+  }
+
   const remote = REMOTE_RE.test(`${title}\n${location}`) && !bodyHybrid && !bodyOnsite;
   const hybrid = HYBRID_RE.test(`${title}\n${location}`) || bodyHybrid;
   const onsite = ONSITE_RE.test(`${title}\n${location}`) || bodyOnsite;
@@ -523,19 +573,7 @@ function locationEligibility(offer, config) {
     (mode) => typeof profileLocation?.[mode] === "boolean"
   );
 
-  const savedMaxOfficeDays = profileLocation.max_commute_days_per_week;
-  const maxOfficeDays =
-    savedMaxOfficeDays === null ||
-    savedMaxOfficeDays === undefined ||
-    String(savedMaxOfficeDays).trim() === ""
-      ? null
-      : Number(savedMaxOfficeDays);
-  if (
-    officeDays != null &&
-    Number.isInteger(maxOfficeDays) &&
-    maxOfficeDays >= 0 &&
-    officeDays > maxOfficeDays
-  ) {
+  if (officeDaysExceedPreference(officeDays, profileLocation)) {
     return { eligible: false, reason: "office-days-exceed-preference" };
   }
 
@@ -572,6 +610,33 @@ function locationEligibility(offer, config) {
     return { eligible: false, reason: hybrid ? "hybrid-not-allowed" : "onsite-not-allowed" };
   }
   return commuteEligibility(location, profileLocation);
+}
+
+function officeDaysExceedPreference(officeDays, profileLocation) {
+  const savedMaxOfficeDays = profileLocation?.max_commute_days_per_week;
+  const maxOfficeDays =
+    savedMaxOfficeDays === null ||
+    savedMaxOfficeDays === undefined ||
+    String(savedMaxOfficeDays).trim() === ""
+      ? null
+      : Number(savedMaxOfficeDays);
+  return (
+    officeDays != null &&
+    Number.isInteger(maxOfficeDays) &&
+    maxOfficeDays >= 0 &&
+    officeDays > maxOfficeDays
+  );
+}
+
+function conditionalLocationPosture(body) {
+  const match = String(body || "").match(
+    /\bremote\s+(?:position|role)\s+for\s+candidates\s+outside\s+(?:of\s+)?(.+?)\s+and\s+(?:a\s+)?hybrid\s+(?:position|role)\s+for\s+candidates\s+within\s+commuting\s+distance\s+to\s+(.+?)(?:[.;]|$)/i
+  );
+  if (!match) return null;
+  const remoteOutside = match[1].trim().replace(/^(?:the\s+)/i, "the ");
+  const hybridNear = match[2].trim();
+  if (!remoteOutside || !hybridNear) return null;
+  return { remoteOutside, hybridNear, usOnly: US_BASED_CANDIDATE_RE.test(body) };
 }
 
 function maxPostingAgeDays(config = {}) {
@@ -616,6 +681,112 @@ function contentEligibility(offer, config) {
     return { eligible: false, reason: "sponsorship-unavailable" };
   }
   return { eligible: true };
+}
+
+const QUALIFICATION_BUCKETS = Object.freeze({
+  seniority: "filteredSeniority",
+  location: "filteredLocation",
+  age: "filteredAge",
+  salary: "filteredSalary",
+  eligibility: "filteredEligibility",
+});
+
+export function qualifyCandidateOffer(
+  offer,
+  {
+    config = {},
+    now = Date.now(),
+    locationFilter = () => true,
+    deferBodyDependentPolicy = false,
+  } = {}
+) {
+  const seniority = seniorityEligibility(offer, config);
+  if (!seniority.eligible) {
+    return { eligible: false, bucket: "seniority", reason: seniority.reason };
+  }
+  if (deferBodyDependentPolicy) {
+    const age = postingAgeEligibility(offer, config, Number(now));
+    if (!age.eligible) return { eligible: false, bucket: "age", reason: age.reason };
+    return {
+      eligible: true,
+      qualificationUnknowns: ["location", "compensation", age.unknown].filter(Boolean),
+    };
+  }
+  if (!locationFilter(offer.location || "", offer.url, offer.title, offer)) {
+    return { eligible: false, bucket: "location", reason: "location-policy-mismatch" };
+  }
+  const qualifiedLocation = locationEligibility(offer, config);
+  if (!qualifiedLocation.eligible) {
+    return {
+      eligible: false,
+      bucket: "location",
+      reason: qualifiedLocation.reason,
+      ...(qualifiedLocation.distanceMiles == null
+        ? {}
+        : { distanceMiles: qualifiedLocation.distanceMiles }),
+    };
+  }
+  const age = postingAgeEligibility(offer, config, Number(now));
+  if (!age.eligible) return { eligible: false, bucket: "age", reason: age.reason };
+  const salary = salaryEligibility(offer, config);
+  if (!salary.eligible) {
+    return {
+      eligible: false,
+      bucket: "salary",
+      reason: salary.reason,
+      compBand: salary.band,
+    };
+  }
+  const content = contentEligibility(offer, config);
+  if (!content.eligible) {
+    return { eligible: false, bucket: "eligibility", reason: content.reason };
+  }
+  return {
+    eligible: true,
+    qualificationUnknowns: [qualifiedLocation.unknown, age.unknown, salary.unknown].filter(Boolean),
+    ...(qualifiedLocation.displayLocation
+      ? { displayLocation: qualifiedLocation.displayLocation }
+      : {}),
+  };
+}
+
+export function requalifyCanonicalOffers(
+  offers,
+  { config = {}, now = Date.now(), locationFilter = () => true } = {}
+) {
+  const result = {
+    kept: [],
+    filteredSeniority: [],
+    filteredLocation: [],
+    filteredAge: [],
+    filteredSalary: [],
+    filteredEligibility: [],
+  };
+  for (const offer of Array.isArray(offers) ? offers : []) {
+    const qualification = qualifyCandidateOffer(offer, { config, now, locationFilter });
+    if (!qualification.eligible) {
+      const bucket = QUALIFICATION_BUCKETS[qualification.bucket];
+      result[bucket].push({
+        ...offer,
+        qualificationReason: qualification.reason,
+        ...(qualification.distanceMiles == null
+          ? {}
+          : { distanceMiles: qualification.distanceMiles }),
+        ...(qualification.compBand ? { compBand: qualification.compBand } : {}),
+      });
+      continue;
+    }
+    const qualifiedOffer = qualification.displayLocation
+      ? { ...offer, location: qualification.displayLocation }
+      : offer;
+    const rating = scoreSourcedOffer(qualifiedOffer, config);
+    result.kept.push({
+      ...qualifiedOffer,
+      qualificationUnknowns: qualification.qualificationUnknowns,
+      ...rating,
+    });
+  }
+  return result;
 }
 
 function scoreSourcedOfferFromConfig(
@@ -797,7 +968,7 @@ function scoreSourcedOfferFromConfig(
 
   const clamped = Math.max(35, Math.min(95, Math.round(score)));
   return {
-    fit: fitFromScore(clamped),
+    fit: fitFromScore(clamped, targeting?.fit_bands),
     score: clamped,
     gate: gateFromScoreAndFlags(clamped, flags, modes),
     ratingReason: reasons.slice(0, 5).join("; "),
@@ -810,10 +981,79 @@ export function scoreSourcedOffer(offer = {}, config = {}) {
   return scoreSourcedOfferFromConfig(offer, config);
 }
 
-export function fitFromScore(score) {
-  if (score >= 82) return "high";
-  if (score >= 65) return "med";
+export function fitFromScore(score, fitBands) {
+  const savedHigh =
+    fitBands?.high_min == null || String(fitBands.high_min).trim() === ""
+      ? Number.NaN
+      : Number(fitBands.high_min);
+  const savedMed =
+    fitBands?.med_min == null || String(fitBands.med_min).trim() === ""
+      ? Number.NaN
+      : Number(fitBands.med_min);
+  const highMin = Number.isFinite(savedHigh) ? savedHigh : 85;
+  const medMin = Number.isFinite(savedMed) ? savedMed : 65;
+  if (score >= Math.max(highMin, medMin)) return "high";
+  if (score >= Math.min(highMin, medMin)) return "med";
   return "stretch";
+}
+
+export function applyPresentationCaps(
+  offers,
+  { companyPresentationCounts = new Map(), perCompanyCap = Infinity, limit = Infinity } = {}
+) {
+  const candidates = (Array.isArray(offers) ? offers : []).map((offer, inputIndex) => ({
+    offer,
+    inputIndex,
+  }));
+  const normalizedCompanyCap = Number(perCompanyCap);
+  const companyCap =
+    Number.isFinite(normalizedCompanyCap) && normalizedCompanyCap > 0
+      ? normalizedCompanyCap
+      : Infinity;
+  if (Number.isFinite(companyCap)) {
+    candidates.sort((left, right) => {
+      const scoreDelta = Number(right.offer.score || 0) - Number(left.offer.score || 0);
+      if (scoreDelta) return scoreDelta;
+      const rightPosted = Date.parse(String(right.offer.postedAt || ""));
+      const leftPosted = Date.parse(String(left.offer.postedAt || ""));
+      if (
+        Number.isFinite(rightPosted) &&
+        Number.isFinite(leftPosted) &&
+        rightPosted !== leftPosted
+      ) {
+        return rightPosted - leftPosted;
+      }
+      return left.inputIndex - right.inputIndex;
+    });
+  }
+
+  const presented = [];
+  const overflow = [];
+  for (const { offer } of candidates) {
+    const companyKey = String(offer.company || "")
+      .trim()
+      .toLowerCase();
+    const companyCount = Number(companyPresentationCounts.get(companyKey) || 0);
+    const { _qualificationInputIndex, ...cleanOffer } = offer;
+    if (companyCount >= companyCap) {
+      overflow.push({ ...cleanOffer, qualificationReason: "per-company-cap" });
+      continue;
+    }
+    companyPresentationCounts.set(companyKey, companyCount + 1);
+    presented.push(cleanOffer);
+  }
+
+  const normalizedLimit = Number(limit);
+  const runLimit =
+    Number.isFinite(normalizedLimit) && normalizedLimit > 0 ? normalizedLimit : Infinity;
+  const kept = presented.slice(0, runLimit);
+  overflow.push(
+    ...presented.slice(runLimit).map((offer) => ({
+      ...offer,
+      qualificationReason: "run-presentation-limit",
+    }))
+  );
+  return { kept, overflow };
 }
 
 function gateFromScoreAndFlags(score, flags, modes = {}) {
@@ -1033,6 +1273,7 @@ export function filterAndDedupeOffers(
     companyPresentationCounts = new Map(),
     seenRunCompanyRoles = new Set(),
     perCompanyCap = Infinity,
+    deferPartialCandidatePolicy = false,
   }
 ) {
   const kept = [];
@@ -1099,39 +1340,29 @@ export function filterAndDedupeOffers(
         continue;
       }
     }
-    const seniority = seniorityEligibility(offer, config);
-    if (!seniority.eligible) {
-      filteredSeniority.push({ ...offer, qualificationReason: seniority.reason });
-      continue;
-    }
-    if (!locationFilter(offer.location || "", offer.url, offer.title, offer)) {
-      filteredLocation.push({ ...offer, qualificationReason: "location-policy-mismatch" });
-      continue;
-    }
-    const qualifiedLocation = locationEligibility(offer, config);
-    if (!qualifiedLocation.eligible) {
-      filteredLocation.push({
+    const qualification = qualifyCandidateOffer(offer, {
+      config,
+      now,
+      locationFilter,
+      deferBodyDependentPolicy: deferPartialCandidatePolicy && offer.bodyPartial === true,
+    });
+    if (!qualification.eligible) {
+      const bucket = QUALIFICATION_BUCKETS[qualification.bucket];
+      const buckets = {
+        filteredSeniority,
+        filteredLocation,
+        filteredAge,
+        filteredSalary,
+        filteredEligibility,
+      };
+      buckets[bucket].push({
         ...offer,
-        qualificationReason: qualifiedLocation.reason,
-        ...(qualifiedLocation.distanceMiles == null
+        qualificationReason: qualification.reason,
+        ...(qualification.distanceMiles == null
           ? {}
-          : { distanceMiles: qualifiedLocation.distanceMiles }),
+          : { distanceMiles: qualification.distanceMiles }),
+        ...(qualification.compBand ? { compBand: qualification.compBand } : {}),
       });
-      continue;
-    }
-    const age = postingAgeEligibility(offer, config, Number(now));
-    if (!age.eligible) {
-      filteredAge.push({ ...offer, qualificationReason: age.reason });
-      continue;
-    }
-    const salary = salaryEligibility(offer, config);
-    if (!salary.eligible) {
-      filteredSalary.push({ ...offer, qualificationReason: salary.reason, compBand: salary.band });
-      continue;
-    }
-    const content = contentEligibility(offer, config);
-    if (!content.eligible) {
-      filteredEligibility.push({ ...offer, qualificationReason: content.reason });
       continue;
     }
     const key = normalizeCompanyRoleKey(offer.company, offer.title);
@@ -1141,55 +1372,27 @@ export function filterAndDedupeOffers(
     const possibleDuplicate = seenCompanyRoles.has(key);
     if (possibleDuplicate) possibleDuplicates.push(offer);
     seenCompanyRoles.add(key);
-    const qualificationUnknowns = [qualifiedLocation.unknown, age.unknown, salary.unknown].filter(
-      Boolean
-    );
+    const qualifiedOffer = qualification.displayLocation
+      ? { ...offer, location: qualification.displayLocation }
+      : offer;
     qualified.push({
-      ...offer,
+      ...qualifiedOffer,
       key,
       reqId: req.id,
       possibleDuplicate,
-      qualificationUnknowns,
+      qualificationUnknowns: qualification.qualificationUnknowns,
       ...(titleRelevance ? { titleRelevance } : {}),
       _qualificationInputIndex: inputIndex,
-      ...(rating || scoreSourcedOffer(offer, config)),
+      ...(rating || scoreSourcedOffer(qualifiedOffer, config)),
     });
   }
 
-  // A company board is usually newest-first, but not all providers guarantee
-  // it. Rank the already-qualified survivors before applying the presentation
-  // cap so one employer cannot fill the default inbox with weaker roles.
-  const normalizedCap = Number(perCompanyCap);
-  const cap = Number.isFinite(normalizedCap) && normalizedCap > 0 ? normalizedCap : Infinity;
-  if (Number.isFinite(cap)) {
-    qualified.sort((left, right) => {
-      const scoreDelta = Number(right.score || 0) - Number(left.score || 0);
-      if (scoreDelta) return scoreDelta;
-      const rightPosted = Date.parse(String(right.postedAt || ""));
-      const leftPosted = Date.parse(String(left.postedAt || ""));
-      if (
-        Number.isFinite(rightPosted) &&
-        Number.isFinite(leftPosted) &&
-        rightPosted !== leftPosted
-      ) {
-        return rightPosted - leftPosted;
-      }
-      return left._qualificationInputIndex - right._qualificationInputIndex;
-    });
-  }
-  for (const offer of qualified) {
-    const companyKey = String(offer.company || "")
-      .trim()
-      .toLowerCase();
-    const presented = Number(companyPresentationCounts.get(companyKey) || 0);
-    const { _qualificationInputIndex, ...cleanOffer } = offer;
-    if (presented >= cap) {
-      overflow.push({ ...cleanOffer, qualificationReason: "per-company-cap" });
-      continue;
-    }
-    companyPresentationCounts.set(companyKey, presented + 1);
-    kept.push(cleanOffer);
-  }
+  const presentation = applyPresentationCaps(qualified, {
+    companyPresentationCounts,
+    perCompanyCap,
+  });
+  kept.push(...presentation.kept);
+  overflow.push(...presentation.overflow);
 
   return {
     kept,

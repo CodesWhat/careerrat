@@ -1479,6 +1479,63 @@ test("qualification gate filters stale, below-floor, and explicit sponsorship-co
   ]);
 });
 
+test("partial offers enforce location, compensation, and content policy by default", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Partial Location Corp",
+        title: "Staff Backend Engineer",
+        url: "https://jobs.example.com/partial-location",
+        location: "Remote - United States",
+        bodyText: "Location: San Francisco Bay Area, CA (in-person).",
+        bodyPartial: true,
+      },
+      {
+        company: "Partial Comp Corp",
+        title: "Staff Backend Engineer",
+        url: "https://jobs.example.com/partial-comp",
+        location: "Remote - United States",
+        bodyText: "Salary Range: $100,000 - $120,000 annually.",
+        bodyPartial: true,
+      },
+      {
+        company: "Partial Eligibility Corp",
+        title: "Staff Backend Engineer",
+        url: "https://jobs.example.com/partial-eligibility",
+        location: "Remote - United States",
+        bodyText: "Visa sponsorship is not available for this position.",
+        bodyPartial: true,
+      },
+    ],
+    {
+      seenUrls: new Set(),
+      seenReqIds: new Set(),
+      seenCompanyRoles: new Set(),
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Staff Backend Engineer"] }] },
+        profile: {
+          compensation: { minimum_base: 180000 },
+          authorization: { requires_sponsorship: true },
+          location: {
+            home: "Brooklyn, NY",
+            remote: true,
+            remote_scope: "home-country",
+            hybrid: true,
+            onsite: false,
+          },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredLocation.length, 1);
+  assert.equal(result.filteredSalary.length, 1);
+  assert.equal(result.filteredEligibility.length, 1);
+});
+
 test("qualification gate caps one company and reconciles every fetched offer", () => {
   const offers = Array.from({ length: 4 }, (_, index) => ({
     company: "FloodCo",
@@ -1520,8 +1577,44 @@ test("qualification gate caps one company and reconciles every fetched offer", (
 
 test("maps score bands to tracker fit buckets", () => {
   assert.equal(fitFromScore(90), "high");
+  assert.equal(fitFromScore(84), "med");
   assert.equal(fitFromScore(70), "med");
   assert.equal(fitFromScore(55), "stretch");
+});
+
+test("maps score bands through the candidate's saved thresholds", () => {
+  assert.equal(fitFromScore(84, { high_min: 85, med_min: 65 }), "med");
+  assert.equal(fitFromScore(64, { high_min: 85, med_min: 65 }), "stretch");
+  assert.equal(fitFromScore(84, { high_min: "not-a-number", med_min: 70 }), "med");
+  assert.equal(fitFromScore(84, { high_min: null, med_min: null }), "med");
+});
+
+test("qualification recognizes an annual salary sentence below the saved floor", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Credence",
+        title: "AI Software Engineer",
+        url: "https://jobs.example.test/credence-ai-software-engineer",
+        location: "Tysons Corner, VA (Remote)",
+        bodyText: "Salary Range: $120,000 - $150,000 annually.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Software Engineer"] }] },
+        profile: {
+          compensation: { minimum_base: 180000 },
+          location: { home: "Brooklyn, NY", remote: true, hybrid: true, onsite: false },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
 });
 
 // ---------------------------------------------------------------------------

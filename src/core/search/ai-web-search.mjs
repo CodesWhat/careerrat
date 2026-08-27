@@ -55,7 +55,7 @@ import {
   postingIdentityIsSeen,
 } from "../scoring/sourced-identity.mjs";
 import { captureAndPersistOffersIfDb } from "../scoring/sourced-persistence.mjs";
-import { normalizeCompanyRoleKey } from "../scoring/sourced-scanner.mjs";
+import { normalizeCompanyRoleKey, requalifyCanonicalOffers } from "../scoring/sourced-scanner.mjs";
 import { buildSearchPromptContext, getSearchPrompts } from "./search-prompts.mjs";
 
 const AI_WEB_SEARCH_SCHEMA_PATH = "config/ai-web-search.schema.json";
@@ -96,7 +96,9 @@ const CUT_GATE_FLAGS = new Set([
 ]);
 
 function deriveGate(ruleFlags = []) {
-  return ruleFlags.some((flag) => CUT_GATE_FLAGS.has(flag)) ? "likely-cut" : "review";
+  return ruleFlags.some((flag) => CUT_GATE_FLAGS.has(flag) || flag.startsWith("cut-risk-"))
+    ? "likely-cut"
+    : "review";
 }
 
 // Map one AI-web-search schema role into the "offer" shape
@@ -112,6 +114,7 @@ function toScanOffer(role, { key, reqId }) {
     url: role.url,
     location: role.location || "",
     comp: role.comp_text || "",
+    postedAt: role.posted_at || null,
     bodyText: role.body_text || "",
     bodyPartial: role.body_partial === true,
     score: Number.isFinite(score) ? score : 0,
@@ -531,7 +534,8 @@ export async function runAiWebSearch({
     preliminary.push(offer);
   }
 
-  const survivors = [];
+  let survivors = [];
+  const canonicalCandidates = [];
   const captureFailures = [];
   const recoveredSources = [];
   const hydrationInputs = [
@@ -603,8 +607,27 @@ export async function runAiWebSearch({
       continue;
     }
     addPostingIdentity(seenPostingKeys, canonicalOffer);
-    survivors.push(canonicalOffer);
+    canonicalCandidates.push(canonicalOffer);
   }
+
+  const canonicalQualification = requalifyCanonicalOffers(canonicalCandidates, {
+    config,
+  });
+  survivors = canonicalQualification.kept.map((offer) => ({
+    ...offer,
+    gate: deriveGate(offer.ruleFlags),
+  }));
+  const reasonCounts = {
+    location: canonicalQualification.filteredLocation.length,
+    salary: canonicalQualification.filteredSalary.length,
+    seniority: canonicalQualification.filteredSeniority.length,
+    age: canonicalQualification.filteredAge.length,
+    eligibility: canonicalQualification.filteredEligibility.length,
+  };
+  for (const key of Object.keys(reasonCounts)) {
+    if (reasonCounts[key] === 0) delete reasonCounts[key];
+  }
+  const disqualified = Object.values(reasonCounts).reduce((sum, count) => sum + count, 0);
 
   // A disconnect that lands after the model finished but before this point
   // must not write a partial result or return a success-shaped summary.
@@ -632,6 +655,8 @@ export async function runAiWebSearch({
     new: persistedOffers.length,
     duplicates,
     invalid,
+    disqualified,
+    reasonCounts,
     partial: persistedOffers.filter((offer) => offer.bodyPartial === true).length,
     unreadable: captureFailures.length,
     errors: captureFailures.length

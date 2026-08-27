@@ -291,10 +291,15 @@ test("partial-offer hydration uses a bounded worker pool and preserves output or
   }
 });
 
-test("the presentation limit is applied before expensive partial-offer hydration", async () => {
+test("the presentation limit is applied after hydration so rejected candidates backfill", async () => {
   const repoRoot = tempRepo();
   try {
     candidateSetupInitialize({ repoRoot });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: { compensation: { minimum_base: 180000 } },
+    });
     const companies = Array.from({ length: 8 }, (_, index) => `Limited ${index}`);
     sourceConfigPut({
       repoRoot,
@@ -309,7 +314,9 @@ test("the presentation limit is applied before expensive partial-offer hydration
         })),
       },
     });
+    let active = 0;
     let hydrated = 0;
+    let maxActive = 0;
     const summary = await runSourcedScan({
       repoRoot,
       write: false,
@@ -324,14 +331,91 @@ test("the presentation limit is applied before expensive partial-offer hydration
       },
       resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
       hydrateOfferImpl: async (offer) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        active -= 1;
         hydrated += 1;
-        return { ...offer, bodyText: "Full role body", bodyPartial: false };
+        const index = Number(String(offer.url).match(/limited-role-(\d+)/)?.[1]);
+        return {
+          ...offer,
+          bodyText:
+            index < 3
+              ? "Salary Range: $100,000 - $120,000 annually."
+              : "Salary Range: $200,000 - $240,000 annually.",
+          bodyPartial: false,
+        };
       },
     });
 
     assert.equal(summary.new, 3);
-    assert.equal(summary.overflow, 5);
-    assert.equal(hydrated, 3);
+    assert.equal(summary.qualified, 5);
+    assert.equal(summary.filteredSalary, 3);
+    assert.equal(summary.overflow, 2);
+    assert.equal(hydrated, 8);
+    assert.ok(maxActive <= 4, `expected at most four hydrations, saw ${maxActive}`);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("the per-company cap is applied after hydration so rejected roles do not consume it", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: { compensation: { minimum_base: 180000 } },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "targeting",
+      patch: { search_preferences: { presentation_cap_per_company: 2 } },
+    });
+    const sources = Array.from({ length: 4 }, (_, index) => ({
+      provider: "Remote Vibe Coding Jobs",
+      source_type: "rss",
+      label: `FloodCo feed ${index}`,
+      rssUrl: `https://example.test/flood-${index}.xml`,
+      enabled: true,
+    }));
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: { searches: sources },
+    });
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: false,
+      fetchImpl: async (url) => {
+        const index = Number(String(url).match(/flood-(\d+)\.xml/)?.[1]);
+        return rssResponse({
+          company: "FloodCo",
+          title: `Staff Platform Engineer ${index}`,
+          url: `https://jobs.example.test/flood-role-${index}`,
+        });
+      },
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      hydrateOfferImpl: async (offer) => {
+        const index = Number(String(offer.url).match(/flood-role-(\d+)/)?.[1]);
+        return {
+          ...offer,
+          bodyText:
+            index < 2
+              ? "Salary Range: $100,000 - $120,000 annually."
+              : "Salary Range: $200,000 - $240,000 annually.",
+          bodyPartial: false,
+        };
+      },
+    });
+
+    assert.equal(summary.new, 2);
+    assert.equal(summary.qualified, 2);
+    assert.equal(summary.filteredSalary, 2);
+    assert.equal(summary.overflow, 0);
   } finally {
     closeAll();
     rmSync(repoRoot, { recursive: true, force: true });
@@ -1060,6 +1144,189 @@ test("DB RSS scan replaces a feed preview with the canonical ATS job body before
     const frontmatterEnd = jdText.indexOf("\n---", 4);
     const frontmatter = parseYaml(jdText.slice(4, frontmatterEnd));
     assert.equal(frontmatter.source, atsUrl);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("DB RSS scan requalifies canonical job facts before capture", async () => {
+  const repoRoot = tempRepo();
+  const feedUrl = "https://remotevibecodingjobs.com/feed.xml";
+  const roles = [
+    {
+      company: "Stealth Startup",
+      title: "Founding Software Engineer",
+      slug: "stealth",
+      location: "San Francisco, CA (Remote)",
+      bodyText: "Location: San Francisco Bay Area, CA (in-person).",
+    },
+    {
+      company: "David",
+      title: "Software Engineer, AI & Internal Tools",
+      slug: "david",
+      location: "New York, NY (Remote)",
+      bodyText: "We work in the office 5 days per week in New York City.",
+    },
+    {
+      company: "Credence",
+      title: "AI Software Engineer",
+      slug: "credence",
+      location: "Tysons Corner, VA (Remote)",
+      bodyText: "Salary Range: $120,000 - $150,000 annually.",
+    },
+  ];
+  try {
+    candidateSetupInitialize({ repoRoot });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: {
+        compensation: { minimum_base: 180000 },
+        location: {
+          home: "Brooklyn, NY",
+          remote: true,
+          remote_scope: "home-country",
+          hybrid: true,
+          onsite: false,
+          max_commute_days_per_week: 2,
+          relocation: [],
+        },
+      },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "targeting",
+      patch: { role_buckets: [{ name: "Primary", titles: ["Software Engineer"] }] },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "RemoteVibeCodingJobs",
+            source_type: "rss",
+            label: "Remote Vibe Coding Jobs",
+            rssUrl: feedUrl,
+            enabled: true,
+          },
+        ],
+      },
+    });
+    const feed = `<?xml version="1.0"?><rss version="2.0"><channel>${roles
+      .map(
+        (role) =>
+          `<item><title>${role.company} — ${role.title} (Remote)</title><link>https://remotevibecodingjobs.com/jobs/${role.slug}</link><description>Location: ${role.location.replace(" (Remote)", "")}</description><guid>${role.slug}</guid></item>`
+      )
+      .join("")}</channel></rss>`;
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: true,
+      fetchImpl: async (url) => {
+        assert.equal(String(url), feedUrl);
+        return new Response(feed, { status: 200 });
+      },
+      hydrateOfferImpl: async (offer) => {
+        const canonical = roles.find((role) => role.company === offer.company);
+        return {
+          ...offer,
+          location: canonical.location,
+          bodyText: canonical.bodyText,
+          bodyPartial: false,
+        };
+      },
+    });
+
+    assert.equal(summary.new, 0);
+    assert.equal(summary.filteredLocation, 2);
+    assert.equal(summary.filteredSalary, 1);
+    assert.deepEqual(summary.rejectionSamples.location.map((row) => row.reason).sort(), [
+      "office-days-exceed-preference",
+      "onsite-not-allowed",
+    ]);
+    assert.equal(summary.rejectionSamples.salary[0]?.reason, "comp-below-floor");
+    assert.equal(
+      openDb({ repoRoot }).prepare("SELECT COUNT(*) AS count FROM sourced").get().count,
+      0
+    );
+    assert.equal(existsSync(userPath({ repoRoot }, "workspace/jobs")), false);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("partial preview policy waits for canonical location and compensation before rejection", async () => {
+  const repoRoot = tempRepo();
+  const feedUrl = "https://remotevibecodingjobs.com/misleading-preview.xml";
+  try {
+    candidateSetupInitialize({ repoRoot });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: {
+        compensation: { minimum_base: 180000 },
+        location: {
+          home: "Brooklyn, NY",
+          remote: true,
+          remote_scope: "home-country",
+          hybrid: true,
+          onsite: false,
+          max_commute_days_per_week: 2,
+          relocation: [],
+        },
+      },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "targeting",
+      patch: { role_buckets: [{ name: "Primary", titles: ["Software Engineer"] }] },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "RemoteVibeCodingJobs",
+            source_type: "rss",
+            label: "Remote Vibe Coding Jobs",
+            rssUrl: feedUrl,
+            enabled: true,
+          },
+        ],
+      },
+    });
+    const feed = `<?xml version="1.0"?><rss version="2.0"><channel>
+      <item><title>Preview Location Co — Software Engineer (Remote)</title><link>https://jobs.example.test/preview-location</link><description>Location: San Francisco Bay Area, CA (in-person)</description><guid>preview-location</guid></item>
+      <item><title>Preview Comp Co — Software Engineer (Remote)</title><link>https://jobs.example.test/preview-comp</link><description>Salary Range: $100,000 - $120,000 annually.</description><guid>preview-comp</guid></item>
+    </channel></rss>`;
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: false,
+      fetchImpl: async (url) => {
+        assert.equal(String(url), feedUrl);
+        return new Response(feed, { status: 200 });
+      },
+      hydrateOfferImpl: async (offer) => ({
+        ...offer,
+        location: "Remote - United States",
+        bodyText: "Salary Range: $200,000 - $240,000 annually. This is a fully remote role.",
+        bodyPartial: false,
+      }),
+    });
+
+    assert.equal(summary.new, 2);
+    assert.equal(summary.qualified, 2);
+    assert.equal(summary.filteredLocation, 0);
+    assert.equal(summary.filteredSalary, 0);
+    assert.deepEqual(summary.offers.map((offer) => offer.company).sort(), [
+      "Preview Comp Co",
+      "Preview Location Co",
+    ]);
   } finally {
     closeAll();
     rmSync(repoRoot, { recursive: true, force: true });

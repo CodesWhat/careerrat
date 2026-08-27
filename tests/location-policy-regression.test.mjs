@@ -178,6 +178,189 @@ test("captured job text rejects an on-site role even when the board calls it rem
   assert.equal(result.filteredLocation[0].qualificationReason, "onsite-not-allowed");
 });
 
+test("full-body work-model blockers apply when the posting header omits location", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Brooklyn, NY",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: true,
+      onsite: false,
+      max_commute_days_per_week: 2,
+      relocation: [],
+    },
+  };
+  const inPerson = offer("blank-location-in-person", "In Person Corp", "");
+  inPerson.bodyText = "Location: San Francisco Bay Area, CA (in-person).";
+  const fiveDays = offer("blank-location-five-days", "Five Day Corp", "");
+  fiveDays.bodyText = "We work in the office 5 days per week in New York City.";
+
+  const result = qualifyByLocation(profile, [inPerson, fiveDays]);
+
+  assert.equal(result.kept.length, 0);
+  assert.deepEqual(
+    result.filteredLocation.map((row) => row.qualificationReason),
+    ["onsite-not-allowed", "office-days-exceed-preference"]
+  );
+});
+
+test("incidental in-person customer meetings do not turn a remote role into on-site work", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Brooklyn, NY",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: false,
+      onsite: false,
+      relocation: [],
+    },
+  };
+  const remote = offer("customer-meetings", "Customer Corp", "Remote - United States");
+  remote.bodyText =
+    "This role includes meeting customers in person twice a year. Daily work is fully remote.";
+
+  const result = qualifyByLocation(profile, [remote]);
+
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.filteredLocation.length, 0);
+});
+
+test("captured in-person text overrides a false remote label", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Brooklyn, NY",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: true,
+      onsite: false,
+      max_commute_days_per_week: 2,
+      relocation: [],
+    },
+  };
+  const mislabeled = offer("stealth-in-person", "Stealth Startup", "San Francisco, CA (Remote)");
+  mislabeled.bodyText = "Location: San Francisco Bay Area, CA (in-person).";
+
+  const result = qualifyByLocation(profile, [mislabeled]);
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredLocation[0]?.qualificationReason, "onsite-not-allowed");
+});
+
+test("a declarative five-day office schedule is required even without policy keywords", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Brooklyn, NY",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: true,
+      onsite: false,
+      max_commute_days_per_week: 2,
+      relocation: [],
+    },
+  };
+  const mislabeled = offer("david-office", "David", "New York, NY (Remote)");
+  mislabeled.bodyText = "We work in the office 5 days per week in New York City.";
+
+  const result = qualifyByLocation(profile, [mislabeled]);
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredLocation[0]?.qualificationReason, "office-days-exceed-preference");
+});
+
+test("conditional remote outside a metro stays eligible and gets an honest location label", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Brooklyn, NY",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: true,
+      onsite: false,
+      max_commute_days_per_week: 2,
+      relocation: [],
+    },
+  };
+  const conditional = offer("conditional-remote", "ngrok", "San Francisco, CA");
+  conditional.bodyText =
+    "This is a remote position for candidates outside of the Bay Area and a hybrid role for candidates within commuting distance to San Francisco. Our Bay Area employees commute to the office on Tuesdays and Wednesdays. All candidates must be US-based.";
+
+  const result = qualifyByLocation(profile, [conditional], { generatedFilter: false });
+
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.kept[0].location, "Remote outside the Bay Area · Hybrid near San Francisco");
+});
+
+test("conditional hybrid work still enforces the saved office-day maximum", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "San Francisco, CA",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: true,
+      onsite: false,
+      max_commute_days_per_week: 2,
+      relocation: [],
+    },
+  };
+  const conditional = offer("conditional-three-days", "ngrok", "San Francisco, CA");
+  conditional.bodyText =
+    "This is a remote position for candidates outside of the Bay Area and a hybrid role for candidates within commuting distance to San Francisco. Employees are required in the office 3 days per week.";
+
+  const result = qualifyByLocation(profile, [conditional], { generatedFilter: false });
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredLocation[0]?.qualificationReason, "office-days-exceed-preference");
+});
+
+test("Oakland candidates enter the Bay Area hybrid branch instead of the outside-area remote branch", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Oakland, CA",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: false,
+      onsite: false,
+      relocation: [],
+    },
+  };
+  const conditional = offer("conditional-oakland", "ngrok", "San Francisco, CA");
+  conditional.bodyText =
+    "This is a remote position for candidates outside of the Bay Area and a hybrid role for candidates within commuting distance to San Francisco.";
+
+  const result = qualifyByLocation(profile, [conditional], { generatedFilter: false });
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredLocation[0]?.qualificationReason, "hybrid-not-allowed");
+});
+
+test("conditional US remote does not widen to a foreign home under worldwide mode", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Toronto, Canada",
+      remote: true,
+      remote_scope: "worldwide",
+      hybrid: false,
+      onsite: false,
+      relocation: [],
+    },
+  };
+  const conditional = offer("conditional-us-remote", "ngrok", "San Francisco, CA");
+  conditional.bodyText =
+    "This is a remote position for candidates outside of the Bay Area and a hybrid role for candidates within commuting distance to San Francisco. All candidates must be US-based.";
+
+  const result = qualifyByLocation(profile, [conditional], { generatedFilter: false });
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredLocation[0]?.qualificationReason, "remote-region-mismatch");
+});
+
 test("the scanner recognizes NYC as US even without a generated source filter", () => {
   const profile = {
     candidate: { domain: "software engineering" },

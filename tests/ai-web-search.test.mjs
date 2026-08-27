@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -233,7 +233,7 @@ test("runAiWebSearch refreshes durable activity through hydration and before per
   ]);
 });
 
-test("runAiWebSearch hard-dedupes batch and DB rows and assigns review/likely-cut gates", async () => {
+test("runAiWebSearch hard-dedupes batch and drops stale pre-hydration cut gates", async () => {
   const repoRoot = repo();
   sourcedUpsertBatch({
     repoRoot,
@@ -326,9 +326,35 @@ test("runAiWebSearch hard-dedupes batch and DB rows and assigns review/likely-cu
   const added = readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search");
   assert.deepEqual(added.map((row) => [row.company, row.gate]).sort(), [
     ["Acme AI", "review"],
-    ["Cut Co", "likely-cut"],
+    ["Cut Co", "review"],
   ]);
   assert.ok(added.every((row) => row.artifacts?.jd));
+});
+
+test("runAiWebSearch keeps likely-cut only when canonical scoring finds a cut flag", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: { cut_signals: ["heavy travel"] },
+  });
+
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: assistantJson({
+      roles: [role({ rule_flags: [] })],
+      queries_run: [{ prompt_id: "p1", query: "ai jobs" }],
+    }),
+    resolveJobUrlImpl: canonicalResolver({
+      bodyText: fullJd("This role requires heavy travel"),
+    }),
+  });
+
+  assert.equal(result.new, 1);
+  const [saved] = readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search");
+  assert.equal(saved.gate, "likely-cut");
+  assert.match(saved.note, /cut-risk-heavy-travel/);
 });
 
 test("runAiWebSearch recovers bounded source receipts for roles deduped before persistence", async () => {
@@ -460,6 +486,92 @@ test("runAiWebSearch replaces model summaries with canonical JD captures", async
   assert.match(capture, /The canonical board body/);
   assert.doesNotMatch(capture, /short model-written summary/);
   assert.match(capture, /partial: false/);
+});
+
+test("runAiWebSearch requalifies canonical job facts before capture", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      compensation: { minimum_base: 180000 },
+      location: {
+        home: "Brooklyn, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: false,
+        max_commute_days_per_week: 2,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: { role_buckets: [{ name: "Primary", titles: ["Software Engineer"] }] },
+  });
+  const canonical = new Map([
+    [
+      "https://jobs.example.test/stealth",
+      {
+        location: "San Francisco, CA (Remote)",
+        bodyText: "Location: San Francisco Bay Area, CA (in-person).",
+      },
+    ],
+    [
+      "https://jobs.example.test/david",
+      {
+        location: "New York, NY (Remote)",
+        bodyText: "We work in the office 5 days per week in New York City.",
+      },
+    ],
+    [
+      "https://jobs.example.test/credence",
+      {
+        location: "Tysons Corner, VA (Remote)",
+        bodyText: "Salary Range: $120,000 - $150,000 annually.",
+      },
+    ],
+  ]);
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: assistantJson({
+      roles: [
+        role({
+          company: "Stealth Startup",
+          title: "Founding Software Engineer",
+          url: "https://jobs.example.test/stealth",
+          location: "Remote",
+        }),
+        role({
+          company: "David",
+          title: "Software Engineer, AI & Internal Tools",
+          url: "https://jobs.example.test/david",
+          location: "Remote",
+        }),
+        role({
+          company: "Credence",
+          title: "AI Software Engineer",
+          url: "https://jobs.example.test/credence",
+          location: "Remote",
+        }),
+      ],
+      queries_run: [{ prompt_id: "p1", query: "software engineer jobs" }],
+    }),
+    resolveJobUrlImpl: async (url) => ({
+      bodyFetchStatus: "resolved",
+      url,
+      ...canonical.get(url),
+    }),
+  });
+
+  assert.equal(result.new, 0);
+  assert.equal(result.disqualified, 3);
+  assert.deepEqual(result.reasonCounts, { location: 2, salary: 1 });
+  assert.equal(readDbScannerRows({ repoRoot }).length, 0);
+  assert.equal(existsSync(userPath({ repoRoot }, "workspace/jobs")), false);
 });
 
 test("runAiWebSearch persists a safety-capped canonical body as partial, never full", async () => {

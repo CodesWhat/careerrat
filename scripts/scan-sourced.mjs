@@ -43,12 +43,14 @@ import {
   sourcedRowsFromScanOffers,
 } from "../src/core/scoring/sourced-persistence.mjs";
 import {
+  applyPresentationCaps,
   buildLocationFilter,
   buildTitleFilter,
   computeFamilyOutcomes,
   filterAndDedupeOffers,
   isBoardProviderSupported,
   loadScannerConfig,
+  requalifyCanonicalOffers,
   scanBoards,
   scanCompanies,
   scanSearchSources,
@@ -494,22 +496,9 @@ export async function runSourcedScan({
     locationFilter,
     config: candidateConfig,
     now: savedAt.getTime(),
-    companyPresentationCounts: new Map(),
     seenRunCompanyRoles: new Set(),
-    perCompanyCap,
+    deferPartialCandidatePolicy: true,
   });
-
-  const outputLimit = limit > 0 ? limit : Infinity;
-  const limitedOffers = filtered.kept.slice(0, outputLimit);
-  const limitedOverflow = filtered.kept.slice(outputLimit).map((offer) => ({
-    ...offer,
-    qualificationReason: "run-presentation-limit",
-  }));
-  filtered = {
-    ...filtered,
-    kept: limitedOffers,
-    overflow: [...filtered.overflow, ...limitedOverflow],
-  };
 
   if (filtered.kept.some((offer) => offer?.bodyPartial === true)) {
     filtered = {
@@ -525,6 +514,30 @@ export async function runSourcedScan({
     };
     ensureActive();
   }
+
+  const canonicalQualification = requalifyCanonicalOffers(filtered.kept, {
+    config: candidateConfig,
+    now: savedAt.getTime(),
+    locationFilter,
+  });
+  const presentation = applyPresentationCaps(canonicalQualification.kept, {
+    companyPresentationCounts: new Map(),
+    perCompanyCap,
+    limit: limit > 0 ? limit : Infinity,
+  });
+  filtered = {
+    ...filtered,
+    kept: presentation.kept,
+    overflow: [...filtered.overflow, ...presentation.overflow],
+    filteredSeniority: [...filtered.filteredSeniority, ...canonicalQualification.filteredSeniority],
+    filteredLocation: [...filtered.filteredLocation, ...canonicalQualification.filteredLocation],
+    filteredAge: [...filtered.filteredAge, ...canonicalQualification.filteredAge],
+    filteredSalary: [...filtered.filteredSalary, ...canonicalQualification.filteredSalary],
+    filteredEligibility: [
+      ...filtered.filteredEligibility,
+      ...canonicalQualification.filteredEligibility,
+    ],
+  };
 
   if (verify && filtered.kept.length > 0) {
     const checked = [];
