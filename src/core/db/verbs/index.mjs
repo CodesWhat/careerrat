@@ -150,6 +150,7 @@ export {
   skillChatMessageAppend,
   skillChatThreadPrepare,
   skillChatThreadRead,
+  skillChatThreadReleaseTurn,
   skillChatThreadSetTurnState,
 } from "./skill-chat.mjs";
 export { sourceWatermarkUpsert } from "./source.mjs";

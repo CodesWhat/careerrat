@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { assertAIExecutionPlanForOperation } from "../../ai/operation-policy.mjs";
 import { requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
 import { applyCandidateResumeSeedInDb } from "./candidate.mjs";
@@ -99,6 +100,10 @@ export function resumeExtractionStart({
   const db = requireDb({ repoRoot, env });
   return withTransaction(db, () => {
     const previous = latestByDigest(db, digest);
+    const frozenExecutionPlan = previous?.executionPlan || executionPlan;
+    if (frozenExecutionPlan) {
+      assertAIExecutionPlanForOperation(frozenExecutionPlan, "structured.extraction");
+    }
     if (
       previous?.status === "completed" ||
       (ACTIVE_STATUSES.has(previous?.status) && previous.ownerId === owner)
@@ -113,7 +118,7 @@ export function resumeExtractionStart({
       filename: required(filename, "filename"),
       status: "queued",
       ownerId: owner,
-      executionPlan: clone(previous?.executionPlan || executionPlan),
+      executionPlan: clone(frozenExecutionPlan),
       progress: { phase: "queued", message: "Resume saved. Waiting to read it." },
       lease: { heartbeatAt: now },
       result: null,

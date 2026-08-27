@@ -14,6 +14,7 @@ const TURN_STATES = new Set(["awaiting-assistant", "awaiting-user", "failed", "c
 const DECISION_ACTIONS = new Set(["save", "discard"]);
 const DECISION_STATES = new Set(["completed", "failed"]);
 const MAX_EXECUTION_PLAN_BYTES = 16_384;
+const DEFAULT_TURN_LEASE_MS = 2 * 60 * 1000;
 
 function cleanSkill(value) {
   const skill = String(value ?? "").trim();
@@ -69,6 +70,23 @@ function cleanExecutionPlan(value) {
     throw error;
   }
   return JSON.parse(serialized);
+}
+
+function cleanOwnerId(value) {
+  const ownerId = String(value ?? "").trim();
+  if (!ownerId || ownerId.length > 500 || ownerId.includes("\0")) {
+    const error = new Error("chat turn owner is invalid");
+    error.code = "BAD_TURN_OWNER";
+    throw error;
+  }
+  return ownerId;
+}
+
+function turnLeaseExpiresAt(at, leaseMs) {
+  const duration = Number(leaseMs);
+  const boundedDuration =
+    Number.isFinite(duration) && duration > 0 ? duration : DEFAULT_TURN_LEASE_MS;
+  return new Date(Date.parse(at) + boundedDuration).toISOString();
 }
 
 function dateIso(now) {
@@ -129,11 +147,14 @@ export function skillChatThreadPrepare({
   env = process.env,
   skill,
   executionPlan,
+  ownerId,
+  leaseMs,
   now,
 } = {}) {
   const clean = cleanSkill(skill);
   const at = dateIso(now);
   const plan = cleanExecutionPlan(executionPlan);
+  const owner = ownerId == null ? null : cleanOwnerId(ownerId);
   const db = requireDb({ repoRoot, env });
   return withTransaction(db, () => {
     const current = readThread(db, clean);
@@ -143,9 +164,38 @@ export function skillChatThreadPrepare({
       error.code = "AI_EXECUTION_PLAN_CONFLICT";
       throw error;
     }
+    if (owner && thread.turnState !== "awaiting-assistant") {
+      const error = new Error(`chat turn for skill "${clean}" is not awaiting an assistant`);
+      error.code = "CHAT_TURN_NOT_AWAITING_ASSISTANT";
+      throw error;
+    }
+    const currentClaim = thread.turnClaim;
+    const currentLeaseExpiresAt = Date.parse(currentClaim?.leaseExpiresAt || "");
+    if (
+      owner &&
+      currentClaim?.ownerId &&
+      currentClaim.ownerId !== owner &&
+      Number.isFinite(currentLeaseExpiresAt) &&
+      currentLeaseExpiresAt > Date.parse(at)
+    ) {
+      const error = new Error(
+        `another app process is already handling the chat turn for "${clean}"`
+      );
+      error.code = "CHAT_TURN_ALREADY_CLAIMED";
+      throw error;
+    }
     const updated = {
       ...thread,
       executionPlan: thread.executionPlan || plan,
+      ...(owner
+        ? {
+            turnClaim: {
+              ownerId: owner,
+              heartbeatAt: at,
+              leaseExpiresAt: turnLeaseExpiresAt(at, leaseMs),
+            },
+          }
+        : {}),
       updatedAt: at,
     };
     if (current) {
@@ -160,6 +210,32 @@ export function skillChatThreadPrepare({
       );
     }
     return { ok: true, thread: updated };
+  });
+}
+
+export function skillChatThreadReleaseTurn({
+  repoRoot,
+  env = process.env,
+  skill,
+  ownerId,
+  now,
+} = {}) {
+  const clean = cleanSkill(skill);
+  const owner = cleanOwnerId(ownerId);
+  const at = dateIso(now);
+  const db = requireDb({ repoRoot, env });
+  return withTransaction(db, () => {
+    const thread = readThread(db, clean);
+    if (!thread || thread.turnClaim?.ownerId !== owner) {
+      return { ok: true, released: false, thread };
+    }
+    const updated = { ...thread, updatedAt: at };
+    delete updated.turnClaim;
+    db.prepare("UPDATE skill_chat_threads SET data = ? WHERE id = ?").run(
+      JSON.stringify(updated),
+      updated.id
+    );
+    return { ok: true, released: true, thread: updated };
   });
 }
 
@@ -283,6 +359,7 @@ export function skillChatThreadSetTurnState({
   env = process.env,
   skill,
   turnState,
+  ownerId,
   now,
 } = {}) {
   const clean = cleanSkill(skill);
@@ -301,7 +378,13 @@ export function skillChatThreadSetTurnState({
       error.code = "NOT_FOUND";
       throw error;
     }
+    if (thread.turnClaim?.ownerId && thread.turnClaim.ownerId !== ownerId) {
+      const error = new Error(`chat turn for skill "${clean}" is owned by another app process`);
+      error.code = "STALE_WRITE";
+      throw error;
+    }
     const updated = { ...thread, turnState: cleanState, updatedAt: at };
+    if (cleanState !== "awaiting-assistant") delete updated.turnClaim;
     db.prepare("UPDATE skill_chat_threads SET data = ? WHERE id = ?").run(
       JSON.stringify(updated),
       updated.id

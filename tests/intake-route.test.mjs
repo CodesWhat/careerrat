@@ -1761,6 +1761,59 @@ test("POST /api/intake/confirm: Lane B freezes and reuses its AI execution plan 
   }
 });
 
+test("POST /api/intake/confirm: Lane B rejects a saved plan for another operation", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const { id } = intakeCapture({ repoRoot, rawInput: "a JD", inputKind: "text" });
+  intakeUpdate({
+    repoRoot,
+    id,
+    patch: {
+      status: "proposed",
+      kind: "jd-text",
+      classification: classificationFixture(),
+      trackerMatch: null,
+      dispatch: { lane: "B", action: "run_skill", params: { skill: "evaluate-job" } },
+      operation: {
+        id: "prior-operation",
+        status: "error",
+        executionPlan: {
+          policyVersion: 1,
+          operation: "coach.deep",
+          runtimeId: "managed-anthropic",
+          adapterVersion: 1,
+          requested: { quality: "automatic", reasoning: "automatic" },
+          resolved: {
+            quality: "best",
+            reasoning: "high",
+            model: "opus",
+            modelSource: "alias",
+            effort: "high",
+            speedTier: null,
+          },
+          fallback: null,
+        },
+      },
+    },
+  });
+
+  let dispatched = false;
+  const server = await bootServer(repoRoot, {
+    runSkillStream: async () => {
+      dispatched = true;
+      return { ok: true };
+    },
+  });
+  try {
+    const result = await postJson(server, "/api/intake/confirm", { id });
+    assert.equal(result.status, 400);
+    assert.match(result.body.error, /coach\.deep.*application\.judgment/i);
+    assert.equal(dispatched, false);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/intake/confirm: Lane B settles to 'error' when the background run rejects", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });

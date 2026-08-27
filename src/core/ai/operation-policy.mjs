@@ -200,3 +200,18 @@ export function assertAIExecutionPlanForRuntime(plan, runtimeId) {
   }
   return deepFreeze(plan);
 }
+
+export function assertAIExecutionPlanForOperation(plan, operation, runtimeId = plan?.runtimeId) {
+  const expectedOperation = String(operation || "").trim();
+  if (!AI_OPERATION_DEFAULTS[expectedOperation]) {
+    throw policyError(`unknown expected AI operation: ${expectedOperation || "(empty)"}`);
+  }
+  if (plan?.operation !== expectedOperation) {
+    const error = new Error(
+      `AI execution plan operation ${plan?.operation || "(empty)"} does not match ${expectedOperation}`
+    );
+    error.code = "AI_EXECUTION_PLAN_OPERATION_MISMATCH";
+    throw error;
+  }
+  return assertAIExecutionPlanForRuntime(plan, runtimeId);
+}

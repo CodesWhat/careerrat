@@ -52,6 +52,7 @@ import {
   skillChatMessageAppend,
   skillChatThreadPrepare,
   skillChatThreadRead,
+  skillChatThreadReleaseTurn,
   skillChatThreadSetTurnState,
 } from "../db/verbs.mjs";
 import { parseSourceReviewOutput } from "../discovery/source-review-artifact.mjs";
@@ -69,7 +70,7 @@ import {
 } from "./installed-runtimes.mjs";
 import {
   aiRuntimeIdForRoute,
-  assertAIExecutionPlanForRuntime,
+  assertAIExecutionPlanForOperation,
   resolveAIExecutionPlan,
 } from "./operation-policy.mjs";
 import { createRuntimeToolPolicy } from "./runtime-tool-policy.mjs";
@@ -540,6 +541,8 @@ export function createChatRuntime({
   closedTtlMs = 5 * 60 * 1000,
   maxSessions = 4,
   maxTurns = envNumber(env, "CAREERRAT_CHAT_MAX_TURNS", 200),
+  turnLeaseMs = 2 * 60 * 1000,
+  turnHeartbeatMs = 30 * 1000,
 } = {}) {
   const installedRuntimeRunner = runInstalledRuntimeImpl || runInstalledRuntime;
   const installedStreamRunner =
@@ -552,6 +555,7 @@ export function createChatRuntime({
   // `pushQueue` null and drive turns through `systemPrompt`/`transcript`/
   // `turnAbortController` instead — see runInstalledTurn() below.
   const sessions = new Map();
+  const runtimeOwnerId = randomUUID();
   let sweepTimer = null;
 
   function currentCandidateContext(skill) {
@@ -590,6 +594,80 @@ export function createChatRuntime({
       runtimeSessionId: session.id,
     });
     session.durableMessageCount += 1;
+  }
+
+  function claimDurableTurn(skill, executionPlan) {
+    if (!DURABLE_CHAT_SKILLS.has(skill) || !dbExists({ repoRoot, env })) return false;
+    skillChatThreadPrepare({
+      repoRoot,
+      env,
+      skill,
+      executionPlan,
+      ownerId: runtimeOwnerId,
+      leaseMs: turnLeaseMs,
+      now,
+    });
+    return true;
+  }
+
+  function stopTurnHeartbeat(session) {
+    if (!session.turnHeartbeat) return;
+    clearInterval(session.turnHeartbeat);
+    session.turnHeartbeat = null;
+  }
+
+  function releaseDurableTurn(session) {
+    stopTurnHeartbeat(session);
+    if (!session.turnClaimed) return;
+    session.turnClaimed = false;
+    try {
+      skillChatThreadReleaseTurn({
+        repoRoot,
+        env,
+        skill: session.skill,
+        ownerId: runtimeOwnerId,
+        now,
+      });
+    } catch {
+      // The lease remains the crash-safe recovery path if shutdown cannot write.
+    }
+  }
+
+  function startTurnHeartbeat(session) {
+    if (!session.turnClaimed || session.turnHeartbeat) return;
+    session.turnHeartbeat = setInterval(
+      () => {
+        try {
+          claimDurableTurn(session.skill, session.executionPlan);
+        } catch (error) {
+          stopTurnHeartbeat(session);
+          session.turnClaimed = false;
+          try {
+            session.query?.close?.();
+          } catch {
+            // best-effort only
+          }
+          session.abortController.abort(error);
+          recordAndBroadcast(session, { type: "error", data: { message: error.message } });
+          closeSessionInternal(session, "turn_claim_lost");
+        }
+      },
+      Math.max(1, Number(turnHeartbeatMs) || 30_000)
+    );
+    session.turnHeartbeat.unref?.();
+  }
+
+  function setDurableTurnState(session, turnState) {
+    stopTurnHeartbeat(session);
+    skillChatThreadSetTurnState({
+      repoRoot,
+      env,
+      skill: session.skill,
+      turnState,
+      ownerId: runtimeOwnerId,
+      now,
+    });
+    session.turnClaimed = false;
   }
 
   function summarize(session) {
@@ -652,6 +730,7 @@ export function createChatRuntime({
   // (closeSession() below) before delegating here for the bookkeeping.
   function closeSessionInternal(session, reason) {
     if (session.state === "closed") return;
+    releaseDurableTurn(session);
     session.state = "closed";
     session.closeReason = reason;
     session.lastActivityAt = now();
@@ -693,12 +772,7 @@ export function createChatRuntime({
       if (evt.type === "error" && evt.data?.message) {
         persistDurableMessage(session, "assistant", evt.data.message, { kind: "agent_error" });
         if (session.persistDurably) {
-          skillChatThreadSetTurnState({
-            repoRoot,
-            env,
-            skill: session.skill,
-            turnState: "failed",
-          });
+          setDurableTurnState(session, "failed");
         }
       }
       if (evt.type === "result" && session.persistDurably && session.durableMessageCount > 0) {
@@ -706,12 +780,7 @@ export function createChatRuntime({
           evt.data?.ok === false ||
           evt.data?.is_error === true ||
           String(evt.data?.subtype || "").startsWith("error");
-        skillChatThreadSetTurnState({
-          repoRoot,
-          env,
-          skill: session.skill,
-          turnState: failed ? "failed" : "awaiting-user",
-        });
+        setDurableTurnState(session, failed ? "failed" : "awaiting-user");
       }
       recordAndBroadcast(session, evt);
       const nextState = classifyChatEvent(evt);
@@ -980,12 +1049,7 @@ export function createChatRuntime({
       } else {
         persistDurableMessage(session, "assistant", err.message, { kind: "agent_error" });
         if (session.persistDurably) {
-          skillChatThreadSetTurnState({
-            repoRoot,
-            env,
-            skill: session.skill,
-            turnState: "failed",
-          });
+          setDurableTurnState(session, "failed");
         }
         recordAndBroadcast(session, { type: "error", data: { message: err.message } });
         closeSessionInternal(session, "error");
@@ -1063,7 +1127,11 @@ export function createChatRuntime({
     }
     const routeRuntimeId = aiRuntimeIdForRoute(route);
     const executionPlan = savedExecutionPlan
-      ? assertAIExecutionPlanForRuntime(savedExecutionPlan, routeRuntimeId)
+      ? assertAIExecutionPlanForOperation(
+          savedExecutionPlan,
+          chatOperationForSkill(trimmedSkill),
+          routeRuntimeId
+        )
       : resolveAIExecutionPlan({
           operation: chatOperationForSkill(trimmedSkill),
           runtimeId: routeRuntimeId,
@@ -1089,35 +1157,37 @@ export function createChatRuntime({
     // silently falls through to the Claude Code CLI regardless of what's
     // logged in locally (the bug this fix closes).
     if (route.type === "installed") {
-      if (
-        !savedExecutionPlan &&
-        DURABLE_CHAT_SKILLS.has(trimmedSkill) &&
-        dbExists({ repoRoot, env })
-      ) {
-        skillChatThreadPrepare({ repoRoot, env, skill: trimmedSkill, executionPlan });
+      const turnClaimed = awaitingUser ? false : claimDurableTurn(trimmedSkill, executionPlan);
+      try {
+        return startInstalledSession({
+          trimmedSkill,
+          input,
+          route,
+          restoredTranscript,
+          resumed,
+          awaitingUser,
+          executionPlan,
+          turnClaimed,
+        });
+      } catch (error) {
+        if (turnClaimed) {
+          skillChatThreadReleaseTurn({
+            repoRoot,
+            env,
+            skill: trimmedSkill,
+            ownerId: runtimeOwnerId,
+            now,
+          });
+        }
+        throw error;
       }
-      return startInstalledSession({
-        trimmedSkill,
-        input,
-        route,
-        restoredTranscript,
-        resumed,
-        awaitingUser,
-        executionPlan,
-      });
     }
 
     // Validate the SDK devDependency is importable before creating any
     // session state — a missing install is a clean 501 from the route, never
     // a half-registered session sitting in the map.
     const { query } = await loadSdk();
-    if (
-      !savedExecutionPlan &&
-      DURABLE_CHAT_SKILLS.has(trimmedSkill) &&
-      dbExists({ repoRoot, env })
-    ) {
-      skillChatThreadPrepare({ repoRoot, env, skill: trimmedSkill, executionPlan });
-    }
+    const turnClaimed = awaitingUser ? false : claimDurableTurn(trimmedSkill, executionPlan);
 
     const childEnv = buildChildEnv({ route, skill: trimmedSkill, baseEnv: env, repoRoot });
     const runtimeTools = resolveChatRuntimeTools({ skill: trimmedSkill });
@@ -1147,6 +1217,8 @@ export function createChatRuntime({
       needsKickoff: awaitingUser,
       executionPlan,
       persistDurably: DURABLE_CHAT_SKILLS.has(trimmedSkill) && dbExists({ repoRoot, env }),
+      turnClaimed,
+      turnHeartbeat: null,
       resumed,
       sourceReviewResponseSeen: false,
       turnAbortController: null,
@@ -1163,25 +1235,33 @@ export function createChatRuntime({
     // The push-queue is passed as `prompt` on this FIRST call — see this
     // file's header comment for why that (not a string prompt + later
     // options.resume) is what keeps the child process alive across turns.
-    const q = query({
-      prompt: pushQueue,
-      options: {
-        cwd: repoRoot,
-        env: childEnv,
-        model: executionPlan.resolved.model,
-        effort: executionPlan.resolved.effort,
-        abortController,
-        settingSources: ["project"],
-        skills: [trimmedSkill],
-        tools: runtimeTools,
-        permissionMode: "default",
-        canUseTool: toolPolicy.canUseTool,
-        hooks: toolPolicy.hooks,
-        maxTurns,
-        title: `careerrat chat: ${trimmedSkill}`,
-      },
-    });
+    let q;
+    try {
+      q = query({
+        prompt: pushQueue,
+        options: {
+          cwd: repoRoot,
+          env: childEnv,
+          model: executionPlan.resolved.model,
+          effort: executionPlan.resolved.effort,
+          abortController,
+          settingSources: ["project"],
+          skills: [trimmedSkill],
+          tools: runtimeTools,
+          permissionMode: "default",
+          canUseTool: toolPolicy.canUseTool,
+          hooks: toolPolicy.hooks,
+          maxTurns,
+          title: `careerrat chat: ${trimmedSkill}`,
+        },
+      });
+    } catch (error) {
+      sessions.delete(id);
+      releaseDurableTurn(session);
+      throw error;
+    }
     session.query = q;
+    startTurnHeartbeat(session);
 
     if (!awaitingUser) {
       pushQueue.push(
@@ -1217,6 +1297,7 @@ export function createChatRuntime({
     resumed,
     awaitingUser,
     executionPlan,
+    turnClaimed,
   }) {
     const runtimeTools = resolveInstalledSkillRuntimeTools({ skill: trimmedSkill });
     const installedPosture = installedSkillRuntimePosture({ skill: trimmedSkill });
@@ -1253,6 +1334,8 @@ export function createChatRuntime({
       needsKickoff: false,
       executionPlan,
       persistDurably: DURABLE_CHAT_SKILLS.has(trimmedSkill) && dbExists({ repoRoot, env }),
+      turnClaimed,
+      turnHeartbeat: null,
       resumed,
       // Messages submitted while a turn is already in flight (postMessage's
       // "session.state === 'running'" branch below); never touched by the
@@ -1270,6 +1353,7 @@ export function createChatRuntime({
       pumpDone: null,
     };
     sessions.set(id, session);
+    startTurnHeartbeat(session);
 
     dispatchEvents(session, [
       {
@@ -1332,6 +1416,10 @@ export function createChatRuntime({
         visibility: /^\[SYSTEM\]\s/.test(trimmed) ? "internal" : undefined,
         choice,
       });
+      if (session.persistDurably && session.state !== "running") {
+        session.turnClaimed = claimDurableTurn(session.skill, session.executionPlan);
+        startTurnHeartbeat(session);
+      }
     }
     if (session.route.type === "installed") {
       // For installed sessions session.state is "running" for exactly the

@@ -24,6 +24,7 @@ import {
   resolveDirectChatSkills,
 } from "../src/core/ai/chat-runtime.mjs";
 import { CHAT_SESSION_RUNTIME_TIMEOUT_MS } from "../src/core/ai/installed-runtimes.mjs";
+import { resolveAIExecutionPlan } from "../src/core/ai/operation-policy.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 import { APP_SAFE_RUNTIME_TOOLS, CHAT_RUNTIME_TOOLS } from "../src/core/ai/runtime-tools.mjs";
 import { readUsageEvents } from "../src/core/ai/usage-log.mjs";
@@ -965,6 +966,82 @@ test("createChatRuntime: a durable thread fails closed when its frozen provider 
       replacementRuntime.shutdown();
     }
   } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime: two app processes cannot dispatch the same durable turn", async () => {
+  const repoRoot = tempRepoWithSkill("research-company");
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
+  candidateSetupInitialize({ repoRoot, env });
+  let providerDispatches = 0;
+  const loadSdk = async () => ({
+    query: (args) => {
+      providerDispatches += 1;
+      return fakeStreamingSdk([turnMessagesWithReply("Research ready.", providerDispatches)]).query(
+        args
+      );
+    },
+  });
+  const firstRuntime = createChatRuntime({ repoRoot, env, loadSdk });
+  const secondRuntime = createChatRuntime({ repoRoot, env, loadSdk });
+  try {
+    const results = await Promise.allSettled([
+      firstRuntime.startSession({ skill: "research-company" }),
+      secondRuntime.startSession({ skill: "research-company" }),
+    ]);
+    assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+    const rejected = results.find((result) => result.status === "rejected");
+    assert.equal(rejected.reason.code, "CHAT_TURN_ALREADY_CLAIMED");
+    assert.equal(providerDispatches, 1);
+  } finally {
+    firstRuntime.shutdown();
+    secondRuntime.shutdown();
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime: a durable skill rejects a saved plan for another operation", async () => {
+  const repoRoot = tempRepoWithSkill("research-company");
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
+  candidateSetupInitialize({ repoRoot, env });
+  const wrongPlan = resolveAIExecutionPlan({
+    operation: "coach.deep",
+    runtimeId: "anthropic-api",
+  });
+  const db = openDb({ repoRoot, env });
+  db.prepare("INSERT INTO skill_chat_threads (id, data) VALUES (?, ?)").run(
+    "skill:research-company",
+    JSON.stringify({
+      id: "skill:research-company",
+      skill: "research-company",
+      status: "active",
+      messageCount: 0,
+      turnState: "awaiting-assistant",
+      executionPlan: wrongPlan,
+      createdAt: "2026-08-27T12:00:00.000Z",
+      updatedAt: "2026-08-27T12:00:00.000Z",
+    })
+  );
+  let loadedSdk = false;
+  const runtime = createChatRuntime({
+    repoRoot,
+    env,
+    loadSdk: async () => {
+      loadedSdk = true;
+      return fakeStreamingSdk([]);
+    },
+  });
+  try {
+    await assert.rejects(
+      runtime.startSession({ skill: "research-company" }),
+      (error) =>
+        error.code === "AI_EXECUTION_PLAN_OPERATION_MISMATCH" &&
+        /coach\.deep.*research\.web/i.test(error.message)
+    );
+    assert.equal(loadedSdk, false);
+  } finally {
+    runtime.shutdown();
     cleanup(repoRoot);
   }
 });

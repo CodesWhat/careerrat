@@ -44,7 +44,11 @@ import { dirname, extname, join } from "node:path";
 import { loadAIPreferences } from "../core/ai/ai-preferences.mjs";
 import { runBoundedAI } from "../core/ai/bounded-ai.mjs";
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
-import { aiRuntimeIdForRoute, resolveAIExecutionPlan } from "../core/ai/operation-policy.mjs";
+import {
+  aiRuntimeIdForRoute,
+  assertAIExecutionPlanForOperation,
+  resolveAIExecutionPlan,
+} from "../core/ai/operation-policy.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
 import { requireDb } from "../core/db/connection.mjs";
 import {
@@ -656,6 +660,7 @@ function createLaneBManager({ repoRoot, env, runSkillStream, heartbeatMs = 30_00
         preferences: loadAIPreferences({ repoRoot, env }),
       });
     }
+    executionPlan = assertAIExecutionPlanForOperation(executionPlan, "application.judgment");
     const operationId = `${id}:${randomUUID()}`;
     const startedAt = new Date().toISOString();
     const operation = {
@@ -1100,6 +1105,14 @@ export function mountIntakeRoutes({
         error: "This intake item uses a retired dispatch. Reclassify it before confirming.",
       });
       return;
+    }
+    if (existing.dispatch?.lane === "B" && existing.operation?.executionPlan) {
+      try {
+        assertAIExecutionPlanForOperation(existing.operation.executionPlan, "application.judgment");
+      } catch (err) {
+        respondError(res, err);
+        return;
+      }
     }
 
     let decided;
