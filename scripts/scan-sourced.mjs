@@ -314,6 +314,8 @@ async function hydratePartialOffer(offer, { fetchImpl, resolveHost } = {}) {
 }
 
 const PARTIAL_HYDRATION_CONCURRENCY = 4;
+const SOURCE_SCAN_CONCURRENCY = 4;
+const LIVENESS_VERIFICATION_CONCURRENCY = 6;
 
 async function mapWithConcurrency(items, mapper, concurrency) {
   const results = new Array(items.length);
@@ -455,13 +457,20 @@ export async function runSourcedScan({
     }
   }
 
-  for (const company of companies) {
-    ensureActive();
-    const result = await scanCompanies(
-      { ...config, tracked_companies: [company] },
-      { fetchImpl: fetchForRun, resolveHost, companyFilter: null }
-    );
-    ensureActive();
+  const companyResults = await mapWithConcurrency(
+    companies,
+    async (company) => {
+      ensureActive();
+      const result = await scanCompanies(
+        { ...config, tracked_companies: [company] },
+        { fetchImpl: fetchForRun, resolveHost, companyFilter: null }
+      );
+      ensureActive();
+      return { company, result };
+    },
+    SOURCE_SCAN_CONCURRENCY
+  );
+  for (const { company, result } of companyResults) {
     await acceptBatch(result, { kind: "company", label: company.name });
     if (write && !standaloneConfigMode && result.errors.length === 0) {
       successfulCompanySources.push(company);
@@ -470,14 +479,21 @@ export async function runSourcedScan({
 
   // Also scan RSS-bearing and board-wide sources. Record successful sources
   // now, then advance their watermarks only after the run result is durable.
-  for (const task of sourceTasks) {
-    ensureActive();
-    const singleton = singleSearchSourceConfig(searchSources, task.source);
-    const result =
-      task.kind === "rss"
-        ? await scanSearchSources(singleton, { fetchImpl: fetchForRun, resolveHost })
-        : await scanBoards(singleton, { fetchImpl: fetchForRun, resolveHost });
-    ensureActive();
+  const searchSourceResults = await mapWithConcurrency(
+    sourceTasks,
+    async (task) => {
+      ensureActive();
+      const singleton = singleSearchSourceConfig(searchSources, task.source);
+      const result =
+        task.kind === "rss"
+          ? await scanSearchSources(singleton, { fetchImpl: fetchForRun, resolveHost })
+          : await scanBoards(singleton, { fetchImpl: fetchForRun, resolveHost });
+      ensureActive();
+      return { task, result };
+    },
+    SOURCE_SCAN_CONCURRENCY
+  );
+  for (const { task, result } of searchSourceResults) {
     await acceptBatch(result, {
       kind: task.kind,
       label: task.source.label || task.source.provider || task.kind,
@@ -550,10 +566,17 @@ export async function runSourcedScan({
   if (verify && filtered.kept.length > 0) {
     const checked = [];
     const dropped = [];
-    for (const offer of filtered.kept) {
-      ensureActive();
-      const live = await checkUrlLiveness(offer.url, { fetchImpl: fetchForRun });
-      ensureActive();
+    const verificationResults = await mapWithConcurrency(
+      filtered.kept,
+      async (offer) => {
+        ensureActive();
+        const live = await checkUrlLiveness(offer.url, { fetchImpl: fetchForRun });
+        ensureActive();
+        return { offer, live };
+      },
+      LIVENESS_VERIFICATION_CONCURRENCY
+    );
+    for (const { offer, live } of verificationResults) {
       if (live.result === "expired") dropped.push({ ...offer, liveness: live });
       else checked.push({ ...offer, liveness: live });
     }

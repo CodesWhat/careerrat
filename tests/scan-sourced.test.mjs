@@ -291,6 +291,120 @@ test("partial-offer hydration uses a bounded worker pool and preserves output or
   }
 });
 
+test("source acquisition uses a bounded worker pool instead of fetching boards serially", async () => {
+  const repoRoot = tempRepo();
+  const release = deferred();
+  const fourStarted = deferred();
+  try {
+    const companies = Array.from({ length: 9 }, (_, index) => ({
+      name: `Company ${index}`,
+      careers_url: `https://jobs.lever.co/company-${index}`,
+    }));
+    const configPath = writeSourcedScanConfig(repoRoot, { tracked_companies: companies });
+    let active = 0;
+    let maxActive = 0;
+    let started = 0;
+    const scan = runSourcedScan({
+      repoRoot,
+      configPath,
+      write: false,
+      fetchImpl: async (url) => {
+        const slug = new URL(String(url)).pathname.split("/").filter(Boolean).at(-1);
+        started += 1;
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        if (started === 4) fourStarted.resolve();
+        await release.promise;
+        active -= 1;
+        return new Response(
+          JSON.stringify([
+            {
+              text: `Platform Engineer ${slug}`,
+              hostedUrl: `https://jobs.lever.co/${slug}/role-1`,
+              categories: { location: "Remote - US" },
+              descriptionPlain: "Build reliable platform infrastructure and developer tooling.",
+            },
+          ]),
+          { status: 200 }
+        );
+      },
+    });
+
+    const ranConcurrently = await Promise.race([
+      fourStarted.promise.then(() => true),
+      new Promise((resolve) => setTimeout(() => resolve(false), 75)),
+    ]);
+    release.resolve();
+    const summary = await scan;
+
+    assert.equal(ranConcurrently, true);
+    assert.ok(maxActive > 1);
+    assert.ok(maxActive <= 4);
+    assert.equal(summary.scanned, companies.length);
+  } finally {
+    release.resolve();
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("offer liveness verification uses bounded concurrency", async () => {
+  const repoRoot = tempRepo();
+  const release = deferred();
+  const fourStarted = deferred();
+  try {
+    const configPath = writeSourcedScanConfig(repoRoot);
+    let active = 0;
+    let maxActive = 0;
+    let started = 0;
+    const scan = runSourcedScan({
+      repoRoot,
+      configPath,
+      write: false,
+      verify: true,
+      fetchImpl: async (url) => {
+        if (String(url).includes("api.lever.co")) {
+          return new Response(
+            JSON.stringify(
+              Array.from({ length: 9 }, (_, index) => ({
+                text: `Platform Engineer ${index}`,
+                hostedUrl: `https://jobs.lever.co/acme/role-${index}`,
+                categories: { location: "Remote - US" },
+                descriptionPlain: "Build reliable platform infrastructure and developer tooling.",
+              }))
+            ),
+            { status: 200 }
+          );
+        }
+        started += 1;
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        if (started === 4) fourStarted.resolve();
+        await release.promise;
+        active -= 1;
+        return new Response("live", { status: 200 });
+      },
+    });
+
+    const ranConcurrently = await Promise.race([
+      fourStarted.promise.then(() => true),
+      new Promise((resolve) => setTimeout(() => resolve(false), 75)),
+    ]);
+    release.resolve();
+    const summary = await scan;
+
+    assert.equal(ranConcurrently, true);
+    assert.ok(maxActive > 1);
+    assert.ok(maxActive <= 6);
+    assert.equal(summary.expired, 0);
+    assert.equal(summary.new, 5);
+  } finally {
+    release.resolve();
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("the presentation limit is applied after hydration so rejected candidates backfill", async () => {
   const repoRoot = tempRepo();
   try {
