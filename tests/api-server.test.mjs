@@ -102,6 +102,23 @@ test("shared operation recovery stays a no-op before a workspace database exists
   }
 });
 
+test("the default app server reaches first-run setup before a database exists", async () => {
+  const repoRoot = tempRepo();
+  writeTracker(repoRoot);
+  const dev = createDevServer({ repoRoot });
+  try {
+    await dev.listen({ port: 0, host: "127.0.0.1" });
+    const response = await fetch(`${baseUrl(dev)}/api/health`);
+    assert.equal(response.status, 200);
+  } finally {
+    await dev.shutdownAppOperations();
+    await dev.shutdownSourcingWorkers?.();
+    dev.chatRuntime.shutdown();
+    if (dev.server.listening) await new Promise((resolve) => dev.server.close(resolve));
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("the listening workspace owner reconciles interrupted shared app operations without replay", async () => {
   const repoRoot = tempRepo();
   writeTracker(repoRoot);

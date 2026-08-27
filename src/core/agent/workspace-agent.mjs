@@ -25,7 +25,7 @@ import { PROVIDERS } from "../automation/session.mjs";
 import { statusTransition, toTrackOutcomeStatus } from "../automation/status-map.mjs";
 import { buildCoachingPlan } from "../coaching/plan.mjs";
 import { buildSendLinks, resolveRecipient } from "../comms/recipient.mjs";
-import { requireDb } from "../db/connection.mjs";
+import { dbExists, requireDb } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
 import { activityAppend } from "../db/verbs/activity.mjs";
 import {
@@ -3060,6 +3060,7 @@ async function recoverWorkspaceAdjacentRoleCoaching({
   searchFetchImpl,
   now,
 } = {}) {
+  if (!dbExists({ repoRoot, env })) return null;
   let current = workspaceThreadRead({ repoRoot, env });
   for (const message of current.messages) {
     const coach = message?.metadata?.careerCoach;
