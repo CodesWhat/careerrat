@@ -259,13 +259,13 @@ test("hard restart fences the stale message completion and a linked retry reuses
   await turn();
   assert.equal(workspaceThreadRead({ repoRoot }).messages.length, 1);
 
-  const retryPlans = [];
+  const retryCalls = [];
   const fresh = createWorkspaceHarness({
     repoRoot,
     ownerId: "workspace-new-owner",
     resolveExecutionPlanImpl: () => executionPlan("claude"),
     async callAIImpl(input) {
-      retryPlans.push(input.executionPlan);
+      retryCalls.push(input);
       return responseText("Review the strongest saved role first.", "codex");
     },
   });
@@ -283,8 +283,9 @@ test("hard restart fences the stale message completion and a linked retry reuses
   assert.equal(retried.operation.retryOf, started.body.operation.id);
   const completed = await fresh.manager.wait(retried.operation.id);
   assert.equal(completed.status, "completed", JSON.stringify(completed.error));
-  assert.equal(retryPlans.length, 1);
-  assert.equal(retryPlans[0].runtimeId, "codex");
+  assert.equal(retryCalls.length, 1);
+  assert.equal(retryCalls[0].executionPlan.runtimeId, "codex");
+  assert.equal(retryCalls[0].useExecutionPlanRoute, true);
   const messages = workspaceThreadRead({ repoRoot }).messages;
   assert.equal(messages.filter((message) => message.role === "user").length, 1);
   assert.equal(messages.filter((message) => message.role === "assistant").length, 1);

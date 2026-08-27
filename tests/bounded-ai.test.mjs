@@ -226,7 +226,9 @@ test("runBoundedAI freezes a named operation plan across schema correction retri
   assert.equal(calls.length, 2);
   assert.equal(calls[0].aiOperation, "application.judgment");
   assert.equal(calls[0].executionPlan, undefined);
+  assert.equal(calls[0].useExecutionPlanRoute, undefined);
   assert.equal(calls[1].executionPlan, executionPlan);
+  assert.equal(calls[1].useExecutionPlanRoute, true);
   assert.equal(result.body.ai.executionPlan, executionPlan);
 });
 

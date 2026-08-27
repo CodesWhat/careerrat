@@ -268,6 +268,7 @@ async function runNativePreferred({
           reasoning,
           aiCapabilities,
           executionPlan: responseExecutionPlan || undefined,
+          useExecutionPlanRoute: responseExecutionPlan ? true : undefined,
           maxTokens,
           outputName,
           root,

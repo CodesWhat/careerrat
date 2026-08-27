@@ -7818,6 +7818,40 @@ test("Draft reply uses the same agent context and persists a reviewable communic
   });
 });
 
+test("communication.draft executes its durable frozen provider plan after settings change", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  seedCommunication(repoRoot);
+  const calls = [];
+  const frozenPlan = {
+    operation: "communication.drafting",
+    runtimeId: "codex",
+    resolved: { model: "gpt-5.6-sol", effort: "high" },
+  };
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "communication.draft",
+      entity: { type: "communication", id: "comm-temporal-recruiter" },
+    },
+    executionPlan: frozenPlan,
+    callAIImpl: async (input) => {
+      calls.push(input);
+      return {
+        content: [{ type: "text", text: "Thanks. Tuesday afternoon works for me." }],
+        executionPlan: frozenPlan,
+      };
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].executionPlan, frozenPlan);
+  assert.equal(calls[0].useExecutionPlanRoute, true);
+  assert.equal(calls[0].aiOperation, undefined);
+});
+
 test("communication.draft refuses and does not persist an AI draft that leaks a comp phrase", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot);

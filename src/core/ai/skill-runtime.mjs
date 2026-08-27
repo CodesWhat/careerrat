@@ -37,7 +37,7 @@ import { loadAgentCandidateConfig } from "../profile/config-store.mjs";
 import { PLAIN_ENGLISH_AGENT_VOICE } from "./agent-voice.mjs";
 import { resolveModelConfig } from "./ai-config.mjs";
 import { loadAIPreferences } from "./ai-preferences.mjs";
-import { resolveAIRoute } from "./call-ai.mjs";
+import { resolveAIRoute, resolveAIRouteForExecutionPlan } from "./call-ai.mjs";
 import { CHAT_ANSWER_MODE_GUIDANCE } from "./chat-answer-mode.mjs";
 import { runInstalledRuntime } from "./installed-runtimes.mjs";
 import {
@@ -554,6 +554,7 @@ export async function runSkillStream({
   reasoning = null,
   aiCapabilities = null,
   executionPlan = null,
+  useExecutionPlanRoute = false,
   runtimeInventory = null,
   runInstalledRuntimeImpl = runInstalledRuntime,
 } = {}) {
@@ -575,7 +576,10 @@ export async function runSkillStream({
     throw err;
   }
 
-  const route = resolveAIRoute(env, { repoRoot, runtimeInventory });
+  const route =
+    executionPlan && useExecutionPlanRoute
+      ? resolveAIRouteForExecutionPlan(executionPlan, env, { runtimeInventory })
+      : resolveAIRoute(env, { repoRoot, runtimeInventory });
   if (route.type === "none") {
     const err = new Error(route.error);
     err.code = "NO_AI_ROUTE";

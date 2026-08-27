@@ -1174,6 +1174,70 @@ test("runSkillStream resolves a named operation once for the selected installed 
   }
 });
 
+test("runSkillStream can execute a server-owned frozen plan after the selected runtime changed", async () => {
+  const repoRoot = tempRepoWithSkill("search-jobs");
+  const env = { CAREERRAT_RUNTIME_SKILLS: "search-jobs" };
+  writeInstalledRuntimeSelection({ repoRoot, env, runtimeId: "claude" });
+  try {
+    const calls = [];
+    const result = await runSkillStream({
+      skill: "search-jobs",
+      input: "find roles",
+      repoRoot,
+      env,
+      executionPlan: {
+        operation: "research.web",
+        runtimeId: "codex",
+        resolved: { model: "gpt-5.6-terra", effort: "medium" },
+      },
+      useExecutionPlanRoute: true,
+      runtimeInventory: [
+        {
+          id: "claude",
+          name: "Claude Code",
+          path: "/safe/claude",
+          available: true,
+          capabilities: {
+            completion: true,
+            structuredOutput: true,
+            appWorkflows: true,
+            exactRead: true,
+            publicWeb: true,
+            liveActivity: true,
+            resumable: true,
+          },
+        },
+        {
+          id: "codex",
+          name: "Codex",
+          path: "/safe/codex",
+          available: true,
+          capabilities: {
+            completion: true,
+            structuredOutput: true,
+            appWorkflows: true,
+            exactRead: true,
+            publicWeb: true,
+            liveActivity: true,
+            resumable: true,
+          },
+        },
+      ],
+      runInstalledRuntimeImpl: async (input) => {
+        calls.push(input);
+        return { text: "{}", runtimeId: input.runtime.id, usage: null };
+      },
+      onEvent: () => {},
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].runtime.id, "codex");
+    assert.equal(result.executionPlan.runtimeId, "codex");
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("runSkillStream applies saved provider-neutral preferences to a new operation", async () => {
   const repoRoot = tempRepoWithSkill("search-jobs");
   const env = { CAREERRAT_RUNTIME_SKILLS: "search-jobs" };

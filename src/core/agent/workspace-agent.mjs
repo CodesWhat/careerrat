@@ -6928,6 +6928,7 @@ export async function executeWorkspaceIntent({
                 selectedExecutionPlan,
                 "communication.drafting"
               ),
+              useExecutionPlanRoute: true,
             }
           : { aiOperation: "communication.drafting" }),
         signal,
@@ -10091,7 +10092,9 @@ export async function runWorkspaceAgentTurn({
       skill: "workspace-agent",
       action: "message",
       operation: "workspace:chat-turn",
-      ...(executionPlan ? { executionPlan } : { aiOperation: "paul.conversation" }),
+      ...(executionPlan
+        ? { executionPlan, useExecutionPlanRoute: true }
+        : { aiOperation: "paul.conversation" }),
       signal,
     });
     const parsedReply = parseChatAnswerMode(responseText(response));
