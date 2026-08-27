@@ -923,9 +923,13 @@ export async function runFirstSearchInBackground({
   env = process.env,
   fetchImpl = fetch,
   runId,
+  signal,
+  heartbeatMs = 30_000,
 } = {}) {
   const pathCtx = { repoRoot, env };
+  let heartbeat = null;
   try {
+    signal?.throwIfAborted();
     const { searchSources, sourcedScan } = currentSourceConfigs(pathCtx);
     const deterministicSources = countDeterministicSources({
       searchSources,
@@ -952,6 +956,18 @@ export async function runFirstSearchInBackground({
     };
 
     let lastProgress = null;
+    const heartbeatProgress = () =>
+      recordProgress({
+        foundCount: 0,
+        offerCount: 0,
+        scannedCount: 0,
+        completedSources: 0,
+        totalSources: deterministicSources.attempted,
+        ...(lastProgress || {}),
+      });
+    heartbeatProgress();
+    heartbeat = setInterval(heartbeatProgress, Math.max(1, Number(heartbeatMs) || 30_000));
+    heartbeat.unref?.();
     const summary = await runSourcedScan({
       repoRoot,
       env,
@@ -960,6 +976,7 @@ export async function runFirstSearchInBackground({
       verify: true,
       assertActive: () => sourcingRunAssertActive({ ...pathCtx, id: runId }),
       writeGuard: (db) => assertSourcingRunActiveInDb(db, runId),
+      signal,
       onProgress: ({ batch: _batch, ...progress }) => {
         lastProgress = progress;
         recordProgress(progress);
@@ -980,18 +997,21 @@ export async function runFirstSearchInBackground({
       summary: normalizeRunSummary(summary, deterministicSources),
     }).run;
   } catch (error) {
+    const failure = signal?.aborted && signal.reason ? signal.reason : error;
     try {
       return sourcingRunFail({
         ...pathCtx,
         id: runId,
         error: {
-          code: error?.code || "SOURCING_SCAN_FAILED",
-          message: error?.message || "Sourcing scan failed.",
+          code: failure?.code || "SOURCING_SCAN_FAILED",
+          message: failure?.message || "Sourcing scan failed.",
         },
       }).run;
     } catch {
       throw error;
     }
+  } finally {
+    if (heartbeat) clearInterval(heartbeat);
   }
 }
 

@@ -50,6 +50,7 @@ import {
 import { relationshipLeadUpsertBatch } from "../src/core/db/verbs/relationship.mjs";
 import { sourceWatermarkUpsert } from "../src/core/db/verbs/source.mjs";
 import { sourcedUpsertBatch } from "../src/core/db/verbs/sourced.mjs";
+import { sourcingRunLatest, sourcingRunStart } from "../src/core/db/verbs/sourcing-runs.mjs";
 import { buildCompanySeedContext } from "../src/core/discovery/company-context.mjs";
 import { companyDiscoveryFingerprint } from "../src/core/discovery/company-discovery-cadence.mjs";
 import { draftOneOffScreeningAnswers } from "../src/core/packet/one-off-answer.mjs";
@@ -4144,6 +4145,63 @@ test("the workspace runtime starts the job sweep before recurring company discov
   assert.equal(await backgroundStarted, "manual-search-concurrent");
   releaseCompanyDiscovery();
   await turn;
+});
+
+test("the workspace runtime owns sourcing workers and settles them during shutdown", async () => {
+  const repoRoot = tempRepo();
+  let started;
+  let startedWorker;
+  const workerStarted = new Promise((resolve) => {
+    startedWorker = resolve;
+  });
+  const runtime = createWorkspaceAgentRuntime({
+    repoRoot,
+    env: {},
+    startManualSearchImpl: async () => {
+      started = sourcingRunStart({ repoRoot, purpose: "manual-search" });
+      return { ok: true, reused: false, run: started.run };
+    },
+    companyDiscoveryCadenceImpl: () => ({ status: "current", due: false }),
+    runSearchInBackgroundImpl: async ({ signal }) => {
+      startedWorker();
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    },
+  });
+
+  await runtime.executeIntent({
+    intent: {
+      type: "search.run",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { purpose: "manual-search" },
+    },
+  });
+  await workerStarted;
+  assert.equal(runtime.ownsSourcingRun(started.run.id), true);
+
+  await runtime.shutdownSourcingWorkers();
+  assert.equal(runtime.ownsSourcingRun(started.run.id), false);
+  const terminal = sourcingRunLatest({ repoRoot, purpose: "manual-search" }).run;
+  assert.equal(terminal.status, "failed");
+  assert.equal(terminal.error.code, "SOURCING_RUN_SERVER_STOPPED");
+  assert.match(terminal.error.message, /app closed/i);
+  const thread = workspaceThreadRead({ repoRoot, env: {} });
+  assert.equal(thread.messages.at(-1).metadata.searchTerminal, true);
+  assert.equal(thread.messages.at(-1).metadata.searchRunId, started.run.id);
+});
+
+test("creating a workspace runtime immediately recovers orphaned sourcing runs", () => {
+  const repoRoot = tempRepo();
+  const orphan = sourcingRunStart({ repoRoot, purpose: "first-search" }).run;
+
+  const runtime = createWorkspaceAgentRuntime({ repoRoot, env: {} });
+
+  assert.equal(runtime.ownsSourcingRun(orphan.id), false);
+  const terminal = sourcingRunLatest({ repoRoot, purpose: "first-search" }).run;
+  assert.equal(terminal.status, "failed");
+  assert.equal(terminal.error.code, "SOURCING_RUN_SERVER_RESTARTED");
+  assert.match(terminal.error.message, /restarted/i);
 });
 
 test("a manual search reopens pending company proposals instead of creating a duplicate batch", async () => {

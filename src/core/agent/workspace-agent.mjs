@@ -59,7 +59,7 @@ import {
 } from "../db/verbs/linkedin-proposals.mjs";
 import { relationshipLeadUpsertBatch } from "../db/verbs/relationship.mjs";
 import { sourcedPromote, sourcedSetStatus, sourcedUpsertBatch } from "../db/verbs/sourced.mjs";
-import { sourcingRunLatest } from "../db/verbs/sourcing-runs.mjs";
+import { sourcingRunFail, sourcingRunLatest } from "../db/verbs/sourcing-runs.mjs";
 import { companyDiscoveryCadenceState } from "../discovery/company-discovery-cadence.mjs";
 import { applyCompanyProposalDecision } from "../discovery/company-proposal-decisions.mjs";
 import { createCompanyProposalBatch } from "../discovery/company-proposals.mjs";
@@ -9238,6 +9238,7 @@ export function createWorkspaceAgentRuntime({
 } = {}) {
   let tail = Promise.resolve();
   let runtime;
+  const sourcingWorkers = new Map();
 
   function enqueue(operation) {
     const current = tail.then(operation, operation);
@@ -9250,21 +9251,71 @@ export function createWorkspaceAgentRuntime({
 
   function startSearchInBackground({ operation, run }) {
     if (operation?.reused === true || run?.status !== "running" || !run?.id) return;
-    void Promise.resolve()
+    if (sourcingWorkers.has(run.id)) return;
+    const controller = new AbortController();
+    const promise = Promise.resolve()
       .then(() =>
         runSearchInBackgroundImpl({
           repoRoot,
           env,
           fetchImpl: searchFetchImpl,
           runId: run.id,
+          signal: controller.signal,
         })
       )
       .then((terminalRun) => runtime.recordSearchCompletion({ run: terminalRun }))
-      .catch(() => {});
+      .catch((error) => {
+        let terminalRun;
+        try {
+          terminalRun = sourcingRunFail({
+            repoRoot,
+            env,
+            id: run.id,
+            error: {
+              code: error?.code || "SOURCING_SCAN_FAILED",
+              message: error?.message || "The search stopped before it finished.",
+            },
+          }).run;
+        } catch {
+          return undefined;
+        }
+        return runtime.recordSearchCompletion({ run: terminalRun });
+      })
+      .finally(() => sourcingWorkers.delete(run.id));
+    sourcingWorkers.set(run.id, { controller, promise });
+  }
+
+  function reconcileOrphanedSourcingRuns() {
+    for (const purpose of ["first-search", "manual-search"]) {
+      try {
+        const run = sourcingRunLatest({ repoRoot, env, purpose }).run;
+        if (run?.status !== "running" || sourcingWorkers.has(run.id)) continue;
+        sourcingRunFail({
+          repoRoot,
+          env,
+          id: run.id,
+          error: {
+            code: "SOURCING_RUN_SERVER_RESTARTED",
+            message: "CareerRat restarted before this search finished. Start it again to continue.",
+          },
+        });
+      } catch {
+        // A workspace without a database has no durable sourcing runs to recover.
+      }
+    }
   }
 
   runtime = {
     startsSearchInBackground: true,
+    ownsSourcingRun(runId) {
+      return sourcingWorkers.has(runId);
+    },
+    async shutdownSourcingWorkers() {
+      const stopped = new Error("CareerRat stopped this search because the app closed.");
+      stopped.code = "SOURCING_RUN_SERVER_STOPPED";
+      for (const { controller } of sourcingWorkers.values()) controller.abort(stopped);
+      await Promise.allSettled([...sourcingWorkers.values()].map(({ promise }) => promise));
+    },
     runTurn(input = {}) {
       return enqueue(() => runWorkspaceAgentTurn({ repoRoot, env, callAIImpl, ...input }));
     },
@@ -9323,5 +9374,6 @@ export function createWorkspaceAgentRuntime({
       return enqueue(() => captureWorkspaceIntake({ repoRoot, env, captureIntakeImpl, ...input }));
     },
   };
+  reconcileOrphanedSourcingRuns();
   return runtime;
 }

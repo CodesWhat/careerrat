@@ -1005,6 +1005,56 @@ test("background first search publishes a growing found count before completion"
   }
 });
 
+test("background sourcing heartbeats while quiet and stops cleanly when the app shuts down", async () => {
+  const repoRoot = tempRepo();
+  const requested = deferred();
+  sourceConfigPut({
+    repoRoot,
+    name: "sourced-scan",
+    data: {
+      title_filter: { positive: [], negative: [] },
+      location_filter: null,
+      tracked_companies: [{ name: "Acme", careers_url: "https://jobs.lever.co/acme" }],
+    },
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: { title_filter: {}, location_filter: null, searches: [] },
+  });
+  const started = sourcingRunStart({ repoRoot, purpose: "manual-search" });
+  const controller = new AbortController();
+  const stopped = new Error("CareerRat stopped this search because the app closed.");
+  stopped.code = "SOURCING_RUN_SERVER_STOPPED";
+
+  const background = runFirstSearchInBackground({
+    repoRoot,
+    env: {},
+    runId: started.run.id,
+    signal: controller.signal,
+    heartbeatMs: 5,
+    fetchImpl: async (_url, init = {}) => {
+      requested.resolve();
+      return new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+      });
+    },
+  });
+
+  await requested.promise;
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  const heartbeat = sourcingRunLatest({ repoRoot, purpose: "manual-search" }).run;
+  assert.equal(heartbeat.status, "running");
+  assert.equal(heartbeat.progress.completedSources, 0);
+  assert.equal(heartbeat.progress.totalSources, 1);
+
+  controller.abort(stopped);
+  const terminal = await background;
+  assert.equal(terminal.status, "failed");
+  assert.equal(terminal.error.code, "SOURCING_RUN_SERVER_STOPPED");
+  assert.match(terminal.error.message, /app closed/i);
+});
+
 test("a superseded background search cannot write stale watermarks, offers, or completion", async () => {
   const repoRoot = tempRepo();
   const oldResponse = deferred();

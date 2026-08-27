@@ -374,9 +374,16 @@ export async function runSourcedScan({
   assertActive,
   writeGuard,
   hydrateOfferImpl = hydratePartialOffer,
+  signal,
 } = {}) {
   const ensureActive = () => {
+    signal?.throwIfAborted();
     if (typeof assertActive === "function") assertActive();
+  };
+  const fetchForRun = (url, init = {}) => {
+    const requestSignal =
+      signal && init.signal ? AbortSignal.any([signal, init.signal]) : signal || init.signal;
+    return fetchImpl(url, requestSignal ? { ...init, signal: requestSignal } : init);
   };
   ensureActive();
   const pathCtx = { repoRoot, env };
@@ -452,7 +459,7 @@ export async function runSourcedScan({
     ensureActive();
     const result = await scanCompanies(
       { ...config, tracked_companies: [company] },
-      { fetchImpl, resolveHost, companyFilter: null }
+      { fetchImpl: fetchForRun, resolveHost, companyFilter: null }
     );
     ensureActive();
     await acceptBatch(result, { kind: "company", label: company.name });
@@ -468,8 +475,8 @@ export async function runSourcedScan({
     const singleton = singleSearchSourceConfig(searchSources, task.source);
     const result =
       task.kind === "rss"
-        ? await scanSearchSources(singleton, { fetchImpl, resolveHost })
-        : await scanBoards(singleton, { fetchImpl, resolveHost });
+        ? await scanSearchSources(singleton, { fetchImpl: fetchForRun, resolveHost })
+        : await scanBoards(singleton, { fetchImpl: fetchForRun, resolveHost });
     ensureActive();
     await acceptBatch(result, {
       kind: task.kind,
@@ -508,7 +515,7 @@ export async function runSourcedScan({
         filtered.kept,
         (offer) => {
           ensureActive();
-          return hydrateOfferImpl(offer, { fetchImpl, resolveHost });
+          return hydrateOfferImpl(offer, { fetchImpl: fetchForRun, resolveHost });
         },
         PARTIAL_HYDRATION_CONCURRENCY
       ),
@@ -545,7 +552,7 @@ export async function runSourcedScan({
     const dropped = [];
     for (const offer of filtered.kept) {
       ensureActive();
-      const live = await checkUrlLiveness(offer.url, { fetchImpl });
+      const live = await checkUrlLiveness(offer.url, { fetchImpl: fetchForRun });
       ensureActive();
       if (live.result === "expired") dropped.push({ ...offer, liveness: live });
       else checked.push({ ...offer, liveness: live });

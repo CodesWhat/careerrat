@@ -605,6 +605,7 @@ export function createDevServer({
     browserSessionManager,
     stopRuntimeSignIns: stopInstalledRuntimeSignIns,
     shutdownAiWebSearch: searchRoutes.shutdownAiWebSearch,
+    shutdownSourcingWorkers: workspaceAgentRuntime.shutdownSourcingWorkers,
   };
 }
 
@@ -652,6 +653,7 @@ async function main() {
     // child process running.
     dev.chatRuntime.shutdown();
     dev.stopRuntimeSignIns();
+    await dev.shutdownSourcingWorkers();
     await dev.shutdownAiWebSearch();
     await dev.browserSessionManager.shutdown();
     dev.server.close(() => process.exit(0));
