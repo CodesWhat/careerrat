@@ -335,6 +335,7 @@ export function buildLocationFilter(locationFilter = null) {
     if (!hasPolicy) return true;
     const lower = location.toLowerCase();
     if (alwaysAllow.some((term) => keywordMatches(lower, term))) return true;
+    if (placeMatchesAllowed(location, alwaysAllow)) return true;
     if (block.some((term) => keywordMatches(lower, term))) return false;
     return allow.some((term) => keywordMatches(lower, term));
   };
@@ -510,6 +511,15 @@ function placeContainsAlias(normalized, aliases) {
   );
 }
 
+function listedPlaces(value) {
+  const source = String(value || "").trim();
+  if (!source) return [];
+  return source
+    .split(/\s*(?:;|\||•|\n|\s\/\s)\s*/)
+    .map((place) => place.trim())
+    .filter(Boolean);
+}
+
 function coordinatesForPlace(value) {
   const normalized = normalizePlace(value);
   if (!normalized) return null;
@@ -554,7 +564,7 @@ function seniorityEligibility(offer, config) {
 
 function homeLooksUs(home) {
   return (
-    US_STATE_RE.test(String(home || "")) ||
+    homeRegionAliases(home).length > 0 ||
     /\bunited states|\busa\b/i.test(String(home || "")) ||
     NEW_YORK_CITY_ALIASES.has(normalizePlace(home))
   );
@@ -592,11 +602,13 @@ function remoteExcludesHomeRegion(value, home) {
 }
 
 function placeMatchesAllowed(location, places) {
-  const normalized = normalizePlace(location);
-  if (!normalized) return false;
-  return places.some((place) => {
-    const candidate = normalizePlace(place);
-    return candidate && (normalized.includes(candidate) || candidate.includes(normalized));
+  return listedPlaces(location).some((listedPlace) => {
+    const normalized = normalizePlace(listedPlace);
+    if (!normalized) return false;
+    return places.some((place) => {
+      const candidate = normalizePlace(place);
+      return candidate && (normalized.includes(candidate) || candidate.includes(normalized));
+    });
   });
 }
 
@@ -616,9 +628,14 @@ function commuteEligibility(location, profileLocation) {
           longitude: Number(profileLocation.home_longitude),
         }
       : coordinatesForPlace(home);
-  const jobCoordinates = coordinatesForPlace(location);
-  if (Number.isFinite(radius) && radius > 0 && homeCoordinates && jobCoordinates) {
-    const distanceMiles = haversineMiles(homeCoordinates, jobCoordinates);
+  const distances = homeCoordinates
+    ? listedPlaces(location)
+        .map((place) => coordinatesForPlace(place))
+        .filter(Boolean)
+        .map((jobCoordinates) => haversineMiles(homeCoordinates, jobCoordinates))
+    : [];
+  if (Number.isFinite(radius) && radius > 0 && homeCoordinates && distances.length > 0) {
+    const distanceMiles = Math.min(...distances);
     return {
       eligible: distanceMiles <= radius,
       reason: distanceMiles <= radius ? undefined : "outside-commute-radius",
@@ -771,7 +788,8 @@ function postingAgeEligibility(offer, config, now) {
 function salaryEligibility(offer, config) {
   const floor = Number(config?.profile?.compensation?.minimum_base);
   const band = extractCompBand(
-    [offer?.comp, offer?.bodyText, offer?.description].filter(Boolean).join("\n")
+    [offer?.comp, offer?.bodyText, offer?.description].filter(Boolean).join("\n"),
+    { baseOnly: true }
   );
   if (!band) return { eligible: true, unknown: "compensation" };
   if (Number.isFinite(floor) && floor > 0 && band.min < floor) {
@@ -1025,7 +1043,9 @@ function scoreSourcedOfferFromConfig(
     profile && profile.compensation && profile.compensation.minimum_base != null
       ? Number(profile.compensation.minimum_base)
       : null;
-  const comp = extractCompBand(`${compText}\n${body}`);
+  const comp = extractCompBand(`${compText}\n${body}`, {
+    baseOnly: minimumBase !== null && Number.isFinite(minimumBase),
+  });
   if (minimumBase !== null && Number.isFinite(minimumBase)) {
     if (comp) {
       if (comp.max < minimumBase) {
@@ -1193,8 +1213,22 @@ function gateFromScoreAndFlags(score, flags, modes = {}) {
   return "review";
 }
 
-export function extractCompBand(text = "") {
+const ANNUAL_WORK_HOURS = 2_080;
+const BASE_COMP_LABEL_RE = /\b(?:base\s+(?:salary|pay)|salary(?:\s+(?:range|band))?)\b/i;
+const VARIABLE_COMP_LABEL_RE =
+  /\b(?:on-target\s+earnings|ote|bonus|equity|commission|total\s+comp(?:ensation)?|variable\s+(?:pay|compensation)|incentive\s+(?:pay|compensation))\b/i;
+const HOURLY_COMP_RE = /\b(?:hourly|per\s+(?:hour|hr))\b|\/\s*(?:hour|hr)\b/i;
+
+function lastLabelIndex(value, pattern) {
+  let index = -1;
+  for (const match of value.matchAll(new RegExp(pattern.source, "gi"))) index = match.index;
+  return index;
+}
+
+export function extractCompBand(text = "", { baseOnly = false } = {}) {
   const source = String(text || "");
+  const explicitBaseCandidates = [];
+  const nonVariableCandidates = [];
   const candidates = [];
   const lines = source
     .split(/\n|\. /)
@@ -1202,14 +1236,30 @@ export function extractCompBand(text = "") {
 
   for (const line of lines) {
     const normalized = line.replace(/,/g, "");
+    const explicitBase = BASE_COMP_LABEL_RE.test(line);
+    const variableComp = VARIABLE_COMP_LABEL_RE.test(line);
+    const hourly = HOURLY_COMP_RE.test(line);
     const re =
       /(?:usd\s*)?\$?\s*(\d{2,6}(?:\.\d+)?)(\s*k)?\s*(?:-|–|—|to)\s*(?:usd\s*)?\$?\s*(\d{2,6}(?:\.\d+)?)(\s*k)?/gi;
     let foundRange = false;
     for (const match of normalized.matchAll(re)) {
-      const min = normalizeMoney(match[1], match[2]);
-      const max = normalizeMoney(match[3], match[4]);
+      const prefix = normalized.slice(0, match.index);
+      const baseLabelIndex = lastLabelIndex(prefix, BASE_COMP_LABEL_RE);
+      const variableLabelIndex = lastLabelIndex(prefix, VARIABLE_COMP_LABEL_RE);
+      const rangeIsBase = baseLabelIndex >= 0 && baseLabelIndex > variableLabelIndex;
+      const rangeIsVariable = variableLabelIndex >= 0 && variableLabelIndex > baseLabelIndex;
+      const rangeIsHourly = rangeIsBase && hourly;
+      const min = rangeIsHourly
+        ? Number(match[1]) * ANNUAL_WORK_HOURS
+        : normalizeMoney(match[1], match[2]);
+      const max = rangeIsHourly
+        ? Number(match[3]) * ANNUAL_WORK_HOURS
+        : normalizeMoney(match[3], match[4]);
       if (min >= 50000 && max >= min && max <= 1200000) {
-        candidates.push({ min, max });
+        const candidate = { min, max };
+        candidates.push(candidate);
+        if (rangeIsBase) explicitBaseCandidates.push(candidate);
+        else if (!rangeIsVariable && !variableComp) nonVariableCandidates.push(candidate);
         foundRange = true;
       }
     }
@@ -1217,16 +1267,24 @@ export function extractCompBand(text = "") {
     if (!/\b(?:salary|base\s+(?:salary|pay)|annual\s+(?:salary|pay|compensation))\b/i.test(line)) {
       continue;
     }
-    if (/\b(?:hourly|per\s+hour|bonus|equity|commission|ote|total\s+compensation)\b/i.test(line)) {
+    if (variableComp && !explicitBase) {
       continue;
     }
     const single = normalized.match(/(?:USD\s*)?\$\s*(\d{2,7}(?:\.\d+)?)(\s*k)?\b/i);
     if (!single) continue;
-    const amount = normalizeMoney(single[1], single[2]);
-    if (amount >= 50000 && amount <= 1200000) candidates.push({ min: amount, max: amount });
+    const amount =
+      explicitBase && hourly
+        ? Number(single[1]) * ANNUAL_WORK_HOURS
+        : normalizeMoney(single[1], single[2]);
+    if (amount >= 50000 && amount <= 1200000) {
+      const candidate = { min: amount, max: amount };
+      candidates.push(candidate);
+      if (explicitBase) explicitBaseCandidates.push(candidate);
+      else if (!variableComp) nonVariableCandidates.push(candidate);
+    }
   }
 
-  return candidates[0] || null;
+  return explicitBaseCandidates[0] || (baseOnly ? nonVariableCandidates[0] : candidates[0]) || null;
 }
 
 function normalizeMoney(value, suffix = "") {

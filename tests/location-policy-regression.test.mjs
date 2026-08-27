@@ -294,6 +294,62 @@ test("conditional remote outside a metro stays eligible and gets an honest locat
   assert.equal(result.kept[0].location, "Remote outside the Bay Area · Hybrid near San Francisco");
 });
 
+test("multi-location hybrid postings stay eligible when any listed metro is allowed", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "San Francisco, CA",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: true,
+      onsite: false,
+      relocation: ["Boston, MA"],
+    },
+  };
+  const homeMetro = offer(
+    "hybrid-home-metro",
+    "Home Metro Corp",
+    "New York, NY; San Francisco, CA (Hybrid)"
+  );
+  homeMetro.bodyText = "Employees are required in a listed office 2 days per week.";
+  const relocationMetro = offer(
+    "hybrid-relocation-metro",
+    "Relocation Metro Corp",
+    "New York, NY; Boston, MA (Hybrid)"
+  );
+  relocationMetro.bodyText = "Employees are required in a listed office 2 days per week.";
+
+  const result = qualifyByLocation(profile, [homeMetro, relocationMetro]);
+
+  assert.deepEqual(
+    result.kept.map((row) => row.company),
+    ["Home Metro Corp", "Relocation Metro Corp"]
+  );
+  assert.equal(result.filteredLocation.length, 0);
+});
+
+test("full US state names qualify a home for conditional US-only remote work", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Brooklyn, New York",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: true,
+      onsite: false,
+      relocation: [],
+    },
+  };
+  const conditional = offer("conditional-us-full-state", "US Remote Corp", "San Francisco, CA");
+  conditional.bodyText =
+    "This is a remote position for candidates outside of the Bay Area and a hybrid role for candidates within commuting distance to San Francisco. All candidates must be US-based.";
+
+  const result = qualifyByLocation(profile, [conditional], { generatedFilter: false });
+
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.filteredLocation.length, 0);
+});
+
 test("conditional hybrid work still enforces the saved office-day maximum", () => {
   const profile = {
     candidate: { domain: "software engineering" },

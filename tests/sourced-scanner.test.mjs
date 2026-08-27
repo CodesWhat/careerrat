@@ -1779,6 +1779,167 @@ test("qualification trusts the role compensation before unrelated recommendation
   assert.deepEqual(result.filteredSalary[0]?.compBand, { min: 70000, max: 70000 });
 });
 
+test("qualification uses base salary instead of variable and total compensation ranges", () => {
+  const nonBaseRanges = [
+    ["OTE Corp", "On-target earnings (OTE): $180,000 - $220,000 per year."],
+    ["Bonus Corp", "Annual bonus opportunity: $100,000 - $120,000."],
+    ["Equity Corp", "Annual equity value: $150,000 - $250,000."],
+    ["Commission Corp", "Annual commission: $120,000 - $180,000."],
+    ["Total Comp Corp", "Total compensation: $190,000 - $230,000 per year."],
+  ];
+  const result = filterAndDedupeOffers(
+    nonBaseRanges.map(([company, variableComp], index) => ({
+      company,
+      title: "Bar Manager",
+      url: `https://jobs.example.test/base-pay-${index}`,
+      location: "New York, NY",
+      bodyText: `${variableComp} Annual base salary: $70,000 - $80,000.`,
+    })),
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_base: 85000 },
+          location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 0);
+  assert.deepEqual(
+    result.filteredSalary.map((offer) => offer.compBand),
+    Array.from({ length: nonBaseRanges.length }, () => ({ min: 70000, max: 80000 }))
+  );
+});
+
+test("qualification selects same-sentence base salary instead of total compensation", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Same Sentence Comp Corp",
+        title: "Bar Manager",
+        url: "https://jobs.example.test/same-sentence-base-pay",
+        location: "New York, NY",
+        bodyText:
+          "Total compensation: $190k-$230k including base salary $70k-$80k plus bonus and equity.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_base: 85000 },
+          location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
+  assert.deepEqual(result.filteredSalary[0]?.compBand, { min: 70000, max: 80000 });
+});
+
+test("qualification treats variable and total compensation without base pay as unknown", () => {
+  const nonBaseRanges = [
+    ["OTE Only Corp", "On-target earnings (OTE): $180,000 - $220,000 per year."],
+    ["Bonus Only Corp", "Annual bonus opportunity: $100,000 - $120,000."],
+    ["Equity Only Corp", "Annual equity value: $150,000 - $200,000."],
+    ["Commission Only Corp", "Annual commission: $120,000 - $180,000."],
+    ["Total Comp Only Corp", "Total compensation: $190,000 - $230,000 per year."],
+  ];
+  const result = filterAndDedupeOffers(
+    nonBaseRanges.map(([company, variableComp], index) => ({
+      company,
+      title: "Bar Manager",
+      url: `https://jobs.example.test/non-base-pay-${index}`,
+      location: "New York, NY",
+      bodyText: variableComp,
+    })),
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_base: 250000 },
+          location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.filteredSalary.length, 0);
+  assert.deepEqual(
+    result.kept.map((offer) => offer.company),
+    nonBaseRanges.map(([company]) => company)
+  );
+  assert.ok(result.kept.every((offer) => offer.qualificationUnknowns.includes("compensation")));
+});
+
+test("qualification annualizes an explicit hourly base-pay range before applying the floor", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Hourly Base Corp",
+        title: "Bar Manager",
+        url: "https://jobs.example.test/hourly-base-pay",
+        location: "New York, NY",
+        bodyText: "Base pay: $40.00 - $45.00 per hour.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_base: 85000 },
+          location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
+  assert.deepEqual(result.filteredSalary[0]?.compBand, { min: 83200, max: 93600 });
+});
+
+test("qualification annualizes a single explicit hourly base-pay amount", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Single Hourly Base Corp",
+        title: "Bar Manager",
+        url: "https://jobs.example.test/single-hourly-base-pay",
+        location: "New York, NY",
+        bodyText: "Base pay: $40 per hour.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_base: 85000 },
+          location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
+  assert.deepEqual(result.filteredSalary[0]?.compBand, { min: 83200, max: 83200 });
+});
+
 // ---------------------------------------------------------------------------
 // Config-driven scoring — domain generality tests (unchanged)
 // ---------------------------------------------------------------------------

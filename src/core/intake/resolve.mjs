@@ -382,11 +382,18 @@ async function resolvePlainFetch({
     };
   }
 
-  const sourceReqId = extractReqId(url).id;
+  const sourceReqId = extractReqId(url);
   for (const canonicalUrl of extractCanonicalAtsUrls(html, fetched.finalUrl || url)) {
     const canonicalProvider = inferProvider({ careers_url: canonicalUrl });
     if (!canonicalProvider) continue;
-    if (sourceReqId && extractReqId(canonicalUrl).id !== sourceReqId) continue;
+    const canonicalReqId = extractReqId(canonicalUrl);
+    if (
+      sourceReqId.id &&
+      sourceReqId.provider === canonicalReqId.provider &&
+      canonicalReqId.id !== sourceReqId.id
+    ) {
+      continue;
+    }
     const resolved = await resolveViaProviderBoard({
       provider: canonicalProvider,
       url: canonicalUrl,

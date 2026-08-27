@@ -553,6 +553,40 @@ test("plain aggregator page: follows a canonical ATS apply link and returns the 
   assert.match(result.bodyText, /Complete canonical job description/);
 });
 
+test("plain aggregator identity may hand off to a different canonical ATS requisition", async () => {
+  const aggregatorUrl = "https://hiring.cafe/job/swfwvwmaq6basefz";
+  const atsUrl = "https://job-boards.greenhouse.io/acme/jobs/123456";
+  const fetchImpl = async (requestedUrl) => {
+    const url = String(requestedUrl);
+    if (url === aggregatorUrl) {
+      return htmlResponse(
+        `<html><body><h1>Staff Engineer</h1><a href="${atsUrl}">Apply now</a></body></html>`,
+        { finalUrl: aggregatorUrl }
+      );
+    }
+    if (url.includes("boards-api.greenhouse.io/v1/boards/acme/jobs")) {
+      return jsonResponse({
+        jobs: [
+          {
+            title: "Staff Engineer",
+            absolute_url: atsUrl,
+            content: `<p>${"Complete employer-owned job description. ".repeat(30)}</p>`,
+          },
+        ],
+      });
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  };
+
+  const result = await resolveJobUrl(aggregatorUrl, { fetchImpl, resolveHost: publicResolver });
+
+  assert.equal(result.bodyFetchStatus, "resolved");
+  assert.equal(result.url, atsUrl);
+  assert.equal(result.sourceUrl, aggregatorUrl);
+  assert.equal(result.provider, "greenhouse");
+  assert.match(result.bodyText, /Complete employer-owned job description/);
+});
+
 test("plain aggregator page: keeps its job body but hands application work to an embedded applyUrl", async () => {
   const aggregatorUrl = "https://remotevibecodingjobs.com/jobs/acme-staff-engineer";
   const applicationUrl = "https://www.linkedin.com/jobs/view/1234567890";
