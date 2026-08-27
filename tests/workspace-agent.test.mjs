@@ -181,6 +181,12 @@ function readSourced(repoRoot, id) {
   return row ? JSON.parse(row.data) : null;
 }
 
+function seedSourcingRun(repoRoot, run) {
+  openDb({ repoRoot, env: {} })
+    .prepare("INSERT INTO sourcing_runs (id, data) VALUES (?, ?)")
+    .run(run.id, JSON.stringify(run));
+}
+
 after(() => {
   closeAll();
   for (const root of cleanupRoots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -4834,6 +4840,154 @@ test("AI search failures stay plain English in workspace history and later agent
   const modelHistory = JSON.stringify(calls[0].messages);
   assert.match(modelHistory, /AI search stopped before it finished/);
   assert.doesNotMatch(modelHistory, /schema|AI_WEB_SEARCH_QUERIES_FAILED|route/i);
+});
+
+test("search status questions answer from current completed and failed runs without the model", async () => {
+  const repoRoot = tempRepo();
+  seedSourcingRun(repoRoot, {
+    id: "manual-search-current",
+    purpose: "manual-search",
+    status: "completed",
+    started_at: "2026-08-27T13:00:00.000Z",
+    completed_at: "2026-08-27T13:00:04.000Z",
+    updated_at: "2026-08-27T13:00:04.000Z",
+    metadata: { searchExecutionId: "search-current" },
+    summary: { scanned: 100, qualified: 0, presented: 0, filtered: 100 },
+    error: null,
+  });
+  seedSourcingRun(repoRoot, {
+    id: "ai-web-search-current",
+    purpose: "ai-web-search",
+    status: "failed",
+    started_at: "2026-08-27T13:00:01.000Z",
+    completed_at: "2026-08-27T13:00:05.000Z",
+    updated_at: "2026-08-27T13:00:05.000Z",
+    metadata: { searchExecutionId: "search-current" },
+    summary: null,
+    error: {
+      code: "AI_WEB_SEARCH_QUERIES_FAILED",
+      message: "Model output did not match the route schema.",
+    },
+  });
+
+  let modelCalls = 0;
+  const result = await runWorkspaceAgentTurn({
+    repoRoot,
+    env: {},
+    text: "hows this search going?",
+    callAIImpl: async () => {
+      modelCalls += 1;
+      return {
+        content: [
+          {
+            type: "text",
+            text: "Turn on browser access for Indeed and LinkedIn in a hidden settings page.",
+          },
+        ],
+      };
+    },
+  });
+
+  assert.equal(modelCalls, 0);
+  assert.equal(
+    result.messages.at(-1).text,
+    "Your saved job sites finished. They scanned 100 jobs and found no matches. The AI search couldn't finish, so it needs another try."
+  );
+  assert.doesNotMatch(
+    result.messages.at(-1).text,
+    /running|hcareers|hospitalityonline|oysterlink|ihirehospitality|majc|indeed|linkedin|browser|settings|docs|role.focus|pending/i
+  );
+});
+
+test("search status questions report a current running lane without calling the model", async () => {
+  const repoRoot = tempRepo();
+  seedSourcingRun(repoRoot, {
+    id: "manual-search-running-pair",
+    purpose: "manual-search",
+    status: "completed",
+    started_at: "2026-08-27T13:10:00.000Z",
+    completed_at: "2026-08-27T13:10:04.000Z",
+    updated_at: "2026-08-27T13:10:04.000Z",
+    metadata: { searchExecutionId: "search-running-pair" },
+    summary: { scanned: 100, qualified: 0, presented: 0, filtered: 100 },
+    error: null,
+  });
+  seedSourcingRun(repoRoot, {
+    id: "ai-web-search-running-pair",
+    purpose: "ai-web-search",
+    status: "running",
+    started_at: "2026-08-27T13:10:05.000Z",
+    completed_at: null,
+    updated_at: new Date().toISOString(),
+    metadata: { searchExecutionId: "search-running-pair" },
+    summary: null,
+    error: null,
+  });
+
+  const result = await runWorkspaceAgentTurn({
+    repoRoot,
+    env: {},
+    text: "How's the job search going?",
+    callAIImpl: async () => {
+      throw new Error("search status must not call the model");
+    },
+  });
+
+  assert.equal(
+    result.messages.at(-1).text,
+    "Your saved job sites finished. They scanned 100 jobs and found no matches. The AI search is still running."
+  );
+
+  const smartApostrophe = await runWorkspaceAgentTurn({
+    repoRoot,
+    env: {},
+    text: "How’s my search doing?",
+    callAIImpl: async () => {
+      throw new Error("search status must not call the model");
+    },
+  });
+  assert.equal(smartApostrophe.messages.at(-1).text, result.messages.at(-1).text);
+});
+
+test("search status questions ignore an AI run from a different search execution", async () => {
+  const repoRoot = tempRepo();
+  seedSourcingRun(repoRoot, {
+    id: "manual-search-new-execution",
+    purpose: "manual-search",
+    status: "completed",
+    started_at: "2026-08-27T13:20:00.000Z",
+    completed_at: "2026-08-27T13:20:04.000Z",
+    updated_at: "2026-08-27T13:20:04.000Z",
+    metadata: { searchExecutionId: "search-new" },
+    summary: { scanned: 42, qualified: 2, presented: 2, filtered: 40 },
+    error: null,
+  });
+  seedSourcingRun(repoRoot, {
+    id: "ai-web-search-old-execution",
+    purpose: "ai-web-search",
+    status: "failed",
+    started_at: "2026-08-27T13:19:00.000Z",
+    completed_at: "2026-08-27T13:19:04.000Z",
+    updated_at: "2026-08-27T13:19:04.000Z",
+    metadata: { searchExecutionId: "search-old" },
+    summary: null,
+    error: { code: "AI_WEB_SEARCH_FAILED", message: "Old search failed." },
+  });
+
+  const result = await runWorkspaceAgentTurn({
+    repoRoot,
+    env: {},
+    text: "Did this search find anything?",
+    callAIImpl: async () => {
+      throw new Error("search status must not call the model");
+    },
+  });
+
+  assert.equal(
+    result.messages.at(-1).text,
+    "Your saved job sites finished. They scanned 42 jobs and found 2 matches."
+  );
+  assert.doesNotMatch(result.messages.at(-1).text, /AI|failed|retry|running/i);
 });
 
 test("free-form turns persist the model-declared yes-no answer mode without its control fence", async () => {

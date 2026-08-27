@@ -59,6 +59,7 @@ import {
 } from "../db/verbs/linkedin-proposals.mjs";
 import { relationshipLeadUpsertBatch } from "../db/verbs/relationship.mjs";
 import { sourcedPromote, sourcedSetStatus, sourcedUpsertBatch } from "../db/verbs/sourced.mjs";
+import { sourcingRunLatest } from "../db/verbs/sourcing-runs.mjs";
 import { companyDiscoveryCadenceState } from "../discovery/company-discovery-cadence.mjs";
 import { applyCompanyProposalDecision } from "../discovery/company-proposal-decisions.mjs";
 import { createCompanyProposalBatch } from "../discovery/company-proposals.mjs";
@@ -8963,6 +8964,109 @@ function previewAnswerLabel(text) {
   return `Answer: “${preview}”`;
 }
 
+function isSearchStatusQuestion(text) {
+  const value = String(text || "").trim();
+  return (
+    /^how(?:['’]?s|\s+is)\s+(?:(?:this|the|my|our)\s+)?(?:job\s+)?search\s+(?:going|doing|progressing)\s*[.?!]*$/i.test(
+      value
+    ) ||
+    /^(?:is|are)\s+(?:(?:this|the|my|our)\s+)?(?:job\s+)?search\s+still\s+(?:going|running|searching)\s*[.?!]*$/i.test(
+      value
+    ) ||
+    /^did\s+(?:(?:this|the|my|our)\s+)?(?:job\s+)?search\s+find\s+anything\s*[.?!]*$/i.test(
+      value
+    ) ||
+    /^what(?:['’]?s|\s+is)\s+(?:happening|going\s+on)\s+with\s+(?:(?:this|the|my|our)\s+)?(?:job\s+)?search\s*[.?!]*$/i.test(
+      value
+    )
+  );
+}
+
+function sourcingRunTime(state) {
+  const run = state?.run || {};
+  for (const value of [
+    run.updatedAt,
+    run.updated_at,
+    run.startedAt,
+    run.started_at,
+    run.completedAt,
+    run.completed_at,
+  ]) {
+    const parsed = Date.parse(value || "");
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
+function latestDeterministicSearch({ repoRoot, env }) {
+  const states = ["manual-search", "first-search"]
+    .map((purpose) => sourcingRunLatest({ repoRoot, env, purpose }))
+    .filter((state) => state?.run && state.run.status !== "not_started");
+  const running = states.filter((state) => state.run.status === "running");
+  return (running.length ? running : states).sort(
+    (left, right) => sourcingRunTime(right) - sourcingRunTime(left)
+  )[0];
+}
+
+function correlatedAiSearch(deterministic, ai) {
+  if (!ai?.run || !deterministic?.run) return ai;
+  const deterministicExecutionId = String(
+    deterministic.run.metadata?.searchExecutionId || ""
+  ).trim();
+  const aiExecutionId = String(ai.run.metadata?.searchExecutionId || "").trim();
+  return deterministicExecutionId && deterministicExecutionId !== aiExecutionId ? null : ai;
+}
+
+function countLabel(count, singular) {
+  return `${count} ${singular}${count === 1 ? "" : "s"}`;
+}
+
+function matchCountLabel(count, adjective = "") {
+  const prefix = adjective ? `${adjective} ` : "";
+  if (count === 0) return `no ${prefix}matches`;
+  return `${count} ${prefix}${count === 1 ? "match" : "matches"}`;
+}
+
+function deterministicSearchStatusText(state) {
+  const run = state?.run;
+  if (!run) return "";
+  if (run.status === "running") return "CareerRat is still searching your saved job sites.";
+  if (run.status === "failed") {
+    return "Your saved job-site search couldn't finish, so it needs another try.";
+  }
+  if (run.status !== "completed") return "";
+  const summary = run.summary || {};
+  const scanned = Number(summary.scanned);
+  const matches = Number(summary.qualified ?? summary.presented ?? summary.new ?? 0);
+  if (!Number.isFinite(scanned)) {
+    return `Your saved job sites finished and found ${matchCountLabel(matches)}.`;
+  }
+  return `Your saved job sites finished. They scanned ${countLabel(scanned, "job")} and found ${matchCountLabel(matches)}.`;
+}
+
+function aiSearchStatusText(state) {
+  const run = state?.run;
+  if (!run) return "";
+  if (run.status === "running") return "The AI search is still running.";
+  if (run.status === "failed") return "The AI search couldn't finish, so it needs another try.";
+  if (run.status !== "completed") return "";
+  const summary = run.summary || {};
+  const matches = Number(summary.new ?? summary.found ?? 0);
+  return `The AI search finished and found ${matchCountLabel(matches, "new")}.`;
+}
+
+function currentSearchStatusText({ repoRoot, env }) {
+  const deterministic = latestDeterministicSearch({ repoRoot, env });
+  const ai = correlatedAiSearch(
+    deterministic,
+    sourcingRunLatest({ repoRoot, env, purpose: "ai-web-search" })
+  );
+  const parts = [deterministicSearchStatusText(deterministic), aiSearchStatusText(ai)].filter(
+    Boolean
+  );
+  return parts.join(" ") || "No job search has run yet.";
+}
+
 // `text` is never persisted or sent anywhere here — this is pure
 // classification against ACTION_PREVIEW_RULES above. `engineAvailable` lets
 // the ask bar render the NO ENGINE receipt state up front (before a turn
@@ -9019,6 +9123,18 @@ export async function runWorkspaceAgentTurn({
     ...(jobContext ? { metadata: { jobContext } } : {}),
     now,
   });
+  if (isSearchStatusQuestion(text)) {
+    workspaceMessageAppend({
+      repoRoot,
+      env,
+      role: "assistant",
+      kind: "text",
+      text: currentSearchStatusText({ repoRoot, env }),
+      metadata: { source: "search-status" },
+      now,
+    });
+    return workspaceThreadRead({ repoRoot, env });
+  }
   const history = workspaceThreadRead({ repoRoot, env });
 
   try {
