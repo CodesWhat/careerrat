@@ -53,20 +53,16 @@ directly and never falls back to or silently switches providers. A runtime
 becomes `Ready` only after local availability, authentication, and its readiness
 check pass.
 
-v0.16.4 is the current public release. Its signed, notarized, and stapled Mac
+v0.16.5 is the current public release. Its signed, notarized, and stapled Mac
 DMG, updater ZIP, update feed, and SBOM are on GitHub; `careerrat@latest` is
-0.16.4 on npm; the Homebrew cask is 0.16.4; and the installed app reports
-version 0.16.4, passes Gatekeeper, launches cleanly, and reports that it is up to
-date. The release also passed a real signed 0.16.3-to-0.16.4 in-app update.
+0.16.5 on npm; the Homebrew cask is 0.16.5; and the installed app reports
+version 0.16.5, passes Gatekeeper, launches cleanly, and reports that it is up to
+date. The release also passed a real signed 0.16.4-to-0.16.5 in-app update.
 
-This release gives recoverable failures a plain-English explanation and next
-step, enforces remote and office-day limits from the captured job description,
-resolves validated application entry points, and adds signed in-app Mac updates.
-
-v0.16.5 is the verified release candidate. It closes the remaining raw-error
-paths in guided installation, expanded diagnostics, browser-workflow cards,
-Search status, and browser setup. v0.16.4 remains the current public release
-until the signed 0.16.5 artifacts and distribution channels pass live checks.
+v0.16.5 preserves plain-English recovery, remote and office-day limits,
+validated application entry points, and signed in-app Mac updates from v0.16.4.
+It also closes the remaining raw-error paths in guided installation, expanded
+diagnostics, browser-workflow cards, Search status, and browser setup.
 
 The Windows x64 installer passed build, install, launch, export, and uninstall
 QA. A public Windows installer will ship only after SignPath Foundation signing
