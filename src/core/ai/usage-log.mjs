@@ -80,12 +80,19 @@ export function usageLogAbsPath(root = DEFAULT_ROOT) {
 
 const DEFAULT_PRICING = {
   "claude-sonnet-5": { in: 3, out: 15 },
+  "claude-sonnet-4-6": { in: 3, out: 15 },
   // NOTE: current Anthropic pricing (verified against the live model table, not
   // the historic Opus 3/4/4.1-era $15/$75 figure) — shipping the stale number
   // as a default would misprice every unoverridden Opus request.
   "claude-opus-4-8": { in: 5, out: 25 },
   "claude-haiku-4-5": { in: 1, out: 5 },
 };
+
+function canonicalPricingModelId(model) {
+  const id = String(model || "").trim();
+  const providerNormalized = id.startsWith("anthropic/") ? id.slice("anthropic/".length) : id;
+  return providerNormalized.replace(/(?<=\d)\.(?=\d)/g, "-");
+}
 
 function loadPricingOverride(env) {
   const raw = String(env.CAREERRAT_PRICING_JSON || "").trim();
@@ -108,9 +115,11 @@ function pricingTable(env = process.env) {
 function resolveRate(model, table) {
   const id = String(model || "");
   if (Object.hasOwn(table, id)) return table[id];
+  const canonicalId = canonicalPricingModelId(id);
+  if (Object.hasOwn(table, canonicalId)) return table[canonicalId];
   let best = null;
   for (const key of Object.keys(table)) {
-    if (id.startsWith(key) && (!best || key.length > best.length)) best = key;
+    if (canonicalId.startsWith(key) && (!best || key.length > best.length)) best = key;
   }
   return best ? table[best] : null;
 }
