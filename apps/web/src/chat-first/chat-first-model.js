@@ -15,6 +15,7 @@ function list(value) {
 
 const BROWSER_TABS = new Set(["search", "pipeline", "files", "people", "schedule"]);
 const MAX_FOREGROUND_IDS = 24;
+const WORKSPACE_OPERATION_STORAGE_KEY = "careerrat:operation:workspace";
 
 function stableIds(value) {
   return [
@@ -43,6 +44,38 @@ function reviewTarget(value) {
 function privateOperationId(value) {
   const id = String(value || "").trim();
   return /^app-operation-[a-z0-9-]{1,140}$/i.test(id) ? id : null;
+}
+
+export function rememberWorkspaceOperation(storage, value) {
+  const id = privateOperationId(value);
+  if (!storage || !id) return null;
+  try {
+    storage.setItem(WORKSPACE_OPERATION_STORAGE_KEY, id);
+    return id;
+  } catch {
+    return null;
+  }
+}
+
+export function readWorkspaceOperationId(storage) {
+  if (!storage) return null;
+  try {
+    return privateOperationId(storage.getItem(WORKSPACE_OPERATION_STORAGE_KEY));
+  } catch {
+    return null;
+  }
+}
+
+export function clearWorkspaceOperation(storage, expectedId) {
+  if (!storage) return false;
+  const current = readWorkspaceOperationId(storage);
+  if (expectedId && current !== privateOperationId(expectedId)) return false;
+  try {
+    storage.removeItem(WORKSPACE_OPERATION_STORAGE_KEY);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function parseChatFirstForeground(search = "") {

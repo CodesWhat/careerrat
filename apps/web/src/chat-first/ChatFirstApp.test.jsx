@@ -2471,6 +2471,9 @@ describe("ChatFirstAppView", () => {
     expect(source).toContain("companyDiscoveryChildFromWorkspaceResult({");
     expect(source).toContain("followCompanyDiscoveryOperation({");
     expect(source).toContain("companyProposalBatchIsResolved(batch)");
+    expect(source).toContain("readWorkspaceOperationId(workspaceOperationStorage)");
+    expect(source).toContain("rememberWorkspaceOperation(workspaceOperationStorage, exactId)");
+    expect(source).toContain("const id = workspaceOperationId;");
     expect(source).toContain('ui.activeThread === "ingest" && deepBusy');
     expect(source).not.toContain(
       "runDeepOperation = useCallback(\n    async (operation, receiptFor) => {\n      setBusy(true)"

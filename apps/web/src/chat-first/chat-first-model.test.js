@@ -5,13 +5,16 @@ import {
   artifactEmoji,
   buildChatFirstView,
   chatFirstReducer,
+  clearWorkspaceOperation,
   createChatFirstState,
   filterPipelineJobs,
   foregroundDraftKey,
   highFitSearchIds,
   parseChatFirstForeground,
   readForegroundDraft,
+  readWorkspaceOperationId,
   reconcileChatFirstForeground,
+  rememberWorkspaceOperation,
   replaceForegroundOperation,
   resolveForegroundStorage,
   serializeChatFirstForeground,
@@ -1199,6 +1202,40 @@ describe("chat-first foreground location", () => {
     });
 
     expect(resolveForegroundStorage(scope)).toBeNull();
+  });
+
+  it("restores durable workspace work after navigation drops its private URL state", () => {
+    const values = new Map();
+    const storage = {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => values.set(key, value),
+      removeItem: (key) => values.delete(key),
+    };
+
+    expect(rememberWorkspaceOperation(storage, "app-operation-workspace-1")).toBe(
+      "app-operation-workspace-1"
+    );
+    expect(readWorkspaceOperationId(storage)).toBe("app-operation-workspace-1");
+    expect(clearWorkspaceOperation(storage, "app-operation-newer")).toBe(false);
+    expect(readWorkspaceOperationId(storage)).toBe("app-operation-workspace-1");
+    expect(clearWorkspaceOperation(storage, "app-operation-workspace-1")).toBe(true);
+    expect(readWorkspaceOperationId(storage)).toBeNull();
+  });
+
+  it("never restores malformed workspace operation ids", () => {
+    const storage = {
+      getItem: () => "job:app-1",
+      setItem() {
+        throw new Error("blocked");
+      },
+      removeItem() {
+        throw new Error("blocked");
+      },
+    };
+
+    expect(readWorkspaceOperationId(storage)).toBeNull();
+    expect(rememberWorkspaceOperation(storage, "job:app-1")).toBeNull();
+    expect(clearWorkspaceOperation(storage)).toBe(false);
   });
 });
 

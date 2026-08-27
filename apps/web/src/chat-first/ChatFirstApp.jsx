@@ -58,12 +58,15 @@ import {
   artifactEmoji,
   buildChatFirstView,
   chatFirstReducer,
+  clearWorkspaceOperation,
   createChatFirstState,
   filterPipelineJobs,
   foregroundDraftKey,
   parseChatFirstForeground,
   readForegroundDraft,
+  readWorkspaceOperationId,
   reconcileChatFirstForeground,
+  rememberWorkspaceOperation,
   replaceForegroundOperation,
   resolveForegroundStorage,
   serializeChatFirstForeground,
@@ -1548,6 +1551,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   const locationSearchRef = useRef(location.search);
   locationSearchRef.current = location.search;
   const draftStorage = resolveForegroundStorage();
+  const workspaceOperationStorage = useMemo(() => resolveForegroundStorage(), []);
   const companyOperationStorage = useMemo(() => resolveCompanyOperationStorage(), []);
   const deepOperationStorage = useMemo(() => resolveDeepIngestOperationStorage(), []);
   const deepOperationController = useMemo(
@@ -1558,6 +1562,11 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     () => parseChatFirstForeground(location.search),
     [location.search]
   );
+  const [workspaceOperationId, setWorkspaceOperationId] = useState(
+    () => locationForeground.operationId || readWorkspaceOperationId(workspaceOperationStorage)
+  );
+  const workspaceOperationIdRef = useRef(workspaceOperationId);
+  workspaceOperationIdRef.current = workspaceOperationId;
   const [ui, dispatch] = useReducer(chatFirstReducer, locationForeground, (foreground) => ({
     ...createChatFirstState(),
     activeThread: foreground.activeThread,
@@ -1799,7 +1808,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       searchSelectionSeeded: ui.searchSelectionSeeded,
       composerChips: ui.composerChips,
       gateId: ui.gateId,
-      operationId: locationForeground.operationId,
+      operationId: workspaceOperationId,
       reviewKind,
       reviewId,
       packetGapId: packetAnswerGap?.id || null,
@@ -1826,23 +1835,51 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     ui.pipeView,
     ui.searchSelectionSeeded,
     ui.selection,
-    locationForeground.operationId,
+    workspaceOperationId,
   ]);
 
   const replaceWorkspaceOperation = useCallback(
     (nextId, expectedId) => {
-      if (nextId) {
-        workspaceOperationLaunchContextRef.current.set(nextId, companyForegroundContextRef.current);
+      const currentId = workspaceOperationIdRef.current;
+      if (expectedId && currentId !== expectedId) return false;
+      const exactId = nextId
+        ? parseChatFirstForeground(replaceForegroundOperation("", nextId)).operationId
+        : null;
+      if (nextId && !exactId) return false;
+      if (exactId) {
+        workspaceOperationLaunchContextRef.current.set(
+          exactId,
+          companyForegroundContextRef.current
+        );
+        rememberWorkspaceOperation(workspaceOperationStorage, exactId);
+      } else {
+        clearWorkspaceOperation(workspaceOperationStorage, expectedId);
       }
+      workspaceOperationIdRef.current = exactId;
+      setWorkspaceOperationId(exactId);
+
+      if (location.pathname !== "/") return currentId !== exactId;
       const currentSearch = locationSearchRef.current;
-      const search = replaceForegroundOperation(currentSearch, nextId, { expectedId });
-      if (search === currentSearch) return false;
+      const search = replaceForegroundOperation(
+        currentSearch,
+        exactId,
+        exactId ? {} : { expectedId }
+      );
+      if (search === currentSearch) return currentId !== exactId;
       locationSearchRef.current = search;
-      navigate({ pathname: location.pathname, search }, { replace: true });
+      navigate({ pathname: "/", search }, { replace: true });
       return true;
     },
-    [location.pathname, navigate]
+    [location.pathname, navigate, workspaceOperationStorage]
   );
+
+  useEffect(() => {
+    const id = locationForeground.operationId;
+    if (!id || workspaceOperationIdRef.current) return;
+    rememberWorkspaceOperation(workspaceOperationStorage, id);
+    workspaceOperationIdRef.current = id;
+    setWorkspaceOperationId(id);
+  }, [locationForeground.operationId, workspaceOperationStorage]);
 
   const navigateForeground = useCallback(
     (patch, { replace = false } = {}) => {
@@ -2404,7 +2441,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   }, [api, dashboard.refetch, view]);
 
   useEffect(() => {
-    const id = locationForeground.operationId;
+    const id = workspaceOperationId;
     if (!id || typeof api.getAppOperation !== "function") return;
     const launchContext = workspaceOperationLaunchContextRef.current.get(id) || null;
     let cancelled = false;
@@ -2458,8 +2495,8 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     api,
     companyOperationStorage,
     dashboard.refetch,
-    locationForeground.operationId,
     replaceWorkspaceOperation,
+    workspaceOperationId,
   ]);
 
   async function run(operation) {
