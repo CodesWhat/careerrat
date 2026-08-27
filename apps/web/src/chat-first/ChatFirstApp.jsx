@@ -80,6 +80,7 @@ import {
   captureSourceAndRefresh,
   decideProposalAndRefresh,
   removeSourceAndRefresh,
+  resolveDeepIngestTextDecision,
   retrySourceAndRefresh,
 } from "./deep-ingest-controller.js";
 import {
@@ -1841,6 +1842,20 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       }
       return;
     }
+    if (ui.activeThread === "ingest") {
+      const proposalDecision = resolveDeepIngestTextDecision({
+        text: clean,
+        proposals: deepIngest.proposals,
+      });
+      if (proposalDecision) {
+        const decisionResult = await decideDeepProposal(
+          proposalDecision.proposal,
+          proposalDecision.decision
+        );
+        if (decisionResult) setComposerValue("");
+        return;
+      }
+    }
     const result = await run(async () => {
       if (activeSkillChat?.chatId) {
         return api.sendChatMessage(activeSkillChat.chatId, clean);
@@ -2084,6 +2099,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       setDeepEditingId(null);
       setDeepEditDraft({});
     }
+    return result;
   }
 
   async function openFile(id) {

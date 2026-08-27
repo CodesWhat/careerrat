@@ -3,9 +3,48 @@ const DEEP_INGEST_REASONS = Object.freeze({
   defer: "Review later",
   reject: "Not relevant to my work",
 });
+const DEEP_INGEST_TEXT_DECISIONS = new Map([
+  ["confirm", "confirm"],
+  ["confirm it", "confirm"],
+  ["confirm this", "confirm"],
+  ["yes", "confirm"],
+  ["yes confirm", "confirm"],
+  ["yes confirm it", "confirm"],
+  ["yes confirm this", "confirm"],
+  ["looks good", "confirm"],
+  ["defer", "defer"],
+  ["defer it", "defer"],
+  ["defer this", "defer"],
+  ["later", "defer"],
+  ["review later", "defer"],
+  ["review this later", "defer"],
+  ["not now", "defer"],
+  ["reject", "reject"],
+  ["reject it", "reject"],
+  ["reject this", "reject"],
+  ["no", "reject"],
+  ["not relevant", "reject"],
+  ["skip", "reject"],
+  ["skip it", "reject"],
+  ["skip this", "reject"],
+]);
 
 function list(value) {
   return Array.isArray(value) ? value : EMPTY_LIST;
+}
+
+function normalizedDecisionText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+export function resolveDeepIngestTextDecision({ text, proposals } = {}) {
+  const proposal = list(proposals)[0];
+  if (!proposal) return null;
+  const decision = DEEP_INGEST_TEXT_DECISIONS.get(normalizedDecisionText(text));
+  return decision ? { proposal, decision } : null;
 }
 
 function proposalPayload(row) {

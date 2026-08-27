@@ -6,6 +6,7 @@ import {
   captureSourceAndRefresh,
   decideProposalAndRefresh,
   removeSourceAndRefresh,
+  resolveDeepIngestTextDecision,
   retrySourceAndRefresh,
 } from "./deep-ingest-controller.js";
 
@@ -55,6 +56,35 @@ function state(overrides = {}) {
 }
 
 describe("deep ingest chat-first controller", () => {
+  it.each([
+    ["Confirm", "confirm"],
+    ["yes, confirm this", "confirm"],
+    ["looks good", "confirm"],
+    ["Defer", "defer"],
+    ["review this later", "defer"],
+    ["not now", "defer"],
+    ["Reject", "reject"],
+    ["not relevant", "reject"],
+    ["skip this", "reject"],
+  ])("routes typed %s through the active proposal decision", (text, decision) => {
+    const row = proposal();
+
+    expect(resolveDeepIngestTextDecision({ text, proposals: [row] })).toEqual({
+      proposal: row,
+      decision,
+    });
+  });
+
+  it("does not turn ordinary pasted material or an empty queue into a proposal decision", () => {
+    expect(
+      resolveDeepIngestTextDecision({
+        text: "Led the billing migration and reduced reconciliation time by 31%.",
+        proposals: [proposal()],
+      })
+    ).toBeNull();
+    expect(resolveDeepIngestTextDecision({ text: "Confirm", proposals: [] })).toBeNull();
+  });
+
   it("builds review cards from the durable queue and filters scan placeholders", () => {
     const scanStub = proposal({
       id: "scan-stub",
