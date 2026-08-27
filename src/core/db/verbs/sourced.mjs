@@ -57,6 +57,14 @@ export function sourcedUpsertBatch({
   if (!Array.isArray(rows) || rows.length === 0) {
     throw new Error("sourcedUpsertBatch: rows must be a non-empty array");
   }
+  const preparedRows = rows.map((row) => {
+    if (!row?.id) throw new Error("sourcedUpsertBatch: every row needs an id");
+    const acceptedRow = typeof prepareAcceptedRow === "function" ? prepareAcceptedRow(row) : row;
+    if (!acceptedRow?.id || String(acceptedRow.id) !== String(row.id)) {
+      throw new Error("sourcedUpsertBatch: prepared rows must preserve their id");
+    }
+    return { row, acceptedRow };
+  });
   return runVerb({ repoRoot, env }, (db) => {
     if (typeof guard === "function") guard(db);
     let created = 0;
@@ -64,17 +72,12 @@ export function sourcedUpsertBatch({
     let duplicates = 0;
     const acceptedIds = [];
     const seenPostingKeys = dedupeCanonical ? storedPostingKeys(db) : null;
-    for (const row of rows) {
-      if (!row?.id) throw new Error("sourcedUpsertBatch: every row needs an id");
+    for (const { row, acceptedRow } of preparedRows) {
       if (seenPostingKeys && postingIdentityIsSeen(row, seenPostingKeys)) {
         duplicates++;
         continue;
       }
       if (seenPostingKeys) addPostingIdentity(seenPostingKeys, row);
-      const acceptedRow = typeof prepareAcceptedRow === "function" ? prepareAcceptedRow(row) : row;
-      if (!acceptedRow?.id || String(acceptedRow.id) !== String(row.id)) {
-        throw new Error("sourcedUpsertBatch: prepared rows must preserve their id");
-      }
       const existed = Boolean(getRow(db, "sourced", acceptedRow.id));
       putRow(db, "sourced", acceptedRow.id, acceptedRow);
       if (existed) updated++;

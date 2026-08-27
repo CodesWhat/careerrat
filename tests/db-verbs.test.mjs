@@ -8,8 +8,9 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { after, test } from "node:test";
-import { closeAll, openDb } from "../src/core/db/connection.mjs";
+import { closeAll, dbFilePath, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
 import {
   activityAppend,
@@ -1236,6 +1237,31 @@ test("sourcedSetStatus patches status and note, refreshes analytics, and rejects
     () => sourcedSetStatus({ repoRoot, id: "missing-role", to: "cut" }),
     (err) => err?.code === "NOT_FOUND"
   );
+});
+
+test("sourcedUpsertBatch prepares rows before opening its write transaction", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  let prepared = false;
+
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [{ id: "sourced-prepared-outside-transaction", company: "Prepared Co" }],
+    prepareAcceptedRow(row) {
+      const contender = new DatabaseSync(dbFilePath({ repoRoot }));
+      try {
+        contender.exec("PRAGMA busy_timeout = 1");
+        contender.exec("BEGIN IMMEDIATE");
+        contender.exec("ROLLBACK");
+        prepared = true;
+        return row;
+      } finally {
+        contender.close();
+      }
+    },
+  });
+
+  assert.equal(prepared, true);
 });
 
 test("sourced policy reconciliation rolls back when the active-search guard rejects the write", () => {
