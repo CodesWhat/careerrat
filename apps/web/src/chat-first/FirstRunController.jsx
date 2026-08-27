@@ -80,7 +80,9 @@ function profileWriteErrorMessage(error, savedCount = 0, summary = "") {
   const message = String(issue?.message || "").trim();
   const savedSuffix = savedCount > 0 ? " The other valid details were saved." : "";
   if (/unexpected property/i.test(message)) {
-    return `One profile detail isn't supported yet.${savedSuffix}`;
+    return savedCount > 0
+      ? "CareerRat skipped one setting it doesn't support. The other valid details were saved, so you can keep going."
+      : "CareerRat skipped one setting it doesn't support. You can keep going; Paul will ask again if that detail is required.";
   }
   const subject = String(summary || "")
     .trim()

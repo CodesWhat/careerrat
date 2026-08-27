@@ -1742,7 +1742,7 @@ describe("FirstRunController chat event reconciliation", () => {
       expect.objectContaining({ status: "error" }),
     ]);
     expect(view.props.error).toBe(
-      "One profile detail isn't supported yet. The other valid details were saved."
+      "CareerRat skipped one setting it doesn't support. The other valid details were saved, so you can keep going."
     );
     expect(view.props.error).not.toContain("auto_submit");
     expect(api.getOnboardState.mock.calls.length).toBeGreaterThan(stateReadsBeforeReply);
