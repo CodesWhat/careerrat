@@ -1600,6 +1600,26 @@ Current implementation ledger, August 27:
   navigation. Invalid saved IDs fall back safely, background view refreshes do not rerun location
   hydration, and workspace tabs have keyboard-complete roving focus. An intentionally cleared job
   selection stays cleared, and source/company review URLs reopen only the exact pending batch.
+- Long Workspace Ask messages and executable intents now run through the shared DB-backed app
+  operation owner. Each composer submission gets one request identity, frozen provider plan,
+  lease/fence, exact result-message identity, candidate-safe terminal error, restart reconciliation,
+  and coalesced retry lineage. A completion from an older request cannot replace a newer foreground
+  route or draft. Application preparation still runs inside its corroborated mission attempt and
+  still stops for the user to press Submit.
+- Company discovery launched by Paul now starts the server-owned company operation instead of
+  doing model work inside the outer Workspace Ask. Candidate/search/dedupe/comp context and the
+  selected provider plan are frozen on the company operation, and the outer result carries its
+  exact child operation and deterministic batch identity. The final main-shell follower that opens
+  that exact finished batch remains in progress; the onboarding follower already has this shape.
+- Deep Ingest source scans and proposal builds now share the durable app-operation owner, exact
+  source-version/proposal-set results, cancellation, retry, and cleanup contract. Removing and
+  re-adding identical pasted or uploaded material starts one new coalesced child attempt instead of
+  reusing a stale completed run and leaving the source stuck in `scanning`. The final main-shell
+  controller hookup and reload follower remain in progress.
+- Contextual permissions are narrow grants instead of a hidden switch to global Advanced mode.
+  Allowing Apple Calendar cannot wake a dormant LinkedIn capability, and the email-check action
+  stores Gmail and Outlook only, matching its copy. Workspace operation failures keep stable codes
+  and people-shaped messages without exposing internal match records.
 - Résumé extraction is now a DB-backed app operation before model work, with a frozen provider
   plan, digest, progress, lease, atomic source/profile/evidence/targeting completion, exact follow,
   and startup reconciliation without replay. PDF/image and configured-runtime DOCX paths share
@@ -1607,10 +1627,20 @@ Current implementation ledger, August 27:
   browser, or server teardown.
 - Public deterministic hospitality seeding now covers common NYC location spellings, up to four
   deduplicated target titles per query board, and a state-wide fallback, while explicit software
-  domains no longer trip hospitality inference. Remaining contextual permissions, shared
-  operation ownership for Workspace Ask/company discovery/Deep Ingest, full packaged
-  desktop/browser QA, and release/update acceptance remain open. Public-intel batching stays
-  follow-up work because no released app surface starts it in the background today.
+  domains no longer trip hospitality inference. The exact tester acceptance now saves the visible
+  65+ floor and voluntary-form decline policy, fails when zero results survive that floor, preserves
+  explicit unverified/unknown-field receipts, recognizes reordered food-and-beverage operations
+  titles, rejects known single salaries below $85k, and rejects US-remote postings that exclude New
+  York residents. The focused scanner/search/location/persistence suite passes 117 tests. Full
+  packaged desktop/browser QA, the final company/Deep main-shell followers, and release/update
+  acceptance remain open. Public-intel batching stays follow-up work because no released app
+  surface starts it in the background today.
+
+- The committed operation pass is green at 4,056 backend tests with 15 intentional skips, 877 web
+  tests, production build, and lint. GitHub currently reports zero open code-scanning, Dependabot,
+  or secret-scanning alerts. Those receipts predate the final main-shell integration and do not
+  replace the clean exact-head, packaged-app, live-provider, updater, Windows, and protected-PR
+  gates below.
 
 This gate blocks the next release until:
 
