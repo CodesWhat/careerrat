@@ -10,6 +10,7 @@ export {
   appApproveReview,
   appCaptureInterviewIntake,
   appPersistEvaluation,
+  appRecordOutcome,
   appRecordRoundOutcome,
   appRegisterArtifact,
   appRegisterInterviewDossier,

@@ -31,6 +31,7 @@ import { activityAppend } from "../db/verbs/activity.mjs";
 import {
   appApproveReview,
   appCaptureInterviewIntake,
+  appRecordOutcome,
   appScheduleInterview,
   appSetFields,
   appSetStatus,
@@ -7260,12 +7261,13 @@ export async function executeWorkspaceIntent({
         );
       }
       const note = String(input.note || "").trim();
-      appSetStatus({
+      appRecordOutcome({
         repoRoot,
         env,
         id: normalized.entity.id,
         to,
         note: note || undefined,
+        at: resolvedDate(undefined, now),
       });
       return appendActionResult({
         repoRoot,

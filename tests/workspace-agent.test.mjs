@@ -5647,6 +5647,65 @@ test("chat-first outcome buttons update the application and remain visible in wo
   assert.match(result.messages[1].text, /recorded.*rejected/i);
 });
 
+test("outcome.record settles every linked communication without touching unrelated threads", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    status: "interview",
+    followUp: { draft: "Checking in on the interview outcome." },
+  });
+  seedApplication(repoRoot, { id: "app-other", company: "Other Co" });
+  seedCommunication(repoRoot, {
+    id: "comm-temporal-recruiter",
+    nextAction: "Reply to the recruiter",
+    nextActionDue: "2026-08-10",
+    draft: { body: "Thanks for the update." },
+  });
+  seedCommunication(repoRoot, {
+    id: "comm-temporal-portal",
+    channel: "portal",
+    nextAction: "Check the portal",
+    nextActionDue: "2026-08-11",
+    draft: { body: "Portal follow-up." },
+  });
+  seedCommunication(repoRoot, {
+    id: "comm-other",
+    applicationId: "app-other",
+    company: "Other Co",
+    nextAction: "Reply to Other Co",
+    nextActionDue: "2026-08-12",
+    draft: { body: "Unrelated draft." },
+  });
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "outcome.record",
+      entity: { type: "application", id: "app-temporal" },
+      input: { to: "rejected", note: "Role was filled internally." },
+    },
+    now: () => new Date("2026-08-09T14:03:00.000Z"),
+  });
+
+  const app = readApplication(repoRoot, "app-temporal");
+  assert.equal(app.status, "rejected");
+  assert.equal(app.followUp.draft, null);
+  for (const id of ["comm-temporal-recruiter", "comm-temporal-portal"]) {
+    const comm = readCommunication(repoRoot, id);
+    assert.equal(comm.status, "closed", id);
+    assert.equal(comm.nextAction, null, id);
+    assert.equal(comm.nextActionDue, null, id);
+    assert.equal(comm.draft, null, id);
+    assert.equal(comm.messages.at(-1).direction, "note", id);
+    assert.match(comm.messages.at(-1).summary, /rejected/i, id);
+  }
+  const unrelated = readCommunication(repoRoot, "comm-other");
+  assert.equal(unrelated.status, "needs-reply");
+  assert.equal(unrelated.nextAction, "Reply to Other Co");
+  assert.equal(unrelated.nextActionDue, "2026-08-12");
+  assert.deepEqual(unrelated.draft, { body: "Unrelated draft." });
+});
+
 test("natural outcome requests resolve one application and persist the typed transition", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot, { status: "interview" });

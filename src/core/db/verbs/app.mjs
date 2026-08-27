@@ -181,6 +181,29 @@ function activityStatusLabel(status) {
   );
 }
 
+function applyStatusUpdate(app, { to, note, round, appliedAt, followUpDueAt, clearInterview, at }) {
+  const from = app.status;
+  const wasInterview = classifyStage(from).id === "interview";
+  const autoClear = clearInterview !== false && wasInterview && to !== from;
+  const willClear = clearInterview === true || autoClear;
+  const updated = { ...app, status: to };
+  if (note) updated.statusNote = note;
+  if (round) {
+    const conversations = Array.isArray(app.conversations) ? app.conversations.slice() : [];
+    conversations.push({
+      date: at || nowIso(),
+      kind: String(round).trim().slice(0, 60),
+      who: null,
+      notes: note || null,
+    });
+    updated.conversations = conversations;
+  }
+  if (appliedAt != null) updated.appliedAt = String(appliedAt);
+  if (followUpDueAt) updated.followUp = { ...(app.followUp || {}), dueAt: followUpDueAt };
+  if (willClear) Object.assign(updated, applyRoundCompletionClearing(app));
+  return { from, updated };
+}
+
 // appSetStatus({id, to, note?, appliedAt?, followUpDueAt?, clearInterview?})
 export function appSetStatus({
   repoRoot,
@@ -201,30 +224,14 @@ export function appSetStatus({
   }
   return runVerb({ repoRoot, env }, (db) => {
     const app = requireApp(db, id);
-    const from = app.status;
-
-    const wasInterview = classifyStage(from).id === "interview";
-    const autoClear = clearInterview !== false && wasInterview && to !== from;
-    const willClear = clearInterview === true || autoClear;
-
-    const updated = { ...app, status: to };
-    if (note) updated.statusNote = note;
-    // Round vocabulary rides in the same write: a status change that carries a
-    // round kind (e.g. a portal label normalized to "recruiter screen") records
-    // it as the conversation entry, per the sync-status STEP 4 contract.
-    if (round) {
-      const conversations = Array.isArray(app.conversations) ? app.conversations.slice() : [];
-      conversations.push({
-        date: nowIso(),
-        kind: String(round).trim().slice(0, 60),
-        who: null,
-        notes: note || null,
-      });
-      updated.conversations = conversations;
-    }
-    if (appliedAt != null) updated.appliedAt = String(appliedAt);
-    if (followUpDueAt) updated.followUp = { ...(app.followUp || {}), dueAt: followUpDueAt };
-    if (willClear) Object.assign(updated, applyRoundCompletionClearing(app));
+    const { from, updated } = applyStatusUpdate(app, {
+      to,
+      note,
+      round,
+      appliedAt,
+      followUpDueAt,
+      clearInterview,
+    });
 
     putRow(db, "applications", id, updated);
     const meta = bumpMeta(db);
@@ -237,6 +244,104 @@ export function appSetStatus({
     });
     const analytics = refreshAnalytics(db);
     return { id, from, to, appliedAt: updated.appliedAt || null, meta, event, analytics };
+  });
+}
+
+const RECORDED_OUTCOME_STATUSES = new Set([
+  "manual-apply",
+  "awaiting",
+  "interview",
+  "offer",
+  "rejected",
+  "withdrawn",
+]);
+
+function outcomeCommunicationStatus(status) {
+  if (status === "rejected" || status === "withdrawn") return "closed";
+  if (status === "interview" || status === "offer") return "waiting";
+  return null;
+}
+
+// A recorded application outcome owns the linked communication state too.
+// Keeping both tables in one runVerb transaction prevents a terminal or
+// advancing outcome from leaving stale reply actions and drafts in the app.
+export function appRecordOutcome({ repoRoot, env, id, to, note, round, at } = {}) {
+  if (!RECORDED_OUTCOME_STATUSES.has(to)) {
+    const error = new Error("appRecordOutcome: unsupported outcome status");
+    error.code = "BAD_OUTCOME_STATUS";
+    throw error;
+  }
+  const timestamp = at || nowIso();
+  if (Number.isNaN(Date.parse(timestamp))) {
+    const error = new Error("appRecordOutcome: at must be an ISO date or datetime");
+    error.code = "BAD_OUTCOME_AT";
+    throw error;
+  }
+
+  return runVerb({ repoRoot, env }, (db) => {
+    const app = requireApp(db, id);
+    const { from, updated } = applyStatusUpdate(app, { to, note, round, at: timestamp });
+    const communicationStatus = outcomeCommunicationStatus(to);
+    if (communicationStatus && updated.followUp?.draft != null) {
+      updated.followUp = { ...updated.followUp, draft: null };
+    }
+    putRow(db, "applications", id, updated);
+
+    const clearedCommunicationIds = [];
+    if (communicationStatus) {
+      const rows = db
+        .prepare("SELECT id, data FROM communications WHERE application_id = ? ORDER BY id")
+        .all(id);
+      for (const row of rows) {
+        const communication = JSON.parse(row.data);
+        const messages = Array.isArray(communication.messages)
+          ? communication.messages.slice()
+          : [];
+        const summary = [
+          `Application outcome recorded: ${activityStatusLabel(to)}.`,
+          String(note || "").trim(),
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .slice(0, 240);
+        messages.push({
+          id: `outcome:${timestamp}:${row.id}`,
+          direction: "note",
+          at: timestamp,
+          summary,
+        });
+        putRow(
+          db,
+          "communications",
+          row.id,
+          {
+            ...communication,
+            status: communicationStatus,
+            nextAction: null,
+            nextActionDue: null,
+            draft: null,
+            messages,
+          },
+          { application_id: id }
+        );
+        clearedCommunicationIds.push(row.id);
+      }
+    }
+
+    const meta = bumpMeta(db, timestamp);
+    const event = logActivityEvent(
+      db,
+      {
+        type: "status_change",
+        title: `${app.company || id}: Status changed to ${activityStatusLabel(to)}`,
+        summary: `Previous status: ${activityStatusLabel(from)}.`,
+        refs: { applicationId: id, company: app.company, role: app.role },
+        tags: [`status:${to}`, "operation:application:outcome-record"],
+      },
+      { now: new Date(timestamp) }
+    );
+    const analytics = refreshAnalytics(db, new Date(timestamp));
+    return { id, from, to, clearedCommunicationIds, meta, event, analytics };
   });
 }
 
