@@ -117,6 +117,11 @@ const RULES = [
     action: { label: "Open Settings", to: "/settings" },
   },
   {
+    match: ({ code }) => code === "EMPTY_AI_RESPONSE",
+    message: "CareerRat didn't get a response from your AI. Try again.",
+    action: { label: "Try again", retry: true },
+  },
+  {
     match: ({ raw }) => startsWith(raw, "no database yet"),
     message: "This workspace hasn't finished setup yet. Finish setup, then try again.",
     action: null,
@@ -140,6 +145,12 @@ const RULES = [
     action: { label: "Open Settings", to: "/settings" },
   },
   {
+    match: ({ code }) => code === "BOARD_DISCOVERY_UNAVAILABLE",
+    message:
+      "CareerRat can't look for new job boards automatically right now. Add one yourself in Settings.",
+    action: { label: "Open Settings", to: "/settings" },
+  },
+  {
     match: ({ raw }) => startsWith(raw, "unsupported ATS host"),
     message:
       "That isn't a supported company job-board URL. Use a Greenhouse, Lever, Ashby, or Workday board.",
@@ -155,6 +166,12 @@ const RULES = [
     message:
       "CareerRat couldn't verify a submission confirmation, so it did not mark this Applied. Check the site, then use “I applied elsewhere” if it went through.",
     action: null,
+  },
+  {
+    match: ({ code }) => code === "APPLICATION_PREPARATION_FAILED",
+    message:
+      "CareerRat couldn't finish preparing this application. It didn't mark the job as applied. Review the job before trying again.",
+    action: { label: "Try again", retry: true },
   },
   {
     match: ({ code }) => code === "JOB_BODY_REQUIRES_BROWSER",
@@ -228,6 +245,11 @@ const RULES = [
     match: ({ code }) => code === "COMMUNICATION_EXECUTOR_UNAVAILABLE",
     message:
       "CareerRat can't send email for you yet. Use Open in your email app, send it yourself, then choose I sent this.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "COMMUNICATION_DRAFT_REQUIRED",
+    message: "There isn't a reply ready to send yet. Draft and review one first.",
     action: null,
   },
   {

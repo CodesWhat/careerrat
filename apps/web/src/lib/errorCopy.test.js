@@ -46,6 +46,15 @@ const RULE_CASES = [
     action: { label: "Open Settings", to: "/settings" },
   },
   {
+    name: "empty AI response",
+    err: new ApiError(400, {
+      code: "EMPTY_AI_RESPONSE",
+      error: "The selected AI runtime returned an empty response.",
+    }),
+    message: "CareerRat didn't get a response from your AI. Try again.",
+    action: { label: "Try again", retry: true },
+  },
+  {
     name: "no ai route configured raw regex",
     err: new ApiError(400, { error: "No AI route configured" }),
     message: "No AI engine is connected yet.",
@@ -84,6 +93,16 @@ const RULE_CASES = [
     action: { label: "Open Settings", to: "/settings" },
   },
   {
+    name: "board discovery unavailable",
+    err: new ApiError(501, {
+      code: "BOARD_DISCOVERY_UNAVAILABLE",
+      error: "Guided board discovery is not connected in this runtime.",
+    }),
+    message:
+      "CareerRat can't look for new job boards automatically right now. Add one yourself in Settings.",
+    action: { label: "Open Settings", to: "/settings" },
+  },
+  {
     name: "unsupported ATS host",
     err: new ApiError(400, {
       error: 'unsupported ATS host — cannot scan "https://example.com/jobs"',
@@ -107,6 +126,17 @@ const RULE_CASES = [
     message:
       "CareerRat couldn't verify a submission confirmation, so it did not mark this Applied. Check the site, then use “I applied elsewhere” if it went through.",
     action: null,
+  },
+  {
+    name: "application preparation failed",
+    err: new ApiError(400, {
+      code: "APPLICATION_PREPARATION_FAILED",
+      error:
+        "The supervised preparation ended without a safe handoff. The application was not marked Applied.",
+    }),
+    message:
+      "CareerRat couldn't finish preparing this application. It didn't mark the job as applied. Review the job before trying again.",
+    action: { label: "Try again", retry: true },
   },
   {
     name: "job body requires browser",
@@ -255,6 +285,15 @@ const RULE_CASES = [
     }),
     message:
       "CareerRat can't send email for you yet. Use Open in your email app, send it yourself, then choose I sent this.",
+    action: null,
+  },
+  {
+    name: "communication draft required",
+    err: new ApiError(409, {
+      code: "COMMUNICATION_DRAFT_REQUIRED",
+      error: "A saved draft is required before this communication can be sent.",
+    }),
+    message: "There isn't a reply ready to send yet. Draft and review one first.",
     action: null,
   },
   {
