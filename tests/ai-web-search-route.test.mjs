@@ -7,6 +7,7 @@ import { Readable } from "node:stream";
 import { after, test } from "node:test";
 
 import { mountSearchRoutes } from "../src/cli/search-route.mjs";
+import { createWorkspaceAgentRuntime } from "../src/core/agent/workspace-agent.mjs";
 import { writeAIPreferences } from "../src/core/ai/ai-preferences.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { candidateSetupInitialize, sourcingRunLatest } from "../src/core/db/verbs.mjs";
@@ -422,6 +423,34 @@ test("AI web-search disconnect leaves the durable worker running to completion",
   assert.equal(durable.error, null);
 });
 
+test("the workspace search worker owns AI web-search execution", async () => {
+  const repoRoot = tempRepo();
+  let release;
+  const blocked = new Promise((resolve) => {
+    release = resolve;
+  });
+  const workspaceAgentRuntime = createWorkspaceAgentRuntime({ repoRoot, env: {} });
+  const { handler } = mountedRoutesFor({
+    repoRoot,
+    workspaceAgentRuntime,
+    runAiWebSearch: async () => {
+      await blocked;
+      return { searched: 1, found: 0, new: 0, duplicates: 0, errors: [] };
+    },
+  });
+  const res = response();
+  const running = handler(request(), res);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const durable = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+  assert.equal(durable.status, "running");
+  assert.equal(workspaceAgentRuntime.ownsSourcingRun(durable.id), true);
+
+  release();
+  await running;
+  await workspaceAgentRuntime.shutdownSourcingWorkers();
+});
+
 test("AI web-search refreshes its durable lease while the provider is quiet", async () => {
   const repoRoot = tempRepo();
   let release;
@@ -462,7 +491,7 @@ test("AI web-search refreshes its durable lease while the provider is quiet", as
   await running;
 });
 
-test("AI web-search lifecycle aborts and settles the durable worker on app shutdown", async () => {
+test("AI web-search lifecycle leaves the durable worker resumable on app shutdown", async () => {
   const repoRoot = tempRepo();
   let providerSignal;
   const { handler, lifecycle } = mountedRoutesFor({
@@ -487,7 +516,57 @@ test("AI web-search lifecycle aborts and settles the durable worker on app shutd
 
   assert.equal(providerSignal.aborted, true);
   const durable = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
-  assert.equal(durable.status, "failed");
-  assert.equal(durable.error.code, "AI_WEB_SEARCH_SERVER_STOPPED");
-  assert.match(durable.error.message, /stopped while this search was running/i);
+  assert.equal(durable.status, "running");
+  assert.equal(durable.error, null);
+});
+
+test("a replacement workspace owner resumes the same AI web-search run", async () => {
+  const repoRoot = tempRepo();
+  let firstSignal;
+  const firstRuntime = createWorkspaceAgentRuntime({ repoRoot, env: {} });
+  const firstMounted = mountedRoutesFor({
+    repoRoot,
+    workspaceAgentRuntime: firstRuntime,
+    runAiWebSearch: ({ signal }) =>
+      new Promise((_resolve, reject) => {
+        firstSignal = signal;
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }),
+  });
+  const firstResponse = response();
+  const firstRequest = firstMounted.handler(request(), firstResponse);
+  await new Promise((resolve) => setImmediate(resolve));
+  const original = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+
+  await firstRuntime.shutdownSourcingWorkers();
+  await firstRequest;
+  assert.equal(firstSignal.aborted, true);
+  assert.equal(sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run.status, "running");
+
+  let resumedInput;
+  const replacementRuntime = createWorkspaceAgentRuntime({ repoRoot, env: {} });
+  mountedRoutesFor({
+    repoRoot,
+    workspaceAgentRuntime: replacementRuntime,
+    runAiWebSearch: async (input) => {
+      resumedInput = input;
+      return { searched: 1, found: 1, new: 1, duplicates: 0, errors: [] };
+    },
+  });
+  replacementRuntime.recoverOrphanedSourcingRuns();
+  for (
+    let attempt = 0;
+    attempt < 50 && replacementRuntime.ownsSourcingRun(original.id);
+    attempt += 1
+  ) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  const completed = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+  assert.equal(completed.id, original.id);
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.metadata.recoveryCount, 1);
+  assert.deepEqual(resumedInput.promptIds, ["p1"]);
+  assert.deepEqual(resumedInput.executionPlan, original.metadata.aiExecutionPlan);
+  await replacementRuntime.shutdownSourcingWorkers();
 });

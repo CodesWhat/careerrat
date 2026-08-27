@@ -875,6 +875,43 @@ test("zero-result scans with attempted deterministic sources complete with zero-
   assert.equal(latest.run.summary.deterministicSources.attempted, 2);
 });
 
+test("the shared worker can own deterministic terminal settlement", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot, { domain: "operations" });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      title_filter: {},
+      location_filter: null,
+      searches: [
+        {
+          label: "Empty RSS",
+          source_type: "rss",
+          rssUrl: "https://example.test/empty.xml",
+          enabled: true,
+        },
+      ],
+      tracked_companies: [],
+      source_catalog: {},
+    },
+  });
+  const started = await startFirstSearchRun({ repoRoot, env: {} });
+
+  const result = await runFirstSearchInBackground({
+    repoRoot,
+    env: {},
+    runId: started.run.id,
+    settle: false,
+    fetchImpl: async () =>
+      new Response('<?xml version="1.0"?><rss><channel></channel></rss>', { status: 200 }),
+  });
+
+  assert.equal(result.settlement.status, "completed");
+  assert.equal(result.settlement.summary.zeroResults, true);
+  assert.equal(sourcingRunLatest({ repoRoot, purpose: "first-search" }).run.status, "running");
+});
+
 test("completed search runs preserve bounded rejection evidence", async () => {
   const repoRoot = tempRepo();
   sourceConfigPut({

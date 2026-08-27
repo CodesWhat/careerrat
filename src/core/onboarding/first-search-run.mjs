@@ -925,6 +925,7 @@ export async function runFirstSearchInBackground({
   runId,
   signal,
   heartbeatMs = 30_000,
+  settle = true,
 } = {}) {
   const pathCtx = { repoRoot, env };
   let heartbeat = null;
@@ -936,6 +937,12 @@ export async function runFirstSearchInBackground({
       sourcedScan,
     });
     if (deterministicSources.attempted < 1) {
+      if (!settle) {
+        return {
+          settlement: { status: "failed", error: sourceSetupError() },
+          value: null,
+        };
+      }
       return sourcingRunFail({
         ...pathCtx,
         id: runId,
@@ -991,14 +998,33 @@ export async function runFirstSearchInBackground({
       scannedCount: Number(summary.scanned || 0),
       errorCount: Array.isArray(summary.errors) ? summary.errors.length : 0,
     });
+    const normalizedSummary = normalizeRunSummary(summary, deterministicSources);
+    if (!settle) {
+      return {
+        settlement: { status: "completed", summary: normalizedSummary },
+        value: summary,
+      };
+    }
     return sourcingRunComplete({
       ...pathCtx,
       id: runId,
-      summary: normalizeRunSummary(summary, deterministicSources),
+      summary: normalizedSummary,
     }).run;
   } catch (error) {
     const failure = signal?.aborted && signal.reason ? signal.reason : error;
     if (failure?.code === "SOURCING_RUN_SERVER_STOPPED") throw failure;
+    if (!settle) {
+      return {
+        settlement: {
+          status: "failed",
+          error: {
+            code: failure?.code || "SOURCING_SCAN_FAILED",
+            message: failure?.message || "Sourcing scan failed.",
+          },
+        },
+        value: null,
+      };
+    }
     try {
       return sourcingRunFail({
         ...pathCtx,
