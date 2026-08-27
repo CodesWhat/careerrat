@@ -86,6 +86,8 @@ const AI_WEB_SEARCH_PROMPT_CONCURRENCY = 2;
 const AI_WEB_SEARCH_PROMPT_TIMEOUT_MS = 30 * 60 * 1000;
 const AI_WEB_SEARCH_HEARTBEAT_MS = 30 * 1000;
 const MAX_FRESHNESS_RECOVERY_TURNS = 2;
+const MIN_USEFUL_SET_ROLES = 3;
+const MIN_USEFUL_SET_BUCKETS = 2;
 
 function savedFitFloor(config = {}) {
   const raw = config?.targeting?.fit_bands?.fit_floor;
@@ -427,6 +429,47 @@ function freshnessRecoveryInstruction(rejections) {
   ].join("\n");
 }
 
+function usefulSetTopUpInstruction(consideredCandidates) {
+  const consideredPostings = consideredCandidates.slice(0, 60).map(({ offer, reason }) => ({
+    url: offer.url,
+    reason: String(reason || "CareerRat already considered this posting.").slice(0, 240),
+  }));
+  return [
+    "CareerRat's canonical result set is still underfilled after the saved prompts finished.",
+    "Run one bounded additional search on the same provider for this saved prompt. Return additional, distinct, currently active posting-specific roles that satisfy every original candidate boundary.",
+    "Search employer-owned career pages and direct ATS postings first. Do not repeat an already considered URL or requisition, and do not loosen title, location, compensation, freshness, or fit requirements.",
+    JSON.stringify({ considered_postings: consideredPostings }),
+  ].join("\n");
+}
+
+function normalizedTitleWords(value) {
+  return new Set(
+    String(value || "")
+      .toLowerCase()
+      .replace(/&/g, " and ")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+  );
+}
+
+function titleMatchesBucket(title, bucket) {
+  const actual = normalizedTitleWords(title);
+  return (Array.isArray(bucket?.titles) ? bucket.titles : []).some((targetTitle) => {
+    const target = normalizedTitleWords(targetTitle);
+    return target.size > 0 && [...target].every((word) => actual.has(word));
+  });
+}
+
+function promptMatchesBucket(prompt, bucket) {
+  const promptWords = normalizedTitleWords(prompt?.text);
+  return (Array.isArray(bucket?.titles) ? bucket.titles : []).some((targetTitle) => {
+    const target = normalizedTitleWords(targetTitle);
+    return target.size > 0 && [...target].every((word) => promptWords.has(word));
+  });
+}
+
 // search-jobs is deliberately excluded from the embedded runtime's default
 // allowlist (see skill-runtime.mjs's own DEFAULT_RUNTIME_SKILLS comment) — a
 // blanket CAREERRAT_RUNTIME_SKILLS opt-in shouldn't also hand every other
@@ -540,23 +583,33 @@ export async function runAiWebSearch({
   const outputSchema = loadSchema(repoRoot);
   const promptTotal = selected.length;
 
-  async function runSavedPrompt(prompt, promptIndex, { rejectedCandidates = [] } = {}) {
+  async function runSavedPrompt(
+    prompt,
+    promptIndex,
+    { rejectedCandidates = [], topUpCandidates = null } = {}
+  ) {
     const promptNumber = promptIndex + 1;
-    const recoveryInstruction = rejectedCandidates.length
+    const topUp = Array.isArray(topUpCandidates);
+    const searchInstruction = rejectedCandidates.length
       ? freshnessRecoveryInstruction(rejectedCandidates)
-      : null;
+      : topUp
+        ? usefulSetTopUpInstruction(topUpCandidates)
+        : null;
     const lifecycle = {
       phase: "prompt",
       promptId: prompt.id,
       promptIndex: promptNumber,
       promptTotal,
-      ...(recoveryInstruction ? { recovery: true } : {}),
+      ...(searchInstruction ? { recovery: true } : {}),
+      ...(topUp ? { topUp: true } : {}),
     };
     onProgress?.({
       type: "activity",
-      message: recoveryInstruction
-        ? `Searching for fresh replacements for saved prompt ${promptNumber} of ${promptTotal}…`
-        : `Searching saved prompt ${promptNumber} of ${promptTotal}…`,
+      message: topUp
+        ? `Searching for additional roles for saved prompt ${promptNumber} of ${promptTotal}…`
+        : searchInstruction
+          ? `Searching for fresh replacements for saved prompt ${promptNumber} of ${promptTotal}…`
+          : `Searching saved prompt ${promptNumber} of ${promptTotal}…`,
       ...lifecycle,
       promptStatus: "running",
     });
@@ -584,8 +637,8 @@ export async function runAiWebSearch({
       throwIfSearchAborted(signal);
       let rawText = "";
       let runtimeResult;
-      const baseInput = recoveryInstruction
-        ? `${JSON.stringify(kickoffInput)}\n\n${recoveryInstruction}`
+      const baseInput = searchInstruction
+        ? `${JSON.stringify(kickoffInput)}\n\n${searchInstruction}`
         : kickoffInput;
       try {
         runtimeResult = await runSkillStream({
@@ -677,7 +730,7 @@ export async function runAiWebSearch({
         schema: outputSchema,
         manual: MANUAL_FALLBACK,
         structuredMode: "fallback",
-        maxRetries: recoveryInstruction ? 0 : 1,
+        maxRetries: searchInstruction ? 0 : 1,
         invoke: async ({ correction }) => {
           if (correction) {
             onProgress?.({
@@ -954,6 +1007,73 @@ export async function runAiWebSearch({
           ...(recoveryCollection.rejectionsByPrompt.get(spec.prompt.id) || []),
         ],
       }));
+  }
+
+  const interimCoverage = mergePromptCoverage({ selected, outcomes: allPromptOutcomes });
+  const interimQualification = requalifyCanonicalOffers(canonicalCandidates, { config });
+  const interimUsefulOffers = interimQualification.kept.filter((offer) =>
+    offerMeetsFitFloor(offer, fitFloor)
+  );
+  const distinctUsefulTitles = new Set(
+    interimUsefulOffers
+      .map((offer) =>
+        String(offer.title || "")
+          .trim()
+          .toLowerCase()
+      )
+      .filter(Boolean)
+  );
+  const targetBuckets = Array.isArray(config?.targeting?.role_buckets)
+    ? config.targeting.role_buckets.filter((bucket) =>
+        Array.isArray(bucket?.titles) ? bucket.titles.length > 0 : false
+      )
+    : [];
+  const representedBuckets = new Set(
+    targetBuckets
+      .filter((bucket) =>
+        interimUsefulOffers.some((offer) => titleMatchesBucket(offer.title, bucket))
+      )
+      .map((bucket) => bucket.name || JSON.stringify(bucket.titles))
+  );
+  const requiredBucketCount = Math.min(MIN_USEFUL_SET_BUCKETS, targetBuckets.length);
+  const needsUsefulSetTopUp =
+    selected.length >= MIN_USEFUL_SET_ROLES &&
+    interimCoverage.failedPromptIds.length === 0 &&
+    allPromptOutcomes.every((outcome) => (outcome.errors || []).length === 0) &&
+    (distinctUsefulTitles.size < MIN_USEFUL_SET_ROLES ||
+      representedBuckets.size < requiredBucketCount);
+
+  if (needsUsefulSetTopUp) {
+    const missingBuckets = targetBuckets.filter(
+      (bucket) => !representedBuckets.has(bucket.name || JSON.stringify(bucket.titles))
+    );
+    const topUpSpec = selected
+      .map((prompt, promptIndex) => ({
+        prompt,
+        promptIndex,
+        targetsMissingBucket: missingBuckets.some((bucket) => promptMatchesBucket(prompt, bucket)),
+      }))
+      .sort(
+        (left, right) =>
+          Number(right.targetsMissingBucket) - Number(left.targetsMissingBucket) ||
+          left.promptIndex - right.promptIndex
+      )[0];
+    const consideredCandidates = roles
+      .filter((role) => role?.company && role?.title && role?.url && isPostingEvidenceUrl(role.url))
+      .map((role) => ({
+        offer: { company: role.company, title: role.title, url: role.url },
+        reason: "CareerRat already accepted or rejected this posting in the current run.",
+      }));
+    const consideredPostingKeys = new Set();
+    for (const { offer } of consideredCandidates) addPostingIdentity(consideredPostingKeys, offer);
+    const topUpOutcome = await runSavedPrompt(topUpSpec.prompt, topUpSpec.promptIndex, {
+      topUpCandidates: consideredCandidates,
+    });
+    allPromptOutcomes.push(topUpOutcome);
+    await collectPromptOutcomes([topUpOutcome], {
+      recovery: true,
+      rejectedPostingKeys: consideredPostingKeys,
+    });
   }
 
   const toolTrace = allPromptOutcomes.flatMap((result) => result.toolTrace);

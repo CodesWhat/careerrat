@@ -19,6 +19,8 @@ metadata:
 
 ## AI Web Search mode
 
+Do not stop after the first viable lead while search or fetch budget remains. Keep looking for distinct active postings until the bounded search is genuinely exhausted or the practical result goal below is met.
+
 Activated when the kickoff input is JSON containing `"mode": "ai-web-search"` (a `prompts: [{id, text}]` array and a `candidate` context object arrive alongside it in that same input). When this mode is active, run this section instead of STEP 0 through STEP 8 above — it is a separate, read-only execution path through the same skill, not a variant of the file-writing sweep.
 
 **Tool surface is restricted to Read, Glob, Grep, WebFetch, WebSearch, and Skill.** No Bash, no Write, no Edit, no session browser, and no `careerrat`/npm CLI commands are available in this mode — the embedded runtime enforces this at the tool-allowlist level, so do not attempt any of them. Everything STEP 0-8 above does through a CLI command, a file write, or the session browser is out of scope here; see "Skip" below.

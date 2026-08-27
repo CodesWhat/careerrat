@@ -456,6 +456,7 @@ test("AI web-search skill gives each saved prompt a small exploration budget", (
   assert.match(skill, /employer-owned career|employer career/i);
   assert.match(skill, /at least two (?:different )?(?:source )?hosts/i);
   assert.match(skill, /no more than one candidate from the same third-party host/i);
+  assert.match(skill, /do not stop after (?:the )?first (?:viable )?(?:lead|match)/i);
 });
 
 test("runAiWebSearch reports structured prompt lifecycle and periodic health", async () => {
@@ -1815,6 +1816,278 @@ test("runAiWebSearch retries only a canonically erased sibling and keeps dedupe 
       .sort(),
     [activeUrl, replacementUrl].sort()
   );
+});
+
+test("runAiWebSearch tops up an underfilled three-prompt useful set once on the frozen provider", async () => {
+  const repoRoot = repo({ prompts: 3 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      compensation: { minimum_base: 85000 },
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        { name: "Bar leadership", titles: ["Bar Manager", "Head Bartender"] },
+        { name: "Hospitality operations", titles: ["Assistant General Manager"] },
+      ],
+      fit_bands: { fit_floor: 65 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      { id: "p1", text: "Find active Bar Manager and Head Bartender jobs in New York City" },
+      { id: "p2", text: "Find active Assistant General Manager jobs in New York City" },
+      { id: "p3", text: "Find active Event Operations jobs in New York City" },
+    ],
+  });
+  const executionPlan = Object.freeze({
+    operation: "research.web",
+    runtimeId: "codex",
+    resolved: Object.freeze({ model: "gpt-5.6-terra", effort: "medium" }),
+  });
+  const calls = new Map();
+  const receivedPlans = [];
+  const inputs = [];
+  const firstUrl = "https://employer-one.example/jobs/bar-manager";
+  const secondUrl = "https://employer-two.example/jobs/assistant-general-manager";
+  const topUpUrl = "https://employer-three.example/jobs/head-bartender";
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    executionPlan,
+    runSkillStream: async ({ input, onEvent, executionPlan: receivedPlan }) => {
+      inputs.push(input);
+      receivedPlans.push(receivedPlan);
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      const promptId = kickoff.prompts[0].id;
+      const attempt = (calls.get(promptId) || 0) + 1;
+      calls.set(promptId, attempt);
+      const roles =
+        promptId === "p1"
+          ? [
+              role({
+                company: attempt === 1 ? "Bar One" : "Bar Three",
+                title: attempt === 1 ? "Bar Manager" : "Head Bartender",
+                location: "New York, NY",
+                url: attempt === 1 ? firstUrl : topUpUrl,
+              }),
+            ]
+          : promptId === "p2"
+            ? [
+                role({
+                  company: "Restaurant Two",
+                  title: "Assistant General Manager",
+                  location: "New York, NY",
+                  url: secondUrl,
+                }),
+              ]
+            : [];
+      emitAssistantJson(onEvent, {
+        roles,
+        queries_run: [
+          { prompt_id: promptId, query: `${promptId} query ${attempt}`, status: "completed" },
+        ],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver({
+      location: "New York, NY",
+      liveness: { result: "active", reason: "visible apply control" },
+    }),
+  });
+
+  assert.deepEqual(Object.fromEntries(calls), { p1: 2, p2: 1, p3: 1 });
+  assert.deepEqual(receivedPlans, [executionPlan, executionPlan, executionPlan, executionPlan]);
+  assert.equal(typeof inputs[3], "string");
+  assert.match(inputs[3], /additional|top up|underfilled/i);
+  assert.match(inputs[3], /employer-owned|direct ATS|direct employer/i);
+  assert.match(inputs[3], /bar-manager/);
+  assert.match(inputs[3], /assistant-general-manager/);
+  assert.equal(result.new, 3, JSON.stringify(result));
+  assert.equal(result.presented, 3, JSON.stringify(result));
+  assert.deepEqual(
+    readDbScannerRows({ repoRoot })
+      .filter((row) => row.source === "ai-web-search")
+      .map((row) => row.role)
+      .sort(),
+    ["Assistant General Manager", "Bar Manager", "Head Bartender"]
+  );
+});
+
+test("runAiWebSearch caps an invalid useful-set top-up at one turn and reuses hard gates", async () => {
+  const repoRoot = repo({ prompts: 3 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      compensation: { minimum_base: 85000 },
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        { name: "Bar leadership", titles: ["Bar Manager", "Head Bartender"] },
+        { name: "Hospitality operations", titles: ["Assistant General Manager"] },
+      ],
+      fit_bands: { fit_floor: 65 },
+    },
+  });
+  const calls = new Map();
+  const firstUrl = "https://employer-one.example/jobs/bar-manager";
+  const secondUrl = "https://employer-two.example/jobs/assistant-general-manager";
+  const outsideUrl = "https://employer-three.example/jobs/head-bartender";
+  const hydrated = [];
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      const promptId = kickoff.prompts[0].id;
+      const attempt = (calls.get(promptId) || 0) + 1;
+      calls.set(promptId, attempt);
+      const roles =
+        promptId === "p1"
+          ? attempt === 1
+            ? [
+                role({
+                  company: "Bar One",
+                  title: "Bar Manager",
+                  location: "New York, NY",
+                  url: firstUrl,
+                }),
+              ]
+            : [
+                role({
+                  company: "Bar One",
+                  title: "Bar Manager",
+                  location: "New York, NY",
+                  url: firstUrl,
+                }),
+                role({
+                  company: "Bar Three",
+                  title: "Head Bartender",
+                  location: "San Francisco, CA",
+                  url: outsideUrl,
+                }),
+              ]
+          : promptId === "p2"
+            ? [
+                role({
+                  company: "Restaurant Two",
+                  title: "Assistant General Manager",
+                  location: "New York, NY",
+                  url: secondUrl,
+                }),
+              ]
+            : [];
+      emitAssistantJson(onEvent, {
+        roles,
+        queries_run: [
+          { prompt_id: promptId, query: `${promptId} query ${attempt}`, status: "completed" },
+        ],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: async (url) => {
+      hydrated.push(url);
+      return canonicalResolver({
+        location: url === outsideUrl ? "San Francisco, CA" : "New York, NY",
+        liveness: { result: "active", reason: "visible apply control" },
+      })(url);
+    },
+  });
+
+  assert.deepEqual(Object.fromEntries(calls), { p1: 2, p2: 1, p3: 1 });
+  assert.equal(hydrated.filter((url) => url === firstUrl).length, 1);
+  assert.equal(result.new, 2, JSON.stringify(result));
+  assert.equal(result.presented, 2, JSON.stringify(result));
+  assert.deepEqual(result.reasonCounts, { location: 1 });
+});
+
+test("runAiWebSearch keeps an empty useful-set top-up explicitly bounded", async () => {
+  const repoRoot = repo({ prompts: 3 });
+  const inputs = [];
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      const promptId = kickoff.prompts[0].id;
+      emitAssistantJson(onEvent, {
+        roles: [],
+        queries_run: [{ prompt_id: promptId, query: `${promptId} empty`, status: "completed" }],
+      });
+      return { ok: true };
+    },
+  });
+
+  assert.equal(inputs.length, 4);
+  assert.equal(typeof inputs[3], "string");
+  assert.match(inputs[3], /underfilled|additional/i);
+  assert.equal(result.new, 0);
+  assert.equal(result.presented, 0);
+});
+
+test("runAiWebSearch does not top up an already useful three-prompt result", async () => {
+  const repoRoot = repo({ prompts: 3 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Applied AI", titles: ["Applied AI Engineer"] }],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  let calls = 0;
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      calls += 1;
+      const kickoff = input;
+      const promptId = kickoff.prompts[0].id;
+      emitAssistantJson(onEvent, {
+        roles: [
+          role({
+            company: `Company ${promptId}`,
+            title: `Applied AI Engineer ${promptId}`,
+            url: `https://jobs.example.test/${promptId}`,
+          }),
+        ],
+        queries_run: [{ prompt_id: promptId, query: `${promptId} query`, status: "completed" }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver(),
+  });
+
+  assert.equal(calls, 3);
+  assert.equal(result.new, 3, JSON.stringify(result));
 });
 
 test("runAiWebSearch scopes concentrated rejected hosts to the owning saved prompt", async () => {
