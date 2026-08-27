@@ -9,6 +9,7 @@ import {
   classifySelfIdentificationQuestion,
 } from "../packet/questions.mjs";
 import { resolveUserPaths } from "../paths/workspace.mjs";
+import { runAbortable, throwIfAborted, withAbortSignal } from "./cancellation.mjs";
 import {
   buildFillPlan,
   confirmationCheck,
@@ -450,49 +451,71 @@ export function screenshotPath({ repoRoot, env, applicationId, data, format }) {
 // Mirrors of the ops action for a fill-plan step. Returns null when the step's
 // type/value combination has no safe action. The caller treats a null action
 // the same as a field that changed out from under it: unresolved, nothing clicked.
+function browserOp(ops, method, input, signal) {
+  return runAbortable(signal, () => ops[method](withAbortSignal(input, signal)));
+}
+
 function fieldOpFor(step, snapshot, ops) {
   if (step.type === "text") {
-    return (ops, pageId) => ops.fillField({ pageId, ref: step.ref, value: String(step.value) });
+    return (ops, pageId, signal) =>
+      browserOp(ops, "fillField", { pageId, ref: step.ref, value: String(step.value) }, signal);
   }
   if (step.type === "select") {
     if (step.declinePolicy === true) {
       if (typeof step.value === "string" && step.value) {
-        return (ops, pageId) =>
-          ops.selectOption({
+        return (ops, pageId, signal) =>
+          browserOp(
+            ops,
+            "selectOption",
+            {
+              pageId,
+              ref: step.ref,
+              label: step.label,
+              value: step.value,
+              typeahead: step.typeahead === true,
+              optionAliases: step.optionAliases,
+            },
+            signal
+          );
+      }
+      if (typeof ops?.selectDeclineOption !== "function") return null;
+      return (ops, pageId, signal) =>
+        browserOp(
+          ops,
+          "selectDeclineOption",
+          {
             pageId,
             ref: step.ref,
             label: step.label,
-            value: step.value,
             typeahead: step.typeahead === true,
-            optionAliases: step.optionAliases,
-          });
-      }
-      if (typeof ops?.selectDeclineOption !== "function") return null;
-      return (ops, pageId) =>
-        ops.selectDeclineOption({
+          },
+          signal
+        );
+    }
+    return (ops, pageId, signal) =>
+      browserOp(
+        ops,
+        "selectOption",
+        {
           pageId,
           ref: step.ref,
           label: step.label,
+          value: selectValueFromSnapshot(step.value, snapshot),
           typeahead: step.typeahead === true,
-        });
-    }
-    return (ops, pageId) =>
-      ops.selectOption({
-        pageId,
-        ref: step.ref,
-        label: step.label,
-        value: selectValueFromSnapshot(step.value, snapshot),
-        typeahead: step.typeahead === true,
-        optionAliases: step.optionAliases,
-      });
+          optionAliases: step.optionAliases,
+        },
+        signal
+      );
   }
   if (step.type === "checkbox") {
     const value = String(step.value).trim();
     if (/^(yes|true|1)$/i.test(value)) {
-      return (ops, pageId) => ops.toggleField({ pageId, ref: step.ref, checked: true });
+      return (ops, pageId, signal) =>
+        browserOp(ops, "toggleField", { pageId, ref: step.ref, checked: true }, signal);
     }
     if (/^(no|false|0)$/i.test(value)) {
-      return (ops, pageId) => ops.toggleField({ pageId, ref: step.ref, checked: false });
+      return (ops, pageId, signal) =>
+        browserOp(ops, "toggleField", { pageId, ref: step.ref, checked: false }, signal);
     }
   }
   if (step.type === "radio") {
@@ -501,10 +524,10 @@ function fieldOpFor(step, snapshot, ops) {
       (candidate) => normalizeLabel(candidate?.label) === requested
     );
     if (option?.ref) {
-      return (ops, pageId) =>
+      return (ops, pageId, signal) =>
         typeof ops.chooseButtonOption === "function"
-          ? ops.chooseButtonOption({ pageId, ref: option.ref })
-          : ops.clickButton({ pageId, ref: option.ref });
+          ? browserOp(ops, "chooseButtonOption", { pageId, ref: option.ref }, signal)
+          : browserOp(ops, "clickButton", { pageId, ref: option.ref }, signal);
     }
   }
   return null;
@@ -551,9 +574,13 @@ async function fillStep({
   candidateConfigGetImpl,
   loadAnswerMapImpl,
   isTrustedOrigin,
+  signal,
 }) {
+  throwIfAborted(signal);
   const config = candidateConfigGetImpl({ repoRoot, env });
-  const answers = await loadAnswerMapImpl({ repoRoot, env, application });
+  const answers = await runAbortable(signal, () =>
+    loadAnswerMapImpl({ repoRoot, env, application, signal })
+  );
   const fields = renderedFieldsFromSnapshot(snapshot);
   const plan = fillPlan({ fields, config, application, answers });
 
@@ -578,12 +605,13 @@ async function fillStep({
   const selectedChoiceValues = new Map();
   let filledCount = 0;
   for (const step of plan) {
+    throwIfAborted(signal);
     if (step.action === "exclude") continue;
     if (step.action !== "fill") {
       if (step.required) unresolved.push({ label: step.label, required: true });
       continue;
     }
-    const freshSnapshot = await ops.snapshot({ pageId });
+    const freshSnapshot = await browserOp(ops, "snapshot", { pageId }, signal);
     if (!isTrustedOrigin(freshSnapshot.origin)) {
       return untrustedFormStepResult({
         snapshot: freshSnapshot,
@@ -612,13 +640,14 @@ async function fillStep({
       continue;
     }
     try {
-      const outcome = await action(ops, pageId);
+      const outcome = await action(ops, pageId, signal);
       const selectedValue = String(outcome?.selectedValue || "").trim();
       if (selectedValue && ["select", "radio"].includes(step.type)) {
         selectedChoiceValues.set(step.id, selectedValue);
       }
       filledCount += 1;
     } catch (error) {
+      throwIfAborted(signal);
       unresolved.push({
         label: step.label,
         required: step.required,
@@ -630,12 +659,13 @@ async function fillStep({
   const uploads = uploadArtifacts({ repoRoot, env, application, postingUrl: url });
   let uploadedCount = 0;
   for (const target of uploadTargetsFromSnapshot(snapshot)) {
+    throwIfAborted(signal);
     const file = uploads[target.kind];
     if (!file) {
       if (target.required) unresolved.push({ label: target.label, required: true });
       continue;
     }
-    const freshSnapshot = await ops.snapshot({ pageId });
+    const freshSnapshot = await browserOp(ops, "snapshot", { pageId }, signal);
     if (!isTrustedOrigin(freshSnapshot.origin)) {
       return untrustedFormStepResult({
         snapshot: freshSnapshot,
@@ -654,9 +684,10 @@ async function fillStep({
       continue;
     }
     try {
-      await ops.upload({ pageId, ref: freshTarget.ref, files: file });
+      await browserOp(ops, "upload", { pageId, ref: freshTarget.ref, files: file }, signal);
       uploadedCount += 1;
     } catch (error) {
+      throwIfAborted(signal);
       unresolved.push({
         label: target.label,
         required: target.required,
@@ -665,7 +696,7 @@ async function fillStep({
     }
   }
 
-  const finalSnapshot = await ops.snapshot({ pageId });
+  const finalSnapshot = await browserOp(ops, "snapshot", { pageId }, signal);
   if (!isTrustedOrigin(finalSnapshot.origin)) {
     return untrustedFormStepResult({
       snapshot: finalSnapshot,
@@ -828,7 +859,9 @@ async function submittedResult({
   providerLabel,
   confirmation,
   prepareOnly = false,
+  signal,
 }) {
+  throwIfAborted(signal);
   if (prepareOnly === true) {
     return {
       available: true,
@@ -844,7 +877,8 @@ async function submittedResult({
       },
     };
   }
-  const screenshot = await ops.screenshot({ pageId });
+  const screenshot = await browserOp(ops, "screenshot", { pageId }, signal);
+  throwIfAborted(signal);
   const path = saveScreenshotImpl({
     repoRoot,
     env,
@@ -891,7 +925,9 @@ export function createApplyDriver({
     questionCapture,
     prepareOnly = false,
     focusSession = false,
+    signal,
   } = {}) {
+    throwIfAborted(signal);
     const url = safePostingUrl(postingUrl);
     if (!url) {
       return {
@@ -918,8 +954,13 @@ export function createApplyDriver({
         if (typeof ops.focusTab !== "function") {
           throw new Error("This browser provider cannot focus a prepared tab.");
         }
-        await ops.focusTab({ pageId: retainedSession.pageId });
-        const retainedSnapshot = await ops.snapshot({ pageId: retainedSession.pageId });
+        await browserOp(ops, "focusTab", { pageId: retainedSession.pageId }, signal);
+        const retainedSnapshot = await browserOp(
+          ops,
+          "snapshot",
+          { pageId: retainedSession.pageId },
+          signal
+        );
         if (!retainedOriginIsTrusted(retainedSession, retainedSnapshot.origin)) {
           throw new Error("The prepared tab left the trusted application site.");
         }
@@ -937,6 +978,7 @@ export function createApplyDriver({
           },
         };
       } catch (error) {
+        throwIfAborted(signal);
         sessions.delete(applicationKey);
         return {
           available: false,
@@ -976,7 +1018,7 @@ export function createApplyDriver({
     }
     const reusedPage = Boolean(retainedSession);
     if (!retainedSession) {
-      const opened = await ops.openTab({ url });
+      const opened = await browserOp(ops, "openTab", { url }, signal);
       const pageId = String(opened?.pageId || "").trim();
       if (!pageId) throw new Error("The supervised browser did not return a browser page id.");
       retainedSession = createRetainedSession(pageId, url);
@@ -986,28 +1028,29 @@ export function createApplyDriver({
 
     let snapshot;
     try {
-      snapshot = await ops.snapshot({ pageId });
+      snapshot = await browserOp(ops, "snapshot", { pageId }, signal);
     } catch (error) {
+      throwIfAborted(signal);
       // A cached page id can point at a tab that has since been closed. That
       // must not poison every later run for this application: drop the stale
       // entry, open a fresh tab, and retry once.
       if (!reusedPage) throw error;
       sessions.delete(applicationKey);
-      const reopened = await ops.openTab({ url });
+      const reopened = await browserOp(ops, "openTab", { url }, signal);
       pageId = String(reopened?.pageId || "").trim();
       if (!pageId) throw new Error("The supervised browser did not return a browser page id.");
       retainedSession = createRetainedSession(pageId, url);
       sessions.set(applicationKey, retainedSession);
-      snapshot = await ops.snapshot({ pageId });
+      snapshot = await browserOp(ops, "snapshot", { pageId }, signal);
     }
     if (reusedPage && !retainedOriginIsTrusted(retainedSession, snapshot.origin)) {
       sessions.delete(applicationKey);
-      const reopened = await ops.openTab({ url });
+      const reopened = await browserOp(ops, "openTab", { url }, signal);
       pageId = String(reopened?.pageId || "").trim();
       if (!pageId) throw new Error("The supervised browser did not return a browser page id.");
       retainedSession = createRetainedSession(pageId, url);
       sessions.set(applicationKey, retainedSession);
-      snapshot = await ops.snapshot({ pageId });
+      snapshot = await browserOp(ops, "snapshot", { pageId }, signal);
     }
     if (!retainedOriginIsTrusted(retainedSession, snapshot.origin)) {
       sessions.delete(applicationKey);
@@ -1050,6 +1093,7 @@ export function createApplyDriver({
         providerLabel,
         confirmation,
         prepareOnly,
+        signal,
       });
     }
 
@@ -1077,13 +1121,13 @@ export function createApplyDriver({
           };
         }
       }
-      const clicked = await ops.clickButton({ pageId, ref: entry.ref });
+      const clicked = await browserOp(ops, "clickButton", { pageId, ref: entry.ref }, signal);
       const clickedPageId = String(clicked?.pageId || clicked?.browserPageId || "").trim();
       if (clickedPageId && clickedPageId !== pageId) {
         pageId = clickedPageId;
         retainedSession.pageId = pageId;
       }
-      snapshot = await ops.snapshot({ pageId });
+      snapshot = await browserOp(ops, "snapshot", { pageId }, signal);
       const detailOrigin = safeHttpOrigin(detailSnapshot.origin);
       const applicationOrigin = safeHttpOrigin(snapshot.origin);
       if (!applicationOrigin) {
@@ -1161,6 +1205,7 @@ export function createApplyDriver({
           providerLabel,
           confirmation,
           prepareOnly,
+          signal,
         });
       }
     }
@@ -1247,14 +1292,17 @@ export function createApplyDriver({
 
       const fields = renderedFieldsFromSnapshot(snapshot);
       if (questionCaptureNeedsRefresh(questionCapture, fields)) {
-        const captured = await captureQuestionsImpl({
-          repoRoot,
-          env,
-          applicationId,
-          source: "rendered",
-          url: snapshot.origin || url,
-          questions: fields,
-        });
+        const captured = await runAbortable(signal, () =>
+          captureQuestionsImpl({
+            repoRoot,
+            env,
+            applicationId,
+            source: "rendered",
+            url: snapshot.origin || url,
+            questions: fields,
+            signal,
+          })
+        );
         return {
           available: true,
           verified: false,
@@ -1281,6 +1329,7 @@ export function createApplyDriver({
         candidateConfigGetImpl,
         loadAnswerMapImpl,
         isTrustedOrigin: (value) => retainedOriginIsTrusted(retainedSession, value),
+        signal,
       });
       totalFilledCount += result.filledCount;
       totalUploadedCount += result.uploadedCount;
@@ -1362,7 +1411,7 @@ export function createApplyDriver({
       // a flow that ends on a review page with no further Next/Continue
       // control (only a disqualified Submit-flavored one, or none at all)
       // stops here awaiting-submit, same as a genuinely single-page form.
-      const preAdvanceSnapshot = await ops.snapshot({ pageId });
+      const preAdvanceSnapshot = await browserOp(ops, "snapshot", { pageId }, signal);
       if (!retainedOriginIsTrusted(retainedSession, preAdvanceSnapshot.origin)) {
         const blocked = untrustedFormStepResult({
           snapshot: preAdvanceSnapshot,
@@ -1481,8 +1530,8 @@ export function createApplyDriver({
         };
       }
       const fingerprintBefore = snapshotFingerprint(preAdvanceSnapshot);
-      await ops.clickButton({ pageId, ref: advanceRef });
-      const nextSnapshot = await ops.snapshot({ pageId });
+      await browserOp(ops, "clickButton", { pageId, ref: advanceRef }, signal);
+      const nextSnapshot = await browserOp(ops, "snapshot", { pageId }, signal);
 
       // A click meant to advance the page can land on a confirmation page
       // directly (the driver's click-safety fixes make this unexpected, not
@@ -1503,6 +1552,7 @@ export function createApplyDriver({
           providerLabel,
           confirmation: postAdvanceConfirmation,
           prepareOnly,
+          signal,
         });
       }
 

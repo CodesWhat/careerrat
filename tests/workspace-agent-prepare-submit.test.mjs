@@ -269,11 +269,13 @@ test("job.prepare-submit resumes a persisted KEEP packet in forced prepare-only 
   const repoRoot = tempRepo();
   seedPreparedApplication(repoRoot);
   const calls = [];
+  const controller = new AbortController();
 
   const result = await executeWorkspaceIntent({
     repoRoot,
     env: {},
     intent: prepareIntent({ resumeSession: false, prepareOnly: false }, repoRoot),
+    signal: controller.signal,
     applyJobImpl: async (input) => {
       calls.push(input);
       return {
@@ -299,6 +301,7 @@ test("job.prepare-submit resumes a persisted KEEP packet in forced prepare-only 
   assert.equal(calls[0].prepareOnly, true);
   assert.equal(calls[0].input.resumeSession, true);
   assert.equal(calls[0].input.prepareOnly, true);
+  assert.equal(calls[0].signal, controller.signal);
   assert.equal(calls[0].input.executionPlan.runtimeId, "codex");
   assert.equal(calls[0].input.executionPlan.operation, "application.drafting");
   assert.equal(readApplication(repoRoot).status, "reviewed-hold");

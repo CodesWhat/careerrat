@@ -715,6 +715,70 @@ test("single-page flow fills resolvable fields and stops awaiting-submit, same a
   }
 });
 
+test("a mid-run cancellation stops before any later browser mutation", async () => {
+  const controller = new AbortController();
+  const cancellation = new Error("application preparation cancelled");
+  const mutations = [];
+  let forwardedSignal = null;
+  const snapshot = {
+    origin: GREENHOUSE_URL,
+    pageText: "Application form",
+    refs: refsOf([
+      ["e1", "textbox", "First Name", true],
+      ["e2", "textbox", "Phone Number", false],
+      ["e3", "button", "Submit application", false],
+    ]),
+  };
+  const execute = makeDriver({
+    ops: {
+      async openTab({ signal }) {
+        mutations.push({ op: "openTab" });
+        forwardedSignal = signal;
+        return { pageId: "page-cancelled" };
+      },
+      async snapshot() {
+        return snapshot;
+      },
+      async fillField({ ref, signal }) {
+        mutations.push({ op: "fillField", ref });
+        forwardedSignal = signal;
+        controller.abort(cancellation);
+      },
+      async selectOption({ ref }) {
+        mutations.push({ op: "selectOption", ref });
+      },
+      async toggleField({ ref }) {
+        mutations.push({ op: "toggleField", ref });
+      },
+      async clickButton({ ref }) {
+        mutations.push({ op: "clickButton", ref });
+      },
+      async upload({ ref }) {
+        mutations.push({ op: "upload", ref });
+      },
+      async screenshot() {
+        mutations.push({ op: "screenshot" });
+        return { data: "", format: "png" };
+      },
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      execute({
+        applicationId: "app-cancelled-mid-fill",
+        application: { id: "app-cancelled-mid-fill" },
+        postingUrl: GREENHOUSE_URL,
+        questionCapture: { state: "captured" },
+        signal: controller.signal,
+      }),
+    (error) => error === cancellation
+  );
+
+  assert.equal(forwardedSignal, controller.signal);
+  assert.deepEqual(mutations, [{ op: "openTab" }, { op: "fillField", ref: "e1" }]);
+});
+
 test("a Greenhouse captcha is the final handoff after safe fields and the resume are prepared", async () => {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-apply-driver-"));
   try {
@@ -2817,6 +2881,49 @@ test("focusSession returns to the exact retained prepared page without opening o
   assert.equal(
     log.some((entry) => entry.op === "clickButton"),
     false
+  );
+});
+
+test("cancelling a focus request preserves the retained page for the next review request", async () => {
+  const reviewPage = {
+    origin: `${GREENHOUSE_URL}?step=review`,
+    pageText: "Review your application",
+    refs: refsOf([["e1", "button", "Submit application", false]]),
+  };
+  const { ops, log } = createFakeOps([reviewPage]);
+  const execute = makeDriver({ ops });
+  const controller = new AbortController();
+  const cancellation = new Error("focus cancelled");
+  let cancelFocus = true;
+  ops.focusTab = async ({ pageId, signal }) => {
+    log.push({ op: "focusTab", pageId });
+    if (cancelFocus) {
+      cancelFocus = false;
+      controller.abort(cancellation);
+      assert.equal(signal, controller.signal);
+    }
+  };
+
+  const request = {
+    applicationId: "app-focus-cancelled",
+    application: { id: "app-focus-cancelled" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  };
+  await execute(request);
+  await assert.rejects(
+    () => execute({ ...request, focusSession: true, signal: controller.signal }),
+    (error) => error === cancellation
+  );
+  const focused = await execute({ ...request, focusSession: true });
+
+  assert.equal(focused.state, "awaiting-submit");
+  assert.equal(focused.session.focused, true);
+  assert.equal(
+    log.filter((entry) => entry.op === "openTab").length,
+    1,
+    "cancellation must not discard and reopen the prepared page"
   );
 });
 

@@ -24,7 +24,7 @@ const GREENHOUSE_URL = "https://job-boards.greenhouse.io/example/jobs/123";
 // no-live-browser suite. A click on a non-file-input control resolves any
 // pending waitForEvent("filechooser") listener with a fake chooser, mirroring
 // how a real styled "Attach" button opens the native file picker on click.
-function createFakeBrowser({ controls, bodyText = "" } = {}) {
+function createFakeBrowser({ controls, bodyText = "", onAction } = {}) {
   const actions = [];
   let pageOpens = 0;
   let currentUrl = "";
@@ -33,10 +33,14 @@ function createFakeBrowser({ controls, bodyText = "" } = {}) {
   function elementLocator(index) {
     return {
       async fill(value) {
-        actions.push({ op: "fill", index, value });
+        const action = { op: "fill", index, value };
+        actions.push(action);
+        onAction?.(action);
       },
       async selectOption(arg) {
-        actions.push({ op: "selectOption", index, arg });
+        const action = { op: "selectOption", index, arg };
+        actions.push(action);
+        onAction?.(action);
         // A real Locator.selectOption() returns the option values it
         // actually selected — selectOption() now checks that array is
         // non-empty before trusting a native <select> attempt succeeded, so
@@ -44,10 +48,14 @@ function createFakeBrowser({ controls, bodyText = "" } = {}) {
         return [String(arg?.label ?? arg)];
       },
       async setChecked(checked) {
-        actions.push({ op: "setChecked", index, checked });
+        const action = { op: "setChecked", index, checked };
+        actions.push(action);
+        onAction?.(action);
       },
       async click() {
-        actions.push({ op: "click", index });
+        const action = { op: "click", index };
+        actions.push(action);
+        onAction?.(action);
         if (controls[index]?.role === "radio") {
           for (const control of controls) {
             if (control.choiceGroup === controls[index].choiceGroup) control.checked = false;
@@ -64,7 +72,9 @@ function createFakeBrowser({ controls, bodyText = "" } = {}) {
         }
       },
       async setInputFiles(files) {
-        actions.push({ op: "setInputFiles", index, files });
+        const action = { op: "setInputFiles", index, files };
+        actions.push(action);
+        onAction?.(action);
       },
     };
   }
@@ -830,6 +840,36 @@ test("fillField and clickButton resolve refs from the latest snapshot", async ()
     { op: "selectOption", index: 2, arg: { label: "Yes" } },
     { op: "click", index: 3 },
   ]);
+});
+
+test("Playwright select stops before another strategy after an in-flight cancellation", async () => {
+  const controller = new AbortController();
+  const cancellation = new Error("application preparation cancelled");
+  const { launchImpl, actions } = createFakeBrowser({
+    controls: FORM_CONTROLS,
+    onAction(action) {
+      if (action.op === "selectOption") controller.abort(cancellation);
+    },
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  await ops.snapshot({ pageId });
+
+  await assert.rejects(
+    () =>
+      ops.selectOption({
+        pageId,
+        ref: "e3",
+        value: "Yes",
+        optionAliases: ["Authorized"],
+        signal: controller.signal,
+      }),
+    (error) => error === cancellation
+  );
+  assert.deepEqual(
+    actions.filter((action) => action.op === "selectOption"),
+    [{ op: "selectOption", index: 2, arg: { label: "Yes" } }]
+  );
 });
 
 test("playwright-ops focuses the retained page without creating a second tab", async () => {
@@ -1689,6 +1729,40 @@ test("configured executor dispatches to the playwright executor for provider pla
 
   assert.equal(result.session.provider, "playwright");
   assert.ok(pageOpens() > 0, "the playwright executor actually opened a fake browser tab");
+});
+
+test("configured Playwright executor preserves cancellation instead of reporting unavailable", async () => {
+  const { launchImpl, pageOpens } = createFakeBrowser({ controls: FORM_CONTROLS });
+  const controller = new AbortController();
+  const cancellation = new Error("application preparation cancelled");
+  controller.abort(cancellation);
+  const execute = createConfiguredApplyExecutor({
+    repoRoot: "/repo",
+    env: {},
+    loadAutomationImpl: () => ({ data: { session: { provider: "playwright" } } }),
+    launchImpl,
+    mayRunImpl: () => ({ allowed: true }),
+    candidateConfigGetImpl: () => ({ profile: {}, honesty: {}, "form-defaults": {} }),
+    loadAnswerMapImpl: async () => new Map(),
+    captureQuestionsImpl: async ({ questions }) => ({
+      questions,
+      excluded: [],
+      demographicSectionPresent: false,
+    }),
+  });
+
+  await assert.rejects(
+    () =>
+      execute({
+        applicationId: "app-pre-cancelled",
+        application: { id: "app-pre-cancelled" },
+        postingUrl: GREENHOUSE_URL,
+        questionCapture: { state: "captured" },
+        signal: controller.signal,
+      }),
+    (error) => error === cancellation
+  );
+  assert.equal(pageOpens(), 0, "a cancelled request must not launch or mutate the browser");
 });
 
 test("configured executor returns to the exact retained Playwright page for final user review", async () => {

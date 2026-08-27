@@ -53,6 +53,30 @@ test("Orca focusTab switches to the retained supervised page", async () => {
   assert.deepEqual(commands, [["tab", "switch", "--page", "page-123", "--json"]]);
 });
 
+test("Orca ops forward cancellation to child work and reject after an in-flight abort", async () => {
+  const controller = new AbortController();
+  const cancellation = new Error("application preparation cancelled");
+  const calls = [];
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args, options) => {
+      calls.push({ args, signal: options?.signal });
+      controller.abort(cancellation);
+      return {};
+    },
+  });
+
+  await assert.rejects(
+    () => ops.clickButton({ pageId: "page-123", ref: "e1", signal: controller.signal }),
+    (error) => error === cancellation
+  );
+  assert.deepEqual(calls, [
+    {
+      args: ["click", "--page", "page-123", "--element", "@e1", "--json"],
+      signal: controller.signal,
+    },
+  ]);
+});
+
 test("Orca selectDeclineOption chooses only one narrowly recognized option", async () => {
   const commands = [];
   let snapshotIndex = 0;

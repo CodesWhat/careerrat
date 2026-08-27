@@ -1,5 +1,6 @@
 import { loadAutomation } from "../automation/consent.mjs";
 import { automaticApplyGap, PROVIDERS, resolveSession } from "../automation/session.mjs";
+import { throwIfAborted } from "./cancellation.mjs";
 import { createOrcaApplyExecutor } from "./orca-executor.mjs";
 import { createPlaywrightApplyExecutor } from "./playwright-executor.mjs";
 
@@ -59,9 +60,13 @@ export function createConfiguredApplyExecutor({
 
   const execute = createExecutor({ repoRoot, env, loadAutomationImpl, ...options });
   return async (input) => {
+    throwIfAborted(input?.signal);
     try {
-      return await execute(input);
+      const result = await execute(input);
+      throwIfAborted(input?.signal);
+      return result;
     } catch (error) {
+      throwIfAborted(input?.signal);
       return {
         available: false,
         verified: false,
