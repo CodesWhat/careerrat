@@ -48,13 +48,15 @@ function repo({ mode = "standard", prompts = 5 } = {}) {
 function assistantJson(data) {
   return async ({ input, onEvent }) => {
     const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+    const usefulSetTopUp =
+      typeof input === "string" && input.includes("canonical result set is still underfilled");
     assistantJson.inputs.push(kickoff);
     const promptIds = new Set((kickoff.prompts || []).map((prompt) => prompt.id));
     const allQueries = Array.isArray(data.queries_run) ? data.queries_run : [];
     const queriesRun = allQueries.filter((query) => promptIds.has(query.prompt_id));
     const scoped = {
       ...data,
-      roles: !allQueries.length || queriesRun.length ? data.roles : [],
+      roles: usefulSetTopUp ? [] : !allQueries.length || queriesRun.length ? data.roles : [],
       queries_run: queriesRun,
     };
     onEvent({
@@ -519,6 +521,27 @@ test("runAiWebSearch reports structured prompt lifecycle and periodic health", a
         promptStatus: "completed",
         heartbeat: false,
       },
+      {
+        promptId: "p1",
+        promptIndex: 1,
+        promptTotal: 1,
+        promptStatus: "running",
+        heartbeat: false,
+      },
+      {
+        promptId: "p1",
+        promptIndex: 1,
+        promptTotal: 1,
+        promptStatus: "running",
+        heartbeat: true,
+      },
+      {
+        promptId: "p1",
+        promptIndex: 1,
+        promptTotal: 1,
+        promptStatus: "completed",
+        heartbeat: false,
+      },
     ]
   );
 });
@@ -597,6 +620,8 @@ test("runAiWebSearch refreshes durable activity through hydration and before per
     "Checking details for 1 discovered job…",
     "hydrating",
     "Checked details for 1 of 1 discovered jobs…",
+    "Searching for additional roles for saved prompt 1 of 1…",
+    "Finished saved prompt 1 of 1.",
     "Saving 1 qualified job…",
   ]);
 });
@@ -1268,7 +1293,7 @@ test("runAiWebSearch rejects a model title that resolves to a different canonica
     }),
   });
 
-  assert.equal(calls, 3, "canonical identity rejection keeps the existing bounded recovery cap");
+  assert.equal(calls, 4, "canonical identity rejection plus useful-set top-up stay bounded");
   assert.equal(result.new, 0, JSON.stringify(result));
   assert.equal(result.presented, 0, JSON.stringify(result));
   assert.deepEqual(result.reasonCounts, { seniority: 1 });
@@ -1398,10 +1423,11 @@ test("runAiWebSearch replaces a prompt batch erased by canonical liveness once",
           })(url),
   });
 
-  assert.equal(inputs.length, 2);
+  assert.equal(inputs.length, 3);
   assert.equal(typeof inputs[0], "object");
   assert.equal(typeof inputs[1], "string");
-  assert.deepEqual(plans, [executionPlan, executionPlan]);
+  assert.equal(typeof inputs[2], "string");
+  assert.deepEqual(plans, [executionPlan, executionPlan, executionPlan]);
   assert.match(inputs[1], /replacement|recover|fresh/i);
   assert.match(inputs[1], /expired-role/);
   assert.match(inputs[1], /no longer available/i);
@@ -1452,7 +1478,7 @@ test("runAiWebSearch never rehydrates a rejected URL repeated by recovery", asyn
     },
   });
 
-  assert.equal(calls, 2);
+  assert.equal(calls, 3);
   assert.equal(hydrationCounts.get(expiredUrl), 1);
   assert.equal(hydrationCounts.get(activeUrl), 1);
   assert.equal(result.new, 1, JSON.stringify(result));
@@ -1501,43 +1527,46 @@ test("runAiWebSearch sends recovery candidates through the existing hard gates",
     runSkillStream: async ({ input, onEvent }) => {
       calls += 1;
       const recovery = typeof input === "string";
+      const topUp = recovery && input.includes("canonical result set is still underfilled");
       emitAssistantJson(onEvent, {
-        roles: recovery
-          ? [
-              role({
-                company: "Search Page Co",
-                title: "Bar Manager",
-                url: "https://www.indeed.com/jobs?q=bar+manager&l=New+York",
-                location: "New York, NY",
-              }),
-              role({
-                company: "Expired Redirect Co",
-                title: "Bar Manager",
-                url: "https://www.linkedin.com/jobs/view/123?trk=expired_jd_redirect",
-                location: "New York, NY",
-              }),
-              role({
-                company: "Outside Co",
-                title: "Bar Manager",
-                url: outsideUrl,
-                location: "San Francisco, CA",
-              }),
-              role({
-                company: "Below Floor Co",
-                title: "Bar Manager",
-                url: belowFloorUrl,
-                location: "New York, NY",
-              }),
-              role({
-                company: "Low Fit Co",
-                title: "Bar Manager",
-                url: lowFitUrl,
-                location: "New York, NY",
-                fit_score: 64,
-                fit_bucket: "stretch",
-              }),
-            ]
-          : [role({ company: "Expired Co", title: "Bar Manager", url: expiredUrl })],
+        roles: topUp
+          ? []
+          : recovery
+            ? [
+                role({
+                  company: "Search Page Co",
+                  title: "Bar Manager",
+                  url: "https://www.indeed.com/jobs?q=bar+manager&l=New+York",
+                  location: "New York, NY",
+                }),
+                role({
+                  company: "Expired Redirect Co",
+                  title: "Bar Manager",
+                  url: "https://www.linkedin.com/jobs/view/123?trk=expired_jd_redirect",
+                  location: "New York, NY",
+                }),
+                role({
+                  company: "Outside Co",
+                  title: "Bar Manager",
+                  url: outsideUrl,
+                  location: "San Francisco, CA",
+                }),
+                role({
+                  company: "Below Floor Co",
+                  title: "Bar Manager",
+                  url: belowFloorUrl,
+                  location: "New York, NY",
+                }),
+                role({
+                  company: "Low Fit Co",
+                  title: "Bar Manager",
+                  url: lowFitUrl,
+                  location: "New York, NY",
+                  fit_score: 64,
+                  fit_bucket: "stretch",
+                }),
+              ]
+            : [role({ company: "Expired Co", title: "Bar Manager", url: expiredUrl })],
         queries_run: [{ prompt_id: "p1", query: `query ${calls}`, status: "completed" }],
       });
       return { ok: true };
@@ -1577,7 +1606,7 @@ test("runAiWebSearch sends recovery candidates through the existing hard gates",
     },
   });
 
-  assert.equal(calls, 2);
+  assert.equal(calls, 3);
   assert.deepEqual(hydrated.sort(), [belowFloorUrl, expiredUrl, lowFitUrl, outsideUrl].sort());
   assert.equal(result.invalid, 2);
   assert.deepEqual(result.reasonCounts, { location: 1, salary: 1 });
@@ -1643,9 +1672,9 @@ test("runAiWebSearch continues canonical freshness recovery until a second turn 
     },
   });
 
-  assert.equal(inputs.length, 3);
+  assert.equal(inputs.length, 4);
   assert.ok(inputs.slice(1).every((input) => typeof input === "string"));
-  assert.deepEqual(plans, [executionPlan, executionPlan, executionPlan]);
+  assert.deepEqual(plans, [executionPlan, executionPlan, executionPlan, executionPlan]);
   assert.match(inputs[2], /expired-initial/);
   assert.match(inputs[2], /expired-recovery/);
   assert.match(inputs[2], /stale-board\.example/);
@@ -1726,7 +1755,7 @@ test("runAiWebSearch continues recovery when canonical hard gates erase the firs
     }),
   });
 
-  assert.equal(inputs.length, 3);
+  assert.equal(inputs.length, 4);
   assert.match(inputs[2], /below-floor/);
   assert.match(inputs[2], /salary|compensation|hard filter/i);
   assert.equal(result.presented, 1, JSON.stringify(result));
@@ -1756,10 +1785,10 @@ test("runAiWebSearch caps canonical freshness recovery at two turns", async () =
     }),
   });
 
-  assert.equal(calls, 3);
+  assert.equal(calls, 4);
   assert.equal(result.new, 0);
   assert.equal(result.presented, 0);
-  assert.equal(result.unreadable, 3);
+  assert.equal(result.unreadable, 4);
   assert.deepEqual(result.errors, []);
   assert.deepEqual(result.failedPromptIds, []);
 });
@@ -1806,7 +1835,7 @@ test("runAiWebSearch retries only a canonically erased sibling and keeps dedupe 
         : canonicalResolver()(url),
   });
 
-  assert.deepEqual(Object.fromEntries(calls), { p1: 1, p2: 2 });
+  assert.deepEqual(Object.fromEntries(calls), { p1: 2, p2: 2 });
   assert.equal(result.new, 2, JSON.stringify(result));
   assert.ok(result.duplicates >= 1, JSON.stringify(result));
   assert.deepEqual(
@@ -1816,6 +1845,212 @@ test("runAiWebSearch retries only a canonically erased sibling and keeps dedupe 
       .sort(),
     [activeUrl, replacementUrl].sort()
   );
+});
+
+test("runAiWebSearch tops up valid one- and two-prompt runs", async () => {
+  for (const promptCount of [1, 2]) {
+    const repoRoot = repo({ prompts: promptCount });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: {
+        location: {
+          home: "New York, NY",
+          remote: true,
+          remote_scope: "home-country",
+          hybrid: true,
+          onsite: true,
+          relocation: [],
+        },
+      },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "targeting",
+      patch: {
+        role_buckets: [
+          {
+            name: "Hospitality operations",
+            titles: ["Bar Manager", "Assistant General Manager", "General Manager"],
+          },
+        ],
+        fit_bands: { fit_floor: 65 },
+      },
+    });
+    const calls = new Map();
+    const result = await runAiWebSearch({
+      repoRoot,
+      env: {},
+      runSkillStream: async ({ input, onEvent }) => {
+        const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+        const promptId = kickoff.prompts[0].id;
+        const attempt = (calls.get(promptId) || 0) + 1;
+        calls.set(promptId, attempt);
+        const initialIndex = Number(promptId.slice(1));
+        const roles =
+          attempt === 1
+            ? [
+                role({
+                  company: `Initial ${initialIndex}`,
+                  title: initialIndex === 1 ? "Bar Manager" : "Assistant General Manager",
+                  location: "New York, NY",
+                  url: `https://initial-${initialIndex}.example/jobs/role`,
+                }),
+              ]
+            : Array.from({ length: 3 - promptCount }, (_, index) =>
+                role({
+                  company: `Top Up ${index + 1}`,
+                  title: index === 0 ? "General Manager" : "Assistant General Manager",
+                  location: "New York, NY",
+                  url: `https://top-up-${promptCount}-${index + 1}.example/jobs/role`,
+                })
+              );
+        emitAssistantJson(onEvent, {
+          roles,
+          queries_run: [
+            { prompt_id: promptId, query: `${promptId} query ${attempt}`, status: "completed" },
+          ],
+        });
+        return { ok: true };
+      },
+      resolveJobUrlImpl: canonicalResolver({
+        location: "New York, NY",
+        liveness: { result: "active", reason: "visible apply control" },
+      }),
+    });
+
+    assert.equal(
+      [...calls.values()].reduce((sum, count) => sum + count, 0),
+      promptCount + 1
+    );
+    assert.equal(result.new, 3, JSON.stringify(result));
+    assert.equal(result.presented, 3, JSON.stringify(result));
+  }
+});
+
+test("runAiWebSearch counts three canonical same-title postings as a useful set", async () => {
+  const repoRoot = repo({ prompts: 3 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Bar leadership", titles: ["Bar Manager"] }],
+      fit_bands: { fit_floor: 65 },
+    },
+  });
+  let calls = 0;
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      calls += 1;
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      const promptId = kickoff.prompts[0].id;
+      emitAssistantJson(onEvent, {
+        roles: [
+          role({
+            company: `Bar Group ${promptId}`,
+            title: "Bar Manager",
+            location: "New York, NY",
+            url: `https://bar-${promptId}.example/jobs/manager`,
+          }),
+        ],
+        queries_run: [{ prompt_id: promptId, query: `${promptId} query`, status: "completed" }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver({
+      location: "New York, NY",
+      liveness: { result: "active", reason: "visible apply control" },
+    }),
+  });
+
+  assert.equal(calls, 3);
+  assert.equal(result.new, 3, JSON.stringify(result));
+  assert.equal(result.presented, 3, JSON.stringify(result));
+});
+
+test("runAiWebSearch scopes bucket coverage to the selected prompt subset", async () => {
+  const repoRoot = repo({ prompts: 3 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        { name: "Bar leadership", titles: ["Bar Manager"] },
+        { name: "Hospitality operations", titles: ["Assistant General Manager"] },
+        { name: "Event operations", titles: ["Event Operations Manager"] },
+      ],
+      fit_bands: { fit_floor: 65 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      { id: "p1", text: "Find active Bar Manager jobs in New York City" },
+      { id: "p2", text: "Find active Assistant General Manager jobs in New York City" },
+      { id: "p3", text: "Find active Event Operations Manager jobs in New York City" },
+    ],
+  });
+  let calls = 0;
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    promptIds: ["p1"],
+    runSkillStream: async ({ input, onEvent }) => {
+      calls += 1;
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      const promptId = kickoff.prompts[0].id;
+      emitAssistantJson(onEvent, {
+        roles: [1, 2, 3].map((index) =>
+          role({
+            company: `Bar Group ${index}`,
+            title: "Bar Manager",
+            location: "New York, NY",
+            url: `https://selected-${index}.example/jobs/bar-manager`,
+          })
+        ),
+        queries_run: [{ prompt_id: promptId, query: `${promptId} query`, status: "completed" }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver({
+      location: "New York, NY",
+      liveness: { result: "active", reason: "visible apply control" },
+    }),
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(result.new, 3, JSON.stringify(result));
+  assert.equal(result.presented, 3, JSON.stringify(result));
 });
 
 test("runAiWebSearch tops up an underfilled three-prompt useful set once on the frozen provider", async () => {
@@ -2134,7 +2369,7 @@ test("runAiWebSearch scopes concentrated rejected hosts to the owning saved prom
         : canonicalResolver()(url),
   });
 
-  assert.deepEqual(Object.fromEntries(calls), { p1: 2, p2: 2 });
+  assert.deepEqual(Object.fromEntries(calls), { p1: 3, p2: 2 });
   assert.equal(result.new, 2, JSON.stringify(result));
 });
 
@@ -2333,7 +2568,7 @@ test("runAiWebSearch scopes a schema correction retry to the prompt that produce
     },
   });
 
-  assert.deepEqual(Object.fromEntries(calls), { p1: 2, p2: 1 });
+  assert.deepEqual(Object.fromEntries(calls), { p1: 3, p2: 1 });
   assert.deepEqual(result.errors, []);
   assert.deepEqual(result.failedPromptIds, []);
   assert.deepEqual(

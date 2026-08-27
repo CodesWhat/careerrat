@@ -1014,20 +1014,14 @@ export async function runAiWebSearch({
   const interimUsefulOffers = interimQualification.kept.filter((offer) =>
     offerMeetsFitFloor(offer, fitFloor)
   );
-  const distinctUsefulTitles = new Set(
-    interimUsefulOffers
-      .map((offer) =>
-        String(offer.title || "")
-          .trim()
-          .toLowerCase()
-      )
-      .filter(Boolean)
-  );
-  const targetBuckets = Array.isArray(config?.targeting?.role_buckets)
+  const configuredTargetBuckets = Array.isArray(config?.targeting?.role_buckets)
     ? config.targeting.role_buckets.filter((bucket) =>
         Array.isArray(bucket?.titles) ? bucket.titles.length > 0 : false
       )
     : [];
+  const targetBuckets = configuredTargetBuckets.filter((bucket) =>
+    selected.some((prompt) => promptMatchesBucket(prompt, bucket))
+  );
   const representedBuckets = new Set(
     targetBuckets
       .filter((bucket) =>
@@ -1037,10 +1031,9 @@ export async function runAiWebSearch({
   );
   const requiredBucketCount = Math.min(MIN_USEFUL_SET_BUCKETS, targetBuckets.length);
   const needsUsefulSetTopUp =
-    selected.length >= MIN_USEFUL_SET_ROLES &&
     interimCoverage.failedPromptIds.length === 0 &&
     allPromptOutcomes.every((outcome) => (outcome.errors || []).length === 0) &&
-    (distinctUsefulTitles.size < MIN_USEFUL_SET_ROLES ||
+    (interimUsefulOffers.length < MIN_USEFUL_SET_ROLES ||
       representedBuckets.size < requiredBucketCount);
 
   if (needsUsefulSetTopUp) {
