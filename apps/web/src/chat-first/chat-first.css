@@ -349,6 +349,11 @@
   pointer-events: none;
 }
 
+.chat-first-controller-alert--notice {
+  border-color: var(--line-cool);
+  background: var(--tint-cool);
+}
+
 .chat-first-controller-alert__message {
   line-height: 1.45;
 }

@@ -1194,6 +1194,25 @@ describe("ChatFirstAppView", () => {
     );
   });
 
+  it("renders a passive background completion as a neutral status, not an error alert", async () => {
+    const html = await renderView({
+      error: {
+        tone: "notice",
+        message: "Your company suggestions are ready whenever you want to review them.",
+        action: { label: "Review companies", onAction: vi.fn() },
+        detail: null,
+      },
+    });
+
+    expect(html).toContain(
+      'class="chat-first-controller-alert chat-first-controller-alert--notice"'
+    );
+    expect(html).toContain('role="status"');
+    expect(html).toContain('aria-live="polite"');
+    expect(html).not.toContain('role="alert"');
+    expect(html).toContain("Review companies");
+  });
+
   it("surfaces dashboard load failures ahead of the setup fallback", async () => {
     const { chatFirstControllerError } = await import("./ChatFirstApp.jsx");
     const dashboardError = {

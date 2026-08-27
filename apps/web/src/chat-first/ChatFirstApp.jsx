@@ -950,6 +950,7 @@ export function localFileError(kind, { name = "This file", onRetry } = {}) {
 function ChatFirstControllerAlert({ error, onAction }) {
   const message = controllerErrorMessage(error);
   if (!message) return null;
+  const notice = error && typeof error === "object" && error.tone === "notice";
   const action = error && typeof error === "object" ? error.action : null;
   const detail = safeDisplayDetail(controllerErrorDetail(error));
   const canRunAction = Boolean(action?.onRetry || action?.onAction || (action?.to && onAction));
@@ -959,7 +960,11 @@ function ChatFirstControllerAlert({ error, onAction }) {
     return onAction?.(action);
   };
   return (
-    <div className="chat-first-controller-alert" role="alert">
+    <div
+      className={`chat-first-controller-alert${notice ? " chat-first-controller-alert--notice" : ""}`}
+      role={notice ? "status" : "alert"}
+      aria-live={notice ? "polite" : undefined}
+    >
       <div className="chat-first-controller-alert__message">{message}</div>
       {action?.label && canRunAction ? (
         <button type="button" onClick={runAction}>
@@ -2222,6 +2227,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
             setError(
               (current) =>
                 current || {
+                  tone: "notice",
                   message: "Your company suggestions are ready whenever you want to review them.",
                   action: {
                     label: "Review companies",
