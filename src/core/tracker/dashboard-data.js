@@ -4675,6 +4675,7 @@ function sourcedJobRow(role, index, now = new Date(), profileComp = {}) {
   const location = role.loc || role.location || role.mode || "";
   const mode = modeInfo(role.mode || "", location);
   const source = sourceInfo("sourced", role.fitBasis || "sourced");
+  const aiDiscovered = role.source === "ai-web-search";
   const comp = compactComp(role.base || role.comp?.base || "", role.tc || role.comp?.tc || "");
   const row = {
     id: role.id || `sourced-${index + 1}`,
@@ -4701,8 +4702,9 @@ function sourcedJobRow(role, index, now = new Date(), profileComp = {}) {
     mode: mode.id,
     modeLabel: mode.label,
     modeIcon: mode.icon,
-    sourceLabel: source.label,
+    sourceLabel: aiDiscovered ? "Open web" : role.sourceMeta?.sourceLabel || source.label,
     sourceIcon: source.icon,
+    aiDiscovered,
     appliedAt: "",
     postedAt: role.postedAt || "",
     sourcedAt: role.sourcedAt || "",

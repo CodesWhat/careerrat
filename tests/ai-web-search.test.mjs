@@ -893,13 +893,37 @@ test("runAiWebSearch preserves a fetched excerpt as partial when canonical recov
   assert.match(capture, /posting excerpt says/);
 });
 
-test("runAiWebSearch does not persist an unreadable role with no JD text", async () => {
+test("runAiWebSearch preserves an open-web lead when canonical recovery defers", async () => {
   const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: false,
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
   const result = await runAiWebSearch({
     repoRoot,
     env: {},
     runSkillStream: assistantJson({
-      roles: [role({ body_text: null, body_partial: true })],
+      roles: [
+        role({
+          company: "Dante NYC",
+          title: "Bartender",
+          url: "https://culinaryagents.com/jobs/12345/bartender",
+          location: "New York, NY",
+          body_text: null,
+          body_partial: true,
+          source_evidence:
+            "The search result names an active bartender opening and cites advancement within the restaurant group.",
+        }),
+      ],
       queries_run: [{ prompt_id: "p1", query: "ai jobs" }],
     }),
     resolveJobUrlImpl: async (url) => ({
@@ -909,12 +933,79 @@ test("runAiWebSearch does not persist an unreadable role with no JD text", async
     }),
   });
 
-  assert.equal(result.new, 0);
-  assert.equal(result.unreadable, 1);
-  assert.match(result.errors[0], /job description.*could not be read/i);
+  assert.equal(result.new, 1, JSON.stringify(result));
+  assert.equal(result.partial, 1);
+  assert.equal(result.unreadable, 0);
+  assert.deepEqual(result.errors, [], JSON.stringify(result));
+  const [saved] = readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search");
+  assert.equal(saved.company, "Dante NYC");
+  assert.equal(saved.scanner.bodyPartial, true);
+  const capture = readFileSync(userPath({ repoRoot }, saved.artifacts.jd), "utf8");
+  assert.match(capture, /Unverified open-web search evidence/i);
+  assert.match(capture, /advancement within the restaurant group/i);
+  assert.match(capture, /partial: true/);
+});
+
+test("runAiWebSearch preserves the twelve-role NYC hospitality open-web parity batch", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: false,
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  const leads = [
+    ["Tender (Hard Shake Bar NYC)", "Bartender", "New York, NY"],
+    ["OASES", "Lead Bartender", "New York, NY"],
+    ["Olly Olly Market", "Lead Bartender — Bar Avant", "New York, NY"],
+    ["Soho House & Co", "Bartender — DUMBO House", "Brooklyn, NY"],
+    ["Union Square Hospitality Group", "Bartender", "New York, NY"],
+    ["Dante NYC", "Bartender", "New York, NY"],
+    ["Death & Co (Gin & Luck)", "Bartender", "New York, NY"],
+    ["Gin & Luck / Death & Co", "NYC bar team openings", "New York, NY"],
+    ["9 Orchard", "Bartender", "New York, NY"],
+    ["Buenavista", "Beverage Manager / Beverage Director", "New York, NY"],
+    ["Bobo", "Beverage Manager", "New York, NY"],
+    ["Teabowl", "Food and Beverage Manager", "New York, NY"],
+  ].map(([company, title, location], index) =>
+    role({
+      company,
+      title,
+      location,
+      url: `https://jobs.example.test/nyc-hospitality-${index + 1}`,
+      body_text: null,
+      body_partial: true,
+      source_evidence: `Open-web result ${index + 1} names this employer and role in New York.`,
+    })
+  );
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: assistantJson({
+      roles: leads,
+      queries_run: [{ prompt_id: "p1", query: "NYC hospitality jobs" }],
+    }),
+    resolveJobUrlImpl: async (url) => ({
+      bodyFetchStatus: "deferred",
+      url,
+      reason: "The source needs a browser session.",
+    }),
+  });
+
+  assert.equal(result.found, 12);
+  assert.equal(result.new, 12, JSON.stringify(result));
+  assert.equal(result.partial, 12);
+  assert.equal(result.unreadable, 0);
   assert.equal(
     readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search").length,
-    0
+    12
   );
 });
 

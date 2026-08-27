@@ -356,7 +356,14 @@ export function SearchJobRow({ job, selected, onToggleSelection }) {
       <div className="cf-job-row__identity">
         <div className="cf-job-row__company">
           {job?.isNew ? <span className="cf-new-badge">NEW</span> : null}
-          {job?.descriptionPartial ? (
+          {job?.aiDiscovered ? (
+            <span
+              className="cf-capture-badge"
+              title="Found by AI on the open web. Evaluate it to verify the posting and capture the full job description."
+            >
+              AI · unverified
+            </span>
+          ) : job?.descriptionPartial ? (
             <span
               className="cf-capture-badge"
               title="CareerRat only captured part of this job description."

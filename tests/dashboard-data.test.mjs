@@ -2050,6 +2050,28 @@ test("Dashboard adapter projects partial job-description capture status onto its
   assert.equal(vm.jobs.rows[0].descriptionPartial, true);
 });
 
+test("Dashboard adapter identifies open-web AI leads as unverified until evaluation", () => {
+  const vm = buildDashboardViewModel({
+    applications: [],
+    sourced: [
+      {
+        id: "ai-open-web-lead",
+        company: "Dante NYC",
+        role: "Bartender",
+        status: "sourced",
+        source: "ai-web-search",
+        scanner: { bodyPartial: true },
+      },
+    ],
+    sources: [],
+    communications: [],
+  });
+
+  assert.equal(vm.jobs.rows[0].aiDiscovered, true);
+  assert.equal(vm.jobs.rows[0].sourceLabel, "Open web");
+  assert.equal(vm.jobs.rows[0].descriptionPartial, true);
+});
+
 test("Dashboard sourcebuckets count only true recruiter-sourced jobs", () => {
   const tracker = {
     applications: [

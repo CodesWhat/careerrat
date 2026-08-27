@@ -106,6 +106,17 @@ function deriveGate(ruleFlags = []) {
     : "review";
 }
 
+function openWebEvidenceBody(role) {
+  const lines = [
+    "Unverified open-web search evidence. Evaluate this role before relying on its availability or details.",
+    role.source_evidence ? `Source evidence: ${role.source_evidence}` : "",
+    role.location ? `Location shown: ${role.location}` : "",
+    role.comp_text ? `Compensation shown: ${role.comp_text}` : "",
+    role.posted_at ? `Listed: ${role.posted_at}` : "",
+  ].filter(Boolean);
+  return lines.join("\n");
+}
+
 // Map one AI-web-search schema role into the "offer" shape
 // sourced-persistence.mjs's sourcedRowsFromScanOffers()/offersWithCapturedJobs()
 // expect (the same shape scoreSourcedOffer()'s callers produce) — reusing
@@ -113,6 +124,7 @@ function deriveGate(ruleFlags = []) {
 function toScanOffer(role, { key, reqId }) {
   const ruleFlags = Array.isArray(role.rule_flags) ? role.rule_flags.filter(Boolean) : [];
   const score = Number(role.fit_score);
+  const bodyText = String(role.body_text || "").trim();
   return {
     company: role.company,
     title: role.title,
@@ -120,14 +132,16 @@ function toScanOffer(role, { key, reqId }) {
     location: role.location || "",
     comp: role.comp_text || "",
     postedAt: role.posted_at || null,
-    bodyText: role.body_text || "",
-    bodyPartial: role.body_partial === true,
+    bodyText: bodyText || openWebEvidenceBody(role),
+    bodyPartial: !bodyText || role.body_partial === true,
     score: Number.isFinite(score) ? score : 0,
     fit: role.fit_bucket || "",
     gate: deriveGate(ruleFlags),
     ratingReason: role.source_evidence || "",
     ruleFlags,
     source: "ai-web-search",
+    sourceLabel: "Open web",
+    sourceProvider: sourceHost(role.url),
     reqId,
     key,
   };

@@ -273,6 +273,20 @@ describe("WorkspaceBrowser", () => {
     expect(complete).not.toContain("Partial description");
   });
 
+  it("marks open-web AI leads as unverified until evaluation", async () => {
+    const { SearchJobRow } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <SearchJobRow
+        job={{ ...JOBS[0], aiDiscovered: true, descriptionPartial: true }}
+        selected={false}
+      />
+    );
+
+    expect(html).toContain("AI · unverified");
+    expect(html).toContain("Found by AI on the open web. Evaluate it to verify the posting");
+    expect(html).not.toContain("Partial description");
+  });
+
   it("renders coordinated lane progress from typed state and never invents a timer", async () => {
     const { WorkspaceBrowser } = await loadBrowser();
     const html = renderToStaticMarkup(
