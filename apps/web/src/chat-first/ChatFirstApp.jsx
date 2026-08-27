@@ -205,13 +205,20 @@ export async function commitCompanyProposalDecision({
 export function foregroundReviewArtifact({ reviewKind, reviewId, messages } = {}) {
   const id = String(reviewId || "").trim();
   if (!id) return null;
-  if (reviewKind === "source") {
-    const review = sourceReviewFromMessages(messages);
-    return review?.id === id ? review : null;
-  }
-  if (reviewKind === "company") {
-    const review = companyProposalReviewFromResult({ messages });
-    return review?.batchId === id && review.proposals.length ? review : null;
+  const transcript = Array.isArray(messages) ? messages : [];
+  for (let messageIndex = transcript.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const artifacts = Array.isArray(transcript[messageIndex]?.artifacts)
+      ? transcript[messageIndex].artifacts
+      : [];
+    for (let artifactIndex = artifacts.length - 1; artifactIndex >= 0; artifactIndex -= 1) {
+      if (reviewKind === "source") {
+        const review = sourceReviewForArtifact(artifacts[artifactIndex]);
+        if (review?.id === id) return review;
+      } else if (reviewKind === "company") {
+        const review = companyProposalReviewForArtifact(artifacts[artifactIndex]);
+        if (review?.batchId === id && review.proposals.length) return review;
+      }
+    }
   }
   return null;
 }

@@ -1734,12 +1734,17 @@ describe("ChatFirstAppView", () => {
 
   it("restores only the exact saved review artifact from the active conversation", async () => {
     const { foregroundReviewArtifact } = await import("./ChatFirstApp.jsx");
-    const company = {
+    const olderCompany = {
       kind: "company_proposals",
-      batchId: "batch-1",
-      proposals: [{ proposalId: "proposal-1", version: 1 }],
+      batchId: "batch-older",
+      proposals: [{ proposalId: "proposal-older", version: 1 }],
     };
-    const source = normalizeSourceReviewArtifact({
+    const newerCompany = {
+      kind: "company_proposals",
+      batchId: "batch-newer",
+      proposals: [{ proposalId: "proposal-newer", version: 1 }],
+    };
+    const olderSource = normalizeSourceReviewArtifact({
       kind: "source_review",
       candidates: [
         {
@@ -1752,16 +1757,47 @@ describe("ChatFirstAppView", () => {
         },
       ],
     });
-    const messages = [{ artifacts: [company, source] }];
+    const newerSource = normalizeSourceReviewArtifact({
+      kind: "source_review",
+      candidates: [
+        {
+          label: "Hospitality Online",
+          url: "https://hospitalityonline.example/jobs",
+          sourceType: "url-query",
+          why: "Current hospitality roles",
+          status: "proposed",
+          confidence: "high",
+        },
+      ],
+    });
+    const messages = [
+      { artifacts: [olderCompany, olderSource] },
+      { artifacts: [newerCompany, newerSource] },
+    ];
 
+    expect
+      .soft(
+        foregroundReviewArtifact({
+          reviewKind: "company",
+          reviewId: olderCompany.batchId,
+          messages,
+        })
+      )
+      .toMatchObject({ kind: "company_proposals", batchId: olderCompany.batchId });
+    expect
+      .soft(
+        foregroundReviewArtifact({
+          reviewKind: "source",
+          reviewId: olderSource.id,
+          messages,
+        })
+      )
+      .toMatchObject({ kind: "source_review", id: olderSource.id });
     expect(
-      foregroundReviewArtifact({ reviewKind: "company", reviewId: "batch-1", messages })
-    ).toMatchObject({ kind: "company_proposals", batchId: "batch-1" });
+      foregroundReviewArtifact({ reviewKind: "company", reviewId: "missing-company", messages })
+    ).toBeNull();
     expect(
-      foregroundReviewArtifact({ reviewKind: "source", reviewId: source.id, messages })
-    ).toMatchObject({ kind: "source_review", id: source.id });
-    expect(
-      foregroundReviewArtifact({ reviewKind: "company", reviewId: "stale", messages })
+      foregroundReviewArtifact({ reviewKind: "source", reviewId: "missing-source", messages })
     ).toBeNull();
   });
 
