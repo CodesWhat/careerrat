@@ -423,6 +423,8 @@ describe("FirstRunExperience", () => {
     expect(html).toContain('href="https://code.claude.com/docs/en/quickstart"');
     expect(html).toContain("Open Claude setup guide");
     expect(html).not.toContain("Try installation again");
+    expect(html).toContain(">SETUP</span>");
+    expect(html).not.toContain(">RETRY</span>");
     checkSetup.props.onClick();
     expect(onRefreshEngines).toHaveBeenCalledOnce();
     expect(onStartGuidedSetup).not.toHaveBeenCalled();

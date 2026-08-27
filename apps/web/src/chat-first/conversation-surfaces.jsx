@@ -399,8 +399,12 @@ export function MessageTranscript({
         if (!message || message.kind === "gate" || message.kind === "decision") return null;
         const key = message.id || `message-${index + 1}`;
         const isError = message.kind === "action_error" || message.kind === "agent_error";
+        const browserArtifact = (
+          Array.isArray(message.artifacts) ? message.artifacts : EMPTY_LIST
+        ).find((artifact) => artifact?.kind === "browser_workflow_result");
         const isReceipt =
           isError ||
+          Boolean(browserArtifact) ||
           message.kind === "action_result" ||
           message.kind === "run" ||
           message.kind === "status" ||
@@ -413,9 +417,6 @@ export function MessageTranscript({
           const errorState = isError
             ? resolvePersistedErrorCopy(message.error, message.text)
             : null;
-          const browserArtifact = (
-            Array.isArray(message.artifacts) ? message.artifacts : EMPTY_LIST
-          ).find((artifact) => artifact?.kind === "browser_workflow_result");
           const browserReceipt = browserArtifact
             ? {
                 mark:

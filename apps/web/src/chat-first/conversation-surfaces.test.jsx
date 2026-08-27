@@ -288,6 +288,34 @@ describe("TodayConversation", () => {
     expect(html).not.toMatch(/\/api\/mail|secret=abc123/i);
   });
 
+  it("does not render diagnostic text from a non-receipt browser-workflow message", () => {
+    const html = markup(
+      <MessageTranscript
+        messages={[
+          {
+            id: "browser-text-message",
+            role: "assistant",
+            kind: "text",
+            text: "Provider failed at /Users/person/private with secret=abc123.",
+            artifacts: [
+              {
+                kind: "browser_workflow_result",
+                state: "needs-user",
+                blockers: [{ code: "BROWSER_UNAVAILABLE" }],
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    expect(html).toContain(
+      "CareerRat can&#x27;t open the browser yet. Open Settings, check the browser connection, then retry."
+    );
+    expect(html).toContain("Browser task needs attention");
+    expect(html).not.toMatch(/provider failed|\/Users\/person|secret=abc123/i);
+  });
+
   it("maps typed browser blockers to the right safe recovery step", () => {
     const html = markup(
       <MessageTranscript
