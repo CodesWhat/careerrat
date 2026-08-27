@@ -236,6 +236,71 @@ test("known ATS (Greenhouse) board fetch fails -> falls through to a plain fetch
   assert.equal(result.liveness.result, "active");
 });
 
+test("an expired ATS redirect cannot canonicalize to an unrelated live posting", async () => {
+  const expiredUrl = "https://job-boards.greenhouse.io/gracioushospitality/jobs/5158318008";
+  const boardUrl = "https://job-boards.greenhouse.io/gracioushospitality?error=true";
+  const unrelatedUrl = "https://job-boards.greenhouse.io/gracioushospitality/jobs/4750317008";
+  const fetchImpl = async (requestedUrl) => {
+    if (new URL(String(requestedUrl)).hostname === "boards-api.greenhouse.io") {
+      return jsonResponse({
+        jobs: [
+          {
+            title: "Research and Development Sous Chef",
+            absolute_url: unrelatedUrl,
+            location: { name: "New York, NY" },
+            content: `<p>${"Unrelated active kitchen posting. ".repeat(20)}</p>`,
+          },
+        ],
+      });
+    }
+    assert.equal(String(requestedUrl), expiredUrl);
+    return htmlResponse(
+      `<html><body><h1>Current openings</h1><a href="${unrelatedUrl}">Research and Development Sous Chef</a></body></html>`,
+      { finalUrl: boardUrl }
+    );
+  };
+
+  const result = await resolveJobUrl(expiredUrl, {
+    fetchImpl,
+    resolveHost: publicResolver,
+  });
+
+  assert.equal(result.url, expiredUrl);
+  assert.equal(result.liveness.result, "expired");
+  assert.equal(result.liveness.code, "expired_url");
+});
+
+test("canonical ATS recovery cannot change a known requisition identity", async () => {
+  const sourceUrl = "https://job-boards.greenhouse.io/acme/jobs/111111";
+  const unrelatedUrl = "https://job-boards.greenhouse.io/acme/jobs/222222";
+  const fetchImpl = async (requestedUrl) => {
+    if (new URL(String(requestedUrl)).hostname === "boards-api.greenhouse.io") {
+      return jsonResponse({
+        jobs: [
+          {
+            title: "Unrelated active role",
+            absolute_url: unrelatedUrl,
+            content: `<p>${"Unrelated canonical body. ".repeat(20)}</p>`,
+          },
+        ],
+      });
+    }
+    return htmlResponse(
+      `<html><body><h1>Current openings</h1><a href="${unrelatedUrl}">Apply</a>${"Board content. ".repeat(30)}</body></html>`,
+      { finalUrl: sourceUrl }
+    );
+  };
+
+  const result = await resolveJobUrl(sourceUrl, {
+    fetchImpl,
+    resolveHost: publicResolver,
+  });
+
+  assert.equal(result.url, sourceUrl);
+  assert.equal(result.title, null);
+  assert.doesNotMatch(result.bodyText, /Unrelated canonical body/);
+});
+
 test("known ATS that's ALSO an SPA host (Ashby) with a failing board fetch -> deferred, no plain-fetch fallback", async () => {
   const url = "https://jobs.ashbyhq.com/acme/12345678-1234-1234-1234-123456789abc";
   let plainFetchAttempted = false;

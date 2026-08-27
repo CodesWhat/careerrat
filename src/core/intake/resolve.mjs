@@ -321,9 +321,38 @@ async function resolvePlainFetch({
   }
 
   const html = fetched.rawText;
+  const bodyText = extractStructuredJobDescription(html) || htmlToTextLiveness(html);
+  const cappedPreview = isCappedPreviewUrl(fetched.finalUrl || url);
+  const classified = classifyLiveness({
+    status: fetched.status,
+    finalUrl: fetched.finalUrl || url,
+    bodyText,
+    applyControls: extractApplyControlsFromHtml(html),
+  });
+
+  if (classified.result === "expired" && classified.code !== "insufficient_content") {
+    return {
+      bodyFetchStatus: "resolved",
+      url,
+      provider,
+      title: null,
+      company: null,
+      location: null,
+      comp: null,
+      bodyText,
+      bodyPartial: cappedPreview,
+      ...(cappedPreview
+        ? { reason: "The source exposes a capped preview instead of the complete job description." }
+        : {}),
+      liveness: classified,
+    };
+  }
+
+  const sourceReqId = extractReqId(url).id;
   for (const canonicalUrl of extractCanonicalAtsUrls(html, fetched.finalUrl || url)) {
     const canonicalProvider = inferProvider({ careers_url: canonicalUrl });
     if (!canonicalProvider) continue;
+    if (sourceReqId && extractReqId(canonicalUrl).id !== sourceReqId) continue;
     const resolved = await resolveViaProviderBoard({
       provider: canonicalProvider,
       url: canonicalUrl,
@@ -337,14 +366,6 @@ async function resolvePlainFetch({
     }
   }
   const applicationUrl = extractEmbeddedApplicationUrl(html, fetched.finalUrl || url);
-  const bodyText = extractStructuredJobDescription(html) || htmlToTextLiveness(html);
-  const cappedPreview = isCappedPreviewUrl(fetched.finalUrl || url);
-  const classified = classifyLiveness({
-    status: fetched.status,
-    finalUrl: fetched.finalUrl || url,
-    bodyText,
-    applyControls: extractApplyControlsFromHtml(html),
-  });
 
   if (classified.code === "insufficient_content" || classified.code === "bot_challenge") {
     return { bodyFetchStatus: "deferred", url, provider, reason: classified.reason };
