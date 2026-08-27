@@ -20,6 +20,8 @@ All notable changes to CareerRat are documented here. This project follows
 ### Release verification
 
 - The repository suite passed 3,857 tests with 15 intentional skips and no failures. The full web suite passed all 776 tests, the combined candidate-error regression set passed 278 focused UI tests, and the browser/session suite passed all 50 tests. Web, website, docs, and desktop staging builds passed; lint completed without errors; placeholder lint, knip, actionlint, package inspection, dependency audit, and `git diff --check` passed.
+- Protected PRs #235, #236, and #238 merged without changing branch protection. The signed `v0.16.5` tag points to the exact `main` promotion merge, and the public GitHub release contains the signed, notarized, and stapled DMG, signed updater ZIP, `latest-mac.yml`, and SPDX SBOM.
+- The release pipeline passed Apple signing, notarization, stapling, Gatekeeper, packaged launch, Windows unsigned installer QA, and a native signed 0.16.4-to-0.16.5 update. `careerrat@latest`, the Homebrew cask, and careerrat.com are live at 0.16.5; the installed app reports 0.16.5 and its own update check reports current.
 
 ## [0.16.4] - 2026-08-26
 
