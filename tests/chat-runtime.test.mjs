@@ -410,6 +410,7 @@ test("classifyChatEvent: every other event type/subtype (including plain system 
 test("buildChatKickoffPrompt: asks ONE question at a time and drops the one-shot headless framing", () => {
   const prompt = buildChatKickoffPrompt({ skill: "ingest-profile" });
   assert.match(prompt, /ONE question/);
+  assert.match(prompt, /one decision.*Do not combine/i);
   assert.match(prompt, /careerrat:answer/);
   assert.match(prompt, /genuinely answerable with Yes or No/i);
   assert.match(prompt, /ingest-profile/);

@@ -420,7 +420,8 @@ const ONESHOT_POSTURE =
   "best defensible call yourself and state what you assumed rather than asking.";
 const CONVERSATIONAL_POSTURE =
   "This is a conversational, multi-turn session — a real user will answer turn by turn. Ask ONE " +
-  "question at a time exactly as the skill's steps specify, wait for the reply, never invent an " +
+  "question about one decision at a time exactly as the skill's steps specify. Do not combine two " +
+  "decisions with 'and' or 'or' just to use one question mark. Wait for the reply, never invent an " +
   "answer on the user's behalf. Confirm what you already know before asking again (skill's own " +
   "STEP 0 guidance).";
 
