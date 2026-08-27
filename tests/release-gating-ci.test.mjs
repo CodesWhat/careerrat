@@ -6,11 +6,12 @@ async function source(path) {
   return readFile(new URL(`../${path}`, import.meta.url), "utf8");
 }
 
-test("real Chromium application preparation is an explicit required CI context", async () => {
-  const [workflow, protection, liveApply] = await Promise.all([
+test("real Chromium application preparation and rendered UI geometry are an explicit required CI context", async () => {
+  const [workflow, protection, liveApply, liveVisual] = await Promise.all([
     source(".github/workflows/ci-verify.yml"),
     source("scripts/protect-main.sh"),
     source("tests/playwright-live.test.mjs"),
+    source("tests/playwright-app-visual.test.mjs"),
   ]);
   const job = workflow.slice(
     workflow.indexOf("  browser-application-prep:"),
@@ -20,12 +21,18 @@ test("real Chromium application preparation is an explicit required CI context",
   assert.match(job, /name:\s*browser-application-prep/);
   assert.match(job, /CAREERRAT_LIVE_BROWSER:\s*["']?1/);
   assert.match(job, /playwright install --with-deps chromium/);
+  assert.match(job, /npm run build --workspace apps\/web/);
   assert.match(job, /tests\/playwright-live\.test\.mjs/);
   assert.match(job, /tests\/playwright-live-dropdowns\.test\.mjs/);
+  assert.match(job, /tests\/playwright-app-visual\.test\.mjs/);
+  assert.match(job, /output\/playwright/);
   assert.doesNotMatch(job, /ANTHROPIC|OPENAI|CLAUDE|CODEX/);
   assert.match(protection, /"context": "browser-application-prep"/);
   assert.match(liveApply, /assert\.notEqual\(result\.state, "applied"\)/);
   assert.match(liveApply, /clicked\.includes\("Submit application"\), false/);
+  assert.match(liveVisual, /getComputedStyle/);
+  assert.match(liveVisual, /boundingBox/);
+  assert.match(liveVisual, /page\.screenshot/);
 });
 
 test("all deterministic product builds are declared as protected contexts", async () => {

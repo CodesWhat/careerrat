@@ -68,6 +68,7 @@ tracker-*.png
 # Local QA evidence bundles (screenshots/logs, 100MB+) — the prose findings get
 # tracked via the roadmap, the raw evidence stays local.
 /qa/
+/output/
 
 # Design handoff archives dropped at repo root — extracted where needed, never committed.
 /*.zip

@@ -218,8 +218,18 @@ jobs:
         run: npm ci
       - name: Install the real Chromium test browser
         run: npx playwright install --with-deps chromium
-      - name: Verify application preparation stops before final Submit
-        run: node --test tests/playwright-live.test.mjs tests/playwright-live-dropdowns.test.mjs
+      - name: Build the app used by the visual contract
+        run: npm run build --workspace apps/web
+      - name: Verify application preparation and rendered workspace geometry
+        run: node --test tests/playwright-live.test.mjs tests/playwright-live-dropdowns.test.mjs tests/playwright-app-visual.test.mjs
+      - name: Retain the rendered workspace screenshot
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: careerrat-browser-visual
+          path: output/playwright
+          if-no-files-found: error
+          retention-days: 7
 
   # Qlty (shell/Docker/Actions/YAML lint, secret + dependency scanning — see
   # .qlty/qlty.toml; Biome stays out of qlty and lints JS/JSON separately).

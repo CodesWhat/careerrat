@@ -324,6 +324,10 @@ describe("CareerRat selection and focus states", () => {
 
   it("keeps selected icon tiles transparent and free of accent surrounds", () => {
     const iconRules = [
+      [
+        "chat-first/chat-first.css",
+        ".chat-first-thread-card.is-active .chat-first-thread-card__icon-badge",
+      ],
       ["chat-first/first-run.css", ".cf-first-run__rail-avatar"],
       [
         "chat-first/first-run.css",
