@@ -1279,8 +1279,8 @@ export function missionStepSetStatus({
         .get(cleanMissionId, cleanStepId)
     );
     if (!step) throw new NotFoundError(`no mission step with id "${cleanStepId}"`);
-    if (attemptId && step.currentAttempt?.id !== attemptId) {
-      throw makeError(`mission step attempt is stale: ${attemptId}`, "CONFLICT");
+    if ((step.currentAttempt || attemptId) && step.currentAttempt?.id !== attemptId) {
+      throw makeError(`mission step attempt is stale: ${attemptId || "missing"}`, "CONFLICT");
     }
     const allowedWhilePaused =
       mission.status === "paused" &&

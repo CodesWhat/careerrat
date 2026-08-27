@@ -1924,6 +1924,62 @@ test("mission execution persists leased attempt identity, idempotency classifica
   assert.equal(intents[0].type, "job.generate-documents");
 });
 
+test("a claimed mission step rejects settlement without its attempt identity", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-attempt-fence",
+    company: "Fence Corp",
+    evaluation: { gate: "keep" },
+  });
+  api.missionCreateForJobs({
+    repoRoot,
+    id: "mission-attempt-fence",
+    mode: "draft",
+    jobs: [{ type: "application", id: "app-attempt-fence" }],
+  });
+
+  let releaseIntent;
+  let markIntentStarted;
+  const intentStarted = new Promise((resolve) => {
+    markIntentStarted = resolve;
+  });
+  const intentReleased = new Promise((resolve) => {
+    releaseIntent = resolve;
+  });
+  const running = api.missionRun({
+    repoRoot,
+    id: "mission-attempt-fence",
+    executeIntent: async () => {
+      markIntentStarted();
+      await intentReleased;
+      return { operationResult: { status: "ready" } };
+    },
+  });
+  await intentStarted;
+
+  const claimedStep = api
+    .chatFirstStateGet({ repoRoot })
+    .missions[0].steps.find((step) => step.currentAttempt);
+  assert.ok(claimedStep?.currentAttempt?.id);
+  assert.throws(
+    () =>
+      api.missionStepSetStatus({
+        repoRoot,
+        missionId: "mission-attempt-fence",
+        stepId: claimedStep.id,
+        status: "completed",
+        result: { id: "app-forged" },
+      }),
+    /mission step attempt is stale/
+  );
+
+  releaseIntent();
+  const result = await running;
+  assert.equal(result.mission.status, "completed");
+  assert.equal(result.mission.steps[0].result.status, "ready");
+});
+
 test("application mission attempts freeze their provider-neutral plan and reuse it when the submit handoff resumes", async () => {
   const api = await chatFirstApi();
   const repoRoot = tempRepo();
