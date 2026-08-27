@@ -113,7 +113,7 @@ export function resumeExtractionStart({
       filename: required(filename, "filename"),
       status: "queued",
       ownerId: owner,
-      executionPlan: clone(executionPlan),
+      executionPlan: clone(previous?.executionPlan || executionPlan),
       progress: { phase: "queued", message: "Resume saved. Waiting to read it." },
       lease: { heartbeatAt: now },
       result: null,

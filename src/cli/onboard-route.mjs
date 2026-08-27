@@ -2534,6 +2534,7 @@ export function mountOnboardRoutes({
         outputSchema: schema,
         signal,
         executionPlan: executionPlan || undefined,
+        useExecutionPlanRoute: Boolean(executionPlan),
         onEvent: (evt) => {
           if (onProgress) {
             if (evt.type === "system") {

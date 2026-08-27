@@ -198,5 +198,5 @@ export function assertAIExecutionPlanForRuntime(plan, runtimeId) {
   if (!AI_OPERATION_DEFAULTS[plan.operation]) {
     throw policyError(`unknown AI operation in execution plan: ${plan.operation || "(empty)"}`);
   }
-  return plan;
+  return deepFreeze(plan);
 }

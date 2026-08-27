@@ -1711,6 +1711,56 @@ test("POST /api/intake/confirm: Lane B fires runSkillStream in the background â€
   }
 });
 
+test("POST /api/intake/confirm: Lane B freezes and reuses its AI execution plan across retry", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const { id } = intakeCapture({ repoRoot, rawInput: "a JD", inputKind: "text" });
+  intakeUpdate({
+    repoRoot,
+    id,
+    patch: {
+      status: "proposed",
+      kind: "jd-text",
+      classification: classificationFixture(),
+      trackerMatch: null,
+      dispatch: { lane: "B", action: "run_skill", params: { skill: "evaluate-job" } },
+    },
+  });
+
+  const env = { ...PROXY_ENV };
+  const calls = [];
+  const server = await bootServer(repoRoot, {
+    env,
+    runSkillStream: async (args) => {
+      calls.push(args);
+      return { ok: false, error: "temporary failure" };
+    },
+  });
+  try {
+    const first = await postJson(server, "/api/intake/confirm", { id });
+    assert.equal(first.status, 200);
+    assert.equal(first.body.item.status, "running");
+    assert.equal(first.body.item.operation.executionPlan.runtimeId, "managed-anthropic");
+    assert.equal(first.body.item.operation.executionPlan.operation, "application.judgment");
+    await waitForPredicate(() => intakeOne({ repoRoot, id }).status === "error");
+    const frozenPlan = intakeOne({ repoRoot, id }).operation.executionPlan;
+    assert.deepEqual(calls[0].executionPlan, frozenPlan);
+    assert.equal(calls[0].useExecutionPlanRoute, true);
+
+    env.CAREERRAT_AI_PROXY_URL = "http://127.0.0.1:9999";
+    intakeUpdate({ repoRoot, id, patch: { status: "proposed" } });
+    const retried = await postJson(server, "/api/intake/confirm", { id });
+    assert.equal(retried.status, 200);
+    assert.equal(retried.body.item.operation.retryOf, first.body.item.operation.id);
+    assert.deepEqual(retried.body.item.operation.executionPlan, frozenPlan);
+    await waitForPredicate(() => calls.length === 2);
+    assert.deepEqual(calls[1].executionPlan, frozenPlan);
+    assert.equal(calls[1].useExecutionPlanRoute, true);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/intake/confirm: Lane B settles to 'error' when the background run rejects", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });

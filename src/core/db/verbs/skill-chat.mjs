@@ -13,6 +13,7 @@ const CHAT_KINDS = new Set(["agent_error"]);
 const TURN_STATES = new Set(["awaiting-assistant", "awaiting-user", "failed", "completed"]);
 const DECISION_ACTIONS = new Set(["save", "discard"]);
 const DECISION_STATES = new Set(["completed", "failed"]);
+const MAX_EXECUTION_PLAN_BYTES = 16_384;
 
 function cleanSkill(value) {
   const skill = String(value ?? "").trim();
@@ -53,6 +54,21 @@ function cleanArtifacts(value) {
     throw error;
   }
   return artifacts;
+}
+
+function cleanExecutionPlan(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    const error = new Error("chat execution plan is invalid");
+    error.code = "BAD_EXECUTION_PLAN";
+    throw error;
+  }
+  const serialized = JSON.stringify(value);
+  if (Buffer.byteLength(serialized, "utf8") > MAX_EXECUTION_PLAN_BYTES) {
+    const error = new Error("chat execution plan is too large");
+    error.code = "BAD_EXECUTION_PLAN";
+    throw error;
+  }
+  return JSON.parse(serialized);
 }
 
 function dateIso(now) {
@@ -106,6 +122,45 @@ export function skillChatThreadRead({ repoRoot, env = process.env, skill } = {})
     thread,
     messages: thread ? readMessages(db, thread.id) : [],
   };
+}
+
+export function skillChatThreadPrepare({
+  repoRoot,
+  env = process.env,
+  skill,
+  executionPlan,
+  now,
+} = {}) {
+  const clean = cleanSkill(skill);
+  const at = dateIso(now);
+  const plan = cleanExecutionPlan(executionPlan);
+  const db = requireDb({ repoRoot, env });
+  return withTransaction(db, () => {
+    const current = readThread(db, clean);
+    const thread = current || createThread(clean, at, { turnState: "awaiting-assistant" });
+    if (thread.executionPlan && JSON.stringify(thread.executionPlan) !== JSON.stringify(plan)) {
+      const error = new Error("chat execution plan was already frozen by another app process");
+      error.code = "AI_EXECUTION_PLAN_CONFLICT";
+      throw error;
+    }
+    const updated = {
+      ...thread,
+      executionPlan: thread.executionPlan || plan,
+      updatedAt: at,
+    };
+    if (current) {
+      db.prepare("UPDATE skill_chat_threads SET data = ? WHERE id = ?").run(
+        JSON.stringify(updated),
+        updated.id
+      );
+    } else {
+      db.prepare("INSERT INTO skill_chat_threads (id, data) VALUES (?, ?)").run(
+        updated.id,
+        JSON.stringify(updated)
+      );
+    }
+    return { ok: true, thread: updated };
+  });
 }
 
 export function skillChatMessageAppend({

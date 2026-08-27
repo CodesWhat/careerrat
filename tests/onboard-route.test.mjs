@@ -230,8 +230,9 @@ async function getDirect(routes, path) {
 // runSkillStream layer (this route's own DI seam) rather than the SDK's.
 function fakeRunSkillStream(replies, { onCall } = {}) {
   let callCount = 0;
-  return async ({ skill, input, repoRoot, env, tools, outputSchema, onEvent }) => {
-    onCall?.({ skill, input, repoRoot, env, tools, outputSchema });
+  return async (args) => {
+    const { onEvent } = args;
+    onCall?.(args);
     const reply = replies[Math.min(callCount, replies.length - 1)];
     callCount++;
     onEvent({
@@ -1910,7 +1911,12 @@ describe("POST /api/onboard/resume-ai", () => {
 
   it("happy path: returns the shared envelope with seed data under body.data and exact AI labels", async () => {
     const repoRoot = buildTempRoot();
-    const runSkillStream = fakeRunSkillStream([VALID_FENCED_REPLY]);
+    let runtimeArgs = null;
+    const runSkillStream = fakeRunSkillStream([VALID_FENCED_REPLY], {
+      onCall: (args) => {
+        runtimeArgs = args;
+      },
+    });
     const routes = mountDirectRoutes(
       repoRoot,
       { ANTHROPIC_API_KEY: "test-key" },
@@ -1975,6 +1981,8 @@ describe("POST /api/onboard/resume-ai", () => {
       assert.equal(state.resumeExtraction.uploadDigest.length, 64);
       assert.equal(state.resumeExtraction.result.profileSeed.candidate.full_name, "Jane Doe");
       assert.equal(state.resumeExtraction.executionPlan.operation, "structured.extraction");
+      assert.deepEqual(runtimeArgs.executionPlan, state.resumeExtraction.executionPlan);
+      assert.equal(runtimeArgs.useExecutionPlanRoute, true);
       assert.equal(state.data.profile.candidate.full_name, "Jane Doe");
       assert.equal(state.data.profile.candidate.email, "jane.doe@example.com");
       assert.equal(state.data.evidence.claims.length, 1);

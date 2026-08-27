@@ -50,6 +50,7 @@ import { dbExists } from "../db/connection.mjs";
 import {
   candidateArtifactExists,
   skillChatMessageAppend,
+  skillChatThreadPrepare,
   skillChatThreadRead,
   skillChatThreadSetTurnState,
 } from "../db/verbs.mjs";
@@ -57,7 +58,7 @@ import { parseSourceReviewOutput } from "../discovery/source-review-artifact.mjs
 import { computeSetupProgress } from "../onboarding/setup-progress.mjs";
 import { loadAgentCandidateConfig } from "../profile/config-store.mjs";
 import { loadAIPreferences } from "./ai-preferences.mjs";
-import { resolveAIRoute } from "./call-ai.mjs";
+import { resolveAIRoute, resolveAIRouteForExecutionPlan } from "./call-ai.mjs";
 import { parseChatAnswerMode } from "./chat-answer-mode.mjs";
 import {
   CHAT_SESSION_RUNTIME_TIMEOUT_MS,
@@ -66,7 +67,11 @@ import {
   runInstalledRuntimeStream,
   supportsInstalledRuntimeStreaming,
 } from "./installed-runtimes.mjs";
-import { aiRuntimeIdForRoute, resolveAIExecutionPlan } from "./operation-policy.mjs";
+import {
+  aiRuntimeIdForRoute,
+  assertAIExecutionPlanForRuntime,
+  resolveAIExecutionPlan,
+} from "./operation-policy.mjs";
 import { createRuntimeToolPolicy } from "./runtime-tool-policy.mjs";
 import {
   installedSkillRuntimePosture,
@@ -592,6 +597,7 @@ export function createChatRuntime({
       chatId: session.id,
       skill: session.skill,
       state: session.state,
+      executionPlan: session.executionPlan,
       createdAt: session.createdAt,
       lastActivityAt: session.lastActivityAt,
     };
@@ -1037,7 +1043,11 @@ export function createChatRuntime({
     // order: selected installed CLI -> BYOK -> proxy -> none). Without it,
     // the W4 onboarding engine picker's selection would be silently ignored
     // by the one caller — the interview itself — where it matters most.
-    const route = resolveAIRoute(env, { repoRoot });
+    const durableState = durableChatState(trimmedSkill);
+    const savedExecutionPlan = durableState.thread?.executionPlan || null;
+    const route = savedExecutionPlan
+      ? resolveAIRouteForExecutionPlan(savedExecutionPlan, env)
+      : resolveAIRoute(env, { repoRoot });
     if (route.type === "none") {
       const err = new Error(route.error);
       err.code = "NO_AI_ROUTE";
@@ -1051,15 +1061,18 @@ export function createChatRuntime({
       err.allowed = [...DIRECT_CHAT_SKILLS];
       throw err;
     }
-    const executionPlan = resolveAIExecutionPlan({
-      operation: chatOperationForSkill(trimmedSkill),
-      runtimeId: aiRuntimeIdForRoute(route),
-      preferences: loadAIPreferences({ repoRoot, env }),
-      modelOverride:
-        route.type === "installed" ? installedRuntimeModel(route.runtime.id, { env }) : undefined,
-    });
-
-    const durableState = durableChatState(trimmedSkill);
+    const routeRuntimeId = aiRuntimeIdForRoute(route);
+    const executionPlan = savedExecutionPlan
+      ? assertAIExecutionPlanForRuntime(savedExecutionPlan, routeRuntimeId)
+      : resolveAIExecutionPlan({
+          operation: chatOperationForSkill(trimmedSkill),
+          runtimeId: routeRuntimeId,
+          preferences: loadAIPreferences({ repoRoot, env }),
+          modelOverride:
+            route.type === "installed"
+              ? installedRuntimeModel(route.runtime.id, { env })
+              : undefined,
+        });
     const restoredTranscript = durableState.transcript;
     const resumed = restoredTranscript.length > 0;
     const awaitingUser =
@@ -1076,6 +1089,13 @@ export function createChatRuntime({
     // silently falls through to the Claude Code CLI regardless of what's
     // logged in locally (the bug this fix closes).
     if (route.type === "installed") {
+      if (
+        !savedExecutionPlan &&
+        DURABLE_CHAT_SKILLS.has(trimmedSkill) &&
+        dbExists({ repoRoot, env })
+      ) {
+        skillChatThreadPrepare({ repoRoot, env, skill: trimmedSkill, executionPlan });
+      }
       return startInstalledSession({
         trimmedSkill,
         input,
@@ -1091,6 +1111,13 @@ export function createChatRuntime({
     // session state — a missing install is a clean 501 from the route, never
     // a half-registered session sitting in the map.
     const { query } = await loadSdk();
+    if (
+      !savedExecutionPlan &&
+      DURABLE_CHAT_SKILLS.has(trimmedSkill) &&
+      dbExists({ repoRoot, env })
+    ) {
+      skillChatThreadPrepare({ repoRoot, env, skill: trimmedSkill, executionPlan });
+    }
 
     const childEnv = buildChildEnv({ route, skill: trimmedSkill, baseEnv: env, repoRoot });
     const runtimeTools = resolveChatRuntimeTools({ skill: trimmedSkill });
@@ -1173,7 +1200,7 @@ export function createChatRuntime({
     // .catch to here.
     session.pumpDone = pump(session, route);
 
-    return { chatId: id, skill: trimmedSkill, state: session.state };
+    return summarize(session);
   }
 
   // startSession's route.type === "installed" branch. Skips loadSdk and the
@@ -1256,7 +1283,7 @@ export function createChatRuntime({
     // error/result event or closes the session instead).
     if (!awaitingUser) session.pumpDone = runInstalledTurn(session, route);
 
-    return { chatId: id, skill: trimmedSkill, state: session.state };
+    return summarize(session);
   }
 
   function getSession(chatId) {

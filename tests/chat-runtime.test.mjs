@@ -868,6 +868,107 @@ test("createChatRuntime: a replacement process waits on the durable unanswered a
   }
 });
 
+test("createChatRuntime: a durable thread reuses and exposes its frozen execution plan after restart", async () => {
+  const repoRoot = tempRepoWithSkill("research-company");
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
+  candidateSetupInitialize({ repoRoot, env });
+  writeAIPreferences({ repoRoot, env, quality: "faster", reasoning: "low" });
+  try {
+    let persistedBeforeDispatch = null;
+    const firstRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => ({
+        query: (args) => {
+          persistedBeforeDispatch = skillChatThreadRead({
+            repoRoot,
+            env,
+            skill: "research-company",
+          }).thread.executionPlan;
+          return fakeStreamingSdk([turnMessagesWithReply("Research ready.", 1)]).query(args);
+        },
+      }),
+    });
+    const first = await firstRuntime.startSession({ skill: "research-company" });
+    await waitForPredicate(() => firstRuntime.getSession(first.chatId)?.state === "idle");
+    firstRuntime.shutdown();
+
+    const stored = skillChatThreadRead({ repoRoot, env, skill: "research-company" });
+    assert.equal(stored.thread.executionPlan.runtimeId, "anthropic-api");
+    assert.equal(stored.thread.executionPlan.resolved.model, "haiku");
+    assert.equal(stored.thread.executionPlan.resolved.effort, "low");
+    assert.deepEqual(persistedBeforeDispatch, stored.thread.executionPlan);
+
+    writeAIPreferences({ repoRoot, env, quality: "best", reasoning: "high" });
+    let resumedOptions;
+    const replacementRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => ({
+        query: (args) => {
+          resumedOptions = args.options;
+          return fakeStreamingSdk([turnMessagesWithReply("Continued.", 2)]).query(args);
+        },
+      }),
+    });
+    try {
+      const resumed = await replacementRuntime.startSession({ skill: "research-company" });
+      assert.equal(resumed.executionPlan.runtimeId, "anthropic-api");
+      assert.equal(resumed.executionPlan.resolved.model, "haiku");
+      assert.equal(resumed.executionPlan.resolved.effort, "low");
+      assert.equal(Object.isFrozen(resumed.executionPlan), true);
+      assert.equal(Object.isFrozen(resumed.executionPlan.resolved), true);
+      assert.equal(resumedOptions.model, "haiku");
+      assert.equal(resumedOptions.effort, "low");
+    } finally {
+      replacementRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime: a durable thread fails closed when its frozen provider is unavailable", async () => {
+  const repoRoot = tempRepoWithSkill("research-company");
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
+  candidateSetupInitialize({ repoRoot, env });
+  try {
+    const firstRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => fakeStreamingSdk([turnMessagesWithReply("Research ready.", 1)]),
+    });
+    const first = await firstRuntime.startSession({ skill: "research-company" });
+    await waitForPredicate(() => firstRuntime.getSession(first.chatId)?.state === "idle");
+    firstRuntime.shutdown();
+
+    delete env.ANTHROPIC_API_KEY;
+    env.CAREERRAT_AI_PROXY_URL = "http://127.0.0.1:7788";
+    let loadedSdk = false;
+    const replacementRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => {
+        loadedSdk = true;
+        return fakeStreamingSdk([]);
+      },
+    });
+    try {
+      await assert.rejects(
+        replacementRuntime.startSession({ skill: "research-company" }),
+        (error) =>
+          error.code === "NO_AI_ROUTE" &&
+          /Anthropic API credential.*unavailable/i.test(error.message)
+      );
+      assert.equal(loadedSdk, false, "a missing saved provider must not fall back to the proxy");
+    } finally {
+      replacementRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
 test("createChatRuntime: visible research chats persist their typed handoff and reopen without duplicating the finished turn", async () => {
   const repoRoot = tempRepoWithSkill("research-company");
   const env = { ANTHROPIC_API_KEY: "sk-ant-test" };

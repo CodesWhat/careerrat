@@ -41,8 +41,10 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
+import { loadAIPreferences } from "../core/ai/ai-preferences.mjs";
 import { runBoundedAI } from "../core/ai/bounded-ai.mjs";
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
+import { aiRuntimeIdForRoute, resolveAIExecutionPlan } from "../core/ai/operation-policy.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
 import { requireDb } from "../core/db/connection.mjs";
 import {
@@ -640,6 +642,20 @@ function createLaneBManager({ repoRoot, env, runSkillStream, heartbeatMs = 30_00
   function start({ id, item, dispatch }) {
     if (workers.has(id)) return intakeOne({ repoRoot, env, id });
     const skill = dispatch.params.skill;
+    let executionPlan = item.operation?.executionPlan || null;
+    if (!executionPlan) {
+      const route = resolveAIRoute(env, { repoRoot });
+      if (route.type === "none") {
+        const error = new Error(route.error);
+        error.code = "NO_AI_ROUTE";
+        throw error;
+      }
+      executionPlan = resolveAIExecutionPlan({
+        operation: "application.judgment",
+        runtimeId: aiRuntimeIdForRoute(route),
+        preferences: loadAIPreferences({ repoRoot, env }),
+      });
+    }
     const operationId = `${id}:${randomUUID()}`;
     const startedAt = new Date().toISOString();
     const operation = {
@@ -648,6 +664,7 @@ function createLaneBManager({ repoRoot, env, runSkillStream, heartbeatMs = 30_00
       skill,
       startedAt,
       heartbeatAt: startedAt,
+      executionPlan,
       ...(item.operation?.id ? { retryOf: item.operation.id } : {}),
     };
     const running = intakeUpdate({
@@ -682,6 +699,8 @@ function createLaneBManager({ repoRoot, env, runSkillStream, heartbeatMs = 30_00
           env,
           onEvent: () => {},
           signal: controller.signal,
+          executionPlan,
+          useExecutionPlanRoute: true,
         })
       )
       .then((resultData) => {
