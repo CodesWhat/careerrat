@@ -1482,6 +1482,161 @@ describe("ChatFirstAppView", () => {
     });
   });
 
+  it("submits named review options through the same sequential batch writers", async () => {
+    const { submitConversationalReviewText } = await import("./ChatFirstApp.jsx");
+    const sourceDecision = vi.fn(async () => true);
+    const sourceComplete = vi.fn(async () => true);
+    const sourceReview = normalizeSourceReviewArtifact({
+      kind: "source_review",
+      candidates: [
+        {
+          label: "LandEarly",
+          url: "https://landearly.example/jobs",
+          sourceType: "url-query",
+          why: "Current hospitality roles",
+          status: "proposed",
+          confidence: "high",
+        },
+        {
+          label: "Culinary Agents",
+          url: "https://culinaryagents.example/jobs",
+          sourceType: "browser",
+          why: "NYC hospitality roles",
+          status: "proposed",
+          confidence: "high",
+        },
+      ],
+    });
+
+    await expect(
+      submitConversationalReviewText({
+        text: "Add Culinary Agents",
+        sourceReview,
+        onSourceDecision: sourceDecision,
+        onSourceComplete: sourceComplete,
+      })
+    ).resolves.toEqual({ handled: true, completed: true });
+    expect(sourceDecision.mock.calls.map(([candidate, action]) => [candidate.id, action])).toEqual([
+      [sourceReview.candidates[0].id, "discard"],
+      [sourceReview.candidates[1].id, "save"],
+    ]);
+    expect(sourceComplete).toHaveBeenCalledOnce();
+
+    const onCompanyIntent = vi.fn(async () => true);
+    await expect(
+      submitConversationalReviewText({
+        text: "Track Tyrell Systems",
+        companyProposalReview: {
+          kind: "company_proposals",
+          batchId: "batch-1",
+          proposals: [
+            {
+              proposalId: "proposal-acme",
+              company: { name: "Acme AI" },
+              classification: "supported_ats",
+              atsProvider: "greenhouse",
+              jobBoardUrl: "https://boards.example/acme",
+              version: 3,
+            },
+            {
+              proposalId: "proposal-tyrell",
+              company: { name: "Tyrell Systems" },
+              classification: "supported_ats",
+              atsProvider: "ashby",
+              jobBoardUrl: "https://boards.example/tyrell",
+              version: 7,
+            },
+          ],
+        },
+        onCompanyIntent,
+      })
+    ).resolves.toEqual({ handled: true, completed: true });
+    expect(onCompanyIntent.mock.calls.map(([intent]) => intent)).toEqual([
+      expect.objectContaining({
+        entity: { type: "company-proposal", id: "proposal-acme" },
+        input: expect.objectContaining({ action: "reject", expectedVersion: 3 }),
+      }),
+      expect.objectContaining({
+        entity: { type: "company-proposal", id: "proposal-tyrell" },
+        input: expect.objectContaining({ action: "approve-supported-ats", expectedVersion: 7 }),
+      }),
+    ]);
+  });
+
+  it("does not consume ordinary chat when visible review names do not match exactly", async () => {
+    const { submitConversationalReviewText } = await import("./ChatFirstApp.jsx");
+    const sourceDecision = vi.fn();
+
+    await expect(
+      submitConversationalReviewText({
+        text: "Could you research more boards?",
+        sourceReview: normalizeSourceReviewArtifact({
+          kind: "source_review",
+          candidates: [
+            {
+              label: "Culinary Agents",
+              url: "https://culinaryagents.example/jobs",
+              sourceType: "browser",
+              why: "NYC hospitality roles",
+              status: "proposed",
+              confidence: "high",
+            },
+          ],
+        }),
+        onSourceDecision: sourceDecision,
+      })
+    ).resolves.toEqual({ handled: false, completed: false });
+    expect(sourceDecision).not.toHaveBeenCalled();
+  });
+
+  it("keeps a failed company decision active and only refreshes a successful review", async () => {
+    const { commitCompanyProposalDecision } = await import("./ChatFirstApp.jsx");
+    const intent = {
+      type: "company.proposal-decide",
+      entity: { type: "company-proposal", id: "proposal-acme" },
+      input: { batchId: "batch-1", action: "reject", expectedVersion: 3 },
+    };
+    const setCompanyProposalReview = vi.fn();
+
+    await expect(
+      commitCompanyProposalDecision({
+        intent,
+        execute: vi.fn(async () => null),
+        setCompanyProposalReview,
+      })
+    ).resolves.toBe(false);
+    expect(setCompanyProposalReview).not.toHaveBeenCalled();
+
+    await expect(
+      commitCompanyProposalDecision({
+        intent,
+        execute: vi.fn(async () => ({
+          messages: [
+            {
+              artifacts: [
+                {
+                  kind: "company_proposals",
+                  batchId: "batch-1",
+                  proposals: [
+                    {
+                      proposalId: "proposal-tyrell",
+                      company: { name: "Tyrell Systems" },
+                      version: 7,
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        })),
+        setCompanyProposalReview,
+      })
+    ).resolves.toBe(true);
+    expect(setCompanyProposalReview).toHaveBeenLastCalledWith(
+      expect.objectContaining({ batchId: "batch-1" })
+    );
+  });
+
   it("keeps durable Today artifacts actionable without repeating an activity link", async () => {
     const { ChatFirstAppView } = await import("./ChatFirstApp.jsx");
     const openActivity = vi.fn();

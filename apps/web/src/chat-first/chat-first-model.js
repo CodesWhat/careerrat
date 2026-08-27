@@ -36,12 +36,15 @@ export function parseChatFirstForeground(search = "") {
   const params = new URLSearchParams(String(search).replace(/^\?/, ""));
   const browse = params.get("browse");
   const deepInputMode = params.get("ingest");
+  const selection = stableIds(params.getAll("selected"));
+  const selectionState = params.get("selection");
   return {
     activeThread: params.get("thread") || "today",
     activeApplicationId: params.get("application") || null,
     browse: BROWSER_TABS.has(browse) ? browse : false,
     pipeView: params.get("pipe") === "list" ? "list" : "funnel",
-    selection: stableIds(params.getAll("selected")),
+    selection,
+    searchSelectionSeeded: selection.length > 0 || ["seeded", "cleared"].includes(selectionState),
     composerChips: stableIds(params.getAll("context")),
     gateId: params.get("gate") || null,
     packetGapId: params.get("answer") || null,
@@ -68,7 +71,11 @@ export function serializeChatFirstForeground(foreground = {}) {
   setParam(params, "application", foreground.activeApplicationId);
   if (BROWSER_TABS.has(foreground.browse)) params.set("browse", foreground.browse);
   setParam(params, "pipe", foreground.pipeView, "funnel");
-  for (const id of stableIds(foreground.selection)) params.append("selected", id);
+  const selection = stableIds(foreground.selection);
+  if (foreground.searchSelectionSeeded === true || selection.length) {
+    params.set("selection", selection.length ? "seeded" : "cleared");
+  }
+  for (const id of selection) params.append("selected", id);
   for (const id of stableIds(foreground.composerChips)) params.append("context", id);
   setParam(params, "gate", foreground.gateId);
   setParam(params, "answer", foreground.packetGapId);
@@ -804,15 +811,17 @@ export function chatFirstReducer(state, action) {
         selection: selected
           ? state.selection.filter((id) => id !== action.id)
           : [...state.selection, action.id],
+        searchSelectionSeeded: true,
       };
     }
     case "selection.replace":
       return {
         ...state,
         selection: [...new Set(list(action.ids).filter(Boolean).map(String))],
+        searchSelectionSeeded: true,
       };
     case "selection.clear":
-      return { ...state, selection: [] };
+      return { ...state, selection: [], searchSelectionSeeded: true };
     case "selection.chat":
       return {
         ...state,

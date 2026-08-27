@@ -9,6 +9,8 @@ import {
   SourceReview,
   SourceReviewSummaryCard,
   sourceReviewBatchDecisions,
+  sourceReviewFromMessages,
+  sourceReviewTextSelection,
   submitSourceReviewBatch,
 } from "./source-review.jsx";
 
@@ -75,6 +77,40 @@ const review = normalizeSourceReviewArtifact({
 });
 
 describe("source review", () => {
+  it("resolves exact visible board names to the same stable batch ids", () => {
+    expect(sourceReviewTextSelection(review, "Add LandEarly and Built In")).toEqual([
+      review.candidates[0].id,
+      review.candidates[3].id,
+    ]);
+    expect(sourceReviewTextSelection(review, "Add landearly, please.")).toEqual([
+      review.candidates[0].id,
+    ]);
+    expect(sourceReviewTextSelection(review, "Add Built")).toBeNull();
+    expect(sourceReviewTextSelection(review, "Add RemotePilot")).toBeNull();
+  });
+
+  it("only restores a pending source review from the active transcript", () => {
+    expect(
+      sourceReviewFromMessages([{ artifacts: [{ kind: "resume" }] }, { artifacts: [review] }])
+    ).toMatchObject({ id: review.id });
+    expect(
+      sourceReviewFromMessages([
+        {
+          artifacts: [
+            {
+              ...review,
+              candidates: review.candidates.map((candidate) =>
+                candidate.status === "proposed"
+                  ? { ...candidate, decision: { action: "discard", status: "completed" } }
+                  : candidate
+              ),
+            },
+          ],
+        },
+      ])
+    ).toBeNull();
+  });
+
   it("owns keyboard focus while its modal is open", () => {
     const onClose = vi.fn();
     const closeEvent = {
@@ -137,6 +173,8 @@ describe("source review", () => {
 
     expect(html).toContain("6 sources found");
     expect(html).toContain("LandEarly");
+    expect(html).toContain("type the board names you want to add");
+    expect(html).toContain("others in this batch will be skipped");
     expect(html).toContain("4 Day Week");
     expect(html).toContain("TrulyRemote Dev");
     expect(html).toContain("Built In");

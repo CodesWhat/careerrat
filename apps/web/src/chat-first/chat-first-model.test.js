@@ -916,6 +916,7 @@ describe("chat-first foreground location", () => {
       browse: "search",
       pipeView: "list",
       selection: ["job-2", "job-1", "job-2"],
+      searchSelectionSeeded: true,
       composerChips: ["job-1"],
       gateId: "submit-app-1",
       packetGapId: "gap-1",
@@ -941,6 +942,7 @@ describe("chat-first foreground location", () => {
       browse: "search",
       pipeView: "list",
       selection: ["job-2", "job-1"],
+      searchSelectionSeeded: true,
       composerChips: ["job-1"],
       gateId: "submit-app-1",
       packetGapId: "gap-1",
@@ -970,6 +972,30 @@ describe("chat-first foreground location", () => {
     expect(parseChatFirstForeground(search).filters.fit80).toBe(false);
   });
 
+  it("round-trips an intentionally empty search selection across reload", () => {
+    const search = serializeChatFirstForeground({
+      browse: "search",
+      selection: [],
+      searchSelectionSeeded: true,
+    });
+
+    expect(search).toBe("?browse=search&selection=cleared");
+    const foreground = parseChatFirstForeground(search);
+    expect(foreground.selection).toEqual([]);
+    expect(foreground.searchSelectionSeeded).toBe(true);
+
+    const hydrated = chatFirstReducer(createChatFirstState(), {
+      type: "foreground.hydrate",
+      foreground,
+    });
+    expect(
+      chatFirstReducer(hydrated, {
+        type: "selection.seed-search",
+        rows: [{ id: "high-fit", fitScore: 99 }],
+      })
+    ).toMatchObject({ selection: [], searchSelectionSeeded: true });
+  });
+
   it("rehydrates the exact prior surface for browser back and forward", () => {
     const threadLocation = parseChatFirstForeground("?thread=job%3Aapp-1&application=app-1");
     const browserLocation = parseChatFirstForeground("?browse=people&people=needs-touch");
@@ -994,6 +1020,34 @@ describe("chat-first foreground location", () => {
     });
     expect(state).toMatchObject({ activeThread: "today", browse: "people" });
     expect(browserLocation.filters.people).toBe("needs-touch");
+  });
+
+  it("keeps a cleared selection cleared through browser back and forward", () => {
+    const selectedLocation = parseChatFirstForeground(
+      "?browse=search&selection=seeded&selected=job-1"
+    );
+    const clearedLocation = parseChatFirstForeground("?browse=search&selection=cleared");
+    let state = chatFirstReducer(createChatFirstState(), {
+      type: "foreground.hydrate",
+      foreground: selectedLocation,
+    });
+    expect(state.selection).toEqual(["job-1"]);
+
+    state = chatFirstReducer(state, {
+      type: "foreground.hydrate",
+      foreground: clearedLocation,
+    });
+    state = chatFirstReducer(state, {
+      type: "selection.seed-search",
+      rows: [{ id: "high-fit", fitScore: 99 }],
+    });
+    expect(state).toMatchObject({ selection: [], searchSelectionSeeded: true });
+
+    state = chatFirstReducer(state, {
+      type: "foreground.hydrate",
+      foreground: selectedLocation,
+    });
+    expect(state).toMatchObject({ selection: ["job-1"], searchSelectionSeeded: true });
   });
 
   it("falls back clearly when a URL references entities that disappeared", () => {

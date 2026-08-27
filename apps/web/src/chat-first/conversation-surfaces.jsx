@@ -285,6 +285,11 @@ function AttachedArtifacts({ message, onArtifactAction }) {
     return (
       <div className="chat-first-indented-card" key={key}>
         <ArtifactCard artifact={artifactView(artifact, message, onArtifactAction)} />
+        {artifact?.kind === "company_proposals" ? (
+          <small>
+            or type the company names you want to track; the others in this batch will be skipped
+          </small>
+        ) : null}
       </div>
     );
   });
@@ -743,14 +748,20 @@ export function TodayConversation({
               <span className="chat-first-eyebrow">MISSION</span>
               <strong>{mission.title}</strong>
               {mission.onPause ? (
-                <button type="button" onClick={mission.onPause}>
-                  pause
-                </button>
+                <>
+                  <button type="button" onClick={mission.onPause}>
+                    pause
+                  </button>
+                  <small>or type “pause mission”</small>
+                </>
               ) : null}
               {mission.onResume ? (
-                <button type="button" onClick={mission.onResume}>
-                  resume
-                </button>
+                <>
+                  <button type="button" onClick={mission.onResume}>
+                    resume
+                  </button>
+                  <small>or type “resume mission”</small>
+                </>
               ) : null}
             </div>
             <div className="chat-first-mission__steps">
@@ -1219,6 +1230,7 @@ export function MockInterviewContext({ title, detail, loadedContext, status = "a
       >
         {ended ? "Back to thread" : "End session → back to thread"}
       </button>
+      {!ended ? <small>or type “end mock interview” in chat</small> : null}
     </aside>
   );
 }

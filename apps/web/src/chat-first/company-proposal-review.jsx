@@ -1,6 +1,10 @@
 import { useRef } from "react";
 
-import { handleSourceReviewKeyDown, useReviewDialog } from "./source-review.jsx";
+import {
+  handleSourceReviewKeyDown,
+  resolveVisibleOptionNames,
+  useReviewDialog,
+} from "./source-review.jsx";
 
 const REVIEW_BATCH_SIZE = 4;
 export const handleCompanyProposalReviewKeyDown = handleSourceReviewKeyDown;
@@ -93,6 +97,18 @@ export function companyProposalBatchIntents(
     )
   );
   return intents.some((intent) => !intent) ? null : intents;
+}
+
+export function companyProposalTextSelection(artifact, text, batchSize = REVIEW_BATCH_SIZE) {
+  const review = companyProposalReviewForArtifact(artifact);
+  if (!review) return null;
+  return resolveVisibleOptionNames(
+    text,
+    review.proposals.slice(0, batchSize).map((proposal) => ({
+      id: String(proposal.proposalId),
+      aliases: [proposal.company?.name, proposal.company?.domain],
+    }))
+  );
 }
 
 export async function submitCompanyProposalBatch({ artifact, selectedOptionIds, onIntent } = {}) {

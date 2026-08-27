@@ -36,6 +36,8 @@ import {
   openApplicationHandoff,
   packetExportReceipt,
   projectWorkspaceResultToJobThread,
+  resolveMissionTextCommand,
+  resolveMockInterviewTextCommand,
   resolveNeedDecision,
   resolvePersonAction,
   resumeHydratedMission,
@@ -65,6 +67,8 @@ import {
   CompanyProposalReview,
   companyProposalReviewForArtifact,
   companyProposalReviewFromResult,
+  companyProposalTextSelection,
+  submitCompanyProposalBatch,
 } from "./company-proposal-review.jsx";
 import {
   CanonicalJobConversation,
@@ -107,7 +111,12 @@ import {
   skillChatStreamUrl,
   skillChatSubmitBlocked,
 } from "./skill-chat-model.js";
-import { SourceReview } from "./source-review.jsx";
+import {
+  SourceReview,
+  sourceReviewFromMessages,
+  sourceReviewTextSelection,
+  submitSourceReviewBatch,
+} from "./source-review.jsx";
 import { WorkspaceBrowser } from "./WorkspaceBrowser.jsx";
 import {
   ChatFirstWorkspace,
@@ -118,6 +127,52 @@ import {
 } from "./workspace-shell.jsx";
 
 const EMPTY_LIST = [];
+
+export async function submitConversationalReviewText({
+  text,
+  sourceReview,
+  companyProposalReview,
+  onSourceDecision,
+  onSourceComplete,
+  onCompanyIntent,
+} = {}) {
+  const sourceSelection = sourceReviewTextSelection(sourceReview, text);
+  if (sourceSelection) {
+    const completed = await submitSourceReviewBatch({
+      artifact: sourceReview,
+      selectedOptionIds: sourceSelection,
+      onDecision: onSourceDecision,
+      onComplete: onSourceComplete,
+    });
+    return { handled: true, completed };
+  }
+  const companySelection = companyProposalTextSelection(companyProposalReview, text);
+  if (companySelection) {
+    const completed = await submitCompanyProposalBatch({
+      artifact: companyProposalReview,
+      selectedOptionIds: companySelection,
+      onIntent: onCompanyIntent,
+    });
+    return { handled: true, completed };
+  }
+  return { handled: false, completed: false };
+}
+
+export async function commitCompanyProposalDecision({
+  intent,
+  execute,
+  setCompanyProposalReview,
+  openReview = true,
+} = {}) {
+  if (intent?.type !== "company.proposal-decide" || typeof execute !== "function") return false;
+  const response = await execute(intent);
+  if (!response) return false;
+  if (openReview) {
+    const refreshed = companyProposalReviewFromResult(response);
+    setCompanyProposalReview?.(refreshed?.proposals.length ? refreshed : null);
+  }
+  return true;
+}
 const DEFAULT_BROWSER_FILTERS = Object.freeze({
   fit80: true,
   comp: false,
@@ -1457,7 +1512,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     browse: foreground.browse,
     pipeView: foreground.pipeView,
     selection: foreground.selection,
-    searchSelectionSeeded: foreground.selection.length > 0,
+    searchSelectionSeeded: foreground.searchSelectionSeeded,
     composerChips: foreground.composerChips,
     gateId: foreground.gateId,
   }));
@@ -1610,6 +1665,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       browse: ui.browse,
       pipeView: ui.pipeView,
       selection: ui.selection,
+      searchSelectionSeeded: ui.searchSelectionSeeded,
       composerChips: ui.composerChips,
       gateId: ui.gateId,
       packetGapId: packetAnswerGap?.id || null,
@@ -1632,6 +1688,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       ui.composerChips,
       ui.gateId,
       ui.pipeView,
+      ui.searchSelectionSeeded,
       ui.selection,
     ]
   );
@@ -1656,7 +1713,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     const foreground = {
       ...createChatFirstState(),
       ...locationForeground,
-      searchSelectionSeeded: locationForeground.selection.length > 0,
+      searchSelectionSeeded: locationForeground.searchSelectionSeeded,
     };
     const currentView = baseViewRef.current;
     const reconciled = reconcileChatFirstForeground(foreground, currentView);
@@ -2059,6 +2116,24 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     const clean = String(text || "").trim();
     if (!clean || busy) return;
     if (persistedSkillChat && skillChatSubmitBlocked(activeSkillChat)) return;
+    const activeMission = missionForView(view);
+    const missionCommand =
+      ui.activeThread === "today" ? resolveMissionTextCommand(clean, activeMission) : null;
+    if (missionCommand) {
+      const result = await controlMission(activeMission.id, missionCommand);
+      if (result) setComposerValue("");
+      return;
+    }
+    if (
+      ui.activeThread === "mock" &&
+      rawMock?.id &&
+      rawMock.status !== "ended" &&
+      resolveMockInterviewTextCommand(clean) === "end"
+    ) {
+      const ended = await endMock();
+      if (ended) setComposerValue("");
+      return;
+    }
     if (activeJob?.applicationId && packetAnswerGap) {
       const result = await run(() =>
         confirmPacketGapAnswer({
@@ -2094,6 +2169,23 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         setComposerValue("");
         dispatch({ type: "mock.open", applicationId: activeJob.applicationId });
       }
+      return;
+    }
+    const conversationMessages =
+      activeSkillChat?.messages || activeJob?.messages || view.mainThread?.messages || [];
+    const reviewResult = await submitConversationalReviewText({
+      text: clean,
+      sourceReview:
+        activeSkillChat && (sourceReview || sourceReviewFromMessages(conversationMessages)),
+      companyProposalReview:
+        companyProposalReview ||
+        companyProposalReviewFromResult({ messages: conversationMessages }),
+      onSourceDecision: decideSkillChatDiscovery,
+      onSourceComplete: completeSkillChatDiscovery,
+      onCompanyIntent: (intent) => decideCompanyProposal(intent, { openReview: false }),
+    });
+    if (reviewResult.handled) {
+      if (reviewResult.completed) setComposerValue("");
       return;
     }
     if (ui.activeThread === "ingest") {
@@ -2234,9 +2326,19 @@ export function ChatFirstApp({ api = chatFirstApi }) {
 
   async function endMock() {
     if (rawMock?.id && rawMock.status !== "ended") {
-      await run(() => api.endMockInterview({ sessionId: rawMock.id }));
+      const ended = await run(() => api.endMockInterview({ sessionId: rawMock.id }));
+      if (!ended) return false;
     }
     dispatch({ type: "mock.close" });
+    return true;
+  }
+
+  function controlMission(id, command) {
+    return run(() =>
+      command === "pause"
+        ? api.setChatFirstMissionStatus({ id, status: "paused" })
+        : api.resumeChatFirstMission(id)
+    );
   }
 
   async function ingestFiles(fileList) {
@@ -2613,15 +2715,16 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     return result;
   }
 
-  async function decideCompanyProposal(intent) {
-    if (intent?.type !== "company.proposal-decide") return;
-    const response = await run(() =>
-      api.runWorkspaceIntent(intent.type, intent.entity, intent.input || {})
-    );
-    if (!response) return;
-    const refreshed = companyProposalReviewFromResult(response);
-    if (refreshed?.proposals.length) setCompanyProposalReview(refreshed);
-    else setCompanyProposalReview(null);
+  async function decideCompanyProposal(intent, { openReview = true } = {}) {
+    return commitCompanyProposalDecision({
+      intent,
+      execute: (nextIntent) =>
+        run(() =>
+          api.runWorkspaceIntent(nextIntent.type, nextIntent.entity, nextIntent.input || {})
+        ),
+      setCompanyProposalReview,
+      openReview,
+    });
   }
 
   async function decideSkillChatDiscovery(item, action) {
@@ -2908,8 +3011,8 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       });
     },
     endMock,
-    pauseMission: (id) => run(() => api.setChatFirstMissionStatus({ id, status: "paused" })),
-    resumeMission: (id) => run(() => api.resumeChatFirstMission(id)),
+    pauseMission: (id) => controlMission(id, "pause"),
+    resumeMission: (id) => controlMission(id, "resume"),
     decideNeed,
     closeGate: () => {
       dispatch({ type: "gate.close" });

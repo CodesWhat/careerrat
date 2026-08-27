@@ -22,7 +22,7 @@ function normalizeDecision(value) {
   };
 }
 
-function sourceReviewForArtifact(artifact) {
+export function sourceReviewForArtifact(artifact) {
   const review = normalizeSourceReviewArtifact(artifact);
   if (!review) return null;
   const originals = new Map(
@@ -44,6 +44,40 @@ function sourceReviewForArtifact(artifact) {
   };
 }
 
+function normalizedOptionText(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+export function resolveVisibleOptionNames(text, options) {
+  const normalized = normalizedOptionText(text);
+  if (!normalized) return null;
+  const haystack = ` ${normalized} `;
+  const matches = [];
+  for (const option of Array.isArray(options) ? options : []) {
+    const aliases = [...new Set((option.aliases || []).map(normalizedOptionText).filter(Boolean))];
+    const matchedAliases = aliases.filter((alias) => haystack.includes(` ${alias} `));
+    if (matchedAliases.length) matches.push({ id: option.id, aliases: matchedAliases });
+  }
+  const ambiguous = matches.some((match, index) =>
+    matches.some(
+      (candidate, candidateIndex) =>
+        candidateIndex !== index &&
+        match.aliases.some((alias) =>
+          candidate.aliases.some(
+            (candidateAlias) =>
+              alias === candidateAlias || ` ${candidateAlias} `.includes(` ${alias} `)
+          )
+        )
+    )
+  );
+  return matches.length && !ambiguous ? matches.map((match) => match.id) : null;
+}
+
 function proposedCandidates(review) {
   return review.candidates
     .filter((candidate) => candidate.status === "proposed")
@@ -55,6 +89,33 @@ function proposedCandidates(review) {
 function pendingCandidates(review) {
   return proposedCandidates(review).filter(
     (candidate) => candidate.decision?.status !== "completed"
+  );
+}
+
+export function sourceReviewFromMessages(messages) {
+  for (
+    let messageIndex = (Array.isArray(messages) ? messages.length : 0) - 1;
+    messageIndex >= 0;
+    messageIndex -= 1
+  ) {
+    const artifacts = Array.isArray(messages[messageIndex]?.artifacts)
+      ? messages[messageIndex].artifacts
+      : [];
+    for (let artifactIndex = artifacts.length - 1; artifactIndex >= 0; artifactIndex -= 1) {
+      const review = sourceReviewForArtifact(artifacts[artifactIndex]);
+      if (review && pendingCandidates(review).length) return review;
+    }
+  }
+  return null;
+}
+
+export function sourceReviewTextSelection(artifact, text, batchSize = REVIEW_BATCH_SIZE) {
+  const review = sourceReviewForArtifact(artifact);
+  if (!review) return null;
+  const batch = pendingCandidates(review).slice(0, batchSize);
+  return resolveVisibleOptionNames(
+    text,
+    batch.map((candidate) => ({ id: candidate.id, aliases: [candidate.label] }))
   );
 }
 
@@ -113,6 +174,9 @@ export function SourceReviewSummaryCard({ artifact, onOpen }) {
           {review.highConfidenceCount === 1 ? "" : "es"}
           {review.borderlineCount ? ` · ${review.borderlineCount} need a closer look` : ""}
         </span>
+        <small>
+          or type the board names you want to add; the others in this batch will be skipped
+        </small>
         <ul className="source-review-summary__sources" aria-label="Strongest source matches">
           {preview.map((candidate) => (
             <li className="source-review-summary__source" key={candidate.id}>

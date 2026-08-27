@@ -20,6 +20,8 @@ import {
   mockStartContext,
   openApplicationHandoff,
   packetExportReceipt,
+  resolveMissionTextCommand,
+  resolveMockInterviewTextCommand,
   resolveNeedDecision,
   resolvePersonAction,
   resumePacketPreparation,
@@ -30,6 +32,46 @@ import {
 } from "./chat-first-app-controller.js";
 
 describe("chat-first app controller", () => {
+  it("recognizes only explicit mission commands valid for the durable mission state", () => {
+    expect(resolveMissionTextCommand("pause mission", { id: "mission-1", status: "running" })).toBe(
+      "pause"
+    );
+    expect(
+      resolveMissionTextCommand("please resume this mission", {
+        id: "mission-1",
+        status: "paused",
+      })
+    ).toBe("resume");
+    expect(
+      resolveMissionTextCommand("pause mission", { id: "mission-1", status: "paused" })
+    ).toBeNull();
+    expect(
+      resolveMissionTextCommand("I need to pause and think about my search", {
+        id: "mission-1",
+        status: "running",
+      })
+    ).toBeNull();
+  });
+
+  it("ends mock interviews only for an explicit control command", () => {
+    for (const command of [
+      "end mock interview",
+      "end this mock interview",
+      "please end the mock interview",
+      "stop mock interview",
+    ]) {
+      expect(resolveMockInterviewTextCommand(command)).toBe("end");
+    }
+    for (const answer of [
+      "I ended the project by shipping the migration.",
+      "At the end, I reviewed the results.",
+      "I would stop and ask the customer what changed.",
+      "end",
+    ]) {
+      expect(resolveMockInterviewTextCommand(answer)).toBeNull();
+    }
+  });
+
   it("returns a newly-created mission before its execution reaches the submit gates", async () => {
     let finishRun;
     const onExecutionStart = vi.fn();

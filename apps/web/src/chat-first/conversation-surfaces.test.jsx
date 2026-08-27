@@ -633,6 +633,8 @@ describe("TodayConversation", () => {
     );
 
     expect(html.match(/Company discovery: 3 to review/g)).toHaveLength(1);
+    expect(html).toContain("type the company names you want to track");
+    expect(html).toContain("others in this batch will be skipped");
     expect(html).toContain("Job search: Complete");
     expect(html).not.toContain("Job search: Running");
     expect(html).not.toContain("Job search started");
@@ -1041,6 +1043,7 @@ describe("TodayConversation", () => {
     expect(html).toContain("Drafting packet 1 of 3 · Aperture Science");
     expect(html).toContain("submits gate back here");
     expect(html).toContain("pause");
+    expect(html).toContain("or type “pause mission”");
   });
 });
 
@@ -1680,6 +1683,7 @@ describe("focused conversation modes", () => {
     expect(html).toContain("LIVE SESSION");
     expect(html).toContain("Context loaded");
     expect(html).toContain("End session → back to thread");
+    expect(html).toContain("or type “end mock interview” in chat");
   });
 
   it("renders deep ingest as a resumable conversation with accessible intake actions", () => {

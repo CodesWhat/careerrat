@@ -71,6 +71,36 @@ function visit(node, callback) {
 }
 
 describe("company proposal review", () => {
+  it("resolves exact visible company names to the same stable batch ids", async () => {
+    const { companyProposalTextSelection } = await reviewContract();
+
+    expect(companyProposalTextSelection(ARTIFACT, "Track Acme AI and Tyrell Systems")).toEqual([
+      "proposal-acme",
+      "proposal-tyrell",
+    ]);
+    expect(companyProposalTextSelection(ARTIFACT, "Track tyrell.example")).toEqual([
+      "proposal-tyrell",
+    ]);
+    expect(companyProposalTextSelection(ARTIFACT, "Track Acme")).toBeNull();
+    expect(companyProposalTextSelection(ARTIFACT, "Track Already Reviewed")).toBeNull();
+    expect(
+      companyProposalTextSelection(
+        {
+          ...ARTIFACT,
+          proposals: [
+            ARTIFACT.proposals[0],
+            {
+              ...ARTIFACT.proposals[1],
+              proposalId: "proposal-acme-labs",
+              company: { name: "Acme AI Labs" },
+            },
+          ],
+        },
+        "Track Acme AI Labs"
+      )
+    ).toBeNull();
+  });
+
   it("recognizes a main-thread company proposals artifact without performing a write", async () => {
     const { companyProposalReviewForArtifact } = await reviewContract();
 

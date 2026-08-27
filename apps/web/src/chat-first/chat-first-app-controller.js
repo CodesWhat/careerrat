@@ -441,6 +441,41 @@ export function isMockInterviewStartRequest(text) {
   return /\b(start|run|begin|launch|do|practice|conduct|give)\b/.test(normalized);
 }
 
+function normalizedControlCommand(text) {
+  return String(text || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+export function resolveMissionTextCommand(text, mission) {
+  if (!mission?.id) return null;
+  const command = normalizedControlCommand(text);
+  if (
+    mission.status === "running" &&
+    /^(?:please )?pause(?:(?: this| the)? (?:mission|run|work))?$/.test(command)
+  ) {
+    return "pause";
+  }
+  if (
+    mission.status === "paused" &&
+    /^(?:please )?(?:resume|continue)(?:(?: this| the)? (?:mission|run|work))?$/.test(command)
+  ) {
+    return "resume";
+  }
+  return null;
+}
+
+export function resolveMockInterviewTextCommand(text) {
+  const command = normalizedControlCommand(text);
+  return /^(?:please )?(?:end|stop|finish)(?: this| the)? (?:mock interview|interview practice|session)$/.test(
+    command
+  )
+    ? "end"
+    : null;
+}
+
 export async function startMockFromJobThread({ api, applicationId, text, title, context } = {}) {
   await api.appendJobThreadMessage({
     applicationId,
