@@ -111,7 +111,7 @@ test("Playwright is ready before any persistent profile exists when Chromium can
   });
 
   assert.equal(session.presence.status, "ready");
-  assert.match(session.presence.detail, /opens.*when a workflow needs it/i);
+  assert.match(session.presence.detail, /can open a browser when a job needs one/i);
   assert.doesNotMatch(session.presence.detail, /sign in|per platform|\.careerrat|board-profiles/i);
   assert.equal(existsSync(profileRoot), false, "readiness detection must not create a profile");
 });
@@ -130,9 +130,28 @@ test("Playwright is not ready when its Chromium executable is missing", () => {
   });
 
   assert.equal(session.presence.status, "missing");
+  assert.equal(session.presence.detail, "CareerRat's browser isn't ready yet.");
+  assert.equal(session.presence.nextStep, undefined);
+});
+
+test("browser readiness gives a plain in-app next step without implementation jargon", () => {
+  const session = detectSession({ data: { session: { provider: "extension" } }, env: {} });
+
+  assert.ok(["missing", "unverified"].includes(session.presence.status));
   assert.equal(
     session.presence.detail,
-    "Playwright is installed, but its Chromium executable is missing."
+    session.presence.status === "missing"
+      ? "CareerRat needs a browser connection before it can help with job forms."
+      : "CareerRat needs one more setup step before it can help with job forms."
+  );
+  assert.deepEqual(session.presence.nextStep, {
+    kind: "choose",
+    provider: "playwright",
+    label: "Use CareerRat browser",
+  });
+  assert.doesNotMatch(
+    `${session.presence.detail} ${session.presence.nextStep.label}`,
+    /CLI|provider|extension|Playwright|Chromium|careerrat automation|`/i
   );
 });
 

@@ -426,7 +426,7 @@ describe("ProfileSettings", () => {
         effectiveProvider: "Chrome extension",
         presenceStatus: "unverified",
         presenceDetail: "Google Chrome detected. Confirm the extension is signed in.",
-        automaticFillSupported: false,
+        automaticFillSupported: true,
         options: [
           {
             id: "auto",
@@ -471,15 +471,14 @@ describe("ProfileSettings", () => {
     expect(html).toContain('value="https://jobs.example.com"');
     expect(html).toContain("Technical details");
     expect(html).toContain("Browser connection");
-    expect(html).toContain("Automatic browser connection");
-    expect(html).toContain("Chrome extension");
+    expect(html).toContain("Let CareerRat choose");
     expect(html).toContain("Needs confirmation");
-    expect(html).toContain("Playwright");
-    expect(html).toContain("Ready");
+    expect(html).toContain("Use CareerRat browser");
+    expect(html).toContain("Available once CareerRat confirms the browser");
+    expect(html).not.toContain("Available after browser setup is fixed");
     expect(html).toContain("Automatic application fill");
-    expect(html).toContain("Unavailable with this browser connection");
-    expect(html).toContain("Browser automation provider");
-    expect(html).toContain("Playwright persistent profile");
+    expect(html).toContain("Browser setup");
+    expect(html).not.toMatch(/Chrome extension|Playwright persistent profile|Chromium/i);
     expect(html).not.toContain("window.prompt");
 
     findElement(
@@ -494,7 +493,7 @@ describe("ProfileSettings", () => {
     expect(onRetryEngine).toHaveBeenCalledWith("codex");
     findElement(
       tree,
-      (node) => node.type === "select" && node.props.id === "cf-browser-automation-provider"
+      (node) => node.type === "select" && node.props.id === "cf-browser-setup"
     ).props.onChange({ target: { value: "playwright" } });
     expect(onBrowserProviderChange).toHaveBeenCalledWith("playwright");
   });
@@ -532,11 +531,95 @@ describe("ProfileSettings", () => {
     );
 
     expect(html).toContain("Ready");
-    expect(html).toMatch(/opens a supervised browser when a workflow needs it/i);
+    expect(html).toMatch(/can open a browser when a job needs one/i);
     expect(html).not.toMatch(
       /\/Users\/person|\.careerrat|board-profiles|sign in once per platform/i
     );
     expect(html).not.toMatch(/create profile|check browser|sign in to platforms/i);
+  });
+
+  it("gives browser recovery inside Settings without rendering technical readiness details", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const onBrowserProviderChange = vi.fn();
+    const tree = ProfileSettings({
+      activeTab: "settings",
+      permissions: PERMISSIONS,
+      technicalDetailsOpen: true,
+      browser: {
+        providerId: "auto",
+        provider: "Automatic browser connection",
+        effectiveProviderId: "extension",
+        effectiveProvider: "Chrome extension",
+        presenceStatus: "unverified",
+        presenceDetail:
+          "Google Chrome detected. Confirm the extension is signed in. Run `careerrat automation status`.",
+        nextStep: {
+          kind: "choose",
+          provider: "playwright",
+          label: "Use CareerRat browser",
+        },
+        automaticFillSupported: false,
+        options: [
+          { id: "auto", label: "Automatic browser connection", automatedApply: false },
+          { id: "extension", label: "Chrome extension", automatedApply: false },
+          { id: "playwright", label: "Playwright persistent profile", automatedApply: true },
+        ],
+        playwright: {
+          ready: false,
+          detail:
+            "Playwright executable missing at /Users/person/.careerrat/board-profiles/chromium",
+        },
+      },
+      onBrowserProviderChange,
+    });
+    const html = renderToStaticMarkup(tree);
+
+    expect(html).toContain("CareerRat needs one more setup step before it can help with job forms");
+    expect(html).toContain("Use CareerRat browser");
+    expect(html).not.toMatch(
+      /Chrome extension|Playwright executable|Playwright persistent|Chromium|\/Users\/person|\.careerrat|careerrat automation|Browser automation provider/i
+    );
+
+    findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "Use CareerRat browser"
+    ).props.onClick();
+    expect(onBrowserProviderChange).toHaveBeenCalledWith("playwright");
+  });
+
+  it("does not offer a retry button that cannot repair a missing CareerRat browser", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const onBrowserProviderChange = vi.fn();
+    const tree = ProfileSettings({
+      activeTab: "settings",
+      permissions: PERMISSIONS,
+      technicalDetailsOpen: true,
+      browser: {
+        providerId: "auto",
+        effectiveProviderId: "playwright",
+        presenceStatus: "missing",
+        presenceDetail: "Chromium missing at /Users/person/private/browser",
+        nextStep: {
+          kind: "retry",
+          provider: "playwright",
+          label: "Check browser again",
+        },
+        automaticFillSupported: true,
+        options: [{ id: "playwright", label: "Playwright", automatedApply: true }],
+      },
+      onBrowserProviderChange,
+    });
+    const html = renderToStaticMarkup(tree);
+
+    expect(html).toContain(
+      "Close and reopen CareerRat. If the browser is still unavailable, reinstall the latest version."
+    );
+    expect(html).not.toContain("Check browser again");
+    expect(html).toContain("Available after browser setup is fixed");
+    expect(html).not.toContain("Available with this browser connection");
+    expect(html).not.toMatch(/Chromium|\/Users\/person/i);
+    expect(html).not.toContain(">Playwright<");
+    expect(onBrowserProviderChange).not.toHaveBeenCalled();
   });
 
   it("keeps supported engines visible when they need setup without a Use action", async () => {

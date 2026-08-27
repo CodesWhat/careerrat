@@ -20,7 +20,7 @@ function compactAssistantText(value) {
 const RESUME_ACCEPT = ".pdf,.docx,.txt,.md,image/*";
 const EMAIL_SHAPE_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CLAUDE_REFERRAL_URL = "https://claude.ai/referral/rOLHwxlsfA";
-const CLAUDE_INSTALL_COMMAND = "curl -fsSL https://claude.ai/install.sh | bash";
+const CLAUDE_CODE_SETUP_URL = "https://code.claude.com/docs/en/quickstart";
 
 function firstFile(files) {
   return files?.[0] || null;
@@ -155,15 +155,28 @@ function ClaudeSetupGuide({ guidedSetup, submitting, onStartGuidedSetup, onRefre
   const setupStatus = guidedSetup?.status || "idle";
   const installing = setupStatus === "installing";
   const installed = ["installed", "ready"].includes(setupStatus);
-  const failed = setupStatus === "failed";
-  const setupLines = safeArray(guidedSetup?.lines);
+  const unavailable = setupStatus === "unavailable";
+  const failed = ["failed", "cancelled", "unavailable"].includes(setupStatus);
+  const setupMessage =
+    {
+      installing: "CareerRat is installing Claude Code. You can stay in this window.",
+      installed: "Claude Code is installed. CareerRat is checking that it can connect.",
+      ready: "Claude Code is ready for CareerRat.",
+      sign_in_started: "Finish signing in in the browser window, then come back here.",
+      cancelled: "Installation stopped. Nothing in your setup was lost.",
+      unavailable:
+        "In-app installation isn't available here. Use the Claude setup guide, then choose Check setup.",
+      failed: "CareerRat couldn't finish installing Claude Code. Nothing in your setup was lost.",
+    }[setupStatus] || "CareerRat can install Claude Code here and keep you on this screen.";
   const actionLabel = installing
     ? "Installing inside CareerRat…"
     : installed
       ? "Claude Code installed ✓"
-      : failed
-        ? "Try installation again"
-        : "Install inside CareerRat";
+      : unavailable
+        ? "Check setup"
+        : failed
+          ? "Try installation again"
+          : "Install inside CareerRat";
   return (
     <article className="cf-first-run__beginner-setup">
       <div className="cf-first-run__beginner-heading">
@@ -185,24 +198,34 @@ function ClaudeSetupGuide({ guidedSetup, submitting, onStartGuidedSetup, onRefre
         <li>
           <span className="cf-first-run__setup-number">2</span>
           <div>
-            <strong>Let CareerRat install Claude Code</strong>
+            <strong>
+              {unavailable
+                ? "Install Claude Code from its setup guide"
+                : "Let CareerRat install Claude Code"}
+            </strong>
             <p>
-              {installing
-                ? "CareerRat is running Anthropic’s official installer below. You can stay in this window."
-                : installed
-                  ? "The install finished. CareerRat is checking it now."
-                  : "CareerRat can run Anthropic’s official installer here and show you exactly what it is doing."}
+              {unavailable
+                ? "Open Claude's setup guide, finish installation, then choose Check setup."
+                : installing
+                  ? "CareerRat is installing Claude Code. You can stay in this window."
+                  : installed
+                    ? "The install finished. CareerRat is checking it now."
+                    : "CareerRat can install Claude Code here and keep you on this screen."}
             </p>
-            <code>{CLAUDE_INSTALL_COMMAND}</code>
             <button
               type="button"
               className="cf-first-run__guided-action"
               disabled={submitting || installing || installed}
-              onClick={() => onStartGuidedSetup?.("claude")}
+              onClick={() => (unavailable ? onRefreshEngines?.() : onStartGuidedSetup?.("claude"))}
             >
               {actionLabel}
             </button>
-            {setupLines.length || installing || installed || failed ? (
+            {unavailable ? (
+              <a href={CLAUDE_CODE_SETUP_URL} target="_blank" rel="noreferrer">
+                Open Claude setup guide
+              </a>
+            ) : null}
+            {guidedSetup ? (
               <section className="cf-first-run__setup-console" aria-label="CareerRat setup">
                 <header>
                   <span>CareerRat setup</span>
@@ -211,13 +234,7 @@ function ClaudeSetupGuide({ guidedSetup, submitting, onStartGuidedSetup, onRefre
                   </span>
                 </header>
                 <div className="cf-first-run__setup-console-output" role="log" aria-live="polite">
-                  {setupLines.length ? (
-                    <p>{setupLines.join("\n")}</p>
-                  ) : (
-                    <p>
-                      {installing ? "Starting the official installer…" : "Installation finished."}
-                    </p>
-                  )}
+                  <p>{setupMessage}</p>
                 </div>
               </section>
             ) : null}

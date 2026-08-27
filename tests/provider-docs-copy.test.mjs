@@ -46,7 +46,7 @@ test("public setup docs expose the neutral direct Claude Code and Codex contract
   );
 });
 
-test("v0.16.4 docs record the release candidate and preserve v0.16.0 release evidence", async () => {
+test("v0.16.5 docs record the release candidate and preserve v0.16.4 public evidence", async () => {
   const [changelog, roadmap, readme, install] = await Promise.all([
     readFile("CHANGELOG.md", "utf8"),
     readFile("docs/ROADMAP.md", "utf8"),
@@ -110,22 +110,28 @@ test("v0.16.4 docs record the release candidate and preserve v0.16.0 release evi
   assert.doesNotMatch(roadmap, /release publication is still pending/i);
   assert.doesNotMatch(roadmap, /not released or deployed/i);
   assert.doesNotMatch(roadmap, /Publication pending/i);
+  assert.match(roadmap, /v0\.16\.4 is released and verified/i);
+  assert.match(roadmap, /v0\.16\.5 is the verified release candidate/i);
+  assert.match(roadmap, /protected\s+PRs #232, #233, and #234 merged/i);
+  assert.match(roadmap, /native\s+signed 0\.16\.3-to-0\.16\.4 update/i);
 
   for (const publicCopy of [readme, install]) {
-    assert.match(publicCopy, /v0\.16\.3 is the current public release/i);
-    assert.match(publicCopy, /v0\.16\.4 is the verified release candidate/i);
-    assert.match(publicCopy, /plain-English explanation and next step/i);
+    assert.match(publicCopy, /v0\.16\.4 is the current public release/i);
+    assert.match(publicCopy, /plain-English explanation and\s+next\s+step/i);
     assert.match(publicCopy, /remote and office-day limits/i);
     assert.match(publicCopy, /resolves validated application entry points/i);
     assert.match(publicCopy, /signed in-app Mac updates/i);
     assert.match(publicCopy, /signed,\s+notarized, and stapled Mac\s+DMG/i);
-    assert.match(publicCopy, /careerrat@latest` is 0\.16\.3/i);
-    assert.match(publicCopy, /Homebrew\s+cask is 0\.16\.3/i);
-    assert.match(publicCopy, /installed app reports version 0\.16\.3/i);
-    assert.match(publicCopy, /public-version claims[^.]*stay on\s+0\.16\.3/i);
+    assert.match(publicCopy, /careerrat@latest` is\s+0\.16\.4/i);
+    assert.match(publicCopy, /Homebrew\s+cask is 0\.16\.4/i);
+    assert.match(publicCopy, /installed app reports\s+version 0\.16\.4/i);
+    assert.match(publicCopy, /real signed 0\.16\.3-to-0\.16\.4 in-app update/i);
+    assert.match(publicCopy, /v0\.16\.5 is the verified release candidate/i);
+    assert.match(publicCopy, /v0\.16\.4 remains the current public release/i);
+    assert.match(publicCopy, /guided installation, expanded diagnostics, browser-workflow cards/i);
     assert.match(publicCopy, /Scott's (?:disclosed )?referral/i);
     assert.match(publicCopy, /Install inside CareerRat/i);
-    assert.match(publicCopy, /passes Gatekeeper,\s+and passed launch and visual inspection/i);
+    assert.match(publicCopy, /passes Gatekeeper,\s+launches cleanly/i);
     assert.match(
       publicCopy,
       /Windows x64 installer pass(?:ed|es) build, install, launch, export, and uninstall\s+QA/i

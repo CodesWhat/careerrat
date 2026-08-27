@@ -1231,42 +1231,46 @@ export function FirstRunController({
   async function startGuidedSetup(runtimeId) {
     setSubmitting(true);
     setEngineError(null);
-    setGuidedSetup({ runtimeId, status: "installing", lines: [] });
-    try {
-      await api.startInstalledAiRuntimeGuidedSetup(runtimeId, {
-        onEvent(event) {
-          if (event?.type !== "output") return;
-          const nextLines = cleanLines(event.message);
-          if (!nextLines.length) return;
-          setGuidedSetup((current) => ({
-            runtimeId,
-            status: "installing",
-            lines: [...list(current?.lines), ...nextLines].slice(-80),
-          }));
-        },
-      });
+    setGuidedSetup({ runtimeId, status: "installing" });
+    async function refreshGuidedRuntime() {
       const nextRuntime = await api.getInstalledAiRuntimes();
       setRuntimeState(nextRuntime);
       const nextId = effectiveRuntimeId(nextRuntime, runtimeId) || effectiveRuntimeId(nextRuntime);
       setPendingRuntimeId(nextId);
       const runtime = list(nextRuntime?.runtimes).find((candidate) => candidate.id === runtimeId);
-      setGuidedSetup((current) => ({
+      setGuidedSetup({
         runtimeId,
         status: runtime?.ready === true && runtime?.selectable === true ? "ready" : "installed",
-        lines: list(current?.lines),
-      }));
+      });
+    }
+    try {
+      await api.startInstalledAiRuntimeGuidedSetup(runtimeId, {
+        onEvent() {
+          // Installer output can contain local paths, shell commands, and credentials.
+          // The candidate-facing guide only exposes trusted setup phases.
+        },
+      });
+      await refreshGuidedRuntime();
     } catch (error) {
-      setGuidedSetup((current) => ({
-        runtimeId,
-        status: "failed",
-        lines: list(current?.lines),
-      }));
-      setEngineError(
-        firstRunErrorMessage(
-          error,
-          "CareerRat couldn't finish installing Claude Code. Check your connection and try installation again."
-        )
-      );
+      const code = String(error?.code || error?.body?.code || "").toUpperCase();
+      if (code === "RUNTIME_ALREADY_INSTALLED") {
+        try {
+          await refreshGuidedRuntime();
+        } catch {
+          setGuidedSetup({ runtimeId, status: "installed" });
+        }
+      } else {
+        const status =
+          code === "RUNTIME_GUIDED_SETUP_CANCELLED"
+            ? "cancelled"
+            : ["RUNTIME_GUIDED_SETUP_UNAVAILABLE", "RUNTIME_GUIDED_SETUP_UNSUPPORTED"].includes(
+                  code
+                )
+              ? "unavailable"
+              : "failed";
+        setGuidedSetup({ runtimeId, status });
+      }
+      setEngineError(null);
     } finally {
       setSubmitting(false);
     }
