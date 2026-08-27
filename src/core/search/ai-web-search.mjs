@@ -39,7 +39,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { runBoundedAI } from "../ai/bounded-ai.mjs";
+import { BOUNDED_AI_CODES, runBoundedAI } from "../ai/bounded-ai.mjs";
 import {
   runSkillStream as defaultRunSkillStream,
   resolveAllowedSkills,
@@ -78,6 +78,7 @@ const MANUAL_FALLBACK = Object.freeze({
 // standard cap rather than either extreme.
 const PROMPT_CAP_BY_MODE = Object.freeze({ lean: 1, standard: 3, full: 5 });
 const HYDRATION_CONCURRENCY = 4;
+const AI_WEB_SEARCH_RUNTIME_TIMEOUT_MS = 8 * 60 * 1000;
 
 // Sourced-row `gate` for an AI-web-search survivor. This mode's `candidate`
 // context (buildSearchPromptContext) never carries company-history or
@@ -373,6 +374,7 @@ export async function runAiWebSearch({
   const outputSchema = loadSchema(repoRoot);
   const toolCalls = new Map();
   const toolTrace = [];
+  let runtimeFailure = null;
 
   async function invokeAiWebSearch({ correction }) {
     // A disconnect that landed between retry attempts (see
@@ -380,65 +382,78 @@ export async function runAiWebSearch({
     // model call on a client that's already gone.
     throwIfSearchAborted(signal);
     let rawText = "";
-    await runSkillStream({
-      skill: AI_WEB_SEARCH_LABELS.skill,
-      action: AI_WEB_SEARCH_LABELS.action,
-      operation: AI_WEB_SEARCH_LABELS.operation,
-      input: correction ? `${JSON.stringify(kickoffInput)}\n\n${correction}` : kickoffInput,
-      repoRoot,
-      env: skillEnv,
-      signal,
-      toolProfile: "chat",
-      outputSchema,
-      onEvent: (evt) => {
-        if (evt.type === "tool_use") {
-          if (evt.data?.name === "WebSearch") {
-            const query = String(evt.data?.input?.query || "").trim();
-            if (query) {
-              const item = { kind: "query", query, status: "completed", error: null };
-              toolTrace.push(item);
-              if (evt.data?.id) toolCalls.set(evt.data.id, item);
-              onProgress?.({ type: "activity", message: `Searching: ${query}…` });
-            }
-          } else if (evt.data?.name === "WebFetch") {
-            const rawUrl = String(evt.data?.input?.url || "").trim();
-            if (rawUrl) {
-              let host = rawUrl;
-              try {
-                host = new URL(rawUrl).hostname || rawUrl;
-              } catch {
-                // not a parseable URL — narrate the raw string as a fallback
+    let runtimeResult;
+    try {
+      runtimeResult = await runSkillStream({
+        skill: AI_WEB_SEARCH_LABELS.skill,
+        action: AI_WEB_SEARCH_LABELS.action,
+        operation: AI_WEB_SEARCH_LABELS.operation,
+        input: correction ? `${JSON.stringify(kickoffInput)}\n\n${correction}` : kickoffInput,
+        repoRoot,
+        env: skillEnv,
+        signal,
+        toolProfile: "chat",
+        outputSchema,
+        timeoutMs: AI_WEB_SEARCH_RUNTIME_TIMEOUT_MS,
+        onEvent: (evt) => {
+          if (evt.type === "tool_use") {
+            if (evt.data?.name === "WebSearch") {
+              const query = String(evt.data?.input?.query || "").trim();
+              if (query) {
+                const item = { kind: "query", query, status: "completed", error: null };
+                toolTrace.push(item);
+                if (evt.data?.id) toolCalls.set(evt.data.id, item);
+                onProgress?.({ type: "activity", message: `Searching: ${query}…` });
               }
-              const item = {
-                kind: "source",
-                url: rawUrl,
-                host,
-                status: "completed",
-                error: null,
-              };
-              toolTrace.push(item);
-              if (evt.data?.id) toolCalls.set(evt.data.id, item);
-              onProgress?.({ type: "activity", message: `Reading ${host}…` });
+            } else if (evt.data?.name === "WebFetch") {
+              const rawUrl = String(evt.data?.input?.url || "").trim();
+              if (rawUrl) {
+                let host = rawUrl;
+                try {
+                  host = new URL(rawUrl).hostname || rawUrl;
+                } catch {
+                  // not a parseable URL — narrate the raw string as a fallback
+                }
+                const item = {
+                  kind: "source",
+                  url: rawUrl,
+                  host,
+                  status: "completed",
+                  error: null,
+                };
+                toolTrace.push(item);
+                if (evt.data?.id) toolCalls.set(evt.data.id, item);
+                onProgress?.({ type: "activity", message: `Reading ${host}…` });
+              }
+            }
+            return;
+          }
+          if (evt.type === "tool_result") {
+            const item = toolCalls.get(evt.data?.toolUseId);
+            if (item && evt.data?.isError) {
+              item.status = "failed";
+              item.error = safeToolError(evt.data?.content);
+            }
+            return;
+          }
+          if (evt.type !== "assistant") return;
+          for (const block of evt.data?.message?.content ?? []) {
+            if (block?.type === "text" && typeof block.text === "string") {
+              rawText += block.text;
             }
           }
-          return;
-        }
-        if (evt.type === "tool_result") {
-          const item = toolCalls.get(evt.data?.toolUseId);
-          if (item && evt.data?.isError) {
-            item.status = "failed";
-            item.error = safeToolError(evt.data?.content);
-          }
-          return;
-        }
-        if (evt.type !== "assistant") return;
-        for (const block of evt.data?.message?.content ?? []) {
-          if (block?.type === "text" && typeof block.text === "string") {
-            rawText += block.text;
-          }
-        }
-      },
-    });
+        },
+      });
+    } catch (error) {
+      runtimeFailure = error;
+      throw error;
+    }
+    if (runtimeResult?.ok === false) {
+      const error = new Error(runtimeResult.error || "AI search could not finish.");
+      error.code = runtimeResult.code || "AI_WEB_SEARCH_RUNTIME_FAILED";
+      runtimeFailure = error;
+      throw error;
+    }
     return rawText;
   }
 
@@ -461,7 +476,13 @@ export async function runAiWebSearch({
 
   if (!outcome.body.ok) {
     const message =
-      outcome.body.error?.message || "AI web search failed to produce usable results.";
+      runtimeFailure?.code === "RUNTIME_TIMEOUT"
+        ? "AI search took too long to finish. Try it again."
+        : outcome.body.code === BOUNDED_AI_CODES.AI_SCHEMA_INVALID
+          ? "AI search returned unusable results. Try it again."
+          : outcome.body.code === BOUNDED_AI_CODES.AI_CAP_EXCEEDED
+            ? outcome.body.error?.message
+            : "AI search couldn't finish. Try it again.";
     const coverage = normalizeQueryResults({
       selected,
       queriesRun: [],
@@ -518,6 +539,13 @@ export async function runAiWebSearch({
     ...receiptOnly.map((offer) => ({ offer, receiptOnly: true })),
   ];
   const resolutionCache = new Map();
+  let hydratedCount = 0;
+  if (hydrationInputs.length) {
+    onProgress?.({
+      type: "activity",
+      message: `Checking details for ${hydrationInputs.length} discovered job${hydrationInputs.length === 1 ? "" : "s"}…`,
+    });
+  }
   const hydratedInputs = await mapBounded(
     hydrationInputs,
     HYDRATION_CONCURRENCY,
@@ -533,6 +561,11 @@ export async function runAiWebSearch({
         resolutionCache,
       });
       throwIfSearchAborted(signal);
+      hydratedCount += 1;
+      onProgress?.({
+        type: "activity",
+        message: `Checked details for ${hydratedCount} of ${hydrationInputs.length} discovered jobs…`,
+      });
       return { offer, receiptOnly: isReceiptOnly, hydrated };
     }
   );
@@ -576,6 +609,12 @@ export async function runAiWebSearch({
   // A disconnect that lands after the model finished but before this point
   // must not write a partial result or return a success-shaped summary.
   throwIfSearchAborted(signal);
+  if (survivors.length) {
+    onProgress?.({
+      type: "activity",
+      message: `Saving ${survivors.length} qualified job${survivors.length === 1 ? "" : "s"}…`,
+    });
+  }
   const persistedOffers = survivors.length
     ? captureAndPersistOffersIfDb({
         repoRoot,

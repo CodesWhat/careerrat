@@ -293,8 +293,19 @@ function messageForModel(message) {
       ? `\n[Exported packet state: ${JSON.stringify(packetExport).slice(0, 8_000)}]`
       : "";
     const search = message.artifacts?.find((artifact) => artifact.kind === "search_run");
-    const searchContext = search
-      ? `\n[Job search state: ${JSON.stringify(search).slice(0, 8_000)}]`
+    if (search) content = searchResultText(search);
+    const searchForModel = search
+      ? {
+          kind: search.kind,
+          title: search.title,
+          purpose: search.purpose,
+          status: search.status,
+          summary: search.summary,
+          ...(search.status === "failed" ? { error: { message: searchResultText(search) } } : {}),
+        }
+      : null;
+    const searchContext = searchForModel
+      ? `\n[Job search state: ${JSON.stringify(searchForModel).slice(0, 8_000)}]`
       : "";
     const companies = message.artifacts?.find((artifact) => artifact.kind === "company_proposals");
     const companyContext = companies
@@ -2191,7 +2202,12 @@ function compactSearchError(error) {
 
 function searchRunArtifact({ run, sources = null, reused = false, parked = false } = {}) {
   const purpose = String(run?.purpose || "manual-search");
-  const titlePrefix = purpose === "first-search" ? "First job search" : "Job search";
+  const titlePrefix =
+    purpose === "first-search"
+      ? "First job search"
+      : purpose === "ai-web-search"
+        ? "AI web search"
+        : "Job search";
   return {
     kind: "search_run",
     title: `${titlePrefix}: ${searchStatusLabel(run)}`,
@@ -2202,7 +2218,10 @@ function searchRunArtifact({ run, sources = null, reused = false, parked = false
     parked: Boolean(parked),
     sources: sources && typeof sources === "object" ? JSON.parse(JSON.stringify(sources)) : null,
     summary: compactSearchSummary(run?.summary),
-    error: compactSearchError(run?.error),
+    error:
+      purpose === "ai-web-search" && run?.status === "failed"
+        ? { message: searchResultText({ ...run, purpose }) }
+        : compactSearchError(run?.error),
   };
 }
 
@@ -2254,7 +2273,9 @@ async function startExpandedSourceSearch({
 
 function searchResultText(run) {
   if (run?.status === "failed") {
-    return `The job search stopped: ${run.error?.message || "the search could not be completed."}`;
+    return run?.purpose === "ai-web-search"
+      ? "AI search stopped before it finished. Try it again."
+      : "The job search stopped before it finished. Try it again.";
   }
   if (run?.status === "completed") {
     const summary = compactSearchSummary(run.summary) || {};

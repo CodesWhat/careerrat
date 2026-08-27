@@ -129,6 +129,34 @@ test("runAiWebSearch gives installed runtimes the same structured output schema 
   assert.equal(receivedSchema.properties.roles.maxItems, 40);
 });
 
+test("runAiWebSearch gives installed web research enough time and preserves runtime failures", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  let calls = 0;
+  let receivedTimeoutMs = null;
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ timeoutMs, onEvent }) => {
+      calls += 1;
+      receivedTimeoutMs = timeoutMs;
+      const failure = {
+        ok: false,
+        error: "Installed AI request timed out.",
+        code: "RUNTIME_TIMEOUT",
+      };
+      onEvent({ type: "error", data: { message: failure.error, code: failure.code } });
+      onEvent({ type: "result", data: failure });
+      return failure;
+    },
+  });
+
+  assert.equal(calls, 1, "a runtime failure must not be retried as invalid JSON");
+  assert.equal(receivedTimeoutMs, 8 * 60 * 1000);
+  assert.equal(result.errors[0], "AI search took too long to finish. Try it again.");
+  assert.doesNotMatch(result.errors[0], /schema|route|runtime|provider/i);
+  assert.deepEqual(result.failedPromptIds, ["p1"]);
+});
+
 test("runAiWebSearch hydrates a bounded number of roles concurrently and preserves input receipt order", async () => {
   const repoRoot = repo({ prompts: 1 });
   const roles = Array.from({ length: 9 }, (_, index) =>
@@ -165,6 +193,44 @@ test("runAiWebSearch hydrates a bounded number of roles concurrently and preserv
     result.sources.map((source) => source.url),
     roles.map((item) => item.url)
   );
+});
+
+test("runAiWebSearch refreshes durable activity through hydration and before persistence", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  const timeline = [];
+
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: assistantJson({
+      roles: [role()],
+      queries_run: [{ prompt_id: "p1", query: "applied AI jobs" }],
+    }),
+    resolveJobUrlImpl: async (url) => {
+      timeline.push("hydrating");
+      return { bodyFetchStatus: "resolved", url, bodyText: fullJd() };
+    },
+    onProgress: (event) => {
+      if (event?.type !== "activity") return;
+      timeline.push(event.message);
+      if (/saving/i.test(event.message)) {
+        assert.equal(
+          readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search").length,
+          0,
+          "the persistence heartbeat must land before the database write"
+        );
+      }
+    },
+  });
+
+  assert.equal(result.new, 1);
+  assert.deepEqual(timeline, [
+    "Running 1 saved search prompt…",
+    "Checking details for 1 discovered job…",
+    "hydrating",
+    "Checked details for 1 of 1 discovered jobs…",
+    "Saving 1 qualified job…",
+  ]);
 });
 
 test("runAiWebSearch hard-dedupes batch and DB rows and assigns review/likely-cut gates", async () => {
