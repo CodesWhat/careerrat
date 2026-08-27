@@ -639,6 +639,32 @@ test("plain fetch: an 'expired'-classified page still returns resolved (honest s
   assert.match(result.bodyText, /expired/);
 });
 
+test("hydrateJobOffer rejects an inactive employer career account", async () => {
+  const url = "https://thegroupnyc.applytojob.com/apply/9Qc0WGm5TR/Assistant-General-Manager";
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "The Group NYC",
+      title: "Assistant General Manager",
+      url,
+      bodyText: "Unverified open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      rejectExpired: true,
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        htmlResponse(`
+          <html><head><title>JazzHR - Inactive Career Page</title></head>
+          <body><h1>This account is no longer active.</h1><a href="/apply">Apply</a></body></html>
+        `),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.match(hydrated.bodyFetchReason, /no longer active/i);
+});
+
 test("plain fetch: a network error -> deferred with the error message", async () => {
   const result = await resolveJobUrl("https://example-startup.com/careers/eng-5", {
     fetchImpl: async () => {

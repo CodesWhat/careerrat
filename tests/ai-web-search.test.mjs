@@ -159,6 +159,7 @@ test("AI web search uses the provider-neutral web research policy without changi
   assert.equal(calls.length, 1, "lean usage mode still controls prompt breadth only");
   assert.equal(calls[0].aiOperation, undefined);
   assert.equal(calls[0].executionPlan, executionPlan);
+  assert.equal(calls[0].useExecutionPlanRoute, true);
 });
 
 test("runAiWebSearch rejects aggregator result pages and expired redirects before hydration", async () => {

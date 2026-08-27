@@ -27,6 +27,30 @@ test("expired body text wins even when generic apply text is present", () => {
   assert.equal(result.code, "expired_body");
 });
 
+test("an inactive employer account wins over generic application-site controls", () => {
+  const result = classifyLiveness({
+    status: 200,
+    finalUrl: "https://employer.applytojob.com/apply/abc/Assistant-General-Manager",
+    bodyText: "JazzHR Inactive Career Page. This account is no longer active. Learn more.",
+    applyControls: ["Apply"],
+  });
+
+  assert.equal(result.result, "expired");
+  assert.equal(result.code, "expired_body");
+});
+
+test("a bare job-expired banner wins over recommendation and sign-in controls", () => {
+  const result = classifyLiveness({
+    status: 200,
+    finalUrl: "https://aggregator.example/job-listing/event-operations-manager",
+    bodyText: "Job expired. This job from Apr 30, 2026 is no longer available for applications.",
+    applyControls: ["Apply", "Sign in"],
+  });
+
+  assert.equal(result.result, "expired");
+  assert.equal(result.code, "expired_body");
+});
+
 test("an expired LinkedIn redirect is expired even when the destination has apply controls", () => {
   const result = classifyLiveness({
     status: 200,

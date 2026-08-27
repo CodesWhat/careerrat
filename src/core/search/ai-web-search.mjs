@@ -586,6 +586,7 @@ export async function runAiWebSearch({
           action: AI_WEB_SEARCH_LABELS.action,
           operation: AI_WEB_SEARCH_LABELS.operation,
           ...(executionPlan ? { executionPlan } : { aiOperation: "research.web" }),
+          useExecutionPlanRoute: Boolean(executionPlan),
           input: correction
             ? `${typeof baseInput === "string" ? baseInput : JSON.stringify(baseInput)}\n\n${correction}`
             : baseInput,
