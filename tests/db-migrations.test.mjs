@@ -54,9 +54,9 @@ test("re-running against a db already at the latest version is a no-op", () => {
   assert.equal(after, before, "no new _migrations rows on a no-op re-run");
 });
 
-test("migration 010-016 preserve workspace state through shared app operations", () => {
+test("migration 010-017 preserve workspace state through shared app operations", () => {
   assert.deepEqual(
-    ALL_MIGRATIONS.slice(-7).map((migration) => [migration.id, migration.name]),
+    ALL_MIGRATIONS.slice(-8).map((migration) => [migration.id, migration.name]),
     [
       [10, "workspace-agent"],
       [11, "linkedin-profile-proposals"],
@@ -65,8 +65,31 @@ test("migration 010-016 preserve workspace state through shared app operations",
       [14, "chat-first-preferences"],
       [15, "resume-extractions"],
       [16, "app-operations"],
+      [17, "remove-retired-form-fields"],
     ]
   );
+});
+
+test("migration 017 removes retired form fields without changing supported answers", () => {
+  const db = freshDb();
+  runMigrations(db, ALL_MIGRATIONS.slice(0, -1));
+  db.prepare("INSERT INTO candidate_form_defaults (id, data) VALUES (1, ?)").run(
+    JSON.stringify({
+      work_authorization: "",
+      requires_sponsorship: "",
+      screening_answers: { "favorite shift": "Dinner" },
+      auto_submit: false,
+    })
+  );
+
+  const result = runMigrations(db);
+  const saved = JSON.parse(
+    db.prepare("SELECT data FROM candidate_form_defaults WHERE id = 1").get().data
+  );
+
+  assert.deepEqual(result.applied, [17]);
+  assert.equal(Object.hasOwn(saved, "auto_submit"), false);
+  assert.deepEqual(saved.screening_answers, { "favorite shift": "Dinner" });
 });
 
 test("migration 016 creates bounded, indexed durable app operations", () => {
