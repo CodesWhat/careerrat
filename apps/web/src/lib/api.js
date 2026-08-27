@@ -133,10 +133,10 @@ export function runWorkspaceIntent(type, entity, input = {}) {
 // row: appends `text` to the one durable workspace thread and returns the
 // assistant's reply already appended (see workspace-agent.mjs's own
 // contract) — no separate poll is needed to see the reply.
-export function sendWorkspaceMessage(text, context) {
+export function sendWorkspaceMessage(text, context, choice) {
   return apiFetch("/api/workspace/message", {
     method: "POST",
-    body: JSON.stringify({ text, ...(context ? { context } : {}) }),
+    body: JSON.stringify({ text, ...(context ? { context } : {}), ...(choice ? { choice } : {}) }),
   });
 }
 
@@ -578,10 +578,10 @@ export function startChat(skill, input) {
   });
 }
 
-export function sendChatMessage(chatId, text) {
+export function sendChatMessage(chatId, text, choice) {
   return apiFetch("/api/chat/message", {
     method: "POST",
-    body: JSON.stringify({ chatId, text }),
+    body: JSON.stringify({ chatId, text, ...(choice ? { choice } : {}) }),
   });
 }
 
@@ -911,10 +911,10 @@ export function appendJobThreadMessage({
   });
 }
 
-export function sendJobThreadTurn({ applicationId, text } = {}) {
+export function sendJobThreadTurn({ applicationId, text, choice } = {}) {
   return apiFetch("/api/chat-first/job-thread/turn", {
     method: "POST",
-    body: JSON.stringify({ applicationId, text }),
+    body: JSON.stringify({ applicationId, text, ...(choice ? { choice } : {}) }),
   });
 }
 

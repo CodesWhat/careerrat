@@ -1431,7 +1431,24 @@ describe("ChatFirstAppView", () => {
               role: "assistant",
               kind: "text",
               text: "Should I keep this company in your search?",
-              metadata: { answerMode: "yes-no" },
+              metadata: {
+                choicePrompt: {
+                  id: "choice-company",
+                  version: 1,
+                  threadId: "workspace-main",
+                  messageId: "binary-question",
+                  question: "Should I keep this company in your search?",
+                  mode: "binary",
+                  minSelections: 1,
+                  maxSelections: 1,
+                  allowText: true,
+                  options: [
+                    { id: "yes", label: "Yes", actionRef: { input: { text: "Yes" } } },
+                    { id: "no", label: "No", actionRef: { input: { text: "No" } } },
+                  ],
+                  state: "pending",
+                },
+              },
             },
           ],
         },
@@ -1458,7 +1475,11 @@ describe("ChatFirstAppView", () => {
     visit(tree);
 
     buttons.find((button) => button.props.children === "Yes").props.onClick();
-    expect(submitComposer).toHaveBeenCalledWith("Yes");
+    expect(submitComposer).toHaveBeenCalledWith("Yes", {
+      promptId: "choice-company",
+      version: 1,
+      optionIds: ["yes"],
+    });
   });
 
   it("keeps durable Today artifacts actionable without repeating an activity link", async () => {

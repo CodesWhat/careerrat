@@ -16,6 +16,7 @@ import {
   retryDeepIngestSource,
   runAiWebSearchStream,
   scheduleInterview,
+  sendChatMessage,
   sendWorkspaceMessage,
   setAppStatus,
   setAutomationSessionProvider,
@@ -242,7 +243,7 @@ describe("retryDeepIngestSource", () => {
 });
 
 describe("sendWorkspaceMessage", () => {
-  it("carries the selected job context into the durable agent turn", async () => {
+  it("carries selected context and a choice reference into the durable agent turn", async () => {
     const fetchMock = vi.fn(
       async () =>
         new Response(JSON.stringify({ ok: true, data: { messages: [] } }), {
@@ -252,12 +253,35 @@ describe("sendWorkspaceMessage", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
     const context = { pathname: "/jobs", jobId: "app-temporal" };
+    const choice = { promptId: "choice-1", version: 1, optionIds: ["yes"] };
 
-    await sendWorkspaceMessage("Change the résumé for this role.", context);
+    await sendWorkspaceMessage("Yes", context, choice);
 
     expect(fetchMock).toHaveBeenCalledWith("/api/workspace/message", {
       method: "POST",
-      body: JSON.stringify({ text: "Change the résumé for this role.", context }),
+      body: JSON.stringify({ text: "Yes", context, choice }),
+      headers: { "content-type": "application/json" },
+    });
+  });
+});
+
+describe("sendChatMessage", () => {
+  it("sends the same durable choice reference used by the transcript button", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ accepted: true }), {
+          status: 202,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const choice = { promptId: "choice-1", version: 1, optionIds: ["no"] };
+
+    await sendChatMessage("chat-1", "No", choice);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/chat/message", {
+      method: "POST",
+      body: JSON.stringify({ chatId: "chat-1", text: "No", choice }),
       headers: { "content-type": "application/json" },
     });
   });

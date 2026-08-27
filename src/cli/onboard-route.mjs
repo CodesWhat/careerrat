@@ -475,9 +475,18 @@ function normalizeOnboardingTranscript(value) {
         normalized.eventId = cursor.eventId;
       }
     }
-    if (message?.answerMode === "yes-no" || message?.metadata?.answerMode === "yes-no") {
+    const binaryChoice =
+      message?.metadata?.choicePrompt?.mode === "binary" &&
+      message.metadata.choicePrompt.state === "pending";
+    if (
+      message?.answerMode === "yes-no" ||
+      message?.metadata?.answerMode === "yes-no" ||
+      binaryChoice
+    ) {
       normalized.answerMode = "yes-no";
-      normalized.metadata = { answerMode: "yes-no" };
+      normalized.metadata = binaryChoice
+        ? { choicePrompt: cloneJsonValue(message.metadata.choicePrompt, null) }
+        : { answerMode: "yes-no" };
     }
     if (message.role === "assistant" && Array.isArray(message.blocks)) {
       normalized.blocks = message.blocks.slice(0, 20).flatMap((block) => {

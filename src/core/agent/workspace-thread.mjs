@@ -4,6 +4,7 @@ import { parseChatAnswerMode, stripChatConfirmationBlocks } from "../ai/chat-ans
 import { requireDb } from "../db/connection.mjs";
 import { withTransaction } from "../db/transaction.mjs";
 import { collapseUnansweredOnboardingPrompts } from "../onboarding/transcript-cleanup.mjs";
+import { choiceMetadataForMessage, resolvePendingMessageChoice } from "./choice-prompt.mjs";
 
 export const WORKSPACE_THREAD_ID = "workspace-main";
 
@@ -258,22 +259,30 @@ export function workspaceOnboardingHandoff({
     const preserved = currentMessages.filter(
       (message) => message.metadata?.source !== "onboarding"
     );
-    const imported = [...messages, { role: "assistant", text: finalText }].map(
-      (message, index) => ({
-        id: `onboarding-${transcriptHash.slice(0, 20)}-${index + 1}`,
+    const imported = [...messages, { role: "assistant", text: finalText }].map((message, index) => {
+      const id = `onboarding-${transcriptHash.slice(0, 20)}-${index + 1}`;
+      const metadata = choiceMetadataForMessage({
+        metadata: {
+          ...(message.metadata || {}),
+          source: "onboarding",
+          handoffHash: transcriptHash,
+        },
+        role: message.role,
+        threadId: WORKSPACE_THREAD_ID,
+        messageId: id,
+        text: message.text,
+      });
+      return {
+        id,
         threadId: WORKSPACE_THREAD_ID,
         sequence: index + 1,
         role: message.role,
         kind: "text",
         text: message.text,
         createdAt: completedAt,
-        metadata: {
-          ...(message.metadata || {}),
-          source: "onboarding",
-          handoffHash: transcriptHash,
-        },
-      })
-    );
+        metadata,
+      };
+    });
     const ordered = [...imported, ...preserved].map((message, index) => ({
       ...message,
       sequence: index + 1,
@@ -323,6 +332,7 @@ export function workspaceMessageAppend({
   artifacts,
   error,
   metadata,
+  choice,
   now,
   id,
 } = {}) {
@@ -338,6 +348,9 @@ export function workspaceMessageAppend({
   });
   const at = dateIso(now);
   const db = requireDb({ repoRoot, env });
+  const messageId = String(id || randomUUID());
+  const safeMetadata = jsonClone(metadata, "metadata");
+  const safeChoice = jsonClone(choice, "choice reply");
 
   const result = withTransaction(db, () => {
     const thread = ensureThread(db, at);
@@ -346,8 +359,30 @@ export function workspaceMessageAppend({
         "SELECT coalesce(max(sequence), 0) + 1 AS next FROM workspace_messages WHERE thread_id = ?"
       )
       .get(WORKSPACE_THREAD_ID).next;
+    const choiceResult =
+      cleanRole === "user"
+        ? resolvePendingMessageChoice(readMessages(db), {
+            text: cleanMessageText,
+            choice: safeChoice,
+            now: at,
+          })
+        : null;
+    if (choiceResult) {
+      db.prepare("UPDATE workspace_messages SET data = ? WHERE id = ?").run(
+        JSON.stringify(choiceResult.message),
+        choiceResult.message.id
+      );
+    }
+    const messageMetadata = choiceMetadataForMessage({
+      metadata: safeMetadata,
+      role: cleanRole,
+      threadId: WORKSPACE_THREAD_ID,
+      messageId,
+      text: cleanMessageText,
+    });
+    if (choiceResult) messageMetadata.choiceResolution = choiceResult.resolution;
     const message = {
-      id: String(id || randomUUID()),
+      id: messageId,
       threadId: WORKSPACE_THREAD_ID,
       sequence,
       role: cleanRole,
@@ -359,7 +394,7 @@ export function workspaceMessageAppend({
     if (entity !== undefined) message.entity = jsonClone(entity, "entity");
     if (artifacts !== undefined) message.artifacts = jsonClone(artifacts, "artifacts");
     if (error !== undefined) message.error = jsonClone(error, "error");
-    if (metadata !== undefined) message.metadata = jsonClone(metadata, "metadata");
+    if (Object.keys(messageMetadata).length) message.metadata = messageMetadata;
 
     db.prepare(
       "INSERT INTO workspace_messages (id, thread_id, sequence, data) VALUES (?, ?, ?, ?)"

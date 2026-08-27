@@ -1,4 +1,3 @@
-import { isPlainYesNoQuestion } from "../../../../src/core/ai/chat-answer-mode.mjs";
 import { resolvePersistedErrorCopy } from "../lib/errorCopy.js";
 import { safeDisplayDetail } from "../lib/safe-display-details.js";
 import { cleanAgentCopy } from "./agent-copy.js";
@@ -32,6 +31,91 @@ function AgentBubble({ agentName = "Paul", children }) {
 
 function UserBubble({ children }) {
   return <div className="chat-first-bubble chat-first-bubble--user">{children}</div>;
+}
+
+function choiceReply(prompt, optionIds) {
+  const selected = optionIds
+    .map((id) => prompt.options.find((option) => option.id === id))
+    .filter(Boolean);
+  return {
+    text: selected.map((option) => option.actionRef?.input?.text || option.label).join(" and "),
+    reference: { promptId: prompt.id, version: prompt.version, optionIds },
+  };
+}
+
+function ChoicePromptActions({ prompt, onAnswer, busy = false }) {
+  const options = Array.isArray(prompt?.options) ? prompt.options : EMPTY_LIST;
+  if (!prompt?.id || prompt.state !== "pending" || !options.length) return null;
+  const status = (
+    <span className="chat-first-choice-actions__status" role="status" aria-live="polite">
+      {busy ? "Saving answer…" : ""}
+    </span>
+  );
+  if (prompt.mode === "multi") {
+    function submit(event) {
+      event.preventDefault();
+      const selected = [...new FormData(event.currentTarget).getAll("choice-option")];
+      if (selected.length < prompt.minSelections || selected.length > prompt.maxSelections) {
+        const first = event.currentTarget.querySelector('input[name="choice-option"]');
+        first?.setCustomValidity(
+          `Choose ${prompt.minSelections === prompt.maxSelections ? prompt.minSelections : `${prompt.minSelections} to ${prompt.maxSelections}`} options.`
+        );
+        first?.reportValidity();
+        first?.setCustomValidity("");
+        return;
+      }
+      const reply = choiceReply(prompt, selected);
+      onAnswer(reply.text, reply.reference);
+    }
+    return (
+      <form className="chat-first-choice-actions" onSubmit={submit}>
+        <fieldset disabled={busy}>
+          <legend className="sr-only">{prompt.question}</legend>
+          <div className="chat-first-choice-actions__options">
+            {options.map((option) => (
+              <label className="chat-first-choice-option" key={option.id}>
+                <input type="checkbox" name="choice-option" value={option.id} />
+                <span>
+                  <strong>{option.label}</strong>
+                  {option.description ? <small>{option.description}</small> : null}
+                </span>
+              </label>
+            ))}
+          </div>
+          <div className="chat-first-choice-actions__footer">
+            <button className="chat-first-pill chat-first-pill--outline" type="submit">
+              {prompt.submitLabel || "Use Selected Options"}
+            </button>
+            {prompt.allowText ? <span>or just type it</span> : null}
+          </div>
+        </fieldset>
+        {status}
+      </form>
+    );
+  }
+  return (
+    <fieldset
+      className={`chat-first-inline-actions chat-first-choice-actions${prompt.mode === "binary" ? " chat-first-binary-actions" : ""}`}
+    >
+      <legend className="sr-only">{prompt.question}</legend>
+      {options.map((option) => (
+        <button
+          className="chat-first-pill chat-first-pill--outline"
+          type="button"
+          key={option.id}
+          disabled={busy}
+          onClick={() => {
+            const reply = choiceReply(prompt, [option.id]);
+            onAnswer(reply.text, reply.reference);
+          }}
+        >
+          {option.label}
+        </button>
+      ))}
+      {prompt.allowText ? <span>or just type it</span> : null}
+      {status}
+    </fieldset>
+  );
 }
 
 function RunReceipt({ receipt }) {
@@ -381,16 +465,11 @@ export function MessageTranscript({
     (action) => action?.intent?.type && action?.intent?.entity
   );
   const latestActionableIndex = latestActions.length ? latestActionStateIndex : -1;
-  const latestDialogueIndex = displayMessages.reduce((latestIndex, message, index) => {
-    return message?.role === "user" || message?.role === "assistant" ? index : latestIndex;
+  const latestChoiceIndex = displayMessages.reduce((latestIndex, message, index) => {
+    return message?.role === "assistant" && message?.metadata?.choicePrompt?.state === "pending"
+      ? index
+      : latestIndex;
   }, -1);
-  const latestDialogue = displayMessages[latestDialogueIndex];
-  const binaryQuestionIndex =
-    latestDialogue?.role === "assistant" &&
-    latestDialogue?.kind === "text" &&
-    isPlainYesNoQuestion(latestDialogue?.text)
-      ? latestDialogueIndex
-      : -1;
 
   return (
     <div className="chat-first-conversation-flow">
@@ -481,22 +560,12 @@ export function MessageTranscript({
           <div className="chat-first-transcript-entry" key={key}>
             {content}
             <AttachedArtifacts message={message} onArtifactAction={onArtifactAction} />
-            {index === binaryQuestionIndex && typeof onAnswer === "function" ? (
-              <fieldset className="chat-first-inline-actions chat-first-binary-actions">
-                <legend className="sr-only">Suggested answers</legend>
-                {["Yes", "No"].map((answer) => (
-                  <button
-                    className="chat-first-pill chat-first-pill--outline"
-                    type="button"
-                    key={answer}
-                    disabled={answerBusy}
-                    onClick={() => onAnswer(answer)}
-                  >
-                    {answer}
-                  </button>
-                ))}
-                <span>or just type it</span>
-              </fieldset>
+            {index === latestChoiceIndex && typeof onAnswer === "function" ? (
+              <ChoicePromptActions
+                prompt={message.metadata.choicePrompt}
+                onAnswer={onAnswer}
+                busy={answerBusy}
+              />
             ) : null}
             {index === latestActionableIndex && typeof onIntentAction === "function" ? (
               <div className="chat-first-inline-actions">

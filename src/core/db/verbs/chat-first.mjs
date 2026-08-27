@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
 
+import {
+  choiceMetadataForMessage,
+  resolvePendingMessageChoice,
+} from "../../agent/choice-prompt.mjs";
 import { workspaceMessagesForDisplay } from "../../agent/workspace-thread.mjs";
 import { PLAIN_ENGLISH_AGENT_VOICE } from "../../ai/agent-voice.mjs";
 import { runBoundedAI } from "../../ai/bounded-ai.mjs";
@@ -359,6 +363,7 @@ export function jobThreadMessageAppend({
   kind = "text",
   text,
   metadata,
+  choice,
   artifacts,
   id,
   now,
@@ -372,7 +377,9 @@ export function jobThreadMessageAppend({
     throw makeError(`unsupported job thread kind: ${cleanKind}`);
   const cleanMessage = cleanText(text, "text");
   const safeMetadata = jsonClone(metadata, "metadata");
+  const safeChoice = jsonClone(choice, "choice reply");
   const safeArtifacts = jsonClone(artifacts, "artifacts");
+  const messageId = cleanId(id || randomUUID(), "message id");
   return runVerb({ repoRoot, env }, (db) => {
     const application = applicationRequired(db, applicationKey);
     const ensured = ensureJobThreadInDb(db, {
@@ -386,15 +393,40 @@ export function jobThreadMessageAppend({
         "SELECT coalesce(max(sequence), 0) + 1 AS next FROM job_thread_messages WHERE thread_id = ?"
       )
       .get(ensured.thread.id).next;
+    const choiceResult =
+      cleanRole === "user"
+        ? resolvePendingMessageChoice(
+            readJsonRows(
+              db,
+              "SELECT data FROM job_thread_messages WHERE thread_id = ? ORDER BY sequence ASC",
+              ensured.thread.id
+            ),
+            { text: cleanMessage, choice: safeChoice, now: at }
+          )
+        : null;
+    if (choiceResult) {
+      db.prepare("UPDATE job_thread_messages SET data = ? WHERE id = ?").run(
+        JSON.stringify(choiceResult.message),
+        choiceResult.message.id
+      );
+    }
+    const messageMetadata = choiceMetadataForMessage({
+      metadata: safeMetadata,
+      role: cleanRole,
+      threadId: ensured.thread.id,
+      messageId,
+      text: cleanMessage,
+    });
+    if (choiceResult) messageMetadata.choiceResolution = choiceResult.resolution;
     const message = {
-      id: cleanId(id || randomUUID(), "message id"),
+      id: messageId,
       threadId: ensured.thread.id,
       sequence,
       role: cleanRole,
       kind: cleanKind,
       text: cleanMessage,
       createdAt: at,
-      ...(safeMetadata === undefined ? {} : { metadata: safeMetadata }),
+      ...(Object.keys(messageMetadata).length ? { metadata: messageMetadata } : {}),
       ...(safeArtifacts === undefined ? {} : { artifacts: safeArtifacts }),
     };
     db.prepare(
@@ -866,7 +898,15 @@ function cleanJobReply(value) {
   }
 }
 
-export async function jobThreadTurn({ repoRoot, env, applicationId, text, call, runAI } = {}) {
+export async function jobThreadTurn({
+  repoRoot,
+  env,
+  applicationId,
+  text,
+  choice,
+  call,
+  runAI,
+} = {}) {
   const user = committedWrite(() =>
     jobThreadMessageAppend({
       repoRoot,
@@ -875,6 +915,7 @@ export async function jobThreadTurn({ repoRoot, env, applicationId, text, call, 
       role: "user",
       kind: "text",
       text,
+      choice,
     })
   );
   try {

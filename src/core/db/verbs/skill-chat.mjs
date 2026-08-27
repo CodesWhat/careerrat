@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
 
+import {
+  choiceMetadataForMessage,
+  resolvePendingMessageChoice,
+} from "../../agent/choice-prompt.mjs";
 import { normalizeSourceReviewArtifact } from "../../discovery/source-review-artifact.mjs";
 import { requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
@@ -113,8 +117,10 @@ export function skillChatMessageAppend({
   kind,
   visibility,
   metadata,
+  choice,
   artifacts,
   runtimeSessionId,
+  id,
   now,
 } = {}) {
   const clean = cleanSkill(skill);
@@ -132,10 +138,19 @@ export function skillChatMessageAppend({
     throw error;
   }
   const cleanVisibility = visibility === "internal" ? "internal" : null;
-  const cleanMetadata = metadata?.answerMode === "yes-no" ? { answerMode: "yes-no" } : null;
+  const cleanMetadata = {
+    ...(metadata?.answerMode === "yes-no" ? { answerMode: "yes-no" } : {}),
+    ...(metadata?.choicePrompt ? { choicePrompt: metadata.choicePrompt } : {}),
+  };
   const cleanMessageArtifacts = cleanArtifacts(artifacts);
   const at = dateIso(now);
   const db = requireDb({ repoRoot, env });
+  const messageId = id ? String(id).trim() : randomUUID();
+  if (!messageId || messageId.length > 500 || messageId.includes("\0")) {
+    const error = new Error("chat message id is invalid");
+    error.code = "BAD_MESSAGE_ID";
+    throw error;
+  }
 
   return withTransaction(db, () => {
     let thread = readThread(db, clean);
@@ -152,8 +167,30 @@ export function skillChatMessageAppend({
         "SELECT coalesce(max(sequence), 0) + 1 AS next FROM skill_chat_messages WHERE thread_id = ?"
       )
       .get(thread.id).next;
+    const choiceResult =
+      cleanRole === "user"
+        ? resolvePendingMessageChoice(readMessages(db, thread.id), {
+            text: cleanMessage,
+            choice,
+            now: at,
+          })
+        : null;
+    if (choiceResult) {
+      db.prepare("UPDATE skill_chat_messages SET data = ? WHERE id = ?").run(
+        JSON.stringify(choiceResult.message),
+        choiceResult.message.id
+      );
+    }
+    const messageMetadata = choiceMetadataForMessage({
+      metadata: cleanMetadata,
+      role: cleanRole,
+      threadId: thread.id,
+      messageId,
+      text: cleanMessage,
+    });
+    if (choiceResult) messageMetadata.choiceResolution = choiceResult.resolution;
     const message = {
-      id: randomUUID(),
+      id: messageId,
       threadId: thread.id,
       sequence,
       role: cleanRole,
@@ -161,7 +198,7 @@ export function skillChatMessageAppend({
       createdAt: at,
       ...(cleanKind ? { kind: cleanKind } : {}),
       ...(cleanVisibility ? { visibility: cleanVisibility } : {}),
-      ...(cleanMetadata ? { metadata: cleanMetadata } : {}),
+      ...(Object.keys(messageMetadata).length ? { metadata: messageMetadata } : {}),
       ...(cleanMessageArtifacts ? { artifacts: cleanMessageArtifacts } : {}),
       ...(runtimeSessionId ? { runtimeSessionId: String(runtimeSessionId).slice(0, 500) } : {}),
     };

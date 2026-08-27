@@ -274,16 +274,14 @@ describe("chat-first durable actions", () => {
 
   it("runs durable assistant turns for job threads and mock interviews", async () => {
     const fetchMock = okFetch();
+    const choice = { promptId: "choice-offer", version: 1, optionIds: ["yes"] };
 
-    await sendJobThreadTurn({ applicationId: "app-1", text: "Coach me on this offer." });
+    await sendJobThreadTurn({ applicationId: "app-1", text: "Yes", choice });
     await sendMockInterviewTurn({ sessionId: "mock-1", text: "I led the migration." });
 
     const calls = fetchMock.mock.calls.map(([path, options]) => [path, JSON.parse(options.body)]);
     expect(calls).toEqual([
-      [
-        "/api/chat-first/job-thread/turn",
-        { applicationId: "app-1", text: "Coach me on this offer." },
-      ],
+      ["/api/chat-first/job-thread/turn", { applicationId: "app-1", text: "Yes", choice }],
       ["/api/chat-first/mock/turn", { sessionId: "mock-1", text: "I led the migration." }],
     ]);
   });

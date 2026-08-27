@@ -1801,7 +1801,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     dispatch({ type: "thread.open", id });
   }
 
-  async function submitComposer(text) {
+  async function submitComposer(text, choice) {
     const clean = String(text || "").trim();
     if (!clean || busy) return;
     if (persistedSkillChat && skillChatSubmitBlocked(activeSkillChat)) return;
@@ -1858,7 +1858,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     }
     const result = await run(async () => {
       if (activeSkillChat?.chatId) {
-        return api.sendChatMessage(activeSkillChat.chatId, clean);
+        return api.sendChatMessage(activeSkillChat.chatId, clean, choice);
       }
       if (ui.activeThread === "mock" && rawMock?.id && rawMock.status !== "ended") {
         return api.sendMockInterviewTurn({ sessionId: rawMock.id, text: clean });
@@ -1871,16 +1871,18 @@ export function ChatFirstApp({ api = chatFirstApi }) {
           api,
           applicationId: activeJob.applicationId,
           text: clean,
+          choice,
         });
       }
       const contextId = ui.composerChips[0];
       const context = contextId ? { pathname: "/jobs", jobId: contextId } : undefined;
-      const preview = await api.previewWorkspaceQuery(clean, context);
+      const preview = choice ? null : await api.previewWorkspaceQuery(clean, context);
       return commitComposerTurn({
         api,
         text: clean,
         preview: preview?.data || preview,
         context,
+        choice,
       });
     });
     if (result) setComposerValue("");

@@ -392,7 +392,9 @@ test("onboarding handoff strips UI control fences and restores clear binary answ
   const messages = workspaceThreadRead({ repoRoot, env: {} }).messages;
   assert.equal(messages[0].text, "What company values matter most to you?");
   assert.doesNotMatch(messages[0].text, /careerrat:confirm|candidate_patch/);
-  assert.equal(messages[1].metadata.answerMode, "yes-no");
+  assert.equal(messages[1].metadata.answerMode, undefined);
+  assert.equal(messages[1].metadata.choicePrompt.mode, "binary");
+  assert.equal(messages[1].metadata.choicePrompt.state, "pending");
 });
 
 test("onboarding handoff preserves explicit binary metadata when text alone cannot infer it", () => {
@@ -415,7 +417,8 @@ test("onboarding handoff preserves explicit binary metadata when text alone cann
 
   const messages = workspaceThreadRead({ repoRoot, env: {} }).messages;
   assert.equal(messages[0].text, "I need to confirm sponsorship. Reply yes or no.");
-  assert.equal(messages[0].metadata.answerMode, "yes-no");
+  assert.equal(messages[0].metadata.answerMode, undefined);
+  assert.equal(messages[0].metadata.choicePrompt.mode, "binary");
 });
 
 test("onboarding handoff excludes internal system instructions from workspace history", () => {
@@ -5048,7 +5051,7 @@ test("search status questions ignore an AI run from a different search execution
   assert.doesNotMatch(result.messages.at(-1).text, /AI|failed|retry|running/i);
 });
 
-test("free-form turns persist the model-declared yes-no answer mode without its control fence", async () => {
+test("free-form turns persist and resolve a durable binary choice across reload", async () => {
   const repoRoot = tempRepo();
   const result = await runWorkspaceAgentTurn({
     repoRoot,
@@ -5071,8 +5074,31 @@ test("free-form turns persist the model-declared yes-no answer mode without its 
 
   const message = result.messages.at(-1);
   assert.equal(message.text, "Should I use your signed-in browser for this?");
-  assert.equal(message.metadata.answerMode, "yes-no");
+  assert.equal(message.metadata.answerMode, undefined);
+  assert.match(message.metadata.choicePrompt.id, /^choice-[a-f0-9]{24}$/);
+  assert.equal(message.metadata.choicePrompt.threadId, WORKSPACE_THREAD_ID);
+  assert.equal(message.metadata.choicePrompt.messageId, message.id);
+  assert.equal(message.metadata.choicePrompt.state, "pending");
   assert.doesNotMatch(message.text, /careerrat:answer/);
+
+  await runWorkspaceAgentTurn({
+    repoRoot,
+    env: {},
+    text: "Yep",
+    callAIImpl: async () => ({ content: [{ type: "text", text: "I’ll use it for this task." }] }),
+  });
+  closeAll();
+  const reloaded = workspaceThreadRead({ repoRoot, env: {} });
+  const resolvedQuestion = reloaded.messages.find((item) => item.id === message.id);
+  const answer = reloaded.messages.find(
+    (item) =>
+      item.role === "user" &&
+      item.metadata?.choiceResolution?.promptId === message.metadata.choicePrompt.id
+  );
+  assert.equal(resolvedQuestion.metadata.choicePrompt.state, "resolved");
+  assert.deepEqual(resolvedQuestion.metadata.choicePrompt.selectedOptionIds, ["yes"]);
+  assert.equal(answer.text, "Yep");
+  assert.deepEqual(answer.metadata.choiceResolution.optionIds, ["yes"]);
 });
 
 test("free-form turns persist and replay only canonical selected-job context", async () => {
@@ -9263,12 +9289,18 @@ test("workspace message route waits for the same agent turn and returns its dura
   });
 
   const response = await callDirect(routes, "POST", "/api/workspace/message", {
-    text: "Keep the context from setup.",
+    text: "Yes",
     context: { pathname: "/jobs", jobId: "app-temporal" },
+    choice: { promptId: "choice-1", version: 1, optionIds: ["yes"] },
   });
   assert.equal(response.status, 200);
   assert.equal(seen.length, 1);
   assert.deepEqual(seen[0].context, { pathname: "/jobs", jobId: "app-temporal" });
+  assert.deepEqual(seen[0].choice, {
+    promptId: "choice-1",
+    version: 1,
+    optionIds: ["yes"],
+  });
   assert.equal(response.body.data.thread.id, WORKSPACE_THREAD_ID);
   assert.equal(response.body.data.messages.at(-1).text, "Same thread reply.");
 });

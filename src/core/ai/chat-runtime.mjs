@@ -562,7 +562,7 @@ export function createChatRuntime({
     session,
     role,
     text,
-    { kind, visibility, metadata, artifacts } = {}
+    { kind, visibility, metadata, artifacts, choice } = {}
   ) {
     if (!session.persistDurably) return;
     skillChatMessageAppend({
@@ -574,6 +574,7 @@ export function createChatRuntime({
       kind,
       visibility,
       metadata,
+      choice,
       artifacts,
       runtimeSessionId: session.id,
     });
@@ -764,9 +765,11 @@ export function createChatRuntime({
   function drainPendingInstalledTurn(session, route) {
     if (!session.pendingMessages.length) return false;
     const drained = session.pendingMessages.splice(0);
-    for (const content of drained) {
+    for (const pending of drained) {
+      const content = typeof pending === "string" ? pending : pending.text;
       persistDurableMessage(session, "user", content, {
         visibility: /^\[SYSTEM\]\s/.test(content) ? "internal" : undefined,
+        choice: typeof pending === "string" ? undefined : pending.choice,
       });
       session.transcript.push({ role: "user", content });
     }
@@ -1256,7 +1259,7 @@ export function createChatRuntime({
   // anything — purely so the client's typing indicator can flip instantly;
   // the pump's own session_state_changed frame is an idempotent confirmation
   // when it lands a moment later.
-  function postMessage(chatId, text) {
+  function postMessage(chatId, text, choice) {
     const trimmed = typeof text === "string" ? text.trim() : "";
     if (!trimmed) {
       const err = new Error("text is required");
@@ -1280,6 +1283,7 @@ export function createChatRuntime({
     if (!(session.route.type === "installed" && session.state === "running")) {
       persistDurableMessage(session, "user", trimmed, {
         visibility: /^\[SYSTEM\]\s/.test(trimmed) ? "internal" : undefined,
+        choice,
       });
     }
     if (session.route.type === "installed") {
@@ -1301,7 +1305,7 @@ export function createChatRuntime({
       // finishes, appending every queued message after that turn's own
       // reply, then kicks exactly one follow-up turn that replays them.
       if (session.state === "running") {
-        session.pendingMessages.push(trimmed);
+        session.pendingMessages.push({ text: trimmed, choice });
         return { accepted: true };
       }
       // No push-queue/child process to feed (see runInstalledTurn's own

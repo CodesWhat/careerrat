@@ -499,6 +499,43 @@ test("job-thread turn persists both sides and grounds bounded AI in canonical ap
   assert.doesNotMatch(prompt, /987654|current_base/);
 });
 
+test("job-thread choice clicks enforce the durable prompt version before appending", async () => {
+  const repoRoot = tempRepo();
+  appUpsert({
+    repoRoot,
+    row: {
+      id: "app-choice-version",
+      company: "Version Labs",
+      role: "Operations Lead",
+      status: "applied",
+    },
+  });
+  const routes = await boot(repoRoot, {
+    callAIImpl: async () =>
+      aiReply({ reply: "Should I draft the reply now?", answerMode: "yes-no" }),
+  });
+  const first = await invoke(routes, "POST", "/api/chat-first/job-thread/turn", {
+    applicationId: "app-choice-version",
+    text: "Check with me first.",
+  });
+  const prompt = first.body.data.assistantMessage.metadata.choicePrompt;
+
+  const stale = await invoke(routes, "POST", "/api/chat-first/job-thread/turn", {
+    applicationId: "app-choice-version",
+    text: "Yes",
+    choice: { promptId: prompt.id, version: prompt.version + 1, optionIds: ["yes"] },
+  });
+
+  assert.equal(stale.status, 409);
+  assert.equal(stale.body.code, "STALE_CHOICE_PROMPT");
+  const state = (await import("../src/core/db/verbs.mjs")).chatFirstStateGet({ repoRoot });
+  const thread = state.jobThreads.find(
+    (candidate) => candidate.applicationId === "app-choice-version"
+  );
+  assert.equal(thread.messages.length, 2);
+  assert.equal(thread.messages[1].metadata.choicePrompt.state, "pending");
+});
+
 test("job-thread turn unwraps a nested JSON reply before it reaches the chat bubble", async () => {
   const repoRoot = tempRepo();
   appUpsert({

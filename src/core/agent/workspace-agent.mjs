@@ -9109,6 +9109,7 @@ export async function runWorkspaceAgentTurn({
   env = process.env,
   text,
   context,
+  choice,
   callAIImpl = callAI,
   signal,
   now = () => new Date(),
@@ -9120,6 +9121,7 @@ export async function runWorkspaceAgentTurn({
     role: "user",
     kind: "text",
     text,
+    choice,
     ...(jobContext ? { metadata: { jobContext } } : {}),
     now,
   });

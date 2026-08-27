@@ -260,7 +260,11 @@ export function resumeHydratedMission({ api, mission, inFlight }) {
   });
 }
 
-export async function commitComposerTurn({ api, text, preview, context }) {
+export async function commitComposerTurn({ api, text, preview, context, choice }) {
+  if (choice) {
+    const response = await api.sendWorkspaceMessage(text, context, choice);
+    return { kind: "message", response };
+  }
   const commit = resolveComposerCommit(preview, text);
   if (commit.kind === "mission") {
     const entity = commit.jobs?.[0] || {};
@@ -308,7 +312,8 @@ export async function projectWorkspaceResultToJobThread({
   });
 }
 
-export async function commitJobThreadComposer({ api, applicationId, text }) {
+export async function commitJobThreadComposer({ api, applicationId, text, choice }) {
+  if (choice) return api.sendJobThreadTurn({ applicationId, text, choice });
   const context = { pathname: "/jobs", jobId: applicationId };
   const previewResponse = await api.previewWorkspaceQuery(text, context);
   const preview = previewResponse?.data || previewResponse;

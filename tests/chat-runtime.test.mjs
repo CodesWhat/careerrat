@@ -769,7 +769,10 @@ test("createChatRuntime: broadcasts a typed yes-no mode and strips its control f
       );
       const stored = skillChatThreadRead({ repoRoot, env, skill: "ingest-profile" }).messages[0];
       assert.equal(stored.text, "Do you require employment sponsorship?");
-      assert.deepEqual(stored.metadata, { answerMode: "yes-no" });
+      assert.equal(stored.metadata.answerMode, undefined);
+      assert.equal(stored.metadata.choicePrompt.mode, "binary");
+      assert.equal(stored.metadata.choicePrompt.messageId, stored.id);
+      assert.equal(stored.metadata.choicePrompt.state, "pending");
     } finally {
       chatRuntime.shutdown();
     }

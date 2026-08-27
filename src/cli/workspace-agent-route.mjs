@@ -163,6 +163,7 @@ export function mountWorkspaceAgentRoutes({
         env,
         text: body?.text,
         context: body?.context,
+        choice: body?.choice,
       });
       sendJson(res, 200, { ok: true, data });
     } catch (error) {

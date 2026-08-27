@@ -29,6 +29,7 @@ function statusForError(error) {
   if (error?.code === "NO_DATABASE") return 409;
   if (error?.code === "NOT_FOUND") return 404;
   if (error?.code === "CONFLICT") return 409;
+  if (["STALE_CHOICE_PROMPT", "CHOICE_ALREADY_RESOLVED"].includes(error?.code)) return 409;
   if (error?.code === "TEXT_TOO_LONG") return 400;
   return 400;
 }
@@ -138,6 +139,7 @@ export function mountChatFirstRoutes({
         ...pathCtx,
         applicationId: body.applicationId,
         text: body.text,
+        choice: body.choice,
         call: callAIImpl,
       })
     )

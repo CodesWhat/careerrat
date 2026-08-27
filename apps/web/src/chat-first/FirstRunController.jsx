@@ -218,6 +218,10 @@ function restoredMessages(payload) {
       const parsed = firstRunAssistantMessage(message?.text || "", id);
       const answerMode =
         parsed.answerMode ||
+        (message?.metadata?.choicePrompt?.mode === "binary" &&
+        message.metadata.choicePrompt.state === "pending"
+          ? "yes-no"
+          : null) ||
         (message?.answerMode === "yes-no" || message?.metadata?.answerMode === "yes-no"
           ? "yes-no"
           : null);

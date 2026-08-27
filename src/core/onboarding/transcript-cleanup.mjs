@@ -96,6 +96,11 @@ export function onboardingMessageIsInternal(message) {
 }
 
 function onboardingAssistantPromptsUser(message) {
+  if (
+    message?.metadata?.choicePrompt?.mode === "binary" &&
+    message.metadata.choicePrompt.state === "pending"
+  )
+    return true;
   if (message?.answerMode === "yes-no" || message?.metadata?.answerMode === "yes-no") return true;
   const text = String(message?.text || "").trim();
   if (/\?\s*$/.test(text)) return true;

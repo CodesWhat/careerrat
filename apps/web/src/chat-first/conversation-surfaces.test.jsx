@@ -86,7 +86,34 @@ describe("TodayConversation", () => {
           role: "assistant",
           kind: "text",
           text: "One quick check: should I keep this company in your search?",
-          metadata: { answerMode: "yes-no" },
+          metadata: {
+            choicePrompt: {
+              id: "choice-question",
+              version: 1,
+              threadId: "workspace-main",
+              messageId: "question",
+              question: "One quick check: should I keep this company in your search?",
+              mode: "binary",
+              minSelections: 1,
+              maxSelections: 1,
+              allowText: true,
+              options: [
+                {
+                  id: "yes",
+                  label: "Yes",
+                  aliases: [],
+                  actionRef: { type: "chat.reply", input: { text: "Yes" } },
+                },
+                {
+                  id: "no",
+                  label: "No",
+                  aliases: [],
+                  actionRef: { type: "chat.reply", input: { text: "No" } },
+                },
+              ],
+              state: "pending",
+            },
+          },
         },
       ],
     });
@@ -109,7 +136,11 @@ describe("TodayConversation", () => {
     expect(buttons.map((button) => button.props.children)).toEqual(["Yes", "No"]);
     expect(buttons.every((button) => button.props.disabled === true)).toBe(true);
     buttons[1].props.onClick();
-    expect(onAnswer).toHaveBeenCalledWith("No");
+    expect(onAnswer).toHaveBeenCalledWith("No", {
+      promptId: "choice-question",
+      version: 1,
+      optionIds: ["no"],
+    });
 
     const answered = markup(
       <MessageTranscript
@@ -120,7 +151,23 @@ describe("TodayConversation", () => {
             role: "assistant",
             kind: "text",
             text: "One quick check: should I keep this company in your search?",
-            metadata: { answerMode: "yes-no" },
+            metadata: {
+              choicePrompt: {
+                id: "choice-question",
+                version: 1,
+                threadId: "workspace-main",
+                messageId: "question",
+                question: "One quick check: should I keep this company in your search?",
+                mode: "binary",
+                minSelections: 1,
+                maxSelections: 1,
+                allowText: true,
+                options: [],
+                state: "resolved",
+                selectedOptionIds: ["no"],
+                resolvedAt: "2026-08-27T16:00:00.000Z",
+              },
+            },
           },
           { id: "answer", role: "user", kind: "text", text: "No" },
         ]}
@@ -142,6 +189,53 @@ describe("TodayConversation", () => {
 
     expect(answered).not.toContain("chat-first-binary-actions");
     expect(untyped).not.toContain("chat-first-binary-actions");
+  });
+
+  it("renders the latest multi-select choice as a semantic keyboard form", () => {
+    const onAnswer = vi.fn();
+    const html = markup(
+      <MessageTranscript
+        onAnswer={onAnswer}
+        answerBusy={true}
+        messages={[
+          {
+            id: "role-question",
+            role: "assistant",
+            kind: "text",
+            text: "Which role directions sound interesting?",
+            metadata: {
+              choicePrompt: {
+                id: "choice-roles",
+                version: 3,
+                threadId: "workspace-main",
+                messageId: "role-question",
+                question: "Which role directions sound interesting?",
+                mode: "multi",
+                minSelections: 1,
+                maxSelections: 3,
+                allowText: true,
+                submitLabel: "Try These Roles",
+                options: [
+                  { id: "event", label: "Event operations" },
+                  { id: "venue", label: "Venue operations" },
+                  { id: "customer", label: "Customer operations" },
+                ],
+                state: "pending",
+              },
+            },
+          },
+        ]}
+      />
+    );
+
+    expect(html).toContain("<fieldset");
+    expect(html).toContain(
+      '<legend class="sr-only">Which role directions sound interesting?</legend>'
+    );
+    expect(html.match(/type="checkbox"/g)).toHaveLength(3);
+    expect(html).toContain("Try These Roles");
+    expect(html).toContain('role="status" aria-live="polite"');
+    expect(html).toContain("Saving answer…");
   });
 
   it("keeps indented cards at the handoff intrinsic desktop widths", () => {
@@ -587,7 +681,7 @@ describe("TodayConversation", () => {
     expect(html).not.toContain("First job search: Running");
   });
 
-  it("offers binary controls for a clear persisted yes-or-no question without model metadata", () => {
+  it("does not invent executable choices from assistant prose without server metadata", () => {
     const html = markup(
       <MessageTranscript
         onAnswer={() => undefined}
@@ -602,8 +696,8 @@ describe("TodayConversation", () => {
       />
     );
 
-    expect(html).toContain(">Yes<");
-    expect(html).toContain(">No<");
+    expect(html).not.toContain(">Yes<");
+    expect(html).not.toContain(">No<");
   });
 
   it("does not collapse a compound persisted question into one Yes or No choice", () => {

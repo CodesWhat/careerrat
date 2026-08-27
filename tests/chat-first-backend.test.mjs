@@ -151,6 +151,36 @@ test("chat-first state hydrates durable research threads and their saved or disc
   });
 });
 
+test("skill chat persists a binary prompt and resolves typed text once", async () => {
+  const api = await import("../src/core/db/verbs.mjs");
+  const repoRoot = tempRepo();
+  const assistant = api.skillChatMessageAppend({
+    repoRoot,
+    skill: "ingest-profile",
+    role: "assistant",
+    text: "Should I keep this role direction?",
+    metadata: { answerMode: "yes-no" },
+    now: new Date("2026-08-27T16:00:00.000Z"),
+  }).message;
+
+  assert.equal(assistant.metadata.answerMode, undefined);
+  assert.equal(assistant.metadata.choicePrompt.threadId, "skill:ingest-profile");
+  assert.equal(assistant.metadata.choicePrompt.messageId, assistant.id);
+  const user = api.skillChatMessageAppend({
+    repoRoot,
+    skill: "ingest-profile",
+    role: "user",
+    text: "Nope",
+    now: new Date("2026-08-27T16:01:00.000Z"),
+  }).message;
+
+  closeAll();
+  const reloaded = api.skillChatThreadRead({ repoRoot, skill: "ingest-profile" });
+  assert.equal(reloaded.messages[0].metadata.choicePrompt.state, "resolved");
+  assert.deepEqual(reloaded.messages[0].metadata.choicePrompt.selectedOptionIds, ["no"]);
+  assert.deepEqual(user.metadata.choiceResolution.optionIds, ["no"]);
+});
+
 function expectSkillChat(threads, skill, { message, decisionAction }) {
   const thread = threads.find((candidate) => candidate.skill === skill);
   assert.ok(thread, `${skill} thread should be present`);
@@ -588,7 +618,7 @@ test("earned job threads project canonical conversations and communications with
   assert.equal(stored.communications, undefined);
 });
 
-test("job-thread turns persist a typed yes-no answer mode on the assistant message", async () => {
+test("job-thread turns persist and hydrate one resolved binary choice", async () => {
   const api = await chatFirstApi();
   const repoRoot = tempRepo();
   seedApplication(repoRoot, {
@@ -614,7 +644,35 @@ test("job-thread turns persist a typed yes-no answer mode on the assistant messa
   });
 
   assert.equal(result.assistantMessage.text, "Should I draft the recruiter reply now?");
-  assert.equal(result.assistantMessage.metadata.answerMode, "yes-no");
+  const prompt = result.assistantMessage.metadata.choicePrompt;
+  assert.equal(result.assistantMessage.metadata.answerMode, undefined);
+  assert.equal(prompt.threadId, "job:app-binary-question");
+  assert.equal(prompt.messageId, result.assistantMessage.id);
+  assert.equal(prompt.state, "pending");
+
+  await api.jobThreadTurn({
+    repoRoot,
+    applicationId: "app-binary-question",
+    text: "Yes",
+    call: async () => ({
+      content: [
+        { type: "text", text: JSON.stringify({ reply: "I’ll draft it.", answerMode: null }) },
+      ],
+    }),
+  });
+
+  closeAll();
+  const hydrated = api.chatFirstStateGet({ repoRoot });
+  const thread = hydrated.jobThreads.find(
+    (candidate) => candidate.applicationId === "app-binary-question"
+  );
+  const question = thread.messages.find((message) => message.id === result.assistantMessage.id);
+  const answer = thread.messages.find(
+    (message) => message.metadata?.choiceResolution?.promptId === prompt.id
+  );
+  assert.equal(question.metadata.choicePrompt.state, "resolved");
+  assert.deepEqual(question.metadata.choicePrompt.selectedOptionIds, ["yes"]);
+  assert.deepEqual(answer.metadata.choiceResolution.optionIds, ["yes"]);
 });
 
 test("unpinning an application that never earned a conversation does not create one", async () => {
