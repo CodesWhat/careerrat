@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { closeSync, openSync, readSync } from "node:fs";
 
 import { PLAIN_ENGLISH_AGENT_VOICE } from "../ai/agent-voice.mjs";
@@ -108,6 +109,14 @@ import {
   sourcedRowsFromScanOffers,
 } from "../scoring/sourced-persistence.mjs";
 import { inferProvider } from "../scoring/sourced-scanner.mjs";
+import {
+  adjacentRoleChoiceQuestion,
+  adjacentRoleCoachingTrigger,
+  buildAdjacentRoleChoicePrompt,
+  buildAdjacentRoleConfirmationPrompt,
+  generateAdjacentRoleProposal,
+  mergeAdjacentRoleTargets,
+} from "../search/adjacent-role-coach.mjs";
 import {
   applyStrategyRecommendation,
   draftStrategyReview,
@@ -2108,6 +2117,8 @@ function compactSearchSummary(summary) {
   if (!summary || typeof summary !== "object") return null;
   const numericKeys = [
     "attemptedSources",
+    "searched",
+    "found",
     "scanned",
     "new",
     "qualified",
@@ -2574,6 +2585,412 @@ export function recordWorkspaceSearchCompletion({ repoRoot, env = process.env, r
     now,
   });
   return workspaceThreadRead({ repoRoot, env });
+}
+
+function careerCoachMessageId(kind, seed) {
+  const digest = createHash("sha256")
+    .update(String(seed || kind))
+    .digest("hex")
+    .slice(0, 24);
+  return `career-coach-${kind}-${digest}`;
+}
+
+function careerCoachMessageForRun(messages, runId) {
+  return (Array.isArray(messages) ? messages : []).find(
+    (message) =>
+      message?.role === "assistant" &&
+      message?.metadata?.careerCoach?.searchRunId === runId &&
+      new Set(["role-selection", "evidence-needed", "proposal-error"]).has(
+        message.metadata.careerCoach.stage
+      )
+  );
+}
+
+function searchRunFromReceipt(message) {
+  const artifact = (Array.isArray(message?.artifacts) ? message.artifacts : []).find(
+    (item) => item?.kind === "search_run"
+  );
+  if (!artifact?.runId || message?.metadata?.searchTerminal !== true) return null;
+  return {
+    id: artifact.runId,
+    purpose: artifact.purpose || message.metadata?.purpose || "manual-search",
+    status: artifact.status || message.metadata?.state,
+    summary: artifact.summary || null,
+    error: artifact.error || null,
+  };
+}
+
+async function recordWorkspaceAdjacentRoleCoaching({
+  repoRoot,
+  env = process.env,
+  run,
+  callAIImpl = callAI,
+  useAI = true,
+  now,
+  signal,
+} = {}) {
+  if (!adjacentRoleCoachingTrigger(run)) return workspaceThreadRead({ repoRoot, env });
+  const current = workspaceThreadRead({ repoRoot, env });
+  const runId = String(run?.id || "");
+  if (careerCoachMessageForRun(current.messages, runId)) return current;
+
+  try {
+    const proposal = await generateAdjacentRoleProposal({
+      repoRoot,
+      env,
+      run,
+      config: candidateConfigGet({ repoRoot, env }),
+      call: callAIImpl,
+      ...(useAI
+        ? {}
+        : {
+            runAI: async () => ({
+              status: 501,
+              body: { ok: false, code: "NO_AI_ROUTE", ai: { used: false } },
+            }),
+          }),
+      signal,
+    });
+    const messageId = careerCoachMessageId("roles", runId);
+    const text = adjacentRoleChoiceQuestion(proposal);
+    const choicePrompt = buildAdjacentRoleChoicePrompt({
+      proposal,
+      threadId: WORKSPACE_THREAD_ID,
+      messageId,
+    });
+    workspaceMessageAppend({
+      repoRoot,
+      env,
+      id: messageId,
+      role: "assistant",
+      kind: "text",
+      text,
+      metadata: {
+        source: "career-coach",
+        careerCoach: {
+          stage: "role-selection",
+          searchRunId: runId,
+          proposal,
+        },
+        choicePrompt,
+      },
+      now,
+    });
+  } catch (error) {
+    const evidenceNeeded = error?.code === "ADJACENT_ROLE_EVIDENCE_TOO_THIN";
+    workspaceMessageAppend({
+      repoRoot,
+      env,
+      id: careerCoachMessageId(evidenceNeeded ? "evidence" : "error", runId),
+      role: "assistant",
+      kind: evidenceNeeded ? "text" : "agent_error",
+      text: evidenceNeeded
+        ? error.message
+        : "I could not build useful role suggestions from that search. I left your targets alone. Tell me about work you have done well, and I can help broaden it.",
+      ...(evidenceNeeded
+        ? {}
+        : {
+            error: {
+              code: "ADJACENT_ROLE_COACHING_FAILED",
+              message: "Career coaching could not build role suggestions.",
+            },
+          }),
+      metadata: {
+        source: "career-coach",
+        careerCoach: {
+          stage: evidenceNeeded ? "evidence-needed" : "proposal-error",
+          searchRunId: runId,
+        },
+      },
+      now,
+    });
+  }
+  return workspaceThreadRead({ repoRoot, env });
+}
+
+function careerCoachPromptForResolution(messages, resolution) {
+  const promptId = String(resolution?.promptId || "");
+  if (!promptId) return null;
+  return (Array.isArray(messages) ? messages : []).find(
+    (message) => message?.metadata?.choicePrompt?.id === promptId
+  );
+}
+
+function selectedProposalRoles(proposal, selectedRoleIds) {
+  const selected = new Set((Array.isArray(selectedRoleIds) ? selectedRoleIds : []).map(String));
+  return (Array.isArray(proposal?.roles) ? proposal.roles : []).filter((role) =>
+    selected.has(String(role?.id))
+  );
+}
+
+function careerCoachOutcomeExists(messages, confirmationPromptId) {
+  return (Array.isArray(messages) ? messages : []).some(
+    (message) =>
+      message?.metadata?.careerCoach?.confirmationPromptId === confirmationPromptId &&
+      new Set(["expansion-applied", "expansion-declined"]).has(message.metadata.careerCoach.stage)
+  );
+}
+
+function joinedRoleTitles(roles) {
+  const labels = roles.map((role) => String(role?.title || "").trim()).filter(Boolean);
+  if (labels.length < 2) return labels[0] || "those directions";
+  return `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
+}
+
+async function applyConfirmedAdjacentRoles({
+  repoRoot,
+  env,
+  promptMessage,
+  startManualSearchImpl,
+  onSearchStarted,
+  searchFetchImpl,
+  now,
+} = {}) {
+  const confirmationPrompt = promptMessage?.metadata?.choicePrompt;
+  const confirmationPromptId = confirmationPrompt?.id;
+  const current = workspaceThreadRead({ repoRoot, env });
+  if (!confirmationPromptId || careerCoachOutcomeExists(current.messages, confirmationPromptId)) {
+    return current;
+  }
+  const coach = promptMessage.metadata?.careerCoach || {};
+  const proposal = coach.proposal;
+  const roles = selectedProposalRoles(proposal, coach.selectedRoleIds);
+  if (!roles.length) {
+    workspaceMessageAppend({
+      repoRoot,
+      env,
+      id: careerCoachMessageId("bad-selection", confirmationPromptId),
+      role: "assistant",
+      kind: "agent_error",
+      text: "I could not match that answer to the role directions. Your targets have not changed.",
+      error: {
+        code: "ADJACENT_ROLE_SELECTION_INVALID",
+        message: "The selected role directions were no longer available.",
+      },
+      metadata: {
+        source: "career-coach",
+        careerCoach: { stage: "proposal-error", confirmationPromptId },
+      },
+      now,
+    });
+    return workspaceThreadRead({ repoRoot, env });
+  }
+
+  const config = candidateConfigGet({ repoRoot, env });
+  const merged = mergeAdjacentRoleTargets({ targeting: config.targeting, roles });
+  if (merged.added.length) {
+    candidateConfigPatch({
+      repoRoot,
+      env,
+      name: "targeting",
+      patch: { role_buckets: merged.roleBuckets },
+    });
+  }
+
+  let operation = null;
+  let run = null;
+  let startError = null;
+  try {
+    operation = await startManualSearchImpl({
+      repoRoot,
+      env,
+      fetchImpl: searchFetchImpl,
+      searchExecutionId: `career-coach-${confirmationPromptId}`,
+    });
+    run = operation?.run || null;
+    if (run) onSearchStarted?.({ operation, run: { ...run, purpose: "manual-search" } });
+  } catch (error) {
+    startError = error;
+  }
+
+  const started = run && new Set(["running", "completed"]).has(run.status);
+  const labels = joinedRoleTitles(roles);
+  const addedText = merged.added.length
+    ? `Added ${joinedRoleTitles(roles.filter((role) => merged.added.includes(role.title)))} as stretch targets.`
+    : "Those directions were already in your targets.";
+  const text = started
+    ? `${addedText} I started a new search with the broader role mix.`
+    : `${addedText} The new search could not start. Open Search and try it again.`;
+  workspaceMessageAppend({
+    repoRoot,
+    env,
+    id: careerCoachMessageId("applied", confirmationPromptId),
+    role: "assistant",
+    kind: started ? "action_result" : "action_error",
+    text,
+    ...(started
+      ? {}
+      : {
+          error: {
+            code: startError?.code || "ADJACENT_ROLE_SEARCH_NOT_STARTED",
+            message: "The broader search could not start.",
+          },
+        }),
+    artifacts: [
+      {
+        kind: "adjacent_role_expansion",
+        title: `Career exploration: ${labels}`,
+        proposalId: proposal?.id || null,
+        roles: roles.map(({ id, title, why, evidenceRefs }) => ({
+          id,
+          title,
+          why,
+          evidenceRefs,
+        })),
+        added: merged.added,
+      },
+      ...(run ? [searchRunArtifact({ run: { ...run, purpose: "manual-search" } })] : []),
+    ],
+    metadata: {
+      source: "career-coach",
+      careerCoach: {
+        stage: "expansion-applied",
+        confirmationPromptId,
+        proposalId: proposal?.id || null,
+        selectedRoleIds: roles.map((role) => role.id),
+        searchRunId: run?.id || null,
+        searchState: run?.status || "failed",
+      },
+    },
+    now,
+  });
+  return workspaceThreadRead({ repoRoot, env });
+}
+
+async function handleAdjacentRoleChoice({
+  repoRoot,
+  env,
+  choiceResolution,
+  startManualSearchImpl,
+  onSearchStarted,
+  searchFetchImpl,
+  now,
+} = {}) {
+  if (!choiceResolution?.promptId) return null;
+  const current = workspaceThreadRead({ repoRoot, env });
+  const promptMessage = careerCoachPromptForResolution(current.messages, choiceResolution);
+  const coach = promptMessage?.metadata?.careerCoach;
+  if (!coach) return null;
+
+  if (coach.stage === "role-selection") {
+    const existing = current.messages.find(
+      (message) =>
+        message?.metadata?.careerCoach?.stage === "confirm-expansion" &&
+        message.metadata.careerCoach.selectionPromptId === choiceResolution.promptId
+    );
+    if (existing) return current;
+    const messageId = careerCoachMessageId("confirm", choiceResolution.promptId);
+    const selectedRoleIds = choiceResolution.optionIds || [];
+    const choicePrompt = buildAdjacentRoleConfirmationPrompt({
+      proposal: coach.proposal,
+      selectedRoleIds,
+      threadId: WORKSPACE_THREAD_ID,
+      messageId,
+    });
+    workspaceMessageAppend({
+      repoRoot,
+      env,
+      id: messageId,
+      role: "assistant",
+      kind: "text",
+      text: choicePrompt.question,
+      metadata: {
+        source: "career-coach",
+        careerCoach: {
+          stage: "confirm-expansion",
+          searchRunId: coach.searchRunId,
+          proposal: coach.proposal,
+          selectionPromptId: choiceResolution.promptId,
+          selectedRoleIds,
+        },
+        choicePrompt,
+      },
+      now,
+    });
+    return workspaceThreadRead({ repoRoot, env });
+  }
+
+  if (coach.stage !== "confirm-expansion") return null;
+  if (choiceResolution.optionIds?.includes("no")) {
+    if (!careerCoachOutcomeExists(current.messages, choiceResolution.promptId)) {
+      workspaceMessageAppend({
+        repoRoot,
+        env,
+        id: careerCoachMessageId("declined", choiceResolution.promptId),
+        role: "assistant",
+        kind: "text",
+        text: "Got it. I left your targets and search alone.",
+        metadata: {
+          source: "career-coach",
+          careerCoach: {
+            stage: "expansion-declined",
+            confirmationPromptId: choiceResolution.promptId,
+            proposalId: coach.proposal?.id || null,
+          },
+        },
+        now,
+      });
+    }
+    return workspaceThreadRead({ repoRoot, env });
+  }
+  if (choiceResolution.optionIds?.includes("yes")) {
+    return applyConfirmedAdjacentRoles({
+      repoRoot,
+      env,
+      promptMessage,
+      startManualSearchImpl,
+      onSearchStarted,
+      searchFetchImpl,
+      now,
+    });
+  }
+  return null;
+}
+
+async function recoverWorkspaceAdjacentRoleCoaching({
+  repoRoot,
+  env,
+  callAIImpl,
+  startManualSearchImpl,
+  onSearchStarted,
+  searchFetchImpl,
+  now,
+} = {}) {
+  let current = workspaceThreadRead({ repoRoot, env });
+  for (const message of current.messages) {
+    const coach = message?.metadata?.careerCoach;
+    const prompt = message?.metadata?.choicePrompt;
+    if (coach?.stage !== "confirm-expansion" || prompt?.state !== "resolved") continue;
+    if (careerCoachOutcomeExists(current.messages, prompt.id)) continue;
+    await handleAdjacentRoleChoice({
+      repoRoot,
+      env,
+      choiceResolution: { promptId: prompt.id, optionIds: prompt.selectedOptionIds || [] },
+      startManualSearchImpl,
+      onSearchStarted,
+      searchFetchImpl,
+      now,
+    });
+    current = workspaceThreadRead({ repoRoot, env });
+  }
+
+  const receipts = current.messages
+    .map((message) => ({ message, run: searchRunFromReceipt(message) }))
+    .filter(({ run }) => run && adjacentRoleCoachingTrigger(run))
+    .reverse();
+  for (const { run } of receipts) {
+    if (careerCoachMessageForRun(current.messages, String(run.id))) continue;
+    await recordWorkspaceAdjacentRoleCoaching({
+      repoRoot,
+      env,
+      run,
+      callAIImpl,
+      useAI: false,
+      now,
+    });
+    current = workspaceThreadRead({ repoRoot, env });
+  }
+  return current;
 }
 
 function recordWorkspaceSearchStart({
@@ -9111,11 +9528,14 @@ export async function runWorkspaceAgentTurn({
   context,
   choice,
   callAIImpl = callAI,
+  startManualSearchImpl = startManualSearchRun,
+  onSearchStarted,
+  searchFetchImpl = fetch,
   signal,
   now = () => new Date(),
 } = {}) {
   const jobContext = canonicalJobContext({ repoRoot, env, context });
-  workspaceMessageAppend({
+  const appended = workspaceMessageAppend({
     repoRoot,
     env,
     role: "user",
@@ -9125,6 +9545,16 @@ export async function runWorkspaceAgentTurn({
     ...(jobContext ? { metadata: { jobContext } } : {}),
     now,
   });
+  const handledChoice = await handleAdjacentRoleChoice({
+    repoRoot,
+    env,
+    choiceResolution: appended.message.metadata?.choiceResolution,
+    startManualSearchImpl,
+    onSearchStarted,
+    searchFetchImpl,
+    now,
+  });
+  if (handledChoice) return handledChoice;
   if (isSearchStatusQuestion(text)) {
     workspaceMessageAppend({
       repoRoot,
@@ -9321,8 +9751,30 @@ export function createWorkspaceAgentRuntime({
       await Promise.allSettled([...sourcingWorkers.values()].map(({ promise }) => promise));
     },
     recoverOrphanedSourcingRuns: reconcileOrphanedSourcingRuns,
+    recoverAdjacentRoleCoaching() {
+      return enqueue(() =>
+        recoverWorkspaceAdjacentRoleCoaching({
+          repoRoot,
+          env,
+          callAIImpl,
+          startManualSearchImpl,
+          onSearchStarted: startSearchInBackground,
+          searchFetchImpl,
+        })
+      );
+    },
     runTurn(input = {}) {
-      return enqueue(() => runWorkspaceAgentTurn({ repoRoot, env, callAIImpl, ...input }));
+      return enqueue(() =>
+        runWorkspaceAgentTurn({
+          repoRoot,
+          env,
+          callAIImpl,
+          startManualSearchImpl,
+          onSearchStarted: startSearchInBackground,
+          searchFetchImpl,
+          ...input,
+        })
+      );
     },
     executeIntent(input = {}) {
       return enqueue(() =>
@@ -9370,7 +9822,18 @@ export function createWorkspaceAgentRuntime({
       );
     },
     recordSearchCompletion(input = {}) {
-      return enqueue(() => recordWorkspaceSearchCompletion({ repoRoot, env, ...input }));
+      return enqueue(async () => {
+        const result = recordWorkspaceSearchCompletion({ repoRoot, env, ...input });
+        if (!adjacentRoleCoachingTrigger(input.run)) return result;
+        return recordWorkspaceAdjacentRoleCoaching({
+          repoRoot,
+          env,
+          callAIImpl,
+          run: input.run,
+          now: input.now,
+          signal: input.signal,
+        });
+      });
     },
     recordSearchStart(input = {}) {
       return enqueue(() => recordWorkspaceSearchStart({ repoRoot, env, ...input }));

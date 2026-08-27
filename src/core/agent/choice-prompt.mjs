@@ -263,12 +263,41 @@ function selectionFromText(prompt, text) {
   if (prompt.mode !== "multi") {
     throw choiceError("typed answer does not match a choice option", "BAD_CHOICE_OPTION");
   }
-  const parts = normalized
-    .split(/\s*(?:,|;|\/|&|\band\b)\s*/i)
-    .map((part) => part.trim())
-    .filter(Boolean);
-  const optionIds = [...new Set(parts.map((part) => byAlias.get(part)))];
-  if (!optionIds.length || optionIds.some((id) => !id) || optionIds.length !== parts.length) {
+  if (normalized.length > 2_000) {
+    throw choiceError("typed answer does not match the available choices", "BAD_CHOICE_OPTION");
+  }
+  const memo = new Map();
+  function resolvePart(value) {
+    const part = value.trim();
+    if (!part) return null;
+    if (memo.has(part)) return memo.get(part);
+    const direct = byAlias.get(part);
+    if (direct) {
+      const match = [direct];
+      memo.set(part, match);
+      return match;
+    }
+    memo.set(part, null);
+    const separators = /\s*(?:,|;|\/|&|\band\b)\s*/gi;
+    let checked = 0;
+    while (checked < 32) {
+      const separator = separators.exec(part);
+      if (!separator) break;
+      checked += 1;
+      const left = resolvePart(part.slice(0, separator.index));
+      if (!left) continue;
+      const right = resolvePart(part.slice(separator.index + separator[0].length));
+      if (!right) continue;
+      const combined = [...new Set([...left, ...right])];
+      if (combined.length === left.length + right.length) {
+        memo.set(part, combined);
+        return combined;
+      }
+    }
+    return null;
+  }
+  const optionIds = resolvePart(normalized);
+  if (!optionIds?.length) {
     throw choiceError("typed answer does not match the available choices", "BAD_CHOICE_OPTION");
   }
   return optionIds;

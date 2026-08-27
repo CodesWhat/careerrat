@@ -65,6 +65,39 @@ test("tracker-dev exposes the durable AI-search shutdown lifecycle", async () =>
   }
 });
 
+test("the listening workspace owner recovers durable career-coach handoffs", async () => {
+  const repoRoot = tempRepo();
+  writeTracker(repoRoot);
+  openDb({ repoRoot });
+  const calls = [];
+  const workspaceAgentRuntime = {
+    recoverOrphanedSourcingRuns() {
+      calls.push("searches");
+    },
+    async recoverAdjacentRoleCoaching() {
+      calls.push("career-coach");
+    },
+    async runTurn() {
+      throw new Error("not used");
+    },
+    async executeIntent() {
+      throw new Error("not used");
+    },
+    async captureIntake() {
+      throw new Error("not used");
+    },
+  };
+  const dev = createDevServer({ repoRoot, workspaceAgentRuntime });
+  try {
+    await dev.listen({ port: 0, host: "127.0.0.1" });
+    assert.deepEqual(calls, ["searches", "career-coach"]);
+  } finally {
+    dev.chatRuntime.shutdown();
+    if (dev.server.listening) await new Promise((resolve) => dev.server.close(resolve));
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("only the listening workspace owner can recover durable background work", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });

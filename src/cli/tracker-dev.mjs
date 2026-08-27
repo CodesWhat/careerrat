@@ -618,6 +618,7 @@ export function createDevServer({
     try {
       runtimeOwnership = acquireWorkspaceRuntimeOwnership({ repoRoot, env });
       workspaceAgentRuntime.recoverOrphanedSourcingRuns();
+      await workspaceAgentRuntime.recoverAdjacentRoleCoaching?.();
       intakeRoutes.recoverOrphans();
       return boundPort;
     } catch (error) {

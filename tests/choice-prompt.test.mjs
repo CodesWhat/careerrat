@@ -128,6 +128,37 @@ test("resolves typed and clicked choices to the same normalized selection", asyn
   assert.equal(typed.prompt.resolvedAt, "2026-08-27T16:00:00.000Z");
 });
 
+test("typed multi-select keeps and inside an option label", async () => {
+  const { createChoicePrompt, resolveChoicePrompt } = await import(
+    "../src/core/agent/choice-prompt.mjs"
+  );
+  const prompt = createChoicePrompt(
+    {
+      threadId: "workspace-main",
+      messageId: "assistant-adjacent",
+      question: "Which directions?",
+      mode: "multi",
+      options: [
+        { id: "event", label: "Event operations" },
+        { id: "training", label: "Training and enablement" },
+        { id: "guest", label: "Guest operations" },
+      ],
+    },
+    {
+      actionRefs: {
+        event: { type: "chat.reply", input: { text: "Event operations" } },
+        training: { type: "chat.reply", input: { text: "Training and enablement" } },
+        guest: { type: "chat.reply", input: { text: "Guest operations" } },
+      },
+    }
+  );
+
+  const resolved = resolveChoicePrompt(prompt, {
+    text: "Event operations and Training and enablement",
+  });
+  assert.deepEqual(resolved.resolution.optionIds, ["event", "training"]);
+});
+
 test("rejects unknown options, stale versions, and replayed resolutions", async () => {
   const { createBinaryChoicePrompt, resolveChoicePrompt } = await import(
     "../src/core/agent/choice-prompt.mjs"
