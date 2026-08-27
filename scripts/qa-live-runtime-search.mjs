@@ -252,6 +252,7 @@ const FIXTURES = {
       ],
       cut_signals: ["more than two office days", "local role outside New York City"],
       excluded_companies: [],
+      fit_bands: { high_min: 85, med_min: 65, fit_floor: 65 },
     },
     prompts: [
       {

@@ -86,6 +86,7 @@ const AI_WEB_SEARCH_PROMPT_CONCURRENCY = 2;
 const AI_WEB_SEARCH_PROMPT_TIMEOUT_MS = 30 * 60 * 1000;
 const AI_WEB_SEARCH_HEARTBEAT_MS = 30 * 1000;
 const MAX_FRESHNESS_RECOVERY_TURNS = 2;
+const MAX_USEFUL_SET_TOP_UP_TURNS = 3;
 const MIN_USEFUL_SET_ROLES = 3;
 const MIN_USEFUL_SET_BUCKETS = 2;
 
@@ -1062,11 +1063,6 @@ export async function runAiWebSearch({
       }));
   }
 
-  const interimCoverage = mergePromptCoverage({ selected, outcomes: allPromptOutcomes });
-  const interimQualification = requalifyCanonicalOffers(canonicalCandidates, { config });
-  const interimUsefulOffers = interimQualification.kept.filter((offer) =>
-    offerMeetsFitFloor(offer, fitFloor)
-  );
   const configuredTargetBuckets = Array.isArray(config?.targeting?.role_buckets)
     ? config.targeting.role_buckets.filter((bucket) =>
         Array.isArray(bucket?.titles) ? bucket.titles.length > 0 : false
@@ -1075,33 +1071,50 @@ export async function runAiWebSearch({
   const targetBuckets = configuredTargetBuckets.filter((bucket) =>
     selected.some((prompt) => promptMatchesBucket(prompt, bucket))
   );
-  const representedBuckets = new Set(
-    targetBuckets
-      .filter((bucket) =>
-        interimUsefulOffers.some((offer) => titleMatchesBucket(offer.title, bucket))
-      )
-      .map((bucket) => bucket.name || JSON.stringify(bucket.titles))
-  );
   const requiredBucketCount = Math.min(MIN_USEFUL_SET_BUCKETS, targetBuckets.length);
-  const needsUsefulSetTopUp =
+  const interimCoverage = mergePromptCoverage({ selected, outcomes: allPromptOutcomes });
+  const canRecoverUsefulSet =
     interimCoverage.failedPromptIds.length === 0 &&
-    allPromptOutcomes.every((outcome) => (outcome.errors || []).length === 0) &&
-    (interimUsefulOffers.length < MIN_USEFUL_SET_ROLES ||
-      representedBuckets.size < requiredBucketCount);
+    allPromptOutcomes.every((outcome) => (outcome.errors || []).length === 0);
 
-  if (needsUsefulSetTopUp) {
-    const missingBuckets = targetBuckets.filter(
-      (bucket) => !representedBuckets.has(bucket.name || JSON.stringify(bucket.titles))
+  function usefulSetState() {
+    const qualification = requalifyCanonicalOffers(canonicalCandidates, { config });
+    const offers = qualification.kept.filter((offer) => offerMeetsFitFloor(offer, fitFloor));
+    const representedBuckets = new Set(
+      targetBuckets
+        .filter((bucket) => offers.some((offer) => titleMatchesBucket(offer.title, bucket)))
+        .map((bucket) => bucket.name || JSON.stringify(bucket.titles))
     );
+    return {
+      complete:
+        offers.length >= MIN_USEFUL_SET_ROLES && representedBuckets.size >= requiredBucketCount,
+      missingBuckets: targetBuckets.filter(
+        (bucket) => !representedBuckets.has(bucket.name || JSON.stringify(bucket.titles))
+      ),
+    };
+  }
+
+  const topUpCounts = new Map(selected.map((prompt) => [prompt.id, 0]));
+  for (
+    let topUpTurn = 0;
+    canRecoverUsefulSet && topUpTurn < MAX_USEFUL_SET_TOP_UP_TURNS;
+    topUpTurn += 1
+  ) {
+    const state = usefulSetState();
+    if (state.complete) break;
     const topUpSpec = selected
       .map((prompt, promptIndex) => ({
         prompt,
         promptIndex,
-        targetsMissingBucket: missingBuckets.some((bucket) => promptMatchesBucket(prompt, bucket)),
+        topUpCount: topUpCounts.get(prompt.id) || 0,
+        targetsMissingBucket: state.missingBuckets.some((bucket) =>
+          promptMatchesBucket(prompt, bucket)
+        ),
       }))
       .sort(
         (left, right) =>
           Number(right.targetsMissingBucket) - Number(left.targetsMissingBucket) ||
+          left.topUpCount - right.topUpCount ||
           left.promptIndex - right.promptIndex
       )[0];
     const consideredCandidates = roles
@@ -1112,6 +1125,7 @@ export async function runAiWebSearch({
       }));
     const consideredPostingKeys = new Set();
     for (const { offer } of consideredCandidates) addPostingIdentity(consideredPostingKeys, offer);
+    topUpCounts.set(topUpSpec.prompt.id, topUpSpec.topUpCount + 1);
     const topUpOutcome = await runSavedPrompt(topUpSpec.prompt, topUpSpec.promptIndex, {
       topUpCandidates: consideredCandidates,
     });
@@ -1120,6 +1134,9 @@ export async function runAiWebSearch({
       recovery: true,
       rejectedPostingKeys: consideredPostingKeys,
     });
+    if ((topUpOutcome.errors || []).length > 0 || (topUpOutcome.failedPromptIds || []).length > 0) {
+      break;
+    }
   }
 
   const toolTrace = allPromptOutcomes.flatMap((result) => result.toolTrace);

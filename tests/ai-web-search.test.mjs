@@ -547,7 +547,7 @@ test("runAiWebSearch reports structured prompt lifecycle and periodic health", a
         promptStatus,
         heartbeat,
       })),
-    [
+    Array.from({ length: 4 }, () => [
       {
         promptId: "p1",
         promptIndex: 1,
@@ -569,28 +569,7 @@ test("runAiWebSearch reports structured prompt lifecycle and periodic health", a
         promptStatus: "completed",
         heartbeat: false,
       },
-      {
-        promptId: "p1",
-        promptIndex: 1,
-        promptTotal: 1,
-        promptStatus: "running",
-        heartbeat: false,
-      },
-      {
-        promptId: "p1",
-        promptIndex: 1,
-        promptTotal: 1,
-        promptStatus: "running",
-        heartbeat: true,
-      },
-      {
-        promptId: "p1",
-        promptIndex: 1,
-        promptTotal: 1,
-        promptStatus: "completed",
-        heartbeat: false,
-      },
-    ]
+    ]).flat()
   );
 });
 
@@ -668,6 +647,10 @@ test("runAiWebSearch refreshes durable activity through hydration and before per
     "Checking details for 1 discovered job…",
     "hydrating",
     "Checked details for 1 of 1 discovered jobs…",
+    "Searching for additional roles for saved prompt 1 of 1…",
+    "Finished saved prompt 1 of 1.",
+    "Searching for additional roles for saved prompt 1 of 1…",
+    "Finished saved prompt 1 of 1.",
     "Searching for additional roles for saved prompt 1 of 1…",
     "Finished saved prompt 1 of 1.",
     "Saving 1 qualified job…",
@@ -1341,7 +1324,7 @@ test("runAiWebSearch rejects a model title that resolves to a different canonica
     }),
   });
 
-  assert.equal(calls, 4, "canonical identity rejection plus useful-set top-up stay bounded");
+  assert.equal(calls, 6, "canonical identity rejection plus useful-set top-ups stay bounded");
   assert.equal(result.new, 0, JSON.stringify(result));
   assert.equal(result.presented, 0, JSON.stringify(result));
   assert.deepEqual(result.reasonCounts, { seniority: 1 });
@@ -1471,11 +1454,10 @@ test("runAiWebSearch replaces a prompt batch erased by canonical liveness once",
           })(url),
   });
 
-  assert.equal(inputs.length, 3);
+  assert.equal(inputs.length, 5);
   assert.equal(typeof inputs[0], "object");
-  assert.equal(typeof inputs[1], "string");
-  assert.equal(typeof inputs[2], "string");
-  assert.deepEqual(plans, [executionPlan, executionPlan, executionPlan]);
+  assert.ok(inputs.slice(1).every((input) => typeof input === "string"));
+  assert.deepEqual(plans, Array(5).fill(executionPlan));
   assert.match(inputs[1], /replacement|recover|fresh/i);
   assert.match(inputs[1], /expired-role/);
   assert.match(inputs[1], /no longer available/i);
@@ -1526,7 +1508,7 @@ test("runAiWebSearch never rehydrates a rejected URL repeated by recovery", asyn
     },
   });
 
-  assert.equal(calls, 3);
+  assert.equal(calls, 5);
   assert.equal(hydrationCounts.get(expiredUrl), 1);
   assert.equal(hydrationCounts.get(activeUrl), 1);
   assert.equal(result.new, 1, JSON.stringify(result));
@@ -1654,7 +1636,7 @@ test("runAiWebSearch sends recovery candidates through the existing hard gates",
     },
   });
 
-  assert.equal(calls, 3);
+  assert.equal(calls, 5);
   assert.deepEqual(hydrated.sort(), [belowFloorUrl, expiredUrl, lowFitUrl, outsideUrl].sort());
   assert.equal(result.invalid, 2);
   assert.deepEqual(result.reasonCounts, { location: 1, salary: 1 });
@@ -1720,9 +1702,9 @@ test("runAiWebSearch continues canonical freshness recovery until a second turn 
     },
   });
 
-  assert.equal(inputs.length, 4);
+  assert.equal(inputs.length, 6);
   assert.ok(inputs.slice(1).every((input) => typeof input === "string"));
-  assert.deepEqual(plans, [executionPlan, executionPlan, executionPlan, executionPlan]);
+  assert.deepEqual(plans, Array(6).fill(executionPlan));
   assert.match(inputs[2], /expired-initial/);
   assert.match(inputs[2], /expired-recovery/);
   assert.match(inputs[2], /stale-board\.example/);
@@ -1803,7 +1785,7 @@ test("runAiWebSearch continues recovery when canonical hard gates erase the firs
     }),
   });
 
-  assert.equal(inputs.length, 4);
+  assert.equal(inputs.length, 6);
   assert.match(inputs[2], /below-floor/);
   assert.match(inputs[2], /salary|compensation|hard filter/i);
   assert.equal(result.presented, 1, JSON.stringify(result));
@@ -1833,10 +1815,10 @@ test("runAiWebSearch caps canonical freshness recovery at two turns", async () =
     }),
   });
 
-  assert.equal(calls, 4);
+  assert.equal(calls, 6);
   assert.equal(result.new, 0);
   assert.equal(result.presented, 0);
-  assert.equal(result.unreadable, 4);
+  assert.equal(result.unreadable, 6);
   assert.deepEqual(result.errors, []);
   assert.deepEqual(result.failedPromptIds, []);
 });
@@ -1883,7 +1865,7 @@ test("runAiWebSearch retries only a canonically erased sibling and keeps dedupe 
         : canonicalResolver()(url),
   });
 
-  assert.deepEqual(Object.fromEntries(calls), { p1: 2, p2: 2 });
+  assert.deepEqual(Object.fromEntries(calls), { p1: 3, p2: 3 });
   assert.equal(result.new, 2, JSON.stringify(result));
   assert.ok(result.duplicates >= 1, JSON.stringify(result));
   assert.deepEqual(
@@ -1974,6 +1956,89 @@ test("runAiWebSearch tops up valid one- and two-prompt runs", async () => {
     assert.equal(result.new, 3, JSON.stringify(result));
     assert.equal(result.presented, 3, JSON.stringify(result));
   }
+});
+
+test("runAiWebSearch gives a selected single prompt multiple bounded chances to reach three roles", async () => {
+  const repoRoot = repo({ prompts: 3 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: { fit_bands: { fit_floor: 0 } },
+  });
+  let calls = 0;
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    promptIds: ["p1"],
+    runSkillStream: async ({ input, onEvent }) => {
+      calls += 1;
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      const roles =
+        calls === 1
+          ? [
+              role({
+                company: "Initial Company",
+                url: "https://initial.example/jobs/role",
+              }),
+            ]
+          : calls === 3
+            ? [
+                role({
+                  company: "Second Company",
+                  url: "https://second.example/jobs/role",
+                }),
+                role({
+                  company: "Third Company",
+                  url: "https://third.example/jobs/role",
+                }),
+              ]
+            : [];
+      emitAssistantJson(onEvent, {
+        roles,
+        queries_run: [
+          { prompt_id: kickoff.prompts[0].id, query: `query ${calls}`, status: "completed" },
+        ],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver(),
+  });
+
+  assert.equal(calls, 3, JSON.stringify(result));
+  assert.equal(result.searched, 1);
+  assert.equal(result.new, 3, JSON.stringify(result));
+  assert.equal(result.presented, 3, JSON.stringify(result));
+});
+
+test("runAiWebSearch exhausts the fixed useful-set cap for one selected prompt", async () => {
+  const repoRoot = repo({ prompts: 3 });
+  const inputs = [];
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    promptIds: ["p1"],
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      emitAssistantJson(onEvent, {
+        roles: [],
+        queries_run: [
+          {
+            prompt_id: kickoff.prompts[0].id,
+            query: `query ${inputs.length}`,
+            status: "completed",
+          },
+        ],
+      });
+      return { ok: true };
+    },
+  });
+
+  assert.equal(inputs.length, 4);
+  assert.ok(inputs.slice(1).every((input) => typeof input === "string"));
+  assert.equal(result.searched, 1);
+  assert.equal(result.new, 0);
+  assert.equal(result.presented, 0);
 });
 
 test("runAiWebSearch counts three canonical same-title postings as a useful set", async () => {
@@ -2211,7 +2276,198 @@ test("runAiWebSearch tops up an underfilled three-prompt useful set once on the 
   );
 });
 
-test("runAiWebSearch caps an invalid useful-set top-up at one turn and reuses hard gates", async () => {
+test("runAiWebSearch continues useful-set recovery across saved prompts after an empty top-up", async () => {
+  const repoRoot = repo({ prompts: 3 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        { name: "Bar leadership", titles: ["Bar Manager", "Head Bartender"] },
+        { name: "Hospitality operations", titles: ["Assistant General Manager"] },
+      ],
+      fit_bands: { fit_floor: 65 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      { id: "p1", text: "Find active Bar Manager and Head Bartender jobs in New York City" },
+      { id: "p2", text: "Find active Assistant General Manager jobs in New York City" },
+      { id: "p3", text: "Find active Event Operations jobs in New York City" },
+    ],
+  });
+  const calls = new Map();
+  const executionPlan = Object.freeze({
+    operation: "research.web",
+    runtimeId: "codex",
+    resolved: Object.freeze({ model: "gpt-5.6-terra", effort: "medium" }),
+  });
+  const receivedPlans = [];
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    executionPlan,
+    runSkillStream: async ({ input, onEvent, executionPlan: receivedPlan }) => {
+      receivedPlans.push(receivedPlan);
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      const promptId = kickoff.prompts[0].id;
+      const attempt = (calls.get(promptId) || 0) + 1;
+      calls.set(promptId, attempt);
+      const roles =
+        attempt === 1 && promptId === "p1"
+          ? [
+              role({
+                company: "Bar One",
+                title: "Bar Manager",
+                location: "New York, NY",
+                url: "https://bar-one.example/jobs/bar-manager",
+              }),
+            ]
+          : attempt === 1 && promptId === "p2"
+            ? [
+                role({
+                  company: "Restaurant Two",
+                  title: "Assistant General Manager",
+                  location: "New York, NY",
+                  url: "https://restaurant-two.example/jobs/assistant-general-manager",
+                }),
+              ]
+            : promptId === "p2"
+              ? [
+                  role({
+                    company: "Restaurant Three",
+                    title: "Assistant General Manager",
+                    location: "New York, NY",
+                    url: "https://restaurant-three.example/jobs/assistant-general-manager",
+                  }),
+                ]
+              : [];
+      emitAssistantJson(onEvent, {
+        roles,
+        queries_run: [
+          { prompt_id: promptId, query: `${promptId} query ${attempt}`, status: "completed" },
+        ],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver({
+      location: "New York, NY",
+      liveness: { result: "active", reason: "visible apply control" },
+    }),
+  });
+
+  assert.deepEqual(Object.fromEntries(calls), { p1: 2, p2: 2, p3: 1 });
+  assert.equal(receivedPlans.length, 5);
+  assert.ok(receivedPlans.every((plan) => plan === executionPlan));
+  assert.equal(result.new, 3, JSON.stringify(result));
+  assert.equal(result.presented, 3, JSON.stringify(result));
+});
+
+test("runAiWebSearch retries a missing target bucket within the bounded useful-set cap", async () => {
+  const repoRoot = repo({ prompts: 3 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        { name: "Bar leadership", titles: ["Bar Manager", "Head Bartender"] },
+        { name: "Hospitality operations", titles: ["Assistant General Manager"] },
+      ],
+      fit_bands: { fit_floor: 65 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      { id: "p1", text: "Find active Bar Manager and Head Bartender jobs in New York City" },
+      { id: "p2", text: "Find active Assistant General Manager jobs in New York City" },
+      { id: "p3", text: "Find active Event Operations jobs in New York City" },
+    ],
+  });
+  const calls = new Map();
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      const promptId = kickoff.prompts[0].id;
+      const attempt = (calls.get(promptId) || 0) + 1;
+      calls.set(promptId, attempt);
+      const roles =
+        promptId === "p1" && attempt === 1
+          ? [
+              role({
+                company: "Bar One",
+                title: "Bar Manager",
+                location: "New York, NY",
+                url: "https://bar-one.example/jobs/bar-manager",
+              }),
+              role({
+                company: "Bar Two",
+                title: "Head Bartender",
+                location: "New York, NY",
+                url: "https://bar-two.example/jobs/head-bartender",
+              }),
+            ]
+          : promptId === "p2" && attempt === 3
+            ? [
+                role({
+                  company: "Restaurant Three",
+                  title: "Assistant General Manager",
+                  location: "New York, NY",
+                  url: "https://restaurant-three.example/jobs/assistant-general-manager",
+                }),
+              ]
+            : [];
+      emitAssistantJson(onEvent, {
+        roles,
+        queries_run: [
+          { prompt_id: promptId, query: `${promptId} query ${attempt}`, status: "completed" },
+        ],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver({
+      location: "New York, NY",
+      liveness: { result: "active", reason: "visible apply control" },
+    }),
+  });
+
+  assert.deepEqual(Object.fromEntries(calls), { p1: 1, p2: 3, p3: 1 });
+  assert.equal(result.new, 3, JSON.stringify(result));
+  assert.equal(result.presented, 3, JSON.stringify(result));
+});
+
+test("runAiWebSearch caps invalid useful-set top-ups at three turns and reuses hard gates", async () => {
   const repoRoot = repo({ prompts: 3 });
   candidateConfigPatch({
     repoRoot,
@@ -2304,7 +2560,7 @@ test("runAiWebSearch caps an invalid useful-set top-up at one turn and reuses ha
     },
   });
 
-  assert.deepEqual(Object.fromEntries(calls), { p1: 2, p2: 1, p3: 1 });
+  assert.deepEqual(Object.fromEntries(calls), { p1: 2, p2: 2, p3: 2 });
   assert.equal(hydrated.filter((url) => url === firstUrl).length, 1);
   assert.equal(result.new, 2, JSON.stringify(result));
   assert.equal(result.presented, 2, JSON.stringify(result));
@@ -2329,9 +2585,15 @@ test("runAiWebSearch keeps an empty useful-set top-up explicitly bounded", async
     },
   });
 
-  assert.equal(inputs.length, 4);
-  assert.equal(typeof inputs[3], "string");
-  assert.match(inputs[3], /underfilled|additional/i);
+  assert.equal(inputs.length, 6);
+  for (const input of inputs.slice(3)) {
+    assert.equal(typeof input, "string");
+    assert.match(input, /underfilled|additional/i);
+  }
+  assert.deepEqual(
+    inputs.slice(3).map((input) => JSON.parse(input.split("\n\n", 1)[0]).prompts[0].id),
+    ["p1", "p2", "p3"]
+  );
   assert.equal(result.new, 0);
   assert.equal(result.presented, 0);
 });
@@ -2417,7 +2679,7 @@ test("runAiWebSearch scopes concentrated rejected hosts to the owning saved prom
         : canonicalResolver()(url),
   });
 
-  assert.deepEqual(Object.fromEntries(calls), { p1: 3, p2: 2 });
+  assert.deepEqual(Object.fromEntries(calls), { p1: 4, p2: 3 });
   assert.equal(result.new, 2, JSON.stringify(result));
 });
 
@@ -2616,7 +2878,7 @@ test("runAiWebSearch scopes a schema correction retry to the prompt that produce
     },
   });
 
-  assert.deepEqual(Object.fromEntries(calls), { p1: 3, p2: 1 });
+  assert.deepEqual(Object.fromEntries(calls), { p1: 4, p2: 2 });
   assert.deepEqual(result.errors, []);
   assert.deepEqual(result.failedPromptIds, []);
   assert.deepEqual(
