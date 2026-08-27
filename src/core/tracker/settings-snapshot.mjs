@@ -99,7 +99,9 @@ export function buildSettingsSnapshot({
   // Optional logo.dev publishable token (PRIVATE candidate config; never committed).
   // Absent → dashboard avatars stay initials chips. No hardcoded default.
   const logoToken = automation?.integrations?.logo_dev_token || automation?.logo_dev_token || "";
-  const configuredFitFloor = Number(targeting?.fit_bands?.fit_floor);
+  const rawFitFloor = targeting?.fit_bands?.fit_floor;
+  const configuredFitFloor =
+    rawFitFloor == null || rawFitFloor === "" ? Number.NaN : Number(rawFitFloor);
   const fitFloor = Number.isFinite(configuredFitFloor) ? configuredFitFloor : 70;
 
   return {

@@ -5,6 +5,7 @@ import { normalizeSourceReviewArtifact } from "../../../../src/core/discovery/so
 import { handleArtifactViewerKeyDown } from "../jobs/ArtifactViewerModal.jsx";
 
 export const handleSourceReviewKeyDown = handleArtifactViewerKeyDown;
+const REVIEW_BATCH_SIZE = 4;
 
 function sourceIcon(type, size = 15) {
   const Icon = type === "rss" ? Rss : type === "browser" ? Globe2 : Search;
@@ -51,6 +52,49 @@ function proposedCandidates(review) {
     );
 }
 
+function pendingCandidates(review) {
+  return proposedCandidates(review).filter(
+    (candidate) => candidate.decision?.status !== "completed"
+  );
+}
+
+export function sourceReviewBatchDecisions(
+  artifact,
+  selectedOptionIds,
+  batchSize = REVIEW_BATCH_SIZE
+) {
+  const review = sourceReviewForArtifact(artifact);
+  if (!review) return null;
+  const batch = pendingCandidates(review).slice(0, batchSize);
+  if (!batch.length) return [];
+  const selected = new Set(Array.isArray(selectedOptionIds) ? selectedOptionIds.map(String) : []);
+  const batchIds = new Set(batch.map((candidate) => candidate.id));
+  if ([...selected].some((id) => !batchIds.has(id))) return null;
+  return batch.map((candidate) => ({
+    candidate,
+    action: selected.has(candidate.id) ? "save" : "discard",
+  }));
+}
+
+export async function submitSourceReviewBatch({
+  artifact,
+  selectedOptionIds,
+  onDecision,
+  onComplete,
+} = {}) {
+  const review = sourceReviewForArtifact(artifact);
+  const decisions = sourceReviewBatchDecisions(artifact, selectedOptionIds);
+  if (!review || !decisions?.length || typeof onDecision !== "function") return false;
+  for (const { candidate, action } of decisions) {
+    const completed = await onDecision(candidate, action);
+    if (completed === false) return false;
+  }
+  if (pendingCandidates(review).length === decisions.length) {
+    await onComplete?.(review.completion);
+  }
+  return true;
+}
+
 export function SourceReviewSummaryCard({ artifact, onOpen }) {
   const review = sourceReviewForArtifact(artifact);
   if (!review) return null;
@@ -89,18 +133,16 @@ export function SourceReviewSummaryCard({ artifact, onOpen }) {
   );
 }
 
-function decisionCopy(candidate) {
-  if (candidate.decision?.status === "failed") return "Try again";
-  if (candidate.decision?.action === "save") return "Added";
-  if (candidate.decision?.action === "discard") return "Skipped";
-  return null;
-}
-
-function SourceCandidateCard({ candidate, busy, onDecision }) {
-  const decided = candidate.decision?.status === "completed";
-  const decision = decisionCopy(candidate);
+function SourceCandidateCard({ candidate, busy }) {
   return (
-    <article className="source-review__card">
+    <label className="source-review__card">
+      <input
+        className="source-review__checkbox"
+        type="checkbox"
+        name="source-option"
+        value={candidate.id}
+        disabled={busy}
+      />
       <div className="source-review__heading">
         <span className="source-review__source-icon">{sourceIcon(candidate.sourceType)}</span>
         <div>
@@ -115,34 +157,39 @@ function SourceCandidateCard({ candidate, busy, onDecision }) {
       </div>
       <p>{candidate.why}</p>
       <span className="source-review__url">{candidate.url}</span>
-      <div className="source-review__actions">
-        {decided ? (
-          <span className="source-review__decision">
-            <CircleCheck aria-hidden="true" size={15} /> {decision}
-          </span>
-        ) : (
-          <>
-            <button
-              className="chat-first-pill chat-first-pill--outline"
-              type="button"
-              disabled={busy}
-              onClick={() => onDecision?.(candidate, "discard")}
-            >
-              Skip
-            </button>
-            <button
-              className="chat-first-pill chat-first-pill--lime"
-              type="button"
-              disabled={busy}
-              onClick={() => onDecision?.(candidate, "save")}
-            >
-              Add source
-            </button>
-          </>
-        )}
-      </div>
-    </article>
+    </label>
   );
+}
+
+export function useReviewDialog({ dialogRef, reviewId, onClose }) {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (!reviewId) return undefined;
+    const dialog = dialogRef.current;
+    const previouslyFocused = document.activeElement;
+    const previousOverflow = document.body.style.overflow;
+    const previousOverscroll = document.body.style.overscrollBehavior;
+    document.body.style.overflow = "hidden";
+    document.body.style.overscrollBehavior = "none";
+    dialog?.focus();
+    function onKeyDown(event) {
+      handleSourceReviewKeyDown({
+        event,
+        onClose: () => onCloseRef.current?.(),
+        dialog,
+        activeElement: document.activeElement,
+      });
+    }
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown, true);
+      document.body.style.overflow = previousOverflow;
+      document.body.style.overscrollBehavior = previousOverscroll;
+      if (previouslyFocused?.isConnected) previouslyFocused.focus?.();
+    };
+  }, [dialogRef, reviewId]);
 }
 
 export function SourceReview({ artifact, busy = false, onDecision, onComplete, onClose }) {
@@ -163,28 +210,7 @@ export function SourceReview({ artifact, busy = false, onDecision, onComplete, o
 
 function SourceReviewDialog({ artifact, busy, onDecision, onComplete, onClose, reviewId }) {
   const dialogRef = useRef(null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-
-  useEffect(() => {
-    if (!reviewId) return undefined;
-    const dialog = dialogRef.current;
-    const previouslyFocused = document.activeElement;
-    dialog?.focus();
-    function onKeyDown(event) {
-      handleSourceReviewKeyDown({
-        event,
-        onClose: () => onCloseRef.current?.(),
-        dialog,
-        activeElement: document.activeElement,
-      });
-    }
-    document.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown, true);
-      if (previouslyFocused?.isConnected) previouslyFocused.focus?.();
-    };
-  }, [reviewId]);
+  useReviewDialog({ dialogRef, reviewId, onClose });
 
   return (
     <SourceReviewContent
@@ -210,11 +236,22 @@ export function SourceReviewContent({
 
   if (!review) return null;
   const proposed = proposedCandidates(review);
+  const pending = pendingCandidates(review);
+  const batch = pending.slice(0, REVIEW_BATCH_SIZE);
   const rejected = review.candidates.filter((candidate) => candidate.status === "rejected");
-  const pendingCount = proposed.filter(
-    (candidate) => candidate.decision?.status !== "completed"
+  const pendingCount = pending.length;
+  const decided = proposed.filter((candidate) => candidate.decision?.status === "completed");
+  const addedCount = decided.filter((candidate) => candidate.decision?.action === "save").length;
+  const skippedCount = decided.filter(
+    (candidate) => candidate.decision?.action === "discard"
   ).length;
   const complete = review.completion?.decision?.status === "completed";
+
+  async function submitBatch(event) {
+    event.preventDefault();
+    const selectedOptionIds = new FormData(event.currentTarget).getAll("source-option");
+    await submitSourceReviewBatch({ artifact, selectedOptionIds, onDecision, onComplete });
+  }
 
   return (
     <div className="packet-viewer-overlay">
@@ -243,19 +280,47 @@ export function SourceReviewContent({
           </button>
         </header>
         <div className="packet-viewer__stage source-review__stage">
-          <div className="source-review__list">
-            {proposed.map((candidate) => (
-              <SourceCandidateCard
-                candidate={candidate}
-                busy={busy}
-                onDecision={onDecision}
-                key={candidate.id}
-              />
-            ))}
-          </div>
+          {decided.length ? (
+            <p className="review-batch__resolved" aria-live="polite">
+              <CircleCheck aria-hidden="true" size={15} /> {decided.length} reviewed · {addedCount}
+              added · {skippedCount} skipped
+            </p>
+          ) : null}
+          {batch.length ? (
+            <form className="review-batch" onSubmit={submitBatch}>
+              <fieldset disabled={busy}>
+                <legend>Which sources should CareerRat add?</legend>
+                <p className="review-batch__help">
+                  Select the useful boards. Saving skips the unselected ones in this batch.
+                  {pendingCount > batch.length
+                    ? ` Showing ${batch.length} of ${pendingCount}.`
+                    : ""}
+                </p>
+                <div className="source-review__list">
+                  {batch.map((candidate) => (
+                    <SourceCandidateCard candidate={candidate} busy={busy} key={candidate.id} />
+                  ))}
+                </div>
+                <footer className="source-review__footer">
+                  <span>
+                    {pendingCount > batch.length
+                      ? `${pendingCount - batch.length} more after this batch`
+                      : "This is the last batch"}
+                  </span>
+                  <button
+                    className="chat-first-pill chat-first-pill--lime"
+                    type="submit"
+                    disabled={busy}
+                  >
+                    Save choices
+                  </button>
+                </footer>
+              </fieldset>
+            </form>
+          ) : null}
           {rejected.length ? (
-            <section className="source-review__rejected" aria-label="Rejected during screening">
-              <h3>Rejected during screening</h3>
+            <details className="source-review__rejected">
+              <summary>{rejected.length} rejected during screening</summary>
               {rejected.map((candidate) => (
                 <div className="source-review__rejected-row" key={candidate.id}>
                   <CircleX aria-hidden="true" size={15} />
@@ -266,27 +331,25 @@ export function SourceReviewContent({
                   </div>
                 </div>
               ))}
-            </section>
+            </details>
           ) : null}
-          <footer className="source-review__footer">
-            <span>
-              {complete
-                ? "Board discovery is complete"
-                : pendingCount
-                  ? `${pendingCount} source${pendingCount === 1 ? "" : "s"} still need a decision`
-                  : "Every source has a decision"}
-            </span>
-            {!complete && pendingCount === 0 ? (
-              <button
-                className="chat-first-pill chat-first-pill--lime"
-                type="button"
-                disabled={busy}
-                onClick={() => onComplete?.(review.completion)}
-              >
-                Finish board discovery
-              </button>
-            ) : null}
-          </footer>
+          {!batch.length ? (
+            <footer className="source-review__footer">
+              <span>
+                {complete ? "Board discovery is complete" : "Every source has a decision"}
+              </span>
+              {!complete ? (
+                <button
+                  className="chat-first-pill chat-first-pill--lime"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onComplete?.(review.completion)}
+                >
+                  Finish board discovery
+                </button>
+              ) : null}
+            </footer>
+          ) : null}
         </div>
       </section>
     </div>

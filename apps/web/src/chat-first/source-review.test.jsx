@@ -7,8 +7,9 @@ import { normalizeSourceReviewArtifact } from "../../../../src/core/discovery/so
 import {
   handleSourceReviewKeyDown,
   SourceReview,
-  SourceReviewContent,
   SourceReviewSummaryCard,
+  sourceReviewBatchDecisions,
+  submitSourceReviewBatch,
 } from "./source-review.jsx";
 
 const review = normalizeSourceReviewArtifact({
@@ -119,7 +120,10 @@ describe("source review", () => {
     expect(css).toMatch(
       /\.source-review__card\s*\{[^}]*border:\s*1\.5px solid var\(--line-warm\)/s
     );
-    expect(css).toMatch(/\.source-review__actions\s*\{[^}]*justify-content:\s*flex-end/s);
+    expect(css).toMatch(/\.review-batch fieldset\s*\{[^}]*border:\s*0/s);
+    expect(css).toMatch(
+      /\.source-review__card:has\(input:checked\)\s*\{[^}]*background:\s*var\(--tint-cool-2\)/s
+    );
     expect(css).not.toMatch(/\.source-review[^}]*box-shadow/s);
     expect(css).not.toMatch(
       /\.source-review[^}]*#(?:[0-9a-f]{2})?(?:00|33|66|99|cc|ff)[0-9a-f]{2}/i
@@ -156,7 +160,7 @@ describe("source review", () => {
     expect(html).not.toContain("1 strong matches");
   });
 
-  it("shows every proposal and rejection only in the dedicated review surface", () => {
+  it("shows one small multi-select batch instead of an Add/Skip wall", () => {
     const html = renderToStaticMarkup(
       <SourceReview
         artifact={review}
@@ -166,55 +170,74 @@ describe("source review", () => {
       />
     );
 
-    for (const label of [
-      "LandEarly",
-      "4 Day Week",
-      "TrulyRemote Dev",
-      "Built In",
-      "RemotePilot",
-      "DevJobsList",
-      "Anywhere Devs",
-    ]) {
+    for (const label of ["LandEarly", "4 Day Week", "TrulyRemote Dev", "Built In"]) {
       expect(html).toContain(label);
     }
-    expect(html).toContain("Needs a closer look");
-    expect(html).toContain("Rejected during screening");
+    expect(html).not.toContain("RemotePilot");
+    expect(html).not.toContain("DevJobsList");
+    expect(html).toContain("rejected during screening");
     expect(html).toContain("no visible dated listing");
-    expect(html.match(/>Add source</g)).toHaveLength(6);
-    expect(html.match(/>Skip</g)).toHaveLength(6);
-    expect(html).not.toContain("Finish board discovery");
+    expect(html).toContain('<details class="source-review__rejected"');
+    expect(html).toContain("Which sources should CareerRat add?");
+    expect(html).toContain("Showing 4 of 6");
+    expect(html.match(/type="checkbox"/g)).toHaveLength(4);
+    expect(html.match(/>Save choices</g)).toHaveLength(1);
+    expect(html).not.toContain(">Add source<");
+    expect(html).not.toContain(">Skip<");
   });
 
-  it("routes confirm-first decisions and only offers completion after every proposal is decided", () => {
+  it("turns one batch selection into one version-stable decision per source", () => {
+    expect(
+      sourceReviewBatchDecisions(review, [review.candidates[0].id, review.candidates[2].id])
+    ).toEqual([
+      { candidate: expect.objectContaining({ id: review.candidates[0].id }), action: "save" },
+      { candidate: expect.objectContaining({ id: review.candidates[1].id }), action: "discard" },
+      { candidate: expect.objectContaining({ id: review.candidates[2].id }), action: "save" },
+      { candidate: expect.objectContaining({ id: review.candidates[3].id }), action: "discard" },
+    ]);
+    expect(sourceReviewBatchDecisions(review, ["source-review-stale:source:missing"])).toBeNull();
+  });
+
+  it("submits batch decisions sequentially and completes from the final batch", async () => {
     const onDecision = vi.fn();
     const onComplete = vi.fn();
     const decided = {
       ...review,
-      candidates: review.candidates.map((candidate) =>
-        candidate.status === "proposed"
+      candidates: review.candidates.map((candidate, index) =>
+        candidate.status === "proposed" && index < 4
           ? { ...candidate, decision: { action: "discard", status: "completed" } }
           : candidate
       ),
     };
-    const tree = SourceReviewContent({
+    await submitSourceReviewBatch({
       artifact: decided,
+      selectedOptionIds: [review.candidates[4].id],
       onDecision,
       onComplete,
-      onClose: () => undefined,
     });
-    const buttons = [];
-    function visit(node) {
-      if (!node || typeof node !== "object") return;
-      if (Array.isArray(node)) return node.forEach(visit);
-      if (typeof node.type === "function") return visit(node.type(node.props));
-      if (node.type === "button") buttons.push(node);
-      visit(node.props?.children);
-    }
-    visit(tree);
-    expect(buttons.map((button) => button.props.children)).toContain("Finish board discovery");
-    buttons.find((button) => button.props.children === "Finish board discovery").props.onClick();
+    expect(onDecision.mock.calls).toEqual([
+      [expect.objectContaining({ id: review.candidates[4].id }), "save"],
+      [expect.objectContaining({ id: review.candidates[5].id }), "discard"],
+    ]);
+    expect(onComplete).toHaveBeenCalledOnce();
     expect(onComplete).toHaveBeenCalledWith(expect.objectContaining(decided.completion));
-    expect(onDecision).not.toHaveBeenCalled();
+    expect(onDecision.mock.invocationCallOrder[0]).toBeLessThan(
+      onDecision.mock.invocationCallOrder[1]
+    );
+  });
+
+  it("stops a batch after a failed durable decision and does not complete it", async () => {
+    const onDecision = vi.fn().mockResolvedValueOnce(false);
+    const onComplete = vi.fn();
+    const result = await submitSourceReviewBatch({
+      artifact: review,
+      selectedOptionIds: [review.candidates[0].id],
+      onDecision,
+      onComplete,
+    });
+    expect(result).toBe(false);
+    expect(onDecision).toHaveBeenCalledOnce();
+    expect(onComplete).not.toHaveBeenCalled();
   });
 
   it("fails closed instead of rendering malformed artifact data", () => {

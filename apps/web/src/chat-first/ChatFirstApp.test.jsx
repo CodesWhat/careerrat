@@ -1561,8 +1561,11 @@ describe("ChatFirstAppView", () => {
 
     expect(html).toContain('aria-label="Company discovery: 1 to review"');
     expect(html).toContain("Acme AI");
-    expect(html).toContain(">Track<");
-    expect(html).toContain(">Skip<");
+    expect(html).toContain("Which companies should CareerRat track?");
+    expect(html).toContain('type="checkbox"');
+    expect(html).toContain(">Save choices<");
+    expect(html).not.toContain(">Track<");
+    expect(html).not.toContain(">Skip<");
     expect(onIntent).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
   });

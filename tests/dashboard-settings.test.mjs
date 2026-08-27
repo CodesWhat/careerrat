@@ -52,3 +52,10 @@ test("Dashboard settings snapshot exposes onboarding config without private curr
   assert.deepEqual(snapshot.files, ["candidate/profile.yml", "candidate/automation.yml"]);
   assert.doesNotMatch(JSON.stringify(snapshot), /123456|current_base|currentBase/);
 });
+
+test("Dashboard settings snapshot uses the product fit floor when no explicit floor is saved", () => {
+  assert.equal(
+    buildSettingsSnapshot({ targeting: { fit_bands: { fit_floor: null } } }).targeting.fitFloor,
+    70
+  );
+});
