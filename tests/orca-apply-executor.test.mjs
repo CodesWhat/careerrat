@@ -11,6 +11,7 @@ import {
   uploadTargetsFromSnapshot,
 } from "../src/core/apply/orca-executor.mjs";
 import { createOrcaOps } from "../src/core/apply/orca-ops.mjs";
+import { buildMinimalPdf } from "./fixtures/pdf.mjs";
 
 const allowApply = () => ({ allowed: true, reasons: [] });
 
@@ -2026,8 +2027,14 @@ test("Orca executor uploads generated PDFs through explicit live controls", asyn
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-orca-upload-"));
   try {
     mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
-    writeFileSync(join(repoRoot, "workspace", "tailored", "resume.pdf"), "resume");
-    writeFileSync(join(repoRoot, "workspace", "tailored", "cover.pdf"), "cover");
+    writeFileSync(
+      join(repoRoot, "workspace", "tailored", "resume.pdf"),
+      buildMinimalPdf(["Resume"]).bytes
+    );
+    writeFileSync(
+      join(repoRoot, "workspace", "tailored", "cover.pdf"),
+      buildMinimalPdf(["Cover letter"]).bytes
+    );
     const commands = [];
     const runOrcaImpl = async (args) => {
       commands.push(args);

@@ -8,6 +8,7 @@ import { createApplyDriver, uploadTargetsFromSnapshot } from "../src/core/apply/
 import { createConfiguredApplyExecutor } from "../src/core/apply/apply-executor-factory.mjs";
 import { createPlaywrightApplyExecutor } from "../src/core/apply/playwright-executor.mjs";
 import { collectControls, createPlaywrightOps } from "../src/core/apply/playwright-ops.mjs";
+import { buildMinimalPdf } from "./fixtures/pdf.mjs";
 
 const GREENHOUSE_URL = "https://job-boards.greenhouse.io/example/jobs/123";
 
@@ -1640,7 +1641,10 @@ test("createApplyDriver uploads the resume through playwright-ops when a target 
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-playwright-upload-"));
   try {
     mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
-    writeFileSync(join(repoRoot, "workspace", "tailored", "resume.pdf"), "resume");
+    writeFileSync(
+      join(repoRoot, "workspace", "tailored", "resume.pdf"),
+      buildMinimalPdf(["Resume"]).bytes
+    );
 
     const { launchImpl, actions } = createFakeBrowser({ controls: UPLOAD_CONTROLS });
     const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
