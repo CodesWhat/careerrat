@@ -25,6 +25,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { dbExists } from "../core/db/connection.mjs";
+import { activityAppend } from "../core/db/verbs.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import { deriveActivityEvents } from "../core/tracker/activity-backfill.mjs";
 import {
@@ -171,7 +173,9 @@ function cmdAppend() {
     process.exit(0);
   }
 
-  const written = appendActivity(event, { root: opts.root });
+  const written = dbExists({ repoRoot: opts.root })
+    ? activityAppend({ repoRoot: opts.root, event: plan.event })
+    : appendActivity(event, { root: opts.root });
   if (!written.ok) fail(written.error);
   if (opts.json)
     console.log(

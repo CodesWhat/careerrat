@@ -21,6 +21,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { dbExists } from "../core/db/connection.mjs";
+import { analyticsRefresh } from "../core/db/verbs.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import { loadCandidateDoc } from "../core/profile/config-store.mjs";
 import { defaultAdapter } from "../core/storage/storage-adapter.mjs";
@@ -110,7 +112,7 @@ function cmdRefresh() {
   const thresholds = resolveThresholds(targeting);
   const now = opts.at ? new Date(opts.at) : new Date();
 
-  const analytics = buildReevaluationAnalytics({
+  let analytics = buildReevaluationAnalytics({
     apps: data.applications || [],
     targeting,
     strategyReview: data.strategyReview || null,
@@ -130,8 +132,12 @@ function cmdRefresh() {
     process.exit(0);
   }
 
-  data.analytics = analytics;
-  defaultAdapter(opts.root).writeTracker(data, { stamp: false });
+  if (dbExists(pathCtx)) {
+    analytics = analyticsRefresh({ repoRoot: opts.root, at: opts.at }).analytics;
+  } else {
+    data.analytics = analytics;
+    defaultAdapter(opts.root).writeTracker(data, { stamp: false });
+  }
 
   if (opts.json) {
     console.log(JSON.stringify({ ok: true, written: true, analytics }, null, 2));
