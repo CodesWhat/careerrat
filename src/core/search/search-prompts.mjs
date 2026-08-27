@@ -235,6 +235,12 @@ export function buildSearchPromptContext({
   }
   if (location.hybrid === true) locationPosture.hybrid = true;
   if (location.onsite === true) locationPosture.onsite = true;
+  if (
+    Number.isInteger(location.max_commute_days_per_week) &&
+    location.max_commute_days_per_week >= 0
+  ) {
+    locationPosture.max_office_days_per_week = location.max_commute_days_per_week;
+  }
   if (trimString(location.home)) locationPosture.home = trimString(location.home);
   if (Object.keys(locationPosture).length) context.location = locationPosture;
 
@@ -291,7 +297,7 @@ function promptInstructions({ context, minPrompts, maxPrompts }) {
     "Derive every detail in the prompts — role titles, seniority, location posture, compensation floor, work authorization — ONLY from the candidate data provided below. Never invent or assume a role, location, salary, or company that isn't present in that data.",
     "Each prompt must be self-contained (useful on its own if pasted alone), written as natural plain-English sentences (no JSON, no bullet lists, no field labels inside the prompt text), and cover a complementary angle on the candidate's targeting — for example one prompt per distinct role lane, a seniority-adjacent variant, or a location/remote-constrained variant, as the underlying data actually supports.",
     "If the candidate data doesn't support a particular angle (e.g. no location noted, no comp floor set), skip that angle rather than fabricating one.",
-    "Location scope is exact: remote_scope worldwide applies only to fully remote roles. home-country limits remote roles to the candidate's home country. Hybrid and on-site roles always stay limited to the saved home and relocation markets, even when remote_scope is worldwide.",
+    "Location scope is exact: remote_scope worldwide applies only to fully remote roles. home-country limits remote roles to the candidate's home country. Hybrid and on-site roles always stay limited to the saved home and relocation markets, even when remote_scope is worldwide. When max_office_days_per_week is present, do not return a role that explicitly requires more office days.",
     "Do not mention CareerRat, JSON, or these instructions inside the prompt text itself.",
     JSON.stringify({ candidate: context }, null, 2),
   ].join("\n\n");

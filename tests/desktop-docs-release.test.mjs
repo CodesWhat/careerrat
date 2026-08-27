@@ -48,10 +48,12 @@ test("desktop README teaches the app-first signed and notarized pilot path", asy
     /signed and notarized macOS DMG/i,
     /CAREERRAT_HOME/i,
     /internal\/ai\.env/i,
-    /auto-update readiness/i,
+    /electron-updater 6\.8\.9/i,
+    /Restart and\s+install/i,
+    /latest-mac\.yml/i,
   ]);
 
-  assert.doesNotMatch(readme, /automatic updates? (are )?(enabled|available|installed)/i);
+  assert.match(readme, /Windows self-update stays\s+disabled/i);
   assert.doesNotMatch(readme, /equal, complete CareerRat engines/i);
 });
 
@@ -71,6 +73,20 @@ test("release checklist requires signed notarized desktop pilot evidence", async
   assert.doesNotMatch(release, /notarization (is )?(deferred|off|optional)/i);
 });
 
+test("release docs require one verified macOS install and update bundle before publication", async () => {
+  const release = await readText("docs/RELEASE.md");
+
+  assertIncludes(release, "docs/RELEASE.md", [
+    /DMG[\s\S]{0,160}exact-version updater ZIP[\s\S]{0,160}`latest-mac\.yml`/i,
+    /SHA-512[\s\S]{0,120}size[\s\S]{0,160}`latest-mac\.yml`/i,
+    /all three[\s\S]{0,160}before[^\n]*publish/i,
+    /Restart and\s+install/i,
+    /shut(?:s|ting)? down[\s\S]{0,160}services[\s\S]{0,160}install/i,
+    /ordinary quit[\s\S]{0,120}(?:does not|never) install/i,
+    /Windows self-update[\s\S]{0,120}disabled[\s\S]{0,240}SignPath/i,
+  ]);
+});
+
 test("architecture docs describe the exact packaged runtime boundaries", async () => {
   const architecture = await readText("docs/ARCHITECTURE.md");
 
@@ -88,6 +104,39 @@ test("architecture docs describe the exact packaged runtime boundaries", async (
 
   assert.doesNotMatch(architecture, /generated tracker\/static .* normal product/i);
   assert.doesNotMatch(architecture, /Hermes Agent|Gemini CLI|OpenCode|GitHub Copilot/i);
+});
+
+test("architecture docs describe the native updater trust and lifecycle boundaries", async () => {
+  const architecture = await readText("docs/ARCHITECTURE.md");
+
+  assertIncludes(architecture, "docs/ARCHITECTURE.md", [
+    /electron-updater 6\.8\.9/i,
+    /main process[\s\S]{0,180}isolated preload[\s\S]{0,180}IPC/i,
+    /renderer[\s\S]{0,160}(?:does not|never)[\s\S]{0,120}(?:fetch|GitHub)/i,
+    /signed\s+updater ZIP[\s\S]{0,160}`latest-mac\.yml`/i,
+    /SHA-512[\s\S]{0,120}size/i,
+    /Restart and\s+install[\s\S]{0,220}service shutdown/i,
+    /Windows self-update[\s\S]{0,120}disabled/i,
+  ]);
+});
+
+test("public privacy copy describes anonymous update checks and checksum metadata", async () => {
+  const [privacy, readme] = await Promise.all([
+    readText("apps/docs/content/docs/advanced/privacy.mdx"),
+    readText("README.md"),
+  ]);
+
+  for (const [relPath, text] of [
+    ["apps/docs/content/docs/advanced/privacy.mdx", privacy],
+    ["README.md", readme],
+  ]) {
+    assertIncludes(text, relPath, [
+      /no\s+unique installation\s+or device\s+identifier/i,
+      /latest-mac\.yml[\s\S]{0,160}(?:SHA-512|checksum) metadata/i,
+      /signed and notarized/i,
+    ]);
+    assert.doesNotMatch(text, /signed (?:release )?feed/i);
+  }
 });
 
 async function readText(relPath) {

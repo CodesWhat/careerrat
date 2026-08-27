@@ -49,22 +49,23 @@ the first search in the background. Finishing setup opens Search with a clear
 running, matches-found, retry, or start state, so you never have to ask whether
 the job search has begun.
 
-v0.16.3 is the current public release. It keeps Claude Code and OpenAI Codex as
-equal complete product choices, hands completed setup directly to a
-location-aware first search, keeps voluntary demographic defaults local, and
-strengthens supervised application filling without touching Submit. The GitHub
-release includes the signed, notarized, and stapled Mac DMG plus its SBOM;
-`careerrat@latest` is 0.16.3 on npm; and careerrat.com is running the production
-release. The Homebrew cask is 0.16.3. The released app installs at
-`/Applications/CareerRat.app`, reports version 0.16.3, passes Gatekeeper, and
-passed launch and visual inspection.
+v0.16.3 is the current public release. Its signed, notarized, and stapled Mac
+DMG and SBOM are on GitHub; `careerrat@latest` is 0.16.3 on npm; the Homebrew
+cask is 0.16.3; and the installed app reports version 0.16.3, passes Gatekeeper,
+and passed launch and visual inspection.
+
+v0.16.4 is the verified release candidate. It gives every recoverable failure a
+plain-English explanation and next step, enforces remote and office-day limits
+from the captured job description, resolves validated application entry points,
+and adds signed in-app Mac updates. The public-version claims above stay on
+0.16.3 until the signed 0.16.4 artifacts and distribution channels are live.
 
 Open the app and it scaffolds your workspace, boots the local app at
 `http://localhost:7777`, and launches your agent with a starter message, the
 same first run described below for the npm path.
 
-The app checks GitHub once a day for a newer release and shows an in-app
-notice. It never downloads or installs anything on its own; see
+The Mac app checks GitHub once a day for a newer signed release, downloads it
+inside CareerRat, and waits for you to choose **Restart and install**. See
 [Privacy & Data Boundaries](/advanced/privacy) for the details.
 
 ## npm (any platform)

@@ -1,538 +1,218 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { describe, it } from "node:test";
 import {
-  buildRequestHeaders,
   CHECK_INTERVAL_MS,
-  compareVersions,
+  createDesktopUpdateController,
   DEFAULT_STATE,
-  fetchLatestRelease,
-  GITHUB_RELEASES_URL,
-  isNewerVersion,
-  mergeCheckedState,
-  resolveUpdateResult,
-  runUpdateCheck,
-  shouldCheckNow,
-  shouldNotify,
-  withCheckRecorded,
-  withEnabled,
-  withSkippedVersion,
+  nextUpdateCheckDelay,
+  updaterErrorCopy,
 } from "../apps/desktop/update-check.mjs";
 
-describe("compareVersions", () => {
-  it("orders multi-digit minor versions correctly (not as strings)", () => {
-    // The naive string-comparison trap: "0.10.0" < "0.9.0" lexicographically,
-    // but 0.10.0 is the newer release.
-    assert.equal(compareVersions("0.9.0", "0.10.0"), -1);
-    assert.equal(compareVersions("0.10.0", "0.9.0"), 1);
+class FakeUpdater extends EventEmitter {
+  constructor() {
+    super();
+    this.autoDownload = false;
+    this.autoInstallOnAppQuit = true;
+    this.allowPrerelease = true;
+    this.allowDowngrade = true;
+    this.checkCalls = 0;
+    this.installCalls = [];
+  }
+
+  async checkForUpdates() {
+    this.checkCalls += 1;
+    return { updateInfo: { version: "0.16.4" } };
+  }
+
+  quitAndInstall(...args) {
+    this.installCalls.push(args);
+  }
+}
+
+function makeController({ platform = "darwin", persisted = DEFAULT_STATE } = {}) {
+  const updater = new FakeUpdater();
+  const writes = [];
+  const pushes = [];
+  const logs = [];
+  const controller = createDesktopUpdateController({
+    updater,
+    platform,
+    currentVersion: "0.16.3",
+    persisted,
+    now: () => Date.parse("2026-08-26T20:00:00Z"),
+    persist: (state) => writes.push(state),
+    push: (state) => pushes.push(state),
+    log: (message) => logs.push(message),
+  });
+  return { controller, updater, writes, pushes, logs };
+}
+
+describe("desktop updater controller", () => {
+  it("configures the pinned v6 updater for explicit restart installation", () => {
+    const { updater } = makeController();
+
+    assert.equal(updater.autoDownload, true);
+    assert.equal(updater.autoInstallOnAppQuit, false);
+    assert.equal(updater.allowPrerelease, false);
+    assert.equal(updater.allowDowngrade, false);
   });
 
-  it("orders patch versions correctly", () => {
-    assert.equal(compareVersions("0.9.0", "0.9.1"), -1);
-    assert.equal(compareVersions("0.9.1", "0.9.0"), 1);
-  });
-
-  it("treats equal versions as equal", () => {
-    assert.equal(compareVersions("0.9.0", "0.9.0"), 0);
-    assert.equal(compareVersions("v0.9.0", "0.9.0"), 0);
-  });
-
-  it("treats an unparseable version as older than a parseable one", () => {
-    assert.equal(compareVersions("", "0.9.0"), -1);
-    assert.equal(compareVersions("0.9.0", ""), 1);
-    assert.equal(compareVersions("", ""), 0);
-  });
-
-  it("ranks a release candidate below the same version's GA release", () => {
-    // The bug this guards: GitHub's /releases/latest only ever returns GA,
-    // so an rc user must compare as older than GA or they never hear about
-    // the version that already shipped.
-    assert.equal(compareVersions("0.9.0-rc.1", "0.9.0"), -1);
-    assert.equal(compareVersions("0.9.0", "0.9.0-rc.1"), 1);
-  });
-
-  it("orders release candidates of the same version numerically", () => {
-    assert.equal(compareVersions("0.9.0-rc.1", "0.9.0-rc.2"), -1);
-    assert.equal(compareVersions("0.9.0-rc.2", "0.9.0-rc.1"), 1);
-  });
-
-  it("orders a release candidate below the next version's GA release", () => {
-    assert.equal(compareVersions("0.9.0-rc.2", "0.9.1"), -1);
-    assert.equal(compareVersions("0.9.1", "0.9.0-rc.2"), 1);
-  });
-});
-
-describe("isNewerVersion", () => {
-  it("is true only when the candidate outranks the current version", () => {
-    assert.equal(isNewerVersion("0.9.0", "0.10.0"), true);
-    assert.equal(isNewerVersion("0.10.0", "0.9.0"), false);
-    assert.equal(isNewerVersion("0.9.0", "0.9.0"), false);
-  });
-
-  it("is false for missing input", () => {
-    assert.equal(isNewerVersion(null, "0.9.0"), false);
-    assert.equal(isNewerVersion("0.9.0", null), false);
-  });
-});
-
-describe("shouldCheckNow", () => {
-  const now = Date.parse("2026-08-18T00:00:00Z");
-
-  it("is false when disabled, regardless of elapsed time", () => {
-    assert.equal(shouldCheckNow({ enabled: false, lastCheckedAt: null, now }), false);
-  });
-
-  it("is true when there is no prior check", () => {
-    assert.equal(shouldCheckNow({ enabled: true, lastCheckedAt: null, now }), true);
-  });
-
-  it("is false before the interval elapses", () => {
-    const lastCheckedAt = now - (CHECK_INTERVAL_MS - 1000);
-    assert.equal(shouldCheckNow({ enabled: true, lastCheckedAt, now }), false);
-  });
-
-  it("is true once the interval has elapsed", () => {
-    const lastCheckedAt = now - CHECK_INTERVAL_MS;
-    assert.equal(shouldCheckNow({ enabled: true, lastCheckedAt, now }), true);
-  });
-
-  it("treats an unparseable lastCheckedAt as due", () => {
-    assert.equal(shouldCheckNow({ enabled: true, lastCheckedAt: "not-a-date", now }), true);
-  });
-});
-
-describe("resolveUpdateResult", () => {
-  it("reports an update available with its .dmg asset", () => {
-    const result = resolveUpdateResult({
-      currentVersion: "0.9.0",
-      release: {
-        tag_name: "v0.10.0",
-        html_url: "https://github.com/CodesWhat/careerrat/releases/tag/v0.10.0",
-        assets: [
-          {
-            name: "CareerRat-0.10.0-arm64.dmg",
-            browser_download_url:
-              "https://github.com/CodesWhat/careerrat/releases/download/v0.10.0/CareerRat-0.10.0-arm64.dmg",
-          },
-        ],
-      },
+  it("replaces the per-install staging header with one shared CareerRat value", () => {
+    const firstUpdater = new FakeUpdater();
+    firstUpdater.requestHeaders = { Accept: "application/octet-stream" };
+    createDesktopUpdateController({
+      updater: firstUpdater,
+      platform: "darwin",
+      currentVersion: "0.16.3",
     });
 
-    assert.deepEqual(result, {
-      updateAvailable: true,
-      version: "0.10.0",
-      releaseUrl: "https://github.com/CodesWhat/careerrat/releases/tag/v0.10.0",
-      dmgUrl:
-        "https://github.com/CodesWhat/careerrat/releases/download/v0.10.0/CareerRat-0.10.0-arm64.dmg",
-    });
-  });
-
-  it("rejects a release URL that isn't on github.com, even over https", () => {
-    // Defense in depth: a compromised or MITM'd API response returning a
-    // plausible https:// URL on another host must not reach the renderer.
-    const result = resolveUpdateResult({
-      currentVersion: "0.9.0",
-      release: { tag_name: "v0.10.0", html_url: "https://evil.example.com/release", assets: [] },
+    const secondUpdater = new FakeUpdater();
+    createDesktopUpdateController({
+      updater: secondUpdater,
+      platform: "darwin",
+      currentVersion: "0.16.3",
     });
 
-    assert.equal(result.releaseUrl, null);
-  });
-
-  it("rejects a release URL that isn't https, even on github.com", () => {
-    const result = resolveUpdateResult({
-      currentVersion: "0.9.0",
-      release: {
-        tag_name: "v0.10.0",
-        html_url: "http://github.com/CodesWhat/careerrat/releases/tag/v0.10.0",
-        assets: [],
-      },
-    });
-
-    assert.equal(result.releaseUrl, null);
-  });
-
-  it("rejects a .dmg asset URL that isn't on github.com", () => {
-    const result = resolveUpdateResult({
-      currentVersion: "0.9.0",
-      release: {
-        tag_name: "v0.10.0",
-        html_url: "https://github.com/CodesWhat/careerrat/releases/tag/v0.10.0",
-        assets: [
-          {
-            name: "CareerRat-0.10.0-arm64.dmg",
-            browser_download_url: "https://evil.example.com/CareerRat-0.10.0-arm64.dmg",
-          },
-        ],
-      },
-    });
-
-    assert.equal(result.dmgUrl, null);
-  });
-
-  it("reports an update available when the running version is a release candidate and GitHub's latest is that version's GA", () => {
-    // GitHub's /releases/latest excludes prereleases, so a pilot user running
-    // "0.9.0-rc.1" who is due for a check always gets the GA release payload
-    // back. They must be notified, not compared as already current.
-    const result = resolveUpdateResult({
-      currentVersion: "0.9.0-rc.1",
-      release: { tag_name: "v0.9.0", html_url: "https://example.com", assets: [] },
-    });
-
-    assert.equal(result.updateAvailable, true);
-    assert.equal(result.version, "0.9.0");
-  });
-
-  it("reports no update available when already current", () => {
-    const result = resolveUpdateResult({
-      currentVersion: "0.9.0",
-      release: { tag_name: "v0.9.0", html_url: "https://example.com", assets: [] },
-    });
-
-    assert.equal(result.updateAvailable, false);
-  });
-
-  it("reports no update available when the release is older than current", () => {
-    const result = resolveUpdateResult({
-      currentVersion: "0.9.0",
-      release: { tag_name: "v0.8.0", html_url: "https://example.com", assets: [] },
-    });
-
-    assert.equal(result.updateAvailable, false);
-  });
-
-  it("resolves a null dmgUrl when the release shipped no .dmg asset", () => {
-    const result = resolveUpdateResult({
-      currentVersion: "0.9.0",
-      release: {
-        tag_name: "v0.10.0",
-        html_url: "https://example.com",
-        assets: [{ name: "source.zip", browser_download_url: "https://example.com/source.zip" }],
-      },
-    });
-
-    assert.equal(result.updateAvailable, true);
-    assert.equal(result.dmgUrl, null);
-  });
-
-  it("degrades to a no-op result for a missing or malformed release payload", () => {
-    assert.deepEqual(resolveUpdateResult({ currentVersion: "0.9.0", release: null }), {
-      updateAvailable: false,
-      version: null,
-      releaseUrl: null,
-      dmgUrl: null,
-    });
-    assert.deepEqual(resolveUpdateResult({ currentVersion: "0.9.0", release: {} }), {
-      updateAvailable: false,
-      version: null,
-      releaseUrl: null,
-      dmgUrl: null,
-    });
-    assert.deepEqual(resolveUpdateResult({ currentVersion: "0.9.0", release: { tag_name: 42 } }), {
-      updateAvailable: false,
-      version: null,
-      releaseUrl: null,
-      dmgUrl: null,
-    });
-  });
-});
-
-describe("shouldNotify", () => {
-  it("is true for an available update that was not skipped", () => {
+    assert.equal(firstUpdater.requestHeaders.Accept, "application/octet-stream");
     assert.equal(
-      shouldNotify({ result: { updateAvailable: true, version: "0.10.0" }, skippedVersion: null }),
-      true
+      firstUpdater.requestHeaders["x-user-staging-id"],
+      "00000000-0000-5000-8000-000000000000"
+    );
+    assert.equal(
+      secondUpdater.requestHeaders["x-user-staging-id"],
+      firstUpdater.requestHeaders["x-user-staging-id"]
     );
   });
 
-  it("is false once that exact version has been skipped", () => {
+  it("maps the native lifecycle into typed, candidate-safe state", () => {
+    const { controller, updater, pushes } = makeController();
+
+    updater.emit("checking-for-update");
+    assert.equal(controller.getState().phase, "checking");
+
+    updater.emit("update-available", { version: "0.16.4" });
+    assert.equal(controller.getState().phase, "downloading");
+    assert.equal(controller.getState().version, "0.16.4");
+
+    updater.emit("download-progress", {
+      percent: 42.49,
+      transferred: 4249,
+      total: 10000,
+    });
+    assert.equal(controller.getState().progress, 42);
+
+    updater.emit("update-downloaded", { version: "0.16.4" });
+    assert.equal(controller.getState().phase, "ready");
+    assert.equal(controller.getState().notify, true);
+    assert.equal(controller.getState().progress, 100);
+    assert.ok(pushes.length >= 4);
+  });
+
+  it("starts a check and download without opening GitHub", async () => {
+    const { controller, updater, writes } = makeController();
+
+    const state = await controller.checkNow({ manual: true });
+
+    assert.equal(updater.checkCalls, 1);
+    assert.equal(state.phase, "checking");
+    assert.equal(state.manual, true);
+    assert.equal(writes.at(-1).lastCheckedAt, Date.parse("2026-08-26T20:00:00Z"));
+  });
+
+  it("only installs after update-downloaded and uses the v6 positional API", () => {
+    const { controller, updater } = makeController();
+
+    assert.equal(controller.install(), false);
+    updater.emit("update-downloaded", { version: "0.16.4" });
+    assert.equal(controller.install(), true);
+    assert.deepEqual(updater.installCalls, [[false, true]]);
+  });
+
+  it("keeps a downloaded update cached while Later hides its prompt", async () => {
+    const { controller, updater, writes } = makeController();
+    await controller.checkNow({ manual: true });
+    updater.emit("update-downloaded", { version: "0.16.4" });
+
+    const state = controller.skipVersion("0.16.4");
+
+    assert.equal(state.phase, "ready");
+    assert.equal(state.notify, false);
+    assert.equal(state.manual, false);
+    assert.equal(writes.at(-1).skippedVersion, "0.16.4");
+    assert.equal(controller.install(), true);
+  });
+
+  it("does not invoke the native updater and links to honest Windows release status", async () => {
+    const { controller, updater } = makeController({ platform: "win32" });
+
+    const state = await controller.checkNow({ manual: true });
+
+    assert.equal(state.supported, false);
+    assert.equal(state.phase, "unsupported");
+    assert.equal(state.manual, true);
+    assert.match(state.message, /can't install updates inside the Windows app/i);
+    assert.match(state.message, /installer isn't publicly available yet/i);
+    assert.doesNotMatch(state.message, /download the current version|run the installer/i);
     assert.equal(
-      shouldNotify({
-        result: { updateAvailable: true, version: "0.10.0" },
-        skippedVersion: "0.10.0",
-      }),
-      false
+      state.downloadUrl,
+      "https://github.com/CodesWhat/careerrat/blob/main/docs/WINDOWS.md"
     );
+    assert.equal(updater.checkCalls, 0);
+    assert.equal(controller.install(), false);
   });
 
-  it("is true again for a newer version than the one skipped", () => {
+  it("turns native failures into typed recovery without leaking raw jargon", () => {
+    const cases = [
+      [
+        "Cannot update while running on a read-only volume /Volumes/CareerRat",
+        "move-to-applications",
+      ],
+      ["sha512 checksum mismatch in latest-mac.yml", "verification"],
+      ["net::ERR_CONNECTION_RESET fetching github.com", "network"],
+      ["ShipIt exited with ENOENT at /Users/person/Library/Caches", "unknown"],
+    ];
+
+    for (const [raw, expectedKind] of cases) {
+      const { controller, updater, logs } = makeController();
+      updater.emit("error", new Error(raw));
+      const state = controller.getState();
+      assert.equal(state.phase, "error");
+      assert.equal(state.errorKind, expectedKind);
+      assert.doesNotMatch(
+        JSON.stringify(state),
+        /ShipIt|ENOENT|sha512|latest-mac|\/Users|github\.com/
+      );
+      assert.equal(logs.at(-1), raw);
+    }
+  });
+
+  it("reports current only from update-not-available", () => {
+    const { controller, updater } = makeController();
+    updater.emit("update-not-available", { version: "0.16.3" });
+
+    assert.equal(controller.getState().phase, "current");
+    assert.equal(controller.getState().version, "0.16.3");
+  });
+});
+
+describe("updater error copy", () => {
+  it("gives people a next step for every native failure class", () => {
+    assert.match(updaterErrorCopy("read-only volume").message, /Applications/);
+    assert.match(updaterErrorCopy("checksum mismatch").message, /wasn.t installed/);
+    assert.match(updaterErrorCopy("ECONNRESET").message, /connection/);
+    assert.match(updaterErrorCopy("unrecognized native failure").message, /Try again/);
+  });
+});
+
+describe("next update check delay", () => {
+  it("respects the preference, cadence, and first-launch delay", () => {
+    const now = Date.parse("2026-08-26T20:00:00Z");
+    assert.equal(nextUpdateCheckDelay({ enabled: false, now }), null);
+    assert.equal(nextUpdateCheckDelay({ lastCheckedAt: null, initialDelayMs: 5000, now }), 5000);
     assert.equal(
-      shouldNotify({
-        result: { updateAvailable: true, version: "0.11.0" },
-        skippedVersion: "0.10.0",
-      }),
-      true
-    );
-  });
-
-  it("is false when there is no update available", () => {
-    assert.equal(shouldNotify({ result: { updateAvailable: false, version: null } }), false);
-  });
-});
-
-describe("state helpers", () => {
-  it("withCheckRecorded stamps lastCheckedAt and preserves other fields", () => {
-    const next = withCheckRecorded({ ...DEFAULT_STATE, enabled: true }, { checkedAt: 12345 });
-    assert.equal(next.lastCheckedAt, 12345);
-    assert.equal(next.enabled, true);
-  });
-
-  it("withSkippedVersion records the skipped version", () => {
-    const next = withSkippedVersion(DEFAULT_STATE, "0.10.0");
-    assert.equal(next.skippedVersion, "0.10.0");
-  });
-
-  it("withEnabled coerces to a boolean and preserves other fields", () => {
-    const next = withEnabled({ ...DEFAULT_STATE, skippedVersion: "0.10.0" }, false);
-    assert.equal(next.enabled, false);
-    assert.equal(next.skippedVersion, "0.10.0");
-  });
-});
-
-describe("buildRequestHeaders", () => {
-  it("carries no candidate data or identifiers, only a User-Agent and Accept", () => {
-    const headers = buildRequestHeaders();
-    assert.deepEqual(Object.keys(headers).sort(), ["Accept", "User-Agent"]);
-    assert.equal(headers.Accept, "application/vnd.github+json");
-    assert.match(headers["User-Agent"], /^CareerRat-Desktop-UpdateCheck$/);
-  });
-});
-
-describe("fetchLatestRelease", () => {
-  it("requests the fixed unauthenticated GitHub endpoint with no body and no query params", async () => {
-    let requestedUrl = null;
-    let requestedInit = null;
-    await fetchLatestRelease({
-      fetchImpl: async (url, init) => {
-        requestedUrl = url;
-        requestedInit = init;
-        return { ok: true, json: async () => ({ tag_name: "v0.9.0" }) };
-      },
-    });
-
-    assert.equal(requestedUrl, GITHUB_RELEASES_URL);
-    assert.equal(requestedInit.body, undefined);
-    assert.equal(new URL(requestedUrl).search, "");
-    assert.deepEqual(Object.keys(requestedInit.headers).sort(), ["Accept", "User-Agent"]);
-    assert.equal(requestedInit.headers.Authorization, undefined);
-  });
-
-  it("resolves null on a network failure without throwing", async () => {
-    const release = await fetchLatestRelease({
-      fetchImpl: async () => {
-        throw new Error("offline");
-      },
-    });
-    assert.equal(release, null);
-  });
-
-  it("resolves null on a non-200 response (e.g. rate limited) without throwing", async () => {
-    const release = await fetchLatestRelease({
-      fetchImpl: async () => ({ ok: false, status: 403, json: async () => ({}) }),
-    });
-    assert.equal(release, null);
-  });
-
-  it("resolves null on malformed JSON without throwing", async () => {
-    const release = await fetchLatestRelease({
-      fetchImpl: async () => ({
-        ok: true,
-        json: async () => {
-          throw new SyntaxError("Unexpected token");
-        },
-      }),
-    });
-    assert.equal(release, null);
-  });
-
-  it("aborts and resolves null when the request hangs past the timeout", async () => {
-    const release = await fetchLatestRelease({
-      timeoutMs: 20,
-      fetchImpl: (_url, { signal }) =>
-        new Promise((_resolve, reject) => {
-          signal.addEventListener("abort", () => reject(new Error("aborted")));
-        }),
-    });
-    assert.equal(release, null);
-  });
-});
-
-describe("runUpdateCheck", () => {
-  const currentVersion = "0.9.0";
-
-  it("performs no network call at all when disabled", async () => {
-    let called = false;
-    const outcome = await runUpdateCheck({
-      currentVersion,
-      state: { ...DEFAULT_STATE, enabled: false },
-      fetchImpl: async () => {
-        called = true;
-        return { ok: true, json: async () => ({ tag_name: "v0.10.0" }) };
-      },
-    });
-
-    assert.equal(called, false);
-    assert.equal(outcome.checked, false);
-    assert.equal(outcome.result, null);
-  });
-
-  it("force-checks even when automatic checks are disabled and recent without changing the preference", async () => {
-    let called = false;
-    const now = Date.parse("2026-08-24T22:00:00Z");
-    const outcome = await runUpdateCheck({
-      currentVersion,
-      force: true,
-      now,
-      state: { ...DEFAULT_STATE, enabled: false, lastCheckedAt: now - 1000 },
-      fetchImpl: async () => {
-        called = true;
-        return {
-          ok: true,
-          json: async () => ({
-            tag_name: "v0.14.0",
-            html_url: "https://github.com/CodesWhat/careerrat/releases/tag/v0.14.0",
-            assets: [],
-          }),
-        };
-      },
-    });
-
-    assert.equal(called, true);
-    assert.equal(outcome.checked, true);
-    assert.equal(outcome.fetchSucceeded, true);
-    assert.equal(outcome.state.enabled, false);
-    assert.equal(outcome.state.lastCheckedAt, now);
-  });
-
-  it("performs no network call when the interval has not elapsed", async () => {
-    let called = false;
-    const now = Date.parse("2026-08-18T00:00:00Z");
-    const outcome = await runUpdateCheck({
-      currentVersion,
-      now,
-      state: { ...DEFAULT_STATE, lastCheckedAt: now - 1000 },
-      fetchImpl: async () => {
-        called = true;
-        return { ok: true, json: async () => ({ tag_name: "v0.10.0" }) };
-      },
-    });
-
-    assert.equal(called, false);
-    assert.equal(outcome.checked, false);
-  });
-
-  it("checks, resolves an available update, and records the check time", async () => {
-    const now = Date.parse("2026-08-18T00:00:00Z");
-    const outcome = await runUpdateCheck({
-      currentVersion,
-      now,
-      state: DEFAULT_STATE,
-      fetchImpl: async () => ({
-        ok: true,
-        json: async () => ({
-          tag_name: "v0.10.0",
-          html_url: "https://example.com/release",
-          assets: [],
-        }),
-      }),
-    });
-
-    assert.equal(outcome.checked, true);
-    assert.equal(outcome.fetchSucceeded, true);
-    assert.equal(outcome.result.updateAvailable, true);
-    assert.equal(outcome.result.version, "0.10.0");
-    assert.equal(outcome.state.lastCheckedAt, now);
-  });
-
-  it("degrades silently on a network failure: checked but not throwing, fetchSucceeded false", async () => {
-    const now = Date.parse("2026-08-18T00:00:00Z");
-    const outcome = await runUpdateCheck({
-      currentVersion,
-      now,
-      state: DEFAULT_STATE,
-      fetchImpl: async () => {
-        throw new Error("offline");
-      },
-    });
-
-    assert.equal(outcome.checked, true);
-    assert.equal(outcome.fetchSucceeded, false);
-    assert.equal(outcome.result.updateAvailable, false);
-    assert.equal(outcome.state.lastCheckedAt, now);
-  });
-});
-
-describe("mergeCheckedState", () => {
-  it("survives a toggle that lands mid-fetch: enabled/skippedVersion come from liveState, not the pre-fetch snapshot", () => {
-    // Simulates main.mjs's performUpdateCheck: `nextState` is built from a
-    // state snapshot taken before the (up to 10s) fetch started. `liveState`
-    // stands in for module-level `updateState`, which an IPC handler can
-    // have mutated and already persisted while the fetch was in flight, e.g.
-    // the user turning update checks off.
-    const nextState = { ...DEFAULT_STATE, enabled: true, skippedVersion: null, lastCheckedAt: 999 };
-    const liveState = { ...DEFAULT_STATE, enabled: false, skippedVersion: "0.10.0" };
-
-    const merged = mergeCheckedState({
-      nextState,
-      fetchSucceeded: true,
-      result: { updateAvailable: true, version: "0.10.0", releaseUrl: null, dmgUrl: null },
-      liveState,
-    });
-
-    assert.equal(merged.enabled, false);
-    assert.equal(merged.skippedVersion, "0.10.0");
-    // The check's own bookkeeping (lastCheckedAt, the cached release fields)
-    // still comes from the check itself, not the live state.
-    assert.equal(merged.lastCheckedAt, 999);
-    assert.equal(merged.latestVersion, "0.10.0");
-  });
-
-  it("re-merges liveState on a failed fetch too", () => {
-    const nextState = { ...DEFAULT_STATE, enabled: true, skippedVersion: null, lastCheckedAt: 999 };
-    const liveState = { ...DEFAULT_STATE, enabled: false, skippedVersion: null };
-
-    const merged = mergeCheckedState({
-      nextState,
-      fetchSucceeded: false,
-      result: null,
-      liveState,
-    });
-
-    assert.equal(merged.enabled, false);
-    assert.equal(merged.lastCheckedAt, 999);
-  });
-});
-
-describe("nextUpdateCheckDelay", () => {
-  it("schedules from the completed check time instead of drifting to the next 24-hour interval", async () => {
-    const module = await import("../apps/desktop/update-check.mjs");
-    assert.equal(typeof module.nextUpdateCheckDelay, "function");
-    const launch = Date.parse("2026-08-24T12:00:00Z");
-    const completed = launch + 5000;
-    const intervalWake = launch + CHECK_INTERVAL_MS;
-
-    assert.equal(
-      module.nextUpdateCheckDelay({
-        enabled: true,
-        lastCheckedAt: completed,
-        now: intervalWake,
-      }),
-      5000
-    );
-  });
-
-  it("uses the initial delay with no check, returns null while disabled, and clamps oversized waits", async () => {
-    const module = await import("../apps/desktop/update-check.mjs");
-    assert.equal(
-      module.nextUpdateCheckDelay({ enabled: true, lastCheckedAt: null, initialDelayMs: 4321 }),
-      4321
-    );
-    assert.equal(module.nextUpdateCheckDelay({ enabled: false }), null);
-    assert.equal(
-      module.nextUpdateCheckDelay({
-        enabled: true,
-        lastCheckedAt: Date.now(),
-        intervalMs: Number.MAX_SAFE_INTEGER,
-      }),
-      module.MAX_TIMER_DELAY_MS
+      nextUpdateCheckDelay({ lastCheckedAt: now - 1000, now }),
+      CHECK_INTERVAL_MS - 1000
     );
   });
 });

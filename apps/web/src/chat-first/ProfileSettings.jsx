@@ -288,37 +288,56 @@ function SettingsView({
       {desktopUpdate?.available ? (
         <article className="cf-settings__card cf-settings__desktop-update">
           <div className="cf-settings__eyebrow">DESKTOP APP</div>
-          <div className="cf-settings__permission">
-            <div>
-              <strong>Automatically check for updates</strong>
-              <span>Checks GitHub once a day. Nothing downloads or installs on its own.</span>
+          {desktopUpdate.supported !== false ? (
+            <>
+              <div className="cf-settings__permission">
+                <div>
+                  <strong>Automatically check for updates</strong>
+                  <span>
+                    Checks once a day. If an update is ready, CareerRat downloads it and waits for
+                    you to restart.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={desktopUpdate.enabled !== false}
+                  aria-label={`Automatically check for updates: ${desktopUpdate.enabled !== false ? "on" : "off"}`}
+                  className="cf-settings__switch"
+                  disabled={desktopUpdate.saving}
+                  onClick={() => desktopUpdate.onEnabledChange?.(desktopUpdate.enabled === false)}
+                >
+                  <span />
+                </button>
+              </div>
+              <div className="cf-settings__desktop-update-actions">
+                <span>
+                  Check now downloads a new version in the app. It never changes this setting.
+                </span>
+                <button
+                  type="button"
+                  className="cf-settings__outline-button"
+                  disabled={desktopUpdate.checking}
+                  onClick={() => desktopUpdate.onCheckNow?.()}
+                >
+                  {desktopUpdate.checking ? "Checking…" : "Check now"}
+                </button>
+              </div>
+            </>
+          ) : null}
+          {desktopUpdate.supported === false && desktopUpdate.downloadUrl ? (
+            <div className="cf-settings__desktop-update-actions">
+              <span role="status">{desktopUpdate.status}</span>
+              <a
+                className="cf-settings__outline-button"
+                href={desktopUpdate.downloadUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Windows release status
+              </a>
             </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={desktopUpdate.enabled !== false}
-              aria-label={`Automatically check for updates: ${desktopUpdate.enabled !== false ? "on" : "off"}`}
-              className="cf-settings__switch"
-              disabled={desktopUpdate.saving}
-              onClick={() => desktopUpdate.onEnabledChange?.(desktopUpdate.enabled === false)}
-            >
-              <span />
-            </button>
-          </div>
-          <div className="cf-settings__desktop-update-actions">
-            <span>
-              Manual checks work even when automatic checks are off and never change that setting.
-            </span>
-            <button
-              type="button"
-              className="cf-settings__outline-button"
-              disabled={desktopUpdate.checking}
-              onClick={() => desktopUpdate.onCheckNow?.()}
-            >
-              {desktopUpdate.checking ? "Checking…" : "Check now"}
-            </button>
-          </div>
-          {desktopUpdate.status ? (
+          ) : desktopUpdate.status ? (
             <span className="cf-settings__desktop-update-status" role="status">
               {desktopUpdate.status}
             </span>

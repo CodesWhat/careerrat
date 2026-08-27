@@ -163,6 +163,30 @@ const RULES = [
     action: null,
   },
   {
+    match: ({ code }) => code === "MISSING_JOB_BODY",
+    message:
+      "CareerRat doesn't have the full job description yet. Paste it here or open the original posting, then try again.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "NEEDS_USER",
+    message: "This question still needs your answer. Add it, then approve the answer.",
+    action: null,
+  },
+  {
+    match: ({ code }) =>
+      code === "ANSWER_CONFIRMATION_NOT_FOUND" || code === "ANSWER_CONFIRMATION_AMBIGUOUS",
+    message:
+      "This application changed since this card opened. Refresh the application packet, then review the answer again.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "BAD_PACKET_ARTIFACT",
+    message:
+      "CareerRat can't find this application's answers file. Rebuild the application packet, then try again.",
+    action: null,
+  },
+  {
     match: ({ code }) => code === "JOB_IDENTITY_REQUIRED",
     message:
       "CareerRat read the page but couldn't identify the company and role. Paste the job description or use the direct posting link.",
@@ -397,7 +421,7 @@ const RULES = [
   },
   {
     match: ({ raw }) => raw === "server restarted mid-session; re-open to retry",
-    message: "CareerRat restarted while that was running.",
+    message: "CareerRat restarted while that was running. Try that action again.",
     action: { label: "Try again", retry: true },
   },
   {
@@ -412,27 +436,28 @@ const RULES = [
   },
   {
     match: ({ raw }) => raw === "artifact not found",
-    message: "That file isn't available anymore.",
+    message: "That file isn't available anymore. Ask Paul to rebuild it, then try again.",
     action: null,
   },
   {
     match: ({ raw }) => raw === "not_found",
-    message: "That couldn't be found.",
+    message: "CareerRat couldn't find what you opened. Go back, open it again, and retry.",
     action: null,
   },
   {
     match: ({ raw, status }) => raw === "unauthorized" || status === 401 || status === 403,
-    message: "That request wasn't authorized.",
+    message: "CareerRat couldn't complete that request safely. Reload CareerRat, then try again.",
     action: null,
   },
   {
     match: ({ status }) => typeof status === "number" && status >= 500,
-    message: "Something went wrong on the server. Try again in a moment.",
+    message:
+      "CareerRat hit a problem while doing that. Try again. If it keeps happening, restart CareerRat.",
     action: { label: "Try again", retry: true },
   },
   {
     match: ({ status }) => status === 404,
-    message: "That couldn't be found.",
+    message: "CareerRat couldn't find what you opened. Go back, open it again, and retry.",
     action: null,
   },
 ];
@@ -496,4 +521,13 @@ export function resolvePersistedErrorCopy(errorRecord, legacyText) {
 export function errorState(err, fallback) {
   const resolved = resolveErrorCopy(err);
   return resolved.message === GENERIC_ERROR_MESSAGE ? { ...resolved, message: fallback } : resolved;
+}
+
+export function inlineErrorMessage(err, fallback) {
+  const resolved = errorState(err, fallback);
+  const label = String(resolved.action?.label || "").trim();
+  if (!label || resolved.message.toLowerCase().includes(label.toLowerCase())) {
+    return resolved.message;
+  }
+  return `${resolved.message} ${label}.`;
 }

@@ -317,6 +317,7 @@ test("buildSearchPromptContext carries explicit worldwide remote scope and defau
           remote_scope: "worldwide",
           hybrid: true,
           onsite: true,
+          max_commute_days_per_week: 2,
         },
       },
     },
@@ -334,6 +335,7 @@ test("buildSearchPromptContext carries explicit worldwide remote scope and defau
     remote_scope: "worldwide",
     hybrid: true,
     onsite: true,
+    max_office_days_per_week: 2,
     home: "New York, NY, United States",
   });
   assert.equal(legacy.location.remote_scope, "home-country");

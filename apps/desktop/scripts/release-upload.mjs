@@ -30,6 +30,8 @@ if (expectedReleaseId && !/^\d+$/.test(expectedReleaseId)) {
 }
 
 const dmgFiles = readdirSync(distDir).filter((name) => name.endsWith(".dmg"));
+const zipFiles = readdirSync(distDir).filter((name) => name.endsWith(".zip"));
+const metadataPath = join(distDir, "latest-mac.yml");
 
 if (dmgFiles.length === 0) {
   fail(`No .dmg files found in ${distDir}. Run \`npm run dist\` first.`);
@@ -49,6 +51,10 @@ function escapeRegExp(value) {
 const versionToken = new RegExp(`(?<![0-9.])${escapeRegExp(version)}(?![0-9.])`);
 const matchingDmgs = dmgFiles.filter((name) => versionToken.test(name));
 const staleDmgs = dmgFiles.filter((name) => !versionToken.test(name));
+const matchingZips = zipFiles
+  .filter((name) => versionToken.test(name))
+  .map((name) => join(distDir, name));
+const staleZips = zipFiles.filter((name) => !versionToken.test(name));
 
 if (matchingDmgs.length === 0) {
   fail(
@@ -57,17 +63,29 @@ if (matchingDmgs.length === 0) {
   );
 }
 
+if (matchingZips.length !== 1) {
+  fail(
+    `Expected one .zip in ${distDir} matching package.json version ${version}, ` +
+      `found ${matchingZips.length}. Run \`npm run dist\` to rebuild the updater feed.`
+  );
+}
+
+if (!existsSync(metadataPath)) {
+  fail(`No latest-mac.yml found in ${distDir}. Run \`npm run dist\` to build the updater feed.`);
+}
+
 if (staleDmgs.length > 0) {
   console.warn(`Skipping stale build output not matching ${version}: ${staleDmgs.join(", ")}`);
 }
+if (staleZips.length > 0) {
+  console.warn(`Skipping stale build output not matching ${version}: ${staleZips.join(", ")}`);
+}
 
-const filesToUpload = [];
+const filesToUpload = [metadataPath, matchingZips[0]];
+const zipBlockmap = `${matchingZips[0]}.blockmap`;
+if (existsSync(zipBlockmap)) filesToUpload.push(zipBlockmap);
 for (const dmgFile of matchingDmgs) {
   filesToUpload.push(join(distDir, dmgFile));
-  const blockmapFile = `${dmgFile}.blockmap`;
-  if (existsSync(join(distDir, blockmapFile))) {
-    filesToUpload.push(join(distDir, blockmapFile));
-  }
 }
 
 function resolveExactDraftRelease() {

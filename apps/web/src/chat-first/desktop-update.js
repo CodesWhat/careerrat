@@ -2,22 +2,24 @@ import { useSyncExternalStore } from "react";
 
 const bridge = globalThis.careerratDesktopUpdate;
 const EMPTY_STATE = Object.freeze({
-  notify: false,
+  supported: false,
   enabled: true,
+  phase: "idle",
   version: null,
-  releaseUrl: null,
-  dmgUrl: null,
-  lastCheckedAt: null,
-  manualResult: null,
+  progress: null,
+  errorKind: null,
+  message: null,
+  manual: false,
+  notify: false,
   saving: false,
-  checking: false,
-  error: null,
+  downloadUrl: null,
 });
 
 const listeners = new Set();
 let state = EMPTY_STATE;
 let receivedPush = false;
 let userChangedPreference = false;
+let dismissedDownloadVersion = null;
 
 function setState(next) {
   state = { ...state, ...next };
@@ -54,14 +56,24 @@ if (bridge) {
 }
 
 function statusCopy(snapshot) {
-  if (snapshot.error) return snapshot.error;
-  if (snapshot.checking) return "Checking GitHub for the latest release…";
-  if (snapshot.manualResult === "failed") return "CareerRat could not reach GitHub. Try again.";
-  if (snapshot.manualResult === "current") return "CareerRat is up to date.";
-  if ((snapshot.notify || snapshot.manualResult === "available") && snapshot.version) {
-    return snapshot.releaseUrl
-      ? `CareerRat ${snapshot.version} is ready.`
-      : `CareerRat ${snapshot.version} is available, but its release link is unavailable. Check again.`;
+  if (snapshot.phase === "unsupported") return snapshot.message;
+  if (snapshot.phase === "checking") return "Checking for a CareerRat update…";
+  if (snapshot.phase === "downloading") {
+    const version = snapshot.version ? ` ${snapshot.version}` : "";
+    const progress = Number.isFinite(snapshot.progress) ? ` ${snapshot.progress}%` : "";
+    return `Downloading CareerRat${version}…${progress}`;
+  }
+  if (snapshot.phase === "ready") {
+    return snapshot.version
+      ? `CareerRat ${snapshot.version} is downloaded and ready to install.`
+      : "A CareerRat update is downloaded and ready to install.";
+  }
+  if (snapshot.phase === "current") return "CareerRat is up to date.";
+  if (snapshot.phase === "error") {
+    return (
+      snapshot.message ||
+      "CareerRat couldn't finish the update. Try again. Your current version still works."
+    );
   }
   return null;
 }
@@ -70,12 +82,16 @@ async function setEnabled(enabled) {
   if (!bridge) return;
   const previous = state.enabled;
   userChangedPreference = true;
-  setState({ enabled: Boolean(enabled), saving: true, error: null });
+  setState({ enabled: Boolean(enabled), saving: true });
   try {
     const next = await bridge.setEnabled(Boolean(enabled));
-    if (next && typeof next === "object") setState(next);
+    mergeBridgeState(next);
   } catch {
-    setState({ enabled: previous, error: "Could not save that update setting." });
+    setState({
+      enabled: previous,
+      phase: "error",
+      message: "CareerRat couldn't save that update setting. Try again.",
+    });
   } finally {
     userChangedPreference = false;
     setState({ saving: false });
@@ -83,62 +99,107 @@ async function setEnabled(enabled) {
 }
 
 async function checkNow() {
-  if (!bridge) return;
-  setState({ checking: true, error: null, manualResult: null });
+  if (!bridge || state.supported === false) return;
+  setState({ phase: "checking", manual: true, message: null, errorKind: null });
   try {
-    const next = await bridge.checkNow();
-    mergeBridgeState(next);
+    mergeBridgeState(await bridge.checkNow());
   } catch {
-    setState({ manualResult: "failed" });
-  } finally {
-    setState({ checking: false });
+    setState({
+      phase: "error",
+      manual: true,
+      errorKind: "network",
+      message: "CareerRat couldn't check for an update. Check your connection and try again.",
+    });
   }
 }
 
 async function dismissNotice() {
+  if (state.phase === "unsupported") {
+    setState({ manual: false });
+    return;
+  }
   const version = state.version;
-  const shouldSkip = state.notify && version;
-  setState({ notify: false, manualResult: null });
+  const shouldSkip = state.phase === "ready" && version;
+  if (state.phase === "downloading" && version) dismissedDownloadVersion = version;
+  setState({ phase: "idle", notify: false, manual: false, message: null });
   if (!bridge || !shouldSkip) return;
   try {
-    const next = await bridge.skipVersion(version);
-    mergeBridgeState(next);
+    await bridge.skipVersion(version);
   } catch {
-    // The notice is already dismissed for this session. A failed persistence
-    // can only make it reappear after relaunch.
+    // The downloaded update remains cached. Only this dismissal may not
+    // survive a relaunch if the preference write failed.
   }
 }
 
-async function openRelease() {
-  if (!bridge) return;
+async function restartAndInstall() {
+  if (!bridge || state.phase !== "ready") return;
   try {
-    await bridge.openRelease();
+    const result = await bridge.restartAndInstall();
+    if (result?.accepted === false) {
+      setState({
+        phase: "error",
+        message: "That update isn't ready to install yet. Check for updates again.",
+      });
+    }
   } catch {
-    setState({ error: "CareerRat could not open the release page." });
+    setState({
+      phase: "error",
+      message:
+        "CareerRat couldn't restart for the update. Try again. Your current version still works.",
+    });
   }
 }
 
 export function useDesktopUpdate() {
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const status = statusCopy(snapshot);
-  const availableNotice =
-    snapshot.version && (snapshot.notify || snapshot.manualResult === "available");
-  const manualNotice = ["current", "failed"].includes(snapshot.manualResult);
+  const visible =
+    snapshot.phase === "unsupported"
+      ? Boolean(snapshot.manual && snapshot.downloadUrl)
+      : snapshot.phase === "ready"
+        ? snapshot.notify || snapshot.manual
+        : snapshot.phase === "downloading"
+          ? snapshot.version === dismissedDownloadVersion
+            ? false
+            : Boolean(snapshot.version) || snapshot.manual
+          : snapshot.phase === "error"
+            ? Boolean(snapshot.version) || snapshot.manual
+            : snapshot.phase === "current"
+              ? snapshot.manual
+              : snapshot.phase === "checking" && snapshot.manual;
+  const primaryLabel =
+    snapshot.phase === "unsupported" && snapshot.downloadUrl
+      ? "Windows release status"
+      : snapshot.phase === "ready"
+        ? "Restart and install"
+        : snapshot.phase === "error"
+          ? "Try again"
+          : null;
+
   return {
     available: Boolean(bridge),
+    supported: snapshot.supported,
     enabled: snapshot.enabled,
     saving: snapshot.saving,
-    checking: snapshot.checking,
+    checking: snapshot.phase === "checking",
     status,
+    downloadUrl: snapshot.downloadUrl,
     setEnabled,
     checkNow,
     notice: {
-      visible: Boolean(bridge) && Boolean(availableNotice || manualNotice),
-      kind: availableNotice ? "available" : snapshot.manualResult || "current",
+      visible: Boolean(bridge) && Boolean(visible),
+      kind: snapshot.phase,
       version: snapshot.version,
-      canOpenRelease: Boolean(snapshot.releaseUrl),
+      progress: snapshot.progress,
       message: status,
-      onOpenRelease: openRelease,
+      primaryLabel,
+      primaryHref: snapshot.phase === "unsupported" ? snapshot.downloadUrl : null,
+      onPrimary:
+        snapshot.phase === "ready"
+          ? restartAndInstall
+          : snapshot.phase === "unsupported"
+            ? undefined
+            : checkNow,
       onDismiss: dismissNotice,
     },
   };

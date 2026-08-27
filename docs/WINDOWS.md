@@ -13,6 +13,8 @@ valid, this repository does not claim a release-ready Windows executable.
 Unsigned Windows packages may be downloaded from a GitHub Actions run for QA,
 but the release workflow cannot attach one to a public release. See the
 [Code signing policy](CODE_SIGNING_POLICY.md).
+The Windows app links to this status page instead of telling people a public
+installer exists before a signed `.exe` has actually shipped.
 
 ## Free signing paths
 

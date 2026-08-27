@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../lib/api.js";
 
 const hooks = vi.hoisted(() => ({
   callbackDeps: [],
@@ -206,10 +207,41 @@ function twoBlockReply() {
   ].join("\n");
 }
 
+function companyAddReply(name = "Acme") {
+  return [
+    `Should I add ${name} to the companies you like?`,
+    "```careerrat:confirm",
+    JSON.stringify({ kind: "company_add", summary: name, payload: { name } }),
+    "```",
+  ].join("\n");
+}
+
 beforeEach(() => {
   hooks.clear();
   sse.calls = [];
   vi.clearAllMocks();
+});
+
+describe("FirstRunController error copy", () => {
+  it("preserves mapped typed errors and hides unknown runtime details", async () => {
+    const { firstRunErrorMessage } = await import("./FirstRunController.jsx");
+
+    expect(
+      firstRunErrorMessage(
+        new ApiError(409, { code: "NO_AI_ROUTE", error: "provider route missing" }),
+        "Try again."
+      )
+    ).toBe("No AI engine is connected yet. Open Settings.");
+    expect(
+      firstRunErrorMessage(
+        new Error("schema parser failed at /Users/person/private/profile.json"),
+        "CareerRat couldn't finish setup. Try again."
+      )
+    ).toBe("CareerRat couldn't finish setup. Try again.");
+    expect(firstRunErrorMessage(new ApiError(401, { error: "raw auth failure" }), "Retry.")).toBe(
+      "CareerRat couldn't complete that request safely. Reload CareerRat, then try again."
+    );
+  });
 });
 
 describe("FirstRunController chat event reconciliation", () => {
@@ -443,7 +475,7 @@ describe("FirstRunController chat event reconciliation", () => {
 
     expect(view.props.stage).toBe("voluntary-defaults");
     expect(view.props.voluntaryDefaultsRequired).toBe(true);
-    expect(view.props.error).toBe("That application default could not be saved.");
+    expect(view.props.error).toBe("CareerRat couldn't save that application choice. Try again.");
   });
 
   it("commits onboarding before releasing a completed setup into the workspace", async () => {
@@ -613,6 +645,7 @@ describe("FirstRunController chat event reconciliation", () => {
 
     expect(api.startFirstSearchRun).not.toHaveBeenCalled();
     expect(view.props.onRetrySearch).toBeUndefined();
+    expect(view.props.error).toMatch(/keep going with setup/i);
   });
 
   it("keeps a saved profile edit successful when its follow-on search kickoff fails", async () => {
@@ -915,7 +948,7 @@ describe("FirstRunController chat event reconciliation", () => {
     expect(view.props.hostedInterest).toEqual({
       status: "error",
       email: "person@example.com",
-      error: "Interest service is unavailable.",
+      error: "CareerRat couldn't send your request. Check your email address and try again.",
     });
 
     await view.props.onHostedInterestSubmit();
@@ -1593,10 +1626,139 @@ describe("FirstRunController chat event reconciliation", () => {
       expect.objectContaining({ status: "resolved", resultSummary: "Saved" }),
       expect.objectContaining({ status: "error" }),
     ]);
-    expect(view.props.error).toMatch(
-      /auto_submit.*not a supported setting.*other valid details were saved/i
+    expect(view.props.error).toBe(
+      "One profile detail isn't supported yet. The other valid details were saved."
     );
+    expect(view.props.error).not.toContain("auto_submit");
     expect(api.getOnboardState.mock.calls.length).toBeGreaterThan(stateReadsBeforeReply);
+  });
+
+  it("saves later profile facts when an earlier generated field is rejected", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    api.saveCandidateFile
+      .mockRejectedValueOnce({
+        status: 400,
+        message: "request failed with status 400",
+        body: {
+          error: "profile does not validate",
+          errors: [{ path: "location.relocation", message: "expected array" }],
+        },
+      })
+      .mockResolvedValueOnce({ ok: true });
+    let view = await bootController(module, api);
+    const reply = [
+      "I found two facts.",
+      "```careerrat:confirm",
+      '{"kind":"candidate_patch","summary":"Remote across the US or hybrid in New York City","payload":{"doc":"profile","patch":{"location":{"remote":true,"hybrid":true,"relocation":false}}}}',
+      "```",
+      "```careerrat:confirm",
+      '{"kind":"candidate_patch","summary":"Avoid on-site-only roles","payload":{"doc":"targeting","patch":{"cut_signals":["On-site-only roles"]}}}',
+      "```",
+    ].join("\n");
+    sse.calls.at(-1).options.onEvent("assistant", assistantPayload(reply), { lastEventId: "2" });
+
+    rerender(module, api);
+    await flushEffects();
+    view = rerender(module, api);
+
+    expect(api.saveCandidateFile).toHaveBeenCalledTimes(2);
+    expect(api.saveCandidateFile).toHaveBeenLastCalledWith("targeting", {
+      cut_signals: ["On-site-only roles"],
+    });
+    expect(view.props.messages[0].blocks).toEqual([
+      expect.objectContaining({ status: "error" }),
+      expect.objectContaining({ status: "resolved", resultSummary: "Saved" }),
+    ]);
+    expect(view.props.error).toBe(
+      "Paul couldn't save “Remote across the US or hybrid in New York City.” Tell him what you meant another way. The other valid details were saved."
+    );
+    expect(view.props.error).not.toContain("validate");
+    expect(view.props.error).not.toContain("array");
+  });
+
+  it("keeps a failed confirmation visible and retryable", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    let view = await bootController(module, api);
+    sse.calls.at(-1).options.onEvent("assistant", assistantPayload(companyAddReply()), {
+      lastEventId: "2",
+    });
+    view = rerender(module, api);
+    const messageId = view.props.messages.at(-1).id;
+    api.saveCandidateFile.mockRejectedValueOnce(new Error("write failed"));
+
+    await expect(view.props.onChooseOption(messageId, "confirm:0")).resolves.toBeUndefined();
+    view = rerender(module, api);
+
+    expect(view.props.error).toMatch(/couldn't save.*try again/i);
+    expect(view.props.messages.at(-1).blocks[0]).toMatchObject({ status: "error" });
+    expect(view.props.messages.at(-1).options.map((option) => option.id)).toEqual([
+      "confirm:0",
+      "decline:0",
+    ]);
+
+    api.saveCandidateFile.mockResolvedValueOnce({ ok: true });
+    await expect(view.props.onChooseOption(messageId, "confirm:0")).resolves.toBeUndefined();
+    view = rerender(module, api);
+
+    expect(view.props.messages.at(-1).blocks[0]).toMatchObject({
+      status: "resolved",
+      resultSummary: "Acme saved",
+    });
+  });
+
+  it("keeps a failed decline visible and retryable without claiming a save", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    let view = await bootController(module, api);
+    sse.calls.at(-1).options.onEvent("assistant", assistantPayload(companyAddReply()), {
+      lastEventId: "2",
+    });
+    view = rerender(module, api);
+    const messageId = view.props.messages.at(-1).id;
+    api.sendChatMessage.mockRejectedValueOnce(new Error("agent unavailable"));
+
+    await expect(view.props.onChooseOption(messageId, "decline:0")).resolves.toBeUndefined();
+    view = rerender(module, api);
+
+    expect(view.props.error).toMatch(/couldn't send.*try again.*nothing was saved/i);
+    expect(view.props.messages.at(-1).blocks[0]?.status).not.toBe("resolved");
+    expect(view.props.messages.at(-1).options.map((option) => option.id)).toEqual([
+      "confirm:0",
+      "decline:0",
+    ]);
+
+    api.sendChatMessage.mockResolvedValueOnce({ accepted: true });
+    await expect(view.props.onChooseOption(messageId, "decline:0")).resolves.toBeUndefined();
+    view = rerender(module, api);
+
+    expect(view.props.messages.at(-1).blocks[0]).toMatchObject({
+      status: "resolved",
+      resultSummary: "Change requested",
+    });
+  });
+
+  it("says a confirmed choice was saved when Paul cannot continue", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    let view = await bootController(module, api);
+    sse.calls.at(-1).options.onEvent("assistant", assistantPayload(companyAddReply()), {
+      lastEventId: "2",
+    });
+    view = rerender(module, api);
+    api.sendChatMessage.mockRejectedValueOnce(new Error("agent unavailable"));
+
+    await expect(
+      view.props.onChooseOption(view.props.messages.at(-1).id, "confirm:0")
+    ).resolves.toBeUndefined();
+    view = rerender(module, api);
+
+    expect(view.props.messages.at(-1).blocks[0]).toMatchObject({
+      status: "resolved",
+      resultSummary: "Acme saved",
+    });
+    expect(view.props.error).toMatch(/Acme.*saved.*send any message/i);
   });
 
   it("routes the engine section editor to settings", async () => {
@@ -1680,6 +1842,26 @@ describe("FirstRunController chat event reconciliation", () => {
       { id: "seed-001", claim: "Led a team", evidence: "Candidate resume" },
     ]);
     expect(api.removeEvidenceClaim).not.toHaveBeenCalled();
+  });
+
+  it("shows actionable validation for empty resume and role section edits", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    let view = await bootController(module, api);
+
+    await expect(
+      view.props.onSaveKnowledgeSection({ id: "resume" }, { resumeText: "" })
+    ).rejects.toThrow("Paste resume text before saving this section.");
+    view = rerender(module, api);
+    expect(view.props.error).toBe("Paste resume text before saving this section.");
+
+    await expect(
+      view.props.onSaveKnowledgeSection({ id: "roles" }, { titles: "" })
+    ).rejects.toThrow("Add at least one target role.");
+    view = rerender(module, api);
+    expect(view.props.error).toBe("Add at least one target role.");
+    expect(api.parseResumeText).not.toHaveBeenCalled();
+    expect(api.saveCandidateFile).not.toHaveBeenCalled();
   });
 
   it("round-trips named target lanes and evidence claim ids through whole-section edits", async () => {
@@ -1976,6 +2158,52 @@ describe("FirstRunController chat event reconciliation", () => {
       cut_signals: ["Crypto"],
     });
     expect(api.sendChatMessage).toHaveBeenCalledOnce();
+  });
+
+  it("says a profile section is saved when Paul cannot continue", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    const view = await bootController(module, api);
+    api.sendChatMessage.mockRejectedValueOnce(new Error("agent unavailable"));
+
+    await view.props.onSaveKnowledgeSection(
+      { id: "guardrails", label: "Guardrails" },
+      { signals: "Crypto" }
+    );
+    await Promise.resolve();
+    const updated = rerender(module, api);
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("targeting", {
+      cut_signals: ["Crypto"],
+    });
+    expect(updated.props.error).toMatch(/Guardrails.*saved.*send any message/i);
+  });
+
+  it("says a dropped resume is saved when Paul cannot continue", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    api.parseResumeText.mockResolvedValue({
+      profileSeed: { candidate: { full_name: "Jordan Rivera" } },
+      evidenceSeed: { claims: [] },
+    });
+    const view = await bootController(module, api);
+    api.sendChatMessage.mockRejectedValueOnce(new Error("agent unavailable"));
+
+    await expect(
+      view.props.onResumeFile({
+        name: "jordan-resume.md",
+        size: 42,
+        lastModified: 1,
+        text: vi.fn().mockResolvedValue("# Jordan Rivera"),
+      })
+    ).resolves.toBe(true);
+    await Promise.resolve();
+    const updated = rerender(module, api);
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("profile", {
+      candidate: { full_name: "Jordan Rivera" },
+    });
+    expect(updated.props.error).toMatch(/resume.*saved.*send any message/i);
   });
 
   it("does not restart the agent when a whole-section edit leaves a visible question unanswered", async () => {

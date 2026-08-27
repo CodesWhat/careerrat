@@ -311,6 +311,7 @@ describe("ProfileSettings", () => {
       permissions: PERMISSIONS,
       desktopUpdate: {
         available: true,
+        supported: true,
         enabled: false,
         checking: false,
         status: "CareerRat is up to date.",
@@ -322,6 +323,8 @@ describe("ProfileSettings", () => {
 
     expect(html).toContain("DESKTOP APP");
     expect(html).toContain("Automatically check for updates");
+    expect(html).toContain("downloads it and waits for you to restart");
+    expect(html).toContain("Check now downloads a new version in the app");
     expect(html).toContain("Check now");
     expect(html).toContain("CareerRat is up to date.");
 
@@ -339,6 +342,39 @@ describe("ProfileSettings", () => {
 
     expect(onEnabledChange).toHaveBeenCalledWith(true);
     expect(onCheckNow).toHaveBeenCalledOnce();
+  });
+
+  it("explains Windows updates and links safely to the current installer", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const tree = (
+      <ProfileSettings
+        activeTab="settings"
+        permissions={PERMISSIONS}
+        desktopUpdate={{
+          available: true,
+          supported: false,
+          status:
+            "CareerRat can't install updates inside the Windows app yet because a signed Windows installer isn't publicly available yet. See Windows release status for availability.",
+          downloadUrl: "https://github.com/CodesWhat/careerrat/blob/main/docs/WINDOWS.md",
+        }}
+      />
+    );
+    const html = renderToStaticMarkup(tree);
+    const download = findElement(
+      tree,
+      (node) => node.type === "a" && textOf(node) === "Windows release status"
+    );
+
+    expect(html).toContain("a signed Windows installer isn&#x27;t publicly available yet");
+    expect(html).not.toContain("Automatically check for updates");
+    expect(html).not.toContain(">Check now</button>");
+    expect(download).toMatchObject({
+      props: {
+        href: "https://github.com/CodesWhat/careerrat/blob/main/docs/WINDOWS.md",
+        target: "_blank",
+        rel: "noopener noreferrer",
+      },
+    });
   });
 
   it("does not render desktop update controls in the browser app", async () => {

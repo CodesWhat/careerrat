@@ -270,6 +270,35 @@ See [SOURCES.md](SOURCES.md).
 
 Candidate facts, generated artifacts, and tracker state stay local.
 
+### Desktop Update Layer
+
+Packaged macOS builds use `electron-updater 6.8.9` as the single desktop update
+path. The Electron main process owns release checks, downloads, persisted
+preferences, and installation. An isolated preload exposes typed IPC methods and
+state to the React shell. The renderer never fetches GitHub releases, handles a
+native updater exception, or receives filesystem access through this bridge.
+
+The macOS feed is one release-bound trust unit: the direct-install DMG, signed
+updater ZIP carrying the exact app version, and `latest-mac.yml`. Before upload,
+the release verifier selects exactly one version-matching ZIP and recomputes its
+SHA-512 and size against the manifest. Draft publication gates then require all
+three assets. The updater rejects prereleases and downgrades, and the signed app
+identity remains the operating-system trust boundary after download.
+
+An update downloads in the background but does not install silently. The shell
+shows progress and a **Restart and install** action only after the native updater
+reports the package ready. Accepting it enters the normal service shutdown path,
+stops watchers, connected clients, agent children, and the local server, then
+hands the cached package to `quitAndInstall`. An ordinary quit exits normally and
+never installs the cached package.
+
+Windows self-update remains disabled. The current SignPath path signs the NSIS
+installer after builder metadata is generated, so the signed public installer
+does not yet have a feed and blockmap proven against its final bytes. Unsigned
+Windows builds remain QA artifacts, and the app exposes no unsupported update
+control. Windows can be enabled only after a signed-installer-first feed is built
+and verified atomically.
+
 ### System Layer
 
 Reusable skills, scripts, templates, and schemas are public-safe.

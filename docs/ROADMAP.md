@@ -748,14 +748,66 @@ queue.
 - Alerts 108, 109, and 111 remain open only until a main-branch Scorecard run can
   observe the live protection and the two staged repository fixes.
 
-## Release status (v0.16.3, updated August 26, 2026)
+## Release status (v0.16.4, updated August 26, 2026)
 
-**v0.16.3 is the current release line.** It preserves the v0.16.0 runtime and
-workflow release, the v0.16.1 UI follow-ups, and the v0.16.2 guided cold start,
-then closes the first-run search, locality, local demographic-default, chat,
-and supervised browser-apply gaps recorded below. The Mac app, npm package,
-Homebrew cask, and production website passed the release and installation gates
-above.
+**v0.16.4 is the verified release candidate.** It preserves the complete Claude
+Code and OpenAI Codex workflow from v0.16.3, then closes the recovery,
+body-truth location filtering, application-entry, and in-app update gaps
+recorded below. v0.16.3 remains the current public version until every signed
+0.16.4 distribution channel has been checked live.
+
+### v0.16.4 recovery and update hardening (August 26, 2026)
+
+The next patch line is focused on recovery and staying current without making a
+candidate decode implementation details or leave the app.
+
+- **People-shaped failures** — Search now fails closed to CareerRat-owned copy.
+  Raw schema, parser, provider, process, path, and lane bookkeeping cannot render
+  just because the source string is short. Timeout, unreachable-source, partial
+  success, and unknown failures each explain what happened and provide Retry or
+  Source health. Onboarding and Settings now route unknown runtime failures
+  through the same typed error boundary, preserve known mapped actions, and keep
+  technical detail out of the primary message. Desktop boot uses a recovery
+  instruction while retaining the original error only in its log.
+- **One-time GitHub star prompt** — after the first completed search that returns
+  matches, the desktop app may show one compact, non-modal GitHub star card. Star
+  and Not now both record the one-time dismissal; browser mode and empty or
+  failed searches never show it.
+- **First-class Mac updates** — pinned `electron-updater 6.8.9` replaces the old
+  notify-only GitHub handoff. The app checks, downloads, shows progress, and only
+  enables **Restart and install** after the native download-complete event.
+  Installation waits for CareerRat's chat, browser, PDF, watcher, and local
+  server shutdown. Ordinary quits never install a downloaded update.
+- **Atomic Mac release feed** — packaging now produces the direct-install DMG,
+  signed updater ZIP, and `latest-mac.yml`. Upload and publication gates require
+  the complete exact-version set, and verification recomputes the feed SHA-512
+  and byte size against the final ZIP.
+- **Honest Windows boundary** — Windows self-update remains unavailable. The
+  current SignPath workflow replaces the installer after builder metadata is
+  created, and the installed executable is not separately signed. Promotion
+  requires signatures on the installed executable and final installer plus a
+  manifest generated and verified from those final bytes.
+- **Location truth from the job body** — remote and hybrid board labels no longer
+  win over explicit office requirements in the captured job description.
+  Candidate setup records a maximum office-days-per-week limit, and sourcing
+  rejects onsite-only or over-limit roles before they enter the review queue.
+- **Application entry points** — generic capture preserves the original listing
+  as `sourceUrl` while extracting a validated embedded application URL for the
+  supervised browser. CareerRat still stops when it cannot prove a safe form
+  entry and never guesses by pressing an unknown Apply or Submit control.
+- **Clean first-search handoff** — Paul does not duplicate a question merely
+  because examples follow it. A dedupe-only completion reports matches already
+  saved instead of showing zero qualified after useful results reached the Jobs
+  view.
+- **Acceptance evidence** — the repository suite passed 3,855 tests with 15
+  intentional skips, and the web suite passed all 761 tests. A fresh
+  Codex-backed desktop run completed intake, saved
+  remote-US plus New York City hybrid targeting with a two-day office limit,
+  scanned 358 listings across five sources, and retained four body-verified
+  matches while excluding a five-day-office listing. The real Chromium
+  application harness passed all 11 scenarios, uploaded the fake résumé, filled
+  supported fields, handled failure handoffs, and never clicked Submit.
+
 Since v0.11.0 the repo runs the strict flow: feature PRs land on the active dev
 branch (`dev/v0.16` for this release), `main`
 advances only through a promotion merge immediately before each cut, and the tag

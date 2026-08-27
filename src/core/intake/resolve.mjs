@@ -11,13 +11,15 @@
 // `fetchImpl` is always injected (defaults to the global fetch) so every path
 // here is testable against a fake network, same convention
 // sourced-scanner.mjs's own provider-fetch tests already use.
+
+import { hostnameToPortal } from "../apply/form-fill.mjs";
 import {
   extractApplyControlsFromHtml,
   htmlToText as htmlToTextLiveness,
   isSpaJobHost,
 } from "../liveness/job-link-checker.mjs";
 import { classifyLiveness } from "../liveness/liveness-core.mjs";
-import { fetchPublicHttpText } from "../net/public-http-fetch.mjs";
+import { fetchPublicHttpText, validatePublicHttpUrl } from "../net/public-http-fetch.mjs";
 import { platformForHost } from "../providers/search-sources.mjs";
 import { extractReqId, fetchProvider, inferProvider } from "../scoring/sourced-scanner.mjs";
 import { extractStructuredJobDescription } from "./job-posting-extract.mjs";
@@ -317,6 +319,7 @@ async function resolvePlainFetch({
       return { ...resolved, sourceUrl: url };
     }
   }
+  const applicationUrl = extractEmbeddedApplicationUrl(html, fetched.finalUrl || url);
   const bodyText = extractStructuredJobDescription(html) || htmlToTextLiveness(html);
   const classified = classifyLiveness({
     status: fetched.status,
@@ -335,7 +338,8 @@ async function resolvePlainFetch({
   // (there's no usable text to hand the classify step at all).
   return {
     bodyFetchStatus: "resolved",
-    url,
+    url: applicationUrl || url,
+    ...(applicationUrl ? { sourceUrl: url } : {}),
     provider,
     title: null,
     company: null,
@@ -345,6 +349,48 @@ async function resolvePlainFetch({
     bodyPartial: false,
     liveness: classified,
   };
+}
+
+function extractEmbeddedApplicationUrl(html, baseUrl) {
+  const normalized = String(html || "")
+    .replace(/\\u002f/gi, "/")
+    .replace(/\\u0026/gi, "&")
+    .replace(/\\\//g, "/")
+    .replace(/\\"/g, '"')
+    .replace(/&quot;/gi, '"')
+    .replace(/&amp;/gi, "&");
+  const current = normalizeComparableUrl(baseUrl);
+  const destinations = new Map();
+  for (const match of normalized.matchAll(
+    /["'](?:applyUrl|applicationUrl)["']\s*:\s*["']([^"']+)["']/gi
+  )) {
+    try {
+      const candidate = new URL(match[1], baseUrl);
+      if (
+        (candidate.protocol !== "http:" && candidate.protocol !== "https:") ||
+        candidate.username ||
+        candidate.password
+      ) {
+        continue;
+      }
+      const comparable = normalizeComparableUrl(candidate);
+      if (!comparable || comparable === current) continue;
+      destinations.set(comparable, candidate);
+    } catch {
+      // Ignore malformed page-owned values.
+    }
+  }
+  if (destinations.size !== 1) return null;
+
+  const candidate = [...destinations.values()][0];
+  const validated = validatePublicHttpUrl(candidate);
+  if (!validated.ok) return null;
+  const source = new URL(baseUrl);
+  const sameOrigin = candidate.origin === source.origin;
+  const knownApplicationHost =
+    Boolean(hostnameToPortal(candidate.href)) || platformForHost(candidate.hostname) === "linkedin";
+  if (!sameOrigin && (candidate.protocol !== "https:" || !knownApplicationHost)) return null;
+  return validated.url;
 }
 
 function exactResolutionKey(rawUrl) {

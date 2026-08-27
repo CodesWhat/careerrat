@@ -4,6 +4,33 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.4] - 2026-08-26
+
+### Added
+
+- Signed Mac releases now update inside CareerRat. The app checks the atomic DMG, updater ZIP, and `latest-mac.yml` release feed, shows download progress, and waits for an explicit **Restart and install** before closing local services and applying the update.
+- A one-time, non-modal GitHub star card can appear after the first successful search with matches. It never interrupts setup, empty searches, failed searches, or browser-only use.
+
+### Changed
+
+- Recoverable failures now explain what happened in plain English and tell the candidate exactly what to do next. Raw database paths, parser text, provider output, HTTP bookkeeping, and process details stay in logs instead of the interface.
+- Location filtering now reads the captured job description, not just the board label. A listing marked Remote is rejected when its body requires too many office days or conflicts with the candidate's remote, hybrid, onsite, or commute limits.
+- Search completion distinguishes new matches from matches already saved, so a dedupe-only refresh cannot look like an empty search.
+
+### Fixed
+
+- Profile setup accepts a normal no-relocation answer and saves every independently valid section when another section needs a retry.
+- Onboarding no longer starts a duplicate Paul turn when a question ends with examples such as “For example” or “For instance.”
+- Job capture now preserves the listing as its source while following a validated embedded application URL for supervised form filling.
+- Failed packet loads, deep-ingest loads, discovery decisions, and discovery completion can be retried from the failure itself, and a successful retry clears the stale alert.
+- Windows update notices now explain that no signed public installer is available yet and link to the current Windows release status instead of advertising a nonexistent download.
+
+### Release verification
+
+- The repository suite passed 3,855 tests with 15 intentional skips and zero failures after the recovery, locality, onboarding, application-link, and release-gate fixes. The web suite passed all 761 tests.
+- A fresh Codex-backed desktop run completed resume intake, saved a remote-US and New York City hybrid profile with a two-day office limit, searched 358 listings across five sources, and retained four body-verified matches without admitting a five-day-office listing.
+- The real-browser application harness passed all 11 Chromium scenarios, including résumé upload, native selects, Greenhouse and Ashby comboboxes, multistep forms, failure handoff, and prepare-only mode. The final Submit control was never clicked.
+
 ## [0.16.3] - 2026-08-26
 
 ### Changed

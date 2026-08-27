@@ -74,7 +74,15 @@ import {
   buildProposalsAndRefresh,
   captureSourceAndRefresh,
   decideProposalAndRefresh,
+  removeSourceAndRefresh,
+  retrySourceAndRefresh,
 } from "./deep-ingest-controller.js";
+import {
+  GithubStarPrompt,
+  githubStarPromptWasHandled,
+  markGithubStarPromptHandled,
+  shouldOfferGithubStarPrompt,
+} from "./GithubStarPrompt.jsx";
 import {
   commitSkillChatCompletion,
   commitSkillChatDecision,
@@ -610,10 +618,258 @@ function errorCopy(error) {
   return resolveErrorCopy(error).message;
 }
 
-export async function runChatFirstOperation(
-  operation,
-  { refetch, setBusy, setError, setEngineDown } = {}
-) {
+function mappedControllerError(error, onRetry) {
+  const resolved = resolveErrorCopy(error);
+  if (!onRetry || !resolved.action?.retry) return resolved;
+  return {
+    ...resolved,
+    action: { ...resolved.action, onRetry },
+  };
+}
+
+export async function loadGatePacketWithRetry({
+  api,
+  applicationId,
+  setGatePacket,
+  setError,
+  isCancelled = () => false,
+}) {
+  const retry = () => loadGatePacketWithRetry({ api, applicationId, setGatePacket, setError });
+  if (!isCancelled()) setError(null);
+  try {
+    const packet = await api.getPacket(applicationId);
+    if (!isCancelled()) setGatePacket(packet);
+    return packet;
+  } catch (cause) {
+    if (!isCancelled()) setError(mappedControllerError(cause, retry));
+    return null;
+  }
+}
+
+export async function loadDeepIngestStateWithRetry({
+  api,
+  setDeepState,
+  setError,
+  isCancelled = () => false,
+}) {
+  const retry = () => loadDeepIngestStateWithRetry({ api, setDeepState, setError });
+  if (!isCancelled()) setError(null);
+  try {
+    const state = await api.getDeepIngestState();
+    if (!isCancelled()) setDeepState(state);
+    return state;
+  } catch (cause) {
+    if (!isCancelled()) setError(mappedControllerError(cause, retry));
+    return null;
+  }
+}
+
+export async function runDiscoveryDecisionWithRetry({
+  api,
+  activeSkillChat,
+  item,
+  action,
+  setBusy,
+  setError,
+  setSourceReview,
+  setSkillChatState,
+  refetch,
+  commit = commitSkillChatDecision,
+}) {
+  const retry = () =>
+    runDiscoveryDecisionWithRetry({
+      api,
+      activeSkillChat,
+      item,
+      action,
+      setBusy,
+      setError,
+      setSourceReview,
+      setSkillChatState,
+      refetch,
+      commit,
+    });
+  setBusy(true);
+  setError(null);
+  try {
+    await commit({ api, skill: activeSkillChat.skill, item, action });
+    setSourceReview((current) =>
+      current
+        ? {
+            ...current,
+            candidates: list(current.candidates).map((candidate) =>
+              candidate?.id === item.id
+                ? { ...candidate, decision: { action, status: "completed" } }
+                : candidate
+            ),
+          }
+        : current
+    );
+    return true;
+  } catch (cause) {
+    const resultText = errorCopy(cause);
+    setSkillChatState((current) =>
+      current?.id === activeSkillChat.id
+        ? {
+            ...current,
+            messages: [
+              ...list(current.messages),
+              {
+                id: `decision-error:${item.id}:${Date.now()}`,
+                role: "assistant",
+                kind: "action_error",
+                text: resultText,
+              },
+            ],
+          }
+        : current
+    );
+    setError(mappedControllerError(cause, retry));
+    return false;
+  } finally {
+    await refetch?.().catch(() => undefined);
+    setBusy(false);
+  }
+}
+
+export async function runDiscoveryCompletionWithRetry({
+  api,
+  activeSkillChat,
+  item,
+  setBusy,
+  setError,
+  setSourceReview,
+  refetch,
+  commit = commitSkillChatCompletion,
+}) {
+  const retry = () =>
+    runDiscoveryCompletionWithRetry({
+      api,
+      activeSkillChat,
+      item,
+      setBusy,
+      setError,
+      setSourceReview,
+      refetch,
+      commit,
+    });
+  setBusy(true);
+  setError(null);
+  try {
+    await commit({ api, skill: activeSkillChat.skill, item });
+    setSourceReview(null);
+    return true;
+  } catch (cause) {
+    setError(mappedControllerError(cause, retry));
+    return false;
+  } finally {
+    await refetch?.().catch(() => undefined);
+    setBusy(false);
+  }
+}
+
+function controllerErrorMessage(error) {
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object" && typeof error.message === "string") {
+    return error.message;
+  }
+  return null;
+}
+
+function controllerErrorDetail(error) {
+  return error && typeof error === "object" && typeof error.detail === "string"
+    ? error.detail
+    : null;
+}
+
+export function chatFirstControllerError(localError, dashboard = {}) {
+  return (
+    localError ||
+    dashboard.error ||
+    (dashboard.noDatabase ? "CareerRat needs local setup before the workspace can open." : null)
+  );
+}
+
+export function localFileError(kind, { name = "This file", onRetry } = {}) {
+  if (kind === "unsafe-link") {
+    return {
+      message:
+        "CareerRat blocked that saved link because it isn't a safe web address. Check the URL or ask Paul to replace it.",
+      action: null,
+      detail: null,
+    };
+  }
+  if (kind === "preview") {
+    return {
+      message: `CareerRat couldn't build a preview for ${name} yet. Try again, or ask Paul to recreate it.`,
+      action: onRetry ? { label: "Try preview again", retry: true, onRetry } : null,
+      detail: null,
+    };
+  }
+  if (kind === "dossier-download") {
+    return {
+      message:
+        "CareerRat made the dossier PDF, but this window couldn't download it. Try the export again.",
+      action: onRetry ? { label: "Try export again", retry: true, onRetry } : null,
+      detail: null,
+    };
+  }
+  if (kind === "missing-export-path") {
+    return {
+      message:
+        "CareerRat finished the export, but couldn't find the saved file. Try exporting it again.",
+      action: onRetry ? { label: "Try export again", retry: true, onRetry } : null,
+      detail: null,
+    };
+  }
+  if (kind === "not-exportable") {
+    return {
+      message: `${name} doesn't have enough saved content to export yet. Ask Paul to rebuild it, then try again.`,
+      action: null,
+      detail: null,
+    };
+  }
+  if (kind === "no-calendar-event") {
+    return {
+      message: "Choose an interview or follow-up first, then try adding it to your calendar again.",
+      action: null,
+      detail: null,
+    };
+  }
+  return null;
+}
+
+function ChatFirstControllerAlert({ error, onAction }) {
+  const message = controllerErrorMessage(error);
+  if (!message) return null;
+  const action = error && typeof error === "object" ? error.action : null;
+  const detail = controllerErrorDetail(error);
+  const canRunAction = Boolean(action?.onRetry || action?.onAction || (action?.to && onAction));
+  const runAction = () => {
+    if (action?.onRetry) return action.onRetry();
+    if (action?.onAction) return action.onAction();
+    return onAction?.(action);
+  };
+  return (
+    <div className="chat-first-controller-alert" role="alert">
+      <div className="chat-first-controller-alert__message">{message}</div>
+      {action?.label && canRunAction ? (
+        <button type="button" onClick={runAction}>
+          {action.label}
+        </button>
+      ) : null}
+      {detail ? (
+        <details>
+          <summary>Technical details</summary>
+          <code>{detail}</code>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+export async function runChatFirstOperation(operation, options = {}) {
+  const { refetch, setBusy, setError, setEngineDown } = options;
   setBusy?.(true);
   setError?.(null);
   try {
@@ -622,7 +878,7 @@ export async function runChatFirstOperation(
     setEngineDown?.(false);
     return result;
   } catch (cause) {
-    setError?.(errorCopy(cause));
+    setError?.(mappedControllerError(cause, () => runChatFirstOperation(operation, options)));
     if (isEngineFailure(cause)) setEngineDown?.(true);
     return null;
   } finally {
@@ -836,6 +1092,7 @@ export function ChatFirstAppView({
   artifactViewer,
   companyProposalReview,
   sourceReview,
+  githubStarPrompt = null,
   engineDown = false,
   technicalDetails = null,
   busy = false,
@@ -896,6 +1153,7 @@ export function ChatFirstAppView({
         onShowTechnical={actions.showTechnical}
         technicalDetails={technicalDetails}
       />
+      <GithubStarPrompt {...githubStarPrompt} />
     </>
   );
 
@@ -912,11 +1170,7 @@ export function ChatFirstAppView({
     return (
       <div className="chat-first-workspace">
         {topBar}
-        {error ? (
-          <div className="chat-first-controller-alert" role="alert">
-            {error}
-          </div>
-        ) : null}
+        <ChatFirstControllerAlert error={error} onAction={actions.handleErrorAction} />
         <div className="chat-first-workspace__browser">
           <WorkspaceBrowser
             activeTab={ui.browse}
@@ -1003,6 +1257,8 @@ export function ChatFirstAppView({
           onInputSubmit={actions.submitDeepInput}
           onInputCancel={actions.cancelDeepInput}
           onAnalyze={actions.analyzeDeepSource}
+          onRetry={actions.retryDeepSource}
+          onRemove={actions.removeDeepSource}
           onStartEdit={actions.editDeepProposal}
           onEditChange={actions.changeDeepProposalEdit}
           onSaveEdit={actions.saveDeepProposalEdit}
@@ -1144,11 +1400,7 @@ export function ChatFirstAppView({
       }
       conversation={
         <>
-          {error ? (
-            <div className="chat-first-controller-alert" role="alert">
-              {error}
-            </div>
-          ) : null}
+          <ChatFirstControllerAlert error={error} onAction={actions.handleErrorAction} />
           {conversation}
         </>
       }
@@ -1190,6 +1442,9 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   const [sourceReview, setSourceReview] = useState(null);
   const [gatePacket, setGatePacket] = useState(null);
   const [skillChatState, setSkillChatState] = useState(null);
+  const [githubStarPromptHandled, setGithubStarPromptHandled] = useState(() =>
+    githubStarPromptWasHandled()
+  );
   const skillChatCursorsRef = useRef(new Map());
   const skillChatSessionResolutionRef = useRef(new Map());
 
@@ -1242,6 +1497,21 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     editDraft: deepEditDraft,
     receipt: deepReceipt,
   };
+  const dismissGithubStarPrompt = useCallback(() => {
+    markGithubStarPromptHandled();
+    setGithubStarPromptHandled(true);
+  }, []);
+  const githubStarPrompt = {
+    visible: shouldOfferGithubStarPrompt({
+      desktop: Boolean(globalThis.careerratDesktopApp),
+      handled: githubStarPromptHandled,
+      searchStatus: sourceSweep.status,
+      matchCount: view.browser.search.length,
+      searchLanes: sourceSweep.lanes,
+      searchRetry: sourceSweep.retry,
+    }),
+    onDismiss: dismissGithubStarPrompt,
+  };
 
   useEffect(() => {
     if (dashboard.loading || ui.searchSelectionSeeded || !baseView.browser.search.length) return;
@@ -1275,7 +1545,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         });
         if (controller.signal.aborted) return;
         const hydrated = hydrateVisibleSearchRuns(loaded);
-        setSourceSweep(hydrated.sourceSweep);
+        setSourceSweep({ ...hydrated.sourceSweep, retry: hydrated.retry });
         sweepRetryRef.current = hydrated.retry;
         const hasRunning = [loaded.deterministic, loaded.aiWeb].some(
           (value) => value?.run?.status === "running"
@@ -1295,7 +1565,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
             detail: "Search is still running in the background. Reload later to see results.",
           };
         }
-        setSourceSweep(completed.sourceSweep);
+        setSourceSweep({ ...completed.sourceSweep, retry: completed.retry });
         sweepRetryRef.current = completed.retry;
         await dashboard.refetch?.();
       } catch (cause) {
@@ -1323,14 +1593,13 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       return;
     }
     let cancelled = false;
-    api
-      .getPacket(rawGate.applicationId)
-      .then((packet) => {
-        if (!cancelled) setGatePacket(packet);
-      })
-      .catch((cause) => {
-        if (!cancelled) setError(errorCopy(cause));
-      });
+    void loadGatePacketWithRetry({
+      api,
+      applicationId: rawGate.applicationId,
+      setGatePacket,
+      setError,
+      isCancelled: () => cancelled,
+    });
     return () => {
       cancelled = true;
     };
@@ -1339,14 +1608,12 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   useEffect(() => {
     if (ui.activeThread !== "ingest") return;
     let cancelled = false;
-    api
-      .getDeepIngestState()
-      .then((state) => {
-        if (!cancelled) setDeepState(state);
-      })
-      .catch((cause) => {
-        if (!cancelled) setError(errorCopy(cause));
-      });
+    void loadDeepIngestStateWithRetry({
+      api,
+      setDeepState,
+      setError,
+      isCancelled: () => cancelled,
+    });
     return () => {
       cancelled = true;
     };
@@ -1462,7 +1729,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     void execution
       .then(() => dashboard.refetch())
       .catch((cause) => {
-        setError(errorCopy(cause));
+        setError(mappedControllerError(cause));
         if (isEngineFailure(cause)) setEngineDown(true);
       });
   }, [api, dashboard.refetch, view]);
@@ -1562,7 +1829,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     void result.execution
       .then(() => dashboard.refetch())
       .catch((cause) => {
-        setError(errorCopy(cause));
+        setError(mappedControllerError(cause));
         if (isEngineFailure(cause)) setEngineDown(true);
       })
       .finally(() => missionExecutionRef.current.delete(result.mission.id));
@@ -1582,7 +1849,11 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         setSearchState: setSourceSweep,
         signal: controller.signal,
       });
-      if (!result?.aborted) sweepRetryRef.current = result?.retry || null;
+      if (!result?.aborted) {
+        const retry = result?.retry || null;
+        sweepRetryRef.current = retry;
+        setSourceSweep((current) => ({ ...current, retry }));
+      }
       if (result?.ok) setSweepComparison((current) => current + 1);
       else if (!result?.timedOut) sweepBaselineRef.current = null;
     } finally {
@@ -1682,6 +1953,30 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     );
   }
 
+  async function retryDeepSource(source) {
+    const result = await run(() => retrySourceAndRefresh({ api, source: source?.raw || source }));
+    if (!result?.view) return;
+    setDeepState(result.view);
+    const next = buildDeepIngestReview(result.view);
+    setDeepReceipt(
+      next.counts.reviewQueue
+        ? `Source reread. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
+        : "Source reread. It is ready to analyze."
+    );
+  }
+
+  async function removeDeepSource(source) {
+    const result = await run(() => removeSourceAndRefresh({ api, source: source?.raw || source }));
+    if (!result?.view) return;
+    setDeepState(result.view);
+    const next = buildDeepIngestReview(result.view);
+    setDeepReceipt(
+      next.counts.sources
+        ? `Source removed. ${next.counts.sources} source${next.counts.sources === 1 ? "" : "s"} remain.`
+        : "Source removed. Add another source whenever you're ready."
+    );
+  }
+
   function editDeepProposal(proposal) {
     setDeepEditingId(proposal.id);
     setDeepEditDraft({
@@ -1732,16 +2027,27 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     }
     if (file.url) {
       if (!openApplicationHandoff({ handoffUrl: file.url })) {
-        setError("That saved link is not safe to open.");
+        setError(localFileError("unsafe-link"));
       }
       return;
     }
     if (file.applicationId) {
-      const artifact = await run(() =>
-        loadChatFirstArtifact({ api, applicationId: file.applicationId, file })
-      );
-      if (artifact) setArtifactViewer({ title: file.name, artifact });
-      else setError(`${file.name || "This file"} is not ready to preview yet.`);
+      const loaded = await run(async () => ({
+        artifact: await loadChatFirstArtifact({
+          api,
+          applicationId: file.applicationId,
+          file,
+        }),
+      }));
+      if (!loaded) return;
+      if (loaded.artifact) setArtifactViewer({ title: file.name, artifact: loaded.artifact });
+      else
+        setError(
+          localFileError("preview", {
+            name: file.name || "This file",
+            onRetry: () => openFile(id),
+          })
+        );
     }
   }
 
@@ -1754,10 +2060,14 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         ...(file?.path ? { artifactPath: file.path } : {}),
       });
       if (!downloadBinaryArtifact(result)) {
-        setError("The dossier PDF could not be downloaded in this window.");
+        setError(
+          localFileError("dossier-download", {
+            onRetry: () => exportJobFile(applicationId, file),
+          })
+        );
       }
     } catch (cause) {
-      setError(errorCopy(cause));
+      setError(mappedControllerError(cause, () => exportJobFile(applicationId, file)));
     } finally {
       setBusy(false);
     }
@@ -1803,7 +2113,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         .runChatFirstMission(mission.id)
         .then(() => dashboard.refetch())
         .catch((cause) => {
-          setError(errorCopy(cause));
+          setError(mappedControllerError(cause));
           if (isEngineFailure(cause)) setEngineDown(true);
         });
       return;
@@ -1897,68 +2207,36 @@ export function ChatFirstApp({ api = chatFirstApi }) {
 
   async function decideSkillChatDiscovery(item, action) {
     if (!activeSkillChat?.skill || !item?.id || !["save", "discard"].includes(action)) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await commitSkillChatDecision({
-        api,
-        skill: activeSkillChat.skill,
-        item,
-        action,
-      });
-      setSourceReview((current) =>
-        current
-          ? {
-              ...current,
-              candidates: list(current.candidates).map((candidate) =>
-                candidate?.id === item.id
-                  ? { ...candidate, decision: { action, status: "completed" } }
-                  : candidate
-              ),
-            }
-          : current
-      );
-    } catch (cause) {
-      const resultText = errorCopy(cause);
-      setSkillChatState((current) =>
-        current?.id === activeSkillChat.id
-          ? {
-              ...current,
-              messages: [
-                ...list(current.messages),
-                {
-                  id: `decision-error:${item.id}:${Date.now()}`,
-                  role: "assistant",
-                  kind: "action_error",
-                  text: resultText,
-                },
-              ],
-            }
-          : current
-      );
-      setError(resultText);
-    } finally {
-      await dashboard.refetch().catch(() => undefined);
-      setBusy(false);
-    }
+    return runDiscoveryDecisionWithRetry({
+      api,
+      activeSkillChat,
+      item,
+      action,
+      setBusy,
+      setError,
+      setSourceReview,
+      setSkillChatState,
+      refetch: dashboard.refetch,
+    });
   }
 
   async function completeSkillChatDiscovery(item) {
     if (!activeSkillChat?.skill || !item?.id) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await commitSkillChatCompletion({ api, skill: activeSkillChat.skill, item });
-      setSourceReview(null);
-    } catch (cause) {
-      setError(errorCopy(cause));
-    } finally {
-      await dashboard.refetch().catch(() => undefined);
-      setBusy(false);
-    }
+    return runDiscoveryCompletionWithRetry({
+      api,
+      activeSkillChat,
+      item,
+      setBusy,
+      setError,
+      setSourceReview,
+      refetch: dashboard.refetch,
+    });
   }
 
   const actions = {
+    handleErrorAction: (action) => {
+      if (action?.to) navigate(action.to);
+    },
     setComposer: setComposerValue,
     submitComposer,
     removeComposerChip: (id) => dispatch({ type: "composer.remove-context", id }),
@@ -2079,14 +2357,19 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         );
         const receipt = packetExportReceipt(result);
         if (receipt) setArtifactViewer(receipt);
-        else if (result) setError("The export finished without returning a saved file path.");
+        else if (result)
+          setError(
+            localFileError("missing-export-path", {
+              onRetry: () => actions.exportFile(id),
+            })
+          );
       } else if (
         file?.applicationId &&
         /interview dossier/i.test(String(file.kind || file.name || ""))
       ) {
         await exportJobFile(file.applicationId, file);
       } else if (file && !downloadTextArtifact(file)) {
-        setError("This file does not have exportable content yet.");
+        setError(localFileError("not-exportable", { name: file.name || "This file" }));
       }
     },
     exportJobFile,
@@ -2133,7 +2416,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     },
     calendarAction: (label) => {
       if (!calendarAction(label, view.browser.schedule)) {
-        setError("No calendar event is ready to export yet.");
+        setError(localFileError("no-calendar-event"));
       }
     },
     openIngest: async () => {
@@ -2153,6 +2436,8 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     submitDeepInput,
     cancelDeepInput,
     analyzeDeepSource,
+    retryDeepSource,
+    removeDeepSource,
     editDeepProposal,
     changeDeepProposalEdit,
     saveDeepProposalEdit: (proposal) => decideDeepProposal(proposal, "save_edits"),
@@ -2193,11 +2478,18 @@ export function ChatFirstApp({ api = chatFirstApi }) {
           file?.packetKind ||
           { Resume: "resume", "Cover letter": "coverLetter", Answers: "answers" }[file?.kind],
       };
-      const artifact = await run(() =>
-        loadChatFirstArtifact({ api, applicationId, file: normalizedFile })
-      );
-      if (artifact) setArtifactViewer({ title: file.name, artifact });
-      else setError(`${file?.name || "This file"} is not ready to preview yet.`);
+      const loaded = await run(async () => ({
+        artifact: await loadChatFirstArtifact({ api, applicationId, file: normalizedFile }),
+      }));
+      if (!loaded) return;
+      if (loaded.artifact) setArtifactViewer({ title: file.name, artifact: loaded.artifact });
+      else
+        setError(
+          localFileError("preview", {
+            name: file?.name || "This file",
+            onRetry: () => actions.openJobFile(applicationId, _id, file),
+          })
+        );
     },
     closeArtifact: () => setArtifactViewer(null),
     decideCompanyProposal,
@@ -2216,6 +2508,8 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     showTechnical: () => setTechnicalOpen((current) => !current),
   };
 
+  const controllerError = chatFirstControllerError(error, dashboard);
+
   return (
     <ChatFirstAppView
       view={view}
@@ -2232,17 +2526,16 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       artifactViewer={artifactViewer}
       companyProposalReview={companyProposalReview}
       sourceReview={sourceReview}
+      githubStarPrompt={githubStarPrompt}
       engineDown={engineDown}
       technicalDetails={
         technicalOpen
-          ? error || "The selected local AI runtime did not return a usable response."
+          ? controllerErrorDetail(controllerError) ||
+            "The selected local AI runtime did not return a usable response."
           : null
       }
       busy={busy || dashboard.loading}
-      error={
-        error ||
-        (dashboard.noDatabase ? "CareerRat needs local setup before the workspace can open." : null)
-      }
+      error={controllerError}
       activeSkillChat={activeSkillChat}
       actions={actions}
     />

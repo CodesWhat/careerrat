@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { requireDb } from "../core/db/connection.mjs";
 import {
@@ -11,6 +11,7 @@ import {
   deepIngestProposalDecision,
   deepIngestProposalPut,
   deepIngestScannedSourcePersist,
+  deepIngestSourceGet,
   deepIngestSourceRemove,
   deepIngestStateGet,
 } from "../core/db/verbs.mjs";
@@ -126,6 +127,35 @@ function ensureDb(repoRoot, env) {
   requireDb({ repoRoot, env });
 }
 
+function retryInputForSource({ repoRoot, env, source }) {
+  const input = {
+    targetShape: source.targetShape,
+    sourceKind: source.sourceKind || source.kind,
+  };
+  const metadata = source.metadata || {};
+  if (["url", "linkedin", "portfolio", "project_link"].includes(input.sourceKind)) {
+    if (metadata.url) return { ...input, url: metadata.url };
+  } else if (input.sourceKind === "repo") {
+    if (metadata.repoPath) return { ...input, repoPath: metadata.repoPath };
+    if (metadata.url) return { ...input, url: metadata.url };
+  } else if (input.sourceKind === "local_path" && metadata.path) {
+    return { ...input, path: metadata.path, explicit: true };
+  } else if (input.sourceKind === "file") {
+    const path = ownedUploadPath({ repoRoot, env, artifactPath: source.artifactPath });
+    if (path) {
+      return {
+        ...input,
+        fileName: metadata.fileName || source.label,
+        bytes: readFileSync(path),
+        artifactPath: source.artifactPath,
+      };
+    }
+  }
+  const error = new Error("That source can't be retried safely. Remove it and add it again.");
+  error.code = "BAD_REQUEST";
+  throw error;
+}
+
 export function mountDeepIngestRoutes({
   addRoute,
   repoRoot,
@@ -158,6 +188,38 @@ export function mountDeepIngestRoutes({
       const scanned = await scanSource({ input: body, fetchImpl });
       const data = {
         ...persistScannedSource({ repoRoot, env, scanned }),
+        state: deepIngestStateGet({ repoRoot, env }),
+      };
+      sendJson(res, 200, { ok: true, data });
+    } catch (err) {
+      respondError(res, err);
+    }
+  });
+
+  addRoute("POST", "/api/deep-ingest/sources/retry", async (req, res) => {
+    try {
+      const body = await readJsonBodyCapped(req, DEEP_INGEST_JSON_BODY_MAX_BYTES);
+      ensureDb(repoRoot, env);
+      const source = deepIngestSourceGet({ repoRoot, env, sourceId: body?.sourceId }).source;
+      if (!source) {
+        const error = new Error("Deep ingest source not found");
+        error.code = "NOT_FOUND";
+        throw error;
+      }
+      const input = retryInputForSource({ repoRoot, env, source });
+      const scanned = await scanSource({ input, fetchImpl });
+      scanned.source = {
+        ...scanned.source,
+        id: source.id,
+        artifactPath: scanned.source?.artifactPath || source.artifactPath,
+      };
+      const data = {
+        ...persistScannedSource({
+          repoRoot,
+          env,
+          scanned,
+          ownedUpload: source.metadata?.ownedUpload === true,
+        }),
         state: deepIngestStateGet({ repoRoot, env }),
       };
       sendJson(res, 200, { ok: true, data });

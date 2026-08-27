@@ -176,6 +176,42 @@ test("electron-builder embeds every desktop main-process module imported by main
   }
 });
 
+test("electron-builder ships the native update acceptance helper and runner", async () => {
+  const [config, pkgText, acceptance] = await Promise.all([
+    readText("apps/desktop/electron-builder.yml"),
+    readText("apps/desktop/package.json"),
+    readText("apps/desktop/native-update-acceptance.mjs"),
+  ]);
+  const pkg = JSON.parse(pkgText);
+
+  assert.match(config, /^\s+- native-update-acceptance\.mjs\s*$/m);
+  assert.equal(pkg.scripts?.["verify:native-update"], "node scripts/verify-native-update.mjs");
+  assert.match(acceptance, /NATIVE_UPDATE_ACCEPTANCE_PUBLIC_KEY_PEM/);
+  assert.match(acceptance, /-----BEGIN PUBLIC KEY-----/);
+});
+
+test("desktop updates stay native, typed, and install only after CareerRat shutdown", async () => {
+  const [main, preload, updater, packageText] = await Promise.all([
+    readText("apps/desktop/main.mjs"),
+    readText("apps/desktop/preload/update-check-preload.cjs"),
+    readText("apps/desktop/update-check.mjs"),
+    readText("apps/desktop/package.json"),
+  ]);
+  const pkg = JSON.parse(packageText);
+
+  assert.equal(pkg.dependencies?.["electron-updater"], "6.8.9");
+  assert.match(main, /createDesktopUpdateController/);
+  assert.match(main, /selfUpdateSupported:\s*app\.isPackaged[\s\S]*process\.platform === "darwin"/);
+  assert.doesNotMatch(main, /shutdown\(\)\.finally\(/);
+  assert.match(main, /shutdown\(\)\.then\([\s\S]*updateController\?\.install\(\)/);
+  assert.match(main, /shutdown failed[\s\S]*app\.exit\(1\)/i);
+  assert.match(updater, /autoInstallOnAppQuit\s*=\s*false/);
+  assert.match(updater, /quitAndInstall\(false, true\)/);
+  assert.match(preload, /restartAndInstall:[\s\S]*CHANNEL_RESTART_AND_INSTALL/);
+  assert.doesNotMatch(preload, /openRelease|open-release/);
+  assert.doesNotMatch(main, /api\.github\.com\/repos\/CodesWhat\/careerrat\/releases\/latest/);
+});
+
 test("ISSUE-028: desktop boots Electron's private PDF renderer before the staged engine", async () => {
   const main = await readText("apps/desktop/main.mjs");
   const rendererStartAt = main.indexOf("await startDesktopPdfRenderer");
@@ -264,7 +300,21 @@ test("electron-builder macOS pilot config requires signing, entitlements, and no
   const builderAt = localDist.indexOf("package:mac");
   assert.ok(stageAt >= 0, "desktop local dist must stage before packaging");
   assert.ok(builderAt > stageAt, "electron-builder must run after staging completes");
-  assert.match(macPackage, /electron-builder --mac dmg/);
+  assert.match(
+    macPackage,
+    /electron-builder --mac --publish never/,
+    "mac packaging must use the configured DMG and ZIP targets without letting builder publish"
+  );
+  assert.match(macBlock, /- target: dmg\b/, "mac builds must keep the direct-install DMG");
+  assert.match(macBlock, /- target: zip\b/, "mac builds must produce the updater ZIP");
+  assert.match(
+    config,
+    /^dmg:\s*\n\s+writeUpdateInfo:\s+false\s*$/m,
+    "the post-build signed DMG must stay out of the ZIP-only updater feed"
+  );
+  assert.match(config, /^publish:\s*\n\s+- provider:\s*github\s*$/m);
+  assert.match(config, /\bowner:\s*CodesWhat\b/);
+  assert.match(config, /\brepo:\s*careerrat\b/);
   assert.match(
     releaseDist,
     /dist:local[\s\S]*release:dmg[\s\S]*verify:release[\s\S]*verify:packaged/,
@@ -319,7 +369,7 @@ function escapeRegExp(value) {
 
 function yamlTopLevelBlock(source, key) {
   const lines = source.split("\n");
-  const start = lines.findIndex((line) => line === `${key}:`);
+  const start = lines.indexOf(`${key}:`);
   assert.notEqual(start, -1, `${key}: block must exist`);
 
   let end = lines.length;

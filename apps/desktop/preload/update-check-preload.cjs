@@ -18,14 +18,13 @@ const CHANNEL_GET_STATE = "careerrat:update-check:get-state";
 const CHANNEL_SKIP_VERSION = "careerrat:update-check:skip-version";
 const CHANNEL_SET_ENABLED = "careerrat:update-check:set-enabled";
 const CHANNEL_CHECK_NOW = "careerrat:update-check:check-now";
-const CHANNEL_OPEN_RELEASE = "careerrat:update-check:open-release";
+const CHANNEL_RESTART_AND_INSTALL = "careerrat:update-check:restart-and-install";
 const EVENT_RESULT = "careerrat:update-check:result";
 const EVENT_NAVIGATE = "careerrat:desktop:navigate";
 
 contextBridge.exposeInMainWorld("careerratDesktopUpdate", {
-  // Resolves the current notice payload: { notify, enabled, version,
-  // releaseUrl, dmgUrl }. Safe to call any time: main.mjs answers from its
-  // in-memory state even before the first scheduled check has run.
+  // Resolves typed updater state. Native errors and release internals never
+  // cross into the renderer.
   getState: () => ipcRenderer.invoke(CHANNEL_GET_STATE),
 
   // Persists "don't notify me about this version again". main.mjs writes it
@@ -42,9 +41,9 @@ contextBridge.exposeInMainWorld("careerratDesktopUpdate", {
   // automatic-check preference.
   checkNow: () => ipcRenderer.invoke(CHANNEL_CHECK_NOW),
 
-  // Opens the GitHub release page in the OS browser via main.mjs's existing
-  // openExternalIfAllowed, no second "open a URL" path.
-  openRelease: () => ipcRenderer.invoke(CHANNEL_OPEN_RELEASE),
+  // Requests the explicit post-download restart. The main process finishes
+  // CareerRat's service shutdown before handing off to the native updater.
+  restartAndInstall: () => ipcRenderer.invoke(CHANNEL_RESTART_AND_INSTALL),
 
   // Subscribes to pushed updates (main.mjs sends one after every completed
   // check). Returns an unsubscribe function.

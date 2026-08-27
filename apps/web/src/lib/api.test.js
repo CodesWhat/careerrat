@@ -10,8 +10,10 @@ import {
   promoteSourced,
   recordExternalApplication,
   recordSkillChatDecision,
+  removeDeepIngestSource,
   replaceEvidenceClaims,
   requestHostedInterest,
+  retryDeepIngestSource,
   runAiWebSearchStream,
   scheduleInterview,
   sendWorkspaceMessage,
@@ -192,6 +194,48 @@ describe("openDeepIngestThread", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/chat-first/deep-ingest/open", {
       method: "POST",
       body: JSON.stringify({}),
+      headers: { "content-type": "application/json" },
+    });
+  });
+});
+
+describe("removeDeepIngestSource", () => {
+  it("posts the source id to the existing removal route", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true, data: { id: "source-failed" } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await removeDeepIngestSource({ sourceId: "source-failed" });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/deep-ingest/sources/remove", {
+      method: "POST",
+      body: JSON.stringify({ sourceId: "source-failed" }),
+      headers: { "content-type": "application/json" },
+    });
+  });
+});
+
+describe("retryDeepIngestSource", () => {
+  it("posts the source id to the source rescan route", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true, data: { id: "source-failed" } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await retryDeepIngestSource({ sourceId: "source-failed" });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/deep-ingest/sources/retry", {
+      method: "POST",
+      body: JSON.stringify({ sourceId: "source-failed" }),
       headers: { "content-type": "application/json" },
     });
   });
