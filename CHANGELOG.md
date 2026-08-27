@@ -29,7 +29,7 @@ All notable changes to CareerRat are documented here. This project follows
 ### Release-candidate verification
 
 - Before the later search and application-review fixes, Claude Code 2.1.247 completed the production AI-search path in 123.592 seconds, beyond the removed 120-second cutoff, with two roles, four recorded queries, two saved job descriptions, and no retry or error. Codex CLI 0.150.1 completed the same isolated source-level path in 29.445 seconds with one role, one recorded query, one saved job description, and no retry or error. Both workspaces passed data verification and left the real CareerRat databases unchanged.
-- After the canonical requalification and application-review fixes above, the repository suite passed 3,888 tests with 15 intentional skips and no failures. The focused application-review UI set passed all 157 tests, the focused public-copy set passed all 71 tests, and the production web, docs, and website builds passed. Biome plus `git diff --check` passed for the changed application-review files.
+- After the canonical requalification and application-review fixes above, the repository suite passed 3,892 tests with 15 intentional skips and no failures. The full web suite passed all 790 tests, the focused public-copy set passed all 71 tests, and the production web, docs, and website builds passed. Biome, Qlty, Knip, the placeholder check, and `git diff --check` passed.
 - Fresh packaged desktop QA has not rerun against this final candidate. The signed app, real end-to-end search and supervised application click-through, updater path, notarization, public release assets, npm, Homebrew, and production website remain at v0.16.5 until that acceptance and release work completes.
 
 ## [0.16.5] - 2026-08-27

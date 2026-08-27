@@ -785,9 +785,9 @@ so that earlier evidence does not qualify the current HEAD for promotion.
   Saved North American locations can answer the matching location screen without
   inventing unknown facts.
 
-The current search-focused group passes 131 tests with no failures, and the new
-onboarding, partial-capture, identity, packet, and job-thread paths have focused
-regressions. This is source-tree evidence, not current packaged acceptance. The
+The repository suite passes 3,892 tests with 15 intentional skips and no failures,
+the full web suite passes all 790 tests, and the final search-focused group passes
+131 tests. This is source-tree evidence, not current packaged acceptance. The
 README and install guide still summarize the earlier timeout/Yes-No v0.16.6
 tranche while correctly naming v0.16.5 as public; the website still keeps safe
 form filling separate from the candidate-owned Submit action.
