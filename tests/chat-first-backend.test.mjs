@@ -418,6 +418,49 @@ test("job threads expose live packet gaps without leaking the packet manifest", 
   assert.equal(JSON.stringify(thread.packetReview).includes("private-answer-path"), false);
 });
 
+test("job threads expose deferred question capture as form preparation, not a candidate question", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-question-capture",
+    company: "Hightouch",
+    status: "reviewed-hold",
+    packetManifest: {
+      applicationId: "app-question-capture",
+      status: "upload-ready",
+      uploadReady: true,
+      gapCount: 1,
+      gaps: [
+        {
+          kind: "answers",
+          code: "QUESTION_CAPTURE_DEFERRED",
+          message:
+            "answers artifact skipped: no application questions captured yet; capture the form questions (packet questions step), then regenerate, to produce answers",
+        },
+      ],
+    },
+  });
+  api.jobThreadSetPinned({ repoRoot, applicationId: "app-question-capture" });
+
+  const thread = api
+    .chatFirstStateGet({ repoRoot })
+    .jobThreads.find((row) => row.applicationId === "app-question-capture");
+
+  assert.deepEqual(thread.packetReview, {
+    status: "upload-ready",
+    uploadReady: true,
+    gapCount: 0,
+    canResume: false,
+    canPrepare: true,
+    questionCaptureRequired: true,
+    questionCaptureMessage:
+      "Open and prepare the application form so CareerRat can discover its questions.",
+    gaps: [],
+  });
+  assert.equal(JSON.stringify(thread.packetReview).includes("answers artifact skipped"), false);
+  assert.equal(JSON.stringify(thread.packetReview).includes("packet questions step"), false);
+});
+
 test("scanner rows preserve whether the saved job description is partial", async () => {
   const { sourcedRowsFromScanOffers } = await import("../src/core/scoring/sourced-persistence.mjs");
   const rows = sourcedRowsFromScanOffers([

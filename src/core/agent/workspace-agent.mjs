@@ -7136,6 +7136,7 @@ export async function executeWorkspaceIntent({
       const sessionUrl = safeExternalHttpUrl(
         execution.currentUrl || application.link || application.url || application.sourceUrl
       );
+      const permissionRequired = execution?.code === "APPLICATION_PREPARATION_PERMISSION_REQUIRED";
       const sessionState =
         prepareSubmit && execution.state === "questions-captured" ? "blocked" : execution.state;
       return appendActionResult({
@@ -7162,15 +7163,17 @@ export async function executeWorkspaceIntent({
           submissionVerified: false,
           nextActions: [
             {
-              label: "Return to supervised application",
+              label: permissionRequired ? "Prepare form" : "Return to supervised application",
               intent: {
                 type: "job.prepare-submit",
                 entity: { type: "application", id: normalized.entity.id },
-                input: {
-                  resumeSession: true,
-                  focusSession: true,
-                  ...carriedReviewApproval(input),
-                },
+                input: permissionRequired
+                  ? carriedReviewApproval(input)
+                  : {
+                      resumeSession: true,
+                      focusSession: true,
+                      ...carriedReviewApproval(input),
+                    },
               },
             },
             {

@@ -7172,6 +7172,52 @@ test("Apply on site keeps an active supervised browser session without treating 
   assert.match(last.text, /not marked Applied/i);
 });
 
+test("permission-blocked preparation offers a fresh retry instead of a missing session return", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    evaluation: { gate: "keep", fitScore: 92 },
+    packetManifest: {
+      applicationId: "app-temporal",
+      generatedAt: "2026-08-27T12:00:00.000Z",
+      status: "reviewable",
+      uploadReady: false,
+      gaps: [
+        {
+          kind: "answers",
+          code: "QUESTION_CAPTURE_DEFERRED",
+          message: "internal packet diagnostic",
+        },
+      ],
+      artifacts: {},
+    },
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.prepare-submit",
+      entity: { type: "application", id: "app-temporal" },
+    },
+    applyJobImpl: async () => ({
+      available: true,
+      verified: false,
+      state: "blocked",
+      code: "APPLICATION_PREPARATION_PERMISSION_REQUIRED",
+      reason:
+        "Application preparation for LinkedIn is off. Turn it on in Settings before CareerRat opens the form.",
+      session: { provider: "orca", blockers: ["permission required"] },
+    }),
+  });
+
+  const last = result.messages.at(-1);
+  assert.equal(last.metadata.state, "blocked");
+  assert.equal(last.metadata.nextActions[0].label, "Prepare form");
+  assert.equal(last.metadata.nextActions[0].intent.type, "job.prepare-submit");
+  assert.deepEqual(last.metadata.nextActions[0].intent.input, {});
+  assert.doesNotMatch(last.text, /prepared browser session/i);
+});
+
 test("job.apply refuses a resumeSession request when the application has no passing gate verdict on record", async () => {
   const repoRoot = tempRepo();
   // No evaluation persisted at all — resumeSession must not be trusted to

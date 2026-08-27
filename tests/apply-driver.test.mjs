@@ -425,6 +425,7 @@ test("LinkedIn form preparation uses the supervised-preparation consent capabili
   });
 
   assert.equal(result.state, "blocked");
+  assert.equal(result.code, "APPLICATION_PREPARATION_PERMISSION_REQUIRED");
   assert.equal(seen.length, 1);
   assert.equal(seen[0].capability, "authenticated_apply_preparation");
   assert.equal(seen[0].platform, "linkedin");
@@ -454,6 +455,7 @@ test("external ATS preparation checks consent before opening the application", a
   });
 
   assert.equal(result.state, "blocked");
+  assert.equal(result.code, "APPLICATION_PREPARATION_PERMISSION_REQUIRED");
   assert.equal(
     result.reason,
     "Application preparation for Greenhouse is off. Turn it on in Settings before CareerRat opens the form."

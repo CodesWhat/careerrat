@@ -1250,6 +1250,55 @@ describe("JobConversation and JobContextPanel", () => {
     enable.props.onClick();
     expect(onEnableApplicationPreparation).toHaveBeenCalledOnce();
   });
+
+  it("offers supervised form preparation without rendering packet diagnostics as questions", () => {
+    const onResumePacket = vi.fn();
+    const packetReview = {
+      status: "reviewable",
+      uploadReady: false,
+      gapCount: 0,
+      canResume: false,
+      canPrepare: true,
+      questionCaptureRequired: true,
+      questionCaptureMessage:
+        "Open and prepare the application form so CareerRat can discover its questions.",
+      gaps: [],
+    };
+    const conversation = markup(
+      <CanonicalJobConversation
+        eyebrow="HIGHTOUCH · SOFTWARE ENGINEER"
+        packetReview={packetReview}
+      />
+    );
+    const tree = JobContextPanel({
+      job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },
+      packetReview,
+      applicationPreparation: { status: "ready", ready: true },
+      onResumePacket,
+    });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(visit);
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+    const html = markup(tree);
+
+    expect(conversation).toContain("CareerRat needs to open the application form");
+    expect(conversation).not.toContain("application answer before I can continue");
+    expect(html).toContain("APPLICATION ANSWERS · FORM NEEDED");
+    expect(html).toContain("Open and prepare the application form");
+    expect(html).not.toContain("answers artifact skipped");
+    expect(html).not.toContain("packet questions step");
+    expect(html).not.toContain("1 NEEDED");
+    const prepare = buttons.find((button) => button.props.children === "Prepare form");
+    expect(prepare).toBeTruthy();
+    prepare.props.onClick();
+    expect(onResumePacket).toHaveBeenCalledOnce();
+  });
+
   it("presents canonical inbound communication and its saved reply draft", () => {
     const onApproveAndCopy = vi.fn();
     const onEditDraft = vi.fn();

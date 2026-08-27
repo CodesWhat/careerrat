@@ -3188,25 +3188,47 @@ function packetGapLabel(gap) {
 function packetReviewFromApplication(application) {
   const manifest = application?.packetManifest;
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) return null;
-  const gaps = (Array.isArray(manifest.gaps) ? manifest.gaps : []).map((gap, index) => {
-    const questionId = String(gap?.questionId || "").trim() || null;
-    const kind = String(gap?.kind || "").trim() || "packet";
-    const code = String(gap?.code || "").trim() || null;
-    return {
-      id: questionId || `${kind}:${code || index + 1}`,
-      ...(questionId ? { questionId } : {}),
-      kind,
-      ...(code ? { code } : {}),
-      label: packetGapLabel(gap),
-      message: String(gap?.message || "").trim(),
-      answerable: kind.toLowerCase() === "answers" && Boolean(questionId),
-    };
-  });
+  const manifestGaps = Array.isArray(manifest.gaps) ? manifest.gaps : [];
+  const questionCaptureRequired = manifestGaps.some(
+    (gap) =>
+      String(gap?.kind || "").toLowerCase() === "answers" &&
+      String(gap?.code || "").toUpperCase() === "QUESTION_CAPTURE_DEFERRED"
+  );
+  const gaps = manifestGaps
+    .filter(
+      (gap) =>
+        !(
+          String(gap?.kind || "").toLowerCase() === "answers" &&
+          String(gap?.code || "").toUpperCase() === "QUESTION_CAPTURE_DEFERRED"
+        )
+    )
+    .map((gap, index) => {
+      const questionId = String(gap?.questionId || "").trim() || null;
+      const kind = String(gap?.kind || "").trim() || "packet";
+      const code = String(gap?.code || "").trim() || null;
+      return {
+        id: questionId || `${kind}:${code || index + 1}`,
+        ...(questionId ? { questionId } : {}),
+        kind,
+        ...(code ? { code } : {}),
+        label: packetGapLabel(gap),
+        message: String(gap?.message || "").trim(),
+        answerable: kind.toLowerCase() === "answers" && Boolean(questionId),
+      };
+    });
   return {
     status: String(manifest.status || "reviewable"),
     uploadReady: manifest.uploadReady === true,
     gapCount: gaps.length,
-    canResume: manifest.uploadReady === true && gaps.length === 0,
+    canResume: manifest.uploadReady === true && gaps.length === 0 && !questionCaptureRequired,
+    ...(questionCaptureRequired
+      ? {
+          canPrepare: gaps.length === 0,
+          questionCaptureRequired: true,
+          questionCaptureMessage:
+            "Open and prepare the application form so CareerRat can discover its questions.",
+        }
+      : {}),
     gaps,
   };
 }

@@ -557,6 +557,23 @@ describe("chat-first app controller", () => {
     expect(api.runWorkspaceIntent).not.toHaveBeenCalled();
   });
 
+  it("starts fresh supervised preparation when no paused mission remains", async () => {
+    const api = {
+      resumeChatFirstMission: vi.fn(),
+      runWorkspaceIntent: vi.fn().mockResolvedValue({ data: { ok: true } }),
+    };
+
+    await expect(
+      resumePacketPreparation({ api, missions: [], applicationId: "app-hightouch" })
+    ).resolves.toMatchObject({ data: { ok: true } });
+    expect(api.resumeChatFirstMission).not.toHaveBeenCalled();
+    expect(api.runWorkspaceIntent).toHaveBeenCalledWith(
+      "job.prepare-submit",
+      { type: "application", id: "app-hightouch" },
+      {}
+    );
+  });
+
   it("ignores unrelated or completed paused missions when resuming packet preparation", async () => {
     const api = {
       resumeChatFirstMission: vi.fn().mockResolvedValue({ ok: true }),

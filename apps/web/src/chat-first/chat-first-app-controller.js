@@ -388,8 +388,11 @@ export async function resumePacketPreparation({ api, missions, applicationId }) 
   const mission = [...list(missions)]
     .sort((left, right) => Date.parse(right?.updatedAt || 0) - Date.parse(left?.updatedAt || 0))
     .find((candidate) => candidate?.status === "paused" && resumablePacketStep(candidate, id));
-  if (!mission?.id || typeof api?.resumeChatFirstMission !== "function") return false;
-  return api.resumeChatFirstMission(mission.id);
+  if (mission?.id && typeof api?.resumeChatFirstMission === "function") {
+    return api.resumeChatFirstMission(mission.id);
+  }
+  if (typeof api?.runWorkspaceIntent !== "function") return false;
+  return api.runWorkspaceIntent("job.prepare-submit", { type: "application", id }, {});
 }
 
 export function applicationPreparationPermission(automation) {

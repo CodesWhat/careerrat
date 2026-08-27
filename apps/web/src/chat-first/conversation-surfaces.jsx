@@ -820,9 +820,11 @@ export function CanonicalJobConversation({
     <JobConversation
       eyebrow={eyebrow}
       notice={
-        packetReview?.gaps?.length
-          ? `I need ${packetReview.gaps.length} application answer${packetReview.gaps.length === 1 ? "" : "s"} before I can continue. Use the application review on the right, then resume preparation.`
-          : null
+        packetReview?.questionCaptureRequired
+          ? "CareerRat needs to open the application form to discover its questions. Use Prepare form on the right."
+          : packetReview?.gaps?.length
+            ? `I need ${packetReview.gaps.length} application answer${packetReview.gaps.length === 1 ? "" : "s"} before I can continue. Use the application review on the right, then resume preparation.`
+            : null
       }
       inbound={canonicalInbound(communication)}
       agentName={agentName}
@@ -926,10 +928,23 @@ export function JobContextPanel({
       {packetReview ? (
         <section className="chat-first-packet-review" aria-label="Application answers">
           <div className="chat-first-eyebrow">
-            {packetReview.gaps?.length
-              ? `APPLICATION ANSWERS · ${packetReview.gaps.length} NEEDED`
-              : "APPLICATION ANSWERS · READY"}
+            {packetReview.questionCaptureRequired
+              ? "APPLICATION ANSWERS · FORM NEEDED"
+              : packetReview.gaps?.length
+                ? `APPLICATION ANSWERS · ${packetReview.gaps.length} NEEDED`
+                : "APPLICATION ANSWERS · READY"}
           </div>
+          {packetReview.questionCaptureRequired ? (
+            <div className="chat-first-packet-review__gap">
+              <div>
+                <strong>No form questions captured yet</strong>
+                <small>
+                  {packetReview.questionCaptureMessage ||
+                    "Open and prepare the application form so CareerRat can discover its questions."}
+                </small>
+              </div>
+            </div>
+          ) : null}
           {(packetReview.gaps || EMPTY_LIST).map((gap) => (
             <div className="chat-first-packet-review__gap" key={gap.id}>
               <div>
@@ -968,14 +983,14 @@ export function JobContextPanel({
               </button>
             </div>
           ) : null}
-          {packetReview.canResume && preparationReady ? (
+          {(packetReview.canResume || packetReview.canPrepare) && preparationReady ? (
             <button
               className="chat-first-context-action"
               type="button"
               disabled={packetBusy}
               onClick={onResumePacket}
             >
-              Resume preparation
+              {packetReview.canPrepare ? "Prepare form" : "Resume preparation"}
             </button>
           ) : null}
         </section>

@@ -546,6 +546,30 @@ describe("buildChatFirstView", () => {
     expect(view.threads[0].needsAction).toBe(false);
   });
 
+  it("keeps question capture visible as a durable job-thread action", () => {
+    const view = buildChatFirstView(
+      { ...dashboard, allNextSteps: [] },
+      {
+        ...runtime,
+        jobThreads: [
+          {
+            id: "thread-question-capture",
+            applicationId: "app-1",
+            company: "E Corp",
+            packetReview: {
+              gaps: [],
+              questionCaptureRequired: true,
+            },
+          },
+        ],
+        missions: [],
+        touchDue: [],
+      }
+    );
+
+    expect(view.threads[0].needsAction).toBe(true);
+  });
+
   it("degrades empty snapshots without inventing demo product state", () => {
     const view = buildChatFirstView(null, null);
 
