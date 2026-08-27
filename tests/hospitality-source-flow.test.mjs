@@ -74,20 +74,26 @@ test("hospitality source generation scans relevant local roles without making Ar
   }
 
   const techDetailUrl = "https://www.hcareers.com/jobs/9999999-platform-engineer-berlin";
+  const outsideDetailUrl = "https://www.hcareers.com/jobs/9999998-bartender-berlin";
   const firstHcareers = hospitalitySources.find((source) => source.provider === "hcareers");
   byUrl.set(
     firstHcareers.url,
     listHtmlByProvider.hcareers.replace(
       "</body>",
-      '<a href="/jobs/9999999-platform-engineer-berlin">Platform Engineer</a></body>'
+      '<a href="/jobs/9999999-platform-engineer-berlin">Platform Engineer</a>' +
+        '<a href="/jobs/9999998-bartender-berlin">Bartender in Berlin</a></body>'
     )
   );
   byUrl.set(
     techDetailUrl,
+    detailHtmlByProvider.hcareers.replace("Rooftop Bartender", "Platform Engineer")
+  );
+  byUrl.set(
+    outsideDetailUrl,
     detailHtmlByProvider.hcareers
-      .replace("Rooftop Bartender", "Platform Engineer")
-      .replace("New York", "Berlin")
-      .replace('"NY"', '"Germany"')
+      .replace('"addressLocality":"New York"', '"addressLocality":"Berlin"')
+      .replace('"addressRegion":"NY"', '"addressRegion":"BE"')
+      .replace('"addressCountry":"US"', '"addressCountry":"DE"')
   );
 
   const scanned = await scanBoards(
@@ -117,6 +123,11 @@ test("hospitality source generation scans relevant local roles without making Ar
     false
   );
   assert.ok(filtered.filteredTitle.some((offer) => /Platform Engineer/.test(offer.title)));
+  assert.ok(
+    filtered.filteredLocation.some(
+      (offer) => /Rooftop Bartender/.test(offer.title) && /Berlin/.test(offer.location)
+    )
+  );
   assert.equal(
     filtered.kept.every((offer) => /New York/.test(offer.location)),
     true
@@ -146,12 +157,138 @@ test("hospitality boards are not seeded for unrelated software targets", () => {
   );
 });
 
-test("hospitality source generation uses OysterLink's canonical New York City slug", () => {
+test("explicit software domains and ambiguous server or event words never enable hospitality boards", () => {
+  for (const candidate of [
+    {
+      domain: "software engineering",
+      titles: ["Server Engineer", "Event Operations Manager"],
+    },
+    { domain: "event-driven software systems", titles: ["Platform Engineer"] },
+    { domain: "", titles: ["Server Engineer", "Event Coordinator"] },
+  ]) {
+    const config = buildSearchSources(
+      {
+        role_buckets: [{ name: "Engineering", priority: "primary", titles: candidate.titles }],
+      },
+      {
+        ...profile,
+        candidate: { domain: candidate.domain },
+      }
+    );
+
+    assert.equal(
+      config.searches.some((source) =>
+        ["oysterlink", "hcareers", "hospitalityonline", "ihirehospitality"].includes(
+          source.provider
+        )
+      ),
+      false,
+      JSON.stringify(candidate)
+    );
+    assert.equal(
+      config.searches.some((source) => source.provider === "arbeitnow"),
+      true,
+      JSON.stringify(candidate)
+    );
+  }
+});
+
+test("a strong hospitality operations title can infer the domain when the profile has none", () => {
+  const config = buildSearchSources(
+    {
+      role_buckets: [
+        { name: "Operations", priority: "primary", titles: ["Event Operations Manager"] },
+      ],
+    },
+    {
+      ...profile,
+      candidate: { domain: "" },
+    }
+  );
+
+  assert.equal(
+    config.searches.some((source) => source.provider === "hcareers"),
+    true
+  );
+});
+
+test("hospitality source generation normalizes common New York location forms", () => {
+  for (const home of ["NYC", "New York City", "New York City, NY", "New York, NY, United States"]) {
+    const config = buildSearchSources(targeting, {
+      ...profile,
+      location: { ...profile.location, home },
+    });
+    const providers = config.searches
+      .filter((source) => source.enabled !== false && source.source_type === "board")
+      .map((source) => source.provider);
+    const oyster = config.searches.find((source) => source.provider === "oysterlink");
+
+    assert.equal(oyster.url, "https://oysterlink.com/jobs/bartender/new-york-ny/", home);
+    assert.deepEqual(
+      [...new Set(providers)].sort(),
+      ["hcareers", "hospitalityonline", "ihirehospitality", "oysterlink"],
+      home
+    );
+  }
+});
+
+test("hospitality source generation keeps a deterministic fallback when no local board URL is possible", () => {
   const config = buildSearchSources(targeting, {
     ...profile,
-    location: { ...profile.location, home: "New York City, NY" },
+    location: { ...profile.location, home: "London, UK" },
   });
-  const oyster = config.searches.find((source) => source.provider === "oysterlink");
 
-  assert.equal(oyster.url, "https://oysterlink.com/jobs/bartender/new-york-ny/");
+  assert.equal(
+    config.searches.some((source) => source.provider === "arbeitnow" && source.enabled),
+    true
+  );
+});
+
+test("hospitality title-query boards cover a bounded deduplicated set of target titles", () => {
+  const config = buildSearchSources(
+    {
+      ...targeting,
+      role_buckets: [
+        {
+          name: "Hospitality",
+          priority: "primary",
+          titles: [
+            "Bartender",
+            " bartender ",
+            "Event Operations Manager",
+            "Food and Beverage Supervisor",
+            "Hotel Operations Manager",
+            "Banquet Manager",
+            "Concierge",
+          ],
+        },
+      ],
+    },
+    profile
+  );
+  const queryProviders = new Set(["oysterlink", "hcareers", "hospitalityonline"]);
+  const queriesByProvider = Object.groupBy(
+    config.searches.filter((source) => queryProviders.has(source.provider)),
+    (source) => source.provider
+  );
+
+  for (const provider of queryProviders) {
+    assert.deepEqual(
+      queriesByProvider[provider].map((source) => source.label.split(" · ").at(-1)),
+      [
+        "Bartender",
+        "Event Operations Manager",
+        "Food and Beverage Supervisor",
+        "Hotel Operations Manager",
+      ]
+    );
+    assert.equal(
+      queriesByProvider[provider].every((source) => source.max_results === 8),
+      true
+    );
+  }
+  assert.equal(
+    config.searches.filter((source) => source.provider === "ihirehospitality").length,
+    1
+  );
 });
