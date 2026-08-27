@@ -156,7 +156,7 @@ function ClaudeSetupGuide({ guidedSetup, submitting, onStartGuidedSetup, onRefre
   const installing = setupStatus === "installing";
   const installed = ["installed", "ready"].includes(setupStatus);
   const unavailable = setupStatus === "unavailable";
-  const failed = ["failed", "cancelled", "unavailable"].includes(setupStatus);
+  const retryable = ["failed", "cancelled"].includes(setupStatus);
   const setupMessage =
     {
       installing: "CareerRat is installing Claude Code. You can stay in this window.",
@@ -174,7 +174,7 @@ function ClaudeSetupGuide({ guidedSetup, submitting, onStartGuidedSetup, onRefre
       ? "Claude Code installed ✓"
       : unavailable
         ? "Check setup"
-        : failed
+        : retryable
           ? "Try installation again"
           : "Install inside CareerRat";
   return (
@@ -230,7 +230,15 @@ function ClaudeSetupGuide({ guidedSetup, submitting, onStartGuidedSetup, onRefre
                 <header>
                   <span>CareerRat setup</span>
                   <span>
-                    {installing ? "RUNNING" : installed ? "DONE" : failed ? "RETRY" : "READY"}
+                    {installing
+                      ? "RUNNING"
+                      : installed
+                        ? "DONE"
+                        : unavailable
+                          ? "SETUP"
+                          : retryable
+                            ? "RETRY"
+                            : "READY"}
                   </span>
                 </header>
                 <div className="cf-first-run__setup-console-output" role="log" aria-live="polite">
