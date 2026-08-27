@@ -6,6 +6,7 @@ export const AI_OPERATION_DEFAULTS = Object.freeze({
   "coach.deep": Object.freeze({ quality: "best", reasoning: "high" }),
   "application.judgment": Object.freeze({ quality: "best", reasoning: "high" }),
   "application.drafting": Object.freeze({ quality: "best", reasoning: "medium" }),
+  "communication.drafting": Object.freeze({ quality: "best", reasoning: "medium" }),
   "research.web": Object.freeze({ quality: "balanced", reasoning: "medium" }),
   "structured.extraction": Object.freeze({ quality: "balanced", reasoning: "medium" }),
   "bounded.classification": Object.freeze({ quality: "faster", reasoning: "low" }),
@@ -14,8 +15,11 @@ export const AI_OPERATION_DEFAULTS = Object.freeze({
 const QUALITY_VALUES = new Set(["automatic", "faster", "balanced", "best"]);
 const REASONING_VALUES = new Set(["automatic", "low", "medium", "high"]);
 const EFFORT_ORDER = Object.freeze(["low", "medium", "high", "xhigh", "max", "ultra"]);
+const CLAUDE_MODEL_MAP = Object.freeze({ faster: "haiku", balanced: "sonnet", best: "opus" });
 const MODEL_MAP = Object.freeze({
-  claude: Object.freeze({ faster: "haiku", balanced: "sonnet", best: "opus" }),
+  claude: CLAUDE_MODEL_MAP,
+  "anthropic-api": CLAUDE_MODEL_MAP,
+  "managed-anthropic": CLAUDE_MODEL_MAP,
   codex: Object.freeze({
     faster: "gpt-5.6-luna",
     balanced: "gpt-5.6-terra",

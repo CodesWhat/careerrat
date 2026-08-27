@@ -6498,6 +6498,7 @@ export async function executeWorkspaceIntent({
         skill: "email-comms",
         action: "draft",
         operation: "communication:draft",
+        aiOperation: "communication.drafting",
       });
       const body = responseText(response);
       if (!body)
@@ -6553,6 +6554,7 @@ export async function executeWorkspaceIntent({
           draftedAt,
           engine: response?.engine || null,
           elapsedMs: response?.elapsedMs ?? null,
+          ...(response?.executionPlan ? { executionPlan: response.executionPlan } : {}),
         },
         now,
       });

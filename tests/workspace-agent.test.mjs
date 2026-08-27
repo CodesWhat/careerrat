@@ -7644,12 +7644,18 @@ test("Draft reply uses the same agent context and persists a reviewable communic
           },
         ],
         model: "installed:claude",
+        executionPlan: {
+          operation: "communication.drafting",
+          runtimeId: "claude",
+          resolved: { model: "opus", effort: "medium" },
+        },
       };
     },
     now: () => new Date("2026-08-09T17:00:00.000Z"),
   });
 
   assert.equal(calls.length, 1);
+  assert.equal(calls[0].aiOperation, "communication.drafting");
   assert.match(calls[0].system, /Interview availability/);
   assert.match(calls[0].system, /Tuesday or Wednesday afternoon/);
   const comm = readCommunication(repoRoot, "comm-temporal-recruiter");
@@ -7660,6 +7666,11 @@ test("Draft reply uses the same agent context and persists a reviewable communic
   assert.equal(result.messages.at(-1).artifacts[0].kind, "communication_draft");
   assert.equal(result.messages.at(-1).metadata.sent, false);
   assert.equal(result.messages.at(-1).metadata.requiresReview, true);
+  assert.deepEqual(result.messages.at(-1).metadata.executionPlan, {
+    operation: "communication.drafting",
+    runtimeId: "claude",
+    resolved: { model: "opus", effort: "medium" },
+  });
 });
 
 test("communication.draft refuses and does not persist an AI draft that leaks a comp phrase", async () => {

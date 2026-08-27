@@ -13,6 +13,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { writeAIPreferences } from "../src/core/ai/ai-preferences.mjs";
 import { isPlainYesNoQuestion, parseChatAnswerMode } from "../src/core/ai/chat-answer-mode.mjs";
 import {
   buildChatKickoffPrompt,
@@ -1716,6 +1717,118 @@ test("createChatRuntime.startSession (installed route): threads skill + repoRoot
   }
 });
 
+test("createChatRuntime freezes saved Faster/Low research policy for every direct Codex research chat", async () => {
+  const skills = ["research-company", "research-comp", "research-boards", "company-health"];
+  const repoRoot = tempRepoWithSkill(skills);
+  try {
+    const env = {};
+    selectInstalledRuntime({ repoRoot, env });
+    writeAIPreferences({ repoRoot, env, quality: "faster", reasoning: "low" });
+    const calls = [];
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      runInstalledRuntimeImpl: async (args) => {
+        calls.push(args);
+        return { text: "Research ready.", usage: null, model: args.model };
+      },
+    });
+    try {
+      for (const skill of skills) {
+        const { chatId } = await chatRuntime.startSession({ skill });
+        await waitForPredicate(() => chatRuntime.getSession(chatId)?.state === "idle");
+      }
+
+      assert.deepEqual(
+        calls.map(({ runtime, skill, model, effort }) => ({
+          runtimeId: runtime.id,
+          skill,
+          model,
+          effort,
+        })),
+        skills.map((skill) => ({
+          runtimeId: "codex",
+          skill,
+          model: "gpt-5.6-luna",
+          effort: "low",
+        }))
+      );
+
+      writeAIPreferences({ repoRoot, env, quality: "best", reasoning: "high" });
+      const companySession = chatRuntime.findBySkill("research-company");
+      chatRuntime.postMessage(companySession.chatId, "Check one more source.");
+      await waitForPredicate(() => calls.length === skills.length + 1);
+      assert.equal(calls.at(-1).model, "gpt-5.6-luna");
+      assert.equal(calls.at(-1).effort, "low");
+    } finally {
+      chatRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime passes saved provider-neutral policy to Claude CLI and Agent SDK research chats", async () => {
+  const installedRoot = tempRepoWithSkill("research-company");
+  try {
+    const installedEnv = {};
+    selectFakeClaudeRuntime({ repoRoot: installedRoot, env: installedEnv });
+    writeAIPreferences({
+      repoRoot: installedRoot,
+      env: installedEnv,
+      quality: "balanced",
+      reasoning: "high",
+    });
+    const installedCalls = [];
+    const installedRuntime = createChatRuntime({
+      repoRoot: installedRoot,
+      env: installedEnv,
+      runInstalledRuntimeStreamImpl: async (args) => {
+        installedCalls.push(args);
+        return { text: "Research ready.", usage: null, model: args.model };
+      },
+    });
+    try {
+      const { chatId } = await installedRuntime.startSession({ skill: "research-company" });
+      await waitForPredicate(() => installedRuntime.getSession(chatId)?.state === "idle");
+      assert.equal(installedCalls[0].runtime.id, "claude");
+      assert.equal(installedCalls[0].model, "sonnet");
+      assert.equal(installedCalls[0].effort, "high");
+    } finally {
+      installedRuntime.shutdown();
+    }
+  } finally {
+    cleanup(installedRoot);
+  }
+
+  const sdkRoot = tempRepoWithSkill("research-comp");
+  try {
+    const sdkEnv = { ANTHROPIC_API_KEY: "sk-ant-test" };
+    writeAIPreferences({ repoRoot: sdkRoot, env: sdkEnv, quality: "faster", reasoning: "low" });
+    let sdkOptions;
+    const sdkRuntime = createChatRuntime({
+      repoRoot: sdkRoot,
+      env: sdkEnv,
+      loadSdk: async () => ({
+        query: (args) => {
+          sdkOptions = args.options;
+          return fakeStreamingSdk([turnMessagesWithReply("Benchmark ready.")]).query(args);
+        },
+      }),
+    });
+    try {
+      const { chatId } = await sdkRuntime.startSession({ skill: "research-comp" });
+      await waitForPredicate(() => sdkRuntime.getSession(chatId)?.state === "idle");
+      assert.equal(sdkOptions.model, "haiku");
+      assert.equal(sdkOptions.effort, "low");
+    } finally {
+      sdkRuntime.shutdown();
+    }
+  } finally {
+    cleanup(sdkRoot);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // The bug this fix closes: startInstalledSession never called loadSdk, so an
 // installed "claude" chat turn only ever had ONE json envelope to work with,
@@ -2124,7 +2237,7 @@ test("createChatRuntime (installed route): a runtime failure surfaces as an erro
   }
 });
 
-test("createChatRuntime does not pass a Claude model override into a selected Codex runtime", async () => {
+test("createChatRuntime ignores a Claude override and keeps the selected Codex model family", async () => {
   const repoRoot = tempRepoWithSkill("ingest-profile");
   const env = { ANTHROPIC_MODEL: "claude-only-model" };
   const binDir = selectFakeCodexRuntime({ repoRoot, env });
@@ -2146,7 +2259,9 @@ test("createChatRuntime does not pass a Claude model override into a selected Co
       await waitForPredicate(() => chatRuntime.getSession(chatId)?.state === "idle");
       assert.equal(calls.length, 1);
       assert.equal(calls[0].runtime.id, "codex");
-      assert.equal(calls[0].model, undefined);
+      assert.equal(calls[0].model, "gpt-5.6-sol");
+      assert.equal(calls[0].effort, "medium");
+      assert.doesNotMatch(calls[0].model, /^claude/i);
     } finally {
       chatRuntime.shutdown();
     }

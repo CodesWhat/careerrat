@@ -85,6 +85,12 @@ test("operation defaults protect consequential judgment and coaching from low ef
   });
   assert.equal(drafting.resolved.model, "opus");
   assert.equal(drafting.resolved.effort, "medium");
+  const communicationDrafting = resolveAIExecutionPlan({
+    operation: "communication.drafting",
+    runtimeId: "claude",
+  });
+  assert.equal(communicationDrafting.resolved.model, "opus");
+  assert.equal(communicationDrafting.resolved.effort, "medium");
 });
 
 test("provider mappings never cross Claude and Codex model families", () => {
@@ -136,15 +142,15 @@ test("an unavailable mapped model falls back within the selected provider and re
   assert.equal(plan.fallback.toEffort, "medium");
 });
 
-test("provider fallbacks keep their existing model owner while applying operation effort", () => {
+test("Anthropic API routes use the Claude quality mapping while applying operation effort", () => {
   for (const runtimeId of ["anthropic-api", "managed-anthropic"]) {
     const plan = resolveAIExecutionPlan({
       operation: "bounded.classification",
       runtimeId,
     });
     assert.equal(plan.runtimeId, runtimeId);
-    assert.equal(plan.resolved.model, null);
-    assert.equal(plan.resolved.modelSource, "provider-default");
+    assert.equal(plan.resolved.model, "haiku");
+    assert.equal(plan.resolved.modelSource, "alias");
     assert.equal(plan.resolved.effort, "low");
   }
 });

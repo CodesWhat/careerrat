@@ -56,6 +56,7 @@ import {
 import { parseSourceReviewOutput } from "../discovery/source-review-artifact.mjs";
 import { computeSetupProgress } from "../onboarding/setup-progress.mjs";
 import { loadAgentCandidateConfig } from "../profile/config-store.mjs";
+import { loadAIPreferences } from "./ai-preferences.mjs";
 import { resolveAIRoute } from "./call-ai.mjs";
 import { parseChatAnswerMode } from "./chat-answer-mode.mjs";
 import {
@@ -65,6 +66,7 @@ import {
   runInstalledRuntimeStream,
   supportsInstalledRuntimeStreaming,
 } from "./installed-runtimes.mjs";
+import { aiRuntimeIdForRoute, resolveAIExecutionPlan } from "./operation-policy.mjs";
 import { createRuntimeToolPolicy } from "./runtime-tool-policy.mjs";
 import {
   installedSkillRuntimePosture,
@@ -89,6 +91,10 @@ const DURABLE_CHAT_SKILLS = new Set([
   "company-health",
 ]);
 const DURABLE_CHAT_PROMPT_CHAR_LIMIT = 64_000;
+
+function chatOperationForSkill(skill) {
+  return skill === "ingest-profile" ? "paul.conversation" : "research.web";
+}
 
 // Lane A / R6 — the current form-defaults.declined_fields key list, read once
 // per session start (both the SDK path's kickoff message and the installed
@@ -825,7 +831,8 @@ export function createChatRuntime({
         repoRoot,
         env,
         signal: turnController.signal,
-        model: installedRuntimeModel(route.runtime.id, { env }),
+        model: session.executionPlan.resolved.model,
+        effort: session.executionPlan.resolved.effort,
         tools: session.runtimeTools,
         // A chat-session turn over CHAT_RUNTIME_TOOLS (WebSearch/WebFetch/
         // Skill, never Read, see runtime-tools.mjs) does live web research,
@@ -1044,6 +1051,13 @@ export function createChatRuntime({
       err.allowed = [...DIRECT_CHAT_SKILLS];
       throw err;
     }
+    const executionPlan = resolveAIExecutionPlan({
+      operation: chatOperationForSkill(trimmedSkill),
+      runtimeId: aiRuntimeIdForRoute(route),
+      preferences: loadAIPreferences({ repoRoot, env }),
+      modelOverride:
+        route.type === "installed" ? installedRuntimeModel(route.runtime.id, { env }) : undefined,
+    });
 
     const durableState = durableChatState(trimmedSkill);
     const restoredTranscript = durableState.transcript;
@@ -1069,6 +1083,7 @@ export function createChatRuntime({
         restoredTranscript,
         resumed,
         awaitingUser,
+        executionPlan,
       });
     }
 
@@ -1103,6 +1118,7 @@ export function createChatRuntime({
       durableTranscript: restoredTranscript,
       durableMessageCount: restoredTranscript.length,
       needsKickoff: awaitingUser,
+      executionPlan,
       persistDurably: DURABLE_CHAT_SKILLS.has(trimmedSkill) && dbExists({ repoRoot, env }),
       resumed,
       sourceReviewResponseSeen: false,
@@ -1125,6 +1141,8 @@ export function createChatRuntime({
       options: {
         cwd: repoRoot,
         env: childEnv,
+        model: executionPlan.resolved.model,
+        effort: executionPlan.resolved.effort,
         abortController,
         settingSources: ["project"],
         skills: [trimmedSkill],
@@ -1171,6 +1189,7 @@ export function createChatRuntime({
     restoredTranscript,
     resumed,
     awaitingUser,
+    executionPlan,
   }) {
     const runtimeTools = resolveInstalledSkillRuntimeTools({ skill: trimmedSkill });
     const installedPosture = installedSkillRuntimePosture({ skill: trimmedSkill });
@@ -1205,6 +1224,7 @@ export function createChatRuntime({
       durableTranscript: restoredTranscript,
       durableMessageCount: restoredTranscript.length,
       needsKickoff: false,
+      executionPlan,
       persistDurably: DURABLE_CHAT_SKILLS.has(trimmedSkill) && dbExists({ repoRoot, env }),
       resumed,
       // Messages submitted while a turn is already in flight (postMessage's
