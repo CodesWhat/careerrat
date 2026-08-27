@@ -53,6 +53,13 @@ directly and never falls back to or silently switches providers. A runtime
 becomes `Ready` only after local availability, authentication, and its readiness
 check pass.
 
+The AI controls use the same product language for either runtime. **Automatic**
+chooses by task, keeping Paul on the strongest coaching path while routine
+search and extraction work stays efficient. **Faster**, **Balanced**, and
+**Best** let you choose the overall quality level, while **Thinking depth**
+controls how long the selected runtime reasons. The setting never ranks Claude
+Code against OpenAI Codex or silently changes providers.
+
 v0.16.5 is the current public release. Its signed, notarized, and stapled Mac
 DMG, updater ZIP, update feed, and SBOM are on GitHub; `careerrat@latest` is
 0.16.5 on npm; the Homebrew cask is 0.16.5; and the installed app reports
@@ -65,15 +72,20 @@ It also closes the remaining raw-error paths in guided installation, expanded
 diagnostics, browser-workflow cards, Search status, and browser setup.
 
 v0.16.6 is an unreleased release candidate. It fixes AI web searches that ran
-past the old two-minute limit and rechecks canonical job descriptions against
-location, office-day, compensation, seniority, eligibility, and saved fit-band
-rules before results are saved. It also adds candidate-facing application-answer
-review inside each job thread, an in-place opt-in for supervised form preparation,
-and exact mission resume after the answers are complete. Claude Code and Codex
-keep the same supported workflow boundary, and CareerRat still never presses the
-final Submit control. Source-level verification is green, but fresh packaged
-desktop acceptance, signing, and distribution have not rerun. The public-version
-claims above stay on v0.16.5 until that work is complete.
+past the old two-minute limit, preserves credible AI open-web discoveries as
+clearly unverified leads, and leaves full-posting verification to Evaluate. It
+adds deterministic hospitality sources alongside the existing engineering and
+general-source coverage, then rechecks readable canonical job descriptions
+against location, office-day, compensation, seniority, eligibility, and saved
+fit-band rules before results are treated as verified. It also adds durable
+choice prompts, provider-neutral AI quality and thinking controls,
+candidate-facing application-answer review inside each job thread, an in-place
+opt-in for supervised form preparation, and exact mission resume after the
+answers are complete. Claude Code and Codex keep the same supported workflow
+boundary, and CareerRat still never presses the final Submit control.
+Source-level verification is green, but fresh packaged desktop acceptance,
+signing, and distribution have not rerun. The public-version claims above stay
+on v0.16.5 until that work is complete.
 
 The Windows x64 installer passed build, install, launch, export, and uninstall
 QA. A public Windows installer will ship only after SignPath Foundation signing
@@ -118,6 +130,22 @@ prepare an interview, or pick up a saved thread. Tool work appears as compact
 activity rows in the conversation, so you can see what it is reading, searching,
 and writing without a wall of approval prompts.
 
+## Search and Evaluate
+
+CareerRat combines deterministic public sources with broad AI open-web
+discovery. The shipped baseline covers engineering and remote work, and v0.16.6
+adds hospitality sources including OysterLink, Hcareers, Hospitality Online,
+and iHireHospitality. AI search can also keep a credible role from a specialist
+board, employer page, or aggregator when automated fetching cannot read the
+whole job description.
+
+Those partial discoveries are not presented as proven jobs. Search labels them
+**AI · unverified** and preserves the visible title, company, location, pay,
+date, link, and search evidence. **Evaluate** then verifies liveness, captures
+the full posting through the public or supervised browser path, and applies the
+candidate's real location, compensation, eligibility, and fit rules before any
+tailoring or application work begins.
+
 ## The workspace
 
 The app uses one desktop shell with three working areas:
@@ -134,6 +162,11 @@ local state. Missions turn longer work into resumable, ordered steps with clear
 user gates. Deep ingest gets its own durable thread. Mock interviews preserve
 the session and debrief. “Needs You” groups actions such as reviewing several
 prepared applications into one focused handoff.
+
+Searches and intake continue in the background when you navigate to another
+view. Returning to the view or reloading restores the durable run status. If
+the app or computer stops mid-run, CareerRat marks the interrupted work for a
+clear retry instead of reporting a false success.
 
 CareerRat stores canonical candidate state, conversations, missions, mock
 sessions, and pipeline records in local SQLite. Job descriptions, research,

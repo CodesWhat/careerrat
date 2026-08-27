@@ -204,6 +204,15 @@ write-back. That product layer is provider-neutral. Runtime adapters translate a
 capability-scoped request into one local CLI call and normalize text, activity,
 usage, cancellation, and errors back into the same app contract.
 
+A provider-neutral operation policy resolves **Automatic**, **Faster**,
+**Balanced**, or **Best** quality plus **Automatic**, **Low**, **Medium**, or
+**High** thinking depth before each call. Automatic keeps Paul and high-stakes
+judgment on the strongest path, routes web research to the balanced path, and
+uses the faster path for small bounded classification. The resolved execution
+plan is immutable for the life of the operation and its retries. Adapters map
+that plan to Claude Code or OpenAI Codex; the user never needs to choose a
+provider based on model capability.
+
 Claude Code 2.1.241 or newer and OpenAI Codex 0.149.1 or newer are the supported
 engines for the complete CareerRat product. Each runtime must pass local
 availability, authentication, and the complete readiness check before
@@ -263,6 +272,12 @@ Search sources are provider adapters under `src/core/providers/`.
 - ATS sources should use stable public endpoints where possible.
 - Browser-rendered sources should preserve the generated URL, raw capture, and
   exact recency cutoff.
+- AI open-web discovery preserves a credible specific role as explicitly
+  unverified when the full body cannot be fetched. Evaluate owns later liveness
+  and full-description verification.
+- Hospitality baselines use OysterLink, Hcareers, Hospitality Online, and
+  iHireHospitality; engineering baselines keep their engineering, remote, ATS,
+  and general sources.
 
 See [SOURCES.md](SOURCES.md).
 

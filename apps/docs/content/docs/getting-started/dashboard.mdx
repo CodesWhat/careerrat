@@ -52,9 +52,11 @@ continue without creating a long stack of separate approval cards.
 The left rail opens focused views without replacing the conversation:
 
 - **Search** shows sourced roles, fit, location, compensation, and the next gated
-  action. Before a result is saved, CareerRat rechecks the canonical posting body
-  against the candidate's location, office-day, compensation, seniority,
-  eligibility, and configured fit-band rules.
+  action. Deterministic public sources and broad AI open-web discovery cover
+  engineering and hospitality work. When AI finds a credible role but cannot
+  read the full description, the row is labeled **AI · unverified**. **Evaluate**
+  owns liveness, full-description capture, and the final check against location,
+  office-day, compensation, seniority, eligibility, and fit-band rules.
 - **Pipeline** groups active applications by stage and opens the owning job
   conversation.
 - **Files** holds résumés, job descriptions, tailored packets, interview dossiers,
@@ -63,8 +65,17 @@ The left rail opens focused views without replacing the conversation:
 - **Schedule** shows interviews, assessments, follow-ups, and deadlines.
 
 Settings holds the selected AI runtime, browser automation readiness, source
-configuration, and candidate preferences. The packaged app uses a fixed desktop
-window and supports normal native full screen.
+configuration, and candidate preferences. **Automatic** quality lets CareerRat
+choose by task; **Faster**, **Balanced**, and **Best** are provider-neutral
+quality choices, while **Thinking depth** offers Automatic, Low, Medium, or High.
+The labels mean the same thing with Claude Code or OpenAI Codex. Changes apply to
+new work; an operation already running keeps the plan it started with. The
+packaged app uses a fixed desktop window and supports normal native full screen.
+
+Searches and intake keep running in the background when you navigate to another
+view. Returning or reloading restores the durable status. If the app stops
+mid-run, the next launch shows a retry instead of marking interrupted work as
+complete.
 
 ## What happens when you act
 

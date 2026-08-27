@@ -16,6 +16,33 @@ owns the body-read gate.
 - Manual/auth sources: support saved browser sessions, but mark them as
   interactive and do not require them for baseline setup.
 
+## AI Open-Web Discovery
+
+AI search broadens the deterministic baseline across specialist boards,
+employer career pages, and useful aggregators. It is domain-neutral; engineering
+and hospitality searches follow the same candidate location, compensation,
+eligibility, and fit rules.
+
+Discovery and verification are separate stages. When AI finds a specific role
+and employer but automated fetching cannot read the full description, CareerRat
+preserves the visible title, company, URL, location, compensation, date, and
+factual search evidence as an **AI · unverified** lead. It does not guess the
+missing job description and does not present the role as confirmed. **Evaluate**
+later verifies liveness, uses the public or supervised browser path to capture
+the full posting, and runs the body-read gate before tailoring or application
+work. Known expired roles, hard-filter violations, duplicates, and results with
+no specific role or employer are still dropped.
+
+## Hospitality Baseline
+
+Hospitality candidates receive deterministic public sources alongside the
+general provider set. The current baseline includes OysterLink, Hcareers,
+Hospitality Online, and iHireHospitality. Each adapter validates its host and URL
+shape, reads structured job-posting data, rejects expired postings, and
+normalizes title, employer, location, compensation, date, and the full visible
+description. Engineering candidates continue to receive the engineering,
+remote, ATS, and general sources matched to their targeting.
+
 ## Public Company Intelligence
 
 Public company intelligence helps CareerRat learn public company and careers-board
@@ -142,10 +169,14 @@ never written here.
 | Working Nomads | remote | niche-board | high | implemented | public board-wide API |
 | We Work Remotely | remote | niche-board | high | implemented | public RSS adapter |
 | Remotive | remote | niche-board | high | implemented | public board-wide API |
+| OysterLink | hospitality | niche-board | high | implemented | public hospitality search and structured job-detail adapter |
+| Hcareers | hospitality | niche-board | high | implemented | public hospitality search and structured job-detail adapter |
+| Hospitality Online | hospitality | niche-board | high | implemented | public hospitality search and structured job-detail adapter |
+| iHireHospitality | hospitality | niche-board | high | implemented | public hospitality search and structured job-detail adapter |
 
 ### Registry legend
 
-- **Domain tag(s):** `general` = all domains; `tech/software` = software engineering domain only; `tech/AI` = AI/ML/agent roles; `remote` = remote-posture candidates across domains. Combine tags with commas for entries that span multiple.
+- **Domain tag(s):** `general` = all domains; `tech/software` = software engineering domain only; `tech/AI` = AI/ML/agent roles; `hospitality` = hospitality, food-service, and beverage work; `remote` = remote-posture candidates across domains. Combine tags with commas for entries that span multiple.
 - **Type:** `aggregator` = collects from many sources; `ATS` = company-level ATS API adapter; `niche-board` = curated domain-specific board; `RSS` = feed-only.
 - **Confidence:** `high` = real dated listings, stable URL, identifiable companies; `medium` = unvetted but reputable; `borderline` = real but with noted quality caveats.
 - **Status:** `implemented` = provider code ships with CareerRat; `planned` = on roadmap, not yet implemented.

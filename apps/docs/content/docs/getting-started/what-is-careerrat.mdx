@@ -32,7 +32,10 @@ The agent does.
    boundaries, and writing-style calibration. SQLite is authoritative in new
    workspaces; `candidate/` files are compatibility exports.
 2. **Source** — `setup-searches` + `search-jobs` build searches from your targets,
-   dedupe, liveness-check, and produce a coarse-triage intake queue.
+   combine deterministic public sources with AI open-web discovery, dedupe, and
+   produce a coarse-triage queue. Engineering and hospitality searches use the
+   same candidate rules. A credible result whose full description is not yet
+   readable is saved as an unverified lead, not treated as a verified posting.
 3. **Gate** — `evaluate-job` reads the full posting and returns a verdict: keep or
    cut the job, how well it fits, whether the pay clears your floor, and what to
    do next. Those four print as a `GATE / FIT / COMP / ACTION` block, joined by
@@ -50,6 +53,11 @@ The agent does.
 
 The loop compounds: learnings from interview debriefs and rejections feed back
 into evaluation and tailoring so each pass is sharper than the last.
+
+Longer searches and intake operations are owned by CareerRat rather than the
+current page. They keep running when you move between views, restore their
+durable status after reload, and surface a retry if the app restarts before the
+work finishes.
 
 ## What "local by default" means
 

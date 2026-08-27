@@ -16,6 +16,13 @@ Claude Code and Codex both run the complete CareerRat product. CareerRat shows a
 runtime as `Ready` only after local availability, authentication, and the
 complete readiness check pass.
 
+The in-app AI preferences are provider-neutral. **Automatic** chooses the right
+quality and thinking depth for each task: Paul stays on the strongest coaching
+path, web research uses a balanced path, and small bounded helpers use a faster
+path. **Faster**, **Balanced**, and **Best** override overall quality;
+**Thinking depth** can be Automatic, Low, Medium, or High. The setting works the
+same with Claude Code and OpenAI Codex and never switches providers.
+
 ## Get It Running
 
 ```bash
@@ -84,6 +91,11 @@ The agent reads `AGENTS.md`, verifies the skills shim, and runs `ingest-profile`
 conversationally if the candidate profile is not yet set up. Once Paul has the
 minimum role and location context, CareerRat starts the deterministic baseline
 search in the background while the rest of setup continues.
+
+Search and intake workers belong to the CareerRat app, not the currently open
+view. They keep running when the user navigates elsewhere. A reload restores
+their durable status; a service restart turns interrupted work into an explicit
+retry instead of claiming success.
 
 ## Candidate Setup
 

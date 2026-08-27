@@ -73,6 +73,84 @@ test("website presents Claude Code and Codex as neutral direct runtime choices",
   );
 });
 
+test("public copy explains provider-neutral AI controls without ranking providers", async () => {
+  const paths = {
+    readme: "README.md",
+    website: "apps/website/src/app/page.tsx",
+    docsIndex: "apps/docs/content/docs/index.mdx",
+    configuration: "apps/docs/content/docs/advanced/configuration.mdx",
+  };
+  const copy = Object.fromEntries(
+    await Promise.all(
+      Object.entries(paths).map(async ([name, path]) => [name, await readFile(path, "utf8")])
+    )
+  );
+
+  for (const name of Object.keys(paths)) {
+    assert.match(copy[name], /Automatic/i, `${paths[name]} should explain Automatic routing`);
+    assert.match(copy[name], /Faster/i, `${paths[name]} should name the Faster choice`);
+    assert.match(copy[name], /Balanced/i, `${paths[name]} should name the Balanced choice`);
+    assert.match(copy[name], /Best/i, `${paths[name]} should name the Best choice`);
+    assert.match(copy[name], /thinking depth/i, `${paths[name]} should explain thinking depth`);
+    assert.match(
+      copy[name],
+      /Claude Code[\s\S]{0,500}OpenAI\s+Codex|OpenAI\s+Codex[\s\S]{0,500}Claude Code/i,
+      `${paths[name]} should keep both runtime choices in the same product contract`
+    );
+    assert.doesNotMatch(
+      copy[name],
+      /Claude(?: Code)?[^\n.]{0,100}(?:better|best|stronger|preferred|recommended)[^\n.]{0,100}Codex|Codex[^\n.]{0,100}(?:better|best|stronger|preferred|recommended)[^\n.]{0,100}Claude/i
+    );
+  }
+});
+
+test("public copy keeps AI discovery broad and evaluation honest", async () => {
+  const paths = {
+    readme: "README.md",
+    website: "apps/website/src/app/page.tsx",
+    docsIndex: "apps/docs/content/docs/index.mdx",
+    firstJob: "apps/docs/content/docs/getting-started/first-job.mdx",
+    sources: "docs/SOURCES.md",
+  };
+  const copy = Object.fromEntries(
+    await Promise.all(
+      Object.entries(paths).map(async ([name, path]) => [name, await readFile(path, "utf8")])
+    )
+  );
+
+  for (const name of Object.keys(paths)) {
+    assert.match(copy[name], /open[- ]web/i, `${paths[name]} should name open-web discovery`);
+    assert.match(copy[name], /unverified/i, `${paths[name]} should label discovery honestly`);
+    assert.match(copy[name], /Evaluate/i, `${paths[name]} should hand verification to Evaluate`);
+    assert.match(copy[name], /hospitality/i, `${paths[name]} should name hospitality coverage`);
+    assert.match(copy[name], /engineering/i, `${paths[name]} should name engineering coverage`);
+  }
+});
+
+test("public docs explain durable background work without claiming interrupted work completed", async () => {
+  const paths = {
+    readme: "README.md",
+    website: "apps/website/src/app/page.tsx",
+    dashboard: "apps/docs/content/docs/getting-started/dashboard.mdx",
+    runtime: "docs/CHAT_FIRST_RUNTIME.md",
+  };
+  const copy = Object.fromEntries(
+    await Promise.all(
+      Object.entries(paths).map(async ([name, path]) => [name, await readFile(path, "utf8")])
+    )
+  );
+
+  for (const name of Object.keys(paths)) {
+    assert.match(
+      copy[name],
+      /navigate|move between|leave (?:the )?(?:view|page|thread)/i,
+      `${paths[name]} should explain navigation continuity`
+    );
+    assert.match(copy[name], /background/i, `${paths[name]} should name background work`);
+    assert.match(copy[name], /retry/i, `${paths[name]} should explain interrupted-work recovery`);
+  }
+});
+
 test("website explains the first-run handoff and supervised apply boundary plainly", async () => {
   const page = await readFile("apps/website/src/app/page.tsx", "utf8");
 
