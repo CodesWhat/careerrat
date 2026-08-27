@@ -770,7 +770,12 @@ test("POST /api/discovery/company-proposals returns review-only non-comp borderl
       const company = config.tracked_companies[0].name;
       if (company === "Partial Body Co") {
         return {
-          offers: [matchingOffer(company, { bodyText: "" })],
+          offers: [
+            matchingOffer(company, {
+              bodyText: "A useful upstream excerpt that ends before the complete job description.",
+              bodyPartial: true,
+            }),
+          ],
           errors: [],
         };
       }

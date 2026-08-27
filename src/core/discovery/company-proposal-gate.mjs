@@ -140,9 +140,11 @@ function compReviewReason(state) {
 function jdCaptureSummary(capturedOffers) {
   const offers = list(capturedOffers);
   if (offers.length === 0) return { status: "missing", capturedCount: 0 };
-  const hasBody = offers.some((offer) => Number(offer.bodyChars || 0) > 0);
+  const hasPartialBody = offers.some(
+    (offer) => Number(offer.bodyChars || 0) === 0 || offer.bodyPartial === true
+  );
   return {
-    status: hasBody ? "captured" : "partial",
+    status: hasPartialBody ? "partial" : "captured",
     capturedCount: offers.length,
   };
 }

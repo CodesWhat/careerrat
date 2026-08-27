@@ -27,6 +27,7 @@ import { extractStructuredJobDescription } from "./job-posting-extract.mjs";
 const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_MAX_BYTES = 1024 * 1024;
 const MIN_USABLE_BODY_CHARS = 40;
+const CAPPED_PREVIEW_HOSTS = new Set(["remotevibecodingjobs.com", "www.remotevibecodingjobs.com"]);
 
 // resolveJobUrl(url) -> {
 //   bodyFetchStatus: "resolved" | "deferred",
@@ -206,6 +207,14 @@ function mergeProviderMetadata(providerResolution, result) {
   };
 }
 
+function isCappedPreviewUrl(value) {
+  try {
+    return CAPPED_PREVIEW_HOSTS.has(new URL(value).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
 async function resolveViaProviderBoard({
   provider,
   url,
@@ -321,6 +330,7 @@ async function resolvePlainFetch({
   }
   const applicationUrl = extractEmbeddedApplicationUrl(html, fetched.finalUrl || url);
   const bodyText = extractStructuredJobDescription(html) || htmlToTextLiveness(html);
+  const cappedPreview = isCappedPreviewUrl(fetched.finalUrl || url);
   const classified = classifyLiveness({
     status: fetched.status,
     finalUrl: fetched.finalUrl || url,
@@ -346,7 +356,10 @@ async function resolvePlainFetch({
     location: null,
     comp: null,
     bodyText,
-    bodyPartial: false,
+    bodyPartial: cappedPreview,
+    ...(cappedPreview
+      ? { reason: "The source exposes a capped preview instead of the complete job description." }
+      : {}),
     liveness: classified,
   };
 }

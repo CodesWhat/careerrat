@@ -269,6 +269,30 @@ test("plain aggregator fetch: prefers the structured JobPosting body over site n
   assert.doesNotMatch(result.bodyText, /For Candidates|Privacy Policy|All rights reserved/);
 });
 
+test("Remote Vibe's capped structured job body remains explicitly partial", async () => {
+  const aggregatorUrl = "https://remotevibecodingjobs.com/jobs/acme-staff-engineer";
+  const cappedDescription = `${"Build reliable distributed systems. ".repeat(140)}Compensa`.slice(
+    0,
+    5000
+  );
+  assert.equal(cappedDescription.length, 5000);
+  const html = `<html><body><script type="application/ld+json">${JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "JobPosting",
+    title: "Staff Engineer",
+    description: cappedDescription,
+  })}</script><button>Apply now</button></body></html>`;
+
+  const result = await resolveJobUrl(aggregatorUrl, {
+    fetchImpl: async () => htmlResponse(html, { finalUrl: aggregatorUrl }),
+    resolveHost: publicResolver,
+  });
+
+  assert.equal(result.bodyFetchStatus, "resolved");
+  assert.equal(result.bodyPartial, true);
+  assert.match(result.reason, /capped preview/i);
+});
+
 test("plain aggregator page: follows a canonical ATS apply link and returns the full provider body", async () => {
   const aggregatorUrl = "https://remotevibecodingjobs.com/jobs/acme-staff-engineer";
   const atsUrl = "https://job-boards.greenhouse.io/acme/jobs/123456";
@@ -300,6 +324,7 @@ test("plain aggregator page: follows a canonical ATS apply link and returns the 
   assert.equal(result.url, atsUrl);
   assert.equal(result.provider, "greenhouse");
   assert.equal(result.location, "United States (Remote)");
+  assert.equal(result.bodyPartial, false);
   assert.match(result.bodyText, /Complete canonical job description/);
 });
 
@@ -316,6 +341,7 @@ test("plain aggregator page: keeps its job body but hands application work to an
   assert.equal(result.bodyFetchStatus, "resolved");
   assert.equal(result.url, applicationUrl);
   assert.equal(result.sourceUrl, aggregatorUrl);
+  assert.equal(result.bodyPartial, true);
   assert.match(result.bodyText, /Build reliable distributed systems/);
 });
 
