@@ -762,14 +762,7 @@ export async function runAiWebSearch({
     reasonCounts,
     partial: persistedOffers.filter((offer) => offer.bodyPartial === true).length,
     unreadable: captureFailures.length,
-    errors: [
-      ...promptErrors,
-      ...(captureFailures.length
-        ? [
-            `${captureFailures.length} job description${captureFailures.length === 1 ? "" : "s"} could not be read and ${captureFailures.length === 1 ? "was" : "were"} not added.`,
-          ]
-        : []),
-    ],
+    errors: promptErrors,
     captureFailures: captureFailures.slice(0, 10),
     revalidatedExisting,
     offers: persistedOffers.map((offer) => ({

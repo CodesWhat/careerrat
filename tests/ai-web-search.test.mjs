@@ -1034,6 +1034,7 @@ test("runAiWebSearch rejects a soft-404 page even when the model supplied a summ
 
   assert.equal(result.new, 0);
   assert.equal(result.unreadable, 1);
+  assert.deepEqual(result.errors, []);
   assert.match(result.captureFailures[0].reason, /not-found/i);
   assert.equal(
     readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search").length,
