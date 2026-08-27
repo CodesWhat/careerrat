@@ -272,6 +272,52 @@ test("a kind can replace a stale completed result with one coalesced child on th
   ]);
 });
 
+test("shutdown fences a completed-result replacement while validity is resolving", async () => {
+  const repoRoot = tempRepo();
+  const validityStarted = deferred();
+  const releaseValidity = deferred();
+  let checkValidity = false;
+  let executeCalls = 0;
+  const manager = createManager({
+    repoRoot,
+    ownerId: "completed-validity-stop-owner",
+    kinds: {
+      "source-scan": {
+        parseRequest: parseEntityRequest,
+        async isCompletedResultReusable() {
+          if (!checkValidity) return true;
+          validityStarted.resolve();
+          return releaseValidity.promise;
+        },
+        async execute() {
+          executeCalls += 1;
+          return { resultRef: { type: "source", id: "source-stop" } };
+        },
+      },
+    },
+  });
+
+  const first = await manager.start({ kind: "source-scan", input: { entityId: "source-stop" } });
+  await manager.wait(first.operation.id);
+  assert.equal(executeCalls, 1);
+
+  checkValidity = true;
+  const starting = manager.start({ kind: "source-scan", input: { entityId: "source-stop" } });
+  await validityStarted.promise;
+  await manager.shutdown();
+  releaseValidity.resolve(false);
+
+  await assert.rejects(starting, (error) => error?.code === "APP_OPERATION_MANAGER_STOPPED");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(executeCalls, 1);
+  assert.equal(
+    openDb({ repoRoot })
+      .prepare("SELECT COUNT(*) AS count FROM app_operations WHERE kind = ?")
+      .get("source-scan").count,
+    1
+  );
+});
+
 test("manager normalizes an allowlisted kind before durable dedupe", async () => {
   const repoRoot = tempRepo();
   let executeCalls = 0;

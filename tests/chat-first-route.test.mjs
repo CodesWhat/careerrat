@@ -125,7 +125,6 @@ test("chat-first route module mounts the complete durable write surface", async 
     "POST /api/chat-first/dossier/pdf",
     "POST /api/chat-first/missions",
     "POST /api/chat-first/missions/status",
-    "POST /api/chat-first/missions/step",
     "POST /api/chat-first/missions/run",
     "POST /api/chat-first/missions/resume",
     "POST /api/chat-first/mock/start",
@@ -140,6 +139,7 @@ test("chat-first route module mounts the complete durable write surface", async 
   ]) {
     assert.equal(routes.has(key), true, key);
   }
+  assert.equal(routes.has("POST /api/chat-first/missions/step"), false);
 });
 
 test("deep ingest prompt dismiss route returns the durable updated aggregate", async () => {

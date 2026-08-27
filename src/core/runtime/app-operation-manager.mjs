@@ -250,6 +250,12 @@ export function createAppOperationManager({
         operation: deepFreeze(clone(started.operation)),
         request: deepFreeze(clone(prepared.request)),
       });
+      if (!accepting) {
+        throw makeError(
+          "CareerRat is stopping and cannot start new work.",
+          "APP_OPERATION_MANAGER_STOPPED"
+        );
+      }
       if (reusable !== true) {
         dispatched = appOperationCompletedReplacementStart({
           ...pathCtx,

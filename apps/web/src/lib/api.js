@@ -1026,13 +1026,6 @@ export function setChatFirstMissionStatus({ id, status } = {}) {
   });
 }
 
-export function setChatFirstMissionStepStatus({ missionId, stepId, status, result, error } = {}) {
-  return apiFetch("/api/chat-first/missions/step", {
-    method: "POST",
-    body: JSON.stringify({ missionId, stepId, status, result, error }),
-  });
-}
-
 export function startMockInterview({ applicationId, questionTotal, title, context } = {}) {
   return apiFetch("/api/chat-first/mock/start", {
     method: "POST",

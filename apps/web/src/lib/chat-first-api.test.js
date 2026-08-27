@@ -16,7 +16,6 @@ import {
   sendMockInterviewMessage,
   sendMockInterviewTurn,
   setChatFirstMissionStatus,
-  setChatFirstMissionStepStatus,
   startMockInterview,
   upsertDeepIngestConfirmedItem,
 } from "./api.js";
@@ -187,12 +186,6 @@ describe("chat-first durable actions", () => {
     await resumeChatFirstMission("mission-1");
     await resumeChatFirstMission("mission-1", { focusApplicationId: "app-1" });
     await setChatFirstMissionStatus({ id: "mission-1", status: "paused" });
-    await setChatFirstMissionStepStatus({
-      missionId: "mission-1",
-      stepId: "submit-app-1",
-      status: "completed",
-      result: { submittedByUser: true },
-    });
 
     const calls = fetchMock.mock.calls.map(([path, options]) => [path, JSON.parse(options.body)]);
     expect(calls).toEqual([
@@ -201,15 +194,6 @@ describe("chat-first durable actions", () => {
       ["/api/chat-first/missions/resume", { id: "mission-1" }],
       ["/api/chat-first/missions/resume", { id: "mission-1", focusApplicationId: "app-1" }],
       ["/api/chat-first/missions/status", { id: "mission-1", status: "paused" }],
-      [
-        "/api/chat-first/missions/step",
-        {
-          missionId: "mission-1",
-          stepId: "submit-app-1",
-          status: "completed",
-          result: { submittedByUser: true },
-        },
-      ],
     ]);
     expect(JSON.stringify(calls)).not.toMatch(/automaticSubmit|auto-submit/i);
   });

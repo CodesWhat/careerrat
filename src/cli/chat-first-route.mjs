@@ -13,7 +13,6 @@ import {
   missionResume,
   missionRun,
   missionSetStatus,
-  missionStepSetStatus,
   mockInterviewEnd,
   mockInterviewFeedbackAppend,
   mockInterviewMessageAppend,
@@ -221,10 +220,6 @@ export function mountChatFirstRoutes({
 
   addRoute("POST", "/api/chat-first/missions/status", (req, res) =>
     withBody(req, res, (body) => missionSetStatus({ ...pathCtx, ...body }))
-  );
-
-  addRoute("POST", "/api/chat-first/missions/step", (req, res) =>
-    withBody(req, res, (body) => missionStepSetStatus({ ...pathCtx, ...body }))
   );
 
   addRoute("POST", "/api/chat-first/missions/run", (req, res) =>
