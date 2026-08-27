@@ -1314,6 +1314,12 @@ test("extracts compensation ranges and strips ATS HTML bodies", () => {
     ),
     { min: 258000, max: 348000 }
   );
+  assert.deepEqual(
+    extractCompBand(
+      "Bar Manager\nFull Time • Salary ($70k)\nRole details\nOther jobs you might be interested in\nBar Director\nSalary ($120k - $140k)"
+    ),
+    { min: 70000, max: 70000 }
+  );
 });
 
 test("dedupe attaches fit ratings to kept offers", () => {
@@ -1674,6 +1680,37 @@ test("qualification recognizes a single annual salary below the saved floor", ()
   assert.equal(result.kept.length, 0);
   assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
   assert.deepEqual(result.filteredSalary[0]?.compBand, { min: 60000, max: 60000 });
+});
+
+test("qualification trusts the role compensation before unrelated recommendation salaries", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Hospitality Group",
+        title: "Bar Manager",
+        url: "https://jobs.example.test/bar-manager-with-recommendations",
+        location: "New York, NY",
+        comp: "Full Time • Salary ($70k)",
+        bodyText:
+          "Bar Manager\nFull Time • Salary ($70k)\nLead this beverage program.\nSimilar jobs\nRestaurant Manager\nSalary ($75k - $120k)",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_base: 85000 },
+          location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
+  assert.deepEqual(result.filteredSalary[0]?.compBand, { min: 70000, max: 70000 });
 });
 
 // ---------------------------------------------------------------------------

@@ -1210,7 +1210,7 @@ export function extractCompBand(text = "") {
     if (amount >= 50000 && amount <= 1200000) candidates.push({ min: amount, max: amount });
   }
 
-  return candidates.sort((a, b) => b.max - b.min - (a.max - a.min) || b.max - a.max)[0] || null;
+  return candidates[0] || null;
 }
 
 function normalizeMoney(value, suffix = "") {

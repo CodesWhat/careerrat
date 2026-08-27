@@ -27,6 +27,20 @@ test("expired body text wins even when generic apply text is present", () => {
   assert.equal(result.code, "expired_body");
 });
 
+test("bare expired and archived date banners win over recommendation apply controls", () => {
+  for (const banner of ["Expired: Apr 21, 2026", "Archived: May 8, 2026"]) {
+    const result = classifyLiveness({
+      status: 200,
+      finalUrl: "https://culinary.example/jobs/123-Bar-Manager",
+      bodyText: `${banner}\nBar Manager\nSimilar jobs`,
+      applyControls: ["Apply to a similar job"],
+    });
+
+    assert.equal(result.result, "expired", banner);
+    assert.equal(result.code, "expired_body", banner);
+  }
+});
+
 test("short pages without apply controls are treated as expired shell pages", () => {
   const result = classifyLiveness({
     status: 200,
