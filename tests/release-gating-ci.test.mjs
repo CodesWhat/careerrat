@@ -60,9 +60,18 @@ test("pre-tag and packaged release verification both require the four live-searc
     source(".github/workflows/desktop-release.yml"),
   ]);
   const pkg = JSON.parse(rootPackage);
+  const macReleaseJob = desktopWorkflow.slice(
+    desktopWorkflow.indexOf("  build-notarize-upload:"),
+    desktopWorkflow.indexOf("  build-windows-upload:")
+  );
+  const checkoutBeforeReceiptGate = macReleaseJob.slice(
+    macReleaseJob.indexOf("actions/checkout@"),
+    macReleaseJob.indexOf("Verify current live-search receipts")
+  );
 
   assert.equal(pkg.scripts?.["release:pretag"], "node scripts/verify-live-search-receipts.mjs");
   assert.match(desktopVerify, /verifyLiveSearchReceiptDirectory/);
   assert.match(desktopWorkflow, /Verify current live-search receipts/);
   assert.match(desktopWorkflow, /npm run release:pretag/);
+  assert.match(checkoutBeforeReceiptGate, /fetch-depth:\s*0/);
 });
