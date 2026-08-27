@@ -1563,8 +1563,10 @@ This gate blocks the next release until:
    bounded web search, extraction, and classification use faster/cheaper capable models. Claude
    Code and Codex adapters map the neutral policy to their native per-run model/effort controls
    without ranking providers or switching the user's runtime. The resolved route is recorded and
-   reused by background runs, retries, and resume. The dedicated model-routing audit owns the
-   exact adapter matrix and acceptance fixtures; this release gate owns the product requirement.
+   reused by background runs, retries, and resume. The dedicated
+   [model-routing audit](../.planning/MODEL-ROUTING-AUDIT.md) owns the exact operation policy,
+   Claude/Codex adapter matrix, fallback receipts, persistence contract, and acceptance fixtures;
+   this release gate owns the product requirement.
 7. **Accessibility and recovery share one contract.** Choice groups use semantic buttons or
    native controls, `fieldset`/`legend`, visible focus, keyboard-complete single/multi selection,
    and announced async success/error. Every dialog traps and restores focus, supports Escape, and
@@ -1575,6 +1577,21 @@ This gate blocks the next release until:
    conflict, cancellation, offline recovery, and completion while another screen is active. Run
    the coaching, evaluation, bounded helper, and search-routing fixtures on both Claude Code and
    Codex with the selected provider held fixed.
+9. **Every claimed background operation has one app-owned lifecycle.** The August 27
+   [durability audit](../.planning/CHAT-FIRST-DURABILITY-AUDIT.md) is the acceptance contract:
+   durable operation ID before work, one owner and abort controller, heartbeat/lease, exact-run
+   follow, active-write fence, idempotent retry lineage, ordered shutdown, immediate startup
+   reconciliation, and a people-shaped terminal state. Deterministic first/manual search and
+   Universal Intake Lane B are P0. AI route provenance, resume extraction, company/Deep Ingest
+   analysis, long Workspace Ask/application preparation, and updater readiness follow on the same
+   shared operation shape. Background completion never steals foreground route, focus, or draft.
+10. **Search quality is proven across real candidate domains, not inferred from a clean request.**
+    The deterministic source layer must seed and scan public hospitality boards that actually
+    contain NYC hospitality roles, keep remote/NYC locality gates intact, and explain which
+    enabled sources are browser-assisted instead of pretending LinkedIn or Indeed has a missing
+    permission toggle. The release fixture covers a hospitality candidate and an engineering
+    candidate on both supported runtimes, requires relevant live results or an evidence-backed
+    zero-result explanation, and exercises adjacent-role coaching before any targeting expansion.
 
 ### Product-surface acceptance sweep (updated August 17, 2026)
 
