@@ -261,7 +261,7 @@ function linkPriority(url) {
   return 10;
 }
 
-function supportedResult({ seed, url, provider, observedAt, provenance: proof }) {
+function supportedResult({ seed, url, provider, provenance: proof }) {
   const companyName = String(seed?.name || "").trim();
   const companyKey = normalizeCompanyKey(companyName);
   const companyDomain = domainFromUrl(url);
@@ -360,13 +360,11 @@ function readCachedResolution({ repoRoot, env, companyKey, companyDomain }) {
   return companyBoardResolutionGet({ repoRoot, env, companyDomain }).resolution;
 }
 
-function writeCachedResolution({ repoRoot, env, result, existing, observedAt }) {
+function writeCachedResolution({ repoRoot, env, result, existing, observedAt, stageResolution }) {
   if (!repoRoot) return result;
-  companyBoardResolutionUpsert({
-    repoRoot,
-    env,
-    resolution: cacheRecordFromResult(result, { existing, observedAt }),
-  });
+  const resolution = cacheRecordFromResult(result, { existing, observedAt });
+  if (typeof stageResolution === "function") stageResolution(resolution);
+  else companyBoardResolutionUpsert({ repoRoot, env, resolution });
   return result;
 }
 
@@ -513,6 +511,7 @@ export async function resolveCompanyBoard({
   now = new Date(),
   timeoutMs = RESOLVER_FETCH_TIMEOUT_MS,
   signal,
+  stageResolution,
 } = {}) {
   signal?.throwIfAborted?.();
   const companyName = String(seed?.name || "").trim();
@@ -548,5 +547,12 @@ export async function resolveCompanyBoard({
     signal,
   });
 
-  return writeCachedResolution({ repoRoot, env, result, existing, observedAt });
+  return writeCachedResolution({
+    repoRoot,
+    env,
+    result,
+    existing,
+    observedAt,
+    stageResolution,
+  });
 }

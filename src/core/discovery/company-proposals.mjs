@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import { companyProposalBatchPut } from "../db/verbs/company-discovery.mjs";
+import {
+  companyBoardResolutionUpsert,
+  companyProposalBatchPut,
+} from "../db/verbs/company-discovery.mjs";
 import { offersWithCapturedJobs as defaultOffersWithCapturedJobs } from "../scoring/sourced-persistence.mjs";
 import {
   buildLocationFilter,
@@ -135,10 +138,10 @@ async function proposalForSeed({
   fetchImpl,
   resolveCompanyBoard,
   scanCompaniesImpl,
-  offersWithCapturedJobs,
   createdAt,
   context,
   signal,
+  stageResolution,
 }) {
   signal?.throwIfAborted?.();
   const proposalId = stableId("cpp", [batchId, seed.name, String(index), createdAt]);
@@ -149,6 +152,7 @@ async function proposalForSeed({
       seed,
       fetchImpl,
       signal,
+      stageResolution,
     });
     signal?.throwIfAborted?.();
     const scanConfig = {
@@ -164,21 +168,7 @@ async function proposalForSeed({
     const rawScanResult = await scanCompaniesImpl(scanConfig, { fetchImpl, signal });
     signal?.throwIfAborted?.();
     const scanResult = prepareScanResult(rawScanResult, context);
-    const capturedOffers = offersWithCapturedJobs({
-      repoRoot,
-      env,
-      offers: Array.isArray(scanResult?.offers) ? scanResult.offers : [],
-      savedAt: new Date(createdAt),
-    });
-    return buildCompanyProposal({
-      seed,
-      resolution,
-      scanResult: { ...scanResult, offers: capturedOffers },
-      context,
-      capturedOffers,
-      proposalId,
-      version: 1,
-    });
+    return { candidate: { seed, resolution, scanResult, proposalId } };
   } catch (err) {
     if (signal?.aborted || err === signal?.reason) throw signal.reason || err;
     return {
@@ -198,11 +188,14 @@ export async function createCompanyProposalBatch({
   repoRoot,
   env = process.env,
   body = {},
+  batchId: requestedBatchId,
   fetchImpl = fetch,
   resolveCompanyBoard = defaultResolveCompanyBoard,
   scanCompaniesImpl = scanCompanies,
   offersWithCapturedJobs = defaultOffersWithCapturedJobs,
+  persistResolution = companyBoardResolutionUpsert,
   buildSeedContext = buildCompanySeedContext,
+  seedContext,
   generateSeeds = generateCompanySeeds,
   seedCall,
   executionPlan,
@@ -212,7 +205,7 @@ export async function createCompanyProposalBatch({
 } = {}) {
   signal?.throwIfAborted?.();
   const manualSeeds = manualSeedsFromBody(body);
-  const baseContext = buildSeedContext({ repoRoot, env });
+  const baseContext = seedContext || buildSeedContext({ repoRoot, env });
   const discoveryRequest = discoveryRequestFromBody(body);
   const context = discoveryRequest ? { ...baseContext, discoveryRequest } : baseContext;
   const seedResult = await generateSeeds({
@@ -239,10 +232,14 @@ export async function createCompanyProposalBatch({
 
   const createdDate = nowDate(now);
   const createdAt = createdDate.toISOString();
-  const batchId = stableId("cpb", [createdAt, seeds.map((seed) => seed.name).join(",")]);
+  const batchId =
+    String(requestedBatchId || "").trim() ||
+    stableId("cpb", [createdAt, seeds.map((seed) => seed.name).join(",")]);
   const trigger = discoveryTriggerFromBody(body);
   const proposals = [];
   const rejected = [];
+  const candidates = [];
+  const stagedResolutions = [];
 
   for (const [index, seed] of seeds.entries()) {
     signal?.throwIfAborted?.();
@@ -255,12 +252,12 @@ export async function createCompanyProposalBatch({
       fetchImpl,
       resolveCompanyBoard,
       scanCompaniesImpl,
-      offersWithCapturedJobs,
       createdAt,
       context,
       signal,
+      stageResolution: (resolution) => stagedResolutions.push(resolution),
     });
-    if (result.proposal) proposals.push(result.proposal);
+    if (result.candidate) candidates.push(result.candidate);
     if (result.rejected) rejected.push(result.rejected);
     await reportProgress({
       phase: "resolving",
@@ -271,6 +268,28 @@ export async function createCompanyProposalBatch({
   }
 
   signal?.throwIfAborted?.();
+
+  for (const candidate of candidates) {
+    const capturedOffers = offersWithCapturedJobs({
+      repoRoot,
+      env,
+      offers: Array.isArray(candidate.scanResult?.offers) ? candidate.scanResult.offers : [],
+      savedAt: new Date(createdAt),
+    });
+    const result = buildCompanyProposal({
+      ...candidate,
+      scanResult: { ...candidate.scanResult, offers: capturedOffers },
+      context,
+      capturedOffers,
+      version: 1,
+    });
+    if (result.proposal) proposals.push(result.proposal);
+    if (result.rejected) rejected.push(result.rejected);
+  }
+
+  for (const resolution of stagedResolutions) {
+    persistResolution({ repoRoot, env, resolution });
+  }
 
   const batch = {
     batchId,

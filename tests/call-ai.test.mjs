@@ -692,6 +692,39 @@ test("callAI rejects a frozen plan when the selected runtime changed", async () 
   }
 });
 
+test("callAI can execute a server-owned frozen plan after the selected runtime changed", async () => {
+  const root = tempRoot();
+  try {
+    writeInstalledRuntimeSelection({ repoRoot: root, env: {}, runtimeId: "claude" });
+    const calls = [];
+    const result = await callAI({
+      executionPlan: {
+        operation: "research.web",
+        runtimeId: "codex",
+        resolved: { model: "gpt-5.6-terra", effort: "medium" },
+      },
+      useExecutionPlanRoute: true,
+      messages: [{ role: "user", content: "find roles" }],
+      root,
+      env: { CAREERRAT_DESKTOP_SHELL: "1" },
+      runtimeInventory: [
+        verifiedInstalled("claude", "Claude Code", "/safe/claude"),
+        verifiedInstalled("codex", "Codex", "/safe/codex"),
+      ],
+      runInstalledRuntimeImpl: async (input) => {
+        calls.push(input);
+        return { text: "ok", runtimeId: input.runtime.id, usage: null };
+      },
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].runtime.id, "codex");
+    assert.equal(result.executionPlan.runtimeId, "codex");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("callAI (installed): tier smallFast on the claude runtime resolves config/ai.json#smallFastModel, not the env base default", async () => {
   const root = tempRoot();
   mkdirSync(join(root, "config"), { recursive: true });

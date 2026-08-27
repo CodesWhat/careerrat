@@ -234,7 +234,9 @@ export async function fillManualDomainHints({
 }) {
   const hintless = seeds.filter((seed) => !seed.domain_hint);
   if (hintless.length === 0) return { seeds, ai: { used: false } };
-  if (resolveAIRoute(env, { repoRoot }).type === "none") return { seeds, ai: { used: false } };
+  if (!executionPlan && resolveAIRoute(env, { repoRoot }).type === "none") {
+    return { seeds, ai: { used: false } };
+  }
 
   const safeContext = context || buildCompanySeedContext({ repoRoot, env });
   const fillResult = await runBoundedAI({

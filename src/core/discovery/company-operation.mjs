@@ -1,6 +1,10 @@
+import { createHash } from "node:crypto";
+import { brotliCompressSync, brotliDecompressSync } from "node:zlib";
+
 import { loadAIPreferences } from "../ai/ai-preferences.mjs";
-import { resolveAIRoute } from "../ai/call-ai.mjs";
+import { callAI, resolveAIRoute } from "../ai/call-ai.mjs";
 import { aiRuntimeIdForRoute, resolveAIExecutionPlan } from "../ai/operation-policy.mjs";
+import { companyProposalBatchGet } from "../db/verbs/company-discovery.mjs";
 import { COMPANY_DISCOVERY_BATCH_MAX } from "./company-board-resolver.mjs";
 import { buildCompanySeedContext } from "./company-context.mjs";
 import { companyDiscoveryFingerprint } from "./company-discovery-cadence.mjs";
@@ -8,6 +12,9 @@ import { createCompanyProposalBatch } from "./company-proposals.mjs";
 import { normalizeManualCompanySeeds } from "./company-seeds.mjs";
 
 export const COMPANY_DISCOVERY_OPERATION_KIND = "company.discovery";
+
+const COMPANY_CONTEXT_MAX_BYTES = 1_048_576;
+const COMPANY_CONTEXT_SNAPSHOT_MAX_BYTES = 36_000;
 
 function makeError(message, code = "COMPANY_DISCOVERY_FAILED") {
   const error = new Error(message);
@@ -44,6 +51,63 @@ function capManualSeed(seed) {
   };
 }
 
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .filter((key) => value[key] !== undefined)
+      .map((key) => [key, stableValue(value[key])])
+  );
+}
+
+function contextDigest(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+export function encodeCompanyDiscoveryContext(context = {}) {
+  const serialized = JSON.stringify(stableValue(context));
+  if (Buffer.byteLength(serialized, "utf8") > COMPANY_CONTEXT_MAX_BYTES) {
+    throw makeError(
+      "CareerRat has too much saved search history to start company discovery safely.",
+      "COMPANY_DISCOVERY_CONTEXT_TOO_LARGE"
+    );
+  }
+  const contextSnapshot = brotliCompressSync(Buffer.from(serialized, "utf8")).toString("base64");
+  if (Buffer.byteLength(contextSnapshot, "utf8") > COMPANY_CONTEXT_SNAPSHOT_MAX_BYTES) {
+    throw makeError(
+      "CareerRat has too much saved search history to start company discovery safely.",
+      "COMPANY_DISCOVERY_CONTEXT_TOO_LARGE"
+    );
+  }
+  return { contextSnapshot, contextDigest: contextDigest(serialized) };
+}
+
+export function decodeCompanyDiscoveryContext(request = {}) {
+  const snapshot = String(request.contextSnapshot || "").trim();
+  const expectedDigest = String(request.contextDigest || "").trim();
+  if (!snapshot || !/^[a-f0-9]{64}$/.test(expectedDigest)) {
+    throw makeError("company discovery context is missing", "APP_OPERATION_REQUEST_INVALID");
+  }
+  try {
+    const serialized = brotliDecompressSync(Buffer.from(snapshot, "base64"), {
+      maxOutputLength: COMPANY_CONTEXT_MAX_BYTES,
+    }).toString("utf8");
+    if (contextDigest(serialized) !== expectedDigest) {
+      throw makeError("company discovery context changed", "APP_OPERATION_REQUEST_INVALID");
+    }
+    const context = JSON.parse(serialized);
+    if (!context || typeof context !== "object" || Array.isArray(context)) {
+      throw makeError("company discovery context is invalid", "APP_OPERATION_REQUEST_INVALID");
+    }
+    return context;
+  } catch (error) {
+    if (error?.code === "APP_OPERATION_REQUEST_INVALID") throw error;
+    throw makeError("company discovery context is invalid", "APP_OPERATION_REQUEST_INVALID");
+  }
+}
+
 export function parseCompanyDiscoveryOperationRequest(input = {}) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw makeError("company discovery input must be an object", "BAD_REQUEST");
@@ -78,6 +142,14 @@ export function companyDiscoveryResultRef(batchId) {
   return { type: "company-proposal-batch", id };
 }
 
+export function companyDiscoveryBatchId(requestDigest) {
+  const digest = String(requestDigest || "").trim();
+  if (!/^[a-f0-9]{64}$/.test(digest)) {
+    throw makeError("company discovery request digest is invalid", "APP_OPERATION_REQUEST_INVALID");
+  }
+  return `cpb_${digest.slice(0, 12)}`;
+}
+
 export function createCompanyDiscoveryOperationKind({
   repoRoot,
   env = process.env,
@@ -96,10 +168,22 @@ export function createCompanyDiscoveryOperationKind({
       return {
         ...parseCompanyDiscoveryOperationRequest(input),
         contextFingerprint: companyDiscoveryFingerprint(context),
+        ...encodeCompanyDiscoveryContext(context),
       };
     },
     resolveExecutionPlan,
-    async execute({ request, executionPlan, signal, reportProgress }) {
+    async execute({ operation, request, executionPlan, signal, reportProgress }) {
+      const seedContext = decodeCompanyDiscoveryContext(request);
+      const batchId = companyDiscoveryBatchId(operation.requestDigest);
+      const existingBatch = companyProposalBatchGet({ repoRoot, env, batchId }).batch;
+      if (existingBatch) return { resultRef: companyDiscoveryResultRef(batchId) };
+      const operationSeedCall =
+        seedCall ||
+        ((options) =>
+          callAI({
+            ...options,
+            useExecutionPlanRoute: Boolean(executionPlan),
+          }));
       await reportProgress({
         phase: "starting",
         completed: 0,
@@ -110,13 +194,15 @@ export function createCompanyDiscoveryOperationKind({
         repoRoot,
         env,
         body: request,
+        batchId,
+        seedContext,
         executionPlan,
         signal,
         reportProgress,
         ...(fetchImpl ? { fetchImpl } : {}),
         ...(resolveCompanyBoard ? { resolveCompanyBoard } : {}),
         ...(scanCompaniesImpl ? { scanCompaniesImpl } : {}),
-        ...(seedCall ? { seedCall } : {}),
+        seedCall: operationSeedCall,
         ...(now ? { now } : {}),
       });
       if (result?.body?.ok === false) {

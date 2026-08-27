@@ -154,6 +154,49 @@ export function resolveAIRoute(
   };
 }
 
+export function resolveAIRouteForExecutionPlan(
+  executionPlan,
+  env = process.env,
+  { runtimeInventory = null } = {}
+) {
+  const runtimeId = String(executionPlan?.runtimeId || "").trim();
+  if (runtimeId === "claude" || runtimeId === "codex") {
+    const inventory = runtimeInventory || detectInstalledRuntimes({ env });
+    const runtime = inventory.find(
+      (candidate) => candidate?.id === runtimeId && candidate?.available === true
+    );
+    return runtime
+      ? { type: "installed", runtime }
+      : {
+          type: "none",
+          error: `the ${runtimeId} runtime selected for this work is no longer available`,
+        };
+  }
+  if (runtimeId === "anthropic-api") {
+    const apiKey = String(env.ANTHROPIC_API_KEY || "").trim();
+    return apiKey
+      ? {
+          type: "byok",
+          baseUrl: (
+            String(env.CAREERRAT_ANTHROPIC_BASE_URL || "").trim() || "https://api.anthropic.com"
+          ).replace(/\/+$/, ""),
+          apiKey,
+        }
+      : { type: "none", error: "the Anthropic API credential for this work is unavailable" };
+  }
+  if (runtimeId === "managed-anthropic") {
+    const baseUrl = String(env.CAREERRAT_AI_PROXY_URL || "").trim();
+    return baseUrl
+      ? {
+          type: "proxy",
+          baseUrl: baseUrl.replace(/\/+$/, ""),
+          token: String(env.CAREERRAT_AI_PROXY_TOKEN || "").trim(),
+        }
+      : { type: "none", error: "the managed AI route for this work is unavailable" };
+  }
+  return { type: "none", error: "the AI route saved for this work is invalid" };
+}
+
 // ---------------------------------------------------------------------------
 // SSE framing — pure, shared with ai-proxy.mjs's tee.
 // ---------------------------------------------------------------------------
@@ -564,10 +607,14 @@ export async function callAI({
   reasoning = null,
   aiCapabilities = null,
   executionPlan = null,
+  useExecutionPlanRoute = false,
   runtimeInventory = null,
   runInstalledRuntimeImpl = runInstalledRuntime,
 } = {}) {
-  const route = resolveAIRoute(env, { repoRoot: root, runtimeInventory });
+  const route =
+    executionPlan && useExecutionPlanRoute
+      ? resolveAIRouteForExecutionPlan(executionPlan, env, { runtimeInventory })
+      : resolveAIRoute(env, { repoRoot: root, runtimeInventory });
   if (route.type === "none") throw new Error(route.error);
   const routeRuntimeId = aiRuntimeIdForRoute(route);
   const resolvedExecutionPlan = executionPlan
