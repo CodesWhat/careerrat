@@ -100,6 +100,41 @@ test("dashboard hydration never overwrites an explicit stored partial value", ()
   assert.equal(hydrated.sourced[1].scanner.bodyPartial, true);
 });
 
+test("dashboard hydration reuses unchanged legacy artifact reads and invalidates changed files", () => {
+  const repoRoot = tempRepo();
+  const relPath = "workspace/jobs/cached-legacy.md";
+  writeArtifact(repoRoot, relPath, "---\npartial: true\n---\n\nExcerpt.\n");
+  const trackerData = { sourced: [sourcedCapture("cached-legacy", relPath)] };
+  let reads = 0;
+  const readStoredPartialValue = () => {
+    reads += 1;
+    return true;
+  };
+
+  hydrateJobDescriptionCompleteness({
+    repoRoot,
+    env: {},
+    trackerData,
+    readStoredPartialValue,
+  });
+  hydrateJobDescriptionCompleteness({
+    repoRoot,
+    env: {},
+    trackerData,
+    readStoredPartialValue,
+  });
+  assert.equal(reads, 1);
+
+  writeArtifact(repoRoot, relPath, "---\npartial: false\n---\n\nComplete description changed.\n");
+  hydrateJobDescriptionCompleteness({
+    repoRoot,
+    env: {},
+    trackerData,
+    readStoredPartialValue,
+  });
+  assert.equal(reads, 2);
+});
+
 test("dashboard hydration skips missing, outside, and malformed artifacts without reading guesses", () => {
   const repoRoot = tempRepo();
   const malformedPath = "workspace/jobs/malformed.md";

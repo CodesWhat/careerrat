@@ -17,6 +17,8 @@ import { splitFrontmatter } from "../research/research-store.mjs";
 const SOURCE_TABLES = Object.freeze({ application: "applications", sourced: "sourced" });
 const MAX_JOB_ARTIFACT_BYTES = 5 * 1024 * 1024;
 const MAX_JOB_FRONTMATTER_BYTES = 64 * 1024;
+const PARTIAL_VALUE_CACHE_MAX = 1_024;
+const partialValueCache = new Map();
 
 function makeError(message, code) {
   const error = new Error(message);
@@ -92,10 +94,11 @@ function resolveSafeJobPath(workspaceDir, storedValue) {
       "UNSAFE_ARTIFACT_PATH"
     );
   }
-  if (statSync(canonicalFile).size > MAX_JOB_ARTIFACT_BYTES) {
+  const fileStat = statSync(canonicalFile);
+  if (fileStat.size > MAX_JOB_ARTIFACT_BYTES) {
     throw makeError("The captured job description is too large to preview.", "JD_TOO_LARGE");
   }
-  return { full: canonicalFile, storedPath };
+  return { full: canonicalFile, storedPath, fileStat };
 }
 
 function recordFromDb(db, table, id, recordType) {
@@ -110,10 +113,10 @@ function isPartialCapture(frontmatter, body) {
   return !text || /No job-description body was returned by the capture source\./i.test(text);
 }
 
-function readStoredPartialValue(workspaceDir, storedValue) {
+function readStoredPartialValue(workspaceDir, storedValue, resolvedArtifact = null) {
   let handle;
   try {
-    const { full } = resolveSafeJobPath(workspaceDir, storedValue);
+    const { full } = resolvedArtifact || resolveSafeJobPath(workspaceDir, storedValue);
     handle = openSync(full, "r");
     const buffer = Buffer.alloc(MAX_JOB_FRONTMATTER_BYTES);
     const bytesRead = readSync(handle, buffer, 0, buffer.length, 0);
@@ -132,17 +135,41 @@ function readStoredPartialValue(workspaceDir, storedValue) {
   }
 }
 
+function cachePartialValue(key, value) {
+  if (partialValueCache.has(key)) partialValueCache.delete(key);
+  partialValueCache.set(key, value);
+  while (partialValueCache.size > PARTIAL_VALUE_CACHE_MAX) {
+    partialValueCache.delete(partialValueCache.keys().next().value);
+  }
+}
+
+function cachedStoredPartialValue(workspaceDir, storedValue, readPartial) {
+  let resolvedArtifact;
+  try {
+    resolvedArtifact = resolveSafeJobPath(workspaceDir, storedValue);
+  } catch {
+    return null;
+  }
+  const { full, fileStat } = resolvedArtifact;
+  const key = `${full}\u0000${fileStat.size}\u0000${fileStat.mtimeMs}`;
+  if (partialValueCache.has(key)) return partialValueCache.get(key);
+  const value = readPartial(workspaceDir, storedValue, resolvedArtifact);
+  cachePartialValue(key, value);
+  return value;
+}
+
 export function hydrateJobDescriptionCompleteness({
   trackerData,
   repoRoot,
   env = process.env,
+  readStoredPartialValue: readPartial = readStoredPartialValue,
 } = {}) {
   if (!trackerData || !Array.isArray(trackerData.sourced)) return trackerData;
   const { workspaceDir } = resolveUserPaths({ repoRoot, env });
   let changed = false;
   const sourced = trackerData.sourced.map((row) => {
     if (typeof row?.scanner?.bodyPartial === "boolean") return row;
-    const bodyPartial = readStoredPartialValue(workspaceDir, row?.artifacts?.jd);
+    const bodyPartial = cachedStoredPartialValue(workspaceDir, row?.artifacts?.jd, readPartial);
     if (bodyPartial === null) return row;
     changed = true;
     const scanner = row?.scanner && typeof row.scanner === "object" ? row.scanner : {};
