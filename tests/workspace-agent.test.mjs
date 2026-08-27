@@ -4840,6 +4840,7 @@ test("free-form turns call the selected AI seam with the complete durable conver
   assert.match(calls[0].system, /short, direct sentences/i);
   assert.match(calls[0].system, /robotic headings/i);
   assert.match(calls[0].system, /tool narration/i);
+  assert.equal(calls[0].aiOperation, "paul.conversation");
   assert.deepEqual(calls[0].messages, [
     { role: "user", content: "Remember that I prefer hybrid roles." },
   ]);

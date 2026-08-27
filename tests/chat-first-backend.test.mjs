@@ -566,6 +566,8 @@ test("promoted scanner facts reach job threads and their AI context", async () =
   assert.match(request.system, /short, direct sentences/i);
   assert.match(request.system, /raw JSON/i);
   assert.match(request.system, /tool narration/i);
+  assert.equal(request.aiOperation, "paul.conversation");
+  assert.equal(request.tier, undefined);
   assert.equal(application.location, "Remote - United States");
   assert.equal(application.mode, "remote");
   assert.equal(application.compensation, "$185,000 - $215,000");
@@ -2358,6 +2360,8 @@ test("mock start retries the same empty active session after AI failure and turn
 
   assert.equal(retried.session.id, "mock-retry");
   assert.equal(retried.question.questionNumber, 1);
+  assert.equal(request.aiOperation, "coach.deep");
+  assert.equal(request.tier, undefined);
   session = api.chatFirstStateGet({ repoRoot }).mockSessions.find((row) => row.id === "mock-retry");
   assert.equal(session.messages.filter((message) => message.kind === "question").length, 1);
   const serialized = request.messages[0].content;

@@ -9151,6 +9151,7 @@ export async function runWorkspaceAgentTurn({
       skill: "workspace-agent",
       action: "message",
       operation: "workspace:chat-turn",
+      aiOperation: "paul.conversation",
       signal,
     });
     const parsedReply = parseChatAnswerMode(responseText(response));
@@ -9172,6 +9173,7 @@ export async function runWorkspaceAgentTurn({
         usage: response?.usage || null,
         engine: response?.engine || null,
         elapsedMs: response?.elapsedMs ?? null,
+        ...(response?.executionPlan ? { executionPlan: response.executionPlan } : {}),
       },
       now,
     });
