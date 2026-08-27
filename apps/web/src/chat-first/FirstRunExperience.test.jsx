@@ -580,6 +580,53 @@ describe("FirstRunExperience", () => {
     expect(requestedHtml).toContain("Thanks, we’ll email you when it’s ready.");
   });
 
+  it("uses the runtime icon-and-label row for CareerRat AI with a restrained rat mark", async () => {
+    const { FirstRunExperience } = await loadFirstRun();
+    const tree = FirstRunExperience({
+      stage: "engine",
+      engines: ENGINES,
+      hostedInterest: { status: "idle", email: "", error: null },
+    });
+    const hostedCard = findElement(tree, (node) => node.type?.name === "HostedInterestCard");
+    const hostedCardView = hostedCard.type(hostedCard.props);
+    const identity = findElement(
+      hostedCardView,
+      (node) => node.props?.className === "cf-first-run__engine-identity"
+    );
+
+    expect(identity).not.toBeNull();
+    const spacer = findElement(
+      hostedCardView,
+      (node) => node.props?.className === "cf-first-run__engine-spacer"
+    );
+    expect(spacer).not.toBeNull();
+    expect(spacer.props["aria-hidden"]).toBe("true");
+    const nameRow = findElement(
+      identity,
+      (node) => node.props?.className === "cf-first-run__engine-name"
+    );
+    expect(nameRow).not.toBeNull();
+    const icon = findElement(nameRow, (node) =>
+      String(node.props?.className || "")
+        .split(" ")
+        .includes("cf-runtime-icon")
+    );
+    expect(textOf(icon)).toBe("🐀");
+    expect(icon.props["aria-hidden"]).toBe("true");
+    expect(textOf(nameRow)).toContain("CareerRat AI");
+
+    const css = readFileSync(fileURLToPath(new URL("./first-run.css", import.meta.url)), "utf8");
+    const ratIconRule = css.match(/\.cf-runtime-icon--careerrat\s*\{([^}]*)\}/)?.[1] || "";
+    expect(css).toMatch(
+      /\.cf-first-run__engine-special \.cf-runtime-icon\s*\{[^}]*filter:\s*grayscale\(1\);[^}]*opacity:\s*0\.58;/s
+    );
+    expect(css).toMatch(
+      /\.cf-first-run__engine-special\s*\{[^}]*grid-template-columns:\s*28px minmax\(0, 1fr\) auto auto;/s
+    );
+    expect(ratIconRule).toMatch(/width:\s*28px/);
+    expect(ratIconRule).toMatch(/height:\s*28px/);
+  });
+
   it("aligns the hosted access action with the email control while retaining its label", async () => {
     const { FirstRunExperience } = await loadFirstRun();
     const html = renderToStaticMarkup(

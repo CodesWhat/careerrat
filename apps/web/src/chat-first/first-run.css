@@ -223,6 +223,21 @@ button.cf-first-run__engine-choice:not(.is-selected):hover {
     opacity 0.15s ease;
 }
 
+.cf-first-run__engine-special .cf-runtime-icon {
+  flex: none;
+  filter: grayscale(1);
+  opacity: 0.58;
+}
+
+.cf-runtime-icon--careerrat {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  font-size: 18px;
+  line-height: 1;
+  place-items: center;
+}
+
 .cf-first-run__engine-choice:hover .cf-runtime-icon,
 .cf-first-run__engine-choice:focus-visible .cf-runtime-icon,
 .cf-first-run__engine-choice:focus-within .cf-runtime-icon {
@@ -498,14 +513,13 @@ button.cf-first-run__engine-choice:not(.is-selected):hover {
   min-height: 84px;
   align-items: center;
   padding: 16px 26px;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: 28px minmax(0, 1fr) auto auto;
   gap: 18px;
 }
 
-.cf-first-run__engine-special > span:first-child {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.cf-first-run__engine-spacer {
+  width: 28px;
+  height: 28px;
 }
 
 .cf-first-run__engine-special strong {

@@ -285,8 +285,14 @@ function HostedInterestCard({
 
   return (
     <article className="cf-first-run__engine-special cf-first-run__engine-special--managed">
-      <span>
-        <strong>CareerRat AI</strong>
+      <span className="cf-first-run__engine-spacer" aria-hidden="true" />
+      <span className="cf-first-run__engine-identity">
+        <span className="cf-first-run__engine-name">
+          <span className="cf-runtime-icon cf-runtime-icon--careerrat" aria-hidden="true">
+            🐀
+          </span>
+          <strong>CareerRat AI</strong>
+        </span>
         <small>Hosted CareerRat AI is planned, but it is not available today.</small>
       </span>
       <span className="cf-first-run__engine-coming-soon">COMING SOON</span>
