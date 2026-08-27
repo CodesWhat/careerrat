@@ -582,6 +582,23 @@ describe("chat-first onboarding controller", () => {
     ]);
   });
 
+  it("starts a durable company operation and hands its exact id to the UI follower", async () => {
+    const operation = { id: "app-operation-company-1", status: "running" };
+    const api = {
+      createCompanyProposals: vi.fn().mockResolvedValue({ ok: true, operation }),
+    };
+    const onCompanyOperation = vi.fn();
+
+    const receipt = await applyFirstRunConfirmation(
+      { kind: "companies_suggest", payload: {} },
+      { api, state: {}, onCompanyOperation }
+    );
+
+    expect(api.createCompanyProposals).toHaveBeenCalledWith({});
+    expect(onCompanyOperation).toHaveBeenCalledWith(operation);
+    expect(receipt).toBe("Finding company suggestions in the background");
+  });
+
   it("refuses a direct agent confirmation that targets voluntary self-identification", async () => {
     const api = { saveCandidateFile: vi.fn() };
 

@@ -6,7 +6,10 @@
 import { WORKSPACE_THREAD_ID } from "../core/agent/workspace-thread.mjs";
 import { DISCOVERY_PIPELINE, recordDiscoveryCompletion } from "../core/agent-guidance.mjs";
 import { dbExists } from "../core/db/connection.mjs";
-import { companyProposalBatchLatest } from "../core/db/verbs/company-discovery.mjs";
+import {
+  companyProposalBatchGet,
+  companyProposalBatchLatest,
+} from "../core/db/verbs/company-discovery.mjs";
 import {
   candidateConfigGet,
   publicIntelReviewDecision,
@@ -16,6 +19,7 @@ import {
   sourceConfigGet,
 } from "../core/db/verbs.mjs";
 import { companyDiscoveryCadenceState } from "../core/discovery/company-discovery-cadence.mjs";
+import { startCompanyDiscoveryOperation } from "../core/discovery/company-operation.mjs";
 import { applyCompanyProposalDecision } from "../core/discovery/company-proposal-decisions.mjs";
 import { createCompanyProposalBatch } from "../core/discovery/company-proposals.mjs";
 import { scanPublicIntelSeeds } from "../core/discovery/scanner-cascade.mjs";
@@ -358,6 +362,7 @@ export function mountDiscoveryRoutes({
   publicIntelSyncPreviewImpl = publicIntelSyncPreview,
   companyDiscoveryCadenceImpl = companyDiscoveryCadenceState,
   workspaceAgentRuntime,
+  appOperations,
 }) {
   addRoute("GET", "/api/discovery/public-intel/state", (_req, res) => {
     try {
@@ -454,6 +459,22 @@ export function mountDiscoveryRoutes({
     }
 
     try {
+      if (appOperations) {
+        const started = await startCompanyDiscoveryOperation({ appOperations, input: body });
+        const {
+          request: _request,
+          ownerId: _ownerId,
+          fence: _fence,
+          ...operation
+        } = started.operation;
+        const active = ["queued", "running"].includes(operation.status);
+        sendJson(res, active ? 202 : 200, {
+          ok: true,
+          reused: started.reused,
+          operation,
+        });
+        return;
+      }
       const result = await createCompanyProposalBatch({
         repoRoot,
         env,
@@ -481,13 +502,16 @@ export function mountDiscoveryRoutes({
   addRoute("GET", "/api/discovery/company-proposals", (req, res) => {
     try {
       const url = new URL(req.url || "/", "http://127.0.0.1");
+      const batchId = String(url.searchParams.get("id") || "").trim();
       const statusParam = String(url.searchParams.get("status") || "pending").trim();
       const status = statusParam === "all" ? null : statusParam || "pending";
-      const result = companyProposalBatchLatest({ repoRoot, env, status });
+      const result = batchId
+        ? companyProposalBatchGet({ repoRoot, env, batchId })
+        : companyProposalBatchLatest({ repoRoot, env, status });
       sendJson(res, 200, {
         ok: true,
         data: { batch: result.batch },
-        meta: { status, found: Boolean(result.batch) },
+        meta: { ...(batchId ? { batchId } : { status }), found: Boolean(result.batch) },
       });
     } catch (err) {
       discoveryRouteError(res, err, err.code === "NO_DATABASE" ? 409 : 500);

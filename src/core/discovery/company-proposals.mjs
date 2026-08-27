@@ -138,7 +138,9 @@ async function proposalForSeed({
   offersWithCapturedJobs,
   createdAt,
   context,
+  signal,
 }) {
+  signal?.throwIfAborted?.();
   const proposalId = stableId("cpp", [batchId, seed.name, String(index), createdAt]);
   try {
     const resolution = await resolveCompanyBoard({
@@ -146,7 +148,9 @@ async function proposalForSeed({
       env,
       seed,
       fetchImpl,
+      signal,
     });
+    signal?.throwIfAborted?.();
     const scanConfig = {
       tracked_companies: [
         {
@@ -157,7 +161,8 @@ async function proposalForSeed({
         },
       ],
     };
-    const rawScanResult = await scanCompaniesImpl(scanConfig, { fetchImpl });
+    const rawScanResult = await scanCompaniesImpl(scanConfig, { fetchImpl, signal });
+    signal?.throwIfAborted?.();
     const scanResult = prepareScanResult(rawScanResult, context);
     const capturedOffers = offersWithCapturedJobs({
       repoRoot,
@@ -175,6 +180,7 @@ async function proposalForSeed({
       version: 1,
     });
   } catch (err) {
+    if (signal?.aborted || err === signal?.reason) throw signal.reason || err;
     return {
       rejected: {
         proposalId,
@@ -199,8 +205,12 @@ export async function createCompanyProposalBatch({
   buildSeedContext = buildCompanySeedContext,
   generateSeeds = generateCompanySeeds,
   seedCall,
+  executionPlan,
+  signal,
+  reportProgress = async () => {},
   now = new Date(),
 } = {}) {
+  signal?.throwIfAborted?.();
   const manualSeeds = manualSeedsFromBody(body);
   const baseContext = buildSeedContext({ repoRoot, env });
   const discoveryRequest = discoveryRequestFromBody(body);
@@ -212,11 +222,20 @@ export async function createCompanyProposalBatch({
     manualSeeds,
     requestedCount: requestedCountFromBody(body),
     call: seedCall,
+    executionPlan,
+    signal,
     now,
   });
   if (!seedResult.body?.ok) return { status: seedResult.status, body: seedResult.body };
 
   const seeds = seedResult.body.data.companies;
+
+  await reportProgress({
+    phase: "seeds-ready",
+    completed: 0,
+    total: seeds.length,
+    message: `CareerRat found ${seeds.length} ${seeds.length === 1 ? "company" : "companies"} to check.`,
+  });
 
   const createdDate = nowDate(now);
   const createdAt = createdDate.toISOString();
@@ -226,6 +245,7 @@ export async function createCompanyProposalBatch({
   const rejected = [];
 
   for (const [index, seed] of seeds.entries()) {
+    signal?.throwIfAborted?.();
     const result = await proposalForSeed({
       repoRoot,
       env,
@@ -238,10 +258,19 @@ export async function createCompanyProposalBatch({
       offersWithCapturedJobs,
       createdAt,
       context,
+      signal,
     });
     if (result.proposal) proposals.push(result.proposal);
     if (result.rejected) rejected.push(result.rejected);
+    await reportProgress({
+      phase: "resolving",
+      completed: index + 1,
+      total: seeds.length,
+      message: `Checked ${index + 1} of ${seeds.length} company boards.`,
+    });
   }
+
+  signal?.throwIfAborted?.();
 
   const batch = {
     batchId,

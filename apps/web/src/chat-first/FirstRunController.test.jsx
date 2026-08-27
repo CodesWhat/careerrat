@@ -129,6 +129,8 @@ function createApi(draft = { transcript: [] }) {
     }),
     getOnboardingDraft: vi.fn().mockResolvedValue({ draft }),
     getOnboardState: vi.fn().mockResolvedValue(ONBOARD_STATE),
+    getAppOperation: vi.fn(),
+    getCompanyProposalBatch: vi.fn(),
     getResumeExtraction: vi.fn().mockResolvedValue(null),
     initOnboard: vi.fn().mockResolvedValue({ ok: true }),
     parseResumeText: vi.fn().mockResolvedValue({ profileSeed: {}, evidenceSeed: { claims: [] } }),
@@ -136,6 +138,8 @@ function createApi(draft = { transcript: [] }) {
     removeEvidenceClaim: vi.fn().mockResolvedValue({ ok: true }),
     replaceEvidenceClaims: vi.fn().mockResolvedValue({ ok: true }),
     requestHostedInterest: vi.fn().mockResolvedValue({ ok: true }),
+    retryAppOperation: vi.fn(),
+    decideCompanyProposal: vi.fn(),
     saveCandidateFile: vi.fn().mockResolvedValue({ ok: true }),
     saveEvidenceSeed: vi.fn().mockResolvedValue({ ok: true }),
     saveOnboardingDraft: vi.fn().mockResolvedValue({ ok: true }),
@@ -2260,6 +2264,44 @@ describe("FirstRunController chat event reconciliation", () => {
 
     expect(api.getResumeExtraction).toHaveBeenCalledWith({ id: "resume-extraction-1" });
     expect(api.getOnboardState).toHaveBeenCalled();
+  });
+
+  it("follows a saved company operation after reload without changing the route or active draft", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi({ transcript: [] });
+    api.getAppOperation.mockResolvedValue({
+      id: "app-operation-company-1",
+      status: "completed",
+      resultRef: { type: "company-proposal-batch", id: "cpb-exact" },
+    });
+    api.getCompanyProposalBatch.mockResolvedValue({
+      batchId: "cpb-exact",
+      proposals: [{ proposalId: "proposal-1", version: 1 }],
+      rejected: [],
+    });
+    const values = new Map([["careerrat:operation:company-discovery", "app-operation-company-1"]]);
+    const operationStorage = {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => values.set(key, value),
+      removeItem: (key) => values.delete(key),
+    };
+
+    let view = await bootController(module, api, {
+      startInterview: false,
+      controllerProps: { operationStorage },
+    });
+    view.props.onDraftChange("Keep this answer");
+    await Promise.resolve();
+    view = rerender(module, api, { operationStorage });
+    await flushEffects();
+    view = rerender(module, api, { operationStorage });
+
+    expect(api.getAppOperation).toHaveBeenCalledWith("app-operation-company-1");
+    expect(api.getCompanyProposalBatch).toHaveBeenCalledWith("cpb-exact");
+    expect(view.props.companyReviewReady).toBe(true);
+    expect(view.props.draft).toBe("Keep this answer");
+    expect(values.get("careerrat:operation:company-discovery")).toBe("app-operation-company-1");
+    expect(navigate).not.toHaveBeenCalled();
   });
 
   it("surfaces a resume operation that startup reconciled as stopped", async () => {

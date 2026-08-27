@@ -1421,7 +1421,7 @@ export function filterAndDedupeOffers(
 
 export async function scanCompanies(
   config,
-  { fetchImpl = fetch, resolveHost, dispatcherFactory, companyFilter = null } = {}
+  { fetchImpl = fetch, resolveHost, dispatcherFactory, companyFilter = null, signal } = {}
 ) {
   const companies = (config.tracked_companies || [])
     .filter((entry) => entry && entry.enabled !== false)
@@ -1433,6 +1433,7 @@ export async function scanCompanies(
   const errors = [];
 
   for (const company of companies) {
+    signal?.throwIfAborted?.();
     const provider = inferProvider(company);
     if (!provider || !isCompanyProviderSupported(provider)) {
       errors.push({ company: company.name, error: "no supported provider inferred" });
@@ -1443,6 +1444,7 @@ export async function scanCompanies(
         fetchImpl,
         resolveHost,
         dispatcherFactory,
+        signal,
       });
       results.push(...jobs.map((job) => ({ ...job, source: `${provider}-api` })));
     } catch (error) {

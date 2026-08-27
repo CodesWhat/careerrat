@@ -359,7 +359,7 @@ function companyExamples(state) {
   return list(state?.data?.targeting?.company_preferences?.examples);
 }
 
-export async function applyFirstRunConfirmation(block, { api, state } = {}) {
+export async function applyFirstRunConfirmation(block, { api, state, onCompanyOperation } = {}) {
   if (block?.kind === "authorization") {
     await api.saveCandidateFile("profile", { authorization: block.patch });
     await api.saveCandidateFile("form-defaults", {
@@ -383,8 +383,11 @@ export async function applyFirstRunConfirmation(block, { api, state } = {}) {
     return "Evidence saved";
   }
   if (block?.kind === "companies_suggest") {
-    await api.createCompanyProposals({});
-    return "Company suggestions ready";
+    const started = await api.createCompanyProposals({});
+    if (started?.operation) onCompanyOperation?.(started.operation);
+    return ["queued", "running"].includes(started?.operation?.status)
+      ? "Finding company suggestions in the background"
+      : "Company suggestions ready";
   }
   if (block?.kind === "company_add") {
     const preferences = state?.data?.targeting?.company_preferences || {};

@@ -62,13 +62,20 @@ function engineDescription(engine) {
   return "This provider is not available on this computer.";
 }
 
-function SearchRetryControl({ onRetrySearch, submitting }) {
-  if (!onRetrySearch) return null;
+function RetryControl({ onRetrySearch, onRetryCompany, submitting }) {
+  if (!onRetrySearch && !onRetryCompany) return null;
   return (
     <div className="cf-first-run__answer-options">
-      <button type="button" disabled={submitting} onClick={onRetrySearch}>
-        Retry search
-      </button>
+      {onRetrySearch ? (
+        <button type="button" disabled={submitting} onClick={onRetrySearch}>
+          Retry search
+        </button>
+      ) : null}
+      {onRetryCompany ? (
+        <button type="button" disabled={submitting} onClick={onRetryCompany}>
+          Retry company search
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -375,6 +382,7 @@ export function EngineSelection({
   onHostedInterestChange,
   onHostedInterestSubmit,
   onRetrySearch,
+  onRetryCompany,
 }) {
   const choices = safeArray(engines).filter(
     (engine) =>
@@ -416,7 +424,7 @@ export function EngineSelection({
         {error ? (
           <div className="cf-first-run__engine-error" role="alert">
             <span>{error}</span>
-            {SearchRetryControl({ onRetrySearch, submitting })}
+            {RetryControl({ onRetrySearch, onRetryCompany, submitting })}
           </div>
         ) : null}
         <fieldset className="cf-first-run__engine-choices">
@@ -916,6 +924,9 @@ export function FirstRunChat({
   onResumeFile,
   onDraftChange,
   onRetrySearch,
+  onRetryCompany,
+  companyReviewReady = false,
+  onOpenCompanyReview,
   onSubmitAnswer,
 }) {
   const rows = safeArray(messages);
@@ -975,7 +986,17 @@ export function FirstRunChat({
             role="alert"
           >
             <span>{error}</span>
-            {SearchRetryControl({ onRetrySearch, submitting })}
+            {RetryControl({ onRetrySearch, onRetryCompany, submitting })}
+          </div>
+        ) : null}
+        {companyReviewReady ? (
+          <div className="cf-first-run__composer-notice" role="status">
+            <span>Company suggestions are ready. Your current answer is still here.</span>
+            <div className="cf-first-run__answer-options">
+              <button type="button" disabled={submitting} onClick={onOpenCompanyReview}>
+                Review companies
+              </button>
+            </div>
           </div>
         ) : null}
         {resumeUploading ? (
@@ -1023,8 +1044,9 @@ export function FirstRunChat({
 }
 
 export function FirstRunExperience(props) {
+  let content;
   if (props?.stage === "voluntary-defaults" || props?.voluntaryDefaultsRequired === true) {
-    return (
+    content = (
       <VoluntaryDefaultsPrompt
         agentName={props.agentName || "Paul"}
         submitting={props.submitting}
@@ -1032,7 +1054,17 @@ export function FirstRunExperience(props) {
         onChoose={props.onChooseVoluntaryDefaults}
       />
     );
+  } else if (props?.stage === "chat") {
+    content = FirstRunChat(props);
+  } else {
+    content = EngineSelection(props);
   }
-  if (props?.stage === "chat") return FirstRunChat(props);
-  return EngineSelection(props);
+  return props?.companyReview ? (
+    <>
+      {content}
+      {props.companyReview}
+    </>
+  ) : (
+    content
+  );
 }

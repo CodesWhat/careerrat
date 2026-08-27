@@ -44,6 +44,10 @@ import {
   sourceRelationshipsInApp,
   syncStatusesInApp,
 } from "../core/automation/browser-workflows.mjs";
+import {
+  COMPANY_DISCOVERY_OPERATION_KIND,
+  createCompanyDiscoveryOperationKind,
+} from "../core/discovery/company-operation.mjs";
 import { resolveUserPaths } from "../core/paths/workspace.mjs";
 import { acquireWorkspaceRuntimeOwnership } from "../core/runtime/workspace-runtime-ownership.mjs";
 import { securityHeaders } from "../core/security/browser-policy.mjs";
@@ -269,7 +273,10 @@ export function createDevServer({
     addRoute,
     repoRoot,
     env,
-    kinds: appOperationKinds,
+    kinds: {
+      [COMPANY_DISCOVERY_OPERATION_KIND]: createCompanyDiscoveryOperationKind({ repoRoot, env }),
+      ...appOperationKinds,
+    },
   });
 
   // P0-4 — the embedded AI skill runtime. See src/cli/skill-run-route.mjs for
@@ -319,7 +326,14 @@ export function createDevServer({
   // /api/chat/* so Quick Start / Continue Discovery can start or reconnect to
   // exactly one visible research-boards session. Company discovery stays on
   // the reviewed app-owned proposal path; search-jobs uses its dedicated route.
-  mountDiscoveryRoutes({ addRoute, repoRoot, env, chatRuntime, workspaceAgentRuntime });
+  mountDiscoveryRoutes({
+    addRoute,
+    repoRoot,
+    env,
+    chatRuntime,
+    workspaceAgentRuntime,
+    appOperations,
+  });
 
   // M3 of the paid-POC journey — the /search surface over the existing
   // deterministic (non-AI) ATS-board sweep. Its HTTP surface (run/read the

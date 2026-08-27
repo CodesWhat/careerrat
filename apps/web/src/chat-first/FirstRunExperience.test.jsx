@@ -963,6 +963,29 @@ describe("FirstRunExperience", () => {
     expect(onRetrySearch).toHaveBeenCalledOnce();
   });
 
+  it("offers the completed company review without replacing the active draft", async () => {
+    const { FirstRunChat } = await loadFirstRun();
+    const onOpenCompanyReview = vi.fn();
+    const tree = FirstRunChat({
+      agentName: "Paul",
+      messages: [],
+      knowledge: [],
+      progress: { completed: 5, total: 8 },
+      draft: "Keep this answer",
+      companyReviewReady: true,
+      onOpenCompanyReview,
+    });
+    const review = findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "Review companies"
+    );
+    const input = findElement(tree, (node) => node.type === "input" && node.props?.value);
+
+    expect(input.props.value).toBe("Keep this answer");
+    review.props.onClick();
+    expect(onOpenCompanyReview).toHaveBeenCalledOnce();
+  });
+
   it("keeps the voluntary-form choice local and offers leave blank as the skip", async () => {
     const { FirstRunExperience } = await loadFirstRun();
     const onChooseVoluntaryDefaults = vi.fn();

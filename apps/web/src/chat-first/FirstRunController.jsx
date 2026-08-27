@@ -14,6 +14,16 @@ import {
   setupNeedsVoluntaryDefaults,
 } from "../onboarding/onboardingSetup.js";
 import { firstRunApi } from "./api.js";
+import {
+  clearCompanyDiscoveryOperation,
+  companyProposalArtifact,
+  followCompanyDiscoveryOperation,
+  readCompanyDiscoveryOperationId,
+  rememberCompanyDiscoveryOperation,
+  resolveCompanyOperationStorage,
+  retryCompanyDiscoveryOperation,
+} from "./company-operation-controller.js";
+import { CompanyProposalReview } from "./company-proposal-review.jsx";
 import { FirstRunExperience, FirstRunShell } from "./FirstRunExperience.jsx";
 import {
   applyFirstRunConfirmation,
@@ -278,6 +288,7 @@ export function FirstRunController({
   api = firstRunApi,
   inWorkspace = true,
   initialOnboardState = null,
+  operationStorage = resolveCompanyOperationStorage(),
 }) {
   const navigate = useNavigate();
   const [stage, setStage] = useState("engine");
@@ -299,6 +310,10 @@ export function FirstRunController({
   const [knowledgeSaving, setKnowledgeSaving] = useState(false);
   const [engineError, setEngineError] = useState(null);
   const [firstSearchRetryAvailable, setFirstSearchRetryAvailable] = useState(false);
+  const [companyOperation, setCompanyOperation] = useState(null);
+  const [companyProposalBatch, setCompanyProposalBatch] = useState(null);
+  const [companyReviewOpen, setCompanyReviewOpen] = useState(false);
+  const [companyRetryAvailable, setCompanyRetryAvailable] = useState(false);
   const [guidedSetup, setGuidedSetup] = useState(null);
   const [hostedInterest, setHostedInterest] = useState({
     status: "idle",
@@ -312,6 +327,7 @@ export function FirstRunController({
   const savingProfileMessagesRef = useRef(new Set());
   const uploadedResumeSignaturesRef = useRef(new Set());
   const reportedResumeExtractionFailuresRef = useRef(new Set());
+  const companyReviewRequestedRef = useRef(false);
   const messagesRef = useRef([]);
   const updateMessages = useCallback((update) => {
     const current = messagesRef.current;
@@ -319,6 +335,17 @@ export function FirstRunController({
     messagesRef.current = next;
     setMessages(next);
   }, []);
+
+  const acceptCompanyOperation = useCallback(
+    (operation) => {
+      if (!operation?.id) return;
+      companyReviewRequestedRef.current = true;
+      rememberCompanyDiscoveryOperation(operationStorage, operation);
+      setCompanyRetryAvailable(false);
+      setCompanyOperation(operation);
+    },
+    [operationStorage]
+  );
 
   const connectChat = useCallback((nextChatId) => {
     const normalizedChatId = String(nextChatId || "").trim();
@@ -463,6 +490,42 @@ export function FirstRunController({
       cancelled = true;
     };
   }, [advanceOnboard, api, initialOnboardState, updateMessages]);
+
+  useEffect(() => {
+    const id = readCompanyDiscoveryOperationId(operationStorage);
+    if (!id || companyOperation?.id) return;
+    setCompanyOperation({ id, status: "running" });
+  }, [companyOperation?.id, operationStorage]);
+
+  const companyOperationId = String(companyOperation?.id || "").trim();
+  useEffect(() => {
+    if (!companyOperationId) return;
+    const controller = new AbortController();
+    void followCompanyDiscoveryOperation({
+      api,
+      id: companyOperationId,
+      signal: controller.signal,
+      onProgress: setCompanyOperation,
+    })
+      .then(({ operation, batch }) => {
+        if (controller.signal.aborted) return;
+        setCompanyOperation(operation);
+        setCompanyProposalBatch(batch);
+        setCompanyRetryAvailable(false);
+        if (companyReviewRequestedRef.current) setCompanyReviewOpen(true);
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setCompanyRetryAvailable(true);
+        setEngineError(
+          firstRunErrorMessage(
+            error,
+            "CareerRat couldn't finish finding company suggestions. Try it again."
+          )
+        );
+      });
+    return () => controller.abort();
+  }, [api, companyOperationId]);
 
   const resumeExtraction = onboardState?.resumeExtraction;
   useEffect(() => {
@@ -712,6 +775,7 @@ export function FirstRunController({
             const receipt = await applyFirstRunConfirmation(block, {
               api,
               state: onboardState,
+              onCompanyOperation: acceptCompanyOperation,
             });
             receipts.set(index, receipt);
             updateMessages((current) =>
@@ -813,7 +877,7 @@ export function FirstRunController({
         setSubmitting(false);
       }
     },
-    [api, chatId, connectChat, onboardState, refreshOnboard, updateMessages]
+    [acceptCompanyOperation, api, chatId, connectChat, onboardState, refreshOnboard, updateMessages]
   );
 
   useEffect(() => {
@@ -882,6 +946,7 @@ export function FirstRunController({
         const receipt = await applyFirstRunConfirmation(block, {
           api,
           state: onboardState,
+          onCompanyOperation: acceptCompanyOperation,
         });
         savedReceipt = receipt;
         updateMessages((current) =>
@@ -1386,6 +1451,52 @@ export function FirstRunController({
     }
   }
 
+  async function retryCompanyDiscovery() {
+    if (!companyOperationId || submitting) return;
+    setSubmitting(true);
+    setEngineError(null);
+    try {
+      const retry = await retryCompanyDiscoveryOperation({
+        api,
+        id: companyOperationId,
+        storage: operationStorage,
+      });
+      companyReviewRequestedRef.current = true;
+      setCompanyRetryAvailable(false);
+      setCompanyOperation(retry);
+    } catch (error) {
+      setEngineError(
+        firstRunErrorMessage(
+          error,
+          "CareerRat couldn't retry the company search. Your setup is still saved."
+        )
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function decideCompanyProposalIntent(intent) {
+    if (intent?.type !== "company.proposal-decide") return false;
+    const batchId = String(intent.input?.batchId || "").trim();
+    if (!batchId || batchId !== companyProposalBatch?.batchId) return false;
+    await api.decideCompanyProposal({
+      batchId,
+      proposalId: intent.entity?.id,
+      action: intent.input.action,
+      expectedVersion: intent.input.expectedVersion,
+      userConfirmed: true,
+    });
+    const refreshed = await api.getCompanyProposalBatch(batchId);
+    setCompanyProposalBatch(refreshed);
+    const pending = list(refreshed?.proposals).some((proposal) => !proposal?.decision);
+    if (!pending) {
+      clearCompanyDiscoveryOperation(operationStorage, companyOperationId);
+      setCompanyReviewOpen(false);
+    }
+    return true;
+  }
+
   const runtime = list(runtimeState?.runtimes).find(
     (candidate) => candidate.id === runtimeState?.selectedId
   );
@@ -1396,6 +1507,16 @@ export function FirstRunController({
     navigate("/settings", {
       state: { activeTab: "settings", openEnginePicker: true },
     });
+
+  const companyReview =
+    companyReviewOpen && companyProposalBatch ? (
+      <CompanyProposalReview
+        artifact={companyProposalArtifact(companyProposalBatch)}
+        busy={submitting}
+        onIntent={decideCompanyProposalIntent}
+        onClose={() => setCompanyReviewOpen(false)}
+      />
+    ) : null;
 
   const experience = (
     <FirstRunExperience
@@ -1442,6 +1563,10 @@ export function FirstRunController({
       }
       onHostedInterestSubmit={submitHostedInterest}
       onRetrySearch={firstSearchRetryAvailable ? retryFirstSearch : undefined}
+      onRetryCompany={companyRetryAvailable ? retryCompanyDiscovery : undefined}
+      companyReviewReady={Boolean(companyProposalBatch) && !companyReviewOpen}
+      onOpenCompanyReview={() => setCompanyReviewOpen(true)}
+      companyReview={companyReview}
       onChooseOption={chooseOption}
       onEditKnowledgeSection={(item) => {
         if (item?.id === "engine") {

@@ -209,12 +209,12 @@ async function assertSafeUrl(url, { lookupHost = defaultLookupHost } = {}) {
   }
 }
 
-async function fetchWithTimeout(url, fetchImpl, timeoutMs) {
+async function fetchWithTimeout(url, fetchImpl, timeoutMs, signal) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetchImpl(url.toString(), {
-      signal: controller.signal,
+      signal: signal ? AbortSignal.any([controller.signal, signal]) : controller.signal,
       redirect: "manual",
     });
   } finally {
@@ -410,7 +410,9 @@ async function resolveSupportedUrl({
   timeoutMs,
   depth,
   visited,
+  signal,
 }) {
+  signal?.throwIfAborted?.();
   await assertSafeUrl(url, { lookupHost });
   const provider = directProvider(url);
   if (provider) {
@@ -435,7 +437,7 @@ async function resolveSupportedUrl({
   }
   visited.add(url.toString());
 
-  const response = await fetchWithTimeout(url, fetchImpl, timeoutMs);
+  const response = await fetchWithTimeout(url, fetchImpl, timeoutMs, signal);
   const redirected = redirectTarget(response, url);
   if (redirected) {
     await assertSafeUrl(redirected, { lookupHost });
@@ -455,6 +457,7 @@ async function resolveSupportedUrl({
       timeoutMs,
       depth: depth + 1,
       visited,
+      signal,
     });
   }
 
@@ -492,6 +495,7 @@ async function resolveSupportedUrl({
       timeoutMs,
       depth: depth + 1,
       visited,
+      signal,
     });
     if (result.status === "supported_ats") return result;
   }
@@ -508,7 +512,9 @@ export async function resolveCompanyBoard({
   forceRefresh = false,
   now = new Date(),
   timeoutMs = RESOLVER_FETCH_TIMEOUT_MS,
+  signal,
 } = {}) {
+  signal?.throwIfAborted?.();
   const companyName = String(seed?.name || "").trim();
   const companyKey = normalizeCompanyKey(companyName);
   if (!companyKey) {
@@ -539,6 +545,7 @@ export async function resolveCompanyBoard({
     timeoutMs,
     depth: 0,
     visited: new Set(),
+    signal,
   });
 
   return writeCachedResolution({ repoRoot, env, result, existing, observedAt });

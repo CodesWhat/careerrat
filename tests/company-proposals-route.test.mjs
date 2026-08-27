@@ -7,7 +7,10 @@ import { after, test } from "node:test";
 import { mountDiscoveryRoutes } from "../src/cli/discovery-route.mjs";
 import { BOUNDED_AI_CODES } from "../src/core/ai/bounded-ai.mjs";
 import { closeAll } from "../src/core/db/connection.mjs";
-import { companyProposalBatchLatest } from "../src/core/db/verbs/company-discovery.mjs";
+import {
+  companyProposalBatchLatest,
+  companyProposalBatchPut,
+} from "../src/core/db/verbs/company-discovery.mjs";
 import {
   appUpsert,
   candidateConfigPatch,
@@ -178,9 +181,82 @@ function bootServer(repoRoot, opts = {}) {
     sourcedUpsertBatch: opts.sourcedUpsertBatch,
     captureAndPersistOffersIfDb: opts.captureAndPersistOffersIfDb,
     writeTracker: opts.writeTracker,
+    appOperations: opts.appOperations,
   });
   return { routes };
 }
+
+test("POST /api/discovery/company-proposals starts one durable background operation", async () => {
+  const repoRoot = tempRepo();
+  candidateSetupInitialize({ repoRoot });
+  const calls = [];
+  const server = bootServer(repoRoot, {
+    appOperations: {
+      async start(args) {
+        calls.push(args);
+        return {
+          reused: false,
+          operation: {
+            id: "app-operation-company-1",
+            kind: "company.discovery",
+            status: "running",
+            progress: { phase: "starting" },
+          },
+        };
+      },
+    },
+  });
+
+  const response = await postJson(server, "/api/discovery/company-proposals", {
+    manualSeeds: [{ name: "Acme AI", domain_hint: "acme.example" }],
+  });
+
+  assert.equal(response.status, 202);
+  assert.equal(response.body.ok, true);
+  assert.equal(response.body.reused, false);
+  assert.equal(response.body.operation.id, "app-operation-company-1");
+  assert.deepEqual(calls, [
+    {
+      kind: "company.discovery",
+      input: { manualSeeds: [{ name: "Acme AI", domain_hint: "acme.example" }] },
+    },
+  ]);
+});
+
+test("GET /api/discovery/company-proposals loads only the exact completed operation batch", async () => {
+  const repoRoot = tempRepo();
+  candidateSetupInitialize({ repoRoot });
+  companyProposalBatchPut({
+    repoRoot,
+    batch: {
+      batchId: "cpb_exact",
+      status: "pending",
+      createdAt: FIXED_NOW.toISOString(),
+      version: 1,
+      proposals: [],
+      rejected: [],
+      counts: { seeds: 0, proposals: 0, rejected: 0 },
+    },
+  });
+  companyProposalBatchPut({
+    repoRoot,
+    batch: {
+      batchId: "cpb_other",
+      status: "pending",
+      createdAt: new Date(FIXED_NOW.getTime() + 1_000).toISOString(),
+      version: 1,
+      proposals: [],
+      rejected: [],
+      counts: { seeds: 0, proposals: 0, rejected: 0 },
+    },
+  });
+  const server = bootServer(repoRoot);
+
+  const response = await invokeJson(server, "GET", "/api/discovery/company-proposals?id=cpb_exact");
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.data.batch.batchId, "cpb_exact");
+});
 
 const PROPOSAL_CONTRACT_FIELDS = [
   "proposalId",
@@ -249,7 +325,8 @@ async function postRaw(server, path, rawBody) {
 }
 
 async function invokeJson(server, method, path, rawBody) {
-  const route = server.routes.get(`${method} ${path}`);
+  const routePath = new URL(path, "http://127.0.0.1").pathname;
+  const route = server.routes.get(`${method} ${routePath}`);
   assert.ok(route, `missing route: ${method} ${path}`);
 
   let resolveEnded;
