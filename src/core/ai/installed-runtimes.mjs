@@ -1131,6 +1131,7 @@ export function buildInstalledRuntimeInvocation({
   schema,
   schemaPath,
   model,
+  effort,
   tools = [],
   // Set by runInstalledRuntime only once it has actually materialized an
   // isolated cwd for this skill (see materializeIsolatedSkillCwd below) —
@@ -1186,6 +1187,7 @@ export function buildInstalledRuntimeInvocation({
       args.push("--allowedTools", boundary.allowedTools.join(","));
     }
     if (model) args.push("--model", model);
+    if (effort) args.push("--effort", effort);
     if (schema) args.push("--json-schema", JSON.stringify(sanitizeInstalledOutputSchema(schema)));
     return { ...common, args };
   }
@@ -1243,6 +1245,7 @@ export function buildInstalledRuntimeInvocation({
       "--skip-git-repo-check",
     ];
     if (model) args.push("--model", model);
+    if (effort) args.push("-c", `model_reasoning_effort=${JSON.stringify(effort)}`);
     if (schemaPath) args.push("--output-schema", schemaPath);
     args.push("-");
     return { ...common, args };
@@ -1770,6 +1773,7 @@ export async function runInstalledRuntime({
   prompt,
   outputSchema,
   model,
+  effort,
   tools = [],
   cwd,
   env = process.env,
@@ -1886,6 +1890,7 @@ export async function runInstalledRuntime({
       schema: outputSchema,
       schemaPath,
       model,
+      effort,
       tools: providerTools,
       // Only tell the arg-builder a skill is "ready" once isolation actually
       // succeeded — never claim --setting-sources project against a plain
@@ -2132,6 +2137,7 @@ export async function runInstalledRuntimeStream({
   runtime,
   prompt,
   model,
+  effort,
   tools = [],
   cwd,
   env = process.env,
@@ -2251,6 +2257,7 @@ export async function runInstalledRuntimeStream({
       runtimeId: runtime.id,
       executablePath: runtime.path,
       model,
+      effort,
       tools,
       skill: skillCwd ? skill : undefined,
       repoRoot,

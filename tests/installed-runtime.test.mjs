@@ -809,6 +809,7 @@ test("fixed invocation adapters pass prompts on stdin and never use a shell", ()
       maxProperties: 2,
     },
     model: "sonnet",
+    effort: "high",
     tools: [],
   });
   assert.equal(claude.command, "/safe/claude");
@@ -826,12 +827,14 @@ test("fixed invocation adapters pass prompts on stdin and never use a shell", ()
   assert.ok(claude.args.includes("--permission-mode"));
   assert.equal(claude.args[claude.args.indexOf("--tools") + 1], "");
   assert.equal(claude.args.includes("--allowedTools"), false);
+  assert.equal(claude.args[claude.args.indexOf("--effort") + 1], "high");
   assert.equal(claude.args.includes("PROMPT_SECRET"), false);
 
   const codex = buildInstalledRuntimeInvocation({
     runtimeId: "codex",
     executablePath: "/safe/codex",
     schemaPath: "/private/tmp/schema.json",
+    effort: "medium",
   });
   assert.equal(codex.command, "/safe/codex");
   assert.deepEqual(codex.args.slice(0, 2), ["exec", "--json"]);
@@ -861,6 +864,7 @@ test("fixed invocation adapters pass prompts on stdin and never use a shell", ()
     assert.ok(index >= 0, `Codex completion capsule must disable ${feature}`);
   }
   assert.ok(codex.args.includes("--output-schema"));
+  assert.ok(codex.args.includes('model_reasoning_effort="medium"'));
   assert.equal(codex.args.at(-1), "-");
   assert.equal(codex.options.shell, false);
 });

@@ -1070,6 +1070,8 @@ test("runSkillStream: a selected installed CLI bypasses the Agent SDK and stream
       approvedReadPaths: [upload],
       outputSchema: { type: "object", required: ["full_text"] },
       timeoutMs: 480_000,
+      model: "opus",
+      effort: "high",
       runtimeInventory: [
         {
           id: "claude",
@@ -1099,11 +1101,8 @@ test("runSkillStream: a selected installed CLI bypasses the Agent SDK and stream
     assert.deepEqual(result, { ok: true, aborted: false });
     assert.equal(calls.length, 1);
     assert.equal(calls[0].runtime.id, "claude");
-    assert.equal(
-      calls[0].model,
-      "claude-haiku-4-5-20251001",
-      "the Anthropic extraction override is valid for Claude"
-    );
+    assert.equal(calls[0].model, "opus", "an operation-level model overrides the process default");
+    assert.equal(calls[0].effort, "high");
     // Threaded so installed-runtimes.mjs can materialize an isolated skill
     // cwd for the "claude" runtimeId (see tests/installed-runtime.test.mjs) —
     // harmless/unused for every other installed runtime, codex included.

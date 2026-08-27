@@ -523,6 +523,7 @@ test("callAI: routes a structured request through the selected CLI without a pro
       maxTokens: 32,
       outputSchema: OUTPUT_SCHEMA,
       outputMode: "native",
+      effort: "high",
       root,
       env: { CAREERRAT_DESKTOP_SHELL: "1" },
       runtimeInventory: [verifiedInstalled("codex", "Codex", "/safe/codex")],
@@ -542,6 +543,7 @@ test("callAI: routes a structured request through the selected CLI without a pro
     assert.match(calls[0].prompt, /PROMPT_SECRET_02_07/);
     assert.deepEqual(calls[0].outputSchema, OUTPUT_SCHEMA);
     assert.equal(calls[0].model, undefined);
+    assert.equal(calls[0].effort, "high");
     const events = readUsageEvents({ root });
     assert.equal(events.length, 1);
     assert.equal(events[0].source, "installed");

@@ -428,6 +428,7 @@ async function runInstalledAI({
   operation,
   model,
   tier,
+  effort,
   runInstalledRuntimeImpl,
 }) {
   const startedAt = performance.now();
@@ -436,6 +437,7 @@ async function runInstalledAI({
     prompt: buildInstalledRuntimePrompt({ system, messages }),
     outputSchema,
     model: resolveInstalledModel({ model, tier, root, env, runtimeId: route.runtime.id }),
+    effort: effort || undefined,
     cwd: root,
     env,
     signal,
@@ -572,6 +574,7 @@ export async function callAI({
       operation,
       model,
       tier,
+      effort,
       runInstalledRuntimeImpl,
     };
     if (stream) return streamInstalledAI(options);

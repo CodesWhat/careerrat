@@ -540,6 +540,8 @@ export async function runSkillStream({
   approvedReadPaths,
   outputSchema,
   timeoutMs,
+  model,
+  effort,
   runtimeInventory = null,
   runInstalledRuntimeImpl = runInstalledRuntime,
 } = {}) {
@@ -605,10 +607,12 @@ export async function runSkillStream({
         // cross-provider; the Anthropic override is Claude-only.
         model:
           String(
-            env.CAREERRAT_INSTALLED_AI_MODEL ||
+            model ||
+              env.CAREERRAT_INSTALLED_AI_MODEL ||
               (route.runtime.id === "claude" ? env.ANTHROPIC_MODEL : "") ||
               ""
           ).trim() || undefined,
+        effort: effort || undefined,
         tools: installedRuntimeTools,
         approvedReadPaths,
         outputSchema,
@@ -693,6 +697,8 @@ export async function runSkillStream({
     options: {
       cwd: repoRoot,
       env: childEnv,
+      ...(model ? { model } : {}),
+      ...(effort ? { effort } : {}),
       abortController: controller,
       settingSources: ["project"],
       skills: [skill],
