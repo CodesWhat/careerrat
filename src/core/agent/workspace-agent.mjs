@@ -908,6 +908,13 @@ function jobIdentityMatchStrength(row, referenceTokens) {
   }).length;
 }
 
+const AMBIGUITY_CHOICE_CANDIDATES = Symbol("ambiguity choice candidates");
+
+function attachAmbiguityCandidates(error, candidates) {
+  error[AMBIGUITY_CHOICE_CANDIDATES] = candidates.slice(0, 5);
+  return error;
+}
+
 function resolveReferencedJobRequest({ repoRoot, env, jobReference }) {
   const tokens = jobReferenceTokens(jobReference);
   if (!tokens.length) {
@@ -962,9 +969,19 @@ function resolveReferencedJobRequest({ repoRoot, env, jobReference }) {
       role: String(row.role || "this role").slice(0, 160),
     }));
     const choices = safeMatches.map((row) => `${row.company}, ${row.role}`).join("; ");
-    const error = actionError(
-      `That matches more than one saved job: ${choices}. Name the company and role more specifically.`,
-      "JOB_REFERENCE_AMBIGUOUS"
+    const error = attachAmbiguityCandidates(
+      actionError(
+        `That matches more than one saved job: ${choices}. Name the company and role more specifically.`,
+        "JOB_REFERENCE_AMBIGUOUS"
+      ),
+      matches.map((row) => ({
+        kind: "job",
+        id: row.id,
+        recordType: row.recordType,
+        company: row.company,
+        role: row.role,
+        location: row.location,
+      }))
     );
     error.details = { matches: safeMatches };
     throw error;
@@ -1007,9 +1024,18 @@ function resolveReferencedApplication({ repoRoot, env, jobReference, interviewOn
       role: String(application.role || "this role").slice(0, 160),
     }));
     const choices = safeMatches.map((row) => `${row.company}, ${row.role}`).join("; ");
-    const error = actionError(
-      `That matches more than one saved job: ${choices}. Name the company and role more specifically.`,
-      "JOB_REFERENCE_AMBIGUOUS"
+    const error = attachAmbiguityCandidates(
+      actionError(
+        `That matches more than one saved job: ${choices}. Name the company and role more specifically.`,
+        "JOB_REFERENCE_AMBIGUOUS"
+      ),
+      matches.map((application) => ({
+        kind: "application",
+        id: application.id,
+        company: application.company,
+        role: application.role,
+        location: application.location,
+      }))
     );
     error.details = { matches: safeMatches };
     throw error;
@@ -1156,9 +1182,18 @@ function resolveReferencedCommunication({ repoRoot, env, communicationReference 
     const choices = safeMatches
       .map((row) => `${row.company}, ${row.role}, ${row.subject}`)
       .join("; ");
-    const error = actionError(
-      `That matches more than one recruiter thread: ${choices}. Name the company, role, or subject more specifically.`,
-      "COMMUNICATION_REFERENCE_AMBIGUOUS"
+    const error = attachAmbiguityCandidates(
+      actionError(
+        `That matches more than one recruiter thread: ${choices}. Name the company, role, or subject more specifically.`,
+        "COMMUNICATION_REFERENCE_AMBIGUOUS"
+      ),
+      matches.map((communication) => ({
+        kind: "communication",
+        id: communication.id,
+        company: communication.company,
+        role: communication.role,
+        subject: communication.subject,
+      }))
     );
     error.details = { matches: safeMatches };
     throw error;
@@ -1334,13 +1369,23 @@ function resolveReferencedCompany({
     byCompany.get(key).push(row);
   }
   if (byCompany.size > 1) {
-    const safeMatches = [...byCompany.values()].slice(0, 5).map((companyRows) => ({
-      company: String(companyRows[0].company || "this company").slice(0, 120),
-    }));
+    const companyCandidates = [...byCompany.values()].slice(0, 5).map((companyRows) => {
+      const selected = primaryCompanyRow(companyRows);
+      return {
+        kind: "company",
+        id: selected.id,
+        recordType: selected.recordType,
+        company: String(selected.company || "this company").slice(0, 120),
+      };
+    });
+    const safeMatches = companyCandidates.map(({ company }) => ({ company }));
     const choices = safeMatches.map((row) => row.company).join("; ");
-    const error = actionError(
-      `That matches more than one tracked company: ${choices}. Name the company more specifically.`,
-      "COMPANY_AMBIGUOUS"
+    const error = attachAmbiguityCandidates(
+      actionError(
+        `That matches more than one tracked company: ${choices}. Name the company more specifically.`,
+        "COMPANY_AMBIGUOUS"
+      ),
+      companyCandidates
     );
     error.details = { matches: safeMatches };
     throw error;
@@ -1585,6 +1630,98 @@ function resolveNaturalWorkspaceRequest({ repoRoot, env, intent }) {
     };
   }
   return intent;
+}
+
+const APPLICATION_AMBIGUITY_INTENTS = Object.freeze({
+  "outcome.record-request": "outcome.record",
+  "status.record-portal-request": "status.record-portal",
+  "status.connect-portal-request": "status.connect-portal",
+  "application.record-external-request": "application.record-external",
+  "interview.prepare-request": "interview.prepare",
+});
+
+const COMMUNICATION_AMBIGUITY_INTENTS = Object.freeze({
+  "communication.draft-request": "communication.draft",
+  "scheduling.prepare-request": "scheduling.prepare",
+  "communication.handoff-request": "communication.handoff",
+  "communication.record-external-request": "communication.record-external",
+  "communication.note-request": "communication.add-note",
+});
+
+function ambiguityLabel(candidate) {
+  const parts =
+    candidate.kind === "communication"
+      ? [candidate.company, candidate.subject, candidate.role]
+      : candidate.kind === "company"
+        ? [candidate.company]
+        : [candidate.company, candidate.role, candidate.location];
+  return parts
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" · ")
+    .slice(0, 320);
+}
+
+function ambiguityChoiceIntents(error, intent) {
+  const candidates = Array.isArray(error?.[AMBIGUITY_CHOICE_CANDIDATES])
+    ? error[AMBIGUITY_CHOICE_CANDIDATES].slice(0, 5)
+    : [];
+  if (!candidates.length) return [];
+  const baseLabels = candidates.map(ambiguityLabel);
+  const labelCounts = new Map();
+  for (const label of baseLabels) labelCounts.set(label, (labelCounts.get(label) || 0) + 1);
+  const labelIndexes = new Map();
+
+  return candidates.flatMap((candidate, index) => {
+    let selectedIntent = null;
+    if (
+      candidate.kind === "job" &&
+      new Set(["job.evaluate-request", "job.prepare-request", "job.tailor-request"]).has(
+        intent.type
+      )
+    ) {
+      selectedIntent = {
+        ...intent,
+        input: { ...(intent.input || {}), jobId: candidate.id },
+      };
+    } else if (candidate.kind === "application" && APPLICATION_AMBIGUITY_INTENTS[intent.type]) {
+      selectedIntent = {
+        ...intent,
+        type: APPLICATION_AMBIGUITY_INTENTS[intent.type],
+        entity: { type: "application", id: candidate.id },
+      };
+    } else if (candidate.kind === "communication" && COMMUNICATION_AMBIGUITY_INTENTS[intent.type]) {
+      selectedIntent = {
+        ...intent,
+        type: COMMUNICATION_AMBIGUITY_INTENTS[intent.type],
+        entity: { type: "communication", id: candidate.id },
+      };
+    } else if (
+      candidate.kind === "company" &&
+      new Set(["research.company-request", "company.health-request"]).has(intent.type)
+    ) {
+      selectedIntent = {
+        ...intent,
+        input: { ...(intent.input || {}), jobId: candidate.id },
+      };
+    } else if (
+      candidate.kind === "company" &&
+      new Set(["relationship.record-lead", "relationship.source-request"]).has(intent.type)
+    ) {
+      selectedIntent = {
+        ...intent,
+        input: { ...(intent.input || {}), company: candidate.company },
+      };
+    }
+    if (!selectedIntent) return [];
+
+    const baseLabel = baseLabels[index] || "Choose this match";
+    const nextIndex = (labelIndexes.get(baseLabel) || 0) + 1;
+    labelIndexes.set(baseLabel, nextIndex);
+    const label =
+      labelCounts.get(baseLabel) > 1 ? `${baseLabel} (saved item ${nextIndex})` : baseLabel;
+    return [{ label, primary: false, intent: selectedIntent }];
+  });
 }
 
 async function evaluateApplicationRequest({
@@ -8164,7 +8301,8 @@ export async function executeWorkspaceIntent({
       "APPLICATION_PREPARATION_FAILED"
     );
   } catch (error) {
-    if (operationAttempt) {
+    const nextActions = ambiguityChoiceIntents(error, normalized);
+    if (operationAttempt && !nextActions.length) {
       error.workspaceThreadId = WORKSPACE_THREAD_ID;
       throw error;
     }
@@ -8180,8 +8318,13 @@ export async function executeWorkspaceIntent({
         code: error?.code || "ACTION_FAILED",
         message: visibleError,
       },
-      metadata: { intentMessageId: intentMessage.message.id },
+      metadata: {
+        intentMessageId: intentMessage.message.id,
+        ...(nextActions.length ? { state: "needs-choice", nextActions } : {}),
+      },
       now,
+      id: resultMessageId,
+      operationAttempt,
     });
     error.workspaceThreadId = WORKSPACE_THREAD_ID;
     throw error;

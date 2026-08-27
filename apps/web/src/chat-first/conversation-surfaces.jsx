@@ -577,7 +577,7 @@ export function MessageTranscript({
               <div className="chat-first-inline-actions">
                 {latestActions.map((action, actionIndex) => (
                   <button
-                    className={`chat-first-pill chat-first-pill--${actionIndex === 0 ? "lime" : "outline"}`}
+                    className={`chat-first-pill chat-first-pill--${action.primary === false || actionIndex > 0 ? "outline" : "lime"}`}
                     type="button"
                     key={
                       action.id ||

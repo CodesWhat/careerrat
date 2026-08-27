@@ -951,6 +951,58 @@ describe("TodayConversation", () => {
     );
   });
 
+  it("renders ambiguity choices as equal neutral actions after reload", () => {
+    const onIntentAction = vi.fn();
+    const actions = ["app-acme-ai", "app-acme-platform"].map((id, index) => ({
+      label: index === 0 ? "Acme · Senior AI Engineer" : "Acme · Staff Platform Engineer",
+      primary: false,
+      intent: {
+        type: "job.evaluate-request",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: { jobReference: "Rate the Acme role", jobId: id },
+      },
+    }));
+    const tree = MessageTranscript({
+      onIntentAction,
+      messages: [
+        {
+          id: "ambiguity-after-reload",
+          role: "assistant",
+          kind: "action_error",
+          text: "That matches more than one saved job.",
+          error: {
+            code: "JOB_REFERENCE_AMBIGUOUS",
+            message: "That matches more than one saved job.",
+          },
+          metadata: { state: "needs-choice", nextActions: actions },
+        },
+      ],
+    });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(visit);
+      if (typeof node.type === "function") return visit(node.type(node.props));
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+
+    const choiceButtons = buttons.filter((button) =>
+      actions.some((action) => action.label === button.props.children)
+    );
+    expect(choiceButtons).toHaveLength(2);
+    expect(choiceButtons.every((button) => button.props.className.endsWith("--outline"))).toBe(
+      true
+    );
+    choiceButtons[1].props.onClick();
+    expect(onIntentAction).toHaveBeenCalledWith(
+      actions[1].intent,
+      expect.objectContaining({ id: "ambiguity-after-reload" }),
+      actions[1]
+    );
+  });
+
   it.each(["action_result", "action_error"])(
     "retires old typed actions after a terminal %s without follow-ups",
     (terminalKind) => {

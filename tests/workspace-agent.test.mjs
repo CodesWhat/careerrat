@@ -1266,6 +1266,15 @@ test("resolveReferencedCompany caps ambiguous matches at 5 and never guesses one
       return true;
     }
   );
+  const actions = workspaceThreadRead({ repoRoot, env: {} }).messages.at(-1).metadata.nextActions;
+  assert.equal(actions.length, 5);
+  for (const action of actions) {
+    assert.equal(action.primary, false);
+    assert.equal(action.intent.type, "research.company-request");
+    assert.deepEqual(action.intent.entity, { type: "workspace", id: WORKSPACE_THREAD_ID });
+    assert.match(action.intent.input.jobId, /^sourced-regional-/);
+    assert.doesNotMatch(action.label, /sourced-regional-/);
+  }
 });
 
 test("company.health-request throws COMPANY_NOT_TRACKED for a company with no saved job", async () => {
@@ -3043,6 +3052,35 @@ test("job.evaluate-request rejects ambiguous named saved jobs instead of choosin
   const last = workspaceThreadRead({ repoRoot, env: {} }).messages.at(-1);
   assert.equal(last.kind, "action_error");
   assert.equal(last.error.code, "JOB_REFERENCE_AMBIGUOUS");
+  assert.deepEqual(
+    last.metadata.nextActions.map((action) => ({
+      label: action.label,
+      primary: action.primary,
+      intent: action.intent,
+    })),
+    [
+      {
+        label: "Acme · Senior AI Engineer",
+        primary: false,
+        intent: {
+          type: "job.evaluate-request",
+          entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+          input: { jobReference: "Rate the Acme role", jobId: "app-acme-ai" },
+        },
+      },
+      {
+        label: "Acme · Staff Platform Engineer",
+        primary: false,
+        intent: {
+          type: "job.evaluate-request",
+          entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+          input: { jobReference: "Rate the Acme role", jobId: "app-acme-platform" },
+        },
+      },
+    ]
+  );
+  assert.doesNotMatch(last.text, /app-acme/);
+  assert.ok(last.metadata.nextActions.every((action) => !action.label.includes("app-acme")));
 });
 
 test("job.evaluate-request prefers a combined company and role match over company-only matches", async () => {
@@ -5919,6 +5957,18 @@ test("natural outcome requests refuse an ambiguous application instead of guessi
   const messages = workspaceThreadRead({ repoRoot, env: {} }).messages;
   assert.equal(messages.at(-1).kind, "action_error");
   assert.match(messages.at(-1).text, /more than one saved job/i);
+  assert.deepEqual(
+    messages.at(-1).metadata.nextActions.map((action) => action.intent),
+    ["app-temporal-ai", "app-temporal-platform"].map((id) => ({
+      type: "outcome.record",
+      entity: { type: "application", id },
+      input: {
+        jobReference: "I got rejected by Temporal Labs.",
+        to: "rejected",
+        note: "I got rejected by Temporal Labs.",
+      },
+    }))
+  );
 });
 
 test("natural interview prep resolves one application and returns the dossier in Ask", async () => {
@@ -6700,6 +6750,19 @@ test("natural recruiter requests refuse ambiguous threads without drafting", asy
 
   assert.equal(readCommunication(repoRoot, "comm-temporal-one").draft, undefined);
   assert.equal(readCommunication(repoRoot, "comm-temporal-two").draft, undefined);
+  const actions = workspaceThreadRead({ repoRoot, env: {} }).messages.at(-1).metadata.nextActions;
+  assert.deepEqual(
+    actions.map((action) => action.intent),
+    ["comm-temporal-one", "comm-temporal-two"].map((id) => ({
+      type: "communication.draft",
+      entity: { type: "communication", id },
+      input: {
+        communicationReference: "the Temporal Labs recruiter",
+        instruction: "Tuesday works.",
+      },
+    }))
+  );
+  assert.ok(actions.every((action) => action.primary === false));
 });
 
 test("one-off screening questions draft inside Ask and offer confirmed durable reuse", async () => {
@@ -9968,6 +10031,53 @@ test("workspace ambiguity failures return candidate-safe guidance without intern
   assert.match(operation.error.message, /more than one matching job/i);
   assert.doesNotMatch(operation.error.message, /internal|Private|Hidden/i);
   assert.equal("details" in operation.error, false);
+});
+
+test("durable ambiguity failures persist one fenced result with neutral exact choices", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-acme-ai",
+    company: "Acme",
+    role: "Senior AI Engineer",
+  });
+  seedApplication(repoRoot, {
+    id: "app-acme-platform",
+    company: "Acme",
+    role: "Staff Platform Engineer",
+    link: "https://jobs.example.test/acme/staff-platform",
+  });
+  const routes = mountDirect(repoRoot);
+  const payload = {
+    requestId: "workspace-durable-ambiguity",
+    intent: {
+      type: "job.evaluate-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobReference: "Rate the Acme role" },
+    },
+  };
+
+  const response = await callDirect(routes, "POST", "/api/workspace/intent", payload);
+  const operation = await waitDirectOperation(routes, response);
+  assert.equal(operation.status, "failed");
+  assert.equal(operation.error.code, "JOB_REFERENCE_AMBIGUOUS");
+  assert.equal("details" in operation.error, false);
+
+  const firstRead = workspaceThreadRead({ repoRoot, env: {} });
+  const result = firstRead.messages.at(-1);
+  assert.match(result.id, /^workspace-operation-result-/);
+  assert.equal(result.kind, "action_error");
+  assert.equal(result.metadata.state, "needs-choice");
+  assert.equal(result.metadata.nextActions.length, 2);
+  assert.ok(result.metadata.nextActions.every((action) => action.primary === false));
+  assert.doesNotMatch(result.text, /app-acme/);
+  assert.ok(result.metadata.nextActions.every((action) => !action.label.includes("app-acme")));
+
+  const repeated = await callDirect(routes, "POST", "/api/workspace/intent", payload);
+  const repeatedOperation = await waitDirectOperation(routes, repeated);
+  assert.equal(repeatedOperation.id, operation.id);
+  const reloaded = workspaceThreadRead({ repoRoot, env: {} });
+  assert.equal(reloaded.messages.filter((message) => message.id === result.id).length, 1);
+  assert.deepEqual(reloaded.messages.at(-1).metadata.nextActions, result.metadata.nextActions);
 });
 
 test("workspace message route returns before the same durable agent turn finishes", async () => {
