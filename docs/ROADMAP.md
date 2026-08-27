@@ -1541,21 +1541,32 @@ Current implementation ledger, August 27:
   Ingest typed Confirm/Defer/Reject decisions use their existing versioned decision writer.
 - Deterministic sourcing and Universal Intake Lane B now have app-owned controllers, durable
   operation IDs, 30-second heartbeats, active-run fencing, retry lineage, ordered shutdown, and
-  startup reconciliation. Electron shutdown and same-workspace ownership remain under the final
-  release review gate.
+  startup reconciliation. Electron now awaits both controllers during shutdown, and exclusive
+  listen-time workspace ownership prevents a second app instance from orphaning the first
+  instance's live work. The focused lifecycle/API/workspace/intake suites pass 316 tests.
 - Provider-neutral operation policy now maps quality/thinking choices to native Claude Code and
   Codex per-run controls, keeps Paul and coaching on their stronger operation policies, freezes
-  bounded retries and AI searches to one plan, and persists the AI-search plan. Settings
-  preference storage/UI and provenance on the remaining durable operations are still in progress.
+  bounded retries and AI searches to one plan, and persists the AI-search plan. The app stores
+  Automatic/Faster/Balanced/Best and Automatic/Low/Medium/High preferences privately, exposes
+  them in Settings, restores them after restart, and applies them when each search plan is frozen.
+  Provenance on remaining durable operations is still in progress.
 - AI discovery now keeps specific open-web leads when the first full-JD fetch is deferred, marks
   them `AI · unverified`, captures the visible search evidence as a partial artifact, and leaves
   liveness/full-JD verification to Evaluate. Known-expired postings still fail closed. The exact
   twelve-role NYC hospitality batch reported from Career Ops is a regression fixture.
-- Live isolated acceptance used the same NYC hospitality profile and prompt on Claude Code 2.1.247
-  and Codex CLI 0.150.1. Claude discovered 5 roles and persisted 3 (2 partial); Codex discovered 7
-  and persisted 2 (1 partial) while rejecting 2 out-of-location roles. Both runs completed with
-  zero prompt/runtime errors and no provider fallback. `scripts/qa-live-runtime-search.mjs`
-  reproduces this acceptance without reading or writing real candidate data.
+- Live isolated acceptance now mirrors the tester's saved profile: eleven bar leadership,
+  food-and-beverage/general-management, and event/venue operations titles; an $85k floor/$100k
+  target; and NYC-local plus US-remote geography. Claude Code 2.1.247 discovered 15 roles and
+  persisted 7 while rejecting 2 by location and 1 by known salary; Codex CLI 0.150.1 discovered
+  14, persisted 6, and rejected 5 by location. Both completed all three saved prompts with zero
+  prompt/runtime errors or provider fallback. Individual dead links remain visible as bounded
+  capture diagnostics instead of poisoning a resultful search lane.
+- The complementary engineering fixture covers Staff Platform/Backend and Developer
+  Infrastructure/Experience work across US remote and NYC hybrid. A green Claude rerun completed
+  all 3 prompts, found 5, persisted 3, and rejected 2 by location; Codex completed all 3 prompts,
+  found and persisted 17, and kept the requested locality shapes. The exact fixture and isolated
+  temporary-home harness live in `scripts/qa-live-runtime-search.mjs`; they never read or write
+  real candidate data.
 - Public deterministic hospitality seeding now covers common NYC location spellings, up to four
   deduplicated target titles per query board, and a state-wide fallback, while explicit software
   domains no longer trip hospitality inference. Career-coach adjacent-role expansion, remaining
