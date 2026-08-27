@@ -3,10 +3,25 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "./api.js";
 import {
   GENERIC_ERROR_MESSAGE,
+  inlineErrorMessage,
   resolveErrorCopy,
   resolvePersistedErrorCopy,
   UserFacingError,
 } from "./errorCopy.js";
+
+describe("inlineErrorMessage", () => {
+  it("keeps the recovery action in surfaces that can only render text", () => {
+    expect(
+      inlineErrorMessage(
+        new ApiError(409, { code: "NO_AI_ROUTE", error: "provider route missing" }),
+        "Try again."
+      )
+    ).toBe("No AI engine is connected yet. Open Settings.");
+    expect(inlineErrorMessage(new Error("upstream_unreachable"), "Try again.")).toBe(
+      "Couldn't reach the AI service right now. Try again."
+    );
+  });
+});
 
 const RULE_CASES = [
   {
@@ -101,6 +116,55 @@ const RULE_CASES = [
     }),
     message:
       "CareerRat couldn't read the full posting from that link. Open the job in your connected browser or paste the job description here.",
+    action: null,
+  },
+  {
+    name: "missing job body",
+    err: new ApiError(409, {
+      code: "MISSING_JOB_BODY",
+      error: { message: "internal text must not render" },
+    }),
+    message:
+      "CareerRat doesn't have the full job description yet. Paste it here or open the original posting, then try again.",
+    action: null,
+  },
+  {
+    name: "screening answer still needs the candidate",
+    err: new ApiError(409, {
+      code: "NEEDS_USER",
+      error: { message: "internal text must not render" },
+    }),
+    message: "This question still needs your answer. Add it, then approve the answer.",
+    action: null,
+  },
+  {
+    name: "answer confirmation is no longer open",
+    err: new ApiError(409, {
+      code: "ANSWER_CONFIRMATION_NOT_FOUND",
+      error: { message: "internal text must not render" },
+    }),
+    message:
+      "This application changed since this card opened. Refresh the application packet, then review the answer again.",
+    action: null,
+  },
+  {
+    name: "answer confirmation is ambiguous",
+    err: new ApiError(409, {
+      code: "ANSWER_CONFIRMATION_AMBIGUOUS",
+      error: { message: "internal text must not render" },
+    }),
+    message:
+      "This application changed since this card opened. Refresh the application packet, then review the answer again.",
+    action: null,
+  },
+  {
+    name: "application answers file is unavailable",
+    err: new ApiError(409, {
+      code: "BAD_PACKET_ARTIFACT",
+      error: { message: "internal text must not render" },
+    }),
+    message:
+      "CareerRat can't find this application's answers file. Rebuild the application packet, then try again.",
     action: null,
   },
   {
@@ -343,7 +407,7 @@ const RULE_CASES = [
   {
     name: "server restarted mid-session",
     err: new ApiError(409, { error: "server restarted mid-session; re-open to retry" }),
-    message: "CareerRat restarted while that was running.",
+    message: "CareerRat restarted while that was running. Try that action again.",
     action: { label: "Try again", retry: true },
   },
   {
@@ -361,43 +425,44 @@ const RULE_CASES = [
   {
     name: "artifact not found",
     err: new ApiError(404, { error: "artifact not found" }),
-    message: "That file isn't available anymore.",
+    message: "That file isn't available anymore. Ask Paul to rebuild it, then try again.",
     action: null,
   },
   {
     name: "not_found",
     err: new ApiError(404, { error: "not_found" }),
-    message: "That couldn't be found.",
+    message: "CareerRat couldn't find what you opened. Go back, open it again, and retry.",
     action: null,
   },
   {
     name: "unauthorized raw",
     err: new ApiError(401, { error: "unauthorized" }),
-    message: "That request wasn't authorized.",
+    message: "CareerRat couldn't complete that request safely. Reload CareerRat, then try again.",
     action: null,
   },
   {
     name: "status 401 without unauthorized raw",
     err: new ApiError(401, { error: "some other reason" }),
-    message: "That request wasn't authorized.",
+    message: "CareerRat couldn't complete that request safely. Reload CareerRat, then try again.",
     action: null,
   },
   {
     name: "status 403",
     err: new ApiError(403, { error: "forbidden" }),
-    message: "That request wasn't authorized.",
+    message: "CareerRat couldn't complete that request safely. Reload CareerRat, then try again.",
     action: null,
   },
   {
     name: "status >= 500 generic server error",
     err: new ApiError(500, { error: "internal server error boom" }),
-    message: "Something went wrong on the server. Try again in a moment.",
+    message:
+      "CareerRat hit a problem while doing that. Try again. If it keeps happening, restart CareerRat.",
     action: { label: "Try again", retry: true },
   },
   {
     name: "status 404 with unmapped raw",
     err: new ApiError(404, { error: "route not registered" }),
-    message: "That couldn't be found.",
+    message: "CareerRat couldn't find what you opened. Go back, open it again, and retry.",
     action: null,
   },
   {

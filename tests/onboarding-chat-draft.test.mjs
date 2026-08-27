@@ -6,7 +6,10 @@ import test from "node:test";
 
 import { normalizeOnboardingDraft, readOnboardingDraft } from "../src/cli/onboard-route.mjs";
 import { candidateSetupInitialize, skillChatMessageAppend } from "../src/core/db/verbs.mjs";
-import { collapseUnansweredOnboardingPrompts } from "../src/core/onboarding/transcript-cleanup.mjs";
+import {
+  collapseUnansweredOnboardingPrompts,
+  onboardingHasUnansweredTurn,
+} from "../src/core/onboarding/transcript-cleanup.mjs";
 
 test("onboarding draft preserves the chat cursor and stable assistant event identity", () => {
   const normalized = normalizeOnboardingDraft({
@@ -80,6 +83,18 @@ test("onboarding prompt cleanup preserves opposite-polarity questions", () => {
   assert.deepEqual(
     collapseUnansweredOnboardingPrompts(transcript).map((message) => message.id),
     ["targets", "exclusions"]
+  );
+});
+
+test("onboarding detects a question followed by examples as waiting for the user", () => {
+  assert.equal(
+    onboardingHasUnansweredTurn([
+      {
+        role: "assistant",
+        text: "What kinds of companies sound good to you? For example, a small growing company, a stable large employer, or an organization whose work you care about.",
+      },
+    ]),
+    true
   );
 });
 

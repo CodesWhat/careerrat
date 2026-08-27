@@ -15,6 +15,10 @@ appId: com.codeswhat.careerrat
 productName: CareerRat
 directories:
   output: dist
+publish:
+  - provider: github
+    owner: CodesWhat
+    repo: careerrat
 files:
   - main.mjs
   - atomic-write.mjs
@@ -23,6 +27,7 @@ files:
   - desktop-runtime.mjs
   - desktop-routing.mjs
   - desktop-smoke.mjs
+  - native-update-acceptance.mjs
   - update-check.mjs
   - window-options.mjs
   - preload/update-check-preload.cjs
@@ -55,6 +60,9 @@ mac:
     - target: dmg
       arch:
         - arm64
+    - target: zip
+      arch:
+        - arm64
   category: public.app-category.productivity
   hardenedRuntime: true
   forceCodeSigning: true
@@ -62,6 +70,8 @@ mac:
   entitlementsInherit: build/entitlements.mac.inherit.plist
   gatekeeperAssess: false
   notarize: true
+dmg:
+  writeUpdateInfo: false
 win:
   icon: build/icon.ico
   executableName: CareerRat

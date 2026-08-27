@@ -13,6 +13,7 @@ import {
   Search,
   Settings2,
   Smile,
+  Star,
 } from "lucide-react";
 
 function chatFirstIcon(Component, name) {
@@ -39,3 +40,4 @@ export const PeopleIcon = chatFirstIcon(Smile, "smile");
 export const SendUpIcon = chatFirstIcon(ArrowUp, "arrow-up");
 export const KanbanIcon = chatFirstIcon(Kanban, "kanban");
 export const PickaxeIcon = chatFirstIcon(Pickaxe, "pickaxe");
+export const StarIcon = chatFirstIcon(Star, "star");

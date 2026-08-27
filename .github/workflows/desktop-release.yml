@@ -191,14 +191,14 @@ jobs:
           echo "release-id=$release_id" >> "$GITHUB_OUTPUT"
 
   build-notarize-upload:
-    name: build, notarize, upload dmg
+    name: build, notarize, upload macOS release
     needs: [resolve-tag, prepare-draft-release]
     # Pinned arm64 image. macos-14 entered deprecation on 2026-07-06 and can
     # brown out before its 2026-11-02 retirement; macos-15 is its supported
     # arm64 replacement and matches the package's arm64-only target.
     runs-on: macos-15
     permissions:
-      contents: write # create the draft release and upload its signed DMG
+      contents: write # upload the signed DMG and complete macOS updater feed
     # GH_TOKEN is deliberately NOT job-level env here: electron-builder
     # auto-activates its own GitHub publishing whenever it sees GH_TOKEN or
     # GITHUB_TOKEN (app-builder-lib PublishManager), then fails trying to
@@ -255,6 +255,7 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          NATIVE_UPDATE_ACCEPTANCE_PRIVATE_KEY: ${{ secrets.NATIVE_UPDATE_ACCEPTANCE_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           missing=()
@@ -263,12 +264,13 @@ jobs:
           [ -n "${APPLE_API_KEY:-}" ] || missing+=("APPLE_API_KEY")
           [ -n "${APPLE_API_KEY_ID:-}" ] || missing+=("APPLE_API_KEY_ID")
           [ -n "${APPLE_API_ISSUER:-}" ] || missing+=("APPLE_API_ISSUER")
+          [ -n "${NATIVE_UPDATE_ACCEPTANCE_PRIVATE_KEY:-}" ] || missing+=("NATIVE_UPDATE_ACCEPTANCE_PRIVATE_KEY")
           if [ "${#missing[@]}" -gt 0 ]; then
             printf '::error::Missing required secrets for the desktop release pipeline: %s\n' "${missing[*]}"
             echo "::error::See docs/RELEASE.md's 'One-time CI signing setup' section to add them."
             exit 1
           fi
-          echo "Required signing and notarization secrets are present."
+          echo "Required release secrets are present."
       - name: Write the App Store Connect API key to a runner-temp file
         id: apple-key
         env:
@@ -319,6 +321,16 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: npm --workspace apps/desktop run release:dmg
+      - name: Verify native N-to-N+1 update
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ steps.apple-key.outputs.key-path }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          NATIVE_UPDATE_ACCEPTANCE_PRIVATE_KEY: ${{ secrets.NATIVE_UPDATE_ACCEPTANCE_PRIVATE_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm --workspace apps/desktop run verify:native-update
       - name: Remove signing material from the runner
         if: ${{ always() }}
         run: |
@@ -329,7 +341,7 @@ jobs:
         run: npm --workspace apps/desktop run verify:release
       - name: Launch the exact signed packaged app
         run: npm --workspace apps/desktop run verify:packaged
-      - name: Upload the dmg to the release
+      - name: Upload the macOS release and updater feed
         env:
           CAREERRAT_RELEASE_ID: ${{ needs.prepare-draft-release.outputs.release-id }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -492,7 +504,7 @@ jobs:
           # the same host without widening the egress allowlist.
           allowed-endpoints: >
             api.github.com:443
-      - name: Publish the release once the dmg asset is confirmed
+      - name: Publish the release once the macOS feed is confirmed
         # Resolved by release ID via the list API, not `gh release view TAG`:
         # a draft release is not addressable by tag through the tag-lookup
         # endpoint, and whether gh's draft fallback kicks in varies by gh
@@ -530,6 +542,20 @@ jobs:
           fi
           if ! jq -er '[.assets[].name | select(endswith(".dmg"))] | length > 0' <<<"$release" >/dev/null; then
             echo "::error::Release $TAG has no .dmg asset attached; refusing to publish."
+            exit 1
+          fi
+          if ! jq -er '[.assets[].name | select(endswith(".zip"))] | length == 1' <<<"$release" >/dev/null; then
+            echo "::error::Release $TAG must have exactly one macOS updater .zip attached."
+            exit 1
+          fi
+          version="${TAG#v}"
+          mac_zip_name="$(jq -er '[.assets[].name | select(endswith(".zip"))][0]' <<<"$release")"
+          if [[ "$mac_zip_name" != *-"$version"-*.zip ]]; then
+            echo "::error::Updater ZIP $mac_zip_name does not match release version $version."
+            exit 1
+          fi
+          if ! jq -er '[.assets[].name | select(. == "latest-mac.yml")] | length == 1' <<<"$release" >/dev/null; then
+            echo "::error::Release $TAG must have exactly one latest-mac.yml attached."
             exit 1
           fi
           if [ "$WINDOWS_PUBLISHED" = "true" ] && \

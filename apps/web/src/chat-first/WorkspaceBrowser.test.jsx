@@ -113,7 +113,7 @@ describe("WorkspaceBrowser", () => {
       ? tree.props.children
       : [tree.props.children];
     const sourceHealth = buttons.find(
-      (child) => child?.type === "button" && child.props.children === "source health"
+      (child) => child?.type === "button" && child.props.children === "Check job sites"
     );
 
     sourceHealth.props.onClick();
@@ -308,13 +308,13 @@ describe("WorkspaceBrowser", () => {
     expect(html).toContain("Searching for jobs…");
     expect(html).toContain("Searching configured sources and the web");
     expect(html).toContain('role="status" aria-label="Search lane status"');
-    expect(html).toContain("Configured sources: running");
-    expect(html).toContain("AI web search: running");
+    expect(html).toContain("Saved job sites: searching");
+    expect(html).toContain("AI search: searching");
     expect(html).not.toContain("Sweep boards");
     expect(source).not.toContain("setTimeout");
   });
 
-  it("shows the failed lane's real error and retries the coordinated search", async () => {
+  it("turns a search timeout into a clear retry state", async () => {
     const { SearchToolbar } = await loadBrowser();
     const onRunSweep = vi.fn();
     const sourceSweep = {
@@ -338,8 +338,8 @@ describe("WorkspaceBrowser", () => {
       (child) => child?.type === "button" && child.props.children?.at?.(-1) === "Retry search"
     );
 
-    expect(html).toContain("AI web search: AI search timed out");
-    expect(html).not.toContain("AI web search: failed");
+    expect(html).toContain("AI search: The AI search took too long. Try again.");
+    expect(html).not.toContain("AI search: failed");
     expect(retry).toBeTruthy();
     retry.props.onClick();
     expect(onRunSweep).toHaveBeenCalledOnce();
@@ -382,10 +382,40 @@ describe("WorkspaceBrowser", () => {
       />
     );
 
-    expect(html).toContain("AI web search: AI web search couldn&#x27;t finish. Try again.");
+    expect(html).toContain("AI search: AI search couldn&#x27;t finish. Try again.");
     expect(html).toContain("Retry search");
     expect(html).not.toContain("ECONNREFUSED");
     expect(html).not.toContain("/Users/person");
+  });
+
+  it("turns schema failures and lane bookkeeping into plain-English search recovery", async () => {
+    const { SearchToolbar } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <SearchToolbar
+        sourceSweep={{
+          status: "complete",
+          summary: "0 search lanes finished · 1 lane needs retry",
+          lanes: {
+            deterministic: { label: "Configured sources", status: "succeeded" },
+            aiWeb: {
+              label: "AI web search",
+              status: "failed",
+              error: "Model output did not match the route schema.",
+            },
+          },
+        }}
+      />
+    );
+
+    expect(html).toContain("Your saved job sites finished. The AI search needs another try.");
+    expect(html).toContain("Saved job sites: finished");
+    expect(html).toContain(
+      "AI search: The AI search returned something CareerRat couldn&#x27;t use. Try again."
+    );
+    expect(html).toContain("Retry search");
+    expect(html).not.toContain("route schema");
+    expect(html).not.toContain("search lanes");
+    expect(html).not.toContain("succeeded");
   });
 
   it("does not claim an empty failed search has nothing to triage", async () => {
@@ -407,9 +437,35 @@ describe("WorkspaceBrowser", () => {
       />
     );
 
-    expect(html).toContain("Configured sources: Greenhouse could not be reached");
+    expect(html).toContain("Your saved job sites need another try.");
+    expect(html).toContain(
+      "Saved job sites: CareerRat couldn&#x27;t reach one of your saved job sites. Try again."
+    );
     expect(html).toContain("Retry search");
     expect(html).not.toContain("No jobs need triage right now.");
+  });
+
+  it("never exposes an unknown short provider error", async () => {
+    const { SearchToolbar } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <SearchToolbar
+        sourceSweep={{
+          status: "error",
+          summary: "provider failed",
+          lanes: {
+            aiWeb: {
+              label: "AI web search",
+              status: "failed",
+              error: "Provider route returned invalid output",
+            },
+          },
+        }}
+      />
+    );
+
+    expect(html).toContain("AI search: AI search couldn&#x27;t finish. Try again.");
+    expect(html).not.toContain("Provider route");
+    expect(html).not.toContain("provider failed");
   });
 
   it("distinguishes initial idle, clean zero, cancelled, and missing-source searches", async () => {
@@ -453,7 +509,7 @@ describe("WorkspaceBrowser", () => {
     });
     const setupButton = findElement(
       noSources,
-      (node) => node.type === "button" && textOf(node) === "Review source health"
+      (node) => node.type === "button" && textOf(node) === "Check job sites"
     );
 
     expect(renderToStaticMarkup(noSources)).toContain("No search sources are ready yet.");

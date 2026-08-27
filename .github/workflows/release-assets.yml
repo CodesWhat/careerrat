@@ -1,11 +1,11 @@
 name: release-assets
 
-# Detects a GitHub Release that was published without its macOS .dmg attached.
+# Detects a GitHub Release published without its complete macOS updater feed.
 # v0.9.0 shipped with zero assets because the desktop upload step lives in a
 # separate manual sequence in docs/RELEASE.md and got skipped. This job remains
 # a detector so a missing asset is loud instead of silent. The actual
 # prevention is the draft-first ordering documented in docs/RELEASE.md. The
-# desktop pipeline dispatches this check only after its DMG gate and release
+# desktop pipeline dispatches this check only after its feed gate and release
 # publication; a release published with a non-workflow credential can also
 # start it through the release event below.
 
@@ -25,8 +25,8 @@ permissions:
   contents: read
 
 jobs:
-  check-dmg-asset:
-    name: check dmg asset
+  check-mac-feed-assets:
+    name: check Mac feed assets
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -49,7 +49,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Verify the release has a matching .dmg asset
+      - name: Verify the release has the complete Mac update feed
         run: |
           set -euo pipefail
           # On `release: published` the tag comes from the event. A manual run
@@ -65,15 +65,30 @@ jobs:
             echo "No event tag, checking the latest release: $tag"
           fi
           version="${tag#v}"
-          assets="$(gh release view "$tag" --json assets --jq '.assets[].name')"
-          # Match the version as a whole token, not a substring: a plain
-          # match would accept CareerRat-0.9.10-arm64.dmg for release 0.9.1
-          # and report success for a stale asset.
-          escaped="${version//./\\.}"
-          match="$(grep "\.dmg$" <<<"$assets" | grep -E "(^|[^0-9.])${escaped}([^0-9.]|$)" || true)"
-          if [[ -z "$match" ]]; then
-            echo "::error::Release $tag has no .dmg asset matching version $version." \
-              "Run \`npm run desktop:release\` to build, notarize, and upload the desktop artifact, then re-run this workflow."
+          matching_dmgs=()
+          matching_zips=()
+          manifest_count=0
+          while IFS= read -r asset; do
+            if [[ "$asset" == CareerRat-"$version"-*.dmg || "$asset" == CareerRat-"$version".dmg ]]; then
+              matching_dmgs+=("$asset")
+            fi
+            if [[ "$asset" == CareerRat-"$version"-*.zip || "$asset" == CareerRat-"$version".zip ]]; then
+              matching_zips+=("$asset")
+            fi
+            if [ "$asset" = "latest-mac.yml" ]; then
+              manifest_count=$((manifest_count + 1))
+            fi
+          done < <(gh release view "$tag" --json assets --jq '.assets[].name')
+          if [ "${#matching_dmgs[@]}" -ne 1 ]; then
+            echo "::error::Release $tag must have exactly one .dmg asset matching version $version; found ${#matching_dmgs[@]}."
             exit 1
           fi
-          echo "Found matching asset: $match"
+          if [ "${#matching_zips[@]}" -ne 1 ]; then
+            echo "::error::Release $tag must have exactly one updater .zip asset matching version $version; found ${#matching_zips[@]}."
+            exit 1
+          fi
+          if [ "$manifest_count" -ne 1 ]; then
+            echo "::error::Release $tag must have exactly one latest-mac.yml asset; found $manifest_count."
+            exit 1
+          fi
+          echo "Found complete Mac feed: ${matching_dmgs[0]}, ${matching_zips[0]}, and latest-mac.yml"

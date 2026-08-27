@@ -5,6 +5,8 @@ import {
   buildProposalsAndRefresh,
   captureSourceAndRefresh,
   decideProposalAndRefresh,
+  removeSourceAndRefresh,
+  retrySourceAndRefresh,
 } from "./deep-ingest-controller.js";
 
 function proposal(overrides = {}) {
@@ -106,6 +108,34 @@ describe("deep ingest chat-first controller", () => {
     expect(buildDeepIngestReview(input).proposals.map((row) => row.id)).toEqual(["proposal-1"]);
   });
 
+  it.each(["failed", "manual_fallback"])(
+    "gives a %s source plain recovery guidance and retry/remove controls",
+    (status) => {
+      const review = buildDeepIngestReview(
+        state({
+          sources: [
+            {
+              id: "source-failed",
+              sourceKind: "paste",
+              status,
+              textPreview: "Career notes that could not be read.",
+            },
+          ],
+          proposals: [],
+          reviewQueue: [],
+        })
+      );
+
+      expect(review.sources[0]).toMatchObject({
+        id: "source-failed",
+        statusLabel: "CareerRat couldn't read this source. Try again or remove it.",
+        canAnalyze: false,
+        canRetry: true,
+        canRemove: true,
+      });
+    }
+  );
+
   it("preserves lane-specific payload fields in reviewer edits", () => {
     expect(
       buildDeepIngestProposalItem(proposal(), {
@@ -168,6 +198,40 @@ describe("deep ingest chat-first controller", () => {
       sourceId: "source-1",
       targetShape: "auto",
     });
+    expect(api.getDeepIngestState).toHaveBeenCalledOnce();
+    expect(result.view).toBe(next);
+  });
+
+  it("removes a failed source and refetches", async () => {
+    const next = state({ sources: [] });
+    const api = {
+      removeDeepIngestSource: vi.fn().mockResolvedValue({ id: "source-failed" }),
+      getDeepIngestState: vi.fn().mockResolvedValue(next),
+    };
+
+    const result = await removeSourceAndRefresh({
+      api,
+      source: { id: "source-failed" },
+    });
+
+    expect(api.removeDeepIngestSource).toHaveBeenCalledWith({ sourceId: "source-failed" });
+    expect(api.getDeepIngestState).toHaveBeenCalledOnce();
+    expect(result.view).toBe(next);
+  });
+
+  it("rescans a failed source and refetches", async () => {
+    const next = state();
+    const api = {
+      retryDeepIngestSource: vi.fn().mockResolvedValue({ id: "source-failed" }),
+      getDeepIngestState: vi.fn().mockResolvedValue(next),
+    };
+
+    const result = await retrySourceAndRefresh({
+      api,
+      source: { id: "source-failed" },
+    });
+
+    expect(api.retryDeepIngestSource).toHaveBeenCalledWith({ sourceId: "source-failed" });
     expect(api.getDeepIngestState).toHaveBeenCalledOnce();
     expect(result.view).toBe(next);
   });

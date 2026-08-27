@@ -28,6 +28,7 @@ import {
   nativeImage,
   shell,
 } from "electron";
+import electronUpdater from "electron-updater";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { get as httpGet } from "node:http";
 import { join } from "node:path";
@@ -40,6 +41,12 @@ import {
 } from "./desktop-routing.mjs";
 import { configureCareerRatAppIdentity } from "./desktop-identity.mjs";
 import { buildCareerRatMenuTemplate, runMenuUpdateCheck } from "./menu-template.mjs";
+import {
+  beginNativeUpdateAcceptance,
+  completeNativeUpdateAcceptance,
+  NATIVE_UPDATE_ACCEPTANCE_ARG,
+  resolveNativeUpdateAcceptance,
+} from "./native-update-acceptance.mjs";
 import {
   choosePreferredPort,
   decideExternalOpen,
@@ -54,14 +61,9 @@ import {
 } from "./desktop-smoke.mjs";
 import {
   CHECK_INTERVAL_MS as UPDATE_CHECK_INTERVAL_MS,
+  createDesktopUpdateController,
   DEFAULT_STATE as DEFAULT_UPDATE_STATE,
-  isNewerVersion,
-  mergeCheckedState,
   nextUpdateCheckDelay,
-  runUpdateCheck,
-  shouldNotify,
-  withEnabled,
-  withSkippedVersion,
 } from "./update-check.mjs";
 import { buildBrowserWindowOptions } from "./window-options.mjs";
 
@@ -82,11 +84,29 @@ import { buildBrowserWindowOptions } from "./window-options.mjs";
 // own env, which Chromium's helpers inherit from.
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const isSmoke = process.argv.includes("--smoke");
+const nativeUpdateAcceptanceRequested = process.argv.some((arg) =>
+  String(arg).startsWith(NATIVE_UPDATE_ACCEPTANCE_ARG)
+);
+const { autoUpdater } = electronUpdater;
 
 // The dev launcher brands Electron.app's Info.plist so macOS owns the right
 // Dock/Cmd-Tab identity. Runtime configuration aligns menus, About, window
 // metadata, and the Windows taskbar/notification identity before app readiness.
 configureCareerRatAppIdentity({ app, platform: process.platform });
+
+let nativeUpdateAcceptance = null;
+let nativeUpdateAcceptanceError = null;
+try {
+  nativeUpdateAcceptance = resolveNativeUpdateAcceptance({
+    argv: process.argv,
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    currentVersion: app.getVersion(),
+    userDataDir: app.getPath("userData"),
+  });
+} catch (error) {
+  nativeUpdateAcceptanceError = error;
+}
 
 // Google's OAuth consent screen rejects UAs it doesn't recognize with
 // disallowed_useragent. Electron's default fallback UA tacks our own
@@ -108,7 +128,9 @@ const runtimePaths = resolveDesktopRuntimePaths({
   appDir: __dirname,
   userDataPath: app.isPackaged ? app.getPath("userData") : undefined,
   resourcesPath: process.resourcesPath,
-  careerratHomeOverride: app.isPackaged && isSmoke ? process.env.CAREERRAT_HOME : undefined,
+  careerratHomeOverride:
+    nativeUpdateAcceptance?.homeDir ||
+    (app.isPackaged && isSmoke ? process.env.CAREERRAT_HOME : undefined),
 });
 if (runtimePaths.careerratHome) {
   process.env.CAREERRAT_HOME = runtimePaths.careerratHome;
@@ -190,13 +212,13 @@ let dev = null;
 let pdfRenderer = null;
 let win = null;
 let shuttingDown = false;
+let installUpdateAfterShutdown = false;
 
-// Update-check (notify-only) state. See the "Update check" block below,
-// defined ahead of createWindow() because createWindow() wires the preload
-// path that exposes it.
+// Desktop update state. The native updater lives in the main process; the
+// renderer only receives typed progress and actions through the preload.
 let updateStateDir = null;
 let updateState = { ...DEFAULT_UPDATE_STATE };
-let updateResult = { updateAvailable: false, version: null, releaseUrl: null, dmgUrl: null };
+let updateController = null;
 let updateCheckTimer = null;
 let desktopBaseUrl = null;
 let desktopRoute = "/";
@@ -303,15 +325,11 @@ function openExternalIfAllowed(target, baseUrl) {
   return decision;
 }
 
-// --- Update check (notify-only) ---------------------------------------------
-// Desktop-only, notify-only: checks GitHub's public releases API for a newer
-// tagged release and hands the result to the renderer over the contextBridge
-// exposed by preload/update-check-preload.cjs. Never a shared HTTP route on
-// the embedded engine server, so the plain browser dev app never sees it and
-// the npm CLI's own update-notifier (src/core/update/update-core.mjs) is
-// untouched. Never downloads or installs anything; the renderer's only
-// action is opening the release page through openExternalIfAllowed above.
-// See apps/desktop/update-check.mjs for the pure comparison/scheduling logic.
+// --- Desktop updates --------------------------------------------------------
+// Packaged macOS builds use electron-updater for one first-class path: check,
+// download, then restart and install. The renderer never fetches a release or
+// sees a native exception. Windows stays disabled until its installed binary
+// and final installer share a complete signed update feed.
 const UPDATE_CHECK_PRELOAD_PATH = join(__dirname, "preload", "update-check-preload.cjs");
 const UPDATE_STATE_FILE = "desktop-update-check.json";
 // Let boot settle (server up, window painted) before the first network call.
@@ -321,7 +339,7 @@ const UPDATE_IPC = Object.freeze({
   skipVersion: "careerrat:update-check:skip-version",
   setEnabled: "careerrat:update-check:set-enabled",
   checkNow: "careerrat:update-check:check-now",
-  openRelease: "careerrat:update-check:open-release",
+  restartAndInstall: "careerrat:update-check:restart-and-install",
   result: "careerrat:update-check:result",
 });
 const DESKTOP_IPC = Object.freeze({
@@ -364,73 +382,27 @@ function persistUpdateState(state) {
   }
 }
 
-// Derives the current notice from the cached "latest known release" fields
-// in persisted state, without a network call. This is what lets the notice
-// keep showing across relaunches inside the same 24h window, the same
-// cache-and-reuse shape as the npm-side update-notifier
-// (src/core/update/update-core.mjs's readUpdateNotice()).
-function deriveUpdateResultFromState(state) {
-  const version = state.latestVersion || null;
-  const updateAvailable = Boolean(version && isNewerVersion(app.getVersion(), version));
-  return {
-    updateAvailable,
-    version,
-    releaseUrl: state.latestReleaseUrl || null,
-    dmgUrl: state.latestDmgUrl || null,
-  };
-}
-
-function currentUpdateNoticePayload({ manualResult = null } = {}) {
-  return {
-    notify: shouldNotify({ result: updateResult, skippedVersion: updateState.skippedVersion }),
-    enabled: updateState.enabled,
-    version: updateResult.version,
-    releaseUrl: updateResult.releaseUrl,
-    dmgUrl: updateResult.dmgUrl,
-    lastCheckedAt: updateState.lastCheckedAt,
-    manualResult,
-  };
+function currentUpdateNoticePayload() {
+  return (
+    updateController?.getState() || {
+      supported: false,
+      enabled: updateState.enabled,
+      lastCheckedAt: updateState.lastCheckedAt,
+      phase: "idle",
+      version: null,
+      progress: null,
+      errorKind: null,
+      message: null,
+      manual: false,
+      notify: false,
+    }
+  );
 }
 
 function pushUpdateNoticeToRenderer(payload = currentUpdateNoticePayload()) {
   if (win && !win.isDestroyed()) {
     win.webContents.send(UPDATE_IPC.result, payload);
   }
-}
-
-async function performUpdateCheck({ force = false, manual = false } = {}) {
-  if (!updateStateDir) {
-    return currentUpdateNoticePayload({ manualResult: manual ? "failed" : null });
-  }
-
-  const { state: nextState, result, checked, fetchSucceeded } = await runUpdateCheck({
-    currentVersion: app.getVersion(),
-    state: loadUpdateState(),
-    force,
-  });
-
-  if (!checked) return currentUpdateNoticePayload();
-
-  // The fetch above can take up to REQUEST_TIMEOUT_MS. If the Settings
-  // toggle or a "skip this version" landed through the IPC handlers below
-  // while it was in flight, module-level `updateState` already holds that
-  // write (and it was already persisted by its own handler). Re-merge those
-  // user-controlled fields from the live state so this persist can't revert
-  // an opt-out or a skip the user made mid-fetch.
-  updateState = mergeCheckedState({ nextState, fetchSucceeded, result, liveState: updateState });
-  persistUpdateState(updateState);
-
-  updateResult = deriveUpdateResultFromState(updateState);
-  const manualResult = manual
-    ? fetchSucceeded
-      ? updateResult.updateAvailable
-        ? "available"
-        : "current"
-      : "failed"
-    : null;
-  const payload = currentUpdateNoticePayload({ manualResult });
-  pushUpdateNoticeToRenderer(payload);
-  return payload;
 }
 
 // Registers the IPC handlers preload/update-check-preload.cjs calls into and
@@ -444,34 +416,39 @@ async function performUpdateCheck({ force = false, manual = false } = {}) {
 function registerUpdateCheckHandlers() {
   updateStateDir = runtimePaths.careerratHome || app.getPath("userData");
   updateState = loadUpdateState();
-  updateResult = deriveUpdateResultFromState(updateState);
+  updateController = createDesktopUpdateController({
+    updater: autoUpdater,
+    platform: process.platform,
+    selfUpdateSupported: app.isPackaged && process.platform === "darwin" && !isSmoke,
+    currentVersion: app.getVersion(),
+    persisted: updateState,
+    persist(next) {
+      updateState = next;
+      persistUpdateState(next);
+    },
+    push: pushUpdateNoticeToRenderer,
+    log,
+  });
 
   ipcMain.handle(UPDATE_IPC.getState, () => currentUpdateNoticePayload());
 
   ipcMain.handle(UPDATE_IPC.skipVersion, (_event, version) => {
-    // Coerce at the trust boundary. withSkippedVersion only guards with
-    // `version || null`, so any truthy value (a number, an array, an object)
-    // would be written into desktop-update-check.json. shouldNotify then
-    // compares against it with !==, which a non-string can never satisfy, so
-    // one bad value would quietly break "skip this version" for good.
-    // setEnabled below gets the same treatment via Boolean().
-    updateState = withSkippedVersion(updateState, typeof version === "string" ? version : null);
-    persistUpdateState(updateState);
-    return currentUpdateNoticePayload();
+    return updateController.skipVersion(typeof version === "string" ? version : null);
   });
 
   ipcMain.handle(UPDATE_IPC.setEnabled, (_event, enabled) => {
-    updateState = withEnabled(updateState, enabled);
-    persistUpdateState(updateState);
+    const payload = updateController.setEnabled(Boolean(enabled));
     scheduleNextUpdateCheck();
-    return currentUpdateNoticePayload();
+    return payload;
   });
 
   ipcMain.handle(UPDATE_IPC.checkNow, () => runManualUpdateCheck());
 
-  ipcMain.handle(UPDATE_IPC.openRelease, () => {
-    if (updateResult.releaseUrl) openExternalIfAllowed(updateResult.releaseUrl, null);
-    return null;
+  ipcMain.handle(UPDATE_IPC.restartAndInstall, () => {
+    if (updateController.getState().phase !== "ready") return { accepted: false };
+    installUpdateAfterShutdown = true;
+    app.quit();
+    return { accepted: true };
   });
 }
 
@@ -549,6 +526,7 @@ function installApplicationMenu() {
 function scheduleNextUpdateCheck() {
   if (updateCheckTimer) clearTimeout(updateCheckTimer);
   updateCheckTimer = null;
+  if (!updateController?.getState().supported) return;
   const delay = nextUpdateCheckDelay({
     enabled: updateState.enabled,
     lastCheckedAt: updateState.lastCheckedAt,
@@ -559,7 +537,7 @@ function scheduleNextUpdateCheck() {
   updateCheckTimer = setTimeout(async () => {
     updateCheckTimer = null;
     try {
-      await performUpdateCheck();
+      await updateController.checkNow();
     } catch (err) {
       log(`update check failed: ${err.message}`);
     } finally {
@@ -571,7 +549,7 @@ function scheduleNextUpdateCheck() {
 
 async function runManualUpdateCheck() {
   try {
-    return await performUpdateCheck({ force: true, manual: true });
+    return await updateController.checkNow({ manual: true });
   } finally {
     scheduleNextUpdateCheck();
   }
@@ -723,6 +701,35 @@ async function waitForClientMount(wc, timeoutMs = 5000, intervalMs = 100) {
 }
 
 app.whenReady().then(async () => {
+  if (nativeUpdateAcceptanceError) throw nativeUpdateAcceptanceError;
+
+  if (nativeUpdateAcceptance?.mode === "complete") {
+    const result = completeNativeUpdateAcceptance({
+      acceptance: nativeUpdateAcceptance,
+      currentVersion: app.getVersion(),
+    });
+    log(
+      `NATIVE UPDATE ACCEPTANCE ${result.ok ? "OK" : "FAILED"} ${result.fromVersion} -> ${result.observedVersion}`
+    );
+    app.exit(result.ok ? 0 : 1);
+    return;
+  }
+
+  if (nativeUpdateAcceptance?.mode === "start") {
+    await beginNativeUpdateAcceptance({
+      acceptance: nativeUpdateAcceptance,
+      updater: autoUpdater,
+      createController: createDesktopUpdateController,
+      requestInstall(controller) {
+        updateController = controller;
+        installUpdateAfterShutdown = true;
+        app.quit();
+        return true;
+      },
+    });
+    return;
+  }
+
   // Dev dock icon (macOS). The packaged app gets its icon from the baked
   // .icns (electron-builder mac.icon), but an unpackaged `electron .` run shows
   // the default Electron icon unless we set it here. build/ isn't bundled into
@@ -808,9 +815,12 @@ app.whenReady().then(async () => {
   // a process that just sat there (--smoke hung forever instead of failing).
   // Fail loudly instead: log, show a dialog in GUI mode, exit nonzero.
   log(`BOOT FAILED: ${err?.stack || err?.message || err}`);
-  if (!isSmoke) {
+  if (!isSmoke && !nativeUpdateAcceptance && !nativeUpdateAcceptanceRequested) {
     try {
-      dialog.showErrorBox("CareerRat failed to start", String(err?.message || err));
+      dialog.showErrorBox(
+        "CareerRat couldn't start",
+        "Quit and reopen CareerRat. If it still won't open, reinstall the latest version."
+      );
     } catch {
       // dialog unavailable (very early failure) — the log line above stands.
     }
@@ -843,5 +853,22 @@ app.on("before-quit", (event) => {
   if (shuttingDown) return;
   shuttingDown = true;
   event.preventDefault();
-  shutdown().finally(() => app.exit(0));
+  shutdown().then(
+    () => {
+      if (!installUpdateAfterShutdown) {
+        app.exit(0);
+        return;
+      }
+      try {
+        if (!updateController?.install()) app.exit(1);
+      } catch (error) {
+        log(`update install failed: ${error?.message || error}`);
+        app.exit(1);
+      }
+    },
+    (error) => {
+      log(`shutdown failed: ${error?.message || error}`);
+      app.exit(1);
+    }
+  );
 });

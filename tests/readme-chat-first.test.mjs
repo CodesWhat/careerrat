@@ -31,7 +31,9 @@ test("README states runtime, update, and Windows boundaries without overclaiming
   assert.doesNotMatch(readme, /Hermes Agent|Gemini CLI|OpenCode|GitHub Copilot/);
   assert.match(readme, /never falls back to or silently switches providers/);
   assert.doesNotMatch(readme, /equal, complete CareerRat engines/i);
-  assert.match(readme, /never downloads or installs the update/);
+  assert.match(readme, /downloads the signed and notarized\s+app update/i);
+  assert.match(readme, /Restart and install/);
+  assert.match(readme, /Windows self-update stays off/i);
   assert.match(readme, /Automatic checks can be disabled in[\s\S]*Settings/);
   assert.match(readme, /SignPath Foundation/);
   assert.match(readme, /public Windows installer will[\s\S]*only after/);

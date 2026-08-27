@@ -303,6 +303,91 @@ test("plain aggregator page: follows a canonical ATS apply link and returns the 
   assert.match(result.bodyText, /Complete canonical job description/);
 });
 
+test("plain aggregator page: keeps its job body but hands application work to an embedded applyUrl", async () => {
+  const aggregatorUrl = "https://remotevibecodingjobs.com/jobs/acme-staff-engineer";
+  const applicationUrl = "https://www.linkedin.com/jobs/view/1234567890";
+  const html = `<html><body><h1>Staff Engineer</h1><p>${"Build reliable distributed systems and platform tooling. ".repeat(20)}</p><script>self.__next_f.push([1,"{\\"applyUrl\\":\\"${applicationUrl}\\",\\"label\\":\\"Apply for this position\\"}"])</script></body></html>`;
+
+  const result = await resolveJobUrl(aggregatorUrl, {
+    fetchImpl: async () => htmlResponse(html, { finalUrl: aggregatorUrl }),
+    resolveHost: publicResolver,
+  });
+
+  assert.equal(result.bodyFetchStatus, "resolved");
+  assert.equal(result.url, applicationUrl);
+  assert.equal(result.sourceUrl, aggregatorUrl);
+  assert.match(result.bodyText, /Build reliable distributed systems/);
+});
+
+test("plain aggregator page: decodes only one mixed escaping layer in an embedded application URL", async () => {
+  const aggregatorUrl = "https://remotevibecodingjobs.com/jobs/acme-staff-engineer";
+  const applicationUrl =
+    "https://www.linkedin.com/jobs/view/1234567890?ref=board\\u0026amp;recommended=true";
+  const html = `<html><body><h1>Staff Engineer</h1><p>${"Build reliable distributed systems and platform tooling. ".repeat(20)}</p><script>{"applyUrl":"${applicationUrl}"}</script></body></html>`;
+
+  const result = await resolveJobUrl(aggregatorUrl, {
+    fetchImpl: async () => htmlResponse(html, { finalUrl: aggregatorUrl }),
+    resolveHost: publicResolver,
+  });
+
+  assert.equal(
+    result.url,
+    "https://www.linkedin.com/jobs/view/1234567890?ref=board&amp;recommended=true"
+  );
+});
+
+test("plain aggregator page: rejects untrusted and private embedded application URLs", async () => {
+  const aggregatorUrl = "https://remotevibecodingjobs.com/jobs/acme-staff-engineer";
+  for (const applicationUrl of [
+    "https://attacker.example/collect",
+    "https://attacker.example/jobs.lever.co/acme/collect",
+    "http://127.0.0.1:7777/api/data/dashboard",
+  ]) {
+    const html = `<html><body><h1>Staff Engineer</h1><p>${"Build reliable distributed systems and platform tooling. ".repeat(20)}</p><script>self.__next_f.push([1,"{\\"applyUrl\\":\\"${applicationUrl}\\"}"])</script></body></html>`;
+
+    const result = await resolveJobUrl(aggregatorUrl, {
+      fetchImpl: async () => htmlResponse(html, { finalUrl: aggregatorUrl }),
+      resolveHost: publicResolver,
+    });
+
+    assert.equal(result.bodyFetchStatus, "resolved");
+    assert.equal(result.url, aggregatorUrl);
+    assert.equal(result.sourceUrl, undefined);
+  }
+});
+
+test("plain aggregator page: keeps its listing URL when embedded application URLs are ambiguous", async () => {
+  const aggregatorUrl = "https://remotevibecodingjobs.com/jobs/acme-staff-engineer";
+  const recommendedUrl = "https://www.linkedin.com/jobs/view/1111111111";
+  const currentUrl = "https://www.linkedin.com/jobs/view/2222222222";
+  const html = `<html><body><h1>Staff Engineer</h1><p>${"Build reliable distributed systems and platform tooling. ".repeat(20)}</p><script>self.__next_f.push([1,"{\\"applyUrl\\":\\"${recommendedUrl}\\"},{\\"applyUrl\\":\\"${currentUrl}\\"}"])</script></body></html>`;
+
+  const result = await resolveJobUrl(aggregatorUrl, {
+    fetchImpl: async () => htmlResponse(html, { finalUrl: aggregatorUrl }),
+    resolveHost: publicResolver,
+  });
+
+  assert.equal(result.bodyFetchStatus, "resolved");
+  assert.equal(result.url, aggregatorUrl);
+  assert.equal(result.sourceUrl, undefined);
+});
+
+test("plain aggregator page: rejects a trusted recommendation beside an untrusted application URL", async () => {
+  const aggregatorUrl = "https://remotevibecodingjobs.com/jobs/acme-staff-engineer";
+  const currentUrl = "https://ats.vendor.example/apply/current-role";
+  const recommendedUrl = "https://www.linkedin.com/jobs/view/1111111111";
+  const html = `<html><body><h1>Staff Engineer</h1><p>${"Build reliable distributed systems and platform tooling. ".repeat(20)}</p><script>self.__next_f.push([1,"{"applyUrl":"${currentUrl}"},{"applyUrl":"${recommendedUrl}"}"])</script></body></html>`;
+
+  const result = await resolveJobUrl(aggregatorUrl, {
+    fetchImpl: async () => htmlResponse(html, { finalUrl: aggregatorUrl }),
+    resolveHost: publicResolver,
+  });
+
+  assert.equal(result.bodyFetchStatus, "resolved");
+  assert.equal(result.url, aggregatorUrl);
+  assert.equal(result.sourceUrl, undefined);
+});
+
 test("plain fetch: short/shell body -> deferred (insufficient_content)", async () => {
   const result = await resolveJobUrl("https://example-startup.com/careers/eng-2", {
     fetchImpl: async () => htmlResponse("<html><body>Loading…</body></html>"),

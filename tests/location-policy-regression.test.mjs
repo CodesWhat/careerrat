@@ -68,6 +68,116 @@ test("remote-or-NYC posture accepts US remote and New York metro roles without l
   ]);
 });
 
+test("captured job text overrides a false remote label and enforces the office-day limit", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "NYC",
+      remote: true,
+      hybrid: true,
+      onsite: false,
+      max_commute_days_per_week: 2,
+      relocation: [],
+    },
+  };
+  const mislabeled = offer("mislabeled-remote", "Mislabeled Corp", "New York, NY (Remote)");
+  mislabeled.bodyText =
+    "This software engineering role requires employees in the office 5 days per week in New York City.";
+  const matchingHybrid = offer("matching-hybrid", "Matching Corp", "New York, NY (Hybrid)");
+  matchingHybrid.bodyText = "This team is expected in the New York office 2 days per week.";
+  const result = qualifyByLocation(profile, [mislabeled, matchingHybrid]);
+
+  assert.deepEqual(
+    result.kept.map((row) => row.company),
+    ["Matching Corp"]
+  );
+  assert.equal(result.filteredLocation.length, 1);
+  assert.equal(result.filteredLocation[0].company, "Mislabeled Corp");
+  assert.equal(result.filteredLocation[0].qualificationReason, "office-days-exceed-preference");
+});
+
+test("an unset office-day limit does not reject a required hybrid schedule", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "NYC",
+      remote: true,
+      hybrid: true,
+      onsite: false,
+      max_commute_days_per_week: null,
+      relocation: [],
+    },
+  };
+  const hybrid = offer("unlimited-hybrid", "Unlimited Hybrid Corp", "New York, NY (Hybrid)");
+  hybrid.bodyText = "Employees are required in the New York office 2 days per week.";
+
+  const result = qualifyByLocation(profile, [hybrid]);
+
+  assert.deepEqual(
+    result.kept.map((row) => row.company),
+    ["Unlimited Hybrid Corp"]
+  );
+  assert.equal(result.filteredLocation.length, 0);
+});
+
+test("optional office access stays remote while required office schedules are enforced", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "NYC",
+      remote: true,
+      hybrid: false,
+      onsite: false,
+      max_commute_days_per_week: null,
+      relocation: [],
+    },
+  };
+  const optional = offer("optional-office", "Optional Office Corp", "Remote - United States");
+  optional.bodyText =
+    "This is a fully remote role. Employees may use the New York office 2 days per week if they prefer.";
+  const required = offer("required-office", "Required Office Corp", "Remote - United States");
+  required.bodyText = "Employees are required in the New York office 2 days per week.";
+  const must = offer("must-office", "Must Office Corp", "Remote - United States");
+  must.bodyText = "Employees must work in the New York office 2 days per week.";
+  const expected = offer("expected-office", "Expected Office Corp", "Remote - United States");
+  expected.bodyText = "Employees are expected in the New York office 2 days per week.";
+
+  const result = qualifyByLocation(profile, [optional, required, must, expected]);
+
+  assert.deepEqual(
+    result.kept.map((row) => row.company),
+    ["Optional Office Corp"]
+  );
+  assert.deepEqual(
+    result.filteredLocation.map((row) => [row.company, row.qualificationReason]),
+    [
+      ["Required Office Corp", "hybrid-not-allowed"],
+      ["Must Office Corp", "hybrid-not-allowed"],
+      ["Expected Office Corp", "hybrid-not-allowed"],
+    ]
+  );
+});
+
+test("captured job text rejects an on-site role even when the board calls it remote", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "NYC",
+      remote: true,
+      hybrid: true,
+      onsite: false,
+      relocation: [],
+    },
+  };
+  const mislabeled = offer("onsite-labeled-remote", "Onsite Corp", "New York, NY (Remote)");
+  mislabeled.bodyText = "This is a fully on-site role at our New York City office.";
+  const result = qualifyByLocation(profile, [mislabeled]);
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredLocation.length, 1);
+  assert.equal(result.filteredLocation[0].qualificationReason, "onsite-not-allowed");
+});
+
 test("the scanner recognizes NYC as US even without a generated source filter", () => {
   const profile = {
     candidate: { domain: "software engineering" },

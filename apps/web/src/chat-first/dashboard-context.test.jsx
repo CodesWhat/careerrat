@@ -169,7 +169,7 @@ describe("DashboardContext", () => {
     let snapshot = dashboardContext.useDashboardSnapshot();
 
     expect(snapshot.error.message).toBe(
-      "Something went wrong on the server. Try again in a moment."
+      "CareerRat hit a problem while doing that. Try again. If it keeps happening, restart CareerRat."
     );
     expect(snapshot.error.message).not.toContain("SQLite");
     expect(snapshot.error.message).not.toContain("/Users/x/workspace");

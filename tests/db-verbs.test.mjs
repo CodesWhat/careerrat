@@ -1824,6 +1824,39 @@ test("candidate profile patches distinguish a resume home market from explicit w
   assert.equal(candidateConfigGet({ repoRoot }).profile.location.mode_preferences_confirmed, true);
 });
 
+test("candidate profile patches normalize a plain-English no-relocation answer", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: false,
+        max_commute_days_per_week: 2,
+        relocation: false,
+      },
+    },
+  });
+
+  assert.deepEqual(candidateConfigGet({ repoRoot }).profile.location, {
+    home: "",
+    remote: true,
+    remote_scope: "home-country",
+    hybrid: true,
+    onsite: false,
+    mode_preferences_confirmed: true,
+    max_commute_days_per_week: 2,
+    relocation: [],
+    travel_tolerance: "",
+  });
+});
+
 test("candidate setup recomputes quick-start readiness from SQLite setup facts", () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });

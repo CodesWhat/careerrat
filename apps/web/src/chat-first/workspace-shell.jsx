@@ -31,22 +31,26 @@ function UpdateNotice({ update }) {
       className={`chat-first-update-notice chat-first-update-notice--${update.kind || "current"}`}
       role="status"
       aria-label={
-        update.kind === "available" ? "CareerRat update available" : "CareerRat update status"
+        update.kind === "ready" ? "CareerRat update available" : "CareerRat update status"
       }
     >
       <span>
         {update.message ||
-          (update.kind === "available"
-            ? `CareerRat ${update.version} is ready`
+          (update.kind === "ready"
+            ? `CareerRat ${update.version} is downloaded and ready to install`
             : "CareerRat is up to date")}
       </span>
-      {update.kind === "available" && update.canOpenRelease !== false ? (
-        <button type="button" onClick={update.onOpenRelease}>
-          Download
+      {update.primaryLabel && update.primaryHref ? (
+        <a href={update.primaryHref} target="_blank" rel="noopener noreferrer">
+          {update.primaryLabel}
+        </a>
+      ) : update.primaryLabel ? (
+        <button type="button" onClick={update.onPrimary}>
+          {update.primaryLabel}
         </button>
       ) : null}
       <button type="button" onClick={update.onDismiss}>
-        {update.kind === "available" ? "Later" : "Dismiss"}
+        {update.kind === "ready" ? "Later" : "Dismiss"}
       </button>
     </div>
   );

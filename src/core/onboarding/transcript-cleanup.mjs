@@ -104,9 +104,10 @@ function onboardingAssistantPromptsUser(message) {
   const trailingInstruction = text.slice(questionAt + 1).trim();
   return (
     trailingInstruction.length <= 360 &&
-    /\b(?:answer|choose|include|paste|pick|reply|select|send|share|say|tell|type|use)\b/i.test(
-      trailingInstruction
-    )
+    (/^(?:for example|for instance|examples?\b|e\.g\.|such as)\b/i.test(trailingInstruction) ||
+      /\b(?:answer|choose|include|paste|pick|reply|select|send|share|say|tell|type|use)\b/i.test(
+        trailingInstruction
+      ))
   );
 }
 

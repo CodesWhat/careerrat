@@ -99,6 +99,18 @@ async function renderView(props = {}) {
 }
 
 describe("ChatFirstAppView", () => {
+  it("mounts the GitHub star prompt over conversation and browser surfaces", async () => {
+    const prompt = { visible: true, onDismiss: vi.fn() };
+    const conversationHtml = await renderView({ githubStarPrompt: prompt });
+    const browserHtml = await renderView({
+      ui: { ...BASE_UI, browse: "search" },
+      githubStarPrompt: prompt,
+    });
+
+    expect(conversationHtml).toContain('class="chat-first-star-prompt"');
+    expect(browserHtml).toContain('class="chat-first-star-prompt"');
+  });
+
   it("hydrates saved search state before exposing a new search action", async () => {
     const module = await import("./ChatFirstApp.jsx");
 
@@ -1108,15 +1120,242 @@ describe("ChatFirstAppView", () => {
     expect(result).toBeNull();
     expect(errors).toEqual([
       null,
-      "CareerRat couldn't find that company among your saved jobs. Name it exactly as it appears there.",
+      {
+        message:
+          "CareerRat couldn't find that company among your saved jobs. Name it exactly as it appears there.",
+        action: null,
+        detail: "application table lookup failed for app-missing",
+      },
     ]);
     const html = await renderView({ error: errors.at(-1) });
     expect(html).toContain('role="alert"');
     expect(html).toContain(
       "CareerRat couldn&#x27;t find that company among your saved jobs. Name it exactly as it appears there."
     );
-    expect(html).not.toContain("application table lookup failed");
+    expect(html).toContain("Technical details");
+    expect(html.indexOf("Technical details")).toBeLessThan(
+      html.indexOf("application table lookup failed")
+    );
     expect(html).not.toContain("[object Object]");
+  });
+
+  it("renders mapped recovery actions and keeps raw diagnostics in a disclosure", async () => {
+    const { ChatFirstAppView } = await import("./ChatFirstApp.jsx");
+    const retry = vi.fn();
+    const error = {
+      message: "Something went wrong on the server. Try again in a moment.",
+      action: { label: "Try again", retry: true, onRetry: retry },
+      detail: "SQLITE_BUSY: applications table at /Users/person/workspace",
+    };
+    const tree = ChatFirstAppView({
+      view: VIEW,
+      ui: BASE_UI,
+      composerValue: "",
+      sourceSweep: {},
+      error,
+      actions: {},
+    });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) {
+        node.forEach(visit);
+        return;
+      }
+      if (typeof node.type === "function") {
+        visit(node.type(node.props));
+        return;
+      }
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+
+    buttons.find((button) => button.props.children === "Try again").props.onClick();
+    expect(retry).toHaveBeenCalledOnce();
+
+    const html = renderToStaticMarkup(tree);
+    expect(html).toContain("Something went wrong on the server. Try again in a moment.");
+    expect(html).toContain("<details");
+    expect(html).toContain("Technical details");
+    expect(html.indexOf("Technical details")).toBeLessThan(html.indexOf("SQLITE_BUSY"));
+  });
+
+  it("surfaces dashboard load failures ahead of the setup fallback", async () => {
+    const { chatFirstControllerError } = await import("./ChatFirstApp.jsx");
+    const dashboardError = {
+      message: "Something went wrong on the server. Try again in a moment.",
+      action: { label: "Try again", retry: true, onRetry: vi.fn() },
+      detail: "SQLITE_BUSY",
+    };
+
+    expect(
+      chatFirstControllerError(null, {
+        error: dashboardError,
+        noDatabase: true,
+      })
+    ).toBe(dashboardError);
+  });
+
+  it("gives file failures plain-English recoveries", async () => {
+    const { localFileError } = await import("./ChatFirstApp.jsx");
+    const retry = vi.fn();
+
+    expect(localFileError("unsafe-link").message).toBe(
+      "CareerRat blocked that saved link because it isn't a safe web address. Check the URL or ask Paul to replace it."
+    );
+    expect(localFileError("preview", { name: "resume.pdf", onRetry: retry })).toEqual({
+      message:
+        "CareerRat couldn't build a preview for resume.pdf yet. Try again, or ask Paul to recreate it.",
+      action: { label: "Try preview again", retry: true, onRetry: retry },
+      detail: null,
+    });
+    expect(localFileError("dossier-download", { onRetry: retry })).toEqual({
+      message:
+        "CareerRat made the dossier PDF, but this window couldn't download it. Try the export again.",
+      action: { label: "Try export again", retry: true, onRetry: retry },
+      detail: null,
+    });
+    expect(localFileError("missing-export-path", { onRetry: retry })).toEqual({
+      message:
+        "CareerRat finished the export, but couldn't find the saved file. Try exporting it again.",
+      action: { label: "Try export again", retry: true, onRetry: retry },
+      detail: null,
+    });
+    expect(localFileError("not-exportable", { name: "Evidence notes" }).message).toBe(
+      "Evidence notes doesn't have enough saved content to export yet. Ask Paul to rebuild it, then try again."
+    );
+    expect(localFileError("no-calendar-event").message).toBe(
+      "Choose an interview or follow-up first, then try adding it to your calendar again."
+    );
+  });
+
+  it("retries the exact packet load that failed", async () => {
+    const { loadGatePacketWithRetry } = await import("./ChatFirstApp.jsx");
+    const failure = new ApiError(500, { error: "packet table locked" });
+    const packet = { artifacts: { resume: { text: "Resume" } } };
+    const api = {
+      getPacket: vi.fn().mockRejectedValueOnce(failure).mockResolvedValueOnce(packet),
+    };
+    const errors = [];
+    const setGatePacket = vi.fn();
+    let cancelled = false;
+
+    await loadGatePacketWithRetry({
+      api,
+      applicationId: "app-1",
+      setGatePacket,
+      setError: (value) => errors.push(value),
+      isCancelled: () => cancelled,
+    });
+
+    const retry = errors.at(-1).action.onRetry;
+    expect(retry).toBeTypeOf("function");
+    cancelled = true;
+    await retry();
+    expect(api.getPacket).toHaveBeenCalledTimes(2);
+    expect(api.getPacket).toHaveBeenLastCalledWith("app-1");
+    expect(setGatePacket).toHaveBeenCalledWith(packet);
+    expect(errors.at(-1)).toBeNull();
+  });
+
+  it("retries the exact deep-ingest state load that failed", async () => {
+    const { loadDeepIngestStateWithRetry } = await import("./ChatFirstApp.jsx");
+    const failure = new ApiError(500, { error: "deep ingest state unavailable" });
+    const state = { counts: { proposals: 3 } };
+    const api = {
+      getDeepIngestState: vi.fn().mockRejectedValueOnce(failure).mockResolvedValueOnce(state),
+    };
+    const errors = [];
+    const setDeepState = vi.fn();
+    let cancelled = false;
+
+    await loadDeepIngestStateWithRetry({
+      api,
+      setDeepState,
+      setError: (value) => errors.push(value),
+      isCancelled: () => cancelled,
+    });
+
+    const retry = errors.at(-1).action.onRetry;
+    expect(retry).toBeTypeOf("function");
+    cancelled = true;
+    await retry();
+    expect(api.getDeepIngestState).toHaveBeenCalledTimes(2);
+    expect(setDeepState).toHaveBeenCalledWith(state);
+    expect(errors.at(-1)).toBeNull();
+  });
+
+  it("retries the exact discovery decision that failed", async () => {
+    const { runDiscoveryDecisionWithRetry } = await import("./ChatFirstApp.jsx");
+    const failure = new ApiError(500, { error: "source decision failed" });
+    const commit = vi.fn().mockRejectedValueOnce(failure).mockResolvedValueOnce(undefined);
+    const errors = [];
+    let review = { candidates: [{ id: "source-1", decision: null }] };
+    let skillChat = { id: "skill-1", messages: [] };
+    const args = {
+      api: {},
+      activeSkillChat: { id: "skill-1", skill: "research-boards" },
+      item: { id: "source-1" },
+      action: "save",
+      commit,
+      setBusy: vi.fn(),
+      setError: (value) => errors.push(value),
+      setSourceReview: (update) => {
+        review = update(review);
+      },
+      setSkillChatState: (update) => {
+        skillChat = update(skillChat);
+      },
+      refetch: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await runDiscoveryDecisionWithRetry(args);
+    const retry = errors.findLast((value) => value?.action?.onRetry).action.onRetry;
+    await retry();
+
+    expect(commit).toHaveBeenCalledTimes(2);
+    expect(commit).toHaveBeenLastCalledWith({
+      api: args.api,
+      skill: "research-boards",
+      item: args.item,
+      action: "save",
+    });
+    expect(review.candidates[0].decision).toEqual({ action: "save", status: "completed" });
+    expect(skillChat.messages.at(-1).text).toBe(
+      errors.findLast((value) => value?.action?.onRetry).message
+    );
+    expect(skillChat.messages.at(-1).text).not.toContain("source decision failed");
+  });
+
+  it("retries the exact discovery completion that failed", async () => {
+    const { runDiscoveryCompletionWithRetry } = await import("./ChatFirstApp.jsx");
+    const failure = new ApiError(500, { error: "source completion failed" });
+    const commit = vi.fn().mockRejectedValueOnce(failure).mockResolvedValueOnce(undefined);
+    const errors = [];
+    const setSourceReview = vi.fn();
+    const args = {
+      api: {},
+      activeSkillChat: { id: "skill-1", skill: "research-boards" },
+      item: { id: "source-1" },
+      commit,
+      setBusy: vi.fn(),
+      setError: (value) => errors.push(value),
+      setSourceReview,
+      refetch: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await runDiscoveryCompletionWithRetry(args);
+    const retry = errors.findLast((value) => value?.action?.onRetry).action.onRetry;
+    await retry();
+
+    expect(commit).toHaveBeenCalledTimes(2);
+    expect(commit).toHaveBeenLastCalledWith({
+      api: args.api,
+      skill: "research-boards",
+      item: args.item,
+    });
+    expect(setSourceReview).toHaveBeenCalledWith(null);
   });
 
   it("keeps application answers in the review column instead of the packet column", async () => {

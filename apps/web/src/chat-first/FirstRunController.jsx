@@ -4,6 +4,7 @@ import {
   collapseUnansweredOnboardingPrompts,
   onboardingHasUnansweredTurn,
 } from "../../../../src/core/onboarding/transcript-cleanup.mjs";
+import { inlineErrorMessage, UserFacingError } from "../lib/errorCopy.js";
 import { useEventSource } from "../lib/sse.js";
 import {
   firstSearchInputsChanged,
@@ -31,7 +32,7 @@ const GUIDED_SETUP_MAX_CHECKS = 150;
 const FIRST_SEARCH_RETRY_ERROR =
   "Your profile is saved, but the first job search couldn't start. Retry search.";
 const FIRST_SEARCH_PENDING_ERROR =
-  "Your profile is saved, but the first job search couldn't start yet.";
+  "Your profile is saved, but the first job search couldn't start yet. Keep going with setup.";
 
 function list(value) {
   return Array.isArray(value) ? value : [];
@@ -39,6 +40,10 @@ function list(value) {
 
 function firstSearchFailureMessage(canRetry) {
   return canRetry ? FIRST_SEARCH_RETRY_ERROR : FIRST_SEARCH_PENDING_ERROR;
+}
+
+export function firstRunErrorMessage(error, fallback) {
+  return inlineErrorMessage(error, fallback);
 }
 
 function cleanLines(value) {
@@ -60,20 +65,24 @@ function moneyAmount(value) {
   return Number.isFinite(amount) ? amount : 0;
 }
 
-function profileWriteErrorMessage(error, savedCount = 0) {
+function profileWriteErrorMessage(error, savedCount = 0, summary = "") {
   const issue = list(error?.body?.errors)[0];
-  const path = String(issue?.path || "").trim();
   const message = String(issue?.message || "").trim();
   const savedSuffix = savedCount > 0 ? " The other valid details were saved." : "";
-  if (path && /unexpected property/i.test(message)) {
-    return `That profile update could not save "${path}" because it is not a supported setting.${savedSuffix}`;
+  if (/unexpected property/i.test(message)) {
+    return `One profile detail isn't supported yet.${savedSuffix}`;
   }
-  const bodyError = error?.body?.error;
-  const detail =
-    (typeof bodyError === "string" ? bodyError : bodyError?.message) ||
-    error?.message ||
-    "Those profile details did not save.";
-  return `${detail}${savedSuffix}`;
+  const subject = String(summary || "")
+    .trim()
+    .replace(/[.!?]+$/, "")
+    .slice(0, 120);
+  if (error?.status === 400 && subject) {
+    return `Paul couldn't save “${subject}.” Tell him what you meant another way.${savedSuffix}`;
+  }
+  return `${firstRunErrorMessage(
+    error,
+    "CareerRat couldn't save those profile details. Try that answer again."
+  )}${savedSuffix}`;
 }
 
 function normalizedClaimText(value) {
@@ -338,7 +347,12 @@ export function FirstRunController({
       try {
         return await graduationRef.current;
       } catch (error) {
-        setEngineError(error?.message || "Setup is ready, but the workspace handoff failed.");
+        setEngineError(
+          firstRunErrorMessage(
+            error,
+            "Your setup is saved, but CareerRat couldn't open the workspace. Try again."
+          )
+        );
         return false;
       }
     },
@@ -437,7 +451,7 @@ export function FirstRunController({
         await advanceOnboard(nextOnboard);
       } catch (error) {
         if (cancelled) return;
-        setEngineError(error?.message || "Setup could not start. Retry from the app.");
+        setEngineError(firstRunErrorMessage(error, "CareerRat couldn't start setup. Try again."));
       }
     })();
     return () => {
@@ -506,7 +520,11 @@ export function FirstRunController({
           {
             id: `chat-error-${current.length + 1}`,
             role: "assistant",
-            text: error?.message || `${agentName} could not start the setup chat.`,
+            kind: "agent_error",
+            text: firstRunErrorMessage(
+              error,
+              `${agentName} couldn't start the setup chat. Try again.`
+            ),
           },
         ]);
       }
@@ -566,7 +584,11 @@ export function FirstRunController({
         {
           id: stableEventMessageId(chatId, eventId, `stream-error-${current.length + 1}`),
           role: "assistant",
-          text: data?.message || `${agentName} hit a problem. Your saved answers are still here.`,
+          kind: "agent_error",
+          text: firstRunErrorMessage(
+            data?.message ? new Error(data.message) : null,
+            `${agentName} couldn't finish that reply. Try again. Your saved answers are still here.`
+          ),
         },
       ]);
     }
@@ -615,31 +637,50 @@ export function FirstRunController({
       );
 
       const receipts = new Map();
+      const failures = [];
       try {
         for (const { block, index } of indexedBlocks) {
-          const receipt = await applyFirstRunConfirmation(block, {
-            api,
-            state: onboardState,
-          });
-          receipts.set(index, receipt);
-          updateMessages((current) =>
-            current.map((candidate) =>
-              candidate.id === messageId
-                ? {
-                    ...candidate,
-                    blocks: list(candidate.blocks).map((candidateBlock, candidateIndex) =>
-                      candidateIndex === index
-                        ? {
-                            ...candidateBlock,
-                            status: "resolved",
-                            resultSummary: receipt,
-                          }
-                        : candidateBlock
-                    ),
-                  }
-                : candidate
-            )
-          );
+          try {
+            const receipt = await applyFirstRunConfirmation(block, {
+              api,
+              state: onboardState,
+            });
+            receipts.set(index, receipt);
+            updateMessages((current) =>
+              current.map((candidate) =>
+                candidate.id === messageId
+                  ? {
+                      ...candidate,
+                      blocks: list(candidate.blocks).map((candidateBlock, candidateIndex) =>
+                        candidateIndex === index
+                          ? {
+                              ...candidateBlock,
+                              status: "resolved",
+                              resultSummary: receipt,
+                            }
+                          : candidateBlock
+                      ),
+                    }
+                  : candidate
+              )
+            );
+          } catch (error) {
+            failures.push({ error, block, index });
+            updateMessages((current) =>
+              current.map((candidate) =>
+                candidate.id === messageId
+                  ? {
+                      ...candidate,
+                      blocks: list(candidate.blocks).map((candidateBlock, candidateIndex) =>
+                        candidateIndex === index
+                          ? { ...candidateBlock, status: "error" }
+                          : candidateBlock
+                      ),
+                    }
+                  : candidate
+              )
+            );
+          }
         }
         updateMessages((current) =>
           current.map((candidate) =>
@@ -660,6 +701,13 @@ export function FirstRunController({
           )
         );
         await refreshOnboard();
+        if (failures.length) {
+          const failure = failures[0];
+          setEngineError(
+            profileWriteErrorMessage(failure.error, receipts.size, failure.block?.summary)
+          );
+          return;
+        }
         const hasUnresolvedAction = list(message.blocks).some(
           (block) =>
             !PROFILE_BLOCK_KINDS.has(block?.kind) &&
@@ -736,7 +784,11 @@ export function FirstRunController({
         {
           id: `send-error-${current.length + 1}`,
           role: "assistant",
-          text: error?.message || "That answer did not send. Try it again.",
+          kind: "agent_error",
+          text: firstRunErrorMessage(
+            error,
+            "Paul couldn't send that answer. Try again. Your answer is still in the chat."
+          ),
         },
       ]);
     }
@@ -752,14 +804,18 @@ export function FirstRunController({
       if (option) await sendAnswer(option.label);
       return;
     }
+    setEngineError(null);
     setSubmitting(true);
     let waitingForChat = false;
+    let savedReceipt = "";
+    let changeRequestSent = false;
     try {
       if (action === "confirm") {
         const receipt = await applyFirstRunConfirmation(block, {
           api,
           state: onboardState,
         });
+        savedReceipt = receipt;
         updateMessages((current) =>
           current.map((candidate) =>
             candidate.id === messageId
@@ -797,7 +853,13 @@ export function FirstRunController({
           connectChat(chatId);
           waitingForChat = true;
         }
-      } else if (chatId) {
+      } else {
+        if (!chatId) throw new Error("The setup chat is not connected.");
+        await api.sendChatMessage(
+          chatId,
+          `[SYSTEM] The user asked to change the proposed ${block.kind}. Do not save it. Ask for the corrected value.`
+        );
+        changeRequestSent = true;
         updateMessages((current) =>
           current.map((candidate) =>
             candidate.id === messageId
@@ -820,12 +882,41 @@ export function FirstRunController({
               : candidate
           )
         );
-        await api.sendChatMessage(
-          chatId,
-          `[SYSTEM] The user asked to change the proposed ${block.kind}. Do not save it. Ask for the corrected value.`
-        );
         connectChat(chatId);
         waitingForChat = true;
+      }
+    } catch {
+      if (savedReceipt) {
+        setEngineError(
+          `${savedReceipt}, but ${configuredAgentName} couldn't continue. Send any message to keep going.`
+        );
+      } else if (changeRequestSent) {
+        setEngineError(
+          `Your change request was sent, but ${configuredAgentName} couldn't continue. Send any message to keep going.`
+        );
+      } else {
+        updateMessages((current) =>
+          current.map((candidate) =>
+            candidate.id === messageId
+              ? {
+                  ...candidate,
+                  blocks: list(candidate.blocks).map((candidateBlock, index) =>
+                    index === blockIndex
+                      ? {
+                          ...candidateBlock,
+                          status: "error",
+                        }
+                      : candidateBlock
+                  ),
+                }
+              : candidate
+          )
+        );
+        setEngineError(
+          action === "confirm"
+            ? "CareerRat couldn't save all of that choice. Some related details may already be saved. Check What Paul knows, then try again."
+            : "CareerRat couldn't send that change request. Try again. Nothing was saved."
+        );
       }
     } finally {
       if (!waitingForChat) setSubmitting(false);
@@ -880,12 +971,12 @@ export function FirstRunController({
     try {
       if (sectionId === "resume") {
         const text = String(values.resumeText || "").trim();
-        if (!text) throw new Error("Paste resume text before saving this section.");
+        if (!text) throw new UserFacingError("Paste resume text before saving this section.");
         await saveResumeSeed(await api.parseResumeText(text, { save: true }));
       } else if (sectionId === "roles") {
         const roleBuckets = editedRoleBuckets(item?.editor, values);
         if (!roleBuckets.some((bucket) => bucket.titles.length)) {
-          throw new Error("Add at least one target role.");
+          throw new UserFacingError("Add at least one target role.");
         }
         await api.saveCandidateFile("targeting", {
           role_buckets: roleBuckets,
@@ -955,13 +1046,18 @@ export function FirstRunController({
           .then(() => connectChat(chatId))
           .catch(() =>
             setEngineError(
-              `The section is saved, but ${configuredAgentName} has not acknowledged it yet.`
+              `${String(item?.label || "That section").trim()} is saved, but ${configuredAgentName} couldn't continue from it. Send any message to keep going.`
             )
           );
       }
       return true;
     } catch (error) {
-      setEngineError(error?.message || "That profile section did not save.");
+      setEngineError(
+        firstRunErrorMessage(
+          error,
+          "CareerRat couldn't save that profile section. Check it and try again."
+        )
+      );
       throw error;
     } finally {
       setSubmitting(false);
@@ -1009,7 +1105,7 @@ export function FirstRunController({
               .then((session) => connectChat(session.chatId));
         void continuation.catch(() =>
           setEngineError(
-            `The resume is saved, but ${configuredAgentName} has not acknowledged it yet.`
+            `The resume is saved, but ${configuredAgentName} couldn't continue from it. Send any message to keep going.`
           )
         );
       }
@@ -1017,7 +1113,12 @@ export function FirstRunController({
     } catch (error) {
       uploadedResumeSignaturesRef.current.delete(signature);
       updateMessages((current) => current.filter((message) => message.text !== receiptText));
-      setEngineError(error?.message || "That resume could not be read.");
+      setEngineError(
+        firstRunErrorMessage(
+          error,
+          "CareerRat couldn't read that resume. Try a PDF, DOCX, TXT, or image."
+        )
+      );
       return false;
     } finally {
       setResumeUploading(false);
@@ -1049,7 +1150,12 @@ export function FirstRunController({
       setStage("chat");
       await refreshOnboard();
     } catch (error) {
-      setEngineError(error?.message || "That AI could not be selected.");
+      setEngineError(
+        firstRunErrorMessage(
+          error,
+          "CareerRat couldn't select that AI. Check it again or choose another one."
+        )
+      );
     } finally {
       setSubmitting(false);
     }
@@ -1071,7 +1177,9 @@ export function FirstRunController({
       });
       await refreshOnboard();
     } catch (error) {
-      setEngineError(error?.message || "That application default could not be saved.");
+      setEngineError(
+        firstRunErrorMessage(error, "CareerRat couldn't save that application choice. Try again.")
+      );
     } finally {
       setSubmitting(false);
     }
@@ -1088,7 +1196,12 @@ export function FirstRunController({
         (current) => effectiveRuntimeId(nextRuntime, current) || effectiveRuntimeId(nextRuntime)
       );
     } catch (error) {
-      setEngineError(error?.message || "CareerRat could not check that AI.");
+      setEngineError(
+        firstRunErrorMessage(
+          error,
+          "CareerRat couldn't check that AI. Make sure it's installed and signed in, then check again."
+        )
+      );
     } finally {
       setSubmitting(false);
     }
@@ -1104,7 +1217,12 @@ export function FirstRunController({
         (current) => effectiveRuntimeId(nextRuntime, current) || effectiveRuntimeId(nextRuntime)
       );
     } catch (error) {
-      setEngineError(error?.message || "CareerRat could not check for AI tools.");
+      setEngineError(
+        firstRunErrorMessage(
+          error,
+          "CareerRat couldn't check for AI tools. Make sure Claude Code or Codex is installed, then check again."
+        )
+      );
     } finally {
       setSubmitting(false);
     }
@@ -1144,7 +1262,10 @@ export function FirstRunController({
         lines: list(current?.lines),
       }));
       setEngineError(
-        error?.body?.error || error?.message || "CareerRat could not install Claude Code."
+        firstRunErrorMessage(
+          error,
+          "CareerRat couldn't finish installing Claude Code. Check your connection and try installation again."
+        )
       );
     } finally {
       setSubmitting(false);
@@ -1158,7 +1279,12 @@ export function FirstRunController({
       await api.startInstalledAiRuntimeSignIn(runtimeId);
       setGuidedSetup({ runtimeId, status: "sign_in_started" });
     } catch (error) {
-      setEngineError(error?.body?.error || error?.message || "CareerRat could not start sign-in.");
+      setEngineError(
+        firstRunErrorMessage(
+          error,
+          "CareerRat couldn't start sign-in. Try again, or sign in from the AI tool."
+        )
+      );
     } finally {
       setSubmitting(false);
     }
@@ -1175,7 +1301,10 @@ export function FirstRunController({
       setHostedInterest({
         status: "error",
         email,
-        error: error?.body?.error || error?.message || "Could not send that. Try again.",
+        error: firstRunErrorMessage(
+          error,
+          "CareerRat couldn't send your request. Check your email address and try again."
+        ),
       });
     }
   }

@@ -84,7 +84,9 @@ function sourceStatusLabel(source, hasProposals) {
   if (hasProposals) return "Proposals drafted";
   if (source?.status === "proposal_ready") return "Ready to analyze";
   if (["captured", "scanning"].includes(source?.status)) return "Reading source";
-  if (["failed", "manual_fallback"].includes(source?.status)) return "Needs attention";
+  if (["failed", "manual_fallback"].includes(source?.status)) {
+    return "CareerRat couldn't read this source. Try again or remove it.";
+  }
   return "Saved locally";
 }
 
@@ -137,12 +139,15 @@ export function buildDeepIngestReview(state) {
     const hasProposals = allProposals.some(
       (row) => row?.sourceId === source?.id && isReviewable(row)
     );
+    const needsRecovery = ["failed", "manual_fallback"].includes(source?.status);
     return {
       ...source,
       raw: source,
       label: sourceLabel(source),
       statusLabel: sourceStatusLabel(source, hasProposals),
       canAnalyze: source?.status === "proposal_ready" && !hasProposals,
+      canRetry: needsRecovery,
+      canRemove: needsRecovery,
     };
   });
   const counts = {
@@ -185,6 +190,18 @@ export async function buildProposalsAndRefresh({ api, source }) {
     sourceId: source.id,
     targetShape: source.targetShape || "auto",
   });
+  const view = await api.getDeepIngestState();
+  return { result, view };
+}
+
+export async function removeSourceAndRefresh({ api, source }) {
+  const result = await api.removeDeepIngestSource({ sourceId: source.id });
+  const view = await api.getDeepIngestState();
+  return { result, view };
+}
+
+export async function retrySourceAndRefresh({ api, source }) {
+  const result = await api.retryDeepIngestSource({ sourceId: source.id });
   const view = await api.getDeepIngestState();
   return { result, view };
 }

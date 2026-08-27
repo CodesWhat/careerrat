@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -11,6 +12,7 @@ import {
   isAllowedExternalUrl,
   resolveDesktopRuntimePaths,
 } from "../apps/desktop/desktop-runtime.mjs";
+import * as releaseVerification from "../apps/desktop/release-verification.mjs";
 import { verifyDesktopRelease } from "../apps/desktop/release-verification.mjs";
 import { verifyPackagedSmoke } from "../apps/desktop/scripts/verify-packaged.mjs";
 import { loadLocalAiEnv, writeLocalAiKey } from "../src/core/ai/ai-env.mjs";
@@ -331,6 +333,29 @@ describe("desktop release verification", () => {
     dmgPath: "/tmp/CareerRat.dmg",
   };
 
+  it("selects only the updater ZIP carrying the exact desktop version", () => {
+    assert.equal(typeof releaseVerification.selectMacUpdateZip, "function");
+    assert.equal(
+      releaseVerification.selectMacUpdateZip(
+        [
+          "CareerRat-0.16.40-arm64-mac.zip",
+          "CareerRat-0.16.4-arm64-mac.zip",
+          "CareerRat-0.16.3-arm64-mac.zip",
+        ],
+        "0.16.4"
+      ),
+      "CareerRat-0.16.4-arm64-mac.zip"
+    );
+    assert.throws(
+      () =>
+        releaseVerification.selectMacUpdateZip(
+          ["CareerRat-0.16.4-a.zip", "CareerRat-0.16.4-b.zip"],
+          "0.16.4"
+        ),
+      /exactly one updater ZIP/i
+    );
+  });
+
   it("passes only when signing, stapling, and Gatekeeper checks all pass", () => {
     const calls = [];
     const result = verifyDesktopRelease({
@@ -373,6 +398,237 @@ describe("desktop release verification", () => {
     assert.match(result.summary, /APPLE_API_KEY|APPLE_ID|APPLE_KEYCHAIN_PROFILE/);
     assert.match(result.summary, /APPLE_API_ISSUER/);
     assert.doesNotMatch(result.summary, /APPLE_API_KEY_ISSUER/);
+  });
+
+  it("accepts latest-mac metadata only when it names and hashes the exact updater ZIP", async () => {
+    assert.equal(typeof releaseVerification.verifyMacUpdateFeed, "function");
+    const root = tempRoot("careerrat-mac-feed-");
+    try {
+      const zipPath = join(root, "CareerRat-0.16.4-arm64-mac.zip");
+      const metadataPath = join(root, "latest-mac.yml");
+      const zip = Buffer.from("signed CareerRat updater ZIP");
+      writeFileSync(zipPath, zip);
+      writeFileSync(
+        metadataPath,
+        [
+          "version: 0.16.4",
+          "files:",
+          `  - url: ${zipPath.split("/").at(-1)}`,
+          `    sha512: ${createHash("sha512").update(zip).digest("base64")}`,
+          `    size: ${zip.byteLength}`,
+          `path: ${zipPath.split("/").at(-1)}`,
+          "",
+        ].join("\n")
+      );
+
+      const result = await releaseVerification.verifyMacUpdateFeed({
+        zipPath,
+        metadataPath,
+        expectedVersion: "0.16.4",
+      });
+
+      assert.equal(result.ok, true);
+      assert.deepEqual(
+        result.checks.map(({ id, ok }) => [id, ok]),
+        [
+          ["updater-version", true],
+          ["updater-filename", true],
+          ["updater-size", true],
+          ["updater-sha512", true],
+        ]
+      );
+    } finally {
+      cleanup(root);
+    }
+  });
+
+  it("rejects latest-mac metadata for a different desktop version", async () => {
+    const root = tempRoot("careerrat-mac-feed-version-");
+    try {
+      const name = "CareerRat-0.16.4-arm64-mac.zip";
+      const zipPath = join(root, name);
+      const metadataPath = join(root, "latest-mac.yml");
+      const zip = Buffer.from("signed CareerRat updater ZIP");
+      writeFileSync(zipPath, zip);
+      writeFileSync(
+        metadataPath,
+        [
+          "version: 0.16.3",
+          "files:",
+          `  - url: ${name}`,
+          `    sha512: ${createHash("sha512").update(zip).digest("base64")}`,
+          `    size: ${zip.byteLength}`,
+          `path: ${name}`,
+          "",
+        ].join("\n")
+      );
+
+      const result = await releaseVerification.verifyMacUpdateFeed({
+        zipPath,
+        metadataPath,
+        expectedVersion: "0.16.4",
+      });
+
+      assert.equal(result.ok, false);
+      assert.deepEqual(
+        result.failures.map(({ id }) => id),
+        ["updater-version"]
+      );
+    } finally {
+      cleanup(root);
+    }
+  });
+
+  it("rejects latest-mac metadata without a top-level desktop version", async () => {
+    const root = tempRoot("careerrat-mac-feed-missing-version-");
+    try {
+      const name = "CareerRat-0.16.4-arm64-mac.zip";
+      const zipPath = join(root, name);
+      const metadataPath = join(root, "latest-mac.yml");
+      const zip = Buffer.from("signed CareerRat updater ZIP");
+      writeFileSync(zipPath, zip);
+      writeFileSync(
+        metadataPath,
+        [
+          "files:",
+          `  - url: ${name}`,
+          `    sha512: ${createHash("sha512").update(zip).digest("base64")}`,
+          `    size: ${zip.byteLength}`,
+          `path: ${name}`,
+          "",
+        ].join("\n")
+      );
+
+      const result = await releaseVerification.verifyMacUpdateFeed({
+        zipPath,
+        metadataPath,
+        expectedVersion: "0.16.4",
+      });
+
+      assert.equal(result.ok, false);
+      assert.deepEqual(
+        result.failures.map(({ id }) => id),
+        ["updater-metadata"]
+      );
+      assert.match(result.failures[0].output, /top-level version/i);
+    } finally {
+      cleanup(root);
+    }
+  });
+
+  it("rejects non-ZIP files in latest-mac metadata", async () => {
+    const root = tempRoot("careerrat-mac-feed-files-");
+    try {
+      const name = "CareerRat-0.16.4-arm64-mac.zip";
+      const zipPath = join(root, name);
+      const metadataPath = join(root, "latest-mac.yml");
+      const zip = Buffer.from("signed CareerRat updater ZIP");
+      writeFileSync(zipPath, zip);
+      writeFileSync(
+        metadataPath,
+        [
+          "version: 0.16.4",
+          "files:",
+          `  - url: ${name}`,
+          `    sha512: ${createHash("sha512").update(zip).digest("base64")}`,
+          `    size: ${zip.byteLength}`,
+          "  - url: CareerRat-0.16.4-arm64.dmg",
+          "    sha512: stale-dmg-checksum",
+          "    size: 1234",
+          `path: ${name}`,
+          "",
+        ].join("\n")
+      );
+
+      const result = await releaseVerification.verifyMacUpdateFeed({
+        zipPath,
+        metadataPath,
+        expectedVersion: "0.16.4",
+      });
+
+      assert.equal(result.ok, false);
+      assert.deepEqual(
+        result.failures.map(({ id }) => id),
+        ["updater-metadata"]
+      );
+      assert.match(result.failures[0].output, /only local ZIP assets/i);
+    } finally {
+      cleanup(root);
+    }
+  });
+
+  it("rejects latest-mac metadata whose legacy path names a different ZIP", async () => {
+    const root = tempRoot("careerrat-mac-feed-path-");
+    try {
+      const zipPath = join(root, "CareerRat-0.16.4-arm64-mac.zip");
+      const metadataPath = join(root, "latest-mac.yml");
+      const zip = Buffer.from("signed CareerRat updater ZIP");
+      writeFileSync(zipPath, zip);
+      writeFileSync(
+        metadataPath,
+        [
+          "version: 0.16.4",
+          "files:",
+          `  - url: ${zipPath.split("/").at(-1)}`,
+          `    sha512: ${createHash("sha512").update(zip).digest("base64")}`,
+          `    size: ${zip.byteLength}`,
+          "path: stale-CareerRat.zip",
+          "",
+        ].join("\n")
+      );
+
+      const result = await releaseVerification.verifyMacUpdateFeed({
+        zipPath,
+        metadataPath,
+        expectedVersion: "0.16.4",
+      });
+
+      assert.equal(result.ok, false);
+      assert.deepEqual(
+        result.failures.map(({ id }) => id),
+        ["updater-filename"]
+      );
+    } finally {
+      cleanup(root);
+    }
+  });
+
+  it("rejects an updater ZIP changed after latest-mac metadata was generated", async () => {
+    const root = tempRoot("careerrat-mac-feed-tamper-");
+    try {
+      const name = "CareerRat-0.16.4-arm64-mac.zip";
+      const zipPath = join(root, name);
+      const metadataPath = join(root, "latest-mac.yml");
+      const original = Buffer.from("signed ZIP");
+      writeFileSync(zipPath, original);
+      writeFileSync(
+        metadataPath,
+        [
+          "version: 0.16.4",
+          "files:",
+          `  - url: ${name}`,
+          `    sha512: ${createHash("sha512").update(original).digest("base64")}`,
+          `    size: ${original.byteLength}`,
+          `path: ${name}`,
+          "",
+        ].join("\n")
+      );
+      writeFileSync(zipPath, Buffer.from("different final ZIP bytes"));
+
+      const result = await releaseVerification.verifyMacUpdateFeed({
+        zipPath,
+        metadataPath,
+        expectedVersion: "0.16.4",
+      });
+
+      assert.equal(result.ok, false);
+      assert.deepEqual(
+        result.failures.map(({ id }) => id),
+        ["updater-size", "updater-sha512"]
+      );
+    } finally {
+      cleanup(root);
+    }
   });
 
   it("requires the exact signed package smoke to report success", () => {

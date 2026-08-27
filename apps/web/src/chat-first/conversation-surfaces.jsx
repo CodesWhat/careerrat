@@ -63,8 +63,14 @@ function artifactSubtitle(artifact) {
   if (typeof value === "string" || typeof value === "number") return String(value);
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
 
+  const qualified = Number(value.qualified);
+  const alreadySaved = qualified === 0 ? Number(value?.reasonCounts?.duplicate || 0) : 0;
   const summary = [
-    Number.isFinite(Number(value.qualified)) ? `${Number(value.qualified)} qualified` : null,
+    Number.isFinite(alreadySaved) && alreadySaved > 0
+      ? `${alreadySaved} ${alreadySaved === 1 ? "match" : "matches"} already saved`
+      : Number.isFinite(qualified)
+        ? `${qualified} qualified`
+        : null,
     Number.isFinite(Number(value.scanned)) ? `${Number(value.scanned)} scanned` : null,
     Number.isFinite(Number(value.attemptedSources))
       ? `${Number(value.attemptedSources)} sources`
@@ -977,6 +983,8 @@ export function DeepIngestConversation({
   onInputSubmit,
   onInputCancel,
   onAnalyze,
+  onRetry,
+  onRemove,
   onStartEdit,
   onEditChange,
   onSaveEdit,
@@ -1112,6 +1120,30 @@ export function DeepIngestConversation({
                 >
                   {busy ? "Analyzing…" : "Analyze"}
                 </button>
+              ) : null}
+              {source.canRetry || source.canRemove ? (
+                <div className="chat-first-inline-actions chat-first-deep-source__actions">
+                  {source.canRetry ? (
+                    <button
+                      className="chat-first-pill chat-first-pill--outline"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => onRetry?.(source)}
+                    >
+                      {busy ? "Trying again…" : "Try again"}
+                    </button>
+                  ) : null}
+                  {source.canRemove ? (
+                    <button
+                      className="chat-first-pill chat-first-pill--outline"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => onRemove?.(source)}
+                    >
+                      Remove source
+                    </button>
+                  ) : null}
+                </div>
               ) : null}
             </div>
           ))}

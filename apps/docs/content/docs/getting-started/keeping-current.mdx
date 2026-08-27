@@ -64,7 +64,11 @@ copied tree where symlinks are not available).
 ## Mac app updates
 
 The signed Mac app does not run `careerrat update`. It checks GitHub once a day
-for a newer release and shows an in-app notice; you download and install the
-update yourself, from a new DMG or `brew upgrade --cask
-codeswhat/tap/careerrat`. The app never downloads or installs anything on its
-own. See [Privacy & Data Boundaries](/advanced/privacy) for the details.
+for a newer signed release and downloads it inside CareerRat. When the download
+has been verified, choose **Restart and install**. CareerRat closes its local
+services, installs the update, and reopens. You can turn automatic checks off
+in Settings and still use **Check for Updates…** whenever you want.
+
+The DMG and `brew upgrade --cask codeswhat/tap/careerrat` remain available for
+manual installation. Windows self-update is not enabled until the installed
+app and installer share a complete signing chain.

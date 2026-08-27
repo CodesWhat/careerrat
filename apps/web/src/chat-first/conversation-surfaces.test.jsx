@@ -218,6 +218,36 @@ describe("TodayConversation", () => {
     expect(html).not.toContain("[object Object]");
   });
 
+  it("does not claim a dedupe-only refresh found zero useful jobs", () => {
+    const html = markup(
+      <MessageTranscript
+        messages={[
+          {
+            id: "search-refresh",
+            role: "assistant",
+            kind: "action_result",
+            text: "Job search complete.",
+            artifacts: [
+              {
+                kind: "search_run",
+                title: "First job search: Complete",
+                summary: {
+                  attemptedSources: 5,
+                  scanned: 358,
+                  qualified: 0,
+                  reasonCounts: { duplicate: 4 },
+                },
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    expect(html).toContain("4 matches already saved · 358 scanned · 5 sources");
+    expect(html).not.toContain("0 qualified");
+  });
+
   it("collapses superseded search activity into the latest compact result", () => {
     const searchArtifact = (runId, status) => ({
       kind: "search_run",
@@ -1315,6 +1345,45 @@ describe("focused conversation modes", () => {
     expect(html).toContain("Confirm");
     expect(html).toContain("Defer");
     expect(html).toContain("Reject");
+  });
+
+  it("lets someone retry or remove a failed deep-ingest source", () => {
+    const source = {
+      id: "source-failed",
+      label: "career-notes.txt",
+      statusLabel: "CareerRat couldn't read this source. Try again or remove it.",
+      canRetry: true,
+      canRemove: true,
+    };
+    const onRetry = vi.fn();
+    const onRemove = vi.fn();
+    const tree = DeepIngestConversation({
+      sources: [source],
+      counts: { sources: 1 },
+      onRetry,
+      onRemove,
+    });
+    const buttons = [];
+
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) {
+        node.forEach(visit);
+        return;
+      }
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+
+    const retry = buttons.find((button) => button.props.children === "Try again");
+    const remove = buttons.find((button) => button.props.children === "Remove source");
+    expect(retry).toBeDefined();
+    expect(remove).toBeDefined();
+    retry.props.onClick();
+    remove.props.onClick();
+    expect(onRetry).toHaveBeenCalledWith(source);
+    expect(onRemove).toHaveBeenCalledWith(source);
   });
 
   it("shows deep-ingest findings one at a time instead of an action wall", () => {
