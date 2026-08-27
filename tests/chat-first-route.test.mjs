@@ -509,6 +509,13 @@ test("job-thread turn persists both sides and grounds bounded AI in canonical ap
   );
   assert.equal(calls.length, 1);
   assert.equal(calls[0].outputName, "chat_first_job_thread_reply");
+  assert.equal(calls[0].useExecutionPlanRoute, true);
+  assert.deepEqual(calls[0].executionPlan, testExecutionPlan("paul.conversation"));
+  assert.deepEqual(
+    turn.body.data.userMessage.metadata.executionPlan,
+    testExecutionPlan("paul.conversation")
+  );
+  assert.deepEqual(turn.body.data.executionPlan, testExecutionPlan("paul.conversation"));
   const prompt = JSON.stringify(calls[0].messages);
   assert.match(prompt, /Massive Dynamic/);
   assert.match(prompt, /Staff Platform Engineer/);
@@ -667,9 +674,17 @@ test("invalid structured mock feedback retains one durable answer and can be ret
   });
   let callCount = 0;
   let feedbackValid = false;
+  let selectedPlan = testExecutionPlan("coach.deep");
+  const calls = [];
+  let planResolutions = 0;
   const routes = await boot(repoRoot, {
+    resolveMissionExecutionPlan: () => {
+      planResolutions += 1;
+      return selectedPlan;
+    },
     callAIImpl: async (options) => {
       callCount += 1;
+      calls.push(options);
       if (options.outputName === "chat_first_mock_question") {
         return aiReply({ question: "Tell me about a difficult decision." });
       }
@@ -688,6 +703,9 @@ test("invalid structured mock feedback retains one durable answer and can be ret
     applicationId: "app-mock-invalid",
     questionCount: 2,
   });
+  const initialPlan = selectedPlan;
+  const initialState = (await import("../src/core/db/verbs.mjs")).chatFirstStateGet({ repoRoot });
+  assert.deepEqual(initialState.mockSessions[0].executionPlan, initialPlan);
   const failed = await invoke(routes, "POST", "/api/chat-first/mock/turn", {
     sessionId: "mock-invalid",
     text: "I chose the safer rollout.",
@@ -702,6 +720,14 @@ test("invalid structured mock feedback retains one durable answer and can be ret
   assert.equal(session.feedback.length, 0);
   assert.equal(callCount, 3);
 
+  selectedPlan = {
+    ...testExecutionPlan("coach.deep"),
+    resolved: {
+      ...testExecutionPlan("coach.deep").resolved,
+      model: "gpt-5.6-luna",
+      effort: "low",
+    },
+  };
   feedbackValid = true;
   const retried = await invoke(routes, "POST", "/api/chat-first/mock/turn", {
     sessionId: "mock-invalid",
@@ -718,4 +744,14 @@ test("invalid structured mock feedback retains one durable answer and can be ret
     2
   );
   assert.equal(retried.body.data.session.feedback.length, 1);
+  assert.deepEqual(retried.body.data.session.executionPlan, initialPlan);
+  assert.deepEqual(
+    calls.map((options) => options.executionPlan),
+    calls.map(() => initialPlan)
+  );
+  assert.equal(
+    calls.every((options) => options.useExecutionPlanRoute === true),
+    true
+  );
+  assert.equal(planResolutions, 1, "a saved mock plan must bypass current provider selection");
 });

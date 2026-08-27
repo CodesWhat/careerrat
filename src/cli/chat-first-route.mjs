@@ -160,6 +160,7 @@ export function mountChatFirstRoutes({
         applicationId: body.applicationId,
         text: body.text,
         choice: body.choice,
+        resolveExecutionPlan: resolveMissionExecutionPlan,
         call: callAIImpl,
       })
     )
@@ -244,6 +245,7 @@ export function mountChatFirstRoutes({
           ...pathCtx,
           ...body,
           questionTotal: body.questionTotal ?? body.questionCount,
+          resolveExecutionPlan: resolveMissionExecutionPlan,
           call: callAIImpl,
         }),
       { status: 201 }
@@ -267,6 +269,7 @@ export function mountChatFirstRoutes({
         ...pathCtx,
         sessionId: body.sessionId,
         text: body.text,
+        resolveExecutionPlan: resolveMissionExecutionPlan,
         call: callAIImpl,
       })
     )

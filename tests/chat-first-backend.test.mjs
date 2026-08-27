@@ -2443,6 +2443,23 @@ test("mock start retries the same empty active session after AI failure and turn
     status: "interview",
   });
 
+  const originalPlan = {
+    policyVersion: 1,
+    operation: "coach.deep",
+    runtimeId: "codex",
+    adapterVersion: 1,
+    requested: { quality: "automatic", reasoning: "automatic" },
+    resolved: {
+      quality: "best",
+      reasoning: "high",
+      model: "gpt-5.6-sol",
+      modelSource: "alias",
+      effort: "high",
+      speedTier: null,
+    },
+    fallback: null,
+  };
+  let failedRequest;
   await assert.rejects(
     () =>
       api.mockInterviewStartWithAI({
@@ -2455,15 +2472,19 @@ test("mock start retries the same empty active session after AI failure and turn
           arbitrarySecret: "do-not-send-this",
           schedulingLink: "https://calendly.com/private/mock",
         },
-        runAI: async () => ({
-          status: 502,
-          body: {
-            ok: false,
-            code: "AI_PROVIDER_FAILED",
-            error: { message: "temporary outage" },
-            ai: { used: false },
-          },
-        }),
+        executionPlan: originalPlan,
+        runAI: async (options) => {
+          failedRequest = options;
+          return {
+            status: 502,
+            body: {
+              ok: false,
+              code: "AI_PROVIDER_FAILED",
+              error: { message: "temporary outage" },
+              ai: { used: false },
+            },
+          };
+        },
       }),
     /temporary outage/
   );
@@ -2489,6 +2510,10 @@ test("mock start retries the same empty active session after AI failure and turn
   );
 
   let request;
+  const changedPlan = {
+    ...originalPlan,
+    resolved: { ...originalPlan.resolved, model: "gpt-5.6-luna", effort: "low" },
+  };
   const retried = await api.mockInterviewStartWithAI({
     repoRoot,
     id: "mock-retry",
@@ -2499,6 +2524,7 @@ test("mock start retries the same empty active session after AI failure and turn
       arbitrarySecret: "do-not-send-this",
       schedulingLink: "https://calendly.com/private/mock",
     },
+    executionPlan: changedPlan,
     runAI: async (options) => {
       request = options;
       return {
@@ -2516,6 +2542,9 @@ test("mock start retries the same empty active session after AI failure and turn
   assert.equal(retried.question.questionNumber, 1);
   assert.equal(request.aiOperation, "coach.deep");
   assert.equal(request.tier, undefined);
+  assert.deepEqual(failedRequest.executionPlan, originalPlan);
+  assert.deepEqual(request.executionPlan, originalPlan);
+  assert.deepEqual(retried.session.executionPlan, originalPlan);
   session = api.chatFirstStateGet({ repoRoot }).mockSessions.find((row) => row.id === "mock-retry");
   assert.equal(session.messages.filter((message) => message.kind === "question").length, 1);
   const serialized = request.messages[0].content;
