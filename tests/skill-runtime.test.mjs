@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_MODEL, DEFAULT_SMALL_FAST_MODEL } from "../src/core/ai/ai-config.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
@@ -916,6 +916,7 @@ test("runSkillStream: aborting mid-run (client disconnect) stops the loop and re
         CAREERRAT_RUNTIME_SKILLS: "evaluate-job",
       },
       signal: externalController.signal,
+      timeoutMs: 5_000,
       onEvent: (evt) => {
         events.push(evt.type);
         // Disconnect right after the first message is observed — by the time
@@ -929,6 +930,117 @@ test("runSkillStream: aborting mid-run (client disconnect) stops the loop and re
     assert.deepEqual(result, { ok: false, aborted: true });
     assert.deepEqual(events, ["system"]);
   } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+for (const [routeName, routeEnv] of [
+  ["BYOK", { ANTHROPIC_API_KEY: "sk-ant-test" }],
+  [
+    "proxy",
+    {
+      CAREERRAT_AI_PROXY_URL: "http://127.0.0.1:7788",
+      CAREERRAT_AI_PROXY_TOKEN: "devtoken",
+    },
+  ],
+]) {
+  test(`runSkillStream: ${routeName} SDK queries stop at the optional runtime deadline`, async () => {
+    mock.timers.enable({ apis: ["setTimeout"] });
+    const repoRoot = tempRepoWithSkill("evaluate-job");
+    const cleanupController = new AbortController();
+    let querySignal = null;
+    let queryReturned = false;
+    let markQueryStarted;
+    const queryStarted = new Promise((resolve) => {
+      markQueryStarted = resolve;
+    });
+    try {
+      const events = [];
+      const running = runSkillStream({
+        skill: "evaluate-job",
+        input: "hi",
+        repoRoot,
+        env: {
+          ...routeEnv,
+          CAREERRAT_RUNTIME_SKILLS: "evaluate-job",
+        },
+        signal: cleanupController.signal,
+        timeoutMs: 25,
+        onEvent: (evt) => events.push(evt.type),
+        loadSdk: async () => ({
+          query: ({ options }) => {
+            querySignal = options.abortController.signal;
+            async function* stalledQuery() {
+              markQueryStarted();
+              await new Promise((_, reject) => {
+                const rejectAsAborted = () => {
+                  const error = new Error("aborted");
+                  error.name = "AbortError";
+                  reject(error);
+                };
+                if (querySignal.aborted) rejectAsAborted();
+                else querySignal.addEventListener("abort", rejectAsAborted, { once: true });
+              });
+            }
+            const iterator = stalledQuery();
+            const returnQuery = iterator.return.bind(iterator);
+            iterator.return = async () => {
+              queryReturned = true;
+              return returnQuery();
+            };
+            return iterator;
+          },
+        }),
+      });
+
+      await queryStarted;
+      mock.timers.tick(25);
+      const deadlineAbortedQuery = querySignal.aborted;
+      if (!deadlineAbortedQuery) cleanupController.abort();
+      const result = await running;
+
+      assert.equal(deadlineAbortedQuery, true);
+      assert.equal(queryReturned, true);
+      assert.equal(result.ok, false);
+      assert.equal(result.code, "RUNTIME_TIMEOUT");
+      assert.match(result.error, /timed out/i);
+      assert.deepEqual(events, ["error", "result"]);
+    } finally {
+      mock.timers.reset();
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+}
+
+test("runSkillStream: a completed SDK query clears its optional runtime deadline", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  const repoRoot = tempRepoWithSkill("evaluate-job");
+  let querySignal = null;
+  try {
+    const result = await runSkillStream({
+      skill: "evaluate-job",
+      input: "hi",
+      repoRoot,
+      env: {
+        ANTHROPIC_API_KEY: "sk-ant-test",
+        CAREERRAT_RUNTIME_SKILLS: "evaluate-job",
+      },
+      timeoutMs: 25,
+      onEvent: () => {},
+      loadSdk: async () => ({
+        query: ({ options }) => {
+          querySignal = options.abortController.signal;
+          return fakeSdk(SAMPLE_RUN).query({ options });
+        },
+      }),
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(querySignal.aborted, false);
+    mock.timers.tick(25);
+    assert.equal(querySignal.aborted, false);
+  } finally {
+    mock.timers.reset();
     rmSync(repoRoot, { recursive: true, force: true });
   }
 });
@@ -957,6 +1069,7 @@ test("runSkillStream: a selected installed CLI bypasses the Agent SDK and stream
       tools: ["Read"],
       approvedReadPaths: [upload],
       outputSchema: { type: "object", required: ["full_text"] },
+      timeoutMs: 480_000,
       runtimeInventory: [
         {
           id: "claude",
@@ -1002,6 +1115,7 @@ test("runSkillStream: a selected installed CLI bypasses the Agent SDK and stream
       type: "object",
       required: ["full_text"],
     });
+    assert.equal(calls[0].timeoutMs, 480_000);
     assert.doesNotMatch(calls[0].prompt, /\.agents\/skills\/resume-extract\/SKILL\.md/);
     assert.match(calls[0].prompt, new RegExp(upload.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.match(calls[0].prompt, /can only return its bounded model result/i);

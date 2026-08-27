@@ -2,7 +2,8 @@ const YES_NO_FENCE = /(?:^|\r?\n)```careerrat:answer[ \t]*\r?\n([^\r\n]+)\r?\n``
 const BINARY_QUESTION_START =
   /^(?:do|does|did|is|are|was|were|can|could|will|would|should|have|has|had|may|might|must)\b/i;
 const OPEN_QUESTION_WORD = /\b(?:what|which|who|whom|whose|where|when|why|how)\b/i;
-const CHOICE_QUESTION = /^(?:would you rather|do you (?:prefer|want)\b.*\bor\b)/i;
+const CHOICE_QUESTION =
+  /^(?:would you rather|do you (?:prefer|want)\b.*\bor\b|should (?:i|we|you)\b.*\bor\b)/i;
 const COMPOUND_BINARY_CLAUSE =
   /\b(?:and|or)\s+(?:do|does|did|is|are|was|were|can|could|will|would|should|have|has|had|may|might|must)\b/i;
 
@@ -25,7 +26,10 @@ export function stripChatConfirmationBlocks(value) {
 export function isPlainYesNoQuestion(value) {
   const source = stripChatConfirmationBlocks(value);
   if (!source.endsWith("?") || (source.match(/\?/g) || []).length !== 1) return false;
-  const question = source.match(/(?:^|[.!]\s+)([^.!?]+\?)$/)?.[1] || source;
+  const question =
+    source.match(
+      /(?:^|[.!:]\s+|\r?\n+|,\s+)((?:do|does|did|is|are|was|were|can|could|will|would|should|have|has|had|may|might|must)\b[^.!?]*\?)$/i
+    )?.[1] || source;
   const normalized = question.trim();
   return (
     BINARY_QUESTION_START.test(normalized) &&
@@ -59,5 +63,6 @@ export function parseChatAnswerMode(value) {
   ) {
     return { text: source.trim(), answerMode: null };
   }
-  return { text: source.slice(0, match.index).trim(), answerMode: "yes-no" };
+  const text = source.slice(0, match.index).trim();
+  return { text, answerMode: isPlainYesNoQuestion(text) ? "yes-no" : null };
 }

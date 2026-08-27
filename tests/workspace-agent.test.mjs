@@ -4792,6 +4792,50 @@ test("free-form turns call the selected AI seam with the complete durable conver
   );
 });
 
+test("AI search failures stay plain English in workspace history and later agent context", async () => {
+  const repoRoot = tempRepo();
+  const failed = recordWorkspaceSearchCompletion({
+    repoRoot,
+    env: {},
+    run: {
+      id: "ai-web-search-failed",
+      purpose: "ai-web-search",
+      status: "failed",
+      error: {
+        code: "AI_WEB_SEARCH_QUERIES_FAILED",
+        message: "Model output did not match the route schema.",
+        errors: ["Model output did not match the route schema."],
+      },
+    },
+  });
+
+  const receipt = failed.messages.at(-1);
+  assert.equal(receipt.artifacts[0].title, "AI web search: Needs attention");
+  assert.equal(receipt.text, "AI search stopped before it finished. Try it again.");
+  assert.deepEqual(receipt.artifacts[0].error, {
+    message: "AI search stopped before it finished. Try it again.",
+  });
+  assert.doesNotMatch(
+    JSON.stringify(receipt.artifacts[0]),
+    /schema|AI_WEB_SEARCH_QUERIES_FAILED|route/i
+  );
+
+  const calls = [];
+  await runWorkspaceAgentTurn({
+    repoRoot,
+    env: {},
+    text: "What happened with that search?",
+    callAIImpl: async (input) => {
+      calls.push(input);
+      return { content: [{ type: "text", text: "The AI search needs another try." }] };
+    },
+  });
+
+  const modelHistory = JSON.stringify(calls[0].messages);
+  assert.match(modelHistory, /AI search stopped before it finished/);
+  assert.doesNotMatch(modelHistory, /schema|AI_WEB_SEARCH_QUERIES_FAILED|route/i);
+});
+
 test("free-form turns persist the model-declared yes-no answer mode without its control fence", async () => {
   const repoRoot = tempRepo();
   const result = await runWorkspaceAgentTurn({

@@ -539,6 +539,7 @@ export async function runSkillStream({
   toolProfile,
   approvedReadPaths,
   outputSchema,
+  timeoutMs,
   runtimeInventory = null,
   runInstalledRuntimeImpl = runInstalledRuntime,
 } = {}) {
@@ -611,6 +612,7 @@ export async function runSkillStream({
         tools: installedRuntimeTools,
         approvedReadPaths,
         outputSchema,
+        timeoutMs,
       });
       if (signal?.aborted) return { ok: false, aborted: true };
       onEvent({
@@ -664,20 +666,16 @@ export async function runSkillStream({
   });
 
   const controller = new AbortController();
-  let externallyAborted = false;
+  let abortCause = null;
+  const abortFromExternalSignal = () => {
+    abortCause ||= "external";
+    controller.abort();
+  };
   if (signal) {
     if (signal.aborted) {
-      externallyAborted = true;
-      controller.abort();
+      abortFromExternalSignal();
     } else {
-      signal.addEventListener(
-        "abort",
-        () => {
-          externallyAborted = true;
-          controller.abort();
-        },
-        { once: true }
-      );
+      signal.addEventListener("abort", abortFromExternalSignal, { once: true });
     }
   }
 
@@ -707,6 +705,16 @@ export async function runSkillStream({
       hooks: toolPolicy.hooks,
     },
   });
+  const runtimeTimeout = Number.isFinite(timeoutMs)
+    ? setTimeout(
+        () => {
+          abortCause ||= "timeout";
+          controller.abort();
+        },
+        Math.max(1, timeoutMs)
+      )
+    : null;
+  runtimeTimeout?.unref?.();
 
   let resultData = null;
   try {
@@ -723,7 +731,15 @@ export async function runSkillStream({
       }
     }
   } catch (err) {
-    if (externallyAborted || controller.signal.aborted) {
+    if (abortCause === "timeout") {
+      resultData = {
+        ok: false,
+        error: "AI request timed out.",
+        code: "RUNTIME_TIMEOUT",
+      };
+      onEvent({ type: "error", data: { message: resultData.error, code: resultData.code } });
+      onEvent({ type: "result", data: resultData });
+    } else if (abortCause === "external" || controller.signal.aborted) {
       resultData = { ok: false, aborted: true };
     } else {
       onEvent({ type: "error", data: { message: err.message } });
@@ -731,6 +747,8 @@ export async function runSkillStream({
       onEvent({ type: "result", data: resultData });
     }
   } finally {
+    if (runtimeTimeout) clearTimeout(runtimeTimeout);
+    signal?.removeEventListener?.("abort", abortFromExternalSignal);
     try {
       await q.return?.();
     } catch {

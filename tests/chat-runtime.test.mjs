@@ -13,7 +13,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { isPlainYesNoQuestion } from "../src/core/ai/chat-answer-mode.mjs";
+import { isPlainYesNoQuestion, parseChatAnswerMode } from "../src/core/ai/chat-answer-mode.mjs";
 import {
   buildChatKickoffPrompt,
   classifyChatEvent,
@@ -789,6 +789,28 @@ test("binary fallback rejects compound questions whose clauses can have differen
     isPlainYesNoQuestion("Do you want remote work and are you open to relocating?"),
     false
   );
+});
+
+test("binary fallback accepts a short lead-in before the terminal yes-or-no question", () => {
+  assert.equal(isPlainYesNoQuestion("One quick check: should I save these settings?"), true);
+  assert.equal(
+    isPlainYesNoQuestion("I have the search details I need.\nShould I start the search now?"),
+    true
+  );
+});
+
+test("explicit answer metadata cannot turn an either-or choice into Yes and No", () => {
+  const parsed = parseChatAnswerMode(
+    [
+      "Should I keep waiting or focus on the job boards?",
+      "```careerrat:answer",
+      '{"mode":"yes-no"}',
+      "```",
+    ].join("\n")
+  );
+
+  assert.equal(parsed.text, "Should I keep waiting or focus on the job boards?");
+  assert.equal(parsed.answerMode, null);
 });
 
 test("createChatRuntime: a replacement process waits on the durable unanswered assistant question and resumes with full history", async () => {

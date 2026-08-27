@@ -388,8 +388,7 @@ export function MessageTranscript({
   const binaryQuestionIndex =
     latestDialogue?.role === "assistant" &&
     latestDialogue?.kind === "text" &&
-    (latestDialogue?.metadata?.answerMode === "yes-no" ||
-      isPlainYesNoQuestion(latestDialogue?.text))
+    isPlainYesNoQuestion(latestDialogue?.text)
       ? latestDialogueIndex
       : -1;
 

@@ -85,7 +85,7 @@ describe("TodayConversation", () => {
           id: "question",
           role: "assistant",
           kind: "text",
-          text: "Should I keep this company in your search?",
+          text: "One quick check: should I keep this company in your search?",
           metadata: { answerMode: "yes-no" },
         },
       ],
@@ -119,7 +119,7 @@ describe("TodayConversation", () => {
             id: "question",
             role: "assistant",
             kind: "text",
-            text: "Should I keep this company in your search?",
+            text: "One quick check: should I keep this company in your search?",
             metadata: { answerMode: "yes-no" },
           },
           { id: "answer", role: "user", kind: "text", text: "No" },
@@ -616,6 +616,26 @@ describe("TodayConversation", () => {
             role: "assistant",
             kind: "text",
             text: "Are you authorized to work in the US and will you need sponsorship?",
+          },
+        ]}
+      />
+    );
+
+    expect(html).not.toContain(">Yes<");
+    expect(html).not.toContain(">No<");
+  });
+
+  it("does not trust stale yes-no metadata on an either-or question", () => {
+    const html = markup(
+      <MessageTranscript
+        onAnswer={() => undefined}
+        messages={[
+          {
+            id: "wait-or-boards",
+            role: "assistant",
+            kind: "text",
+            text: "Should I keep waiting or focus on the job boards?",
+            metadata: { answerMode: "yes-no" },
           },
         ]}
       />
