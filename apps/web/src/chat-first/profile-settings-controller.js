@@ -138,6 +138,7 @@ function browserModel(automation) {
     effectiveProvider: effective?.label || session.effectiveProvider || "Not detected",
     presenceStatus: session.presence?.status || "unknown",
     presenceDetail: session.presence?.detail || "Browser readiness has not been checked yet.",
+    nextStep: session.presence?.nextStep || null,
     automaticFillSupported: Boolean((configured || effective)?.automatedApply),
     options: options.map((option) => ({
       id: option?.id,

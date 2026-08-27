@@ -4,6 +4,23 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.5] - 2026-08-27
+
+### Changed
+
+- Guided AI installation now shows trusted setup phases and recovery actions instead of streaming npm, shell, authentication, path, or stack output into the app.
+- Browser setup uses plain product language and an in-app recovery action instead of provider, extension, Playwright, or CLI instructions.
+- Expanded diagnostics explain that private raw details are hidden. They never render database errors, local paths, credentials, stack frames, parser text, or provider responses.
+
+### Fixed
+
+- Search translates skipped and failed lanes into candidate-facing states, removes unknown internal reason codes, and protects the no-lane summary and progress paths from raw backend copy.
+- Browser-workflow cards derive their result message from the typed workflow state instead of displaying a persisted exception or backend summary.
+
+### Release verification
+
+- The repository suite passed 3,857 tests with 15 intentional skips and no failures. The full web suite passed all 776 tests, the combined candidate-error regression set passed 278 focused UI tests, and the browser/session suite passed all 50 tests. Web, website, docs, and desktop staging builds passed; lint completed without errors; placeholder lint, knip, actionlint, package inspection, dependency audit, and `git diff --check` passed.
+
 ## [0.16.4] - 2026-08-26
 
 ### Added
@@ -30,6 +47,8 @@ All notable changes to CareerRat are documented here. This project follows
 - The repository suite passed 3,856 tests with 15 intentional skips and zero failures after the recovery, locality, onboarding, application-link, and release-gate fixes. The web suite passed all 761 tests.
 - A fresh Codex-backed desktop run completed resume intake, saved a remote-US and New York City hybrid profile with a two-day office limit, searched 358 listings across five sources, and retained four body-verified matches without admitting a five-day-office listing.
 - The real-browser application harness passed all 11 Chromium scenarios, including résumé upload, native selects, Greenhouse and Ashby comboboxes, multistep forms, failure handoff, and prepare-only mode. The final Submit control was never clicked.
+- Protected PRs #232, #233, and #234 merged without changing branch protection. The signed `v0.16.4` tag points to the exact `main` promotion merge, and the public GitHub release contains the notarized DMG, signed updater ZIP, `latest-mac.yml`, and SPDX SBOM.
+- The release pipeline passed Apple signing, notarization, stapling, Gatekeeper, packaged launch, and a native signed 0.16.3-to-0.16.4 update. `careerrat@latest`, the Homebrew cask, and careerrat.com are live at 0.16.4; the installed app reports 0.16.4 and its own update check reports current.
 
 ## [0.16.3] - 2026-08-26
 

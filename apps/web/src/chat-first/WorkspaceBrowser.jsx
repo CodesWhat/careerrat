@@ -89,24 +89,61 @@ function candidateSafeLaneError(lane) {
 
 function laneStatusCopy(lane) {
   const label = candidateLaneLabel(lane.label);
+  if (lane.status === "skipped") {
+    const status = {
+      cancelled: "stopped",
+      "not-configured": "not set up",
+      "not-consented": "permission needed",
+      unavailable: "not available",
+    }[lane.reason];
+    return status ? `${label}: ${status}` : null;
+  }
   const status = { succeeded: "finished", running: "searching" }[lane.status] || lane.status;
   if (lane.status !== "failed") return `${label}: ${status}`;
   return `${label}: ${candidateSafeLaneError(lane)}`;
+}
+
+function candidateRunningSearchCopy(lanes) {
+  const runningLabels = new Set(
+    lanes.filter((lane) => lane.status === "running").map((lane) => lane.label)
+  );
+  const savedSites = runningLabels.has("Configured sources");
+  const aiWeb = runningLabels.has("AI web search");
+  if (savedSites && aiWeb) return "Searching your saved job sites and the web";
+  if (savedSites) return "Searching your saved job sites";
+  if (aiWeb) return "Searching the web";
+  return "Searching for jobs that match your preferences";
 }
 
 function candidateSearchSummary(sourceSweep, lanes) {
   const finished = lanes.filter((lane) => lane.status === "succeeded");
   const failed = lanes.filter((lane) => lane.status === "failed");
   const savedSitesFinished = finished.some((lane) => lane.label === "Configured sources");
+  const savedSitesNeedRetry = failed.some((lane) => lane.label === "Configured sources");
+  const aiFinished = finished.some((lane) => lane.label === "AI web search");
   const aiNeedsRetry = failed.some((lane) => lane.label === "AI web search");
   if (savedSitesFinished && aiNeedsRetry) {
     return "Your saved job sites finished. The AI search needs another try.";
+  }
+  if (aiFinished && savedSitesNeedRetry) {
+    return "The AI search finished. Your saved job sites need another try.";
+  }
+  if (finished.length && failed.length) {
+    return "Part of the search finished. The rest needs another try.";
   }
   if (failed.length && !finished.length) {
     if (failed.length > 1) return "The search needs another try.";
     return failed[0].label === "Configured sources"
       ? "Your saved job sites need another try."
       : "The AI search needs another try.";
+  }
+  if (!lanes.length && sourceSweep?.status === "error") {
+    if (searchHasNoConfiguredLane(sourceSweep)) {
+      return "CareerRat needs at least one job site or a connected AI before it can search.";
+    }
+    const fallback = "Search couldn't finish. Try again.";
+    const raw = String(sourceSweep?.summary || "").trim();
+    return raw ? errorState(new Error(raw), fallback).message : fallback;
   }
   return sourceSweep?.summary || "Ready to search";
 }
@@ -154,6 +191,7 @@ export function SearchToolbar({ sourceSweep = {}, onRunSweep, onOpenSourceHealth
   const lanes = Object.values(sourceSweep?.lanes || {}).filter(
     (lane) => lane && typeof lane === "object"
   );
+  const laneCopies = lanes.map(laneStatusCopy).filter(Boolean);
   const needsRetry = searchNeedsRetry(sourceSweep);
   return (
     <div className="cf-search__sweep" aria-live="polite" aria-busy={busy}>
@@ -170,14 +208,14 @@ export function SearchToolbar({ sourceSweep = {}, onRunSweep, onOpenSourceHealth
       )}
       <span className="cf-search__sweep-copy">
         {hydrating
-          ? sourceSweep?.detail || "Loading your saved search"
+          ? "Loading your saved search"
           : running
-            ? sourceSweep?.detail || "Searching for jobs that match your preferences"
+            ? candidateRunningSearchCopy(lanes)
             : candidateSearchSummary(sourceSweep, lanes)}
       </span>
-      {lanes.length ? (
+      {laneCopies.length ? (
         <span className="cf-search__lane-status" role="status" aria-label="Search lane status">
-          {lanes.map(laneStatusCopy).join(" · ")}
+          {laneCopies.join(" · ")}
         </span>
       ) : null}
       <button

@@ -1,5 +1,6 @@
 import { isPlainYesNoQuestion } from "../../../../src/core/ai/chat-answer-mode.mjs";
 import { resolvePersistedErrorCopy } from "../lib/errorCopy.js";
+import { safeDisplayDetail } from "../lib/safe-display-details.js";
 import { cleanAgentCopy } from "./agent-copy.js";
 import { UploadIcon } from "./chat-first-icons.jsx";
 import { artifactEmoji } from "./chat-first-model.js";
@@ -50,7 +51,59 @@ function RunReceipt({ receipt }) {
   );
 }
 
+function browserWorkflowTitle(artifact) {
+  return (
+    {
+      "ingest-mail": "Email check",
+      "ingest-messages": "Recruiting message check",
+      "relationship-sourcing": "Relationship search",
+      "optimize-linkedin": "LinkedIn profile review",
+      "sync-status": "Application status check",
+    }[artifact?.skill] || "Browser task"
+  );
+}
+
+function browserWorkflowBlockerCode(artifact) {
+  const blockers = Array.isArray(artifact?.blockers) ? artifact.blockers : EMPTY_LIST;
+  const codes = new Set(blockers.map((blocker) => String(blocker?.code || "").toUpperCase()));
+  return [
+    "CONSENT_REQUIRED",
+    "STATUS_URL_REQUIRED",
+    "AUTH_REQUIRED",
+    "VERIFICATION_REQUIRED",
+    "CHALLENGE_REQUIRED",
+    "BROWSER_UNAVAILABLE",
+    "BROWSER_ERROR",
+  ].find((code) => codes.has(code));
+}
+
+function browserWorkflowRecovery(artifact) {
+  const blockerCode = browserWorkflowBlockerCode(artifact);
+  if (blockerCode === "CONSENT_REQUIRED") {
+    return "CareerRat needs your permission for this browser task. Open Settings, turn it on, then retry.";
+  }
+  if (blockerCode === "STATUS_URL_REQUIRED") {
+    return "CareerRat needs the signed-in application dashboard link. Open the job, save that link, then retry.";
+  }
+  if (["AUTH_REQUIRED", "VERIFICATION_REQUIRED", "CHALLENGE_REQUIRED"].includes(blockerCode)) {
+    return "Sign in or finish the verification step in the CareerRat browser, then retry.";
+  }
+  if (blockerCode === "BROWSER_UNAVAILABLE") {
+    return "CareerRat can't open the browser yet. Open Settings, check the browser connection, then retry.";
+  }
+  return "CareerRat couldn't finish this browser task. Try again. If it still doesn't work, open Settings and check the browser connection.";
+}
+
+function browserWorkflowReceiptLabel(artifact) {
+  const title = browserWorkflowTitle(artifact);
+  if (artifact?.state === "completed") return `${title} finished`;
+  if (artifact?.state === "needs-review") return `${title} needs your review`;
+  if (artifact?.state === "running") return `${title} is in progress`;
+  return `${title} needs attention`;
+}
+
 function artifactTitle(artifact) {
+  if (artifact?.kind === "browser_workflow_result") return browserWorkflowTitle(artifact);
   if (artifact?.title || artifact?.name || artifact?.label) {
     return artifact.title || artifact.name || artifact.label;
   }
@@ -59,6 +112,18 @@ function artifactTitle(artifact) {
 }
 
 function artifactSubtitle(artifact) {
+  if (artifact?.kind === "browser_workflow_result") {
+    if (artifact.state === "completed") {
+      return "Browser task finished. Review what CareerRat saved.";
+    }
+    if (artifact.state === "needs-review") {
+      return "Browser task finished. Review the items that need your attention.";
+    }
+    if (artifact.state === "running") {
+      return "CareerRat is working in the browser now.";
+    }
+    return browserWorkflowRecovery(artifact);
+  }
   const value = artifact?.subtitle || artifact?.summary || artifact?.description || artifact?.note;
   if (typeof value === "string" || typeof value === "number") return String(value);
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -84,6 +149,19 @@ function artifactSubtitle(artifact) {
 }
 
 function artifactView(artifact, message, onArtifactAction) {
+  if (artifact?.kind === "browser_workflow_result") {
+    return {
+      kind: artifact.kind,
+      skill: artifact.skill,
+      state: artifact.state,
+      title: browserWorkflowTitle(artifact),
+      icon: "🌐",
+      subtitle: artifactSubtitle(artifact),
+      actionLabel: null,
+      onAction: undefined,
+      secondaryActions: EMPTY_LIST,
+    };
+  }
   const ownAction = artifact?.onAction;
   const canOpen = typeof ownAction === "function" || typeof onArtifactAction === "function";
   const title = artifactTitle(artifact);
@@ -335,21 +413,40 @@ export function MessageTranscript({
           const errorState = isError
             ? resolvePersistedErrorCopy(message.error, message.text)
             : null;
+          const browserArtifact = (
+            Array.isArray(message.artifacts) ? message.artifacts : EMPTY_LIST
+          ).find((artifact) => artifact?.kind === "browser_workflow_result");
+          const browserReceipt = browserArtifact
+            ? {
+                mark:
+                  browserArtifact.state === "completed"
+                    ? "✓"
+                    : browserArtifact.state === "running"
+                      ? "…"
+                      : "!",
+                label: browserWorkflowReceiptLabel(browserArtifact),
+                tone: ["completed", "running", "needs-review"].includes(browserArtifact.state)
+                  ? undefined
+                  : "error",
+              }
+            : null;
           content = (
             <RunReceipt
-              receipt={{
-                mark: message.metadata?.mark || (isError ? "!" : undefined),
-                label: errorState?.message || message.text || "Action updated",
-                tone: isError ? "error" : undefined,
-                actionLabel: message.metadata?.actionLabel,
-                onAction:
-                  typeof action === "function"
-                    ? () => {
-                        if (message.onAction) message.onAction(message);
-                        else onMessageAction(message);
-                      }
-                    : undefined,
-              }}
+              receipt={
+                browserReceipt || {
+                  mark: message.metadata?.mark || (isError ? "!" : undefined),
+                  label: errorState?.message || message.text || "Action updated",
+                  tone: isError ? "error" : undefined,
+                  actionLabel: message.metadata?.actionLabel,
+                  onAction:
+                    typeof action === "function"
+                      ? () => {
+                          if (message.onAction) message.onAction(message);
+                          else onMessageAction(message);
+                        }
+                      : undefined,
+                }
+              }
             />
           );
         } else if (message.kind === "artifact") {
@@ -1415,6 +1512,7 @@ export function EngineDownCover({
   technicalDetails,
 }) {
   if (!open) return null;
+  const displayDetails = safeDisplayDetail(technicalDetails);
   return (
     <div className="chat-first-cover chat-first-cover--engine">
       <section
@@ -1451,9 +1549,9 @@ export function EngineDownCover({
         >
           what happened, technically
         </button>
-        {technicalDetails ? (
+        {displayDetails ? (
           <p className="chat-first-engine-down__technical-details" role="status">
-            {technicalDetails}
+            {displayDetails}
           </p>
         ) : null}
       </section>

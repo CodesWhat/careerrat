@@ -748,18 +748,40 @@ queue.
 - Alerts 108, 109, and 111 remain open only until a main-branch Scorecard run can
   observe the live protection and the two staged repository fixes.
 
-## Release status (v0.16.4, updated August 26, 2026)
+## Release status (v0.16.5, updated August 27, 2026)
 
-**v0.16.4 is the verified release candidate.** It preserves the complete Claude
-Code and OpenAI Codex workflow from v0.16.3, then closes the recovery,
-body-truth location filtering, application-entry, and in-app update gaps
-recorded below. v0.16.3 remains the current public version until every signed
-0.16.4 distribution channel has been checked live.
+**v0.16.5 is the verified release candidate.** It closes the remaining
+candidate-visible raw-error paths found in the final v0.16.4 audit: guided
+installer output, expanded diagnostics, browser-workflow summaries, skipped and
+no-lane Search status, and browser readiness setup. The repository suite passed
+3,857 tests with 15 intentional skips and no failures. The full web suite passed
+all 776 tests, the combined candidate-error regression set passed 278 focused UI
+tests, and the browser/session suite passed all 50 tests. Web, website, docs, and
+desktop staging builds passed; lint completed without errors; placeholder lint,
+knip, actionlint, package inspection, dependency audit, and `git diff --check`
+passed. v0.16.4 remains the current public release until the signed 0.16.5
+distribution set passes live checks.
+
+### v0.16.4 public release verification
+
+**v0.16.4 is released and verified.** It preserves the complete Claude Code and
+OpenAI Codex workflow from v0.16.3, then closes the recovery, body-truth location
+filtering, application-entry, and in-app update gaps recorded below. Protected
+PRs #232, #233, and #234 merged without changing branch protection, and the
+signed tag points to the exact `main` promotion merge.
+
+The public GitHub release contains the signed, notarized, and stapled DMG,
+signed updater ZIP, `latest-mac.yml`, and SPDX SBOM. `careerrat@latest` is
+0.16.4, careerrat.com is serving the production site, and the Homebrew cask is
+0.16.4 with the published DMG hash. `/Applications/CareerRat.app` reports
+0.16.4, passes Gatekeeper and deep signature verification, launches cleanly,
+and reports that it is up to date. The release pipeline also passed a native
+signed 0.16.3-to-0.16.4 update.
 
 ### v0.16.4 recovery and update hardening (August 26, 2026)
 
-The next patch line is focused on recovery and staying current without making a
-candidate decode implementation details or leave the app.
+This patch focused on recovery and staying current without making a candidate
+decode implementation details or leave the app.
 
 - **People-shaped failures** — Search now fails closed to CareerRat-owned copy.
   Raw schema, parser, provider, process, path, and lane bookkeeping cannot render

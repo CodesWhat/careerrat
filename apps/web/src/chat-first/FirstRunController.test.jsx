@@ -980,7 +980,7 @@ describe("FirstRunController chat event reconciliation", () => {
     expect(view.props.engines).toEqual([]);
   });
 
-  it("runs the Claude installer inside CareerRat and keeps its readable progress", async () => {
+  it("runs the Claude installer without retaining raw installer output", async () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi({ transcript: [] });
     api.getInstalledAiRuntimes.mockResolvedValue({
@@ -990,7 +990,11 @@ describe("FirstRunController chat event reconciliation", () => {
     });
     api.startInstalledAiRuntimeGuidedSetup.mockImplementation(async (_runtimeId, { onEvent }) => {
       onEvent({ type: "started", runtimeId: "claude" });
-      onEvent({ type: "output", message: "Installing Claude Code…" });
+      onEvent({
+        type: "output",
+        message:
+          "npm ERR! auth failed at /Users/person/.npm/_logs/debug.log\n    at install (/private/tmp/setup.js:42:9)",
+      });
       onEvent({ type: "done", runtimeId: "claude" });
       return { runtimeId: "claude" };
     });
@@ -1006,8 +1010,73 @@ describe("FirstRunController chat event reconciliation", () => {
     expect(view.props.guidedSetup).toEqual({
       runtimeId: "claude",
       status: "installed",
-      lines: ["Installing Claude Code…"],
     });
+    expect(JSON.stringify(view.props.guidedSetup)).not.toMatch(
+      /npm|auth|\/Users\/person|private\/tmp|setup\.js/i
+    );
+  });
+
+  it("turns a technical guided-install failure into a safe retry state", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi({ transcript: [] });
+    api.getInstalledAiRuntimes.mockResolvedValue({
+      selectedId: null,
+      providerFallback: false,
+      runtimes: [],
+    });
+    api.startInstalledAiRuntimeGuidedSetup.mockRejectedValue(
+      Object.assign(
+        new Error(
+          "SSE disconnected: npm ERR! EACCES /Users/person/.npm/_logs/debug.log bearer abc123"
+        ),
+        { code: "RUNTIME_GUIDED_SETUP_LAUNCH_FAILED" }
+      )
+    );
+    let view = await bootController(module, api, { startInterview: false });
+
+    await view.props.onStartGuidedSetup("claude");
+    view = rerender(module, api);
+
+    expect(view.props.guidedSetup).toEqual({ runtimeId: "claude", status: "failed" });
+    expect(view.props.error).toBeNull();
+  });
+
+  it.each([
+    ["RUNTIME_GUIDED_SETUP_CANCELLED", "cancelled"],
+    ["RUNTIME_GUIDED_SETUP_UNAVAILABLE", "unavailable"],
+    ["RUNTIME_GUIDED_SETUP_UNSUPPORTED", "unavailable"],
+  ])("maps %s to a reachable guided-setup state", async (code, status) => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi({ transcript: [] });
+    api.startInstalledAiRuntimeGuidedSetup.mockRejectedValue(
+      new ApiError(409, { code, error: "raw installer details /Users/person/private" })
+    );
+    let view = await bootController(module, api, { startInterview: false });
+
+    await view.props.onStartGuidedSetup("claude");
+    view = rerender(module, api);
+
+    expect(view.props.guidedSetup).toEqual({ runtimeId: "claude", status });
+    expect(view.props.error).toBeNull();
+  });
+
+  it("refreshes inventory when guided setup reports Claude Code is already installed", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi({ transcript: [] });
+    api.startInstalledAiRuntimeGuidedSetup.mockRejectedValue(
+      new ApiError(409, {
+        code: "RUNTIME_ALREADY_INSTALLED",
+        error: "already installed at /Users/person/bin",
+      })
+    );
+    let view = await bootController(module, api, { startInterview: false });
+    const callsBeforeSetup = api.getInstalledAiRuntimes.mock.calls.length;
+
+    await view.props.onStartGuidedSetup("claude");
+    view = rerender(module, api);
+
+    expect(api.getInstalledAiRuntimes.mock.calls.length).toBeGreaterThan(callsBeforeSetup);
+    expect(view.props.guidedSetup).toEqual({ runtimeId: "claude", status: "ready" });
   });
 
   it("starts browser sign-in directly from the engine picker", async () => {
@@ -1079,7 +1148,6 @@ describe("FirstRunController chat event reconciliation", () => {
       expect(view.props.guidedSetup).toEqual({
         runtimeId: "claude",
         status: "ready",
-        lines: [],
       });
       expect(view.props.engines[0]).toMatchObject({ id: "claude", selected: true, ready: true });
     } finally {
