@@ -157,6 +157,18 @@ test("architecture docs do not advertise a stale shipped skill count", () => {
   }
 });
 
+test("public setup docs derive their shipped skill count from the canonical catalog", () => {
+  const expected = canonicalSkillNames().length;
+  for (const path of [
+    join(root, "apps", "docs", "content", "docs", "getting-started", "keeping-current.mdx"),
+    join(root, "apps", "docs", "content", "docs", "advanced", "data-model.mdx"),
+  ]) {
+    const source = readFileSync(path, "utf8");
+    assert.match(source, new RegExp(`\\b${expected} skill definitions\\b`, "i"));
+    assert.doesNotMatch(source, /\\b(?:16|21) skill definitions\\b/i);
+  }
+});
+
 test("ingest-profile captures remote geographic eligibility separately from local work modes", () => {
   const { body } = readSkill("ingest-profile");
 

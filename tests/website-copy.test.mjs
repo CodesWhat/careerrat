@@ -460,6 +460,19 @@ test("website publishes canonical social metadata with a large CareerRat sharing
   );
 });
 
+test("the app shell and website share the selected CR favicon", async () => {
+  const iconBuild = await readFile("apps/website/scripts/generate-brand-icons.mjs", "utf8");
+  const appFavicon = await readFile("assets/favicon.ico");
+  const websiteFavicon = await readFile("apps/website/src/app/favicon.ico");
+
+  assert.equal(
+    Buffer.compare(appFavicon, websiteFavicon),
+    0,
+    "the app shell favicon must match the generated website CR favicon"
+  );
+  assert.match(iconBuild, /writeFile\(join\(repoRoot, "assets", "favicon\.ico"\), favicon\)/);
+});
+
 test("deployed sites bundle fonts without Google build-time fetches", async () => {
   const websiteLayout = await readFile("apps/website/src/app/layout.tsx", "utf8");
   const docsLayout = await readFile("apps/docs/src/app/layout.tsx", "utf8");
