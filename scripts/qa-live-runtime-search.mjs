@@ -65,13 +65,13 @@ const FIXTURES = {
       },
       location: {
         home: "New York, NY",
-        remote: false,
+        remote: true,
         remote_scope: "home-country",
         hybrid: true,
         onsite: true,
         relocation: [],
       },
-      compensation: { minimum_base: null, target_base: null },
+      compensation: { minimum_base: 85000, target_base: 100000 },
       authorization: { work_authorized: true, requires_sponsorship: false },
     },
     targeting: {
@@ -79,27 +79,51 @@ const FIXTURES = {
         {
           name: "Bar leadership",
           priority: "primary",
-          titles: ["Bartender", "Lead Bartender", "Bar Manager", "Beverage Manager"],
+          titles: [
+            "Bar Manager",
+            "Assistant Bar Manager",
+            "Bar Operations Lead",
+            "Lead Bartender",
+            "Head Bartender",
+          ],
         },
         {
           name: "Hospitality operations",
+          priority: "secondary",
+          titles: [
+            "Operations Manager, Food and Beverage",
+            "Assistant General Manager",
+            "General Manager",
+          ],
+        },
+        {
+          name: "Event and venue operations",
           priority: "adjacent",
-          titles: ["Food and Beverage Manager", "Event Operations Manager"],
+          titles: ["Event Operations Manager", "Event Coordinator", "Venue Operations Manager"],
         },
       ],
       keep_signals: [
-        "New York City",
+        "New York City local or remote anywhere in the United States",
         "beverage program ownership",
         "training and advancement",
         "high-volume polished service",
+        "$85,000 or more in salary or credible total compensation",
       ],
-      cut_signals: ["outside the New York City area"],
+      cut_signals: ["local role outside New York City", "remote role unavailable in New York"],
       excluded_companies: [],
     },
     prompts: [
       {
-        id: "nyc-hospitality",
-        text: "Find currently active bartender, lead bartender, bar manager, beverage manager, and food and beverage manager openings in New York City. Search the open web broadly, including specialist hospitality boards, employer career pages, and useful aggregators. Keep specific employer-and-role leads even when the full posting needs a browser session, but do not include roles outside New York City.",
+        id: "nyc-bar-leadership",
+        text: "Find currently active Bar Manager, Assistant Bar Manager, Bar Operations Lead, Lead Bartender, and Head Bartender openings in New York City. Search the open web broadly, including specialist hospitality boards, employer career pages, and useful aggregators. Prefer roles that can credibly reach $85,000 in salary or total compensation. Keep specific employer-and-role leads when compensation or the full posting still needs verification, but exclude local roles outside New York City.",
+      },
+      {
+        id: "nyc-hospitality-operations",
+        text: "Find currently active Food and Beverage Operations Manager, Assistant General Manager, and General Manager openings in New York City hospitality businesses. Search specialist hospitality boards, employer career pages, and the open web. Prefer roles paying at least $85,000 with a path toward $100,000. Keep specific sourced leads when compensation still needs verification, but exclude local roles outside New York City.",
+      },
+      {
+        id: "event-and-venue-operations",
+        text: "Find currently active Event Operations Manager, Event Coordinator, and Venue Operations Manager roles that are either local to New York City or remote anywhere in the United States and available to a New York resident. Search employer career pages, specialist boards, and the open web. Prefer hospitality-transferable roles paying at least $85,000, while keeping specific sourced leads with unverified compensation for later evaluation.",
       },
     ],
   },
