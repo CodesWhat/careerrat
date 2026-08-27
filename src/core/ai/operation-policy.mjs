@@ -87,8 +87,9 @@ function deepFreeze(value) {
 export function resolveAIExecutionPlan({
   operation,
   runtimeId,
-  quality = "automatic",
-  reasoning = "automatic",
+  quality,
+  reasoning,
+  preferences,
   capabilities,
   modelOverride,
   effortOverride,
@@ -102,8 +103,8 @@ export function resolveAIExecutionPlan({
     throw policyError(`unsupported AI runtime: ${selectedRuntime || "(empty)"}`);
   }
 
-  const requestedQuality = normalizeQuality(quality);
-  const requestedReasoning = normalizeReasoning(reasoning);
+  const requestedQuality = normalizeQuality(quality ?? preferences?.quality ?? "automatic");
+  const requestedReasoning = normalizeReasoning(reasoning ?? preferences?.reasoning ?? "automatic");
   const resolvedQuality =
     requestedQuality === "automatic" ? operationDefaults.quality : requestedQuality;
   const desiredEffort = String(

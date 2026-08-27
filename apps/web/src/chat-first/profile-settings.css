@@ -291,6 +291,88 @@
   cursor: pointer;
 }
 
+.cf-settings__ai-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cf-settings__ai-status {
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.cf-settings__ai-group {
+  min-width: 0;
+  margin: 12px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.cf-settings__ai-group legend {
+  margin-bottom: 7px;
+  font-size: 13.5px;
+  font-weight: 800;
+}
+
+.cf-settings__ai-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.cf-settings__ai-option {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px;
+  border: 1.5px solid var(--tint-cool-3);
+  border-radius: 14px;
+  cursor: pointer;
+}
+
+.cf-settings__ai-option:has(input:checked) {
+  border-color: var(--line-cool-2);
+  background: var(--tint-cool-2);
+}
+
+.cf-settings__ai-option:has(input:focus-visible) {
+  outline: var(--cf-focus-ring);
+  outline-offset: 2px;
+}
+
+.cf-settings__ai-option:has(input:disabled) {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.cf-settings__ai-option input {
+  width: 15px;
+  height: 15px;
+  margin: 2px 0 0;
+  accent-color: var(--ink-soft);
+}
+
+.cf-settings__ai-option > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cf-settings__ai-option strong {
+  font-size: 12.5px;
+}
+
+.cf-settings__ai-option small {
+  color: var(--slate);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
 .cf-settings__permission {
   display: flex;
   align-items: center;

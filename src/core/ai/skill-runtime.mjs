@@ -36,6 +36,7 @@ import { join } from "node:path";
 import { loadAgentCandidateConfig } from "../profile/config-store.mjs";
 import { PLAIN_ENGLISH_AGENT_VOICE } from "./agent-voice.mjs";
 import { resolveModelConfig } from "./ai-config.mjs";
+import { loadAIPreferences } from "./ai-preferences.mjs";
 import { resolveAIRoute } from "./call-ai.mjs";
 import { CHAT_ANSWER_MODE_GUIDANCE } from "./chat-answer-mode.mjs";
 import { runInstalledRuntime } from "./installed-runtimes.mjs";
@@ -548,8 +549,8 @@ export async function runSkillStream({
   model,
   effort,
   aiOperation,
-  quality = "automatic",
-  reasoning = "automatic",
+  quality = null,
+  reasoning = null,
   aiCapabilities = null,
   executionPlan = null,
   runtimeInventory = null,
@@ -589,6 +590,7 @@ export async function runSkillStream({
           runtimeId: routeRuntimeId,
           quality,
           reasoning,
+          preferences: loadAIPreferences({ repoRoot, env }),
           capabilities: aiCapabilities,
           modelOverride: model,
           effortOverride: effort,

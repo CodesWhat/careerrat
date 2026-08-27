@@ -26,6 +26,36 @@ test("automatic policy keeps Paul strong and routes web research to the balanced
   assert.equal(search.resolved.effort, "medium");
 });
 
+test("saved product preferences override operation defaults for a new plan", () => {
+  const plan = resolveAIExecutionPlan({
+    operation: "research.web",
+    runtimeId: "codex",
+    preferences: { quality: "best", reasoning: "high" },
+  });
+
+  assert.equal(plan.requested.quality, "best");
+  assert.equal(plan.requested.reasoning, "high");
+  assert.equal(plan.resolved.quality, "best");
+  assert.equal(plan.resolved.reasoning, "high");
+  assert.equal(plan.resolved.model, "gpt-5.6-sol");
+  assert.equal(plan.resolved.effort, "high");
+});
+
+test("an explicit operation request wins over saved product preferences", () => {
+  const plan = resolveAIExecutionPlan({
+    operation: "research.web",
+    runtimeId: "claude",
+    quality: "balanced",
+    reasoning: "low",
+    preferences: { quality: "best", reasoning: "high" },
+  });
+
+  assert.equal(plan.requested.quality, "balanced");
+  assert.equal(plan.requested.reasoning, "low");
+  assert.equal(plan.resolved.model, "sonnet");
+  assert.equal(plan.resolved.effort, "low");
+});
+
 test("quality and reasoning preferences use provider-neutral product values", () => {
   const plan = resolveAIExecutionPlan({
     operation: "paul.conversation",

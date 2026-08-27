@@ -68,6 +68,12 @@ function createApi() {
   let enabled = true;
   return {
     addBoard: vi.fn(),
+    getAiPreferences: vi.fn().mockResolvedValue({
+      quality: "automatic",
+      reasoning: "automatic",
+      source: "default",
+      updatedAt: null,
+    }),
     getAutomationSettings: vi.fn().mockResolvedValue({ capabilities: [] }),
     getInstalledAiRuntimes: vi.fn().mockResolvedValue({ runtimes: [] }),
     getOnboardState: vi.fn(async () => ({
@@ -76,6 +82,12 @@ function createApi() {
     })),
     getSourceMaintenance: vi.fn().mockResolvedValue({ searches: [], companies: [] }),
     saveCandidateFile: vi.fn().mockResolvedValue({ ok: true }),
+    saveAiPreferences: vi.fn(async ({ quality, reasoning }) => ({
+      quality,
+      reasoning,
+      source: "saved",
+      updatedAt: "2026-08-27T16:00:00.000Z",
+    })),
     setAutomationSessionProvider: vi.fn().mockResolvedValue({ ok: true }),
     setPublicSyncPreference: vi.fn(async (nextEnabled) => {
       enabled = nextEnabled;
@@ -223,6 +235,66 @@ describe("ProfileSettingsController public metadata preference", () => {
       source: "user",
     });
     expect(settingsProps(view).publicSyncBusy).toBe(false);
+  });
+});
+
+describe("ProfileSettingsController AI preferences", () => {
+  it("loads local preferences and saves a merged provider-neutral choice", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getAiPreferences.mockResolvedValue({
+      quality: "balanced",
+      reasoning: "medium",
+      source: "saved",
+      updatedAt: "2026-08-27T15:00:00.000Z",
+    });
+
+    renderController(module, api);
+    await flushEffects();
+    let view = renderController(module, api);
+    expect(settingsProps(view).aiPreferences).toMatchObject({
+      quality: "balanced",
+      reasoning: "medium",
+      source: "saved",
+    });
+
+    await settingsProps(view).onAiPreferenceChange("reasoning", "high");
+
+    expect(api.saveAiPreferences).toHaveBeenCalledWith({
+      quality: "balanced",
+      reasoning: "high",
+    });
+    expect(api.saveCandidateFile).not.toHaveBeenCalled();
+    view = renderController(module, api);
+    expect(settingsProps(view).aiPreferences).toMatchObject({
+      quality: "balanced",
+      reasoning: "high",
+      source: "saved",
+    });
+    expect(settingsProps(view).aiPreferencesBusy).toBe(false);
+    expect(settingsProps(view).aiPreferencesStatus).toBe("Saved on this computer");
+  });
+
+  it("surfaces a people-shaped save error without losing the last saved choice", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.saveAiPreferences.mockRejectedValue(
+      new ApiError(400, {
+        code: "AI_PREFERENCES_INVALID",
+        error: "Paul quality must be Automatic, Faster, Balanced, or Best.",
+      })
+    );
+
+    renderController(module, api);
+    await flushEffects();
+    let view = renderController(module, api);
+    await settingsProps(view).onAiPreferenceChange("quality", "broken");
+    view = renderController(module, api);
+
+    expect(controllerAlertText(view)).toBe(
+      "CareerRat couldn't save that AI setting. Choose one of the options and try again."
+    );
+    expect(settingsProps(view).aiPreferences.quality).toBe("automatic");
   });
 });
 

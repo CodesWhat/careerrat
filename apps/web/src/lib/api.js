@@ -183,6 +183,17 @@ export function getInstalledAiRuntimes() {
   return apiFetch("/api/settings/ai-runtimes");
 }
 
+export function getAiPreferences() {
+  return apiFetch("/api/settings/ai-preferences");
+}
+
+export function saveAiPreferences({ quality, reasoning } = {}) {
+  return apiFetch("/api/settings/ai-preferences", {
+    method: "POST",
+    body: JSON.stringify({ quality, reasoning }),
+  });
+}
+
 export function getRuntimeConfig() {
   return apiFetch("/api/runtime/config");
 }

@@ -23,6 +23,7 @@
 // read raw Anthropic SSE agree on framing.
 
 import { resolveModelConfig } from "./ai-config.mjs";
+import { loadAIPreferences } from "./ai-preferences.mjs";
 import {
   detectInstalledRuntimes,
   hasCompleteCareerRatCapabilities,
@@ -559,8 +560,8 @@ export async function callAI({
   outputMode = null,
   effort = null,
   aiOperation = null,
-  quality = "automatic",
-  reasoning = "automatic",
+  quality = null,
+  reasoning = null,
   aiCapabilities = null,
   executionPlan = null,
   runtimeInventory = null,
@@ -577,6 +578,7 @@ export async function callAI({
           runtimeId: routeRuntimeId,
           quality,
           reasoning,
+          preferences: loadAIPreferences({ repoRoot: root, env }),
           capabilities: aiCapabilities,
           modelOverride: model,
           effortOverride: effort,

@@ -100,6 +100,67 @@ describe("ProfileSettings", () => {
     expect(html).toContain("edit anything here");
   });
 
+  it("renders keyboard-operable provider-neutral quality and thinking choices", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const onAiPreferenceChange = vi.fn();
+    const tree = ProfileSettings({
+      agentName: "Paul",
+      activeTab: "settings",
+      permissions: PERMISSIONS,
+      aiPreferences: {
+        quality: "balanced",
+        reasoning: "high",
+        source: "saved",
+        updatedAt: "2026-08-27T16:00:00.000Z",
+      },
+      aiPreferencesStatus: "Saved on this computer",
+      onAiPreferenceChange,
+    });
+    const html = renderToStaticMarkup(tree);
+
+    expect(html).toContain("HOW PAUL THINKS");
+    expect(html).toContain("Paul quality");
+    expect(html).toContain("Thinking depth");
+    expect(html).toContain("Automatic (recommended)");
+    expect(html).toContain("Paul stays strong; searches and small helpers stay efficient.");
+    expect(html).toContain("CareerRat chooses by task.");
+    expect(html).toContain("Saved on this computer");
+    expect(html.match(/<fieldset class="cf-settings__ai-group"/g)).toHaveLength(2);
+    expect(html).not.toMatch(/opus|sonnet|haiku|gpt-5\.6|luna|terra|sol/i);
+
+    const best = findElement(
+      tree,
+      (node) =>
+        node.type === "input" && node.props.name === "paul-quality" && node.props.value === "best"
+    );
+    const high = findElement(
+      tree,
+      (node) =>
+        node.type === "input" && node.props.name === "thinking-depth" && node.props.value === "high"
+    );
+    expect(best.props.checked).toBe(false);
+    expect(high.props.checked).toBe(true);
+    best.props.onChange({ target: { value: "best" } });
+    expect(onAiPreferenceChange).toHaveBeenCalledWith("quality", "best");
+  });
+
+  it("disables every AI preference radio while a save is in flight", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const html = renderToStaticMarkup(
+      <ProfileSettings
+        activeTab="settings"
+        permissions={PERMISSIONS}
+        aiPreferences={{ quality: "automatic", reasoning: "automatic" }}
+        aiPreferencesBusy
+        aiPreferencesStatus="Saving…"
+      />
+    );
+
+    expect(html).toContain("Saving…");
+    expect(html.match(/type="radio"/g)).toHaveLength(8);
+    expect(html.match(/disabled=""/g).length).toBeGreaterThanOrEqual(8);
+  });
+
   it("keeps the application-defaults editor local and never shows saved sensitive answers", async () => {
     const { ProfileSettings } = await loadProfile();
     const onAskAgent = vi.fn();
@@ -799,10 +860,11 @@ describe("ProfileSettings", () => {
     expect(actions.onBack).toHaveBeenCalledOnce();
     expect(actions.onTabChange).toHaveBeenCalledWith("profile");
 
-    const settings = tree.props.children[1];
-    const permissionCard = settings.props.children[1];
-    const mutablePermission = permissionCard.props.children[1][1];
-    mutablePermission.props.children[1].props.onClick();
+    const mutablePermission = findElement(
+      tree,
+      (node) => node.type === "button" && node.props["aria-label"] === "Read job-search email: off"
+    );
+    mutablePermission.props.onClick();
     expect(actions.onPermissionChange).toHaveBeenCalledWith("email", true);
   });
 

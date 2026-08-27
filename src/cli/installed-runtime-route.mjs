@@ -1,3 +1,4 @@
+import { loadAIPreferences, writeAIPreferences } from "../core/ai/ai-preferences.mjs";
 import {
   CLAUDE_NATIVE_INSTALL_COMMAND,
   detectInstalledRuntimes,
@@ -218,6 +219,51 @@ export function mountInstalledRuntimeRoutes({
       probeImpl,
       autoSelect,
     });
+
+  addRoute("GET", "/api/settings/ai-preferences", (_req, res) => {
+    sendJson(res, 200, loadAIPreferences({ repoRoot, env }));
+  });
+
+  addRoute("POST", "/api/settings/ai-preferences", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+    } catch (error) {
+      sendJson(res, error.status || 400, { ok: false, error: error.message });
+      return;
+    }
+    const keys = body && typeof body === "object" && !Array.isArray(body) ? Object.keys(body) : [];
+    if (keys.length !== 2 || !keys.includes("quality") || !keys.includes("reasoning")) {
+      sendJson(res, 400, {
+        ok: false,
+        code: "AI_PREFERENCES_INVALID",
+        error: "Only Paul quality and thinking depth can be changed here.",
+      });
+      return;
+    }
+    try {
+      sendJson(
+        res,
+        200,
+        writeAIPreferences({
+          repoRoot,
+          env,
+          quality: body.quality,
+          reasoning: body.reasoning,
+        })
+      );
+    } catch (error) {
+      if (error?.code === "AI_PREFERENCES_INVALID") {
+        sendJson(res, 400, { ok: false, code: error.code, error: error.message });
+        return;
+      }
+      sendJson(res, 500, {
+        ok: false,
+        code: "AI_PREFERENCES_SAVE_FAILED",
+        error: "CareerRat couldn't save those AI settings. Try again.",
+      });
+    }
+  });
 
   addRoute("GET", "/api/settings/ai-runtimes", async (_req, res) => {
     sendJson(res, 200, await inspect(true));

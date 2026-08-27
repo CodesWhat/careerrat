@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { DEFAULT_SMALL_FAST_MODEL } from "../src/core/ai/ai-config.mjs";
+import { writeAIPreferences } from "../src/core/ai/ai-preferences.mjs";
 import {
   callAI,
   extractSSEEvents,
@@ -614,6 +615,56 @@ test("callAI resolves the same product policy into Claude and Codex model flags"
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  }
+});
+
+test("callAI applies saved preferences only when it creates a new execution plan", async () => {
+  const root = tempRoot();
+  try {
+    const env = { CAREERRAT_DESKTOP_SHELL: "1" };
+    writeInstalledRuntimeSelection({ repoRoot: root, env, runtimeId: "codex" });
+    writeAIPreferences({
+      repoRoot: root,
+      env,
+      quality: "balanced",
+      reasoning: "medium",
+    });
+    const calls = [];
+    const runInstalledRuntimeImpl = async (input) => {
+      calls.push(input);
+      return { text: "ok", runtimeId: "codex", usage: null };
+    };
+    const options = {
+      aiOperation: "research.web",
+      messages: [{ role: "user", content: "find roles" }],
+      root,
+      env,
+      runtimeInventory: [verifiedInstalled("codex", "Codex", "/safe/codex")],
+      runInstalledRuntimeImpl,
+    };
+
+    const started = await callAI(options);
+    writeAIPreferences({ repoRoot: root, env, quality: "best", reasoning: "high" });
+    const resumed = await callAI({
+      ...options,
+      aiOperation: undefined,
+      executionPlan: started.executionPlan,
+    });
+    const next = await callAI(options);
+
+    assert.deepEqual(
+      calls.map(({ model, effort }) => ({ model, effort })),
+      [
+        { model: "gpt-5.6-terra", effort: "medium" },
+        { model: "gpt-5.6-terra", effort: "medium" },
+        { model: "gpt-5.6-sol", effort: "high" },
+      ]
+    );
+    assert.equal(resumed.executionPlan, started.executionPlan);
+    assert.equal(next.executionPlan.requested.quality, "best");
+    assert.equal(next.executionPlan.requested.reasoning, "high");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

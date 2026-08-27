@@ -153,11 +153,15 @@ function SettingsView({
   agentName,
   desktopUpdate = null,
   engine = {},
+  aiPreferences = { quality: "automatic", reasoning: "automatic" },
+  aiPreferencesBusy = false,
+  aiPreferencesStatus = "",
   permissions = [],
   sources = {},
   publicSyncPreference = { enabled: true, source: "default", updatedAt: null },
   publicSyncBusy = false,
   onPermissionChange,
+  onAiPreferenceChange,
   onPublicSyncChange,
   onChangeEngine,
   onShowTechnicalDetails,
@@ -194,6 +198,13 @@ function SettingsView({
           </button>
         </div>
       </article>
+      <AIPreferencesCard
+        agentName={agentName}
+        preferences={aiPreferences}
+        busy={aiPreferencesBusy}
+        status={aiPreferencesStatus}
+        onChange={onAiPreferenceChange}
+      />
       <article className="cf-settings__card">
         <div className="cf-settings__eyebrow">WHAT {agentName.toUpperCase()} MAY DO ON HIS OWN</div>
         {safeArray(permissions).map((permission) => (
@@ -358,6 +369,115 @@ function SettingsView({
         </button>
       </article>
     </section>
+  );
+}
+
+const QUALITY_OPTIONS = Object.freeze([
+  {
+    value: "automatic",
+    label: "Automatic (recommended)",
+    description:
+      "Uses the best fit for each task. Paul stays strong; searches and small helpers stay efficient.",
+  },
+  { value: "faster", label: "Faster", description: "Quicker replies with a lighter model." },
+  {
+    value: "balanced",
+    label: "Balanced",
+    description: "A middle ground for speed and depth.",
+  },
+  {
+    value: "best",
+    label: "Best",
+    description: "Uses the strongest available model for Paul.",
+  },
+]);
+
+const REASONING_OPTIONS = Object.freeze([
+  {
+    value: "automatic",
+    label: "Automatic (recommended)",
+    description: "CareerRat chooses by task.",
+  },
+  { value: "low", label: "Low", description: "Spends less time reasoning before replying." },
+  {
+    value: "medium",
+    label: "Medium",
+    description: "Takes a little more time to reason through the response.",
+  },
+  {
+    value: "high",
+    label: "High",
+    description: "Spends more time reasoning before replying.",
+  },
+]);
+
+function AIPreferenceGroup({ id, legend, field, value, options, busy, onChange }) {
+  return (
+    <fieldset className="cf-settings__ai-group" aria-labelledby={`${id}-legend`}>
+      <legend id={`${id}-legend`}>{legend}</legend>
+      <div className="cf-settings__ai-options">
+        {options.map((option) => {
+          const inputId = `${id}-${option.value}`;
+          const descriptionId = `${inputId}-description`;
+          return (
+            <label className="cf-settings__ai-option" htmlFor={inputId} key={option.value}>
+              <input
+                id={inputId}
+                name={id}
+                type="radio"
+                value={option.value}
+                checked={value === option.value}
+                disabled={busy}
+                aria-describedby={descriptionId}
+                onChange={(event) => onChange?.(field, event.target.value)}
+              />
+              <span>
+                <strong>{option.label}</strong>
+                <small id={descriptionId}>{option.description}</small>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
+
+function AIPreferencesCard({ agentName, preferences, busy, status, onChange }) {
+  const savedStatus = status || (preferences?.source === "saved" ? "Saved on this computer" : "");
+  return (
+    <article className="cf-settings__card cf-settings__ai-card">
+      <div className="cf-settings__ai-heading">
+        <span className="cf-settings__eyebrow">HOW {agentName.toUpperCase()} THINKS</span>
+        {savedStatus ? (
+          <span className="cf-settings__ai-status" role="status" aria-live="polite">
+            {savedStatus}
+          </span>
+        ) : null}
+      </div>
+      <p className="cf-settings__note">
+        Changes apply to new replies and tasks. Work already running keeps the setup it started
+        with.
+      </p>
+      <AIPreferenceGroup
+        id="paul-quality"
+        legend={`${agentName} quality`}
+        field="quality"
+        value={preferences?.quality || "automatic"}
+        options={QUALITY_OPTIONS}
+        busy={busy}
+        onChange={onChange}
+      />
+      <AIPreferenceGroup
+        id="thinking-depth"
+        legend="Thinking depth"
+        field="reasoning"
+        value={preferences?.reasoning || "automatic"}
+        options={REASONING_OPTIONS}
+        busy={busy}
+        onChange={onChange}
+      />
+    </article>
   );
 }
 
@@ -731,6 +851,9 @@ export function ProfileSettings({
   activeTab = "profile",
   profile = {},
   engine = {},
+  aiPreferences = { quality: "automatic", reasoning: "automatic" },
+  aiPreferencesBusy = false,
+  aiPreferencesStatus = "",
   browser = {},
   permissions = [],
   sources = {},
@@ -742,6 +865,7 @@ export function ProfileSettings({
   onEditSection,
   onOpenFiles,
   onPermissionChange,
+  onAiPreferenceChange,
   onPublicSyncChange,
   onChangeEngine,
   onShowTechnicalDetails,
@@ -806,11 +930,15 @@ export function ProfileSettings({
             agentName,
             desktopUpdate,
             engine,
+            aiPreferences,
+            aiPreferencesBusy,
+            aiPreferencesStatus,
             permissions,
             sources,
             publicSyncPreference,
             publicSyncBusy,
             onPermissionChange,
+            onAiPreferenceChange,
             onPublicSyncChange,
             onChangeEngine,
             onShowTechnicalDetails,

@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { mock, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_MODEL, DEFAULT_SMALL_FAST_MODEL } from "../src/core/ai/ai-config.mjs";
+import { writeAIPreferences } from "../src/core/ai/ai-preferences.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 import { createRuntimeToolPolicy } from "../src/core/ai/runtime-tool-policy.mjs";
 import {
@@ -1168,6 +1169,52 @@ test("runSkillStream resolves a named operation once for the selected installed 
     assert.equal(calls[0].effort, "medium");
     assert.equal(result.executionPlan.runtimeId, "codex");
     assert.equal(result.executionPlan.operation, "research.web");
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("runSkillStream applies saved provider-neutral preferences to a new operation", async () => {
+  const repoRoot = tempRepoWithSkill("search-jobs");
+  const env = { CAREERRAT_RUNTIME_SKILLS: "search-jobs" };
+  writeInstalledRuntimeSelection({ repoRoot, env, runtimeId: "codex" });
+  writeAIPreferences({ repoRoot, env, quality: "best", reasoning: "high" });
+  try {
+    const calls = [];
+    const result = await runSkillStream({
+      skill: "search-jobs",
+      input: "find roles",
+      repoRoot,
+      env,
+      aiOperation: "research.web",
+      runtimeInventory: [
+        {
+          id: "codex",
+          name: "Codex",
+          path: "/safe/codex",
+          available: true,
+          capabilities: {
+            completion: true,
+            structuredOutput: true,
+            appWorkflows: true,
+            exactRead: true,
+            publicWeb: true,
+            liveActivity: true,
+            resumable: true,
+          },
+        },
+      ],
+      runInstalledRuntimeImpl: async (input) => {
+        calls.push(input);
+        return { text: "{}", runtimeId: "codex", usage: null };
+      },
+      onEvent: () => {},
+    });
+
+    assert.equal(calls[0].model, "gpt-5.6-sol");
+    assert.equal(calls[0].effort, "high");
+    assert.equal(result.executionPlan.requested.quality, "best");
+    assert.equal(result.executionPlan.requested.reasoning, "high");
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }

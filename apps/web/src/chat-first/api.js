@@ -16,6 +16,7 @@ import {
   extractResumeDocx,
   findChatBySkill,
   finishOnboarding,
+  getAiPreferences,
   getAutomationSettings,
   getDeepIngestState,
   getInstalledAiRuntimes,
@@ -43,6 +44,7 @@ import {
   retryDeepIngestSource,
   runChatFirstMission,
   runWorkspaceIntent,
+  saveAiPreferences,
   saveCandidateFile,
   saveEvidenceSeed,
   saveOnboardingDraft,
@@ -93,6 +95,7 @@ export const firstRunApi = Object.freeze({
 
 export const profileSettingsApi = Object.freeze({
   addBoard,
+  getAiPreferences,
   getAutomationSettings,
   getInstalledAiRuntimes,
   getOnboardState,
@@ -100,6 +103,7 @@ export const profileSettingsApi = Object.freeze({
   startInstalledAiRuntimeSignIn,
   probeInstalledAiRuntime,
   saveCandidateFile,
+  saveAiPreferences,
   selectInstalledAiRuntime,
   setAutomationSessionProvider,
   setPublicSyncPreference,

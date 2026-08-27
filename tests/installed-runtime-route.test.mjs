@@ -204,6 +204,75 @@ test("inventory auto-selects the sole verified full-workflow CLI", async () => {
   );
 });
 
+test("AI preference routes load defaults and persist provider-neutral choices", async () => {
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {
+      claude: { status: "authentication_required", ready: false, action: "start_sign_in" },
+      codex: readyProbe(),
+    },
+  });
+
+  const initial = await request(server, "GET", "/api/settings/ai-preferences");
+  assert.equal(initial.status, 200);
+  assert.deepEqual(initial.body, {
+    quality: "automatic",
+    reasoning: "automatic",
+    source: "default",
+    updatedAt: null,
+  });
+
+  const saved = await request(server, "POST", "/api/settings/ai-preferences", {
+    quality: "balanced",
+    reasoning: "high",
+  });
+  assert.equal(saved.status, 200);
+  assert.deepEqual(saved.body, {
+    quality: "balanced",
+    reasoning: "high",
+    source: "saved",
+    updatedAt: saved.body.updatedAt,
+  });
+  assert.equal(Number.isNaN(Date.parse(saved.body.updatedAt)), false);
+
+  const reloaded = await request(server, "GET", "/api/settings/ai-preferences");
+  assert.deepEqual(reloaded.body, saved.body);
+});
+
+test("AI preference routes reject unknown fields and invalid choices cleanly", async () => {
+  const server = boot({
+    inventory: INVENTORY,
+    probes: { claude: readyProbe(), codex: readyProbe() },
+  });
+
+  const unknown = await request(server, "POST", "/api/settings/ai-preferences", {
+    quality: "best",
+    reasoning: "high",
+    model: "provider-specific-model",
+  });
+  assert.deepEqual(unknown, {
+    status: 400,
+    body: {
+      ok: false,
+      code: "AI_PREFERENCES_INVALID",
+      error: "Only Paul quality and thinking depth can be changed here.",
+    },
+  });
+
+  const invalid = await request(server, "POST", "/api/settings/ai-preferences", {
+    quality: "provider-specific-model",
+    reasoning: "high",
+  });
+  assert.deepEqual(invalid, {
+    status: 400,
+    body: {
+      ok: false,
+      code: "AI_PREFERENCES_INVALID",
+      error: "Paul quality must be Automatic, Faster, Balanced, or Best.",
+    },
+  });
+});
+
 test("inventory leaves selection open when both a full runtime and completion runtime are ready", async () => {
   const server = boot({
     inventory: INVENTORY,

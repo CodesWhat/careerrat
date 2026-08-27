@@ -15,6 +15,12 @@ function buildSettingsModel(input = {}) {
   const model = buildProfileSettingsModel(input);
   return {
     ...model,
+    aiPreferences: {
+      quality: input.aiPreferences?.quality || "automatic",
+      reasoning: input.aiPreferences?.reasoning || "automatic",
+      source: input.aiPreferences?.source || "default",
+      updatedAt: input.aiPreferences?.updatedAt || null,
+    },
     engine: {
       ...model.engine,
       choices: firstRunRuntimeChoices(input.runtimes),
@@ -47,19 +53,22 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   const [technicalDetailsOpen, setTechnicalDetailsOpen] = useState(false);
   const [browserProviderBusy, setBrowserProviderBusy] = useState(false);
   const [publicSyncBusy, setPublicSyncBusy] = useState(false);
+  const [aiPreferencesBusy, setAiPreferencesBusy] = useState(false);
+  const [aiPreferencesStatus, setAiPreferencesStatus] = useState("");
   const [editingSection, setEditingSection] = useState(null);
   const [editorValues, setEditorValues] = useState({});
   const [editorBusy, setEditorBusy] = useState(false);
   const desktopUpdate = useDesktopUpdate();
 
   async function load() {
-    const [onboard, runtimes, automation, sources] = await Promise.all([
+    const [onboard, runtimes, automation, sources, aiPreferences] = await Promise.all([
       api.getOnboardState(),
       api.getInstalledAiRuntimes(),
       api.getAutomationSettings(),
       api.getSourceMaintenance(),
+      api.getAiPreferences(),
     ]);
-    const next = { onboard, runtimes, automation, sources };
+    const next = { onboard, runtimes, automation, sources, aiPreferences };
     setModel(buildSettingsModel(next));
     setError(null);
     return next;
@@ -72,10 +81,11 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
       api.getInstalledAiRuntimes(),
       api.getAutomationSettings(),
       api.getSourceMaintenance(),
+      api.getAiPreferences(),
     ])
-      .then(([onboard, runtimes, automation, sources]) => {
+      .then(([onboard, runtimes, automation, sources, aiPreferences]) => {
         if (cancelled) return;
-        const next = { onboard, runtimes, automation, sources };
+        const next = { onboard, runtimes, automation, sources, aiPreferences };
         setModel(buildSettingsModel(next));
       })
       .catch((cause) => {
@@ -172,6 +182,32 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
       );
     } finally {
       setPublicSyncBusy(false);
+    }
+  }
+
+  async function changeAiPreference(field, value) {
+    const next = {
+      quality: model.aiPreferences?.quality || "automatic",
+      reasoning: model.aiPreferences?.reasoning || "automatic",
+      [field]: value,
+    };
+    setAiPreferencesBusy(true);
+    setAiPreferencesStatus("Saving…");
+    setError(null);
+    try {
+      const saved = await api.saveAiPreferences(next);
+      setModel((current) => ({ ...current, aiPreferences: saved }));
+      setAiPreferencesStatus("Saved on this computer");
+    } catch (cause) {
+      setAiPreferencesStatus("");
+      setError(
+        profileSettingsErrorMessage(
+          cause,
+          "CareerRat couldn't save that AI setting. Choose one of the options and try again."
+        )
+      );
+    } finally {
+      setAiPreferencesBusy(false);
     }
   }
 
@@ -299,6 +335,9 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
         onEditSection={editSection}
         onOpenFiles={() => navigate("/", { state: { browse: "files" } })}
         onPermissionChange={changePermission}
+        aiPreferencesBusy={aiPreferencesBusy}
+        aiPreferencesStatus={aiPreferencesStatus}
+        onAiPreferenceChange={changeAiPreference}
         publicSyncBusy={publicSyncBusy}
         desktopUpdate={{
           available: desktopUpdate.available,
