@@ -97,13 +97,25 @@ function withoutCurrentBase(profile) {
 // only pass/fail check for this lane, per the spec.
 const dimensionReplySchema = Object.freeze({
   type: "object",
-  additionalProperties: true,
+  additionalProperties: false,
   required: ["level", "note"],
   properties: {
     level: { type: "string" },
     note: { type: "string" },
-    functionHit: { type: "boolean" },
-    trend: { type: "string" },
+    functionHit: { type: ["boolean", "null"] },
+    trend: { type: ["string", "null"] },
+  },
+});
+
+const companyHealthSignalReplySchema = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["source", "date", "summary", "url"],
+  properties: {
+    source: { type: "string" },
+    date: { type: "string" },
+    summary: { type: "string" },
+    url: { type: "string" },
   },
 });
 
@@ -130,7 +142,7 @@ const companyHealthReplySchema = Object.freeze({
       },
     },
     rationale: { type: "string" },
-    signals: { type: "array", items: { type: "object", additionalProperties: true } },
+    signals: { type: "array", items: companyHealthSignalReplySchema },
   },
 });
 

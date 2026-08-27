@@ -312,6 +312,23 @@ test("skill-shape-qa LANES: enumerates exactly the four AI-shaped lanes", () => 
   }
 });
 
+test("company-health live schema closes every object for Codex structured output", () => {
+  const schema = LANES.find((lane) => lane.name === "company-health").schema;
+  function assertClosedObjects(node, path = "root") {
+    if (!node || typeof node !== "object") return;
+    if (node.type === "object") {
+      assert.equal(node.additionalProperties, false, `${path} must reject undeclared fields`);
+      assert.equal(typeof node.properties, "object", `${path} must declare its fields`);
+    }
+    for (const [key, value] of Object.entries(node.properties || {})) {
+      assertClosedObjects(value, `${path}.${key}`);
+    }
+    if (node.items) assertClosedObjects(node.items, `${path}[]`);
+  }
+
+  assertClosedObjects(schema);
+});
+
 test("skill-shape-qa defaults to every supported installed runtime", () => {
   assert.deepEqual(parseSkillShapeQaArgs([]), { list: false, lane: null, runtime: "all" });
   const runtimes = selectSkillShapeRuntimes(
