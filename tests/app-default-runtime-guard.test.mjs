@@ -154,9 +154,16 @@ const CLASSIFIED_EXPLICIT_CHAT_SLICES = [
   },
   {
     file: "src/cli/intake-route.mjs",
-    label: "confirm-first intake background skill dispatch",
-    slices: [["function executeLaneB", "async function executeLaneW"]],
-    patterns: [/\brunSkillStream\b/],
+    label: "confirm-first durable Lane B runtime owner",
+    slices: [
+      ["function createLaneBManager", "async function executeLaneW"],
+      ["export function mountIntakeRoutes", 'addRoute("POST", "/api/intake"'],
+    ],
+    patterns: [
+      /\brunSkillStream\(\{[\s\S]*signal:\s*controller\.signal/,
+      /\brunSkillStream\s*=\s*defaultRunSkillStream\b/,
+      /\bcreateLaneBManager\(\{\s*repoRoot,\s*env,\s*runSkillStream,\s*heartbeatMs\s*\}\)/,
+    ],
   },
   {
     file: "src/cli/onboard-route.mjs",
