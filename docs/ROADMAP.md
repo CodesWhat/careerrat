@@ -750,7 +750,7 @@ queue.
 
 ## Release status (v0.16.5, updated August 27, 2026)
 
-**v0.16.5 is the verified release candidate.** It closes the remaining
+**v0.16.5 is released and verified.** It closes the remaining
 candidate-visible raw-error paths found in the final v0.16.4 audit: guided
 installer output, expanded diagnostics, browser-workflow summaries, skipped and
 no-lane Search status, and browser readiness setup. The repository suite passed
@@ -759,8 +759,15 @@ all 776 tests, the combined candidate-error regression set passed 278 focused UI
 tests, and the browser/session suite passed all 50 tests. Web, website, docs, and
 desktop staging builds passed; lint completed without errors; placeholder lint,
 knip, actionlint, package inspection, dependency audit, and `git diff --check`
-passed. v0.16.4 remains the current public release until the signed 0.16.5
-distribution set passes live checks.
+passed.
+
+The signed `v0.16.5` tag points to the exact `main` promotion merge. The public
+GitHub release contains the signed, notarized, and stapled DMG, signed updater
+ZIP, `latest-mac.yml`, and SPDX SBOM. `careerrat@latest` and the Homebrew cask
+are 0.16.5, careerrat.com serves the production release, and the installed app
+reports 0.16.5, passes Gatekeeper and deep signature verification, launches
+cleanly, and reports that it is up to date. The release pipeline also passed a
+native signed 0.16.4-to-0.16.5 update.
 
 ### v0.16.4 public release verification
 
