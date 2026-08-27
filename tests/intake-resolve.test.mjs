@@ -339,6 +339,67 @@ test("non-ATS aggregator host recognized via platformForHost (LinkedIn) -> defer
   assert.equal(called, false);
 });
 
+test("hydrateJobOffer rejects an exact SPA posting whose guarded redirect probe proves it expired", async () => {
+  const sourceUrl = "https://www.linkedin.com/jobs/view/events-manager-4337644841";
+  const expiredUrl =
+    "https://www.linkedin.com/jobs/conference-planning-manager-jobs?trk=expired_jd_redirect";
+  const requested = [];
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Little Island",
+      title: "Events Manager",
+      url: sourceUrl,
+      bodyText: "Unverified open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      rejectExpired: true,
+      resolveHost: publicResolver,
+      fetchImpl: async (url) => {
+        requested.push(String(url));
+        if (String(url) === sourceUrl) {
+          return new Response(null, { status: 302, headers: { location: expiredUrl } });
+        }
+        return new Response("Expired results page", { status: 200 });
+      },
+    }
+  );
+
+  assert.deepEqual(requested, [sourceUrl, expiredUrl]);
+  assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.equal(hydrated.bodyPartial, true);
+  assert.match(hydrated.bodyFetchReason, /expired_jd_redirect/);
+});
+
+test("hydrateJobOffer keeps an exact SPA posting deferred when the redirect probe finds only an auth wall", async () => {
+  const sourceUrl = "https://www.indeed.com/viewjob?jk=active-but-gated";
+  let requested = 0;
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "COTE NYC",
+      title: "Bar Manager",
+      url: sourceUrl,
+      bodyText: "Unverified open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      rejectExpired: true,
+      resolveHost: publicResolver,
+      fetchImpl: async () => {
+        requested += 1;
+        return new Response("Authentication required", { status: 401 });
+      },
+    }
+  );
+
+  assert.equal(requested, 1);
+  assert.equal(hydrated.bodyFetchStatus, "deferred");
+  assert.equal(hydrated.bodyPartial, true);
+  assert.match(hydrated.bodyFetchReason, /SPA-rendered or login-gated/);
+});
+
 test("plain fetch: a long body with a visible apply control -> resolved, active liveness", async () => {
   const result = await resolveJobUrl("https://example-startup.com/careers/eng-1", {
     fetchImpl: async () => htmlResponse(LONG_ACTIVE_JD),

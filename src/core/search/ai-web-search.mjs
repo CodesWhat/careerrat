@@ -84,6 +84,7 @@ const HYDRATION_CONCURRENCY = 4;
 const AI_WEB_SEARCH_PROMPT_CONCURRENCY = 2;
 const AI_WEB_SEARCH_PROMPT_TIMEOUT_MS = 30 * 60 * 1000;
 const AI_WEB_SEARCH_HEARTBEAT_MS = 30 * 1000;
+const MAX_FRESHNESS_RECOVERY_TURNS = 2;
 
 function savedFitFloor(config = {}) {
   const raw = config?.targeting?.fit_bands?.fit_floor;
@@ -367,16 +368,35 @@ function mergePromptCoverage({ selected, outcomes }) {
   };
 }
 
+function concentratedRejectedHosts(rejections) {
+  const counts = new Map();
+  for (const { offer } of rejections) {
+    const host = sourceHost(offer?.url);
+    if (host) counts.set(host, (counts.get(host) || 0) + 1);
+  }
+  const total = rejections.length;
+  return new Set(
+    [...counts.entries()]
+      .filter(([, count]) => count >= 2 && count / total >= 0.6)
+      .map(([host]) => host)
+  );
+}
+
 function freshnessRecoveryInstruction(rejections) {
   const rejectedPostings = rejections.slice(0, 40).map(({ offer, reason }) => ({
     url: offer.url,
     reason: String(reason || "The canonical posting could not be verified.").slice(0, 240),
   }));
+  const rejectedSourceHosts = [...concentratedRejectedHosts(rejections)];
   return [
     "CareerRat's canonical checker rejected every usable candidate from this saved prompt for liveness or posting-identity reasons.",
     "Run one fresh replacement search on the same provider. Return different, currently active, posting-specific roles that still satisfy every original candidate boundary.",
-    "Do not return any rejected URL below, or another URL for the same rejected requisition. Do not loosen title, location, compensation, freshness, or fit requirements.",
-    JSON.stringify({ rejected_postings: rejectedPostings }),
+    "Search employer-owned career pages and direct ATS postings first. Return candidates from at least two source hosts when the open web has them, with no more than one candidate from the same third-party host.",
+    "Do not return any rejected URL below, another URL for the same rejected requisition, or a host listed in rejected_source_hosts. Do not loosen title, location, compensation, freshness, or fit requirements.",
+    JSON.stringify({
+      rejected_postings: rejectedPostings,
+      rejected_source_hosts: rejectedSourceHosts,
+    }),
   ].join("\n");
 }
 
@@ -710,10 +730,15 @@ export async function runAiWebSearch({
 
   async function collectPromptOutcomes(
     outcomes,
-    { recovery = false, rejectedPostingKeys = new Set() } = {}
+    {
+      recovery = false,
+      rejectedPostingKeys = new Set(),
+      rejectedSourceHostsByPrompt = new Map(),
+    } = {}
   ) {
     const preliminary = [];
     const receiptOnly = [];
+    const rejectionsByPrompt = new Map();
     for (const outcome of outcomes) {
       for (const role of outcome.roles || []) {
         roles.push(role);
@@ -726,6 +751,22 @@ export async function runAiWebSearch({
         const offer = toScanOffer(role, { key, reqId: req.id });
         if (recovery && postingIdentityIsSeen(offer, rejectedPostingKeys)) {
           duplicates += 1;
+          continue;
+        }
+        const offerHost = sourceHost(offer.url);
+        if (recovery && rejectedSourceHostsByPrompt.get(outcome.promptId)?.has(offerHost)) {
+          const reason = `Source host ${offerHost} already produced a concentrated rejected batch.`;
+          captureFailures.push({
+            company: offer.company,
+            title: offer.title,
+            url: offer.url,
+            reason,
+          });
+          recoveredSources.push({ url: offer.url, status: "failed", error: reason });
+          if (!rejectionsByPrompt.has(outcome.promptId)) {
+            rejectionsByPrompt.set(outcome.promptId, []);
+          }
+          rejectionsByPrompt.get(outcome.promptId).push({ offer, reason });
           continue;
         }
         const entry = { offer, promptId: outcome.promptId };
@@ -781,7 +822,6 @@ export async function runAiWebSearch({
 
     const canonicalPromptIds = new Set();
     const receiptPromptIds = new Set();
-    const rejectionsByPrompt = new Map();
     for (const { offer, promptId, receiptOnly: isReceiptOnly, hydrated } of hydratedInputs) {
       throwIfSearchAborted(signal);
       const bodyText = String(hydrated?.bodyText || "").trim();
@@ -830,7 +870,7 @@ export async function runAiWebSearch({
   }
 
   const initialCollection = await collectPromptOutcomes(promptOutcomes);
-  const recoverySpecs = selected
+  let recoverySpecs = selected
     .map((prompt, promptIndex) => ({
       prompt,
       promptIndex,
@@ -843,10 +883,16 @@ export async function runAiWebSearch({
         !initialCollection.receiptPromptIds.has(prompt.id)
     );
 
-  if (recoverySpecs.length) {
+  for (
+    let recoveryTurn = 1;
+    recoveryTurn <= MAX_FRESHNESS_RECOVERY_TURNS && recoverySpecs.length;
+    recoveryTurn += 1
+  ) {
     const rejectedPostingKeys = new Set();
-    for (const { rejectedCandidates } of recoverySpecs) {
+    const rejectedSourceHostsByPrompt = new Map();
+    for (const { prompt, rejectedCandidates } of recoverySpecs) {
       for (const { offer } of rejectedCandidates) addPostingIdentity(rejectedPostingKeys, offer);
+      rejectedSourceHostsByPrompt.set(prompt.id, concentratedRejectedHosts(rejectedCandidates));
     }
     const recoveryOutcomes = await mapBounded(
       recoverySpecs,
@@ -855,7 +901,24 @@ export async function runAiWebSearch({
         runSavedPrompt(prompt, promptIndex, { rejectedCandidates })
     );
     allPromptOutcomes.push(...recoveryOutcomes);
-    await collectPromptOutcomes(recoveryOutcomes, { recovery: true, rejectedPostingKeys });
+    const recoveryCollection = await collectPromptOutcomes(recoveryOutcomes, {
+      recovery: true,
+      rejectedPostingKeys,
+      rejectedSourceHostsByPrompt,
+    });
+    recoverySpecs = recoverySpecs
+      .filter(
+        ({ prompt }) =>
+          !recoveryCollection.canonicalPromptIds.has(prompt.id) &&
+          !recoveryCollection.receiptPromptIds.has(prompt.id)
+      )
+      .map((spec) => ({
+        ...spec,
+        rejectedCandidates: [
+          ...spec.rejectedCandidates,
+          ...(recoveryCollection.rejectionsByPrompt.get(spec.prompt.id) || []),
+        ],
+      }));
   }
 
   const toolTrace = allPromptOutcomes.flatMap((result) => result.toolTrace);

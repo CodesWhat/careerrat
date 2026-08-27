@@ -58,6 +58,45 @@ function safeResult(result) {
   };
 }
 
+function normalizedTitleWords(value) {
+  return new Set(
+    String(value || "")
+      .toLowerCase()
+      .replace(/&/g, " and ")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+  );
+}
+
+function roleMatchesBucket(role, bucket) {
+  const actual = normalizedTitleWords(role);
+  return (bucket.titles || []).some((title) => {
+    const target = normalizedTitleWords(title);
+    return target.size > 0 && [...target].every((word) => actual.has(word));
+  });
+}
+
+function presentedSetReceipt({ fixture, result, rows }) {
+  const presentedRows = rows.filter(
+    (row) => Number.isFinite(Number(row.fitScore)) && Number(row.fitScore) >= result.fitFloor
+  );
+  const presentedRoleCount = new Set(
+    presentedRows
+      .map((row) =>
+        String(row.role || "")
+          .trim()
+          .toLowerCase()
+      )
+      .filter(Boolean)
+  ).size;
+  const presentedBuckets = (fixture.targeting.role_buckets || [])
+    .filter((bucket) => presentedRows.some((row) => roleMatchesBucket(row.role, bucket)))
+    .map((bucket) => bucket.name);
+  return { presentedRoleCount, presentedBucketCount: presentedBuckets.length, presentedBuckets };
+}
+
 const FIXTURES = {
   hospitality: {
     profile: {
@@ -267,13 +306,16 @@ try {
       unverified: row.scanner?.unverified === true,
       source: row.link,
     }));
-  console.log(JSON.stringify({ summary: safeResult(result), rows }, null, 2));
+  const usefulSet = presentedSetReceipt({ fixture, result, rows });
+  console.log(JSON.stringify({ summary: safeResult(result), usefulSet, rows }, null, 2));
   if (
     result.errors?.length ||
     result.failedPromptIds?.length ||
     rows.length === 0 ||
     Number(result.presented || 0) < 1 ||
-    rows.some((row) => row.unverified !== true)
+    rows.some((row) => row.unverified !== true) ||
+    (fixtureId === "hospitality" &&
+      (usefulSet.presentedRoleCount < 3 || usefulSet.presentedBucketCount < 2))
   )
     process.exitCode = 1;
 } catch (error) {

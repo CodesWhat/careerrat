@@ -42,9 +42,10 @@ export async function resolveJobUrl(
     maxBytes = DEFAULT_MAX_BYTES,
     signal,
     resolutionCache,
+    probePostingRedirect = false,
   } = {}
 ) {
-  const cacheKey = exactResolutionKey(rawUrl);
+  const cacheKey = exactResolutionKey(rawUrl, { probePostingRedirect });
   if (resolutionCache && cacheKey && resolutionCache.has(cacheKey)) {
     return resolutionCache.get(cacheKey);
   }
@@ -55,6 +56,7 @@ export async function resolveJobUrl(
     maxBytes,
     signal,
     resolutionCache,
+    probePostingRedirect,
   });
   if (resolutionCache && cacheKey) resolutionCache.set(cacheKey, resolution);
   return resolution;
@@ -62,7 +64,7 @@ export async function resolveJobUrl(
 
 async function resolveJobUrlUncached(
   rawUrl,
-  { fetchImpl, resolveHost, timeoutMs, maxBytes, signal, resolutionCache }
+  { fetchImpl, resolveHost, timeoutMs, maxBytes, signal, resolutionCache, probePostingRedirect }
 ) {
   signal?.throwIfAborted();
   let parsed;
@@ -100,6 +102,16 @@ async function resolveJobUrlUncached(
   }
 
   if (isSpaJobHost(parsed.hostname) || platformForHost(parsed.hostname)) {
+    if (probePostingRedirect) {
+      const expiredRedirect = await resolveDefinitivePostingRedirect({
+        url: rawUrl,
+        fetchImpl,
+        resolveHost,
+        timeoutMs,
+        signal,
+      });
+      if (expiredRedirect) return mergeProviderMetadata(providerResolution, expiredRedirect);
+    }
     return mergeProviderMetadata(providerResolution, {
       bodyFetchStatus: "deferred",
       url: rawUrl,
@@ -151,6 +163,7 @@ export async function hydrateJobOffer(
       resolveHost,
       signal,
       resolutionCache,
+      probePostingRedirect: true,
     });
   } catch (error) {
     resolved = {
@@ -435,11 +448,48 @@ function extractEmbeddedApplicationUrl(html, baseUrl) {
   return validated.url;
 }
 
-function exactResolutionKey(rawUrl) {
+async function resolveDefinitivePostingRedirect({
+  url,
+  fetchImpl,
+  resolveHost,
+  timeoutMs,
+  signal,
+}) {
+  const fetched = await fetchPublicHttpText(url, {
+    fetchImpl,
+    resolveHost,
+    timeoutMs,
+    maxBytes: 1,
+    readErrorBody: false,
+    signal,
+  });
+  const finalUrl = fetched.finalUrl || url;
+  const liveness = classifyLiveness({
+    status: Number(fetched.status || 0),
+    finalUrl,
+    bodyText: "",
+    applyControls: [],
+  });
+  if (!new Set(["expired_url", "http_gone"]).has(liveness.code)) return null;
+  return {
+    bodyFetchStatus: "resolved",
+    url,
+    provider: null,
+    title: null,
+    company: null,
+    location: null,
+    comp: null,
+    bodyText: "",
+    bodyPartial: true,
+    liveness,
+  };
+}
+
+function exactResolutionKey(rawUrl, { probePostingRedirect = false } = {}) {
   try {
     const url = new URL(rawUrl);
     url.hash = "";
-    return `url:${url.toString()}`;
+    return `url:${url.toString()}:posting-redirect-${probePostingRedirect ? "on" : "off"}`;
   } catch {
     return "";
   }

@@ -431,6 +431,9 @@ test("AI web-search skill gives each saved prompt a small exploration budget", (
   assert.match(skill, /at most 2 `WebSearch` calls per saved prompt/i);
   assert.match(skill, /at most 4 job-posting `WebFetch` calls per saved prompt/i);
   assert.match(skill, /never emit an aggregator search\/results page/i);
+  assert.match(skill, /employer-owned career|employer career/i);
+  assert.match(skill, /at least two (?:different )?(?:source )?hosts/i);
+  assert.match(skill, /no more than one candidate from the same third-party host/i);
 });
 
 test("runAiWebSearch reports structured prompt lifecycle and periodic health", async () => {
@@ -1429,7 +1432,78 @@ test("runAiWebSearch sends recovery candidates through the existing hard gates",
   assert.ok(saved.fitScore < 95);
 });
 
-test("runAiWebSearch caps canonical freshness recovery at one turn", async () => {
+test("runAiWebSearch continues canonical freshness recovery until a second turn succeeds", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Applied AI", titles: ["Applied AI Engineer"] }],
+      fit_bands: { fit_floor: 65 },
+    },
+  });
+  const executionPlan = Object.freeze({
+    operation: "research.web",
+    runtimeId: "claude",
+    resolved: Object.freeze({ model: "claude-sonnet-4-6", effort: "medium" }),
+  });
+  const inputs = [];
+  const plans = [];
+  const hydrated = [];
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    executionPlan,
+    runSkillStream: async ({ input, onEvent, executionPlan: receivedPlan }) => {
+      inputs.push(input);
+      plans.push(receivedPlan);
+      const call = inputs.length;
+      const url =
+        call === 1
+          ? "https://stale-board.example/jobs/expired-initial"
+          : call === 2
+            ? "https://stale-board.example/jobs/expired-recovery"
+            : "https://employer.example/careers/active-replacement";
+      emitAssistantJson(onEvent, {
+        roles: [role({ company: `Company ${call}`, url })],
+        queries_run: [{ prompt_id: "p1", query: `query ${call}`, status: "completed" }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: async (url) => {
+      hydrated.push(url);
+      if (url.includes("expired")) {
+        return {
+          bodyFetchStatus: "resolved",
+          url,
+          bodyText: fullJd("Expired posting"),
+          liveness: { result: "expired", reason: `Expired ${url}` },
+        };
+      }
+      return canonicalResolver({
+        bodyText: fullJd("Active employer posting"),
+        liveness: { result: "active", reason: "visible apply control" },
+      })(url);
+    },
+  });
+
+  assert.equal(inputs.length, 3);
+  assert.ok(inputs.slice(1).every((input) => typeof input === "string"));
+  assert.deepEqual(plans, [executionPlan, executionPlan, executionPlan]);
+  assert.match(inputs[2], /expired-initial/);
+  assert.match(inputs[2], /expired-recovery/);
+  assert.match(inputs[2], /stale-board\.example/);
+  assert.match(inputs[2], /employer-owned|employer career|direct employer/i);
+  assert.deepEqual(hydrated, [
+    "https://stale-board.example/jobs/expired-initial",
+    "https://stale-board.example/jobs/expired-recovery",
+    "https://employer.example/careers/active-replacement",
+  ]);
+  assert.equal(result.new, 1, JSON.stringify(result));
+  assert.equal(result.presented, 1, JSON.stringify(result));
+});
+
+test("runAiWebSearch caps canonical freshness recovery at two turns", async () => {
   const repoRoot = repo({ prompts: 1 });
   let calls = 0;
   const result = await runAiWebSearch({
@@ -1452,10 +1526,10 @@ test("runAiWebSearch caps canonical freshness recovery at one turn", async () =>
     }),
   });
 
-  assert.equal(calls, 2);
+  assert.equal(calls, 3);
   assert.equal(result.new, 0);
   assert.equal(result.presented, 0);
-  assert.equal(result.unreadable, 2);
+  assert.equal(result.unreadable, 3);
   assert.deepEqual(result.errors, []);
   assert.deepEqual(result.failedPromptIds, []);
 });
@@ -1512,6 +1586,54 @@ test("runAiWebSearch retries only a canonically erased sibling and keeps dedupe 
       .sort(),
     [activeUrl, replacementUrl].sort()
   );
+});
+
+test("runAiWebSearch scopes concentrated rejected hosts to the owning saved prompt", async () => {
+  const repoRoot = repo({ prompts: 2 });
+  const calls = new Map();
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      const promptId = kickoff.prompts[0].id;
+      const attempt = (calls.get(promptId) || 0) + 1;
+      calls.set(promptId, attempt);
+      const ownHost = promptId === "p1" ? "stale-a.example" : "stale-b.example";
+      const siblingHost = promptId === "p1" ? "stale-b.example" : "stale-a.example";
+      const roles =
+        attempt === 1
+          ? [1, 2].map((index) =>
+              role({
+                company: `${promptId} stale ${index}`,
+                url: `https://${ownHost}/jobs/${promptId}-expired-${index}`,
+              })
+            )
+          : [
+              role({
+                company: `${promptId} active`,
+                url: `https://${siblingHost}/jobs/${promptId}-active`,
+              }),
+            ];
+      emitAssistantJson(onEvent, {
+        roles,
+        queries_run: [{ prompt_id: promptId, query: `${promptId} query ${attempt}` }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: async (url) =>
+      url.includes("expired")
+        ? {
+            bodyFetchStatus: "resolved",
+            url,
+            bodyText: fullJd("Expired posting"),
+            liveness: { result: "expired", reason: "Expired posting." },
+          }
+        : canonicalResolver()(url),
+  });
+
+  assert.deepEqual(Object.fromEntries(calls), { p1: 2, p2: 2 });
+  assert.equal(result.new, 2, JSON.stringify(result));
 });
 
 test("runAiWebSearch dedupes again after canonical URL recovery", async () => {
