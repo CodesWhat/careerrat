@@ -145,6 +145,7 @@ export function createChatFirstOperationKinds({
   return {
     [JOB_THREAD_TURN_OPERATION_KIND]: {
       parseRequest: parseJobThreadTurnRequest,
+      resumeOnRestart: true,
       resolveExecutionPlan: ({ request }) =>
         resolveExecutionPlan({ repoRoot, env, operation: "paul.conversation", request }),
       normalizeError(error) {
@@ -157,7 +158,7 @@ export function createChatFirstOperationKinds({
           retryable: error?.retryable !== false,
         };
       },
-      async execute({ request, executionPlan }) {
+      async execute({ operation, request, executionPlan, signal }) {
         const result = await jobThreadTurn({
           repoRoot,
           env,
@@ -168,6 +169,12 @@ export function createChatFirstOperationKinds({
           assistantMessageId: request.assistantMessageId,
           executionPlan,
           call: callAIImpl,
+          signal,
+          operationAttempt: {
+            id: operation.id,
+            ownerId: operation.ownerId,
+            fence: operation.fence,
+          },
         });
         return {
           resultRef: {

@@ -141,7 +141,7 @@ test("company discovery freezes its provider-neutral plan before deduped work st
   await manager.shutdown();
 });
 
-test("an interrupted company operation never commits a partial proposal batch", async () => {
+test("an interrupted company operation stays resumable and never commits a partial proposal batch", async () => {
   const repoRoot = tempRepo();
   const secondSeedStarted = deferred();
   const persistedResolutions = [];
@@ -205,9 +205,9 @@ test("an interrupted company operation never commits a partial proposal batch", 
 
   await secondSeedStarted.promise;
   await manager.shutdown();
-  const failed = manager.get({ id: started.operation.id });
-  assert.equal(failed.status, "failed");
-  assert.equal(failed.error.code, "APP_OPERATION_SERVER_STOPPED");
+  const interrupted = manager.get({ id: started.operation.id });
+  assert.equal(interrupted.status, "running");
+  assert.equal(interrupted.error, null);
   assert.equal(companyProposalBatchLatest({ repoRoot }).batch, null);
   assert.deepEqual(persistedResolutions, []);
   assert.deepEqual(capturedOfferBatches, []);

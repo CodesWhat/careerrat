@@ -591,6 +591,77 @@ test("job-thread route reuses one in-flight durable operation for a lost-respons
   }
 });
 
+test("an interrupted job-thread turn resumes under the next app owner without duplicating messages", async () => {
+  const repoRoot = tempRepo();
+  appUpsert({
+    repoRoot,
+    row: {
+      id: "app-restarted-turn",
+      company: "Resume Corp",
+      role: "Operations Lead",
+      status: "applied",
+    },
+  });
+  const routeModule = await import("../src/cli/chat-first-route.mjs");
+  let resolveOldReply;
+  const oldReply = new Promise((resolve) => {
+    resolveOldReply = resolve;
+  });
+  let oldCalls = 0;
+  const old = createAppOperationManager({
+    repoRoot,
+    env: {},
+    ownerId: "job-turn-old-owner",
+    kinds: routeModule.createChatFirstOperationKinds({
+      repoRoot,
+      env: {},
+      resolveExecutionPlan: ({ operation }) => testExecutionPlan(operation),
+      async callAIImpl() {
+        oldCalls += 1;
+        return oldReply;
+      },
+    }),
+  });
+  const oldRoutes = await boot(repoRoot, { appOperations: old });
+  const payload = {
+    applicationId: "app-restarted-turn",
+    text: "What should I emphasize?",
+    requestId: "job-thread-request-restart-0001",
+  };
+  const started = await invoke(oldRoutes, "POST", "/api/chat-first/job-thread/turn", payload);
+  while (oldCalls < 1) await new Promise((resolve) => setImmediate(resolve));
+
+  const fresh = createAppOperationManager({
+    repoRoot,
+    env: {},
+    ownerId: "job-turn-new-owner",
+    kinds: routeModule.createChatFirstOperationKinds({
+      repoRoot,
+      env: {},
+      resolveExecutionPlan: ({ operation }) => testExecutionPlan(operation),
+      async callAIImpl() {
+        return aiReply({ reply: "Lead with the operating result.", answerMode: null });
+      },
+    }),
+  });
+  const recovered = fresh.recoverOrphans();
+  assert.equal(recovered.length, 1);
+  assert.equal(recovered[0].id, started.body.data.operation.id);
+  const completed = await fresh.wait(started.body.data.operation.id);
+  assert.equal(completed.status, "completed", JSON.stringify(completed.error));
+
+  resolveOldReply(aiReply({ reply: "This stale answer must not land.", answerMode: null }));
+  await old.wait(started.body.data.operation.id);
+  const state = (await import("../src/core/db/verbs.mjs")).chatFirstStateGet({ repoRoot });
+  const thread = state.jobThreads.find(
+    (candidate) => candidate.applicationId === "app-restarted-turn"
+  );
+  assert.equal(thread.messages.filter((message) => message.role === "user").length, 1);
+  assert.equal(thread.messages.filter((message) => message.role === "assistant").length, 1);
+  assert.equal(thread.messages.at(-1).text, "Lead with the operating result.");
+  await Promise.all([old.shutdown(), fresh.shutdown()]);
+});
+
 test("job-thread choice clicks enforce the durable prompt version before appending", async () => {
   const repoRoot = tempRepo();
   appUpsert({

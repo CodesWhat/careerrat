@@ -1125,6 +1125,7 @@ export function createOnboardingSearchPromptOperationKind({
   saveSearchPromptsImpl = saveSearchPrompts,
 } = {}) {
   return {
+    resumeOnRestart: true,
     parseRequest(input = {}) {
       if (
         !input ||

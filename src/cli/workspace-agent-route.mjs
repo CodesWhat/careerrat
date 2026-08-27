@@ -327,6 +327,7 @@ export function createWorkspaceOperationKinds({
   return {
     [WORKSPACE_MESSAGE_OPERATION_KIND]: {
       parseRequest: parseWorkspaceMessageRequest,
+      resumeOnRestart: true,
       normalizeError: (error) => workspaceOperationError(error, WORKSPACE_MESSAGE_OPERATION_KIND),
       resolveExecutionPlan: ({ request }) =>
         resolvePlans({ operations: ["paul.conversation"], request }),

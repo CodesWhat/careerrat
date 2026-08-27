@@ -163,6 +163,7 @@ export function createCompanyDiscoveryOperationKind({
   now,
 } = {}) {
   return {
+    resumeOnRestart: true,
     parseRequest(input) {
       const context = buildSeedContext({ repoRoot, env });
       return {

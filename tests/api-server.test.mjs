@@ -319,7 +319,7 @@ test("only the listening workspace owner can recover durable background work", a
     const recoveredSearch = sourcingRunLatest({ repoRoot, purpose: "manual-search" }).run;
     assert.equal(recoveredSearch.id, liveSearch.id);
     assert.equal(recoveredSearch.status, "failed");
-    assert.equal(recoveredSearch.error.code, "SOURCING_RUN_SERVER_RESTARTED");
+    assert.equal(recoveredSearch.error.code, "NO_DETERMINISTIC_SOURCES");
     const recoveredIntake = intakeOne({ repoRoot, id: liveIntakeId });
     assert.equal(recoveredIntake.status, "error");
     assert.equal(recoveredIntake.operation.error.code, "INTAKE_SERVER_RESTARTED");

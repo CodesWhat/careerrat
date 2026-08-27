@@ -173,6 +173,9 @@ export function createAppOperationManager({
         }).operation;
       } catch (error) {
         const stopped = execution.shutdownRequested || controller.signal.aborted;
+        if (stopped && config.resumeOnRestart === true) {
+          return appOperationGet({ ...pathCtx, id: operation.id }).operation;
+        }
         let normalizedError = null;
         if (!stopped && typeof config.normalizeError === "function") {
           try {
@@ -305,14 +308,24 @@ export function createAppOperationManager({
 
   function recoverOrphans() {
     try {
-      return appOperationRecoverOrphans({
+      const recovered = appOperationRecoverOrphans({
         ...pathCtx,
         ownerId,
+        leaseMs,
+        recoveryMode(operation) {
+          return kindRegistry.get(operation.kind)?.resumeOnRestart === true ? "resume" : "fail";
+        },
         recoveryError(operation) {
           const configured = kindRegistry.get(operation.kind)?.recoveryError;
           return typeof configured === "function" ? configured(operation) : configured;
         },
       }).recovered;
+      for (const operation of recovered) {
+        if (!["queued", "running"].includes(operation.status)) continue;
+        const config = kindRegistry.get(operation.kind);
+        if (config) startWorker(operation, config);
+      }
+      return recovered;
     } catch (error) {
       if (error?.code === "NO_DATABASE") return [];
       throw error;

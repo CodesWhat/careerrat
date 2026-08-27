@@ -444,6 +444,7 @@ export function createDeepIngestAppOperationKinds({
   const pathCtx = { repoRoot, env };
   return {
     [DEEP_INGEST_SOURCE_SCAN_KIND]: {
+      resumeOnRestart: true,
       parseRequest(input) {
         return parsePreparedSourceRequest({ ...pathCtx, input });
       },
@@ -509,6 +510,7 @@ export function createDeepIngestAppOperationKinds({
       },
     },
     [DEEP_INGEST_PROPOSAL_BUILD_KIND]: {
+      resumeOnRestart: true,
       parseRequest(input) {
         if (!input || typeof input !== "object" || Array.isArray(input)) {
           throw makeError("Deep Ingest proposal input is required");

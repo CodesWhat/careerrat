@@ -212,7 +212,7 @@ test("source scan owns a stable scanning row before work and outlives the reques
   await manager.shutdown();
 });
 
-test("shutdown aborts scanning without orphaning its retryable upload", async () => {
+test("shutdown leaves scanning resumable without orphaning its upload", async () => {
   const repoRoot = tempRepo();
   const artifactPath = "workspace/deep-ingest/sources/abort-notes.md";
   const absolutePath = userPath({ repoRoot }, artifactPath);
@@ -247,14 +247,13 @@ test("shutdown aborts scanning without orphaning its retryable upload", async ()
   await new Promise((resolve) => setImmediate(resolve));
   await manager.shutdown();
 
-  const failed = manager.get({ id: started.operation.id });
+  const interrupted = manager.get({ id: started.operation.id });
   const source = deepIngestSourceGet({
     repoRoot,
     sourceId: started.operation.request.sourceId,
   }).source;
-  assert.equal(failed.status, "failed");
-  assert.equal(failed.error.code, "APP_OPERATION_SERVER_STOPPED");
-  assert.equal(failed.error.retryable, true);
+  assert.equal(interrupted.status, "running");
+  assert.equal(interrupted.error, null);
   assert.equal(source.status, "scanning");
   assert.equal(source.artifactPath, artifactPath);
   assert.equal(source.metadata.ownedUpload, true);

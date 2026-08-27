@@ -520,7 +520,15 @@ export function appOperationFail({ repoRoot, env, id, ownerId, fence, error, now
   });
 }
 
-export function appOperationRecoverOrphans({ repoRoot, env, ownerId, recoveryError, now } = {}) {
+export function appOperationRecoverOrphans({
+  repoRoot,
+  env,
+  ownerId,
+  recoveryError,
+  recoveryMode,
+  leaseMs = 90_000,
+  now,
+} = {}) {
   const owner = required(ownerId, "ownerId");
   const db = requireDb({ repoRoot, env });
   return withTransaction(db, () => {
@@ -531,6 +539,29 @@ export function appOperationRecoverOrphans({ repoRoot, env, ownerId, recoveryErr
     const recovered = [];
     for (const current of rows) {
       const completedAt = timestampAfter(now, current.updatedAt);
+      const configuredMode =
+        typeof recoveryMode === "function" ? recoveryMode(current) : recoveryMode;
+      if (configuredMode === "resume") {
+        recovered.push(
+          updateOperation(db, {
+            ...current,
+            status: "queued",
+            ownerId: owner,
+            fence: current.fence + 1,
+            heartbeatAt: completedAt,
+            leaseExpiresAt: leaseExpiry(completedAt, leaseMs),
+            progress: {
+              phase: "queued",
+              message: "CareerRat is resuming this work.",
+            },
+            resultRef: null,
+            error: null,
+            completedAt: null,
+            updatedAt: completedAt,
+          })
+        );
+        continue;
+      }
       const configuredError =
         typeof recoveryError === "function" ? recoveryError(current) : recoveryError;
       const safeError = configuredError

@@ -320,7 +320,7 @@ test("workspace message shortcuts still settle one fenced durable assistant resu
   await manager.shutdown();
 });
 
-test("hard restart fences the stale message completion and a linked retry reuses its frozen plan once", async () => {
+test("hard restart resumes the same safe message operation with its frozen plan once", async () => {
   const repoRoot = tempRepo();
   const oldModel = deferred();
   const old = createWorkspaceHarness({
@@ -331,6 +331,7 @@ test("hard restart fences the stale message completion and a linked retry reuses
   });
   const payload = { text: "Help me pick a next step.", requestId: "workspace-request-restart" };
   const started = await requestDirect(old.routes, "POST", "/api/workspace/message", payload);
+  const original = old.manager.get({ id: started.body.operation.id });
   await turn();
   assert.equal(workspaceThreadRead({ repoRoot }).messages.length, 1);
 
@@ -347,25 +348,70 @@ test("hard restart fences the stale message completion and a linked retry reuses
   const recovered = fresh.manager.recoverOrphans();
   assert.equal(recovered.length, 1);
   assert.equal(recovered[0].id, started.body.operation.id);
-  assert.equal(recovered[0].error.code, "APP_OPERATION_SERVER_RESTARTED");
-  assert.equal(recovered[0].error.retryable, true);
+  assert.equal(recovered[0].status, "queued");
+  assert.equal(recovered[0].fence, original.fence + 1);
 
-  oldModel.resolve(responseText("This stale reply must never be written."));
-  await old.manager.wait(started.body.operation.id);
-  assert.equal(workspaceThreadRead({ repoRoot }).messages.length, 1);
-
-  const retried = await fresh.manager.retry({ id: started.body.operation.id });
-  assert.equal(retried.operation.retryOf, started.body.operation.id);
-  const completed = await fresh.manager.wait(retried.operation.id);
+  const completed = await fresh.manager.wait(started.body.operation.id);
   assert.equal(completed.status, "completed", JSON.stringify(completed.error));
+  assert.equal(completed.id, started.body.operation.id);
+  assert.equal(completed.retryOf, null);
   assert.equal(retryCalls.length, 1);
   assert.equal(retryCalls[0].executionPlan.runtimeId, "codex");
   assert.equal(retryCalls[0].useExecutionPlanRoute, true);
+
+  oldModel.resolve(responseText("This stale reply must never be written."));
+  await old.manager.wait(started.body.operation.id);
   const messages = workspaceThreadRead({ repoRoot }).messages;
   assert.equal(messages.filter((message) => message.role === "user").length, 1);
   assert.equal(messages.filter((message) => message.role === "assistant").length, 1);
   assert.equal(messages.at(-1).text, "Review the strongest saved role first.");
   await Promise.all([old.manager.shutdown(), fresh.manager.shutdown()]);
+});
+
+test("clean shutdown leaves a safe message operation for the next app owner", async () => {
+  const repoRoot = tempRepo();
+  let modelStarted;
+  const startedModel = new Promise((resolve) => {
+    modelStarted = resolve;
+  });
+  const old = createWorkspaceHarness({
+    repoRoot,
+    ownerId: "workspace-shutdown-owner",
+    resolveExecutionPlanImpl: () => executionPlan("codex"),
+    callAIImpl: ({ signal }) =>
+      new Promise((_resolve, reject) => {
+        modelStarted();
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }),
+  });
+  const started = await requestDirect(old.routes, "POST", "/api/workspace/message", {
+    text: "Keep this turn moving after the update.",
+    requestId: "workspace-request-clean-restart",
+  });
+  await startedModel;
+  await old.manager.shutdown();
+  const interrupted = old.manager.get({ id: started.body.operation.id });
+  assert.equal(interrupted.status, "running");
+
+  const fresh = createWorkspaceHarness({
+    repoRoot,
+    ownerId: "workspace-restarted-owner",
+    resolveExecutionPlanImpl: () => executionPlan("claude"),
+    async callAIImpl() {
+      return responseText("The same turn resumed after the app restarted.", "codex");
+    },
+  });
+  const recovered = fresh.manager.recoverOrphans();
+  assert.equal(recovered.length, 1);
+  assert.equal(recovered[0].id, started.body.operation.id);
+  const completed = await fresh.manager.wait(started.body.operation.id);
+  assert.equal(completed.status, "completed", JSON.stringify(completed.error));
+  assert.equal(completed.executionPlan.runtimeId, "codex");
+  const messages = workspaceThreadRead({ repoRoot }).messages;
+  assert.equal(messages.filter((message) => message.role === "user").length, 1);
+  assert.equal(messages.filter((message) => message.role === "assistant").length, 1);
+  assert.equal(messages.at(-1).text, "The same turn resumed after the app restarted.");
+  await fresh.manager.shutdown();
 });
 
 test("interrupted workspace intents become outcome-uncertain and never replay", async () => {
