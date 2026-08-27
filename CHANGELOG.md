@@ -6,9 +6,6 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [0.16.6] - 2026-08-27
 
-> Release candidate. v0.16.5 remains the current public release while fresh
-> packaged acceptance, signing, and distribution work for v0.16.6 is pending.
-
 ### Changed
 
 - Configured-board and AI web-search results are requalified after CareerRat captures the canonical job description. Location and office-day rules, compensation floor, seniority, posting age, work eligibility, and the candidate's saved fit bands now use the full posting before a role is saved, and per-company presentation limits apply only after that check. Job cards also recover clearly labeled salary or base-pay ranges from complete postings while leaving bonus, OTE, equity, total-comp, and partial-body ambiguity marked for verification.
@@ -16,6 +13,8 @@ All notable changes to CareerRat are documented here. This project follows
 - Job threads now surface unresolved application answers in the right-side review panel. The candidate chooses **Answer**, writes the response in the normal composer, and CareerRat saves it against the exact application question before rebuilding the packet.
 - Once the packet is ready, the same review panel explains supervised form preparation, offers the existing opt-in permission in place, and resumes only the matching paused application mission. CareerRat may fill confirmed fields and advance safe form steps, but the candidate always reviews and presses the final Submit control.
 - Claude Code and OpenAI Codex remain the only supported product runtime choices. Both use the same CareerRat-owned workflows, skills, and durable state through direct installed-CLI adapters; v0.16.6 does not silently promote or fall back to another detected CLI.
+- Workspace, job, and research choices now share one durable click-or-type contract. Finite job, recruiter-thread, and company ambiguities render equal neutral choices that act on exact saved records without guessing or exposing internal IDs.
+- Activity shows the twelve most recent steps instead of growing without a bound. The complete audit history remains local and durable.
 
 ### Fixed
 
@@ -26,12 +25,14 @@ All notable changes to CareerRat are documented here. This project follows
 - Packet lineage recognizes unanswered question IDs as live review state instead of rebuilding a valid reviewable packet forever. A confirmed final answer resumes the owning paused mission instead of starting an unrelated preparation action.
 - Saved North American home locations can answer the corresponding location screen deterministically, while voluntary demographic and self-identification answers remain explicit, local, and never inferred.
 - Onboarding no longer advances to the next topic while a plain question with a short safety clarification is still waiting for the candidate's answer.
+- First, manual, and AI searches now share one durable worker owner for progress, cancellation, settlement, clean shutdown, and restart recovery. AI search resumes its frozen prompts and provider plan instead of being orphaned by a route-local controller.
+- Recording an application as Applied resolves its durable Submit gate and completes the owning mission in the same transaction, so a finished application cannot leave a ghost **Review & submit** action.
+- Common AI, communication-draft, application-preparation, and board-discovery failures now explain what happened and what to do next in plain English.
 
-### Release-candidate verification
+### Verification
 
 - Before the later search and application-review fixes, Claude Code 2.1.247 completed the production AI-search path in 123.592 seconds, beyond the removed 120-second cutoff, with two roles, four recorded queries, two saved job descriptions, and no retry or error. Codex CLI 0.150.1 completed the same isolated source-level path in 29.445 seconds with one role, one recorded query, one saved job description, and no retry or error. Both workspaces passed data verification and left the real CareerRat databases unchanged.
-- After the canonical requalification, application-review, and onboarding fixes above, the repository suite passed 3,893 tests with 15 intentional skips and no failures. The full web suite passed all 791 tests, the focused public-copy set passed all 71 tests, and the production web, docs, and website builds passed. Biome, Qlty, Knip, the placeholder check, and `git diff --check` passed.
-- Fresh packaged desktop QA has not rerun against this final candidate. The signed app, real end-to-end search and supervised application click-through, updater path, notarization, public release assets, npm, Homebrew, and production website remain at v0.16.5 until that acceptance and release work completes.
+- The repository suite passes 4,222 tests with 16 intentional skips and no failures. The web suite passes all 905 tests. The release gate also covers the production web, docs, and website builds, Biome, Qlty, Knip, placeholder checks, real Chromium UI and supervised application preparation, the exact Claude/Codex hospitality and engineering search matrix, signed/notarized Mac packaging, native updating, and unsigned Windows packaging QA.
 
 ## [0.16.5] - 2026-08-27
 

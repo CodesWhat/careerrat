@@ -60,32 +60,19 @@ search and extraction work stays efficient. **Faster**, **Balanced**, and
 controls how long the selected runtime reasons. The setting never ranks Claude
 Code against OpenAI Codex or silently changes providers.
 
-v0.16.5 is the current public release. Its signed, notarized, and stapled Mac
-DMG, updater ZIP, update feed, and SBOM are on GitHub; `careerrat@latest` is
-0.16.5 on npm; the Homebrew cask is 0.16.5; and the installed app reports
-version 0.16.5, passes Gatekeeper, launches cleanly, and reports that it is up to
-date. The release also passed a real signed 0.16.4-to-0.16.5 in-app update.
+v0.16.6 is the current release. It gives Claude Code and Codex the same complete
+CareerRat workflow, keeps long searches and application missions durable across
+navigation and restart, and turns finite questions into normal clickable choices
+that can also be answered in text. Search combines built-in boards with AI
+open-web discovery, keeps AI leads clearly unverified, then checks readable full
+postings against location, office-day, compensation, seniority, eligibility, and
+fit rules before treating them as verified.
 
-v0.16.5 preserves plain-English recovery, remote and office-day limits,
-validated application entry points, and signed in-app Mac updates from v0.16.4.
-It also closes the remaining raw-error paths in guided installation, expanded
-diagnostics, browser-workflow cards, Search status, and browser setup.
-
-v0.16.6 is an unreleased release candidate. It fixes AI web searches that ran
-past the old two-minute limit, preserves credible AI open-web discoveries as
-clearly unverified leads, and leaves full-posting verification to Evaluate. It
-expands the built-in job-board source layer selected from the candidate's saved
-roles, then rechecks readable canonical job descriptions
-against location, office-day, compensation, seniority, eligibility, and saved
-fit-band rules before results are treated as verified. It also adds durable
-choice prompts, provider-neutral AI quality and thinking controls,
-candidate-facing application-answer review inside each job thread, an in-place
-opt-in for supervised form preparation, and exact mission resume after the
-answers are complete. Claude Code and Codex keep the same supported workflow
-boundary, and CareerRat still never presses the final Submit control.
-Source-level verification is green, but fresh packaged desktop acceptance,
-signing, and distribution have not rerun. The public-version claims above stay
-on v0.16.5 until that work is complete.
+Application questions now stay with the exact job thread. CareerRat can prepare
+a reviewed form through the final safe step, but CAPTCHA, sensitive attestations,
+uncertainty, and the final Submit control always stay with the candidate. The Mac
+app checks for signed updates, downloads them in place, and waits for an explicit
+**Restart and install**.
 
 The Windows x64 installer passed build, install, launch, export, and uninstall
 QA. A public Windows installer will ship only after SignPath Foundation signing

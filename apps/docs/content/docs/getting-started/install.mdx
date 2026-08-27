@@ -49,29 +49,17 @@ the first search in the background. Finishing setup opens Search with a clear
 running, matches-found, retry, or start state, so you never have to ask whether
 the job search has begun.
 
-v0.16.5 is the current public release. Its signed, notarized, and stapled Mac
-DMG, updater ZIP, update feed, and SBOM are on GitHub; `careerrat@latest` is
-0.16.5 on npm; the Homebrew cask is 0.16.5; and the installed app reports
-version 0.16.5, passes Gatekeeper, launches cleanly, and reports that it is up to
-date. The release also passed a real signed 0.16.4-to-0.16.5 in-app update.
+v0.16.6 is the current release. Claude Code and Codex run the same complete
+CareerRat workflow with no fallback or silent provider switch. Long searches,
+application missions, drafts, choices, and selected views survive navigation and
+restart. Built-in job boards run alongside AI open-web discovery, and AI leads
+stay clearly unverified until Evaluate reads the posting.
 
-v0.16.5 preserves plain-English recovery, remote and office-day limits,
-validated application entry points, and signed in-app Mac updates from v0.16.4.
-It also closes the remaining raw-error paths in guided installation, expanded
-diagnostics, browser-workflow cards, Search status, and browser setup.
-
-v0.16.6 is an unreleased release candidate. It fixes AI web searches that ran
-past the old two-minute limit, keeps credible open-web discoveries as clearly
-unverified leads for Evaluate, and expands the built-in public job-board source
-layer selected from saved roles. It adds provider-neutral
-AI quality and thinking controls, durable choice prompts, candidate-facing
-application-answer review inside each job thread, an in-place opt-in for
-supervised form preparation, and exact mission resume after the answers are
-complete. Claude Code and Codex keep the same supported workflow boundary, and
-CareerRat still never presses the final Submit control. Source-level verification
-is green, but fresh packaged desktop acceptance, signing, and distribution have
-not rerun. The public-version claims above stay on v0.16.5 until that work is
-complete.
+Application questions stay with the exact job thread. CareerRat can fill reviewed
+fields and advance safe form steps, but CAPTCHA, sensitive attestations,
+uncertainty, and the final Submit control always stay with you. The signed Mac app
+checks for updates, downloads them in CareerRat, and waits for you to choose
+**Restart and install**.
 
 Open the app and it scaffolds your workspace, boots the local app at
 `http://localhost:7777`, and launches your agent with a starter message, the
