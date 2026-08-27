@@ -496,9 +496,18 @@ function normalizePlace(value) {
     .replace(/\b(remote|hybrid|on[ -]?site|in[ -]?office)\b/g, " ")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
-  if (NEW_YORK_CITY_ALIASES.has(normalized)) return "new york city";
-  if (SAN_FRANCISCO_BAY_AREA_ALIASES.has(normalized)) return "san francisco bay area";
+  if (placeContainsAlias(normalized, NEW_YORK_CITY_ALIASES)) return "new york city";
+  if (placeContainsAlias(normalized, SAN_FRANCISCO_BAY_AREA_ALIASES)) {
+    return "san francisco bay area";
+  }
   return normalized;
+}
+
+function placeContainsAlias(normalized, aliases) {
+  if (!normalized) return false;
+  return [...aliases].some((alias) =>
+    new RegExp(`(?:^| )${escapeRegExp(alias)}(?: |$)`).test(normalized)
+  );
 }
 
 function coordinatesForPlace(value) {

@@ -1449,6 +1449,43 @@ test("qualification gate enforces remote eligibility and a configured commute ra
   assert.equal(result.kept[2].qualificationUnknowns.includes("location"), true);
 });
 
+test("qualification gate recognizes NYC inside a detailed neighborhood label", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Midtown Hospitality",
+        title: "General Manager",
+        url: "https://jobs.example.com/midtown-general-manager",
+        location: "New York, NY (Midtown/Koreatown NYC)",
+      },
+    ],
+    {
+      seenUrls: new Set(),
+      seenReqIds: new Set(),
+      seenCompanyRoles: new Set(),
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: {
+          role_buckets: [{ name: "Hospitality", titles: ["General Manager"] }],
+        },
+        profile: {
+          location: {
+            home: "New York, NY",
+            remote: true,
+            hybrid: true,
+            onsite: true,
+            relocation: [],
+          },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.filteredLocation.length, 0);
+});
+
 test("qualification gate filters stale, below-floor, and explicit sponsorship-conflict roles", () => {
   const now = Date.parse("2026-08-09T12:00:00Z");
   const result = filterAndDedupeOffers(

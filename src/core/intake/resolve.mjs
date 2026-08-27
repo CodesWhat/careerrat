@@ -174,7 +174,7 @@ export async function hydrateJobOffer(
     return {
       ...offer,
       url: resolved.url || offer.url,
-      location: resolved.location || offer.location,
+      location: preferredResolvedLocation(resolved.location, offer.location),
       comp: resolved.comp || offer.comp,
       bodyText: canonicalBody,
       bodyPartial,
@@ -192,6 +192,14 @@ export async function hydrateJobOffer(
     bodyFetchReason:
       resolved?.reason || "The full job description was not available from this source.",
   };
+}
+
+function preferredResolvedLocation(resolvedLocation, existingLocation) {
+  const resolved = String(resolvedLocation || "").trim();
+  const existing = String(existingLocation || "").trim();
+  if (!resolved) return existingLocation;
+  if (existing && /^\d[\d\s#./-]*$/u.test(resolved)) return existingLocation;
+  return resolvedLocation;
 }
 
 function mergeProviderMetadata(providerResolution, result) {

@@ -94,6 +94,39 @@ test("known ATS (Greenhouse) board fetch succeeds and finds the matching posting
   assert.match(result.bodyText, /Full JD text here/);
 });
 
+test("hydrateJobOffer does not replace a usable location with a numeric ATS label", async () => {
+  const url = "https://job-boards.greenhouse.io/550/jobs/5186736008";
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Gracious Hospitality Management",
+      title: "Assistant General Manager (Bar Chimera)",
+      url,
+      location: "New York, NY",
+      bodyText: "Open-web preview.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        jsonResponse({
+          jobs: [
+            {
+              id: 5186736008,
+              title: "Assistant General Manager (Bar Chimera)",
+              absolute_url: url,
+              location: { name: "550" },
+              content: `<p>${"Lead an active Midtown Manhattan restaurant operation. ".repeat(4)}</p>`,
+            },
+          ],
+        }),
+    }
+  );
+
+  assert.equal(hydrated.location, "New York, NY");
+  assert.equal(hydrated.bodyPartial, false);
+});
+
 test("known ATS preserves a complete canonical body beyond the old 4000-character preview cap", async () => {
   const url = "https://job-boards.greenhouse.io/acme/jobs/long-body";
   const ending =
