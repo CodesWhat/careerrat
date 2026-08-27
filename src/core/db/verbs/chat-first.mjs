@@ -1373,6 +1373,24 @@ function retryablePrepareStep(step) {
   );
 }
 
+function focusablePrepareStep(step, applicationId) {
+  return (
+    step.action === "prepare-submit" &&
+    step.status === "completed" &&
+    step.result?.state === "awaiting-submit" &&
+    (step.result?.applicationId === applicationId ||
+      (step.jobRef?.type === "application" && step.jobRef?.id === applicationId))
+  );
+}
+
+function missionStepPlanOperation(step) {
+  if (step.action === "evaluate") return "application.judgment";
+  if (new Set(["generate-documents", "prepare-submit"]).has(step.action)) {
+    return "application.drafting";
+  }
+  return null;
+}
+
 function normalizedLeaseMs(value) {
   if (value == null) return 600_000;
   const leaseMs = Number(value);
@@ -1466,7 +1484,16 @@ function recoverStaleMissionAttempts({
   });
 }
 
-function claimMissionStepAttempt({ repoRoot, env, missionId, stepId, leaseMs, now } = {}) {
+function claimMissionStepAttempt({
+  repoRoot,
+  env,
+  missionId,
+  stepId,
+  leaseMs,
+  executionPlan,
+  focusApplicationId,
+  now,
+} = {}) {
   return runVerb({ repoRoot, env }, (db) => {
     const mission = missionRequired(db, missionId);
     if (mission.status !== "running") {
@@ -1479,7 +1506,10 @@ function claimMissionStepAttempt({ repoRoot, env, missionId, stepId, leaseMs, no
     );
     if (!step) throw new NotFoundError(`no mission step with id "${stepId}"`);
     const retryableBlocked = retryablePrepareStep(step);
-    if (step.status !== "pending" && !retryableBlocked) {
+    const retryableFocus = focusApplicationId
+      ? focusablePrepareStep(step, focusApplicationId)
+      : false;
+    if (step.status !== "pending" && !retryableBlocked && !retryableFocus) {
       throw makeError(`mission step cannot be claimed from ${step.status}`, "CONFLICT");
     }
     const at = nextIso(step.updatedAt, now);
@@ -1492,6 +1522,9 @@ function claimMissionStepAttempt({ repoRoot, env, missionId, stepId, leaseMs, no
       startedAt: at,
       leaseExpiresAt: new Date(Date.parse(at) + leaseMs).toISOString(),
       idempotency,
+      ...(executionPlan
+        ? { executionPlan: jsonClone(executionPlan, "mission execution plan") }
+        : {}),
     };
     const updatedStep = {
       ...step,
@@ -1687,6 +1720,8 @@ export async function missionRun({
   env,
   id,
   executeIntent,
+  resolveExecutionPlan,
+  focusApplicationId,
   leaseMs,
   now,
   recoverActiveAttempts = false,
@@ -1695,6 +1730,9 @@ export async function missionRun({
     throw makeError("missionRun requires an executeIntent callback");
   }
   const missionId = cleanId(id, "mission id");
+  const focusedApplicationId = focusApplicationId
+    ? cleanId(focusApplicationId, "focus application id")
+    : null;
   const stepLeaseMs = normalizedLeaseMs(leaseMs);
   const recovered = committedWrite(() =>
     recoverStaleMissionAttempts({
@@ -1713,6 +1751,15 @@ export async function missionRun({
   if (mission.status !== "running") {
     throw makeError(`mission must be running before execution (got ${mission.status})`, "CONFLICT");
   }
+  if (
+    focusedApplicationId &&
+    !mission.steps.some((step) => focusablePrepareStep(step, focusedApplicationId))
+  ) {
+    throw makeError(
+      `mission has no prepared application handoff for ${focusedApplicationId}`,
+      "CONFLICT"
+    );
+  }
 
   const applicationIds = new Map();
   for (const step of mission.steps) {
@@ -1724,7 +1771,11 @@ export async function missionRun({
 
   for (const step of mission.steps) {
     const retryablePrepare = retryablePrepareStep(step);
-    if (step.status !== "pending" && !retryablePrepare) continue;
+    const retryableFocus = focusedApplicationId
+      ? focusablePrepareStep(step, focusedApplicationId)
+      : false;
+    if (focusedApplicationId && !retryableFocus) continue;
+    if (step.status !== "pending" && !retryablePrepare && !retryableFocus) continue;
     // Give a user pause request waiting on the HTTP event loop a chance to
     // commit before this runner claims more work. Some installed CLI agents
     // block the server process while they run, so a microtask-only loop would
@@ -1779,6 +1830,28 @@ export async function missionRun({
         error,
       };
     }
+    const planOperation = missionStepPlanOperation(step);
+    const priorExecutionPlan =
+      (retryablePrepare || retryableFocus) && Array.isArray(step.attempts)
+        ? step.attempts.at(-1)?.executionPlan || null
+        : null;
+    const executionPlan =
+      priorExecutionPlan ||
+      (planOperation && typeof resolveExecutionPlan === "function"
+        ? await resolveExecutionPlan({
+            repoRoot,
+            env,
+            operation: planOperation,
+            missionId,
+            step,
+          })
+        : null);
+    if (planOperation && typeof resolveExecutionPlan === "function" && !executionPlan) {
+      throw makeError(
+        `mission execution plan is unavailable for ${step.action}`,
+        "MISSION_EXECUTION_PLAN_REQUIRED"
+      );
+    }
     const claimed = committedWrite(() =>
       claimMissionStepAttempt({
         repoRoot,
@@ -1786,6 +1859,8 @@ export async function missionRun({
         missionId,
         stepId: step.id,
         leaseMs: stepLeaseMs,
+        executionPlan,
+        focusApplicationId: focusedApplicationId,
         now,
       })
     );
@@ -1800,7 +1875,12 @@ export async function missionRun({
     };
     const durableIntent = {
       ...intent,
-      input: { ...(intent.input || {}), missionAttempt },
+      input: {
+        ...(intent.input || {}),
+        ...(focusedApplicationId ? { focusSession: true } : {}),
+        ...(claimed.attempt.executionPlan ? { executionPlan: claimed.attempt.executionPlan } : {}),
+        missionAttempt,
+      },
     };
     const heartbeat = startMissionLeaseHeartbeat({
       repoRoot,
@@ -1936,12 +2016,33 @@ export async function missionRun({
   return { ok: true, mission };
 }
 
-export async function missionResume({ repoRoot, env, id, executeIntent, leaseMs, now } = {}) {
+export async function missionResume({
+  repoRoot,
+  env,
+  id,
+  executeIntent,
+  resolveExecutionPlan,
+  focusApplicationId,
+  leaseMs,
+  now,
+} = {}) {
   const missionId = cleanId(id, "mission id");
   const db = requireDb({ repoRoot, env });
   const current = hydrateMission(db, missionRequired(db, missionId));
   if (TERMINAL_MISSION_STATUSES.has(current.status)) {
     throw makeError(`mission is already ${current.status}: ${missionId}`, "CONFLICT");
+  }
+  const focusedApplicationId = focusApplicationId
+    ? cleanId(focusApplicationId, "focus application id")
+    : null;
+  if (
+    focusedApplicationId &&
+    !current.steps.some((step) => focusablePrepareStep(step, focusedApplicationId))
+  ) {
+    throw makeError(
+      `mission has no prepared application handoff for ${focusedApplicationId}`,
+      "CONFLICT"
+    );
   }
   if (current.status === "paused") {
     committedWrite(() =>
@@ -1959,6 +2060,8 @@ export async function missionResume({ repoRoot, env, id, executeIntent, leaseMs,
     env,
     id: missionId,
     executeIntent,
+    resolveExecutionPlan,
+    focusApplicationId: focusedApplicationId,
     leaseMs,
     now,
     recoverActiveAttempts: true,

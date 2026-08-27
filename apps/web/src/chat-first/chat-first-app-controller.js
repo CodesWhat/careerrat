@@ -391,12 +391,39 @@ export async function resumePacketPreparation({ api, missions, applicationId }) 
   if (!id) return false;
   const mission = [...list(missions)]
     .sort((left, right) => Date.parse(right?.updatedAt || 0) - Date.parse(left?.updatedAt || 0))
-    .find((candidate) => candidate?.status === "paused" && resumablePacketStep(candidate, id));
-  if (mission?.id && typeof api?.resumeChatFirstMission === "function") {
+    .find(
+      (candidate) =>
+        ["paused", "running"].includes(candidate?.status) && resumablePacketStep(candidate, id)
+    );
+  if (
+    mission?.id &&
+    mission.status === "paused" &&
+    typeof api?.resumeChatFirstMission === "function"
+  ) {
     return api.resumeChatFirstMission(mission.id);
   }
-  if (typeof api?.runWorkspaceIntent !== "function") return false;
-  return api.runWorkspaceIntent("job.prepare-submit", { type: "application", id }, {});
+  if (
+    mission?.id &&
+    mission.status === "running" &&
+    typeof api?.runChatFirstMission === "function"
+  ) {
+    return api.runChatFirstMission(mission.id);
+  }
+  if (
+    typeof api?.createChatFirstMission !== "function" ||
+    typeof api?.runChatFirstMission !== "function"
+  ) {
+    return false;
+  }
+  const created = await api.createChatFirstMission({
+    title: "Prepare this application",
+    mode: "prepare-to-submit",
+    requiresUserSubmit: true,
+    jobs: [{ type: "application", id }],
+  });
+  const createdMission = missionFromResponse(created);
+  if (!createdMission?.id) throw new Error("Application mission did not return an id");
+  return api.runChatFirstMission(createdMission.id);
 }
 
 export function applicationPreparationPermission(automation) {
@@ -723,14 +750,12 @@ export function openApplicationHandoff(gate, openWindow = globalThis.window?.ope
   return true;
 }
 
-export async function focusApplicationHandoff(gate, runWorkspaceIntent) {
+export async function focusApplicationHandoff(gate, api) {
+  const missionId = String(gate?.missionId || "").trim();
   const applicationId = String(gate?.applicationId || "").trim();
-  if (!applicationId || typeof runWorkspaceIntent !== "function") return false;
-  await runWorkspaceIntent(
-    "job.prepare-submit",
-    { type: "application", id: applicationId },
-    { resumeSession: true, focusSession: true }
-  );
+  if (!missionId || !applicationId || typeof api?.resumeChatFirstMission !== "function")
+    return false;
+  await api.resumeChatFirstMission(missionId, { focusApplicationId: applicationId });
   return true;
 }
 

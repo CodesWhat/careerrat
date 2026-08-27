@@ -623,21 +623,30 @@ describe("chat-first app controller", () => {
     expect(api.runWorkspaceIntent).not.toHaveBeenCalled();
   });
 
-  it("starts fresh supervised preparation when no paused mission remains", async () => {
+  it("creates and runs a durable application mission when no paused mission remains", async () => {
     const api = {
       resumeChatFirstMission: vi.fn(),
-      runWorkspaceIntent: vi.fn().mockResolvedValue({ data: { ok: true } }),
+      createChatFirstMission: vi
+        .fn()
+        .mockResolvedValue({ data: { mission: { id: "mission-fresh" } } }),
+      runChatFirstMission: vi
+        .fn()
+        .mockResolvedValue({ data: { mission: { id: "mission-fresh", status: "paused" } } }),
+      runWorkspaceIntent: vi.fn(),
     };
 
     await expect(
       resumePacketPreparation({ api, missions: [], applicationId: "app-hightouch" })
-    ).resolves.toMatchObject({ data: { ok: true } });
+    ).resolves.toMatchObject({ data: { mission: { id: "mission-fresh" } } });
     expect(api.resumeChatFirstMission).not.toHaveBeenCalled();
-    expect(api.runWorkspaceIntent).toHaveBeenCalledWith(
-      "job.prepare-submit",
-      { type: "application", id: "app-hightouch" },
-      {}
-    );
+    expect(api.createChatFirstMission).toHaveBeenCalledWith({
+      title: "Prepare this application",
+      mode: "prepare-to-submit",
+      requiresUserSubmit: true,
+      jobs: [{ type: "application", id: "app-hightouch" }],
+    });
+    expect(api.runChatFirstMission).toHaveBeenCalledWith("mission-fresh");
+    expect(api.runWorkspaceIntent).not.toHaveBeenCalled();
   });
 
   it("ignores unrelated or completed paused missions when resuming packet preparation", async () => {
@@ -844,31 +853,31 @@ describe("chat-first app controller", () => {
     expect(openApplicationHandoff({ handoffUrl: "javascript:alert(1)" }, open)).toBe(false);
   });
 
-  it("returns a submit gate to the retained supervised session instead of opening its URL", async () => {
-    const runWorkspaceIntent = vi.fn().mockResolvedValue({ ok: true });
+  it("returns a submit gate through its durable mission owner instead of a workspace shortcut", async () => {
+    const api = {
+      resumeChatFirstMission: vi.fn().mockResolvedValue({ data: { mission: { id: "mission-1" } } }),
+      runWorkspaceIntent: vi.fn(),
+    };
     const gate = {
+      missionId: "mission-1",
       applicationId: "app-1",
       handoffUrl: "https://jobs.example.test/submit",
     };
 
-    await expect(focusApplicationHandoff(gate, runWorkspaceIntent)).resolves.toBe(true);
-    expect(runWorkspaceIntent).toHaveBeenCalledWith(
-      "job.prepare-submit",
-      { type: "application", id: "app-1" },
-      { resumeSession: true, focusSession: true }
-    );
+    await expect(focusApplicationHandoff(gate, api)).resolves.toBe(true);
+    expect(api.resumeChatFirstMission).toHaveBeenCalledWith("mission-1", {
+      focusApplicationId: "app-1",
+    });
+    expect(api.runWorkspaceIntent).not.toHaveBeenCalled();
   });
 
   it("does not fall back to a fresh URL when a submit gate has no retained application owner", async () => {
-    const runWorkspaceIntent = vi.fn();
+    const api = { resumeChatFirstMission: vi.fn() };
 
     await expect(
-      focusApplicationHandoff(
-        { handoffUrl: "https://jobs.example.test/submit" },
-        runWorkspaceIntent
-      )
+      focusApplicationHandoff({ handoffUrl: "https://jobs.example.test/submit" }, api)
     ).resolves.toBe(false);
-    expect(runWorkspaceIntent).not.toHaveBeenCalled();
+    expect(api.resumeChatFirstMission).not.toHaveBeenCalled();
   });
 
   it("resolves every canonical Needs You decision to its durable owner action", () => {

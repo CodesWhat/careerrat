@@ -3164,11 +3164,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       });
     },
     openGateHandoff: async () => {
-      const focused = await run(() =>
-        focusApplicationHandoff(activeGate, (type, entity, input) =>
-          api.runWorkspaceIntent(type, entity, input)
-        )
-      );
+      const focused = await run(() => focusApplicationHandoff(activeGate, api));
       if (focused === false) {
         setError("The prepared application session is not available yet.");
       }

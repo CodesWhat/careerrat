@@ -1,4 +1,7 @@
 import { executeWorkspaceIntent } from "../core/agent/workspace-agent.mjs";
+import { loadAIPreferences } from "../core/ai/ai-preferences.mjs";
+import { resolveAIRoute } from "../core/ai/call-ai.mjs";
+import { aiRuntimeIdForRoute, resolveAIExecutionPlan } from "../core/ai/operation-policy.mjs";
 import {
   deepIngestPromptDismiss,
   deepIngestThreadOpen,
@@ -23,6 +26,21 @@ import { exportInterviewDossierPdf } from "../core/documents/dossier-pdf.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024;
+
+function selectedMissionExecutionPlan({ repoRoot, env, operation }) {
+  const route = resolveAIRoute(env, { repoRoot });
+  const runtimeId = aiRuntimeIdForRoute(route);
+  if (!runtimeId) {
+    const error = new Error(route.error || "Select a ready AI CLI before starting this mission.");
+    error.code = "NO_AI_ROUTE";
+    throw error;
+  }
+  return resolveAIExecutionPlan({
+    operation,
+    runtimeId,
+    preferences: loadAIPreferences({ repoRoot, env }),
+  });
+}
 
 function statusForError(error) {
   if (Number.isInteger(error?.status)) return error.status;
@@ -84,6 +102,7 @@ export function mountChatFirstRoutes({
   env = process.env,
   workspaceAgentRuntime,
   executeMissionIntent,
+  resolveMissionExecutionPlan = selectedMissionExecutionPlan,
   callAIImpl,
   exportInterviewDossierPdfImpl = exportInterviewDossierPdf,
 } = {}) {
@@ -91,13 +110,15 @@ export function mountChatFirstRoutes({
   const executeIntent =
     executeMissionIntent || workspaceAgentRuntime?.executeIntent || executeWorkspaceIntent;
   const activeMissionRuns = new Map();
-  async function executeMission(id, { resume = false } = {}) {
+  async function executeMission(id, { resume = false, focusApplicationId = null } = {}) {
     const missionId = String(id ?? "").trim();
     if (activeMissionRuns.has(missionId)) return activeMissionRuns.get(missionId);
     const execution = Promise.resolve().then(() =>
       (resume ? missionResume : missionRun)({
         ...pathCtx,
         id,
+        resolveExecutionPlan: resolveMissionExecutionPlan,
+        ...(focusApplicationId ? { focusApplicationId } : {}),
         executeIntent: (attempt) => executeIntent({ repoRoot, env, ...attempt }),
       })
     );
@@ -211,7 +232,12 @@ export function mountChatFirstRoutes({
   );
 
   addRoute("POST", "/api/chat-first/missions/resume", (req, res) =>
-    withBody(req, res, (body) => executeMission(body.id, { resume: true }))
+    withBody(req, res, (body) =>
+      executeMission(body.id, {
+        resume: true,
+        focusApplicationId: body.focusApplicationId,
+      })
+    )
   );
 
   addRoute("POST", "/api/chat-first/mock/start", (req, res) =>

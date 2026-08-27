@@ -407,6 +407,7 @@ export async function draftCoverLetterBlocks({
   context = {},
   call,
   runAI = runBoundedAI,
+  executionPlan,
 } = {}) {
   // Built once so the same storyHints selection both goes into the prompt
   // and scopes validatePacketEvidenceIds's allowed `story:<id>` set below —
@@ -432,6 +433,7 @@ export async function draftCoverLetterBlocks({
     maxTokens: 4000,
     root: repoRoot,
     env,
+    executionPlan,
   });
 
   // The packet lane never writes a degraded cover letter: an AI-call failure
@@ -615,6 +617,7 @@ export async function draftResumeProposal({
   context = {},
   call,
   runAI = runBoundedAI,
+  executionPlan,
 } = {}) {
   // The packet lane never writes a degraded résumé: every failure path below
   // throws instead of falling back to the deterministic claims-list resume —
@@ -651,6 +654,7 @@ export async function draftResumeProposal({
       maxTokens: 10000,
       root: repoRoot,
       env,
+      executionPlan,
     });
 
   let aiResult = await runResumeAI(baseMessages);
@@ -1147,6 +1151,7 @@ export async function generatePacket({
   coverLetterCall,
   resumeCall,
   packetAnswersCall,
+  executionPlan,
 } = {}) {
   const id = cleanText(
     applicationId || appId || context?.applicationId || appFromContext(context).id
@@ -1195,8 +1200,20 @@ export async function generatePacket({
   // schemas, different prompts) — run them concurrently rather than
   // sequentially. answers stays sequential where it already was.
   const [resumeProposal, coverLetter] = await Promise.all([
-    resumeDraft({ repoRoot, env, context: packetContext, call: resumeCall }),
-    coverDraft({ repoRoot, env, context: packetContext, call: coverLetterCall }),
+    resumeDraft({
+      repoRoot,
+      env,
+      context: packetContext,
+      call: resumeCall,
+      executionPlan,
+    }),
+    coverDraft({
+      repoRoot,
+      env,
+      context: packetContext,
+      call: coverLetterCall,
+      executionPlan,
+    }),
   ]);
   const answers = skipAnswers
     ? {
@@ -1214,6 +1231,7 @@ export async function generatePacket({
         context: packetContext,
         questions: capture,
         call: packetAnswersCall,
+        executionPlan,
       });
   const sources = buildSourceArtifacts({
     context: packetContext,

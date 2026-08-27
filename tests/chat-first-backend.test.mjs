@@ -1924,6 +1924,92 @@ test("mission execution persists leased attempt identity, idempotency classifica
   assert.equal(intents[0].type, "job.generate-documents");
 });
 
+test("application mission attempts freeze their provider-neutral plan and reuse it when the submit handoff resumes", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-plan-reuse",
+    company: "Frozen Plan Corp",
+    evaluation: { gate: "keep" },
+  });
+  api.missionCreate({
+    repoRoot,
+    id: "mission-plan-reuse",
+    title: "Prepare Frozen Plan Corp",
+    mode: "prepare-to-submit",
+    steps: [
+      {
+        id: "prepare",
+        label: "Prepare form",
+        action: "prepare-submit",
+        jobRef: { type: "application", id: "app-plan-reuse" },
+      },
+      {
+        id: "submit",
+        label: "Submit form",
+        action: "submit-gate",
+        jobRef: { type: "application", id: "app-plan-reuse" },
+      },
+    ],
+  });
+  const frozenPlan = {
+    policyVersion: 1,
+    operation: "application.drafting",
+    runtimeId: "codex",
+    adapterVersion: 1,
+    requested: { quality: "best", reasoning: "medium" },
+    resolved: {
+      quality: "best",
+      reasoning: "medium",
+      model: "gpt-5.6-sol",
+      modelSource: "alias",
+      effort: "medium",
+      speedTier: null,
+    },
+    fallback: null,
+  };
+  let resolverCalls = 0;
+  const seen = [];
+  const resolveExecutionPlan = () => {
+    resolverCalls += 1;
+    return resolverCalls === 1 ? frozenPlan : { ...frozenPlan, runtimeId: "claude" };
+  };
+  const executeIntent = async ({ intent }) => {
+    seen.push(intent);
+    return {
+      messages: [{ metadata: { state: "awaiting-submit" } }],
+      operationResult: { status: "ready" },
+    };
+  };
+
+  const initial = await api.missionRun({
+    repoRoot,
+    id: "mission-plan-reuse",
+    resolveExecutionPlan,
+    executeIntent,
+  });
+  assert.equal(initial.mission.status, "paused");
+  assert.deepEqual(seen[0].input.executionPlan, frozenPlan);
+  assert.deepEqual(initial.mission.steps[0].attempts[0].executionPlan, frozenPlan);
+
+  const resumed = await api.missionResume({
+    repoRoot,
+    id: "mission-plan-reuse",
+    focusApplicationId: "app-plan-reuse",
+    resolveExecutionPlan,
+    executeIntent,
+  });
+  assert.equal(resumed.mission.status, "paused");
+  assert.equal(seen.length, 2);
+  assert.equal(seen[1].input.focusSession, true);
+  assert.deepEqual(seen[1].input.executionPlan, frozenPlan);
+  assert.equal(resolverCalls, 1, "handoff resume must reuse the persisted plan");
+  assert.deepEqual(
+    resumed.mission.steps[0].attempts.map((attempt) => attempt.executionPlan),
+    [frozenPlan, frozenPlan]
+  );
+});
+
 test("mission execution pauses an expired uncertain operation instead of replaying it and refuses a live lease", async () => {
   const api = await chatFirstApi();
   const repoRoot = tempRepo();

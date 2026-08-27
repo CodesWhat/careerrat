@@ -84,8 +84,9 @@ export async function evaluateAndPersistPacketGate({
   body,
   invoke,
   runAI,
+  executionPlan,
 } = {}) {
-  const result = await evaluatePacketGate({ repoRoot, env, body, invoke, runAI });
+  const result = await evaluatePacketGate({ repoRoot, env, body, invoke, runAI, executionPlan });
   const evaluation = result.body?.data;
   if (result.status !== 200 || !result.body?.ok || !evaluation?.applicationId) return result;
 

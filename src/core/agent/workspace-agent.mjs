@@ -1579,13 +1579,19 @@ async function evaluateApplicationRequest({
   applicationId,
   jobBody,
   jobUrl,
+  executionPlan,
   evaluateJobImpl,
 }) {
   const application = applicationForIntent({ repoRoot, env, id: applicationId });
   const body = { applicationId };
   if (jobBody) body.jobBody = String(jobBody);
   if (jobUrl) body.jobUrl = String(jobUrl);
-  const operation = await evaluateJobImpl({ repoRoot, env, body });
+  const operation = await evaluateJobImpl({
+    repoRoot,
+    env,
+    body,
+    ...(executionPlan ? { executionPlan } : {}),
+  });
   const evaluation = operation?.body?.data;
   if (operation?.status !== 200 || !operation?.body?.ok || !evaluation) {
     throw actionError(
@@ -1752,6 +1758,75 @@ function applicationApplySafetyBlockReason(application) {
     return "This application's packet still has open items to resolve.";
   }
   return null;
+}
+
+function applicationIdForMissionStep(db, missionId, step) {
+  if (step?.jobRef?.type === "application") return String(step.jobRef.id || "").trim() || null;
+  if (step?.jobRef?.type !== "sourced") return null;
+  const rows = db
+    .prepare("SELECT data FROM mission_steps WHERE mission_id = ? ORDER BY sequence ASC")
+    .all(missionId)
+    .map((row) => JSON.parse(row.data));
+  const promoted = rows.find(
+    (candidate) =>
+      candidate.action === "promote" &&
+      candidate.jobRef?.type === "sourced" &&
+      candidate.jobRef?.id === step.jobRef.id &&
+      candidate.status === "completed"
+  );
+  return String(promoted?.result?.applicationId || promoted?.result?.id || "").trim() || null;
+}
+
+function corroborateApplicationMissionAttempt({ repoRoot, env, intent, now }) {
+  const supplied = intent.input?.missionAttempt;
+  if (!supplied || typeof supplied !== "object" || Array.isArray(supplied)) {
+    throw actionError(
+      "Start or resume this application from its CareerRat mission.",
+      "APPLICATION_MISSION_ATTEMPT_REQUIRED"
+    );
+  }
+  const missionId = String(supplied.missionId || "").trim();
+  const stepId = String(supplied.stepId || "").trim();
+  const attemptId = String(supplied.attemptId || "").trim();
+  const fence = Number(supplied.fence);
+  const db = requireDb({ repoRoot, env });
+  const missionRow = missionId
+    ? db.prepare("SELECT data FROM missions WHERE id = ?").get(missionId)
+    : null;
+  const stepRow =
+    missionId && stepId
+      ? db
+          .prepare("SELECT data FROM mission_steps WHERE mission_id = ? AND id = ?")
+          .get(missionId, stepId)
+      : null;
+  const mission = missionRow ? JSON.parse(missionRow.data) : null;
+  const step = stepRow ? JSON.parse(stepRow.data) : null;
+  const current = step?.currentAttempt;
+  const expiresAt = Date.parse(current?.leaseExpiresAt || "");
+  const expectedApplicationId = step ? applicationIdForMissionStep(db, missionId, step) : null;
+  const valid =
+    mission?.status === "running" &&
+    step?.status === "running" &&
+    step?.action === "prepare-submit" &&
+    attemptId &&
+    current?.id === attemptId &&
+    Number.isInteger(fence) &&
+    current?.fence === fence &&
+    current?.idempotency?.key === supplied.idempotencyKey &&
+    current?.idempotency?.classification === supplied.idempotencyClassification &&
+    Number.isFinite(expiresAt) &&
+    expiresAt > requestDate(now).getTime() &&
+    expectedApplicationId === intent.entity.id &&
+    current?.executionPlan &&
+    typeof current.executionPlan === "object" &&
+    current.executionPlan.operation === "application.drafting";
+  if (!valid) {
+    throw actionError(
+      "That application mission run is no longer current. Resume it from CareerRat.",
+      "APPLICATION_MISSION_ATTEMPT_STALE"
+    );
+  }
+  return current.executionPlan;
 }
 
 function questionCaptureFromApplication(application) {
@@ -2024,12 +2099,14 @@ async function generateDocumentsWithQuestionFallback({
   formats,
   applyIntent,
   force = false,
+  executionPlan,
   generateDocumentsImpl,
 }) {
   const invoke = (nextApplyIntent) =>
     generateDocumentsImpl({
       repoRoot,
       env,
+      ...(executionPlan ? { executionPlan } : {}),
       body: {
         applicationId,
         applyIntent: nextApplyIntent,
@@ -3295,6 +3372,23 @@ export async function executeWorkspaceIntent({
   const intentMessage = workspaceIntentAppend({ repoRoot, env, intent: normalized, now });
   try {
     normalized = resolveNaturalWorkspaceRequest({ repoRoot, env, intent: normalized });
+    if (new Set(["job.prepare-submit", "job.apply"]).has(normalized.type)) {
+      applicationForIntent({ repoRoot, env, id: normalized.entity.id });
+      const executionPlan = corroborateApplicationMissionAttempt({
+        repoRoot,
+        env,
+        intent: normalized,
+        now,
+      });
+      normalized = {
+        ...normalized,
+        input: {
+          ...(normalized.input || {}),
+          prepareOnly: true,
+          executionPlan,
+        },
+      };
+    }
     const input = normalized.input || {};
     if (normalized.type === "screening.answer") {
       const questionText = String(input.questionText || "").trim();
@@ -3761,6 +3855,7 @@ export async function executeWorkspaceIntent({
         applicationId: captured.applicationId,
         jobBody: captured.bodyText,
         jobUrl: captured.jobUrl,
+        executionPlan: input.executionPlan,
         evaluateJobImpl,
       });
       const evaluationMetadata = {
@@ -3810,6 +3905,7 @@ export async function executeWorkspaceIntent({
         applicationId: captured.applicationId,
         applyIntent,
         formats: ["pdf"],
+        executionPlan: input.executionPlan,
         generateDocumentsImpl,
       });
       const gaps = packetGapsForApplication(packet.gaps, evaluated.application, applyIntent);
@@ -3880,6 +3976,7 @@ export async function executeWorkspaceIntent({
         applicationId: normalized.entity.id,
         jobBody: input.jobBody,
         jobUrl: input.jobUrl,
+        executionPlan: input.executionPlan,
         evaluateJobImpl,
       });
       return appendActionResult({
@@ -3930,6 +4027,7 @@ export async function executeWorkspaceIntent({
           applicationId: normalized.entity.id,
           applyIntent,
           formats: formats.length ? formats : ["pdf"],
+          executionPlan: input.executionPlan,
           generateDocumentsImpl,
         });
       const gaps = packetGapsForApplication(operation.gaps, application, applyIntent);
@@ -7364,6 +7462,7 @@ export async function executeWorkspaceIntent({
           repoRoot,
           env,
           applicationId: normalized.entity.id,
+          executionPlan: input.executionPlan,
           evaluateJobImpl,
         });
       }
@@ -7407,6 +7506,7 @@ export async function executeWorkspaceIntent({
         applicationId: normalized.entity.id,
         applyIntent: true,
         formats: ["pdf"],
+        executionPlan: input.executionPlan,
         generateDocumentsImpl,
       });
       const gaps = packetGapsForApplication(packet.gaps, application, true);
@@ -7507,6 +7607,7 @@ export async function executeWorkspaceIntent({
         applyIntent: true,
         formats: ["pdf"],
         force: true,
+        executionPlan: input.executionPlan,
         generateDocumentsImpl,
       });
       const gaps = packetGapsForApplication(packet.gaps, application, true);
@@ -7648,6 +7749,7 @@ export async function executeWorkspaceIntent({
         applyIntent: true,
         formats: ["pdf"],
         force: true,
+        executionPlan: input.executionPlan,
         generateDocumentsImpl,
       });
       const gaps = packetGapsForApplication(packet.gaps, application, true);

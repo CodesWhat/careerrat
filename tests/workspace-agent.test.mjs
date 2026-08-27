@@ -10,7 +10,7 @@ import {
   captureWorkspaceIntake,
   createWorkspaceAgentRuntime,
   EXECUTABLE_INTENTS,
-  executeWorkspaceIntent,
+  executeWorkspaceIntent as executeWorkspaceIntentCore,
   mailSyncSources,
   messagesSyncSources,
   previewWorkspaceIntent,
@@ -40,6 +40,7 @@ import {
   candidateConfigPatch,
   candidateEvidenceMerge,
 } from "../src/core/db/verbs/candidate.mjs";
+import { missionCreate } from "../src/core/db/verbs/chat-first.mjs";
 import { commUpsert } from "../src/core/db/verbs/comm.mjs";
 import { companyProposalBatchPut } from "../src/core/db/verbs/company-discovery.mjs";
 import { intakeCapture, intakeUpdate } from "../src/core/db/verbs/intake.mjs";
@@ -62,6 +63,7 @@ import {
 } from "../src/core/research/research-store.mjs";
 
 const cleanupRoots = [];
+let missionFixtureSequence = 0;
 
 function tempRepo() {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-workspace-agent-"));
@@ -121,6 +123,86 @@ function preparedApplyDeps(overrides = {}) {
     }),
     ...overrides,
   };
+}
+
+function currentApplicationMissionAttempt(repoRoot, intent) {
+  if (!new Set(["job.prepare-submit", "job.apply"]).has(intent?.type)) return null;
+  const applicationId = String(intent.entity?.id || "").trim();
+  const missionId = `mission-workspace-fixture-${++missionFixtureSequence}`;
+  const stepId = "prepare";
+  missionCreate({
+    repoRoot,
+    env: {},
+    id: missionId,
+    title: "Prepare application fixture",
+    mode: "prepare-to-submit",
+    steps: [
+      {
+        id: stepId,
+        label: "Prepare form",
+        action: "prepare-submit",
+        jobRef: { type: "application", id: applicationId },
+      },
+    ],
+  });
+  const db = openDb({ repoRoot, env: {} });
+  const row = db
+    .prepare("SELECT data FROM mission_steps WHERE mission_id = ? AND id = ?")
+    .get(missionId, stepId);
+  const step = JSON.parse(row.data);
+  step.status = "running";
+  step.currentAttempt = {
+    id: `attempt-workspace-fixture-${missionFixtureSequence}`,
+    fence: 1,
+    status: "running",
+    startedAt: "2026-08-27T14:00:00.000Z",
+    leaseExpiresAt: "2099-08-27T14:10:00.000Z",
+    idempotency: { key: `${missionId}:${stepId}`, classification: "receipt-required" },
+    executionPlan: {
+      policyVersion: 1,
+      operation: "application.drafting",
+      runtimeId: "codex",
+      adapterVersion: 1,
+      requested: { quality: "best", reasoning: "medium" },
+      resolved: {
+        quality: "best",
+        reasoning: "medium",
+        model: "gpt-5.6-sol",
+        modelSource: "alias",
+        effort: "medium",
+        speedTier: null,
+      },
+      fallback: null,
+    },
+  };
+  db.prepare("UPDATE mission_steps SET data = ? WHERE mission_id = ? AND id = ?").run(
+    JSON.stringify(step),
+    missionId,
+    stepId
+  );
+  return {
+    missionId,
+    stepId,
+    attemptId: step.currentAttempt.id,
+    fence: step.currentAttempt.fence,
+    idempotencyKey: step.currentAttempt.idempotency.key,
+    idempotencyClassification: step.currentAttempt.idempotency.classification,
+  };
+}
+
+function executeWorkspaceIntent(options) {
+  const missionAttempt = currentApplicationMissionAttempt(options.repoRoot, options.intent);
+  return executeWorkspaceIntentCore({
+    ...options,
+    ...(missionAttempt
+      ? {
+          intent: {
+            ...options.intent,
+            input: { ...(options.intent.input || {}), missionAttempt },
+          },
+        }
+      : {}),
+  });
 }
 
 function seedCommunication(repoRoot, overrides = {}) {
@@ -9341,6 +9423,27 @@ test("workspace agent routes expose the one thread and route button intents thro
   assert.equal(seen.length, 1);
   assert.equal(acted.body.data.thread.id, WORKSPACE_THREAD_ID);
   assert.equal(acted.body.data.messages.length, 2);
+});
+
+test("POST /api/workspace/intent cannot bypass the durable application mission owner", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    evaluation: { gate: "keep", fitScore: 92 },
+    packetManifest: { uploadReady: true, gaps: [], artifacts: {} },
+  });
+  const routes = mountDirect(repoRoot);
+
+  const response = await callDirect(routes, "POST", "/api/workspace/intent", {
+    intent: {
+      type: "job.prepare-submit",
+      entity: { type: "application", id: "app-temporal" },
+      input: { resumeSession: true },
+    },
+  });
+
+  assert.equal(response.status, 409);
+  assert.equal(response.body.ok, false);
+  assert.equal(response.body.code, "APPLICATION_MISSION_ATTEMPT_REQUIRED");
 });
 
 test("workspace action errors return actionable client statuses instead of server errors", async () => {

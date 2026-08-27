@@ -175,6 +175,7 @@ export async function evaluatePacketGate({
   body,
   invoke,
   runAI = runBoundedAI,
+  executionPlan,
 } = {}) {
   let request;
   try {
@@ -308,7 +309,7 @@ export async function evaluatePacketGate({
               "Return only JSON for a local application packet gate. Do not include raw prompt text.",
             outputName: "packet_gate_verdict",
             maxTokens: 4096,
-            aiOperation: "application.judgment",
+            ...(executionPlan ? { executionPlan } : { aiOperation: "application.judgment" }),
             root: repoRoot,
             env,
           }),

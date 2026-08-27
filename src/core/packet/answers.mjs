@@ -339,6 +339,7 @@ export async function draftPacketAnswers({
   questions,
   call,
   runAI = runBoundedAI,
+  executionPlan,
 } = {}) {
   let capture = questions ? normalizeQuestions(questions) : null;
   const id = cleanText(applicationId || appId);
@@ -420,6 +421,7 @@ export async function draftPacketAnswers({
     maxTokens: 3600,
     root: repoRoot,
     env,
+    executionPlan,
   });
 
   if (!aiResult.body?.ok) {

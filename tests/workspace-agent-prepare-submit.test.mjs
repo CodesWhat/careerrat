@@ -11,6 +11,7 @@ import {
 } from "../src/core/agent/workspace-thread.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { appRegisterPacketQuestionCapture, appUpsert } from "../src/core/db/verbs/app.mjs";
+import { missionCreate } from "../src/core/db/verbs/chat-first.mjs";
 
 const cleanupRoots = [];
 
@@ -50,19 +51,89 @@ function readApplication(repoRoot) {
   return JSON.parse(row.data);
 }
 
-function prepareIntent(input) {
+function prepareIntent(input, repoRoot) {
+  const missionAttempt = repoRoot ? seedCurrentPrepareAttempt(repoRoot) : null;
   return {
     type: "job.prepare-submit",
     entity: { type: "application", id: "app-prepared" },
-    ...(input ? { input } : {}),
+    ...(input || missionAttempt
+      ? { input: { ...(input || {}), ...(missionAttempt ? { missionAttempt } : {}) } }
+      : {}),
   };
 }
 
-function legacyApplyIntent(input) {
+function legacyApplyIntent(input, repoRoot) {
+  const missionAttempt = repoRoot ? seedCurrentPrepareAttempt(repoRoot) : null;
   return {
     type: "job.apply",
     entity: { type: "application", id: "app-prepared" },
-    ...(input ? { input } : {}),
+    ...(input || missionAttempt
+      ? { input: { ...(input || {}), ...(missionAttempt ? { missionAttempt } : {}) } }
+      : {}),
+  };
+}
+
+function seedCurrentPrepareAttempt(repoRoot, { attemptId = "attempt-current" } = {}) {
+  missionCreate({
+    repoRoot,
+    env: {},
+    id: "mission-prepare",
+    title: "Prepare application",
+    mode: "prepare-to-submit",
+    steps: [
+      {
+        id: "prepare",
+        label: "Prepare form",
+        action: "prepare-submit",
+        jobRef: { type: "application", id: "app-prepared" },
+      },
+    ],
+  });
+  const db = openDb({ repoRoot, env: {} });
+  const row = db
+    .prepare("SELECT data FROM mission_steps WHERE mission_id = ? AND id = ?")
+    .get("mission-prepare", "prepare");
+  const step = JSON.parse(row.data);
+  step.status = "running";
+  step.currentAttempt = {
+    id: attemptId,
+    fence: 1,
+    status: "running",
+    startedAt: "2026-08-27T14:00:00.000Z",
+    leaseExpiresAt: "2099-08-27T14:10:00.000Z",
+    idempotency: {
+      key: "mission-prepare:prepare",
+      classification: "receipt-required",
+    },
+    executionPlan: {
+      policyVersion: 1,
+      operation: "application.drafting",
+      runtimeId: "codex",
+      adapterVersion: 1,
+      requested: { quality: "best", reasoning: "medium" },
+      resolved: {
+        quality: "best",
+        reasoning: "medium",
+        model: "gpt-5.6-sol",
+        modelSource: "alias",
+        effort: "medium",
+        speedTier: null,
+      },
+      fallback: null,
+    },
+  };
+  db.prepare("UPDATE mission_steps SET data = ? WHERE mission_id = ? AND id = ?").run(
+    JSON.stringify(step),
+    "mission-prepare",
+    "prepare"
+  );
+  return {
+    missionId: "mission-prepare",
+    stepId: "prepare",
+    attemptId: step.currentAttempt.id,
+    fence: step.currentAttempt.fence,
+    idempotencyKey: step.currentAttempt.idempotency.key,
+    idempotencyClassification: step.currentAttempt.idempotency.classification,
   };
 }
 
@@ -85,6 +156,60 @@ test("job.prepare-submit is executable only for application entities", () => {
   );
 });
 
+test("browser-touching application intents reject direct calls without a current mission attempt", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+  let applyCalls = 0;
+
+  for (const intent of [prepareIntent(), legacyApplyIntent({ resumeSession: true })]) {
+    await assert.rejects(
+      () =>
+        executeWorkspaceIntent({
+          repoRoot,
+          env: {},
+          intent,
+          applyJobImpl: async () => {
+            applyCalls += 1;
+            return { available: true, verified: false, state: "awaiting-submit" };
+          },
+        }),
+      (error) => error.code === "APPLICATION_MISSION_ATTEMPT_REQUIRED"
+    );
+  }
+  assert.equal(applyCalls, 0);
+});
+
+test("browser-touching application intents reject forged and stale mission attempt ids", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+  const current = seedCurrentPrepareAttempt(repoRoot);
+
+  for (const missionAttempt of [
+    { ...current, missionId: "mission-forged", stepId: "prepare" },
+    {
+      ...current,
+      missionId: "mission-prepare",
+      stepId: "prepare",
+      attemptId: "attempt-stale",
+    },
+  ]) {
+    await assert.rejects(
+      () =>
+        executeWorkspaceIntent({
+          repoRoot,
+          env: {},
+          intent: prepareIntent({ missionAttempt }),
+          applyJobImpl: async () => ({
+            available: true,
+            verified: false,
+            state: "awaiting-submit",
+          }),
+        }),
+      (error) => error.code === "APPLICATION_MISSION_ATTEMPT_STALE"
+    );
+  }
+});
+
 test("job.prepare-submit resumes a persisted KEEP packet in forced prepare-only mode", async () => {
   const repoRoot = tempRepo();
   seedPreparedApplication(repoRoot);
@@ -93,7 +218,7 @@ test("job.prepare-submit resumes a persisted KEEP packet in forced prepare-only 
   const result = await executeWorkspaceIntent({
     repoRoot,
     env: {},
-    intent: prepareIntent({ resumeSession: false, prepareOnly: false }),
+    intent: prepareIntent({ resumeSession: false, prepareOnly: false }, repoRoot),
     applyJobImpl: async (input) => {
       calls.push(input);
       return {
@@ -119,6 +244,8 @@ test("job.prepare-submit resumes a persisted KEEP packet in forced prepare-only 
   assert.equal(calls[0].prepareOnly, true);
   assert.equal(calls[0].input.resumeSession, true);
   assert.equal(calls[0].input.prepareOnly, true);
+  assert.equal(calls[0].input.executionPlan.runtimeId, "codex");
+  assert.equal(calls[0].input.executionPlan.operation, "application.drafting");
   assert.equal(readApplication(repoRoot).status, "reviewed-hold");
   const last = result.messages.at(-1);
   assert.equal(last.metadata.state, "awaiting-submit");
@@ -135,7 +262,7 @@ test("job.apply is forced through the same prepare-only boundary and can never m
   const result = await executeWorkspaceIntent({
     repoRoot,
     env: {},
-    intent: legacyApplyIntent({ resumeSession: true, prepareOnly: false }),
+    intent: legacyApplyIntent({ resumeSession: true, prepareOnly: false }, repoRoot),
     applyJobImpl: async (input) => {
       calls.push(input);
       return {
@@ -166,7 +293,7 @@ test("job.prepare-submit forwards a focus-only request to the retained supervise
   await executeWorkspaceIntent({
     repoRoot,
     env: {},
-    intent: prepareIntent({ resumeSession: true, focusSession: true }),
+    intent: prepareIntent({ resumeSession: true, focusSession: true }, repoRoot),
     applyJobImpl: async (input) => {
       calls.push(input);
       return {
@@ -208,7 +335,7 @@ test("job.prepare-submit does not block form filling on an optional cover-letter
   const result = await executeWorkspaceIntent({
     repoRoot,
     env: {},
-    intent: prepareIntent(),
+    intent: prepareIntent(null, repoRoot),
     applyJobImpl: async () => {
       applyCalls += 1;
       return {
@@ -234,7 +361,7 @@ test("job.prepare-submit blocks before opening a browser when persisted safety s
   const result = await executeWorkspaceIntent({
     repoRoot,
     env: {},
-    intent: prepareIntent(),
+    intent: prepareIntent(null, repoRoot),
     applyJobImpl: async () => {
       applyCalls += 1;
       return { verified: false, state: "awaiting-submit" };
@@ -254,7 +381,7 @@ test("job.prepare-submit never records an application even if an executor claims
   const result = await executeWorkspaceIntent({
     repoRoot,
     env: {},
-    intent: prepareIntent(),
+    intent: prepareIntent(null, repoRoot),
     applyJobImpl: async () => ({
       available: true,
       verified: true,
@@ -282,7 +409,7 @@ test("job.prepare-submit never hands a live-question recovery off to job.apply",
   const result = await executeWorkspaceIntent({
     repoRoot,
     env: {},
-    intent: prepareIntent(),
+    intent: prepareIntent(null, repoRoot),
     applyJobImpl: async () => {
       appRegisterPacketQuestionCapture({
         repoRoot,
@@ -372,7 +499,7 @@ test("job.prepare-submit treats open answer gaps as current packet lineage", asy
   const result = await executeWorkspaceIntent({
     repoRoot,
     env: {},
-    intent: prepareIntent(),
+    intent: prepareIntent(null, repoRoot),
     generateDocumentsImpl: async () => {
       generateCalls += 1;
       return {
@@ -422,7 +549,7 @@ test("job.prepare-submit rebuilds a packet whose answer lineage predates its sav
   const result = await executeWorkspaceIntent({
     repoRoot,
     env: {},
-    intent: prepareIntent(),
+    intent: prepareIntent(null, repoRoot),
     applyJobImpl: async () => {
       applyCalls += 1;
       return { available: true, verified: false, state: "awaiting-submit" };
@@ -484,7 +611,7 @@ test("job.prepare-submit treats an intentionally skipped optional question as cu
   const result = await executeWorkspaceIntent({
     repoRoot,
     env: {},
-    intent: prepareIntent(),
+    intent: prepareIntent(null, repoRoot),
     generateDocumentsImpl: async () => {
       generateCalls += 1;
       throw new Error("current lineage must not regenerate");
