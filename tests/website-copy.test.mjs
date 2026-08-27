@@ -181,6 +181,7 @@ test("public copy keeps local Application defaults and plain-English onboarding 
     browserAutomation: "apps/docs/content/docs/advanced/browser-automation.mdx",
     architecture: "docs/ARCHITECTURE.md",
     changelog: "CHANGELOG.md",
+    acceptance: "docs/QA-ACCEPTANCE.md",
   };
   const copy = Object.fromEntries(
     await Promise.all(

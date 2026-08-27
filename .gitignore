@@ -73,7 +73,8 @@ tracker-*.png
 # Design handoff archives dropped at repo root — extracted where needed, never committed.
 /*.zip
 
-# Private working roadmap + internal planning docs.
+# Private working roadmap + internal planning docs. CI-owned contracts live
+# under docs/ so they remain available in a fresh clone.
 /.planning/
 # Anchor root-only legacy names so matching files elsewhere keep their own policy.
 /ROADMAP.md
@@ -82,7 +83,11 @@ tracker-*.png
 /RUNTIME-PARITY-PLAN.md
 /CODE-REVIEW-FINDINGS.md
 docs/COMPARISON.md
-# Internal build-spec artifacts.
+# CLI-owned runtime state: ai.env (chmod 0600, loaded at server boot), the
+# tracker-dev pid/log, and update caches. Not documents — the review write-ups
+# that used to live here moved to .planning/review/ on 2026-08-27. This is one
+# of four legacy roots (candidate/, workspace/, config/, .internal/) that
+# src/core/paths/workspace.mjs is folding into .careerrat/; don't add a fifth.
 .internal/
 
 # Consolidated local user data root (candidate/workspace/generated config/internal).

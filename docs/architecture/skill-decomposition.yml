@@ -1,0 +1,725 @@
+version: "1.0"
+phase: "01-decomposition-map"
+non_runtime_boundary: "Phase 1 creates planning artifacts only; runtime behavior changes are outside this phase."
+classification_buckets:
+  deterministic: "Code-owned work with predictable inputs, validation, persistence, scanning, routing, or rendering behavior."
+  bounded_ai: "Small schema-validated model calls whose output remains untrusted until deterministic code validates it."
+  full_skill_runtime: "Agent-led workflows that still need tool loops, live browser or web search work, human prompts, or nuanced judgment."
+  prompt_spec: "Skill prose retained as the human and agent workflow contract for gates, phrasing, and handoffs."
+  deferred: "Work intentionally left outside this phase or outside the first app-runtime migration slice."
+owner_types:
+  existing_ts_module: "A checked-in JavaScript module that owns reusable runtime logic today."
+  planned_ts_module: "A future JavaScript module path, prefixed with planned:src/ or planned:scripts/."
+  planned_policy: "A named future policy, epic, consent surface, or migration slice that is not yet a module path."
+  api_route: "A local HTTP route mounted by tracker-dev or a planned route module."
+  db_verb: "A SQLite-backed data or source-config verb that owns durable mutations."
+  cli_command: "A CLI surface used by skills, agents, or app routes."
+  retained_skill_runtime: "The existing SKILL.md, chat runtime, or skill runtime kept for full agent workflows."
+source_decisions:
+  D-01: "V1 keeps multiple sourcing lanes in play: cached ATS scans, local public-page extraction, low or free job APIs, crawler tools, AI search or extract, and full skill runtime."
+  D-02: "Default order is cheapest-first: existing config, cached board resolution, direct scanner or local scraper, cheap API, crawler, AI search, then full skill runtime."
+  D-03: "AI web search is reserved for gaps, ranking, and ambiguous resolution, not routine repeated scans."
+  D-04: "Company board resolution should be cached once and reused by later sweeps."
+  D-05: "Resolution cache records need company, domain, careers URL, board URL, provider, API URL, confidence, provenance, timestamps, scan result, and failure counters."
+  D-06: "Re-resolution should be TTL or event driven by failures, redirects, stale windows, zero-job scans, or explicit refresh."
+  D-07: "Public non-job-board pages can use Node fetch first and Playwright for public JS rendering; authenticated browser automation remains v2."
+  D-08: "The practical source-design blockers are freshness, disappearing postings, cost, reliability, cacheability, and immediate JD capture."
+  D-09: "Every discovered job should preserve the first reachable full JD body locally when found."
+  D-10: "Phase 1 specifies a bakeoff across direct scanner/local scraper, low or free job APIs, Firecrawl, AI-search extraction, and optional benchmarks."
+  D-11: "The bakeoff measures usable jobs per dollar, JD capture quality, apply-link quality, freshness, duplicates, unsupported pages, failures, and model/tool calls."
+  D-12: "Skill files remain human and agent workflow contracts while runtime decomposes them into local APIs, DB verbs, scanners, and bounded AI calls."
+  D-13: "discover-companies becomes seed generation or source intake -> deterministic cached resolver -> scanner or extractor -> gate and dedupe -> confirm-first write."
+  D-14: "Supported ATS promotion is separate from caching unsupported or custom public career pages for generic extraction."
+skills:
+  setup-searches:
+    source: ".agents/skills/setup-searches/SKILL.md"
+    requirements:
+      - "ARCH-01"
+      - "ARCH-02"
+    deterministic:
+      - step: "Generate baseline source searches from candidate targeting and profile."
+        owner: "src/cli/searches.mjs"
+        owner_type: "cli_command"
+        decisions:
+          - "D-02"
+          - "D-12"
+      - step: "Persist DB-backed search-source config and validate generated source data."
+        owner: "src/core/db/verbs/source-config.mjs"
+        owner_type: "db_verb"
+        decisions:
+          - "D-02"
+          - "D-12"
+      - step: "Import pasted board URLs, preserve embedded filters, enable or disable sources, and refuse invalid source config."
+        owner: "src/cli/searches.mjs"
+        owner_type: "cli_command"
+        decisions:
+          - "D-02"
+          - "D-12"
+    bounded_ai: []
+    full_skill_runtime:
+      - step: "Use conversational setup only for user corrections, source curation questions, and handoff steering."
+        owner: "src/core/ai/chat-runtime.mjs"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-12"
+    prompt_spec:
+      - step: "Retain the setup-searches sequence, privacy gates, and post-onboarding handoff order as the agent contract."
+        owner: ".agents/skills/setup-searches/SKILL.md"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-12"
+    deferred:
+      - step: "Durable per-candidate board preference helper beyond current source enable, disable, and add commands."
+        owner: "planned:src/core/db/verbs/source-preferences.mjs"
+        owner_type: "planned_ts_module"
+        decisions:
+          - "D-06"
+    notes:
+      - "This skill creates source configuration but does not scan, evaluate, tailor, or submit."
+      - "It stays upstream of research-boards, discover-companies, and search-jobs."
+  research-boards:
+    source: ".agents/skills/research-boards/SKILL.md"
+    requirements:
+      - "ARCH-01"
+      - "ARCH-02"
+    deterministic:
+      - step: "Read configured sources, build a board dedupe set, and add confirmed board URLs through the existing source command."
+        owner: "src/cli/searches.mjs"
+        owner_type: "cli_command"
+        decisions:
+          - "D-01"
+          - "D-02"
+          - "D-12"
+      - step: "Persist confirmed board additions through DB-backed source config when a DB workspace exists."
+        owner: "src/core/db/verbs/source-config.mjs"
+        owner_type: "db_verb"
+        decisions:
+          - "D-02"
+          - "D-12"
+    bounded_ai: []
+    full_skill_runtime:
+      - step: "Keep web-search board discovery, legitimacy screening, and confirm-first proposal handling in the conversational skill path until it is decomposed."
+        owner: "src/core/ai/chat-runtime.mjs"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-01"
+          - "D-10"
+          - "D-12"
+      - step: "Fallback full skill execution remains available for supervised or tool-heavy research if explicitly routed."
+        owner: "src/core/ai/skill-runtime.mjs"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-12"
+    prompt_spec:
+      - step: "Retain confirm-first board proposal rules, quality gate, and source-write constraints."
+        owner: ".agents/skills/research-boards/SKILL.md"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-12"
+    deferred:
+      - step: "Automated board-source provider bakeoff and candidate-specific board research ranking."
+        owner: "planned:src/core/discovery/board-source-bakeoff.mjs"
+        owner_type: "planned_ts_module"
+        decisions:
+          - "D-10"
+          - "D-11"
+      - step: "Authenticated board sources remain gated by the browser automation consent model."
+        owner: "planned:src/core/discovery/authenticated-board-source.mjs"
+        owner_type: "planned_ts_module"
+        decisions:
+          - "D-07"
+    notes:
+      - "research-boards finds boards and aggregators, not employers or individual applications."
+      - "Candidate-specific discoveries must go to user source config and workspace research logs, not shipped docs."
+  discover-companies:
+    source: ".agents/skills/discover-companies/SKILL.md"
+    requirements:
+      - "ARCH-01"
+      - "ARCH-02"
+    deterministic:
+      - step: "Load candidate context, exclusions, already tracked companies, applications, and sourced companies for dedupe."
+        owner: "planned:src/core/discovery/company-context.mjs"
+        owner_type: "planned_ts_module"
+        decisions:
+          - "D-02"
+          - "D-13"
+      - step: "Resolve and cache company homepage, careers page, board URL, provider, API URL, confidence, provenance, timestamps, scan results, and failures."
+        owner: "planned:src/core/discovery/company-board-resolver.mjs"
+        owner_type: "planned_ts_module"
+        decisions:
+          - "D-04"
+          - "D-05"
+          - "D-06"
+          - "D-13"
+          - "D-14"
+      - step: "Promote supported ATS boards to the existing scanner path when provider identity is validated."
+        owner: "src/core/scoring/sourced-scanner.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-02"
+          - "D-13"
+          - "D-14"
+      - step: "Capture and persist scan offers as sourced rows with local JD artifacts when scan output contains jobs."
+        owner: "src/core/scoring/sourced-persistence.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-09"
+          - "D-13"
+      - step: "Use Node fetch first and public Playwright extraction second for unsupported or custom public career pages."
+        owner: "planned:src/core/discovery/public-career-extractor.mjs"
+        owner_type: "planned_ts_module"
+        decisions:
+          - "D-07"
+          - "D-08"
+          - "D-09"
+          - "D-14"
+      - step: "Evaluate free or low-cost job API lane without committing to a vendor."
+        owner: "planned:src/core/discovery/job-api-bakeoff.mjs"
+        owner_type: "planned_ts_module"
+        decisions:
+          - "D-01"
+          - "D-10"
+          - "D-11"
+      - step: "Evaluate targeted crawler or extractor lane as a measured fallback after cheaper local paths."
+        owner: "planned:src/core/discovery/crawler-extractor-lane.mjs"
+        owner_type: "planned_ts_module"
+        decisions:
+          - "D-01"
+          - "D-02"
+          - "D-10"
+          - "D-11"
+      - step: "Present high-confidence and borderline company proposals before writes; keep unsupported pages as cached intel until generic extraction can use them."
+        owner: "src/cli/discovery-route.mjs"
+        owner_type: "api_route"
+        decisions:
+          - "D-13"
+          - "D-14"
+      - step: "Write confirmed supported ATS companies through the current companies CLI and source-config verb."
+        owner: "src/cli/companies.mjs"
+        owner_type: "cli_command"
+        decisions:
+          - "D-12"
+          - "D-13"
+      - step: "Persist supported ATS tracked companies with existing DB source-config validation."
+        owner: "src/core/db/verbs/source-config.mjs"
+        owner_type: "db_verb"
+        decisions:
+          - "D-12"
+          - "D-13"
+          - "D-14"
+    bounded_ai:
+      - step: "Generate company seed candidates as schema-validated JSON, with names and rationale only; final URLs are untrusted hints at most."
+        owner: "src/core/ai/structured-oneshot.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-03"
+          - "D-12"
+          - "D-13"
+      - step: "Route seed-generation model calls through the BYOK or proxy AI seam with skill and action labels."
+        owner: "src/core/ai/call-ai.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-03"
+          - "D-12"
+      - step: "Use AI search or extract only as a late fallback for gaps and ambiguous resolution, never as a write-ready URL owner."
+        owner: "planned:src/core/discovery/ai-search-extract-lane.mjs"
+        owner_type: "planned_ts_module"
+        decisions:
+          - "D-01"
+          - "D-02"
+          - "D-03"
+          - "D-13"
+    full_skill_runtime:
+      - step: "Retain conversational company discovery for exploratory search, user-led refinement, and confirmation-heavy workflows."
+        owner: "src/core/ai/chat-runtime.mjs"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-12"
+          - "D-13"
+      - step: "Retain full skill runtime as the last fallback when local lanes cannot produce enough useful proposals."
+        owner: "src/core/ai/skill-runtime.mjs"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-01"
+          - "D-02"
+          - "D-12"
+    prompt_spec:
+      - step: "Keep confirm-first proposal tables, dedupe rules, unsupported-ATS intel handling, and handoff to search-jobs as the prompt contract."
+        owner: ".agents/skills/discover-companies/SKILL.md"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-12"
+          - "D-13"
+          - "D-14"
+    deferred:
+      - step: "Browser-authenticated LinkedIn, Wellfound, webmail, or logged-in portal discovery."
+        owner: "planned:v2-browser-surface"
+        owner_type: "planned_policy"
+        decisions:
+          - "D-07"
+      - step: "Vendor commitment for paid provider APIs before bakeoff data exists."
+        owner: "planned:phase-provider-bakeoff-decision"
+        owner_type: "planned_policy"
+        decisions:
+          - "D-10"
+          - "D-11"
+      - step: "High-confidence auto-add as a default behavior."
+        owner: "planned:src/core/discovery/company-auto-add-policy.mjs"
+        owner_type: "planned_ts_module"
+        decisions:
+          - "D-13"
+    notes:
+      - "AI output is candidate generation only; deterministic resolver and cache own final URLs and write eligibility."
+      - "Supported ATS promotion and unsupported public-page cache records are separate by design."
+  search-jobs:
+    source: ".agents/skills/search-jobs/SKILL.md"
+    requirements:
+      - "ARCH-01"
+      - "ARCH-02"
+    deterministic:
+      - step: "Run the importable sourced sweep and return scan summaries for CLI and app route callers."
+        owner: "scripts/scan-sourced.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-02"
+          - "D-09"
+          - "D-12"
+      - step: "Fetch supported ATS and RSS providers, apply title and location filters, dedupe, score, and extract req IDs."
+        owner: "src/core/scoring/sourced-scanner.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-02"
+          - "D-09"
+          - "D-13"
+      - step: "Capture JD bodies to workspace/jobs and transform kept offers into sourced rows."
+        owner: "src/core/scoring/sourced-persistence.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-08"
+          - "D-09"
+          - "D-11"
+      - step: "Persist sourced rows through DB verbs in DB workspaces."
+        owner: "src/core/db/verbs/sourced.mjs"
+        owner_type: "db_verb"
+        decisions:
+          - "D-09"
+          - "D-12"
+      - step: "Expose the deterministic scan route for app search controls."
+        owner: "src/cli/search-route.mjs"
+        owner_type: "api_route"
+        decisions:
+          - "D-02"
+          - "D-12"
+      - step: "Read source config and watermarks through source-config owners."
+        owner: "src/core/db/verbs/source-config.mjs"
+        owner_type: "db_verb"
+        decisions:
+          - "D-02"
+          - "D-06"
+    bounded_ai: []
+    full_skill_runtime:
+      - step: "Keep browser or auth fallback orchestration, triage narration, and optional evaluate-job fan-out in the agent-led skill."
+        owner: "src/core/ai/chat-runtime.mjs"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-07"
+          - "D-12"
+    prompt_spec:
+      - step: "Retain JD-body capture invariant, browser escalation rules, coarse triage flags, and handoff to evaluate-job."
+        owner: ".agents/skills/search-jobs/SKILL.md"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-08"
+          - "D-09"
+          - "D-12"
+    deferred:
+      - step: "Authenticated saved-search sources beyond explicit session-browser consent gates."
+        owner: "planned:v2-authenticated-source-runner"
+        owner_type: "planned_policy"
+        decisions:
+          - "D-07"
+      - step: "Generic public career-page extractor integration into the scan offer shape."
+        owner: "planned:src/core/discovery/public-career-extractor.mjs"
+        owner_type: "planned_ts_module"
+        decisions:
+          - "D-07"
+          - "D-14"
+    notes:
+      - "The deterministic scan path must not call AI."
+      - "Search results remain sourced or reviewed-hold until evaluate-job owns the body-read gate."
+  evaluate-job:
+    source: ".agents/skills/evaluate-job/SKILL.md"
+    requirements:
+      - "ARCH-01"
+      - "ARCH-02"
+    deterministic:
+      - step: "Parse saved JDs, run legitimacy checks, resolve comp floors, estimate comparable comp, score fit, and render the gate block."
+        owner: "src/core/evaluate/gate.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-09"
+          - "D-12"
+      - step: "Persist evaluated sourced-row fit status or application fit fields through data verbs when DB mode is active."
+        owner: "src/core/db/verbs/sourced.mjs"
+        owner_type: "db_verb"
+        decisions:
+          - "D-12"
+      - step: "Use application data verbs for fit annotations and existing application updates."
+        owner: "src/core/db/verbs/app.mjs"
+        owner_type: "db_verb"
+        decisions:
+          - "D-12"
+      - step: "Run the product packet gate for a known application through the local packet API before packet generation."
+        owner: "src/core/packet/gate.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+      - step: "Expose packet gate execution through POST /api/packet/gate for app-default packet flows."
+        owner: "src/cli/packet-route.mjs"
+        owner_type: "api_route"
+        decisions:
+          - "D-12"
+    bounded_ai:
+      - step: "Use bounded schema-validated AI only for finite packet gate judgment when deterministic context is insufficient."
+        owner: "src/core/packet/gate.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+    full_skill_runtime:
+      - step: "Keep body-read judgment, ambiguous fit or comp decisions, browser JD capture escalation, and user-facing gate narration in the retained skill."
+        owner: "src/core/ai/skill-runtime.mjs"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-12"
+      - step: "Allow conversational review when a user is actively deciding on REVIEW outcomes."
+        owner: "src/core/ai/chat-runtime.mjs"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-12"
+    prompt_spec:
+      - step: "Retain the required GATE, FIT, COMP, COMP ANCHOR, ACTION output block and JD capture workflow."
+        owner: ".agents/skills/evaluate-job/SKILL.md"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-09"
+          - "D-12"
+    deferred:
+      - step: "Full evaluate-job migration to deterministic and bounded assists is a v2 migration after discovery proves the pattern."
+        owner: "planned:v2-evaluate-job-decomposition"
+        owner_type: "planned_policy"
+        decisions:
+          - "D-12"
+    notes:
+      - "The deterministic gate module is a starting point, but the final body-read verdict still relies on the skill's evidence-bound judgment."
+      - "For ordinary packet generation, the local packet gate is the product default; retained evaluate-job remains an explicit handoff for broad body-read workflows."
+  apply-job:
+    source: ".agents/skills/apply-job/SKILL.md"
+    requirements:
+      - "ARCH-01"
+      - "ARCH-02"
+    deterministic:
+      - step: "Resolve form fields, portal recipes, submit guards, confirmation checks, and Easy Apply helpers."
+        owner: "src/core/apply/form-fill.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+      - step: "Write submitted application status, artifacts, and status notes through application data verbs in DB mode."
+        owner: "src/core/db/verbs/app.mjs"
+        owner_type: "db_verb"
+        decisions:
+          - "D-12"
+      - step: "Patch linked communications records when a submission satisfies a recruiter or portal CTA."
+        owner: "src/core/db/verbs/comm.mjs"
+        owner_type: "db_verb"
+        decisions:
+          - "D-12"
+      - step: "Capture application-page questions and exclude EEO, disability, veteran, and demographic prompts before answer generation."
+        owner: "src/core/packet/questions.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+      - step: "Generate packet materials for a gated application through local packet routes before supervised submit."
+        owner: "src/core/packet/generate.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+    bounded_ai: []
+    full_skill_runtime:
+      - step: "Keep live browser form filling, blocker handling, supervised submit gates, and ATS-specific judgment in the full skill runtime."
+        owner: "src/core/ai/skill-runtime.mjs"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-12"
+    prompt_spec:
+      - step: "Retain the application-limit gate, evaluate-job dependency, artifact requirements, and submission verification invariants."
+        owner: ".agents/skills/apply-job/SKILL.md"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-09"
+          - "D-12"
+    deferred:
+      - step: "Auto-submit applications as a default product behavior."
+        owner: "planned:v2-auto-submit-policy"
+        owner_type: "planned_policy"
+        decisions:
+          - "D-07"
+      - step: "Broader browser-authenticated apply surfaces outside explicit opt-in."
+        owner: "planned:v2-browser-surface"
+        owner_type: "planned_policy"
+        decisions:
+          - "D-07"
+    notes:
+      - "Application submission remains full skill and human-supervised for this phase."
+      - "Packet preparation is local product runtime; browser form fill and submit remain supervised apply-job behavior."
+  tailor-application:
+    source: ".agents/skills/tailor-application/SKILL.md"
+    requirements:
+      - "ARCH-01"
+      - "ARCH-02"
+    deterministic:
+      - step: "Assemble packet context from local application, profile, JD, evidence, captured questions, company research, and honesty boundaries."
+        owner: "src/core/packet/context.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+      - step: "Generate resume, cover-letter, answers, source markdown, and packet manifest artifacts for a gated application."
+        owner: "src/core/packet/generate.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+      - step: "Register packet source, manifest, PDF, and conditional DOCX artifacts through application DB verbs."
+        owner: "src/core/db/verbs/app.mjs"
+        owner_type: "db_verb"
+        decisions:
+          - "D-12"
+      - step: "Expose ordinary packet generation and export through POST /api/packet/generate and POST /api/packet/export."
+        owner: "src/cli/packet-route.mjs"
+        owner_type: "api_route"
+        decisions:
+          - "D-12"
+      - step: "Export user-facing packet files as PDF by default and DOCX only when selected or required by captured upload metadata."
+        owner: "src/core/packet/exports.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+    bounded_ai:
+      - step: "Draft finite cover-letter blocks with schema validation, evidence ids, no-AI fallback, and reviewable gaps."
+        owner: "src/core/packet/generate.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+      - step: "Draft non-EEO application answers with schema validation, evidence ids, and NEEDS YOU gaps."
+        owner: "src/core/packet/answers.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+    full_skill_runtime:
+      - step: "Retain full tailoring workflow for broad evidence gathering, unusual application requirements, nuanced user review, or tool-heavy work explicitly requested by the user."
+        owner: "src/core/ai/skill-runtime.mjs"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-12"
+    prompt_spec:
+      - step: "Retain honesty boundaries, evidence grounding, artifact expectations, and review language as the workflow contract."
+        owner: ".agents/skills/tailor-application/SKILL.md"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-12"
+    deferred:
+      - step: "Automatic application submission after packet generation."
+        owner: "planned:v2-auto-submit-policy"
+        owner_type: "planned_policy"
+        decisions:
+          - "D-07"
+    notes:
+      - "Ordinary product packet generation does not call tailor-application through POST /api/skill/run."
+      - "Generated tracker and activity files are compatibility exports, not packet source of truth."
+  answer-question:
+    source: ".agents/skills/answer-question/SKILL.md"
+    requirements:
+      - "ARCH-01"
+      - "ARCH-02"
+    deterministic:
+      - step: "Normalize provider or pasted application questions and filter self-identification prompts before answer drafting."
+        owner: "src/core/packet/questions.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+      - step: "Reuse provider/manual question parsing for Greenhouse, Ashby, and pasted application text."
+        owner: "src/core/apply/form-questions.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+      - step: "Expose question capture and one-off local answer drafting through POST /api/packet/questions and POST /api/packet/answers."
+        owner: "src/cli/packet-route.mjs"
+        owner_type: "api_route"
+        decisions:
+          - "D-12"
+    bounded_ai:
+      - step: "Draft only answerable non-EEO questions with bounded schema-validated AI and evidence-id validation."
+        owner: "src/core/packet/answers.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+    full_skill_runtime:
+      - step: "Retain full answer-question workflow for explicit agent-led review, unusual evidence gathering, or nuanced manually supervised answers outside the local packet path."
+        owner: "src/core/ai/skill-runtime.mjs"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-12"
+    prompt_spec:
+      - step: "Retain the answer-question output contract and honesty guidance as the human/agent workflow contract."
+        owner: ".agents/skills/answer-question/SKILL.md"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-12"
+    deferred:
+      - step: "Provider-specific browser form filling and submission of answers."
+        owner: "planned:v2-browser-surface"
+        owner_type: "planned_policy"
+        decisions:
+          - "D-07"
+    notes:
+      - "Ordinary one-off answer drafting in the app uses local packet answers, not answer-question through POST /api/skill/run."
+      - "EEO, disability, veteran, demographic, and voluntary self-identification prompts are skipped metadata, not generated answers."
+  email-comms:
+    source: ".agents/skills/email-comms/SKILL.md"
+    requirements:
+      - "ARCH-01"
+      - "ARCH-02"
+    deterministic:
+      - step: "Persist communication rows, append messages, mark sent messages, and clear drafts through comm data verbs."
+        owner: "src/core/db/verbs/comm.mjs"
+        owner_type: "db_verb"
+        decisions:
+          - "D-12"
+      - step: "Patch linked application follow-up state or artifacts through app data verbs."
+        owner: "src/core/db/verbs/app.mjs"
+        owner_type: "db_verb"
+        decisions:
+          - "D-12"
+    bounded_ai:
+      - step: "Future finite-context draft generation can become a bounded assist once communication scope and schemas are explicit."
+        owner: "planned:src/core/comms/draft-assist.mjs"
+        owner_type: "planned_ts_module"
+        decisions:
+          - "D-12"
+    full_skill_runtime:
+      - step: "Keep negotiation, nuanced reply strategy, ambiguous thread matching, and user-confirmed outbound language in the conversational skill."
+        owner: "src/core/ai/chat-runtime.mjs"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-12"
+    prompt_spec:
+      - step: "Retain thread reconstruction, honesty boundaries, negotiation depth, sent-clears-draft, and CTA clearing rules."
+        owner: ".agents/skills/email-comms/SKILL.md"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-12"
+    deferred:
+      - step: "Communications migration beyond deterministic write verbs is v2 after discovery validates the decomposition pattern."
+        owner: "planned:v2-comms-decomposition"
+        owner_type: "planned_policy"
+        decisions:
+          - "D-12"
+    notes:
+      - "Current Phase 1 classifies write ownership only; it does not move drafting behavior into runtime code."
+  interview-prep:
+    source: ".agents/skills/interview-prep/SKILL.md"
+    requirements:
+      - "ARCH-01"
+      - "ARCH-02"
+    deterministic:
+      - step: "Render interview packets and preserve comp privacy in generated packet sections."
+        owner: "src/core/interview/packet.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+      - step: "Read and validate STAR+R story-bank records for packet grounding."
+        owner: "src/core/interview/story-bank.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+      - step: "Schedule interview fields and register dossier artifacts through application data verbs in DB mode."
+        owner: "src/core/db/verbs/app.mjs"
+        owner_type: "db_verb"
+        decisions:
+          - "D-12"
+      - step: "Patch communications rows when interview or offer prep changes the thread's CTA state."
+        owner: "src/core/db/verbs/comm.mjs"
+        owner_type: "db_verb"
+        decisions:
+          - "D-12"
+    bounded_ai:
+      - step: "Future structured prep assists can generate finite packet sections from explicit JD, evidence, and invite context after discovery proves the pattern."
+        owner: "planned:src/core/interview/prep-assist.mjs"
+        owner_type: "planned_ts_module"
+        decisions:
+          - "D-12"
+    full_skill_runtime:
+      - step: "Keep live coaching, mock interview turns, debrief synthesis, negotiation rehearsal, and gap-closing questions in the conversational skill."
+        owner: "src/core/ai/chat-runtime.mjs"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-12"
+    prompt_spec:
+      - step: "Retain packet section requirements, evidence-gap handling, debrief write-back, round vocabulary, and dossier gating."
+        owner: ".agents/skills/interview-prep/SKILL.md"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-12"
+    deferred:
+      - step: "Full interview-prep migration is v2 after discovery and communications decomposition mature."
+        owner: "planned:v2-interview-prep-decomposition"
+        owner_type: "planned_policy"
+        decisions:
+          - "D-12"
+    notes:
+      - "The deterministic packet renderer exists, but the skill still owns nuanced coaching and evidence-gap conversations."
+  track-outcomes:
+    source: ".agents/skills/track-outcomes/SKILL.md"
+    requirements:
+      - "ARCH-01"
+      - "ARCH-02"
+    deterministic:
+      - step: "Apply application status transitions, follow-up due dates, interview clearing, artifact fields, and activity events."
+        owner: "src/core/db/verbs/app.mjs"
+        owner_type: "db_verb"
+        decisions:
+          - "D-12"
+      - step: "Patch communication records and append outcome notes when app outcomes satisfy or close CTAs."
+        owner: "src/core/db/verbs/comm.mjs"
+        owner_type: "db_verb"
+        decisions:
+          - "D-12"
+      - step: "Promote sourced rows into application rows or update sourced status through sourced data verbs."
+        owner: "src/core/db/verbs/sourced.mjs"
+        owner_type: "db_verb"
+        decisions:
+          - "D-12"
+      - step: "Read analytics reevaluation state from tracker analytics rather than recomputing thresholds in prose."
+        owner: "src/core/tracker/outcome-analysis.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+    bounded_ai: []
+    full_skill_runtime:
+      - step: "Keep ambiguous outcome interpretation, learning synthesis, and user-stated gate write-back in the conversational skill."
+        owner: "src/core/ai/chat-runtime.mjs"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-12"
+    prompt_spec:
+      - step: "Retain canonical status vocabulary, comm write-back rules, learning-file updates, and reevaluation handoff behavior."
+        owner: ".agents/skills/track-outcomes/SKILL.md"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-12"
+    deferred:
+      - step: "Cross-record combined app plus comm transaction helper; current DB mode composes verbs back-to-back."
+        owner: "planned:src/core/db/verbs/outcome-transaction.mjs"
+        owner_type: "planned_ts_module"
+        decisions:
+          - "D-12"
+    notes:
+      - "Ordinary status transitions are deterministic, but the skill remains the safe interpreter for pasted outcome prose."
