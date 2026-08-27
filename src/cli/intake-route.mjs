@@ -70,6 +70,7 @@ import { extractDocxResumeText, normalizeDocxResumeText } from "../core/onboardi
 import { userPath } from "../core/paths/workspace.mjs";
 import { sanitizeUploadFilename } from "./onboard-route.mjs";
 import { readJsonBodyCapped, readRawBodyCapped, sendJson } from "./skill-run-route.mjs";
+import { executeDurableWorkspaceIntent } from "./workspace-agent-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB — same cap every other JSON-body route uses.
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // binary intake artifacts: PDFs/images/JDs.
@@ -549,16 +550,21 @@ export async function captureIntakeText({
   return withDispatchSummary(finalItem);
 }
 
-async function executeLaneA({ repoRoot, env, id, dispatch, workspaceAgentRuntime }) {
+async function executeLaneA({ repoRoot, env, id, dispatch, workspaceAgentRuntime, appOperations }) {
   const { applicationId, to, note } = dispatch.params;
-  if (typeof workspaceAgentRuntime?.executeIntent === "function") {
-    const result = await workspaceAgentRuntime.executeIntent({
-      intent: {
-        type: "outcome.record",
-        entity: { type: "application", id: applicationId },
-        input: { to, note: note || null, sourceIntakeId: id },
-      },
-    });
+  const intent = {
+    type: "outcome.record",
+    entity: { type: "application", id: applicationId },
+    input: { to, note: note || null, sourceIntakeId: id },
+  };
+  if (appOperations?.start || typeof workspaceAgentRuntime?.executeIntent === "function") {
+    const result = appOperations?.start
+      ? await executeDurableWorkspaceIntent({
+          appOperations,
+          requestId: `intake-confirm:${id}`,
+          intent,
+        })
+      : await workspaceAgentRuntime.executeIntent({ intent });
     return intakeUpdate({
       repoRoot,
       env,
@@ -568,7 +574,7 @@ async function executeLaneA({ repoRoot, env, id, dispatch, workspaceAgentRuntime
         result: {
           applicationId,
           to,
-          threadId: result.thread?.id || "workspace-main",
+          threadId: result.resultRef?.threadId || result.thread?.id || "workspace-main",
         },
         error: null,
       },
@@ -785,21 +791,26 @@ function createLaneBManager({ repoRoot, env, runSkillStream, heartbeatMs = 30_00
   };
 }
 
-async function executeLaneW({ repoRoot, env, id, dispatch, workspaceAgentRuntime }) {
-  if (typeof workspaceAgentRuntime?.executeIntent !== "function") {
+async function executeLaneW({ repoRoot, env, id, dispatch, workspaceAgentRuntime, appOperations }) {
+  if (!appOperations?.start && typeof workspaceAgentRuntime?.executeIntent !== "function") {
     const error = new Error("the workspace agent is unavailable for this confirmed intake item");
     error.code = "WORKSPACE_AGENT_UNAVAILABLE";
     throw error;
   }
-  const result = await workspaceAgentRuntime.executeIntent({
-    intent: {
-      type: dispatch.params.intentType,
-      entity: { type: "intake", id },
-    },
-  });
-  const actionResult = [...(result.messages || [])]
-    .reverse()
-    .find((message) => message.kind === "action_result");
+  const intent = {
+    type: dispatch.params.intentType,
+    entity: { type: "intake", id },
+  };
+  const result = appOperations?.start
+    ? await executeDurableWorkspaceIntent({
+        appOperations,
+        requestId: `intake-confirm:${id}`,
+        intent,
+      })
+    : await workspaceAgentRuntime.executeIntent({ intent });
+  const actionResult = appOperations?.start
+    ? result.resultRef?.message
+    : [...(result.messages || [])].reverse().find((message) => message.kind === "action_result");
   const evaluationArtifact = actionResult?.artifacts?.find(
     (artifact) => artifact.kind === "job_evaluation"
   );
@@ -815,7 +826,7 @@ async function executeLaneW({ repoRoot, env, id, dispatch, workspaceAgentRuntime
     patch: {
       status: "done",
       result: {
-        threadId: result.thread?.id || "workspace-main",
+        threadId: result.resultRef?.threadId || result.thread?.id || "workspace-main",
         intentType: dispatch.params.intentType,
         summary: actionResult?.text || null,
         communicationId: actionResult?.metadata?.communicationId || null,
@@ -842,6 +853,7 @@ export function mountIntakeRoutes({
   loadSdk,
   runSkillStream = defaultRunSkillStream,
   workspaceAgentRuntime,
+  appOperations,
   captureTextImpl = captureIntakeText,
   heartbeatMs = 30_000,
 }) {
@@ -1139,6 +1151,7 @@ export function mountIntakeRoutes({
           id,
           dispatch,
           workspaceAgentRuntime,
+          appOperations,
         });
       } else if (dispatch?.lane === "B") {
         finalItem = laneB.start({ id, item: existing, dispatch });
@@ -1149,6 +1162,7 @@ export function mountIntakeRoutes({
           id,
           dispatch,
           workspaceAgentRuntime,
+          appOperations,
         });
       } else {
         // Defensive only: dispatch.mjs never returns a lane-less action

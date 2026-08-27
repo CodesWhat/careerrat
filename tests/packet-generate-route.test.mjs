@@ -1180,6 +1180,69 @@ test("POST /api/packet/generate delegates document work to workspace-main when m
   }
 });
 
+test("POST /api/packet/generate uses the durable workspace operation owner in production", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  const generation = {
+    applicationId: "app-packet",
+    submitted: false,
+    uploadReady: false,
+    status: "reviewable",
+    artifacts: { resume: "workspace/tailored/acme-resume.md" },
+    gaps: [],
+  };
+  const calls = [];
+  const server = await bootServer(repoRoot, {
+    appOperations: {
+      async start(input) {
+        calls.push(input);
+        return {
+          reused: false,
+          operation: {
+            id: "app-operation-packet-generate",
+            status: "completed",
+            resultRef: { data: generation },
+          },
+        };
+      },
+      async wait() {
+        throw new Error("a completed operation should not need to wait");
+      },
+    },
+    workspaceAgentRuntime: {
+      async executeIntent() {
+        throw new Error("the durable operation owner must be the only production executor");
+      },
+    },
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/packet/generate", {
+      applicationId: "app-packet",
+      applyIntent: false,
+      formats: ["pdf"],
+      requestId: "packet-generate-request-1",
+    });
+    assert.equal(status, 200);
+    assert.deepEqual(body, { ok: true, data: generation });
+    assert.deepEqual(calls, [
+      {
+        kind: "workspace.intent",
+        input: {
+          requestId: "packet-generate-request-1",
+          intent: {
+            type: "job.generate-documents",
+            entity: { type: "application", id: "app-packet" },
+            input: { applyIntent: false, formats: ["pdf"] },
+          },
+        },
+      },
+    ]);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/packet/export delegates packaging to workspace-main when mounted", async () => {
   const repoRoot = tempRepo();
   seedPacketReadyApp(repoRoot);

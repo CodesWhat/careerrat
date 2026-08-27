@@ -404,6 +404,8 @@ export async function draftStrategyReview({
   env = process.env,
   now = new Date(),
   force = false,
+  executionPlan,
+  signal,
   runAI = runBoundedAI,
   buildContextImpl = buildStrategyReviewContext,
 } = {}) {
@@ -431,6 +433,8 @@ export async function draftStrategyReview({
     maxTokens: 2600,
     root: repoRoot,
     env,
+    executionPlan,
+    signal,
   });
 
   if (!aiResult.body?.ok) {

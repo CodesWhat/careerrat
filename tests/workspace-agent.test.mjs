@@ -1605,6 +1605,42 @@ test("coaching.plan persists a plan onto the application row and returns a coach
   assert.deepEqual(persisted.coachingPlan, plan);
 });
 
+test("coaching.plan preserves its frozen plan and cancellation signal at the coaching boundary", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-coach-plan",
+    company: "Acme Platform",
+    role: "Platform Engineer",
+    evaluation: { gate: "review", fitRisks: ["No direct Kubernetes experience"] },
+  });
+  const controller = new AbortController();
+  const executionPlan = {
+    version: 1,
+    runtimeId: "codex",
+    operation: "coach.deep",
+    resolved: { model: "gpt-5.4", effort: "high" },
+  };
+  let coachingInput;
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "coaching.plan",
+      entity: { type: "application", id: "app-coach-plan" },
+    },
+    executionPlan,
+    signal: controller.signal,
+    buildCoachingPlanImpl: async (input) => {
+      coachingInput = input;
+      return { status: 200, body: { ok: true, data: coachingPlanPayload() } };
+    },
+  });
+
+  assert.equal(coachingInput.executionPlan, executionPlan);
+  assert.equal(coachingInput.signal, controller.signal);
+});
+
 test("coaching.plan surfaces a failed plan build as a real error, not a silent artifact", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot, {
@@ -1998,6 +2034,45 @@ test("strategy.review returns a strategy_review artifact and only a 'Run it anyw
       },
     },
   ]);
+});
+
+test("strategy.review preserves its frozen plan and cancellation signal at the review boundary", async () => {
+  const repoRoot = tempRepo();
+  const controller = new AbortController();
+  const executionPlan = {
+    version: 1,
+    runtimeId: "claude",
+    operation: "coach.deep",
+    resolved: { model: "opus", effort: "high" },
+  };
+  let reviewInput;
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "strategy.review",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { force: true },
+    },
+    executionPlan,
+    signal: controller.signal,
+    draftStrategyReviewImpl: async (input) => {
+      reviewInput = input;
+      return {
+        state: "drafted",
+        generatedAt: "2026-08-15T12:00:00.000Z",
+        reviewSignal: { reviewed: true, outcomes: 5, newOutcomes: 5, daysSince: 1 },
+        reevaluation: null,
+        headline: "Review ready.",
+        findings: [],
+        recommendations: [],
+      };
+    },
+  });
+
+  assert.equal(reviewInput.executionPlan, executionPlan);
+  assert.equal(reviewInput.signal, controller.signal);
 });
 
 test("strategy.review returns only a 'Finish review' nextAction once drafted, and passes force through to the impl", async () => {

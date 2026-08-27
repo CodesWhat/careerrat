@@ -381,7 +381,7 @@ export function createDevServer({
   // via tailor-application. Its HTTP surface (list + single-packet resolution,
   // path-safety-checked artifact reads) is src/cli/packet-route.mjs. No page
   // mounted here — apps/web's SPA is the only client.
-  mountPacketRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
+  mountPacketRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime, appOperations });
   mountInterviewPrepRoutes({ addRoute, repoRoot, env });
   mountJobArtifactRoutes({ addRoute, repoRoot, env });
 
@@ -416,6 +416,7 @@ export function createDevServer({
     repoRoot,
     env,
     workspaceAgentRuntime,
+    appOperations,
     captureTextImpl: async ({ text, inputKind, requestedAction }) => {
       const result = await workspaceAgentRuntime.captureIntake({
         text,

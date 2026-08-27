@@ -274,11 +274,51 @@ function resultReference(result, request) {
     type: "workspace-message",
     id: message?.id || request.resultMessageId,
     threadId: WORKSPACE_THREAD_ID,
+    ...(result?.operationResult === undefined ? {} : { data: result.operationResult }),
+    ...(message
+      ? {
+          message: {
+            text: message.text || "",
+            artifacts: Array.isArray(message.artifacts) ? message.artifacts : [],
+            metadata: message.metadata || {},
+          },
+        }
+      : {}),
   };
 }
 
 export const WORKSPACE_MESSAGE_OPERATION_KIND = "workspace.message";
 export const WORKSPACE_INTENT_OPERATION_KIND = "workspace.intent";
+
+export async function executeDurableWorkspaceIntent({ appOperations, requestId, intent } = {}) {
+  if (!appOperations?.start) {
+    const error = new Error("Workspace operations are not available yet. Restart CareerRat.");
+    error.code = "APP_OPERATION_MANAGER_STOPPED";
+    throw error;
+  }
+  const started = await appOperations.start({
+    kind: WORKSPACE_INTENT_OPERATION_KIND,
+    input: { requestId, intent },
+  });
+  const operation = ["queued", "running"].includes(started.operation.status)
+    ? await appOperations.wait(started.operation.id)
+    : started.operation;
+  if (operation.status === "failed") {
+    const error = new Error(
+      operation.error?.message || "CareerRat couldn't finish that action. Try again."
+    );
+    error.code = operation.error?.code || "APP_OPERATION_FAILED";
+    error.retryable = operation.error?.retryable !== false;
+    throw error;
+  }
+  if (operation.status !== "completed") {
+    const error = new Error("CareerRat could not confirm that action finished.");
+    error.code = "APP_OPERATION_INCOMPLETE";
+    error.retryable = false;
+    throw error;
+  }
+  return operation;
+}
 
 function workspaceOperationError(error, kind) {
   const code = String(error?.code || "WORKSPACE_AGENT_ERROR").slice(0, 128);

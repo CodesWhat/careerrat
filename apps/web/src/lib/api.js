@@ -795,10 +795,14 @@ export function setSourcedStatus({ id, to, note } = {}) {
 // markdown sources to real PDF/DOCX files under workspace/tailored/ and
 // registers them on the application row; `userFacing` in the response is
 // {resume:[{format,path,name}], coverLetter:[...], answers:[...]}.
-export function exportPacketDocuments({ applicationId, formats } = {}) {
+export function exportPacketDocuments({ applicationId, formats, requestId } = {}) {
   return apiFetch("/api/packet/export", {
     method: "POST",
-    body: JSON.stringify({ applicationId, formats }),
+    body: JSON.stringify({
+      applicationId,
+      formats,
+      requestId: durableWorkspaceRequestId(requestId),
+    }),
   });
 }
 

@@ -274,6 +274,7 @@ function bootServer(repoRoot, opts = {}) {
     runSkillStream: opts.runSkillStream,
     chatRuntime: opts.chatRuntime,
     workspaceAgentRuntime: opts.workspaceAgentRuntime,
+    appOperations: opts.appOperations,
     captureTextImpl: opts.captureTextImpl,
     heartbeatMs: opts.heartbeatMs,
   });
@@ -1525,6 +1526,85 @@ test("POST /api/intake/confirm: a JD evaluates through workspace-main and return
         intent: {
           type: "job.evaluate-request",
           entity: { type: "intake", id },
+        },
+      },
+    ]);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/intake/confirm gives confirmed workspace dispatches one durable owner", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const { id } = intakeCapture({
+    repoRoot,
+    rawInput: "Acme\nSRE\nKeep production reliable.",
+    inputKind: "text",
+  });
+  intakeUpdate({
+    repoRoot,
+    id,
+    patch: {
+      status: "proposed",
+      kind: "jd-text",
+      classification: classificationFixture({
+        entities: { company: "Acme", role: "SRE" },
+      }),
+      dispatch: {
+        lane: "W",
+        action: "workspace_intent",
+        params: { intentType: "job.evaluate-request" },
+      },
+    },
+  });
+  const evaluation = { gate: "keep", fitScore: 91, fitReasons: ["Strong reliability evidence"] };
+  const calls = [];
+  const server = await bootServer(repoRoot, {
+    appOperations: {
+      async start(input) {
+        calls.push(input);
+        return {
+          reused: false,
+          operation: {
+            id: "app-operation-intake-confirm",
+            status: "completed",
+            resultRef: {
+              threadId: "workspace-main",
+              message: {
+                text: "Evaluated Acme — SRE: Keep (91/100 fit).",
+                artifacts: [{ kind: "job_evaluation", evaluation }],
+                metadata: { applicationId: "app-acme", state: "keep", nextActions: [] },
+              },
+            },
+          },
+        };
+      },
+      async wait() {
+        throw new Error("a completed operation should not need to wait");
+      },
+    },
+    workspaceAgentRuntime: {
+      async executeIntent() {
+        throw new Error("confirmed intake must not bypass its durable operation owner");
+      },
+    },
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/intake/confirm", { id });
+    assert.equal(status, 200);
+    assert.equal(body.item.status, "done");
+    assert.equal(body.item.result.summary, "Evaluated Acme — SRE: Keep (91/100 fit).");
+    assert.deepEqual(calls, [
+      {
+        kind: "workspace.intent",
+        input: {
+          requestId: `intake-confirm:${id}`,
+          intent: {
+            type: "job.evaluate-request",
+            entity: { type: "intake", id },
+          },
         },
       },
     ]);

@@ -4987,6 +4987,8 @@ export async function executeWorkspaceIntent({
         repoRoot,
         env,
         applicationId: normalized.entity.id,
+        executionPlan: operationExecutionPlan(selectedExecutionPlan, "coach.deep"),
+        signal,
       });
       const plan = operation?.body?.data;
       if (operation?.status !== 200 || !operation?.body?.ok || !plan) {
@@ -5129,7 +5131,14 @@ export async function executeWorkspaceIntent({
     // the freshness gate) — never a per-recommendation entry.
     if (normalized.type === "strategy.review") {
       const force = Boolean(input.force);
-      const draft = await draftStrategyReviewImpl({ repoRoot, env, force, now: now() });
+      const draft = await draftStrategyReviewImpl({
+        repoRoot,
+        env,
+        force,
+        now: now(),
+        executionPlan: operationExecutionPlan(selectedExecutionPlan, "coach.deep"),
+        signal,
+      });
       const artifact = {
         kind: "strategy_review",
         state: draft.state,

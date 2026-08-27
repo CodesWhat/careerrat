@@ -320,6 +320,52 @@ test("workspace message shortcuts still settle one fenced durable assistant resu
   await manager.shutdown();
 });
 
+test("durable workspace intents retain the typed result needed by compatibility routes", async () => {
+  const repoRoot = tempRepo();
+  const operationResult = {
+    applicationId: "app-packet-result",
+    status: "reviewable",
+    artifacts: { resume: "workspace/tailored/app-packet-result-resume.md" },
+  };
+  const { routes, manager } = createWorkspaceHarness({
+    repoRoot,
+    ownerId: "workspace-result-owner",
+    resolveExecutionPlanImpl: () => executionPlan("codex", "application.drafting"),
+    async executeIntentImpl({ resultMessageId }) {
+      return {
+        operationResult,
+        messages: [
+          {
+            id: resultMessageId,
+            kind: "action_result",
+            text: "Generated the application packet.",
+            artifacts: [{ kind: "packet_generation", applicationId: "app-packet-result" }],
+            metadata: { state: "reviewable" },
+          },
+        ],
+      };
+    },
+  });
+
+  const started = await requestDirect(routes, "POST", "/api/workspace/intent", {
+    requestId: "workspace-packet-result-1",
+    intent: {
+      type: "job.generate-documents",
+      entity: { type: "application", id: "app-packet-result" },
+      input: {},
+    },
+  });
+  const completed = await manager.wait(started.body.operation.id);
+
+  assert.deepEqual(completed.resultRef.data, operationResult);
+  assert.deepEqual(completed.resultRef.message, {
+    text: "Generated the application packet.",
+    artifacts: [{ kind: "packet_generation", applicationId: "app-packet-result" }],
+    metadata: { state: "reviewable" },
+  });
+  await manager.shutdown();
+});
+
 test("hard restart resumes the same safe message operation with its frozen plan once", async () => {
   const repoRoot = tempRepo();
   const oldModel = deferred();

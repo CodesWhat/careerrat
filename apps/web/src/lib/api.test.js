@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyOnSite,
   completeDiscovery,
+  exportPacketDocuments,
   extractResumeAi,
   finishOnboarding,
   getResumeExtraction,
@@ -741,6 +742,27 @@ describe("apiFetch capability-cookie retry", () => {
 });
 
 describe("chat-first workflow actions", () => {
+  it("gives packet exports a durable request identity", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true, data: { applicationId: "app-1" } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await exportPacketDocuments({ applicationId: "app-1", formats: ["pdf"] });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, options] = fetchMock.mock.calls[0];
+    expect(JSON.parse(options.body)).toEqual({
+      applicationId: "app-1",
+      formats: ["pdf"],
+      requestId: expect.stringMatching(/^workspace-/),
+    });
+  });
+
   it("submits visible job actions as typed intents to workspace-main", async () => {
     const fetchMock = vi.fn(
       async () =>
