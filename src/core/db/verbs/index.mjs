@@ -20,6 +20,18 @@ export {
   appSetStatus,
   appUpsert,
 } from "./app.mjs";
+export {
+  APP_OPERATION_LIMITS,
+  APP_OPERATION_STATUSES,
+  appOperationComplete,
+  appOperationFail,
+  appOperationGet,
+  appOperationHeartbeat,
+  appOperationProgress,
+  appOperationRecoverOrphans,
+  appOperationRetryStart,
+  appOperationStart,
+} from "./app-operations.mjs";
 export { calendarBusyUpsert, calendarWriteAppend } from "./calendar.mjs";
 export {
   authorizationDeclared,

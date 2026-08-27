@@ -55,6 +55,7 @@ import {
 } from "../core/tracker/request-security.mjs";
 import { dispatchHttpRoute } from "../core/tracker/route-dispatch.mjs";
 import { readVersion } from "../core/version.mjs";
+import { mountAppOperationRoutes } from "./app-operation-route.mjs";
 import { mountAssistRoutes } from "./assist-route.mjs";
 import { mountAutomationRoutes } from "./automation-route.mjs";
 import {
@@ -117,6 +118,7 @@ export function createDevServer({
   repoRoot = DEFAULT_ROOT,
   env = process.env,
   runSkillStream = defaultRunSkillStream,
+  appOperationKinds = {},
   // M2 — the conversational chat runtime (see src/core/ai/chat-runtime.mjs).
   // Dependency-injected the same way `runSkillStream` is above, so tests can
   // hand in a runtime built against a fake `loadSdk` without touching the
@@ -261,6 +263,13 @@ export function createDevServer({
       version: PACKAGE_VERSION,
       pid: process.pid,
     });
+  });
+
+  const appOperations = mountAppOperationRoutes({
+    addRoute,
+    repoRoot,
+    env,
+    kinds: appOperationKinds,
   });
 
   // P0-4 — the embedded AI skill runtime. See src/cli/skill-run-route.mjs for
@@ -617,6 +626,7 @@ export function createDevServer({
 
     try {
       runtimeOwnership = acquireWorkspaceRuntimeOwnership({ repoRoot, env });
+      appOperations.recoverOrphans();
       workspaceAgentRuntime.recoverOrphanedSourcingRuns();
       await workspaceAgentRuntime.recoverAdjacentRoleCoaching?.();
       intakeRoutes.recoverOrphans();
@@ -644,6 +654,8 @@ export function createDevServer({
     shutdownSourcingWorkers: workspaceAgentRuntime.shutdownSourcingWorkers,
     shutdownIntake: intakeRoutes.shutdownLaneB,
     shutdownResumeExtractions: onboardRoutes.shutdownResumeExtractions,
+    appOperations,
+    shutdownAppOperations: appOperations.shutdown,
   };
 }
 
@@ -695,6 +707,7 @@ async function main() {
     await dev.shutdownAiWebSearch();
     await dev.shutdownIntake();
     await dev.shutdownResumeExtractions();
+    await dev.shutdownAppOperations();
     await dev.browserSessionManager.shutdown();
     dev.server.close(() => process.exit(0));
     // Don't hang on a lingering socket.

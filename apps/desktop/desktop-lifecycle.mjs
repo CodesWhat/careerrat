@@ -5,6 +5,7 @@ export async function shutdownDesktopRuntime(active) {
   await active.shutdownIntake();
   await active.shutdownAiWebSearch();
   await active.shutdownResumeExtractions();
+  await active.shutdownAppOperations();
   await active.chatRuntime.shutdown();
   active.stopRuntimeSignIns();
   await active.browserSessionManager.shutdown();

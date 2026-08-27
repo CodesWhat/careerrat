@@ -54,19 +54,71 @@ test("re-running against a db already at the latest version is a no-op", () => {
   assert.equal(after, before, "no new _migrations rows on a no-op re-run");
 });
 
-test("migration 009-015 preserve public intel through resume extraction order", () => {
+test("migration 010-016 preserve workspace state through shared app operations", () => {
   assert.deepEqual(
     ALL_MIGRATIONS.slice(-7).map((migration) => [migration.id, migration.name]),
     [
-      [9, "public-intel"],
       [10, "workspace-agent"],
       [11, "linkedin-profile-proposals"],
       [12, "chat-first-workspace"],
       [13, "durable-skill-chat"],
       [14, "chat-first-preferences"],
       [15, "resume-extractions"],
+      [16, "app-operations"],
     ]
   );
+});
+
+test("migration 016 creates bounded, indexed durable app operations", () => {
+  const db = freshDb();
+  runMigrations(db);
+
+  const columns = new Map(
+    db
+      .prepare("PRAGMA table_info('app_operations')")
+      .all()
+      .map((column) => [column.name, column])
+  );
+  for (const required of [
+    "id",
+    "kind",
+    "request_digest",
+    "request",
+    "status",
+    "owner_id",
+    "fence",
+    "heartbeat_at",
+    "lease_expires_at",
+    "execution_plan",
+    "progress",
+    "result_ref",
+    "error",
+    "retry_of",
+    "attempt",
+    "created_at",
+    "started_at",
+    "completed_at",
+    "updated_at",
+  ]) {
+    assert.ok(columns.has(required), `expected app_operations.${required}`);
+  }
+
+  const tableSql = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'app_operations'")
+    .get()?.sql;
+  assert.match(tableSql, /CHECK \(length\(request\) <= 65536\)/);
+  assert.match(tableSql, /CHECK \(execution_plan IS NULL OR length\(execution_plan\) <= 16384\)/);
+  assert.match(tableSql, /CHECK \(progress IS NULL OR length\(progress\) <= 8192\)/);
+  assert.match(tableSql, /CHECK \(result_ref IS NULL OR length\(result_ref\) <= 8192\)/);
+  assert.match(tableSql, /CHECK \(error IS NULL OR length\(error\) <= 4096\)/);
+
+  const indexes = db
+    .prepare("PRAGMA index_list('app_operations')")
+    .all()
+    .map((row) => row.name);
+  assert.ok(indexes.includes("idx_app_operations_kind_digest"));
+  assert.ok(indexes.includes("idx_app_operations_status_lease"));
+  assert.ok(indexes.includes("idx_app_operations_retry"));
 });
 
 test("migration 015 creates digest-indexed durable resume extractions", () => {

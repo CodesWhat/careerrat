@@ -16,6 +16,8 @@ import { test } from "node:test";
 import { createDevServer } from "../src/cli/tracker-dev.mjs";
 import { openDb } from "../src/core/db/connection.mjs";
 import {
+  appOperationGet,
+  appOperationStart,
   intakeCapture,
   intakeOne,
   intakeUpdate,
@@ -59,10 +61,84 @@ test("tracker-dev exposes the durable AI-search shutdown lifecycle", async () =>
   try {
     assert.equal(typeof dev.shutdownAiWebSearch, "function");
     assert.equal(typeof dev.shutdownResumeExtractions, "function");
+    assert.equal(typeof dev.shutdownAppOperations, "function");
     await dev.shutdownAiWebSearch();
     await dev.shutdownResumeExtractions();
+    await dev.shutdownAppOperations();
   } finally {
     dev.chatRuntime.shutdown();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("shared operation recovery stays a no-op before a workspace database exists", async () => {
+  const repoRoot = tempRepo();
+  writeTracker(repoRoot);
+  const dev = createDevServer({
+    repoRoot,
+    workspaceAgentRuntime: {
+      recoverOrphanedSourcingRuns() {},
+      async recoverAdjacentRoleCoaching() {},
+      async runTurn() {
+        throw new Error("not used");
+      },
+      async executeIntent() {
+        throw new Error("not used");
+      },
+      async captureIntake() {
+        throw new Error("not used");
+      },
+      async shutdownSourcingWorkers() {},
+    },
+  });
+  try {
+    await dev.listen({ port: 0, host: "127.0.0.1" });
+    assert.equal(dev.server.listening, true);
+  } finally {
+    await dev.shutdownAppOperations();
+    dev.chatRuntime.shutdown();
+    if (dev.server.listening) await new Promise((resolve) => dev.server.close(resolve));
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("the listening workspace owner reconciles interrupted shared app operations without replay", async () => {
+  const repoRoot = tempRepo();
+  writeTracker(repoRoot);
+  openDb({ repoRoot });
+  const orphan = appOperationStart({
+    repoRoot,
+    kind: "company-proposals",
+    requestDigest: "c".repeat(64),
+    request: { candidateId: "candidate-1" },
+    executionPlan: { runtimeId: "codex", operation: "research.company" },
+    ownerId: "dead-process",
+  }).operation;
+  let executeCalls = 0;
+  const dev = createDevServer({
+    repoRoot,
+    appOperationKinds: {
+      "company-proposals": {
+        parseRequest: (input) => input,
+        async execute() {
+          executeCalls += 1;
+          return { resultRef: null };
+        },
+      },
+    },
+  });
+
+  try {
+    await dev.listen({ port: 0, host: "127.0.0.1" });
+    const recovered = appOperationGet({ repoRoot, id: orphan.id }).operation;
+    assert.equal(recovered.status, "failed");
+    assert.equal(recovered.error.code, "APP_OPERATION_SERVER_RESTARTED");
+    assert.equal(recovered.error.retryable, true);
+    assert.equal(executeCalls, 0);
+  } finally {
+    await dev.shutdownAppOperations();
+    dev.chatRuntime.shutdown();
+    if (dev.server.listening) await new Promise((resolve) => dev.server.close(resolve));
     rmSync(repoRoot, { recursive: true, force: true });
   }
 });
