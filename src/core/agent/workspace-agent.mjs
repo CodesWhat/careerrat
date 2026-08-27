@@ -9468,7 +9468,7 @@ function aiSearchStatusText(state) {
   if (run.status === "failed") return "The AI search couldn't finish, so it needs another try.";
   if (run.status !== "completed") return "";
   const summary = run.summary || {};
-  const matches = Number(summary.new ?? summary.found ?? 0);
+  const matches = Number(summary.presented ?? summary.new ?? summary.found ?? 0);
   return `The AI search finished and found ${matchCountLabel(matches, "new")}.`;
 }
 

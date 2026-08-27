@@ -5013,6 +5013,32 @@ test("search status questions report a current running lane without calling the 
   assert.equal(smartApostrophe.messages.at(-1).text, result.messages.at(-1).text);
 });
 
+test("search status reports matches visible at the saved fit floor instead of raw persisted leads", async () => {
+  const repoRoot = tempRepo();
+  seedSourcingRun(repoRoot, {
+    id: "ai-web-search-fit-floor",
+    purpose: "ai-web-search",
+    status: "completed",
+    started_at: "2026-08-27T13:15:00.000Z",
+    completed_at: "2026-08-27T13:15:05.000Z",
+    updated_at: "2026-08-27T13:15:05.000Z",
+    metadata: {},
+    summary: { searched: 3, found: 12, new: 4, presented: 0, fitFloor: 65, errors: [] },
+    error: null,
+  });
+
+  const result = await runWorkspaceAgentTurn({
+    repoRoot,
+    env: {},
+    text: "How's the job search going?",
+    callAIImpl: async () => {
+      throw new Error("search status must not call the model");
+    },
+  });
+
+  assert.equal(result.messages.at(-1).text, "The AI search finished and found no new matches.");
+});
+
 test("search status questions ignore an AI run from a different search execution", async () => {
   const repoRoot = tempRepo();
   seedSourcingRun(repoRoot, {

@@ -85,6 +85,19 @@ const AI_WEB_SEARCH_PROMPT_CONCURRENCY = 2;
 const AI_WEB_SEARCH_PROMPT_TIMEOUT_MS = 30 * 60 * 1000;
 const AI_WEB_SEARCH_HEARTBEAT_MS = 30 * 1000;
 
+function savedFitFloor(config = {}) {
+  const raw = config?.targeting?.fit_bands?.fit_floor;
+  const configured = raw == null || raw === "" ? Number.NaN : Number(raw);
+  const floor = Number.isFinite(configured) ? configured : 70;
+  return Math.max(0, Math.min(100, floor));
+}
+
+function offerMeetsFitFloor(offer, fitFloor) {
+  if (offer?.score == null || offer.score === "") return true;
+  const score = Number(offer.score);
+  return Number.isFinite(score) && score >= fitFloor;
+}
+
 // Sourced-row `gate` for an AI-web-search survivor. This mode's `candidate`
 // context (buildSearchPromptContext) never carries company-history or
 // application-limit data (see the SKILL.md section's own note), so unlike
@@ -358,6 +371,7 @@ export async function runAiWebSearch({
   }
 
   const config = candidateConfigGet({ repoRoot, env });
+  const fitFloor = savedFitFloor(config);
   const modesGate = computeAllows("search:ai-web", config.modes);
   const promptCap = PROMPT_CAP_BY_MODE[modesGate.usage_mode] ?? PROMPT_CAP_BY_MODE.standard;
 
@@ -756,6 +770,8 @@ export async function runAiWebSearch({
     searched: selected.length,
     found: roles.length,
     new: persistedOffers.length,
+    presented: persistedOffers.filter((offer) => offerMeetsFitFloor(offer, fitFloor)).length,
+    fitFloor,
     duplicates,
     invalid,
     disqualified,

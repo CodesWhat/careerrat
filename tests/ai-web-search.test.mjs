@@ -1009,6 +1009,50 @@ test("runAiWebSearch preserves the twelve-role NYC hospitality open-web parity b
   );
 });
 
+test("runAiWebSearch reports the count visible at the candidate's saved fit floor", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: false,
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: { fit_bands: { fit_floor: 65 } },
+  });
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: assistantJson({
+      roles: [
+        role({
+          company: "Below Floor Hospitality",
+          title: "Bar Manager",
+          url: "https://jobs.example.test/below-floor-hospitality",
+          location: "New York, NY",
+          fit_score: 64,
+          fit_bucket: "stretch",
+        }),
+      ],
+      queries_run: [{ prompt_id: "p1", query: "NYC hospitality jobs" }],
+    }),
+    resolveJobUrlImpl: canonicalResolver(),
+  });
+
+  assert.equal(result.new, 1, JSON.stringify(result));
+  assert.equal(result.presented, 0, JSON.stringify(result));
+  assert.equal(result.fitFloor, 65);
+});
+
 test("runAiWebSearch rejects a soft-404 page even when the model supplied a summary", async () => {
   const repoRoot = repo({ prompts: 1 });
   const result = await runAiWebSearch({

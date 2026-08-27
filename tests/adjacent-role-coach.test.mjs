@@ -105,6 +105,20 @@ test("offers coaching only after a clean zero-result or clearly role-narrow sear
     }),
     null
   );
+
+  assert.deepEqual(
+    adjacentRoleCoachingTrigger({
+      status: "completed",
+      summary: {
+        searched: 3,
+        found: 12,
+        new: 4,
+        presented: 0,
+        errors: [],
+      },
+    }),
+    { kind: "zero-result", presented: 0, scanned: 12, roleFiltered: 0 }
+  );
 });
 
 test("uses coach.deep to propose three to five evidence-grounded directions", async () => {
