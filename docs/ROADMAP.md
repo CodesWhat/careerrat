@@ -1567,11 +1567,21 @@ Current implementation ledger, August 27:
   found and persisted 17, and kept the requested locality shapes. The exact fixture and isolated
   temporary-home harness live in `scripts/qa-live-runtime-search.mjs`; they never read or write
   real candidate data.
+- Clean zero-result and clearly role-over-narrow searches now hand back to Paul for a
+  provider-neutral `coach.deep` turn. He offers three to five evidence-grounded adjacent
+  directions through the durable multi-select contract, accepts clicks or ordinary text, then
+  asks separately before changing targeting and starting a linked rerun. The deterministic
+  fallback uses only saved candidate evidence, and the tester's actual hospitality/operations
+  target set is a regression fixture.
+- Desktop update state now survives app restart honestly. A previously downloaded update is
+  rechecked by the native updater before **Restart and install** returns; an interrupted check or
+  download restores as a clear retry instead of idle. Installation remains an explicit action
+  after verified download and ordered CareerRat shutdown.
 - Public deterministic hospitality seeding now covers common NYC location spellings, up to four
   deduplicated target titles per query board, and a state-wide fallback, while explicit software
-  domains no longer trip hospitality inference. Career-coach adjacent-role expansion, remaining
-  typed-choice migrations, full packaged desktop/browser QA, and release/update acceptance remain
-  open.
+  domains no longer trip hospitality inference. Remaining typed-choice migrations, foreground
+  durability, resume extraction lifecycle, full packaged desktop/browser QA, and release/update
+  acceptance remain open.
 
 This gate blocks the next release until:
 
