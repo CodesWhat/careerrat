@@ -1679,6 +1679,43 @@ export function mountOnboardRoutes({
       return;
     }
 
+    const parsed = parseResume(text);
+    const localProfileSeed = deriveProfileSeed(parsed);
+    const localEvidenceSeed = deriveEvidenceSeed(parsed);
+    const rawTargetingSeed = deriveTargetingSeed(parsed);
+    const localTargetingSeed = rawTargetingSeed ? normalizeTargetingSeed(rawTargetingSeed) : null;
+    const resumeDocument = buildResumeDocumentFromParsed(parsed);
+    const localSections = {
+      experience: parsed.sections.experience.length,
+      education: parsed.sections.education.length,
+      skills: parsed.sections.skills.length,
+      projects: parsed.sections.projects.length,
+      other: parsed.sections.other.length,
+    };
+    const localData = {
+      fullText: text,
+      profileSeed: localProfileSeed,
+      evidenceSeed: localEvidenceSeed,
+      sections: localSections,
+      resumeDocument,
+      source: "docx",
+      extraction: "local",
+      savedPath: savedRelPath,
+      reused,
+      ...(localTargetingSeed?.role_buckets?.length ? { targetingSeed: localTargetingSeed } : {}),
+    };
+    const docxResponseData = (data) => ({
+      profileSeed: data.profileSeed,
+      evidenceSeed: data.evidenceSeed,
+      sections: data.sections,
+      ...(data.resumeDocument ? { resumeDocument: data.resumeDocument } : {}),
+      source: "docx",
+      extraction: data.extraction,
+      savedPath: data.savedPath,
+      reused: data.reused,
+      ...(data.targetingSeed?.role_buckets?.length ? { targetingSeed: data.targetingSeed } : {}),
+    });
+
     // AI upgrade — resolveAIRoute() never throws, it reports {type: "none"}
     // when neither ANTHROPIC_API_KEY nor CAREERRAT_AI_PROXY_URL is set (same
     // check GET /api/onboard/state already uses for keyConfigured), so this
@@ -1690,10 +1727,55 @@ export function mountOnboardRoutes({
       try {
         const markdown = await extractDocxResumeMarkdown(bytes);
         const markdownRelPath = `${savedRelPath}.md`;
-        atomicWriteFile(userPath(pathCtx, markdownRelPath), markdown);
+        const markdownPath = userPath(pathCtx, markdownRelPath);
+        atomicWriteFile(markdownPath, markdown);
+
+        if (dbExists(pathCtx)) {
+          let closed = false;
+          res.on?.("close", () => {
+            closed = true;
+          });
+          const upload = {
+            savedRelPath,
+            savedPath,
+            reused,
+            uploadDigest: createHash("sha256").update(bytes).digest("hex"),
+          };
+          const { started, execution } = startDurableResumeExtraction(upload, name, {
+            inputPath: markdownPath,
+            resultSource: "docx",
+            resultExtraction: "ai",
+            artifactSource: "docx",
+            artifactExtraction: "ai",
+            fallbackData: localData,
+          });
+          const response = execution
+            ? await execution.promise
+            : {
+                status: 200,
+                body: {
+                  ok: true,
+                  data: started.operation.result,
+                  operation: started.operation,
+                },
+              };
+          if (!closed) {
+            if (response.body.ok) {
+              sendJson(res, 200, {
+                ok: true,
+                ...docxResponseData(response.body.data),
+                operation: response.body.operation,
+                seedSaved: true,
+              });
+            } else {
+              sendJson(res, response.status, response.body);
+            }
+          }
+          return;
+        }
 
         const outcome = await runResumeExtractBounded({
-          savedPath: userPath(pathCtx, markdownRelPath),
+          savedPath: markdownPath,
         });
 
         if (outcome.body.ok) {
@@ -1711,26 +1793,10 @@ export function mountOnboardRoutes({
           }));
           const aiTargetingSeed = normalizeTargetingSeed(extracted.targeting_suggestions);
 
-          if (dbExists(pathCtx)) {
-            candidateArtifactPut({
-              ...pathCtx,
-              id: "source-resume",
-              kind: "source-resume",
-              data: {
-                path: savedRelPath,
-                filename: sanitizeUploadFilename(name),
-                savedAt: new Date().toISOString(),
-                source: "docx",
-                extraction: "ai",
-                text: fullText,
-              },
-            });
-          } else {
-            const entry = COPY_ONLY_CANDIDATE_FILES.find((f) => f.name === "source-resume");
-            const dest = userPath(pathCtx, entry.candidatePath);
-            mkdirSync(dirname(dest), { recursive: true });
-            atomicWriteFile(dest, fullText);
-          }
+          const entry = COPY_ONLY_CANDIDATE_FILES.find((f) => f.name === "source-resume");
+          const dest = userPath(pathCtx, entry.candidatePath);
+          mkdirSync(dirname(dest), { recursive: true });
+          atomicWriteFile(dest, fullText);
 
           sendJson(res, 200, {
             ok: true,
@@ -1750,20 +1816,6 @@ export function mountOnboardRoutes({
         // fails a DOCX upload the deterministic parser already handled.
       }
     }
-
-    const parsed = parseResume(text);
-    const profileSeed = deriveProfileSeed(parsed);
-    const evidenceSeed = deriveEvidenceSeed(parsed);
-    const rawTargetingSeed = deriveTargetingSeed(parsed);
-    const targetingSeed = rawTargetingSeed ? normalizeTargetingSeed(rawTargetingSeed) : null;
-    const resumeDocument = buildResumeDocumentFromParsed(parsed);
-    const sections = {
-      experience: parsed.sections.experience.length,
-      education: parsed.sections.education.length,
-      skills: parsed.sections.skills.length,
-      projects: parsed.sections.projects.length,
-      other: parsed.sections.other.length,
-    };
 
     if (dbExists(pathCtx)) {
       candidateArtifactPut({
@@ -1788,15 +1840,7 @@ export function mountOnboardRoutes({
 
     sendJson(res, 200, {
       ok: true,
-      profileSeed,
-      evidenceSeed,
-      sections,
-      resumeDocument,
-      source: "docx",
-      extraction: "local",
-      savedPath: savedRelPath,
-      reused,
-      ...(targetingSeed?.role_buckets?.length ? { targetingSeed } : {}),
+      ...docxResponseData(localData),
     });
   });
 
@@ -1865,7 +1909,7 @@ export function mountOnboardRoutes({
     });
   }
 
-  function resumeExtractionData({ extracted, savedRelPath, reused }) {
+  function resumeExtractionData({ extracted, savedRelPath, reused, source = "ai", extraction }) {
     const fullText = normalizeDocxResumeText(extracted.full_text || "");
     const claims = (extracted.claims || []).map((claim, index) => ({
       id: `resume-${String(index + 1).padStart(3, "0")}`,
@@ -1878,13 +1922,26 @@ export function mountOnboardRoutes({
       evidenceSeed: { claims },
       sections: extracted.sections || {},
       targetingSeed: normalizeTargetingSeed(extracted.targeting_suggestions),
-      source: "ai",
+      source,
+      ...(extraction ? { extraction } : {}),
       savedPath: savedRelPath,
       reused,
     };
   }
 
-  function startResumeExtractionWorker({ operation, savedPath, savedRelPath, name, reused }) {
+  function startResumeExtractionWorker({
+    operation,
+    savedPath,
+    savedRelPath,
+    name,
+    reused,
+    inputPath = savedPath,
+    resultSource = "ai",
+    resultExtraction,
+    artifactSource = "resume-ai",
+    artifactExtraction,
+    fallbackData,
+  }) {
     const existing = activeResumeExtractions.get(operation.id);
     if (existing) return existing;
 
@@ -1892,6 +1949,39 @@ export function mountOnboardRoutes({
     const listeners = new Set();
     const execution = { controller, listeners, shutdownRequested: false, promise: null };
     activeResumeExtractions.set(operation.id, execution);
+
+    const complete = (data, outcome) => {
+      const completed = resumeExtractionComplete({
+        ...pathCtx,
+        id: operation.id,
+        ownerId: resumeWorkerOwnerId,
+        artifact: {
+          path: savedRelPath,
+          filename: sanitizeUploadFilename(name),
+          savedAt: new Date().toISOString(),
+          source: artifactSource,
+          ...(data.extraction || artifactExtraction
+            ? { extraction: data.extraction || artifactExtraction }
+            : {}),
+          text: data.fullText,
+          ...(data.resumeDocument ? { resumeDocument: data.resumeDocument } : {}),
+        },
+        result: data,
+        ai: outcome?.body?.ai,
+        manual: outcome?.body?.manual,
+      }).operation;
+      notify({ type: "done", data, operation: completed });
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          data,
+          ai: outcome?.body?.ai,
+          manual: outcome?.body?.manual || RESUME_AI_MANUAL,
+          operation: completed,
+        },
+      };
+    };
 
     const notify = (event) => {
       for (const listener of listeners) listener(event);
@@ -1930,7 +2020,7 @@ export function mountOnboardRoutes({
           progress: { phase: "reading", message: `Reading ${sanitizeUploadFilename(name)}…` },
         });
         const outcome = await runResumeExtractBounded({
-          savedPath,
+          savedPath: inputPath,
           originalName: name,
           onProgress: notify,
           signal: controller.signal,
@@ -1945,6 +2035,10 @@ export function mountOnboardRoutes({
           throw error;
         }
         if (!outcome.body.ok) {
+          if (fallbackData) {
+            const data = typeof fallbackData === "function" ? fallbackData() : fallbackData;
+            return complete(data, outcome);
+          }
           const failed = resumeExtractionFail({
             ...pathCtx,
             id: operation.id,
@@ -1969,29 +2063,23 @@ export function mountOnboardRoutes({
           extracted: outcome.body.data || {},
           savedRelPath,
           reused,
+          source: resultSource,
+          extraction: resultExtraction,
         });
-        const completed = resumeExtractionComplete({
-          ...pathCtx,
-          id: operation.id,
-          ownerId: resumeWorkerOwnerId,
-          artifact: {
-            path: savedRelPath,
-            filename: sanitizeUploadFilename(name),
-            savedAt: new Date().toISOString(),
-            source: "resume-ai",
-            text: data.fullText,
-          },
-          result: data,
-          ai: outcome.body.ai,
-          manual: outcome.body.manual,
-        }).operation;
-        notify({ type: "done", data, operation: completed });
-        return {
-          status: outcome.status,
-          body: { ...outcome.body, data, operation: completed },
-        };
+        return complete(data, outcome);
       } catch (error) {
         const stopped = execution.shutdownRequested || controller.signal.aborted;
+        if (!stopped && fallbackData) {
+          const current = resumeExtractionGet({ ...pathCtx, id: operation.id }).operation;
+          if (["queued", "running"].includes(current?.status)) {
+            try {
+              const data = typeof fallbackData === "function" ? fallbackData() : fallbackData;
+              return complete(data);
+            } catch {
+              // Persist the terminal failure below when deterministic fallback cannot commit.
+            }
+          }
+        }
         const safeError = {
           code: stopped
             ? "RESUME_EXTRACTION_SERVER_STOPPED"
@@ -2028,7 +2116,7 @@ export function mountOnboardRoutes({
     return execution;
   }
 
-  function startDurableResumeExtraction(upload, name) {
+  function startDurableResumeExtraction(upload, name, workerOptions = {}) {
     const started = resumeExtractionStart({
       ...pathCtx,
       uploadDigest: upload.uploadDigest,
@@ -2048,6 +2136,7 @@ export function mountOnboardRoutes({
         savedRelPath: upload.savedRelPath,
         name,
         reused: upload.reused,
+        ...workerOptions,
       }),
     };
   }

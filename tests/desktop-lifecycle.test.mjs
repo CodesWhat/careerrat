@@ -23,6 +23,16 @@ test("desktop shutdown settles app-owned work before browser and server teardown
       await Promise.resolve();
       calls.push("intake:end");
     },
+    async shutdownAiWebSearch() {
+      calls.push("ai-search:start");
+      await Promise.resolve();
+      calls.push("ai-search:end");
+    },
+    async shutdownResumeExtractions() {
+      calls.push("resume:start");
+      await Promise.resolve();
+      calls.push("resume:end");
+    },
     chatRuntime: {
       async shutdown() {
         calls.push("chat:shutdown");
@@ -53,6 +63,10 @@ test("desktop shutdown settles app-owned work before browser and server teardown
     "sourcing:end",
     "intake:start",
     "intake:end",
+    "ai-search:start",
+    "ai-search:end",
+    "resume:start",
+    "resume:end",
     "chat:shutdown",
     "sign-ins:stop",
     "browser:shutdown",

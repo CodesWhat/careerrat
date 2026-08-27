@@ -22,6 +22,7 @@ publish:
 files:
   - main.mjs
   - atomic-write.mjs
+  - desktop-lifecycle.mjs
   - desktop-identity.mjs
   - menu-template.mjs
   - desktop-runtime.mjs

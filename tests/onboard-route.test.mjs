@@ -1644,6 +1644,8 @@ describe("POST /api/onboard/resume-docx", () => {
       assert.equal(status, 200);
       assert.equal(body.source, "docx");
       assert.equal(body.extraction, "ai");
+      assert.equal(body.seedSaved, true);
+      assert.equal(body.operation.status, "completed");
       assert.equal(
         body.profileSeed.candidate.linkedin,
         "https://www.linkedin.com/in/profile-handle"
@@ -1662,7 +1664,81 @@ describe("POST /api/onboard/resume-docx", () => {
       // resume_document was dropped from the extract contract for speed —
       // the persisted artifact must not carry it either.
       assert.equal(artifact.resumeDocument, undefined);
+      const state = (await getDirect(routes, "/api/onboard/state")).body;
+      assert.equal(state.resumeExtraction.id, body.operation.id);
+      assert.equal(state.data.profile.candidate.full_name, "Resume Candidate");
+      assert.equal(state.data.evidence.claims.length, 1);
     } finally {
+      closeAll();
+    }
+  });
+
+  it("owns configured-runtime DOCX extraction through shutdown and durable reconciliation", async () => {
+    const repoRoot = buildTempRoot();
+    let runtimeStarted;
+    let abortSeen;
+    let releaseRuntime;
+    const started = new Promise((resolve) => {
+      runtimeStarted = resolve;
+    });
+    const aborted = new Promise((resolve) => {
+      abortSeen = resolve;
+    });
+    const release = new Promise((resolve) => {
+      releaseRuntime = resolve;
+    });
+    const runSkillStream = async ({ signal }) => {
+      runtimeStarted();
+      await new Promise((resolve) => {
+        signal.addEventListener(
+          "abort",
+          () => {
+            abortSeen();
+            resolve();
+          },
+          { once: true }
+        );
+      });
+      await release;
+      return { ok: false, aborted: true };
+    };
+    const { routes, runtime } = mountDirectRuntime(
+      repoRoot,
+      { ANTHROPIC_API_KEY: "test-key" },
+      { runSkillStream, extractDocxResumeMarkdown: async () => "# Converted resume" }
+    );
+    let pendingResponse;
+    try {
+      await postJsonDirect(routes, "/api/onboard/init", {});
+      pendingResponse = postResumeDocxDirect(routes, "resume.docx", VALID_DOCX);
+      await started;
+
+      const active = (await getDirect(routes, "/api/onboard/resume-ai/operation")).body.operation;
+      assert.equal(active.status, "running");
+      assert.equal(active.filename, "resume.docx");
+      assert.equal(active.uploadDigest.length, 64);
+      assert.equal(active.executionPlan.operation, "structured.extraction");
+
+      let shutdownSettled = false;
+      const shutdown = runtime.shutdownResumeExtractions().then(() => {
+        shutdownSettled = true;
+      });
+      await aborted;
+      await Promise.resolve();
+      assert.equal(shutdownSettled, false, "shutdown must await provider cleanup");
+      releaseRuntime();
+      await shutdown;
+
+      const response = await pendingResponse;
+      assert.equal(response.status, 500);
+      assert.equal(response.body.code, "RESUME_EXTRACTION_SERVER_STOPPED");
+      const stopped = (await getDirect(routes, "/api/onboard/resume-ai/operation")).body.operation;
+      assert.equal(stopped.status, "failed");
+      assert.equal(stopped.error.code, "RESUME_EXTRACTION_SERVER_STOPPED");
+      assert.equal(candidateArtifactGet({ repoRoot, id: "source-resume" }), null);
+    } finally {
+      releaseRuntime?.();
+      await pendingResponse?.catch(() => {});
       closeAll();
     }
   });
@@ -1693,6 +1769,9 @@ describe("POST /api/onboard/resume-docx", () => {
 
       const artifact = candidateArtifactGet({ repoRoot, id: "source-resume" });
       assert.match(artifact.text, /Built deterministic onboarding workflows/);
+      assert.equal(artifact.extraction, "local");
+      assert.equal(body.seedSaved, true);
+      assert.equal(body.operation.status, "completed");
     } finally {
       closeAll();
     }
