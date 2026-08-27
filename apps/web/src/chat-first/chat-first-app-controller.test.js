@@ -672,6 +672,7 @@ describe("chat-first app controller", () => {
     );
     expect(api.appendJobThreadMessage).toHaveBeenNthCalledWith(1, {
       applicationId: "app-hightouch",
+      id: "packet-answer-user:workspace-request-screening-answer",
       role: "user",
       kind: "text",
       text: "LinkedIn Profile: https://www.linkedin.com/in/riley",

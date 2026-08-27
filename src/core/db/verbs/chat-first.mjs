@@ -388,6 +388,27 @@ export function jobThreadMessageAppend({
       reason: "user-pinned",
       now,
     });
+    const existingRow = db
+      .prepare("SELECT data FROM job_thread_messages WHERE id = ?")
+      .get(messageId);
+    if (existingRow) {
+      const existing = JSON.parse(existingRow.data);
+      if (
+        existing.threadId !== ensured.thread.id ||
+        existing.role !== cleanRole ||
+        existing.kind !== cleanKind ||
+        existing.text !== cleanMessage
+      ) {
+        throw makeError(`job thread message id already exists: ${messageId}`, "CONFLICT");
+      }
+      return {
+        thread: ensured.thread,
+        message: existing,
+        reused: true,
+        meta: null,
+        event: null,
+      };
+    }
     const at = nextIso(ensured.thread.updatedAt, now);
     const sequence = db
       .prepare(
@@ -454,7 +475,7 @@ export function jobThreadMessageAppend({
       skill: "chat-first",
       operation: "job-thread:message-append",
     });
-    return { thread: updatedThread, message, meta, event };
+    return { thread: updatedThread, message, reused: false, meta, event };
   });
 }
 

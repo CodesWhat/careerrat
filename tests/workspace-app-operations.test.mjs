@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { after, test } from "node:test";
-
+import { confirmPacketGapAnswer } from "../apps/web/src/chat-first/chat-first-app-controller.js";
 import {
   createWorkspaceOperationKinds,
   mountWorkspaceAgentRoutes,
@@ -12,7 +12,7 @@ import {
 import { runWorkspaceAgentTurn } from "../src/core/agent/workspace-agent.mjs";
 import { workspaceThreadRead } from "../src/core/agent/workspace-thread.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
-import { appOperationGet } from "../src/core/db/verbs.mjs";
+import { appOperationGet, appUpsert, jobThreadMessageAppend } from "../src/core/db/verbs.mjs";
 import { createAppOperationManager } from "../src/core/runtime/app-operation-manager.mjs";
 
 const roots = [];
@@ -215,6 +215,81 @@ test("workspace message HTTP returns a durable operation before model work and d
   assert.equal(after.messages.filter((message) => message.role === "assistant").length, 1);
   assert.equal(after.messages.at(-1).text, "Focus on the two roles already waiting for review.");
   await manager.shutdown();
+});
+
+test("repeating one packet answer request persists one user transcript row and one workspace operation", async () => {
+  const repoRoot = tempRepo();
+  appUpsert({
+    repoRoot,
+    row: {
+      id: "app-packet-answer",
+      company: "Hightouch",
+      role: "Solutions Engineer",
+      status: "reviewed-hold",
+    },
+  });
+  const action = deferred();
+  let actionCalls = 0;
+  const { routes, manager } = createWorkspaceHarness({
+    repoRoot,
+    ownerId: "packet-answer-owner",
+    resolveExecutionPlanImpl: () => null,
+    async executeIntentImpl() {
+      actionCalls += 1;
+      await action.promise;
+      return { messages: [] };
+    },
+  });
+  const api = {
+    appendJobThreadMessage(payload) {
+      return Promise.resolve(jobThreadMessageAppend({ repoRoot, ...payload }));
+    },
+    async runWorkspaceIntent(type, entity, input, { requestId }) {
+      const response = await requestDirect(routes, "POST", "/api/workspace/intent", {
+        requestId,
+        intent: { type, entity, input },
+      });
+      assert.equal(response.status, 202);
+      return response.body;
+    },
+  };
+  const input = {
+    api,
+    applicationId: "app-packet-answer",
+    gap: { questionId: "availability", label: "When can you start?" },
+    answer: "Two weeks after accepting an offer",
+    requestId: "workspace-packet-answer-repeat",
+  };
+
+  try {
+    const first = await confirmPacketGapAnswer(input);
+    const second = await confirmPacketGapAnswer(input);
+    await turn();
+
+    assert.equal(second.operation.id, first.operation.id);
+    assert.equal(actionCalls, 1);
+    const db = openDb({ repoRoot });
+    assert.equal(
+      db
+        .prepare("SELECT count(*) AS count FROM app_operations WHERE kind = 'workspace.intent'")
+        .get().count,
+      1
+    );
+    const transcriptRows = db
+      .prepare("SELECT id, data FROM job_thread_messages ORDER BY sequence")
+      .all()
+      .map((row) => ({ id: row.id, ...JSON.parse(row.data) }))
+      .filter(
+        (message) =>
+          message.role === "user" &&
+          message.text === "When can you start?: Two weeks after accepting an offer"
+      );
+    assert.equal(transcriptRows.length, 1);
+    assert.equal(transcriptRows[0].id, "packet-answer-user:workspace-packet-answer-repeat");
+  } finally {
+    action.resolve();
+    await manager.shutdown();
+  }
 });
 
 test("workspace message shortcuts still settle one fenced durable assistant result", async () => {

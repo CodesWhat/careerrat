@@ -392,11 +392,14 @@ export async function confirmPacketGapAnswer({ api, applicationId, gap, answer, 
   const questionId = String(gap?.questionId || "").trim();
   const question = String(gap?.label || gap?.question || "").trim();
   const cleanAnswer = String(answer || "").trim();
+  const stableRequestId = String(requestId || "").trim();
   if (!id || !questionId || !question) throw new Error("This application question is unavailable");
   if (!cleanAnswer) throw new Error("Write an answer first");
+  if (!stableRequestId) throw new Error("This application answer needs a request id");
 
   await api.appendJobThreadMessage({
     applicationId: id,
+    id: `packet-answer-user:${stableRequestId}`,
     role: "user",
     kind: "text",
     text: `${question}: ${cleanAnswer}`,
@@ -405,7 +408,7 @@ export async function confirmPacketGapAnswer({ api, applicationId, gap, answer, 
     "screening.answer-confirm",
     { type: "application", id },
     { questionId, question, answer: cleanAnswer },
-    { requestId }
+    { requestId: stableRequestId }
   );
   if (workspaceOperationFromResponse(response)) return response;
   await projectWorkspaceResultToJobThread({

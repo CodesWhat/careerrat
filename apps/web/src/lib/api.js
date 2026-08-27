@@ -977,6 +977,7 @@ export function decideChatFirstSourced(payload = {}) {
 
 export function appendJobThreadMessage({
   applicationId,
+  id,
   role,
   kind,
   text,
@@ -985,7 +986,7 @@ export function appendJobThreadMessage({
 } = {}) {
   return apiFetch("/api/chat-first/job-thread/message", {
     method: "POST",
-    body: JSON.stringify({ applicationId, role, kind, text, metadata, artifacts }),
+    body: JSON.stringify({ applicationId, id, role, kind, text, metadata, artifacts }),
   });
 }
 

@@ -384,6 +384,80 @@ test("pinning, messaging, and manual archive state survive restart without copyi
   assert.equal(stored.touchDue, undefined);
 });
 
+test("jobThreadMessageAppend reuses an identical durable message id without a second write", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-packet-answer",
+    company: "Hightouch",
+    status: "reviewed-hold",
+  });
+  const input = {
+    repoRoot,
+    applicationId: "app-packet-answer",
+    id: "packet-answer-user:workspace-repeat",
+    role: "user",
+    kind: "text",
+    text: "When can you start?: Two weeks after accepting an offer",
+    now: new Date("2026-08-27T14:00:00.000Z"),
+  };
+
+  const first = api.jobThreadMessageAppend(input);
+  const db = openDb({ repoRoot });
+  const versionAfterFirst = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+  const activityAfterFirst = db
+    .prepare("SELECT count(*) AS count FROM activity_events")
+    .get().count;
+  const second = api.jobThreadMessageAppend(input);
+
+  assert.equal(first.reused, false);
+  assert.equal(second.reused, true);
+  assert.equal(second.message.id, input.id);
+  assert.equal(
+    db.prepare("SELECT count(*) AS count FROM job_thread_messages WHERE id = ?").get(input.id)
+      .count,
+    1
+  );
+  assert.equal(
+    db.prepare("SELECT version FROM meta WHERE id = 1").get().version,
+    versionAfterFirst
+  );
+  assert.equal(
+    db.prepare("SELECT count(*) AS count FROM activity_events").get().count,
+    activityAfterFirst
+  );
+});
+
+test("jobThreadMessageAppend refuses to reuse one message id for different transcript text", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-packet-answer-conflict",
+    company: "Hightouch",
+    status: "reviewed-hold",
+  });
+  const input = {
+    repoRoot,
+    applicationId: "app-packet-answer-conflict",
+    id: "packet-answer-user:workspace-conflict",
+    role: "user",
+    kind: "text",
+    text: "When can you start?: Two weeks",
+  };
+  api.jobThreadMessageAppend(input);
+
+  assert.throws(
+    () => api.jobThreadMessageAppend({ ...input, text: "When can you start?: Immediately" }),
+    (error) => error.code === "CONFLICT"
+  );
+  const db = openDb({ repoRoot });
+  assert.equal(
+    db.prepare("SELECT count(*) AS count FROM job_thread_messages WHERE id = ?").get(input.id)
+      .count,
+    1
+  );
+});
+
 test("job threads expose live packet gaps without leaking the packet manifest", async () => {
   const api = await chatFirstApi();
   const repoRoot = tempRepo();

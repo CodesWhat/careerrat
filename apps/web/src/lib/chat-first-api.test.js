@@ -42,6 +42,7 @@ describe("chat-first durable actions", () => {
     await archiveJobThread({ applicationId: "app-1", archived: true });
     await appendJobThreadMessage({
       applicationId: "app-1",
+      id: "packet-answer-user:workspace-request-1",
       role: "user",
       text: "Coach me on the offer.",
     });
@@ -69,6 +70,7 @@ describe("chat-first durable actions", () => {
           method: "POST",
           body: JSON.stringify({
             applicationId: "app-1",
+            id: "packet-answer-user:workspace-request-1",
             role: "user",
             text: "Coach me on the offer.",
           }),
