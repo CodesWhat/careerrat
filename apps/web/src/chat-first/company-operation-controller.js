@@ -6,6 +6,10 @@ function operationId(value) {
   return id ? id.slice(0, 200) : null;
 }
 
+function list(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 function sleep(ms, signal) {
   if (signal?.aborted) return Promise.reject(signal.reason);
   if (!ms) return Promise.resolve();
@@ -76,6 +80,52 @@ export function companyProposalArtifact(batch) {
     title: "Company suggestions to review",
     ...batch,
     batchId,
+  };
+}
+
+export function companyDiscoveryChildFromWorkspaceResult({ operation, thread } = {}) {
+  if (operation?.status !== "completed" || operation?.resultRef?.type !== "workspace-message") {
+    return null;
+  }
+  const messageId = operationId(operation.resultRef.id);
+  if (!messageId) return null;
+  const message = list(thread?.messages).find(
+    (candidate) => operationId(candidate?.id) === messageId
+  );
+  const artifact = list(message?.artifacts).find(
+    (candidate) => candidate?.kind === "company_discovery_operation"
+  );
+  const id = operationId(artifact?.operationId);
+  if (!id) return null;
+  const batchId = operationId(artifact?.batchId);
+  const status = String(artifact?.status || "running").trim() || "running";
+  return { id, ...(batchId ? { batchId } : {}), status };
+}
+
+export function companyProposalBatchIsResolved(batch) {
+  const proposals = list(batch?.proposals);
+  return Boolean(batch?.batchId) && proposals.every((proposal) => Boolean(proposal?.decision));
+}
+
+export function companyOperationMayOpenReview({ launchContext, currentContext } = {}) {
+  const launch = String(launchContext || "").trim();
+  return Boolean(launch) && launch === String(currentContext || "").trim();
+}
+
+export function companyOperationFailure(error, { id, retry } = {}) {
+  const operation = error?.operation;
+  const message =
+    error?.message ||
+    operation?.error?.message ||
+    "CareerRat couldn't finish finding company suggestions. Try it again.";
+  const exactId = operationId(id || operation?.id);
+  return {
+    message,
+    action:
+      exactId && typeof retry === "function"
+        ? { label: "Try again", retry: true, onRetry: () => retry(exactId) }
+        : null,
+    detail: String(error?.code || operation?.error?.code || "COMPANY_DISCOVERY_FAILED"),
   };
 }
 

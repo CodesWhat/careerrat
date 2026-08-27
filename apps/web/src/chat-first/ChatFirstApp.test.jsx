@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { normalizeSourceReviewArtifact } from "../../../../src/core/discovery/source-review-artifact.mjs";
@@ -2438,5 +2439,22 @@ describe("ChatFirstAppView", () => {
     expect(html).toContain("Nothing sends until you press submit");
     expect(html).toContain("viewer:Resume preview");
     expect(html).toContain("Paul can&#x27;t think right now");
+  });
+
+  it("wires durable company and Deep operation owners without route-owned background state", async () => {
+    const source = await readFile(new URL("./ChatFirstApp.jsx", import.meta.url), "utf8");
+
+    expect(source).toContain("createDeepIngestOperationController({");
+    expect(source).toContain("readDeepIngestOperation(deepOperationStorage)");
+    expect(source).toContain('if (ui.activeThread !== "ingest") return;');
+    expect(source).toContain("controller: deepOperationController");
+    expect(source).toContain("uploadDeepIngestFilesAndRefresh({");
+    expect(source).toContain("companyDiscoveryChildFromWorkspaceResult({");
+    expect(source).toContain("followCompanyDiscoveryOperation({");
+    expect(source).toContain("companyProposalBatchIsResolved(batch)");
+    expect(source).toContain('ui.activeThread === "ingest" && deepBusy');
+    expect(source).not.toContain(
+      "runDeepOperation = useCallback(\n    async (operation, receiptFor) => {\n      setBusy(true)"
+    );
   });
 });

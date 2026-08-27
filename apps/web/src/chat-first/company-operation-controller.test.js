@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   clearCompanyDiscoveryOperation,
+  companyDiscoveryChildFromWorkspaceResult,
+  companyOperationFailure,
+  companyOperationMayOpenReview,
   companyProposalArtifact,
+  companyProposalBatchIsResolved,
   followCompanyDiscoveryOperation,
   readCompanyDiscoveryOperationId,
   rememberCompanyDiscoveryOperation,
@@ -88,5 +92,105 @@ describe("company discovery foreground lifecycle", () => {
     expect(retried.id).toBe("op-2");
     expect(retried.retryOf).toBe("op-1");
     expect(readCompanyDiscoveryOperationId(storage)).toBe("op-2");
+  });
+
+  it("finds the company child only in the exact completed workspace result message", () => {
+    const operation = {
+      id: "workspace-op-1",
+      status: "completed",
+      resultRef: { type: "workspace-message", id: "workspace-message-exact" },
+    };
+    const thread = {
+      messages: [
+        {
+          id: "workspace-message-unrelated",
+          artifacts: [{ kind: "company_discovery_operation", operationId: "company-op-unrelated" }],
+        },
+        {
+          id: "workspace-message-exact",
+          artifacts: [
+            {
+              kind: "company_discovery_operation",
+              operationId: "company-op-exact",
+              batchId: "cpb-exact",
+              status: "running",
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(companyDiscoveryChildFromWorkspaceResult({ operation, thread })).toEqual({
+      id: "company-op-exact",
+      batchId: "cpb-exact",
+      status: "running",
+    });
+    expect(
+      companyDiscoveryChildFromWorkspaceResult({
+        operation: { ...operation, resultRef: { type: "workspace-message", id: "missing" } },
+        thread,
+      })
+    ).toBeNull();
+  });
+
+  it("keeps the saved company operation until every exact proposal has a decision", () => {
+    expect(companyProposalBatchIsResolved({ batchId: "cpb-empty", proposals: [] })).toBe(true);
+    expect(
+      companyProposalBatchIsResolved({
+        batchId: "cpb-exact",
+        proposals: [
+          { proposalId: "proposal-1", decision: "confirm" },
+          { proposalId: "proposal-2" },
+        ],
+      })
+    ).toBe(false);
+    expect(
+      companyProposalBatchIsResolved({
+        batchId: "cpb-exact",
+        proposals: [
+          { proposalId: "proposal-1", decision: "confirm" },
+          { proposalId: "proposal-2", decision: "reject" },
+        ],
+      })
+    ).toBe(true);
+  });
+
+  it("does not open a completed company review after the user navigates away", () => {
+    expect(
+      companyOperationMayOpenReview({
+        launchContext: "today",
+        currentContext: "search",
+      })
+    ).toBe(false);
+    expect(
+      companyOperationMayOpenReview({
+        launchContext: "today",
+        currentContext: "today",
+      })
+    ).toBe(true);
+    expect(
+      companyOperationMayOpenReview({
+        launchContext: null,
+        currentContext: "today",
+      })
+    ).toBe(false);
+  });
+
+  it("turns a failed company operation into a people-shaped linked retry", async () => {
+    const retry = vi.fn().mockResolvedValue(true);
+    const alert = companyOperationFailure(
+      {
+        code: "COMPANY_DISCOVERY_FAILED",
+        message: "The company search stopped before it finished.",
+      },
+      { id: "company-op-failed", retry }
+    );
+
+    expect(alert).toMatchObject({
+      message: "The company search stopped before it finished.",
+      action: { label: "Try again" },
+    });
+    await alert.action.onRetry();
+    expect(retry).toHaveBeenCalledWith("company-op-failed");
   });
 });

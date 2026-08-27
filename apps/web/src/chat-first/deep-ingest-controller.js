@@ -165,6 +165,18 @@ function deepIngestFailure(cause, operation) {
   return error;
 }
 
+export function deepIngestOperationFailure(error, { id, retry } = {}) {
+  const exactId = cleanOperationId(id || error?.operation?.id);
+  return {
+    message: error?.message || "CareerRat couldn't finish Deep Ingest. Try it again.",
+    action:
+      exactId && error?.retryable !== false && typeof retry === "function"
+        ? { label: "Try again", retry: true, onRetry: () => retry(exactId) }
+        : null,
+    detail: String(error?.code || "DEEP_INGEST_FAILED"),
+  };
+}
+
 function exactDeepIngestResult(view, resultRef) {
   if (resultRef?.type === "deep-ingest-source") {
     const source = list(view?.sources).find(

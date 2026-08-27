@@ -588,6 +588,11 @@ export async function getAppOperation(id) {
   return body.operation || null;
 }
 
+export async function getWorkspaceThread() {
+  const body = await apiFetch("/api/workspace/thread");
+  return body?.data || null;
+}
+
 export function retryAppOperation(id) {
   return apiFetch("/api/app-operations/retry", {
     method: "POST",

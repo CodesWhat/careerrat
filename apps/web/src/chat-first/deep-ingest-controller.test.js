@@ -7,6 +7,7 @@ import {
   clearDeepIngestOperation,
   createDeepIngestOperationController,
   decideProposalAndRefresh,
+  deepIngestOperationFailure,
   readDeepIngestOperation,
   removeSourceAndRefresh,
   resolveDeepIngestTextDecision,
@@ -69,6 +70,23 @@ function state(overrides = {}) {
 }
 
 describe("deep ingest chat-first controller", () => {
+  it("keeps an interrupted operation retry people-shaped and linked to the exact id", async () => {
+    const retry = vi.fn().mockResolvedValue(true);
+    const alert = deepIngestOperationFailure(
+      Object.assign(new Error("The app closed before Deep Ingest finished."), {
+        code: "APP_OPERATION_SERVER_STOPPED",
+      }),
+      { id: "app-operation-deep-failed", retry }
+    );
+
+    expect(alert).toMatchObject({
+      message: "The app closed before Deep Ingest finished.",
+      action: { label: "Try again", retry: true },
+    });
+    await alert.action.onRetry();
+    expect(retry).toHaveBeenCalledWith("app-operation-deep-failed");
+  });
+
   it("resumes an exact saved source scan after reload", async () => {
     const storage = memoryStorage();
     const firstApi = {

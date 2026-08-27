@@ -141,6 +141,24 @@ describe("durable company discovery", () => {
       "/api/discovery/company-proposals?id=cpb_exact",
     ]);
   });
+
+  it("loads the exact durable workspace thread used to find a child operation", async () => {
+    const api = await import("./api.js");
+    const thread = { id: "workspace-main", messages: [{ id: "workspace-message-exact" }] };
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true, data: thread }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.getWorkspaceThread()).resolves.toEqual(thread);
+    expect(fetchMock).toHaveBeenCalledWith("/api/workspace/thread", {
+      headers: { "content-type": "application/json" },
+    });
+  });
 });
 
 describe("finishOnboarding", () => {

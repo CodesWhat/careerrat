@@ -70,6 +70,19 @@ import {
   writeForegroundDraft,
 } from "./chat-first-model.js";
 import {
+  clearCompanyDiscoveryOperation,
+  companyDiscoveryChildFromWorkspaceResult,
+  companyOperationFailure,
+  companyOperationMayOpenReview,
+  companyProposalArtifact,
+  companyProposalBatchIsResolved,
+  followCompanyDiscoveryOperation,
+  readCompanyDiscoveryOperationId,
+  rememberCompanyDiscoveryOperation,
+  resolveCompanyOperationStorage,
+  retryCompanyDiscoveryOperation,
+} from "./company-operation-controller.js";
+import {
   CompanyProposalReview,
   companyProposalReviewForArtifact,
   companyProposalReviewFromResult,
@@ -95,10 +108,15 @@ import {
   buildDeepIngestReview,
   buildProposalsAndRefresh,
   captureSourceAndRefresh,
+  createDeepIngestOperationController,
   decideProposalAndRefresh,
+  deepIngestOperationFailure,
+  readDeepIngestOperation,
   removeSourceAndRefresh,
+  resolveDeepIngestOperationStorage,
   resolveDeepIngestTextDecision,
   retrySourceAndRefresh,
+  uploadDeepIngestFilesAndRefresh,
 } from "./deep-ingest-controller.js";
 import {
   GithubStarPrompt,
@@ -1525,6 +1543,12 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   const locationSearchRef = useRef(location.search);
   locationSearchRef.current = location.search;
   const draftStorage = resolveForegroundStorage();
+  const companyOperationStorage = useMemo(() => resolveCompanyOperationStorage(), []);
+  const deepOperationStorage = useMemo(() => resolveDeepIngestOperationStorage(), []);
+  const deepOperationController = useMemo(
+    () => createDeepIngestOperationController({ api, storage: deepOperationStorage }),
+    [api, deepOperationStorage]
+  );
   const locationForeground = useMemo(
     () => parseChatFirstForeground(location.search),
     [location.search]
@@ -1561,7 +1585,11 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   const sweepRetryRef = useRef(null);
   const missionExecutionRef = useRef(new Set());
   const workspaceSubmissionRef = useRef(null);
+  const companyOperationBatchRef = useRef(null);
+  const companyOperationLaunchContextRef = useRef(new Map());
+  const workspaceOperationLaunchContextRef = useRef(new Map());
   const [deepState, setDeepState] = useState(null);
+  const [deepBusy, setDeepBusy] = useState(false);
   const [deepInputMode, setDeepInputMode] = useState(locationForeground.deepInputMode);
   const [deepInputValue, setDeepInputValue] = useState(() =>
     locationForeground.deepInputMode
@@ -1578,6 +1606,12 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   const [deepReceipt, setDeepReceipt] = useState(null);
   const [artifactViewer, setArtifactViewer] = useState(null);
   const [companyProposalReview, setCompanyProposalReview] = useState(null);
+  const [companyOperationId, setCompanyOperationId] = useState(() =>
+    readCompanyDiscoveryOperationId(companyOperationStorage)
+  );
+  const companyForegroundContext = `${ui.activeThread || "today"}:${ui.activeApplicationId || ""}:${ui.browse || ""}`;
+  const companyForegroundContextRef = useRef(companyForegroundContext);
+  companyForegroundContextRef.current = companyForegroundContext;
   const [sourceReview, setSourceReview] = useState(null);
   const [gatePacket, setGatePacket] = useState(null);
   const [skillChatState, setSkillChatState] = useState(null);
@@ -1667,6 +1701,71 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     editDraft: deepEditDraft,
     receipt: deepReceipt,
   };
+  const applyDeepOperationResult = useCallback((result, receiptFor) => {
+    if (!result?.view) return false;
+    setDeepState(result.view);
+    const next = buildDeepIngestReview(result.view);
+    setDeepReceipt(typeof receiptFor === "function" ? receiptFor(next, result) : receiptFor);
+    return true;
+  }, []);
+  const runDeepOperation = useCallback(
+    async (operation, receiptFor) => {
+      setDeepBusy(true);
+      setError(null);
+      try {
+        const result = await operation();
+        applyDeepOperationResult(result, receiptFor);
+        await dashboard.refetch?.().catch(() => undefined);
+        setEngineDown(false);
+        return result;
+      } catch (cause) {
+        const saved = readDeepIngestOperation(deepOperationStorage);
+        if (saved?.operationId) {
+          setError(
+            deepIngestOperationFailure(cause, {
+              id: saved.operationId,
+              retry: (id) =>
+                runDeepOperation(() => deepOperationController.retry({ id }), receiptFor),
+            })
+          );
+        } else {
+          setError(mappedControllerError(cause, () => runDeepOperation(operation, receiptFor)));
+        }
+        if (isEngineFailure(cause)) setEngineDown(true);
+        return null;
+      } finally {
+        setDeepBusy(false);
+      }
+    },
+    [applyDeepOperationResult, dashboard.refetch, deepOperationController, deepOperationStorage]
+  );
+  const applyCompanyProposalBatch = useCallback(
+    (batch, { operationId, openReview = true } = {}) => {
+      const artifact = companyProposalArtifact(batch);
+      if (!artifact) return false;
+      const exactOperationId = String(operationId || "").trim() || null;
+      if (exactOperationId) {
+        companyOperationBatchRef.current = {
+          operationId: exactOperationId,
+          batchId: batch.batchId,
+        };
+      }
+      if (companyProposalBatchIsResolved(batch)) {
+        if (exactOperationId) {
+          clearCompanyDiscoveryOperation(companyOperationStorage, exactOperationId);
+          setCompanyOperationId((current) => (current === exactOperationId ? null : current));
+        }
+        setCompanyProposalReview((current) =>
+          current?.batchId === batch.batchId ? null : current
+        );
+        return true;
+      }
+      const review = companyProposalReviewForArtifact(artifact);
+      if (openReview && review?.proposals.length) setCompanyProposalReview(review);
+      return true;
+    },
+    [companyOperationStorage]
+  );
   const dismissGithubStarPrompt = useCallback(() => {
     markGithubStarPromptHandled();
     setGithubStarPromptHandled(true);
@@ -1727,6 +1826,9 @@ export function ChatFirstApp({ api = chatFirstApi }) {
 
   const replaceWorkspaceOperation = useCallback(
     (nextId, expectedId) => {
+      if (nextId) {
+        workspaceOperationLaunchContextRef.current.set(nextId, companyForegroundContextRef.current);
+      }
       const currentSearch = locationSearchRef.current;
       const search = replaceForegroundOperation(currentSearch, nextId, { expectedId });
       if (search === currentSearch) return false;
@@ -2036,6 +2138,112 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   }, [api, ui.activeThread]);
 
   useEffect(() => {
+    if (ui.activeThread !== "ingest") return;
+    const saved = readDeepIngestOperation(deepOperationStorage);
+    if (!saved?.operationId) return;
+    const controller = new AbortController();
+    setDeepBusy(true);
+    void deepOperationController
+      .resume({ id: saved.operationId, signal: controller.signal })
+      .then((result) => {
+        if (controller.signal.aborted || !result) return;
+        applyDeepOperationResult(result, (next) =>
+          result.resultRef?.type === "deep-ingest-proposal-set"
+            ? `Analysis complete. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
+            : `Material saved locally. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
+        );
+        void dashboard.refetch?.().catch(() => undefined);
+      })
+      .catch((cause) => {
+        if (controller.signal.aborted) return;
+        setError(
+          deepIngestOperationFailure(cause, {
+            id: saved.operationId,
+            retry: (id) =>
+              runDeepOperation(
+                () => deepOperationController.retry({ id }),
+                (next) =>
+                  `Deep Ingest finished. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
+              ),
+          })
+        );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setDeepBusy(false);
+      });
+    return () => {
+      controller.abort();
+      setDeepBusy(false);
+    };
+  }, [
+    applyDeepOperationResult,
+    dashboard.refetch,
+    deepOperationController,
+    deepOperationStorage,
+    runDeepOperation,
+    ui.activeThread,
+  ]);
+
+  useEffect(() => {
+    const id = companyOperationId || readCompanyDiscoveryOperationId(companyOperationStorage);
+    if (!id) return;
+    const controller = new AbortController();
+    const launchContext = companyOperationLaunchContextRef.current.get(id) || null;
+    const retry = async (failedId) => {
+      const operation = await retryCompanyDiscoveryOperation({
+        api,
+        id: failedId,
+        storage: companyOperationStorage,
+      });
+      companyOperationLaunchContextRef.current.set(
+        operation.id,
+        companyForegroundContextRef.current
+      );
+      setError(null);
+      setCompanyOperationId(operation.id);
+      return true;
+    };
+    void followCompanyDiscoveryOperation({
+      api,
+      id,
+      signal: controller.signal,
+    })
+      .then(({ batch }) => {
+        if (controller.signal.aborted) return;
+        const openReview = companyOperationMayOpenReview({
+          launchContext,
+          currentContext: companyForegroundContextRef.current,
+        });
+        applyCompanyProposalBatch(batch, { operationId: id, openReview });
+        companyOperationLaunchContextRef.current.delete(id);
+        if (!openReview && !companyProposalBatchIsResolved(batch)) {
+          const review = companyProposalReviewForArtifact(companyProposalArtifact(batch));
+          if (review?.proposals.length) {
+            setError(
+              (current) =>
+                current || {
+                  message: "Your company suggestions are ready whenever you want to review them.",
+                  action: {
+                    label: "Review companies",
+                    onAction: () => {
+                      setError(null);
+                      setCompanyProposalReview(review);
+                    },
+                  },
+                  detail: null,
+                }
+            );
+          }
+        }
+      })
+      .catch((cause) => {
+        if (controller.signal.aborted) return;
+        setError(companyOperationFailure(cause, { id, retry }));
+      });
+    return () => controller.abort();
+  }, [api, applyCompanyProposalBatch, companyOperationId, companyOperationStorage]);
+
+  useEffect(() => {
     const proposalId = locationForeground.deepEditId;
     if (ui.activeThread !== "ingest" || !proposalId || !deepState) return;
     const proposal = buildDeepIngestReview(deepState).proposals.find(
@@ -2192,6 +2400,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   useEffect(() => {
     const id = locationForeground.operationId;
     if (!id || typeof api.getAppOperation !== "function") return;
+    const launchContext = workspaceOperationLaunchContextRef.current.get(id) || null;
     let cancelled = false;
     let timer = null;
 
@@ -2215,9 +2424,20 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         }
         await dashboard.refetch?.();
         if (cancelled) return;
+        if (operation?.status === "completed" && typeof api.getWorkspaceThread === "function") {
+          const thread = await api.getWorkspaceThread();
+          if (cancelled) return;
+          const child = companyDiscoveryChildFromWorkspaceResult({ operation, thread });
+          if (child?.id) {
+            companyOperationLaunchContextRef.current.set(child.id, launchContext);
+            rememberCompanyDiscoveryOperation(companyOperationStorage, child);
+            setCompanyOperationId(child.id);
+          }
+        }
         if (operation?.status === "failed") {
           setError(workspaceOperationFailure(operation, retry));
         }
+        workspaceOperationLaunchContextRef.current.delete(id);
         replaceWorkspaceOperation(null, id);
       } catch (cause) {
         if (!cancelled) setError(mappedControllerError(cause, follow));
@@ -2228,7 +2448,13 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [api, dashboard.refetch, locationForeground.operationId, replaceWorkspaceOperation]);
+  }, [
+    api,
+    companyOperationStorage,
+    dashboard.refetch,
+    locationForeground.operationId,
+    replaceWorkspaceOperation,
+  ]);
 
   async function run(operation) {
     return runChatFirstOperation(operation, {
@@ -2359,37 +2585,48 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     if (workspaceSubmissionRef.current) return;
     const requestId = createWorkspaceRequestId();
     workspaceSubmissionRef.current = requestId;
-    const result = await run(async () => {
-      if (activeSkillChat?.chatId) {
-        return api.sendChatMessage(activeSkillChat.chatId, clean, choice);
-      }
-      if (ui.activeThread === "mock" && rawMock?.id && rawMock.status !== "ended") {
-        return api.sendMockInterviewTurn({ sessionId: rawMock.id, text: clean });
-      }
-      if (ui.activeThread === "ingest") {
-        return captureSourceAndRefresh({ api, kind: "paste", value: clean });
-      }
-      if (activeJob?.applicationId) {
-        return commitJobThreadComposer({
-          api,
-          applicationId: activeJob.applicationId,
-          text: clean,
-          choice,
-          requestId,
-        });
-      }
-      const contextId = ui.composerChips[0];
-      const context = contextId ? { pathname: "/jobs", jobId: contextId } : undefined;
-      const preview = choice ? null : await api.previewWorkspaceQuery(clean, context);
-      return commitComposerTurn({
-        api,
-        text: clean,
-        preview: preview?.data || preview,
-        context,
-        choice,
-        requestId,
-      });
-    });
+    const result =
+      ui.activeThread === "ingest"
+        ? await runDeepOperation(
+            () =>
+              captureSourceAndRefresh({
+                api,
+                kind: "paste",
+                value: clean,
+                controller: deepOperationController,
+                storage: deepOperationStorage,
+              }),
+            (next) =>
+              `Material saved locally. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
+          )
+        : await run(async () => {
+            if (activeSkillChat?.chatId) {
+              return api.sendChatMessage(activeSkillChat.chatId, clean, choice);
+            }
+            if (ui.activeThread === "mock" && rawMock?.id && rawMock.status !== "ended") {
+              return api.sendMockInterviewTurn({ sessionId: rawMock.id, text: clean });
+            }
+            if (activeJob?.applicationId) {
+              return commitJobThreadComposer({
+                api,
+                applicationId: activeJob.applicationId,
+                text: clean,
+                choice,
+                requestId,
+              });
+            }
+            const contextId = ui.composerChips[0];
+            const context = contextId ? { pathname: "/jobs", jobId: contextId } : undefined;
+            const preview = choice ? null : await api.previewWorkspaceQuery(clean, context);
+            return commitComposerTurn({
+              api,
+              text: clean,
+              preview: preview?.data || preview,
+              context,
+              choice,
+              requestId,
+            });
+          });
     if (workspaceSubmissionRef.current === requestId) workspaceSubmissionRef.current = null;
     const workspaceOperation = workspaceOperationFromResponse(result?.response || result);
     if (workspaceOperation) replaceWorkspaceOperation(workspaceOperation.id);
@@ -2406,13 +2643,6 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     }
     const launchedSkillChat = skillChatFromWorkspaceResult(result);
     if (launchedSkillChat) dispatch({ type: "thread.open", id: launchedSkillChat.id });
-    if (ui.activeThread === "ingest" && result?.view) {
-      setDeepState(result.view);
-      const next = buildDeepIngestReview(result.view);
-      setDeepReceipt(
-        `Material saved locally. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
-      );
-    }
   }
 
   async function runCartMission(ids, mode) {
@@ -2516,17 +2746,18 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   async function ingestFiles(fileList) {
     const files = Array.from(fileList || []);
     if (!files.length) return;
-    const result = await run(async () => {
-      for (const file of files) await api.uploadDeepIngestFile(file, { targetShape: "auto" });
-      return api.getDeepIngestState();
-    });
-    if (result) {
-      setDeepState(result);
-      const next = buildDeepIngestReview(result);
-      setDeepReceipt(
+    await runDeepOperation(
+      () =>
+        uploadDeepIngestFilesAndRefresh({
+          api,
+          files,
+          targetShape: "auto",
+          controller: deepOperationController,
+          storage: deepOperationStorage,
+        }),
+      (next) =>
         `${files.length} file${files.length === 1 ? "" : "s"} saved locally. ${next.counts.sources} source${next.counts.sources === 1 ? "" : "s"} total.`
-      );
-    }
+    );
   }
 
   function openDeepInput(kind) {
@@ -2568,39 +2799,49 @@ export function ChatFirstApp({ api = chatFirstApi }) {
 
   async function submitDeepInput() {
     if (!deepInputMode || !deepInputValue.trim()) return;
-    const result = await run(() =>
-      captureSourceAndRefresh({ api, kind: deepInputMode, value: deepInputValue })
+    const result = await runDeepOperation(
+      () =>
+        captureSourceAndRefresh({
+          api,
+          kind: deepInputMode,
+          value: deepInputValue,
+          controller: deepOperationController,
+          storage: deepOperationStorage,
+        }),
+      (next) =>
+        `Source saved locally. ${next.counts.sources} source${next.counts.sources === 1 ? "" : "s"} ready for deep ingest.`
     );
     if (!result?.view) return;
-    setDeepState(result.view);
-    const next = buildDeepIngestReview(result.view);
-    setDeepReceipt(
-      `Source saved locally. ${next.counts.sources} source${next.counts.sources === 1 ? "" : "s"} ready for deep ingest.`
-    );
     cancelDeepInput();
   }
 
   async function analyzeDeepSource(source) {
-    const result = await run(() =>
-      buildProposalsAndRefresh({ api, source: source?.raw || source })
-    );
-    if (!result?.view) return;
-    setDeepState(result.view);
-    const next = buildDeepIngestReview(result.view);
-    setDeepReceipt(
-      `Analysis complete. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
+    await runDeepOperation(
+      () =>
+        buildProposalsAndRefresh({
+          api,
+          source: source?.raw || source,
+          controller: deepOperationController,
+          storage: deepOperationStorage,
+        }),
+      (next) =>
+        `Analysis complete. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
     );
   }
 
   async function retryDeepSource(source) {
-    const result = await run(() => retrySourceAndRefresh({ api, source: source?.raw || source }));
-    if (!result?.view) return;
-    setDeepState(result.view);
-    const next = buildDeepIngestReview(result.view);
-    setDeepReceipt(
-      next.counts.reviewQueue
-        ? `Source reread. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
-        : "Source reread. It is ready to analyze."
+    await runDeepOperation(
+      () =>
+        retrySourceAndRefresh({
+          api,
+          source: source?.raw || source,
+          controller: deepOperationController,
+          storage: deepOperationStorage,
+        }),
+      (next) =>
+        next.counts.reviewQueue
+          ? `Source reread. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
+          : "Source reread. It is ready to analyze."
     );
   }
 
@@ -2903,26 +3144,28 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   }
 
   async function decideCompanyProposal(intent, { openReview = true } = {}) {
-    return commitCompanyProposalDecision({
-      intent,
-      execute: (nextIntent) =>
-        run(() =>
-          api.runWorkspaceIntent(nextIntent.type, nextIntent.entity, nextIntent.input || {})
-        ),
-      setCompanyProposalReview: (nextReview) => {
-        setCompanyProposalReview(nextReview);
-        if (openReview) {
-          navigateForeground(
-            {
-              reviewKind: nextReview ? "company" : null,
-              reviewId: nextReview?.batchId || null,
-            },
-            { replace: true }
-          );
-        }
-      },
-      openReview,
+    if (intent?.type !== "company.proposal-decide") return false;
+    const batchId = String(intent.input?.batchId || "").trim();
+    const proposalId = String(intent.entity?.id || "").trim();
+    if (!batchId || !proposalId) return false;
+    const decided = await run(() =>
+      api.decideCompanyProposal({
+        batchId,
+        proposalId,
+        action: intent.input.action,
+        expectedVersion: intent.input.expectedVersion,
+        userConfirmed: true,
+      })
+    );
+    if (!decided) return false;
+    const batch = await run(() => api.getCompanyProposalBatch(batchId));
+    if (!batch || String(batch.batchId || "") !== batchId) return false;
+    const owner = companyOperationBatchRef.current;
+    applyCompanyProposalBatch(batch, {
+      operationId: owner?.batchId === batchId ? owner.operationId : null,
+      openReview: openReview || companyProposalReview?.batchId === batchId,
     });
+    return true;
   }
 
   async function decideSkillChatDiscovery(item, action) {
@@ -3333,7 +3576,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
             "The selected local AI runtime did not return a usable response."
           : null
       }
-      busy={busy || dashboard.loading}
+      busy={busy || (ui.activeThread === "ingest" && deepBusy) || dashboard.loading}
       error={controllerError}
       activeSkillChat={activeSkillChat}
       packetAnswerGap={packetAnswerGap}
