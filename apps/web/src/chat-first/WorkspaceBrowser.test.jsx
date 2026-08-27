@@ -488,7 +488,8 @@ describe("WorkspaceBrowser", () => {
     );
 
     expect(html).toContain("Saved job sites: not set up");
-    expect(html).toContain("AI search: permission needed");
+    expect(html).toContain("AI search: not available");
+    expect(html).not.toContain("AI search: permission needed");
     expect(html).toContain("Backup search: not available");
     expect(html).toContain("Paused search: stopped");
     expect(html).not.toContain("Internal lane");

@@ -496,7 +496,8 @@ export async function optimizeLinkedinInApp({
       blockers: [
         {
           code: "CONSENT_REQUIRED",
-          message: "Turn on LinkedIn profile review in Settings.",
+          message:
+            "Return to CareerRat and run LinkedIn profile review again. The permission control will appear there.",
         },
       ],
       at,

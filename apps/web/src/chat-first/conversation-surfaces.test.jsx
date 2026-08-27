@@ -460,9 +460,10 @@ describe("TodayConversation", () => {
       />
     );
 
-    expect(html).toContain("CareerRat needs your permission for this browser task");
+    expect(html).toContain("CareerRat needs permission to review your LinkedIn profile");
     expect(html).toContain("signed-in application dashboard link");
     expect(html).toContain("Sign in or finish the verification step in the CareerRat browser");
+    expect(html).not.toContain("Open Settings");
     expect(html).not.toMatch(/raw (?:consent|status|auth) backend output/i);
   });
 
@@ -899,6 +900,54 @@ describe("TodayConversation", () => {
       resumeApply,
       expect.objectContaining({ id: "confirmed" }),
       expect.objectContaining({ label: "Resume supervised apply" })
+    );
+  });
+
+  it("restores a persisted contextual permission action and sends its server-owned intent", () => {
+    const onIntentAction = vi.fn();
+    const intent = {
+      type: "settings.apply",
+      entity: { type: "workspace", id: "workspace-main" },
+      input: {
+        change: {
+          kind: "automation",
+          op: "contextual-permission",
+          permission: "status-checks",
+        },
+      },
+    };
+    const tree = MessageTranscript({
+      onIntentAction,
+      messages: [
+        {
+          id: "permission-after-reload",
+          role: "assistant",
+          kind: "action_result",
+          text: "CareerRat needs permission to read Greenhouse, Workday, Ashby, and Lever application statuses. Choose Allow status checks, or type “Allow status checks”.",
+          metadata: {
+            state: "permission-needed",
+            nextActions: [{ label: "Allow status checks", intent }],
+          },
+        },
+      ],
+    });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(visit);
+      if (typeof node.type === "function") return visit(node.type(node.props));
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+
+    const allow = buttons.find((button) => button.props.children === "Allow status checks");
+    expect(allow).toBeTruthy();
+    allow.props.onClick();
+    expect(onIntentAction).toHaveBeenCalledWith(
+      intent,
+      expect.objectContaining({ id: "permission-after-reload" }),
+      expect.objectContaining({ label: "Allow status checks" })
     );
   });
 
@@ -1341,6 +1390,8 @@ describe("JobConversation and JobContextPanel", () => {
     const html = markup(tree);
     expect(html).toContain("CareerRat needs permission to open and fill application forms");
     expect(html).toContain("You still press Submit");
+    expect(html).toContain("or type “Allow form preparation”");
+    expect(html).not.toContain("Open Settings");
     expect(html).not.toContain("Resume preparation");
     const enable = buttons.find((button) => button.props.children === "Allow form preparation");
     expect(enable).toBeTruthy();

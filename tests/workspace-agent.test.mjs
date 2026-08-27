@@ -7479,9 +7479,16 @@ test("permission-blocked preparation offers a fresh retry instead of a missing s
 
   const last = result.messages.at(-1);
   assert.equal(last.metadata.state, "blocked");
-  assert.equal(last.metadata.nextActions[0].label, "Prepare form");
-  assert.equal(last.metadata.nextActions[0].intent.type, "job.prepare-submit");
-  assert.deepEqual(last.metadata.nextActions[0].intent.input, {});
+  assert.equal(last.metadata.nextActions[0].label, "Allow form preparation");
+  assert.equal(last.metadata.nextActions[0].intent.type, "settings.apply");
+  assert.deepEqual(last.metadata.nextActions[0].intent.input.change, {
+    kind: "automation",
+    op: "contextual-permission",
+    permission: "application-preparation",
+  });
+  assert.match(last.text, /You still press Submit/i);
+  assert.match(last.text, /type “Allow form preparation”/i);
+  assert.doesNotMatch(last.text, /settings/i);
   assert.doesNotMatch(last.text, /prepared browser session/i);
 });
 
@@ -8364,7 +8371,7 @@ test("settings.apply automation: capability disable is allowed even for a high-t
   );
 });
 
-test("settings.apply automation: consent changes are unsupported from Ask", async () => {
+test("settings.apply automation: raw consent changes are unsupported from Ask", async () => {
   const repoRoot = tempRepo();
   await assert.rejects(
     executeWorkspaceIntent({
@@ -8382,6 +8389,98 @@ test("settings.apply automation: consent changes are unsupported from Ask", asyn
       return true;
     }
   );
+});
+
+test("settings.apply automation: contextual application permission writes the reviewed site set and is replay-safe", async () => {
+  const repoRoot = tempRepo();
+  const intent = {
+    type: "settings.apply",
+    entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+    input: {
+      change: {
+        kind: "automation",
+        op: "contextual-permission",
+        permission: "application-preparation",
+      },
+    },
+  };
+
+  const first = await executeWorkspaceIntent({ repoRoot, env: {}, intent });
+  const replay = await executeWorkspaceIntent({ repoRoot, env: {}, intent });
+  const automation = candidateConfigGet({ repoRoot, env: {} }).automation;
+
+  assert.equal(automation.setup_mode, "advanced");
+  assert.equal(automation.capabilities.authenticated_apply_preparation.enabled, true);
+  for (const platform of [
+    "greenhouse",
+    "lever",
+    "ashby",
+    "workable",
+    "smartrecruiters",
+    "linkedin",
+    "external_ats",
+  ]) {
+    assert.equal(automation.consent[platform], true, platform);
+    assert.equal(
+      automation.capabilities.authenticated_apply_preparation.platforms[platform],
+      true,
+      platform
+    );
+  }
+  assert.notEqual(settingsArtifact(first).changed, false);
+  assert.equal(settingsArtifact(replay).changed, false);
+  assert.match(replay.messages.at(-1).text, /already allowed/i);
+});
+
+test("settings.apply automation: an unknown contextual permission fails closed", async () => {
+  const repoRoot = tempRepo();
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "settings.apply",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {
+          change: {
+            kind: "automation",
+            op: "contextual-permission",
+            permission: "everything-everywhere",
+          },
+        },
+      },
+    }),
+    (error) => error.code === "SETTINGS_CHANGE_INVALID"
+  );
+});
+
+test("permission text only mutates on a direct allow command and leaves questions for Paul", () => {
+  const repoRoot = tempRepo();
+  for (const [text, permission] of [
+    ["Allow form preparation", "application-preparation"],
+    ["Allow relationship sourcing", "relationship-sourcing"],
+    ["Allow status checks", "status-checks"],
+    ["Allow email checks", "mail-checks"],
+    ["Allow message checks", "message-checks"],
+    ["Allow LinkedIn review", "linkedin-profile-review"],
+    ["Allow Google Calendar", "google-calendar-write"],
+  ]) {
+    const action = previewWorkspaceIntent({ repoRoot, env: {}, text }).action;
+    assert.equal(action.intent.type, "settings.apply", text);
+    assert.deepEqual(action.intent.input.change, {
+      kind: "automation",
+      op: "contextual-permission",
+      permission,
+    });
+  }
+
+  for (const text of [
+    "Why does CareerRat need permission to prepare the form?",
+    "Allow form preparation?",
+    "What can CareerRat do on LinkedIn?",
+  ]) {
+    assert.equal(previewWorkspaceIntent({ repoRoot, env: {}, text }).action, null, text);
+  }
 });
 
 test("settings.apply automation: enabling a high-tier capability is unsupported from Ask", async () => {
@@ -8564,26 +8663,31 @@ test("calendar.record-write rejects a missing or unknown provider with CALENDAR_
   );
 });
 
-test("calendar.record-write gates automated provenance on real calendar_sync consent and never appends a row when denied", async () => {
+test("calendar.record-write offers provider-specific permission in place and never appends a row when denied", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot, { nextInterviewAt: "2030-09-02T18:00:00.000Z" });
 
-  await assert.rejects(
-    executeWorkspaceIntent({
-      repoRoot,
-      env: {},
-      intent: {
-        type: "calendar.record-write",
-        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-        input: {
-          provider: "google_calendar",
-          provenance: "automated",
-          event: { applicationId: "app-temporal" },
-        },
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "calendar.record-write",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        provider: "google_calendar",
+        provenance: "automated",
+        event: { applicationId: "app-temporal" },
       },
-    }),
-    (error) => error.code === "CALENDAR_WRITE_NOT_ALLOWED"
-  );
+    },
+  });
+  const message = result.messages.at(-1);
+  assert.match(message.text, /add this event to Google Calendar/i);
+  assert.doesNotMatch(message.text, /settings/i);
+  assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
+    kind: "automation",
+    op: "contextual-permission",
+    permission: "google-calendar-write",
+  });
 
   const db = openDb({ repoRoot, env: {} });
   const stored = db.prepare("SELECT data FROM kv WHERE key = ?").get("calendarWrites");
@@ -8979,20 +9083,27 @@ test("relationship.record-lead: an unrecognized type falls back to Contact and a
   assert.equal(artifact.platform, "linkedin");
 });
 
-test("relationship.source-request: zero relationship_sourcing consent throws RELATIONSHIP_SOURCING_NOT_ALLOWED", async () => {
+test("relationship.source-request: zero consent offers LinkedIn and Wellfound permission in place", async () => {
   const repoRoot = tempRepo();
-  await assert.rejects(
-    executeWorkspaceIntent({
-      repoRoot,
-      env: {},
-      intent: {
-        type: "relationship.source-request",
-        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-        input: { company: "Acme" },
-      },
-    }),
-    (error) => error.code === "RELATIONSHIP_SOURCING_NOT_ALLOWED"
-  );
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "relationship.source-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { company: "Acme" },
+    },
+  });
+  const message = result.messages.at(-1);
+  assert.match(message.text, /LinkedIn and Wellfound/i);
+  assert.match(message.text, /find recruiters and hiring-team contacts/i);
+  assert.equal(message.metadata.nextActions[0].label, "Allow relationship sourcing");
+  assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
+    kind: "automation",
+    op: "contextual-permission",
+    permission: "relationship-sourcing",
+  });
+  assert.doesNotMatch(message.text, /settings/i);
 });
 
 test("relationship.source-request: partial platform consent produces a per-platform receipt and records the sourcing CTA exactly once", async () => {
@@ -9619,20 +9730,26 @@ function grantStatusPolling(repoRoot, platforms) {
   });
 }
 
-test("status.sync-request: zero status_polling consent throws STATUS_SYNC_NOT_ALLOWED", async () => {
+test("status.sync-request: zero consent offers ATS status permission in place", async () => {
   const repoRoot = tempRepo();
-  await assert.rejects(
-    executeWorkspaceIntent({
-      repoRoot,
-      env: {},
-      intent: {
-        type: "status.sync-request",
-        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-        input: {},
-      },
-    }),
-    (error) => error.code === "STATUS_SYNC_NOT_ALLOWED"
-  );
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "status.sync-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+  const message = result.messages.at(-1);
+  assert.match(message.text, /Greenhouse, Workday, Ashby, and Lever/i);
+  assert.match(message.text, /application status/i);
+  assert.doesNotMatch(message.text, /LinkedIn|Indeed|settings/i);
+  assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
+    kind: "automation",
+    op: "contextual-permission",
+    permission: "status-checks",
+  });
 });
 
 test("status portal connection is a typed in-app action that saves the dashboard URL on one application", async () => {
@@ -10263,25 +10380,27 @@ test("mail.sync-request: zero mail_access grant on darwin still returns the card
   assert.equal(byId["outlook-webmail"].allowed, false);
 });
 
-test("mail.sync-request: zero mail_access grant off darwin refuses with MAIL_SYNC_NOT_ALLOWED (no apple-mail source to keep it alive)", async () => {
+test("mail.sync-request: zero webmail grant offers Gmail and Outlook permission in place", async () => {
   const repoRoot = tempRepo();
-
-  await assert.rejects(
-    executeWorkspaceIntent({
-      repoRoot,
-      env: {},
-      hostPlatform: "linux",
-      intent: {
-        type: "mail.sync-request",
-        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-        input: {},
-      },
-    }),
-    (error) => {
-      assert.equal(error.code, "MAIL_SYNC_NOT_ALLOWED");
-      return true;
-    }
-  );
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    hostPlatform: "linux",
+    intent: {
+      type: "mail.sync-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+  const message = result.messages.at(-1);
+  assert.match(message.text, /Gmail and Outlook/i);
+  assert.match(message.text, /recruiting email/i);
+  assert.doesNotMatch(message.text, /settings/i);
+  assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
+    kind: "automation",
+    op: "contextual-permission",
+    permission: "mail-checks",
+  });
 });
 
 test("mail.sync-request: pure read — application and communication rows are byte-for-byte unchanged and no sources rows are created", async () => {
@@ -10451,25 +10570,26 @@ test("messages.sync-request: linkedin grant returns a messages_sync_handoff arti
   assert.equal(result.messages.at(-1).artifacts[1].kind, "browser_workflow_result");
 });
 
-test("messages.sync-request: zero messaging grant rejects with MESSAGES_SYNC_NOT_ALLOWED", async () => {
+test("messages.sync-request: zero consent offers LinkedIn and Wellfound message permission", async () => {
   const repoRoot = tempRepo();
-
-  await assert.rejects(
-    () =>
-      executeWorkspaceIntent({
-        repoRoot,
-        env: {},
-        intent: {
-          type: "messages.sync-request",
-          entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-          input: {},
-        },
-      }),
-    (error) => {
-      assert.equal(error.code, "MESSAGES_SYNC_NOT_ALLOWED");
-      return true;
-    }
-  );
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "messages.sync-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+  const message = result.messages.at(-1);
+  assert.match(message.text, /LinkedIn and Wellfound/i);
+  assert.match(message.text, /recruiting messages/i);
+  assert.doesNotMatch(message.text, /settings/i);
+  assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
+    kind: "automation",
+    op: "contextual-permission",
+    permission: "message-checks",
+  });
 });
 
 test("messages.sync-request: pure read — application and communication rows are byte-for-byte unchanged and no sources rows are created", async () => {
@@ -10637,6 +10757,14 @@ test("linkedin.optimize-request: zero consent still succeeds, never refuses, bot
   assert.equal(byKey.profile_optimize.allowed, false);
   assert.equal(byKey.profile_apply.allowed, false);
   assert.equal(artifact.batch, null);
+  const message = result.messages.at(-1);
+  assert.match(message.text, /read your LinkedIn profile/i);
+  assert.doesNotMatch(message.text, /settings/i);
+  assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
+    kind: "automation",
+    op: "contextual-permission",
+    permission: "linkedin-profile-review",
+  });
 });
 
 test("linkedin.optimize-request: pure read — application and communication rows are byte-for-byte unchanged", async () => {

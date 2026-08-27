@@ -3108,6 +3108,141 @@ function workflowActionMetadata(normalized, execution, retryLabel, extra = {}) {
   };
 }
 
+const CONTEXTUAL_PERMISSIONS = Object.freeze({
+  "application-preparation": {
+    capability: "authenticated_apply_preparation",
+    label: "Application form preparation",
+    allowLabel: "Allow form preparation",
+    typedCommand: "Allow form preparation",
+    request:
+      "CareerRat needs permission to open and fill application forms on Greenhouse, Lever, Ashby, Workable, SmartRecruiters, LinkedIn, and other job sites. You still press Submit.",
+  },
+  "relationship-sourcing": {
+    capability: "relationship_sourcing",
+    label: "Relationship sourcing",
+    allowLabel: "Allow relationship sourcing",
+    typedCommand: "Allow relationship sourcing",
+    request:
+      "CareerRat needs permission to use LinkedIn and Wellfound to find recruiters and hiring-team contacts for your review.",
+  },
+  "status-checks": {
+    capability: "status_polling",
+    label: "Application status checks",
+    allowLabel: "Allow status checks",
+    typedCommand: "Allow status checks",
+    request:
+      "CareerRat needs permission to read your saved application status pages on Greenhouse, Workday, Ashby, and Lever.",
+  },
+  "mail-checks": {
+    capability: "mail_access",
+    label: "Recruiting email checks",
+    allowLabel: "Allow email checks",
+    typedCommand: "Allow email checks",
+    request:
+      "CareerRat needs permission to check Gmail and Outlook for recruiting email and bring the results back here.",
+  },
+  "message-checks": {
+    capability: "messaging",
+    label: "Recruiting message checks",
+    allowLabel: "Allow message checks",
+    typedCommand: "Allow message checks",
+    request:
+      "CareerRat needs permission to check LinkedIn and Wellfound for recruiting messages and bring the results back here.",
+  },
+  "linkedin-profile-review": {
+    capability: "profile_optimize",
+    label: "LinkedIn profile review",
+    allowLabel: "Allow LinkedIn review",
+    typedCommand: "Allow LinkedIn review",
+    request:
+      "CareerRat needs permission to read your LinkedIn profile and draft evidence-backed suggestions. It will not edit your profile.",
+  },
+  "apple-calendar-write": {
+    capability: "calendar_sync",
+    platforms: ["apple_calendar"],
+    label: "Apple Calendar access",
+    allowLabel: "Allow Apple Calendar",
+    typedCommand: "Allow Apple Calendar",
+    request: "CareerRat needs permission to add this event to Apple Calendar.",
+  },
+  "google-calendar-write": {
+    capability: "calendar_sync",
+    platforms: ["google_calendar"],
+    label: "Google Calendar access",
+    allowLabel: "Allow Google Calendar",
+    typedCommand: "Allow Google Calendar",
+    request: "CareerRat needs permission to add this event to Google Calendar.",
+  },
+  "outlook-calendar-write": {
+    capability: "calendar_sync",
+    platforms: ["outlook_calendar"],
+    label: "Outlook Calendar access",
+    allowLabel: "Allow Outlook Calendar",
+    typedCommand: "Allow Outlook Calendar",
+    request: "CareerRat needs permission to add this event to Outlook Calendar.",
+  },
+  "automation-tools-calendar-write": {
+    capability: "calendar_sync",
+    platforms: ["automation_tools"],
+    label: "Calendar automation access",
+    allowLabel: "Allow calendar automation",
+    typedCommand: "Allow calendar automation",
+    request: "CareerRat needs permission to add this event through your calendar automation.",
+  },
+});
+
+function contextualPermissionDefinition(permission) {
+  const key = String(permission || "").trim();
+  return Object.hasOwn(CONTEXTUAL_PERMISSIONS, key)
+    ? { key, ...CONTEXTUAL_PERMISSIONS[key] }
+    : null;
+}
+
+function contextualPermissionChange(permission) {
+  return {
+    kind: "automation",
+    op: "contextual-permission",
+    permission,
+  };
+}
+
+function appendContextualPermissionRequest({
+  repoRoot,
+  env,
+  normalized,
+  intentMessage,
+  permission,
+  artifacts,
+  now,
+}) {
+  const definition = contextualPermissionDefinition(permission);
+  if (!definition) {
+    throw actionError("That permission request is unavailable.", "SETTINGS_CHANGE_INVALID");
+  }
+  return appendActionResult({
+    repoRoot,
+    env,
+    normalized,
+    intentMessage,
+    text: `${definition.request} Choose ${definition.allowLabel}, or type “${definition.typedCommand}”.`,
+    artifacts,
+    metadata: {
+      state: "permission-needed",
+      nextActions: [
+        {
+          label: definition.allowLabel,
+          intent: {
+            type: "settings.apply",
+            entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+            input: { change: contextualPermissionChange(definition.key) },
+          },
+        },
+      ],
+    },
+    now,
+  });
+}
+
 export async function executeWorkspaceIntent({
   repoRoot,
   env = process.env,
@@ -5062,9 +5197,49 @@ export async function executeWorkspaceIntent({
           }
         }
 
-        const automationDoc = mergeAutomationDefaults(loadAutomation({ root: repoRoot }).data);
+        const automationDoc = mergeAutomationDefaults(loadAutomation({ root: repoRoot, env }).data);
         let patch;
-        if (op === "setup_mode") {
+        if (op === "contextual-permission") {
+          const definition = contextualPermissionDefinition(change.permission);
+          if (!definition) {
+            const error = actionError(
+              "That permission request is no longer available.",
+              "SETTINGS_CHANGE_INVALID"
+            );
+            error.details = { reason: "permission-context" };
+            throw error;
+          }
+          const platforms = definition.platforms || CAPABILITIES[definition.capability].platforms;
+          const capability = automationDoc.capabilities?.[definition.capability] || {};
+          const alreadyAllowed =
+            automationDoc.setup_mode === "advanced" &&
+            capability.enabled === true &&
+            platforms.every(
+              (platform) =>
+                capability.platforms?.[platform] === true &&
+                automationDoc.consent?.[platform] === true
+            );
+          patch = {
+            setup_mode: "advanced",
+            consent: Object.fromEntries(platforms.map((platform) => [platform, true])),
+            capabilities: {
+              [definition.capability]: {
+                enabled: true,
+                platforms: Object.fromEntries(platforms.map((platform) => [platform, true])),
+              },
+            },
+          };
+          result = {
+            label: definition.label,
+            field: `capabilities.${definition.capability}`,
+            from: alreadyAllowed,
+            to: true,
+            changed: !alreadyAllowed,
+            summary: alreadyAllowed
+              ? `${definition.label} is already allowed.`
+              : `${definition.label} is allowed now.`,
+          };
+        } else if (op === "setup_mode") {
           const value = String(change.value || "");
           if (value !== "basic" && value !== "advanced") {
             throw actionError(
@@ -5809,10 +5984,21 @@ export async function executeWorkspaceIntent({
           env,
         });
         if (!verdict.allowed) {
-          throw actionError(
-            "Automated calendar sync isn't enabled for that provider. Turn it on in Settings first.",
-            "CALENDAR_WRITE_NOT_ALLOWED"
-          );
+          const providerPermission =
+            {
+              apple_calendar: "apple-calendar-write",
+              google_calendar: "google-calendar-write",
+              outlook_calendar: "outlook-calendar-write",
+              automation_tools: "automation-tools-calendar-write",
+            }[provider] || null;
+          return appendContextualPermissionRequest({
+            repoRoot,
+            env,
+            normalized,
+            intentMessage,
+            permission: providerPermission,
+            now,
+          });
         }
       }
 
@@ -6013,10 +6199,14 @@ export async function executeWorkspaceIntent({
           .allowed,
       }));
       if (platforms.every((entry) => !entry.allowed)) {
-        throw actionError(
-          "Relationship sourcing isn't turned on yet. Turn it on in Settings first.",
-          "RELATIONSHIP_SOURCING_NOT_ALLOWED"
-        );
+        return appendContextualPermissionRequest({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          permission: "relationship-sourcing",
+          now,
+        });
       }
 
       // A durable CTA only gets written when the linked application has no
@@ -6092,10 +6282,14 @@ export async function executeWorkspaceIntent({
         allowed: mayRun({ capability: "status_polling", platform, root: repoRoot, env }).allowed,
       }));
       if (platforms.every((entry) => !entry.allowed)) {
-        throw actionError(
-          "Portal status polling isn't turned on yet. Turn it on in Settings first.",
-          "STATUS_SYNC_NOT_ALLOWED"
-        );
+        return appendContextualPermissionRequest({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          permission: "status-checks",
+          now,
+        });
       }
 
       const applications = assembleTrackerObject(requireDb({ repoRoot, env })).applications || [];
@@ -6150,10 +6344,14 @@ export async function executeWorkspaceIntent({
         tracker,
       });
       if (sources.every((source) => !source.allowed)) {
-        throw actionError(
-          "Mail sync isn't available on this device yet. Turn on mail access for Gmail or Outlook in Settings first.",
-          "MAIL_SYNC_NOT_ALLOWED"
-        );
+        return appendContextualPermissionRequest({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          permission: "mail-checks",
+          now,
+        });
       }
 
       // Count only — never surface thread rows, subjects, participants, or
@@ -6229,10 +6427,14 @@ export async function executeWorkspaceIntent({
       const tracker = assembleTrackerObject(requireDb({ repoRoot, env }));
       const sources = messagesSyncSources({ repoRoot, env, tracker });
       if (sources.every((source) => !source.allowed)) {
-        throw actionError(
-          "Message sync isn't turned on yet. Turn on in-platform messaging for LinkedIn or Wellfound in Settings first.",
-          "MESSAGES_SYNC_NOT_ALLOWED"
-        );
+        return appendContextualPermissionRequest({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          permission: "message-checks",
+          now,
+        });
       }
 
       // Count only — never surface thread rows, subjects, participants, or
@@ -6298,8 +6500,19 @@ export async function executeWorkspaceIntent({
         },
       ];
       const batch = linkedinProposalBatchLatest({ repoRoot, env });
+      if (!capabilities[0].allowed) {
+        return appendContextualPermissionRequest({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          permission: "linkedin-profile-review",
+          artifacts: [linkedinOptimizeHandoffArtifact({ capabilities, batch, now })],
+          now,
+        });
+      }
       const execution =
-        capabilities[0].allowed && typeof runLinkedinOptimizeImpl === "function"
+        typeof runLinkedinOptimizeImpl === "function"
           ? await runLinkedinOptimizeImpl({ profileUrl: null })
           : null;
 
@@ -6308,11 +6521,9 @@ export async function executeWorkspaceIntent({
         env,
         normalized,
         intentMessage,
-        text: execution
-          ? execution.summary
-          : capabilities[0].allowed
-            ? "LinkedIn profile review is ready in CareerRat. Suggestions come back here for your approval."
-            : "Turn on LinkedIn profile review in Settings to read your profile and draft suggestions here.",
+        text:
+          execution?.summary ||
+          "LinkedIn profile review is ready in CareerRat. Suggestions come back here for your approval.",
         artifacts: [
           linkedinOptimizeHandoffArtifact({ capabilities, batch, now }),
           ...(batch ? [linkedinProfileProposalsArtifact(batch)] : []),
@@ -7557,6 +7768,9 @@ export async function executeWorkspaceIntent({
         execution.currentUrl || application.link || application.url || application.sourceUrl
       );
       const permissionRequired = execution?.code === "APPLICATION_PREPARATION_PERMISSION_REQUIRED";
+      const permission = permissionRequired
+        ? contextualPermissionDefinition("application-preparation")
+        : null;
       const sessionState =
         prepareSubmit && execution.state === "questions-captured" ? "blocked" : execution.state;
       return appendActionResult({
@@ -7564,7 +7778,9 @@ export async function executeWorkspaceIntent({
         env,
         normalized,
         intentMessage,
-        text: applicationSessionText(execution),
+        text: permission
+          ? `${permission.request} Choose ${permission.allowLabel}, or type “${permission.typedCommand}”.`
+          : applicationSessionText(execution),
         artifacts: [
           {
             kind: "application_handoff",
@@ -7583,12 +7799,16 @@ export async function executeWorkspaceIntent({
           submissionVerified: false,
           nextActions: [
             {
-              label: permissionRequired ? "Prepare form" : "Return to supervised application",
+              label: permissionRequired
+                ? permission.allowLabel
+                : "Return to supervised application",
               intent: {
-                type: "job.prepare-submit",
-                entity: { type: "application", id: normalized.entity.id },
+                type: permissionRequired ? "settings.apply" : "job.prepare-submit",
+                entity: permissionRequired
+                  ? { type: "workspace", id: WORKSPACE_THREAD_ID }
+                  : { type: "application", id: normalized.entity.id },
                 input: permissionRequired
-                  ? carriedReviewApproval(input)
+                  ? { change: contextualPermissionChange("application-preparation") }
                   : {
                       resumeSession: true,
                       focusSession: true,
@@ -8430,6 +8650,20 @@ function settingsAutomationFromText(text) {
   return null;
 }
 
+function settingsContextualPermissionFromText(text) {
+  const raw = String(text || "").trim();
+  if (raw.endsWith("?")) return null;
+  const value = raw
+    .replace(/^(?:please\s+)/i, "")
+    .replace(/[.!]+$/g, "")
+    .trim()
+    .toLowerCase();
+  const match = Object.entries(CONTEXTUAL_PERMISSIONS).find(
+    ([, definition]) => definition.typedCommand.toLowerCase() === value
+  );
+  return match ? contextualPermissionChange(match[0]) : null;
+}
+
 // Named a platform? It must be one this capability actually runs on (each
 // capability has its own platform list in CAPABILITIES — status_polling is
 // ATS portals, not linkedin). A platform phrase that doesn't fit the
@@ -8468,6 +8702,9 @@ function settingsApplyFromText(text) {
   const profile = settingsProfileFromText(value);
   if (profile) return { kind: "profile", ...profile };
 
+  const contextualPermission = settingsContextualPermissionFromText(value);
+  if (contextualPermission) return contextualPermission;
+
   const automation = settingsAutomationFromText(value);
   if (automation) return { kind: "automation", ...automation };
 
@@ -8498,6 +8735,11 @@ function settingsApplyPreviewLabel(change) {
     return `Set ${label} to ${change.value}`;
   }
   if (change.kind === "automation") {
+    if (change.op === "contextual-permission") {
+      return (
+        contextualPermissionDefinition(change.permission)?.allowLabel || "Allow this permission"
+      );
+    }
     if (change.op === "setup_mode") return `Set automation setup mode to ${change.value}`;
     if (change.op === "session") return `Use ${change.value} for browser sessions`;
     const capabilityLabel = CAPABILITIES[change.capability]?.label || change.capability;

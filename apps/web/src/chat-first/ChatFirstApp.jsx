@@ -2300,6 +2300,16 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       });
     });
     if (result) setComposerValue("");
+    if (
+      result?.intent?.input?.change?.op === "contextual-permission" &&
+      result.intent.input.change.permission === "application-preparation" &&
+      typeof api.getAutomationSettings === "function"
+    ) {
+      const automation = await run(() => api.getAutomationSettings());
+      if (automation) {
+        setApplicationPreparation(applicationPreparationPermission(automation));
+      }
+    }
     const launchedSkillChat = skillChatFromWorkspaceResult(result);
     if (launchedSkillChat) dispatch({ type: "thread.open", id: launchedSkillChat.id });
     if (ui.activeThread === "ingest" && result?.view) {
@@ -2762,6 +2772,14 @@ export function ChatFirstApp({ api = chatFirstApi }) {
             typedIntent.entity,
             typedIntent.input || {}
           );
+          if (
+            typedIntent.input?.change?.op === "contextual-permission" &&
+            typedIntent.input.change.permission === "application-preparation" &&
+            typeof api.getAutomationSettings === "function"
+          ) {
+            const automation = await api.getAutomationSettings();
+            setApplicationPreparation(applicationPreparationPermission(automation));
+          }
           if (
             activeJob?.applicationId &&
             typedIntent.entity?.type === "application" &&

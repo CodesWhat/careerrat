@@ -238,6 +238,30 @@ describe("chat-first app controller", () => {
     expect(result.kind).toBe("message");
   });
 
+  it("returns the exact committed permission intent so the open job can refresh in place", async () => {
+    const intent = {
+      type: "settings.apply",
+      entity: { type: "workspace", id: "workspace-main" },
+      input: {
+        change: {
+          kind: "automation",
+          op: "contextual-permission",
+          permission: "application-preparation",
+        },
+      },
+    };
+    const api = { runWorkspaceIntent: vi.fn().mockResolvedValue({ ok: true }) };
+
+    const result = await commitComposerTurn({
+      api,
+      text: "Allow form preparation",
+      preview: { action: { label: "Allow form preparation", intent } },
+    });
+
+    expect(api.runWorkspaceIntent).toHaveBeenCalledWith(intent.type, intent.entity, intent.input);
+    expect(result).toEqual({ kind: "intent", intent, response: { ok: true } });
+  });
+
   it("turns packet export paths into an observable receipt", () => {
     expect(
       packetExportReceipt({
@@ -710,7 +734,7 @@ describe("chat-first app controller", () => {
       ],
     };
     const api = {
-      saveCandidateFile: vi.fn().mockResolvedValue({ ok: true }),
+      runWorkspaceIntent: vi.fn().mockResolvedValue({ ok: true }),
       getAutomationSettings: vi.fn().mockResolvedValue(automation),
     };
 
@@ -718,17 +742,28 @@ describe("chat-first app controller", () => {
       status: "ready",
       ready: true,
     });
-    expect(api.saveCandidateFile).toHaveBeenCalledWith(
-      "automation",
-      expect.objectContaining({
-        setup_mode: "advanced",
-        consent: expect.objectContaining({ greenhouse: true, external_ats: true }),
-        capabilities: {
-          authenticated_apply_preparation: expect.objectContaining({ enabled: true }),
+    expect(api.runWorkspaceIntent).toHaveBeenCalledWith(
+      "settings.apply",
+      { type: "workspace", id: "workspace-main" },
+      {
+        change: {
+          kind: "automation",
+          op: "contextual-permission",
+          permission: "application-preparation",
         },
-      })
+      }
     );
     expect(api.getAutomationSettings).toHaveBeenCalledOnce();
+  });
+
+  it("does not claim form permission when the server-owned write fails", async () => {
+    const api = {
+      runWorkspaceIntent: vi.fn().mockRejectedValue(new Error("write failed")),
+      getAutomationSettings: vi.fn(),
+    };
+
+    await expect(enableApplicationPreparation({ api })).rejects.toThrow("write failed");
+    expect(api.getAutomationSettings).not.toHaveBeenCalled();
   });
 
   it("creates draft-only and prepare-to-submit cart missions from current rows", async () => {

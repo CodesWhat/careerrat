@@ -1,7 +1,6 @@
 import { safeExternalHttpUrl } from "../lib/safeExternalUrl.js";
 import { buildMissionPayload, resolveComposerCommit } from "./chat-first-controller.js";
 import { artifactEmoji } from "./chat-first-model.js";
-import { permissionPatch } from "./profile-settings-controller.js";
 
 function list(value) {
   return Array.isArray(value) ? value : [];
@@ -285,7 +284,7 @@ export async function commitComposerTurn({ api, text, preview, context, choice }
   if (commit.kind === "intent") {
     const { type, entity, input } = commit.intent;
     const response = await api.runWorkspaceIntent(type, entity, input || {});
-    return { kind: "intent", response };
+    return { kind: "intent", intent: commit.intent, response };
   }
   if (!commit.text) throw new Error("Write a message first");
   const response = await api.sendWorkspaceMessage(commit.text, context);
@@ -415,14 +414,21 @@ export function applicationPreparationPermission(automation) {
 
 export async function enableApplicationPreparation({ api }) {
   if (
-    typeof api?.saveCandidateFile !== "function" ||
+    typeof api?.runWorkspaceIntent !== "function" ||
     typeof api?.getAutomationSettings !== "function"
   ) {
     throw new Error("Application form permission is unavailable");
   }
-  await api.saveCandidateFile(
-    "automation",
-    permissionPatch("authenticated_apply_preparation", true)
+  await api.runWorkspaceIntent(
+    "settings.apply",
+    { type: "workspace", id: "workspace-main" },
+    {
+      change: {
+        kind: "automation",
+        op: "contextual-permission",
+        permission: "application-preparation",
+      },
+    }
   );
   return applicationPreparationPermission(await api.getAutomationSettings());
 }

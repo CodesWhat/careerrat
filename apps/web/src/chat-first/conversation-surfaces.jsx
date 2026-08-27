@@ -164,7 +164,8 @@ function browserWorkflowBlockerCode(artifact) {
 function browserWorkflowRecovery(artifact) {
   const blockerCode = browserWorkflowBlockerCode(artifact);
   if (blockerCode === "CONSENT_REQUIRED") {
-    return "CareerRat needs your permission for this browser task. Open Settings, turn it on, then retry.";
+    const task = browserWorkflowTitle(artifact);
+    return `CareerRat needs permission to ${task === "LinkedIn profile review" ? "review your LinkedIn profile" : `run ${task.toLowerCase()}`}. Ask Paul to run this task again and the permission control will appear here.`;
   }
   if (blockerCode === "STATUS_URL_REQUIRED") {
     return "CareerRat needs the signed-in application dashboard link. Open the job, save that link, then retry.";
@@ -1051,7 +1052,7 @@ export function JobContextPanel({
               <strong>Allow CareerRat to prepare the form</strong>
               <small>
                 CareerRat needs permission to open and fill application forms. You still press
-                Submit.
+                Submit. Choose the button, or type “Allow form preparation”.
               </small>
               <button
                 className="chat-first-context-action"
