@@ -1839,6 +1839,123 @@ test("createChatRuntime.startSession (installed route): runs turns through the s
   }
 });
 
+test("createChatRuntime installed chats keep a bounded prompt window and durable rolling checkpoint across restart", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  const env = {};
+  candidateSetupInitialize({ repoRoot, env });
+  selectInstalledRuntime({ repoRoot, env });
+  const accepted = [];
+  let chatRuntime;
+  let replacementRuntime;
+  try {
+    const calls = [];
+    chatRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      installedTranscriptWindowChars: 360,
+      installedCheckpointChars: 260,
+      runInstalledRuntimeImpl: async (args) => {
+        calls.push(args);
+        return {
+          text: `Reply ${calls.length}: ${"assistant context ".repeat(6)}`,
+          usage: null,
+          model: null,
+        };
+      },
+    });
+    const started = await chatRuntime.startSession({ skill: "ingest-profile" });
+    await waitForPredicate(() => chatRuntime.getSession(started.chatId)?.state === "idle");
+    const baselinePromptLength = calls[0].prompt.length;
+
+    for (let index = 1; index <= 24; index += 1) {
+      const text =
+        index === 1
+          ? "Decision: I will not relocate from Boston for this search."
+          : `accepted message ${index}: ${"background detail ".repeat(6)}`.trim();
+      accepted.push(text);
+      chatRuntime.postMessage(started.chatId, text);
+      await waitForPredicate(
+        () => calls.length === index + 1 && chatRuntime.getSession(started.chatId)?.state === "idle"
+      );
+    }
+
+    const lastLivePrompt = calls.at(-1).prompt;
+    assert.match(lastLivePrompt, /Earlier durable conversation checkpoint/i);
+    assert.match(lastLivePrompt, /will not relocate from Boston/);
+    assert.match(lastLivePrompt, /accepted message 24/);
+    assert.ok(
+      lastLivePrompt.length <= baselinePromptLength + 2_400,
+      `installed prompt grew from ${baselinePromptLength} to ${lastLivePrompt.length}`
+    );
+    const stored = skillChatThreadRead({ repoRoot, env, skill: "ingest-profile" });
+    assert.deepEqual(
+      stored.messages.filter((message) => message.role === "user").map((message) => message.text),
+      accepted,
+      "prompt compaction must not delete or rewrite an accepted durable turn"
+    );
+
+    chatRuntime.shutdown();
+    chatRuntime = null;
+    const restartCalls = [];
+    replacementRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      installedTranscriptWindowChars: 360,
+      installedCheckpointChars: 260,
+      runInstalledRuntimeImpl: async (args) => {
+        restartCalls.push(args);
+        return { text: "The restarted reply.", usage: null, model: null };
+      },
+    });
+    const resumed = await replacementRuntime.startSession({ skill: "ingest-profile" });
+    assert.equal(resumed.state, "idle");
+    replacementRuntime.postMessage(resumed.chatId, "accepted message after restart");
+    await waitForPredicate(() => replacementRuntime.getSession(resumed.chatId)?.state === "idle");
+    assert.equal(restartCalls.length, 1);
+    assert.match(restartCalls[0].prompt, /Earlier durable conversation checkpoint/i);
+    assert.match(restartCalls[0].prompt, /will not relocate from Boston/);
+    assert.match(restartCalls[0].prompt, /accepted message after restart/);
+    assert.ok(restartCalls[0].prompt.length <= baselinePromptLength + 2_400);
+  } finally {
+    chatRuntime?.shutdown();
+    replacementRuntime?.shutdown();
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime bounds the replay event buffer without breaking monotonic cursors", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  const env = {};
+  selectInstalledRuntime({ repoRoot, env });
+  const chatRuntime = createChatRuntime({
+    repoRoot,
+    env,
+    eventRecordLimit: 10,
+    runInstalledRuntimeImpl: async () => ({ text: "A bounded reply.", usage: null, model: null }),
+  });
+  try {
+    const started = await chatRuntime.startSession({ skill: "ingest-profile" });
+    await waitForPredicate(() => chatRuntime.getSession(started.chatId)?.state === "idle");
+    for (let index = 1; index <= 8; index += 1) {
+      chatRuntime.postMessage(started.chatId, `message ${index}`);
+      await waitForPredicate(() => chatRuntime.getSession(started.chatId)?.state === "idle");
+    }
+
+    const replay = subscribeCollect(chatRuntime, started.chatId);
+    assert.ok(replay.length <= 10, `late subscriber received ${replay.length} buffered events`);
+    assert.ok(replay[0].id > 1, "old event records should have been released from memory");
+    assert.deepEqual(
+      replay.map((event) => event.id),
+      replay.map((event) => event.id).toSorted((a, b) => a - b)
+    );
+    assert.equal(replay.at(-1).type, "chat_state");
+    assert.equal(replay.at(-1).data.state, "idle");
+  } finally {
+    chatRuntime.shutdown();
+    cleanup(repoRoot);
+  }
+});
+
 // P0 regression — a CHAT_RUNTIME_TOOLS session (research-company,
 // research-comp, company-health, research-boards) grants only WebSearch/
 // WebFetch/Skill, never Read, so it depends entirely on the Skill tool to

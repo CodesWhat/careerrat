@@ -99,6 +99,12 @@ const DURABLE_CHAT_SKILLS = new Set([
   "company-health",
 ]);
 const DURABLE_CHAT_PROMPT_CHAR_LIMIT = 64_000;
+const INSTALLED_CHAT_WINDOW_CHAR_LIMIT = 48_000;
+const INSTALLED_CHAT_CHECKPOINT_CHAR_LIMIT = 12_000;
+const CHAT_EVENT_RECORD_LIMIT = 256;
+const CHECKPOINT_DECISION_LIMIT = 48;
+const CHECKPOINT_DECISION_PATTERN =
+  /\b(?:decision|decided|will not|won't|must|never|do not|don't|prefer|constraint|minimum|maximum|only|keep|cut)\b/i;
 
 function chatOperationForSkill(skill) {
   return skill === "ingest-profile" ? "paul.conversation" : "research.web";
@@ -226,6 +232,99 @@ function boundedDurableTranscript(messages) {
     remaining -= text.length;
   }
   return bounded.reverse();
+}
+
+function boundedConversationText(value, limit) {
+  const text = String(value ?? "");
+  const cap = Math.max(1, Math.floor(Number(limit) || 1));
+  if (text.length <= cap) return text;
+  const marker = "\n[… older detail omitted …]\n";
+  if (cap <= marker.length + 2) return text.slice(0, cap);
+  const available = cap - marker.length;
+  const headLength = Math.ceil(available / 2);
+  return `${text.slice(0, headLength)}${marker}${text.slice(-(available - headLength))}`;
+}
+
+function appendInstalledCheckpoint(checkpoint, turn, checkpointChars) {
+  const throughTurn = (Number(checkpoint?.throughTurn) || 0) + 1;
+  const role = String(turn?.role || "user").toUpperCase();
+  const content = String(turn?.content ?? "").trim();
+  const addition = `${throughTurn}. ${role}: ${boundedConversationText(content, 600)}`;
+  const summary = boundedConversationText(
+    [checkpoint?.summary, addition].filter(Boolean).join("\n"),
+    checkpointChars
+  );
+  const decisions = Array.isArray(checkpoint?.decisions) ? [...checkpoint.decisions] : [];
+  if (CHECKPOINT_DECISION_PATTERN.test(content)) {
+    decisions.push({
+      turn: throughTurn,
+      role: role.toLowerCase(),
+      text: boundedConversationText(content, 600),
+    });
+  }
+  const selectedDecisions =
+    decisions.length <= CHECKPOINT_DECISION_LIMIT
+      ? decisions
+      : [
+          ...decisions.slice(0, CHECKPOINT_DECISION_LIMIT / 2),
+          ...decisions.slice(-(CHECKPOINT_DECISION_LIMIT / 2)),
+        ];
+  return { throughTurn, summary, decisions: selectedDecisions };
+}
+
+function compactInstalledConversation(
+  { checkpoint = null, transcript = [] } = {},
+  { windowChars, checkpointChars }
+) {
+  const recent = (Array.isArray(transcript) ? transcript : []).flatMap((turn) => {
+    const role = String(turn?.role || "").trim();
+    const content = String(turn?.content ?? "").trim();
+    return (role === "user" || role === "assistant") && content ? [{ role, content }] : [];
+  });
+  let nextCheckpoint = checkpoint;
+  let firstRecent = 0;
+  let recentChars = recent.reduce((total, turn) => total + turn.content.length, 0);
+  while (recent.length - firstRecent > 1 && recentChars > windowChars) {
+    const removed = recent[firstRecent++];
+    recentChars -= removed.content.length;
+    nextCheckpoint = appendInstalledCheckpoint(nextCheckpoint, removed, checkpointChars);
+  }
+  const window = recent.slice(firstRecent);
+  if (window.length === 1 && window[0].content.length > windowChars) {
+    window[0] = {
+      ...window[0],
+      content: boundedConversationText(window[0].content, windowChars),
+    };
+  }
+  return { checkpoint: nextCheckpoint, transcript: window };
+}
+
+function installedCheckpointNote(checkpoint, checkpointChars) {
+  if (!checkpoint) return "";
+  const heading =
+    `Earlier durable conversation checkpoint through turn ${Number(checkpoint.throughTurn) || 0}. ` +
+    "Exact accepted messages remain saved locally; use this checkpoint with the recent window:\n";
+  const available = Math.max(1, checkpointChars - heading.length);
+  const decisions = (Array.isArray(checkpoint.decisions) ? checkpoint.decisions : [])
+    .map(
+      (decision) =>
+        `${Number(decision.turn) || "?"}. ${String(decision.role || "message").toUpperCase()}: ` +
+        `${String(decision.text || "")}`
+    )
+    .join("\n");
+  const decisionLabel = "Durable decisions and constraints:\n";
+  const decisionBudget = decisions
+    ? Math.max(1, Math.min(decisions.length, available - decisionLabel.length))
+    : 0;
+  const selectedDecisions = decisions
+    ? `${decisionLabel}${boundedConversationText(decisions, decisionBudget)}`
+    : "";
+  const summaryBudget = Math.max(1, available - selectedDecisions.length);
+  const summary = boundedConversationText(checkpoint.summary || "", summaryBudget);
+  return boundedConversationText(
+    `${heading}${[selectedDecisions, summary].filter(Boolean).join("\n")}`,
+    checkpointChars
+  );
 }
 
 function durableConversationNote(transcript) {
@@ -393,7 +492,14 @@ function buildKickoffMessage({
 // here for a closing instruction that actually matches a chat turn.
 // ---------------------------------------------------------------------------
 
-function buildInstalledChatPrompt({ system, transcript, candidateContext, resumed }) {
+function buildInstalledChatPrompt({
+  system,
+  checkpoint,
+  checkpointChars,
+  transcript,
+  candidateContext,
+  resumed,
+}) {
   const sections = [];
   if (system) sections.push(`System instructions:\n${String(system).trim()}`);
   const candidateNote = canonicalCandidateNote(candidateContext);
@@ -404,6 +510,8 @@ function buildInstalledChatPrompt({ system, transcript, candidateContext, resume
         "Continue it without restarting the interview or repeating an answered question."
     );
   }
+  const checkpointNote = installedCheckpointNote(checkpoint, checkpointChars);
+  if (checkpointNote) sections.push(checkpointNote);
   const turns = (Array.isArray(transcript) ? transcript : []).map(
     (turn) => `${String(turn?.role || "user").toUpperCase()}:\n${String(turn?.content ?? "")}`
   );
@@ -523,6 +631,11 @@ function envNumber(env, key, fallback) {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+function positiveWholeNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.max(1, Math.floor(number)) : fallback;
+}
+
 // ---------------------------------------------------------------------------
 // createChatRuntime — the session registry + pump driver.
 // ---------------------------------------------------------------------------
@@ -545,10 +658,24 @@ export function createChatRuntime({
   maxTurns = envNumber(env, "CAREERRAT_CHAT_MAX_TURNS", 200),
   turnLeaseMs = 2 * 60 * 1000,
   turnHeartbeatMs = 30 * 1000,
+  installedTranscriptWindowChars = INSTALLED_CHAT_WINDOW_CHAR_LIMIT,
+  installedCheckpointChars = INSTALLED_CHAT_CHECKPOINT_CHAR_LIMIT,
+  eventRecordLimit = CHAT_EVENT_RECORD_LIMIT,
 } = {}) {
   const installedRuntimeRunner = runInstalledRuntimeImpl || runInstalledRuntime;
   const installedStreamRunner =
     runInstalledRuntimeStreamImpl || (runInstalledRuntimeImpl ? null : runInstalledRuntimeStream);
+  const installedConversationLimits = {
+    windowChars: positiveWholeNumber(
+      installedTranscriptWindowChars,
+      INSTALLED_CHAT_WINDOW_CHAR_LIMIT
+    ),
+    checkpointChars: positiveWholeNumber(
+      installedCheckpointChars,
+      INSTALLED_CHAT_CHECKPOINT_CHAR_LIMIT
+    ),
+  };
+  const retainedEventLimit = positiveWholeNumber(eventRecordLimit, CHAT_EVENT_RECORD_LIMIT);
   // id -> session record. See this file's header + the M2 design doc for the
   // exact record shape: {id, skill, route, sdkSessionId, state, closeReason,
   // query, pushQueue, systemPrompt, transcript, turnAbortController, events,
@@ -573,6 +700,15 @@ export function createChatRuntime({
     return {
       thread: stored.thread,
       transcript: boundedDurableTranscript(stored.messages),
+      installedConversation: compactInstalledConversation(
+        {
+          transcript: stored.messages.map((message) => ({
+            role: message.role,
+            content: message.text,
+          })),
+        },
+        installedConversationLimits
+      ),
     };
   }
 
@@ -714,13 +850,16 @@ export function createChatRuntime({
     }
   }
 
-  // Appends `evt` to the session's full event buffer (assigning the next
-  // monotonic id) and fans it out to every currently-subscribed SSE
-  // listener. The buffer is what makes GET /api/chat/events's Last-Event-ID
-  // replay possible — see subscribe() below.
+  // Appends `evt` to the session's bounded replay window (assigning the next
+  // monotonic id) and fans it out to every currently-subscribed SSE listener.
+  // The retained tail makes ordinary Last-Event-ID reconnects lossless while
+  // preventing a long-lived session from retaining every activity frame.
   function recordAndBroadcast(session, evt) {
     const record = { id: session.nextEventId++, type: evt.type, data: evt.data };
     session.events.push(record);
+    if (session.events.length > retainedEventLimit) {
+      session.events.splice(0, session.events.length - retainedEventLimit);
+    }
     for (const res of session.listeners) {
       writeSseFrame(res, record);
     }
@@ -836,7 +975,7 @@ export function createChatRuntime({
   // Drains session.pendingMessages (queued by postMessage's own "a turn is
   // already in flight" branch below) onto the transcript, in arrival order,
   // AFTER whatever this just-finished turn appended, then kicks exactly one
-  // follow-up runInstalledTurn call that replays the transcript including
+  // follow-up runInstalledTurn call that replays the checkpointed window including
   // every drained message. One follow-up turn per drain batch, never one per
   // queued message, so N messages typed during a single in-flight turn still
   // cost exactly one extra installed-runtime call.
@@ -860,7 +999,7 @@ export function createChatRuntime({
       });
       session.durableMessageCount += drained.messages.length;
       for (const message of drained.messages) {
-        session.transcript.push({ role: "user", content: message.text });
+        appendInstalledTranscriptTurn(session, "user", message.text);
       }
       if (!session.turnClaimed) {
         session.turnClaimed = claimDurableTurn(session.skill, session.executionPlan);
@@ -869,11 +1008,23 @@ export function createChatRuntime({
     } else {
       for (const pending of queued) {
         const content = typeof pending === "string" ? pending : pending.text;
-        session.transcript.push({ role: "user", content });
+        appendInstalledTranscriptTurn(session, "user", content);
       }
     }
     session.pumpDone = runInstalledTurn(session, route);
     return true;
+  }
+
+  function appendInstalledTranscriptTurn(session, role, content) {
+    const compacted = compactInstalledConversation(
+      {
+        checkpoint: session.transcriptCheckpoint,
+        transcript: [...session.transcript, { role, content }],
+      },
+      installedConversationLimits
+    );
+    session.transcriptCheckpoint = compacted.checkpoint;
+    session.transcript = compacted.transcript;
   }
 
   // Drives one turn of an "installed" chat session. Unlike the SDK path's
@@ -882,7 +1033,7 @@ export function createChatRuntime({
   // one stdin write, one stdout parse) — so a multi-turn chat over it has to
   // be stateless on the runtime's side: every turn replays the session's
   // fixed system/instructions prompt (built once in startSession) plus the
-  // session's own growing transcript, via buildInstalledChatPrompt (below —
+  // session's bounded checkpoint plus recent window, via buildInstalledChatPrompt (below —
   // the same system+"Conversation so far" framing callAI()'s own installed
   // route uses via call-ai.mjs's buildInstalledRuntimePrompt, but with a
   // chat-appropriate closing instruction instead of that helper's one-shot
@@ -912,6 +1063,8 @@ export function createChatRuntime({
     try {
       const prompt = buildInstalledChatPrompt({
         system: session.systemPrompt,
+        checkpoint: session.transcriptCheckpoint,
+        checkpointChars: installedConversationLimits.checkpointChars,
         transcript: session.transcript,
         candidateContext: currentCandidateContext(session.skill),
         resumed: session.resumed,
@@ -968,7 +1121,7 @@ export function createChatRuntime({
         session.skill === "research-boards"
           ? parseSourceReviewOutput(visibleResult.text).text
           : visibleResult.text;
-      session.transcript.push({ role: "assistant", content: persistedResult });
+      appendInstalledTranscriptTurn(session, "assistant", persistedResult);
       session.lastActivityAt = now();
       // Metering parity with runSkillStream's own installed branch
       // (skill-runtime.mjs) — without this, installed-route interview turns
@@ -1182,6 +1335,7 @@ export function createChatRuntime({
           input,
           route,
           restoredTranscript,
+          restoredInstalledConversation: durableState.installedConversation,
           resumed,
           awaitingUser,
           executionPlan,
@@ -1306,12 +1460,13 @@ export function createChatRuntime({
   // allowlist and per-call tool boundary in installed-runtimes.mjs.
   // `systemPrompt` is built once here and the installed CLI's
   // scoped Skill tool loads the isolated SKILL.md. Every runInstalledTurn()
-  // replays that prompt; only `transcript` grows turn over turn.
+  // replays that prompt; older transcript turns roll into a bounded checkpoint.
   async function startInstalledSession({
     trimmedSkill,
     input,
     route,
     restoredTranscript,
+    restoredInstalledConversation,
     resumed,
     awaitingUser,
     executionPlan,
@@ -1343,10 +1498,13 @@ export function createChatRuntime({
       pushQueue: null,
       systemPrompt,
       runtimeTools,
-      transcript: restoredTranscript.map((message) => ({
-        role: message.role,
-        content: message.text,
-      })),
+      transcript:
+        restoredInstalledConversation?.transcript ||
+        restoredTranscript.map((message) => ({
+          role: message.role,
+          content: message.text,
+        })),
+      transcriptCheckpoint: restoredInstalledConversation?.checkpoint || null,
       durableTranscript: restoredTranscript,
       durableMessageCount: restoredTranscript.length,
       needsKickoff: false,
@@ -1487,7 +1645,7 @@ export function createChatRuntime({
       // header comment) — the transcript entry itself IS this turn's input;
       // runInstalledTurn replays it (plus everything before it) as the next
       // one-shot installed-runtime call, kicked off below.
-      session.transcript.push({ role: "user", content: trimmed });
+      appendInstalledTranscriptTurn(session, "user", trimmed);
     } else if (session.needsKickoff) {
       session.pushQueue.push(
         buildKickoffMessage({
@@ -1578,7 +1736,7 @@ export function createChatRuntime({
   }
 
   // Subscribes `res` (an http.ServerResponse) to a session's SSE stream:
-  // replays the backlog (full buffer, or only events after `lastEventId` on
+  // replays the retained backlog (full retained tail, or only events after `lastEventId` on
   // a reconnect), then leaves `res` registered for live broadcast. Writes
   // its own 15s heartbeat comment so idle connections aren't reaped by an
   // intermediary proxy/load balancer.
