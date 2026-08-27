@@ -124,6 +124,14 @@ export {
   publicSyncPreferenceSet,
 } from "./public-intel.mjs";
 export { relationshipLeadSetStatus, relationshipLeadUpsertBatch } from "./relationship.mjs";
+export {
+  resumeExtractionComplete,
+  resumeExtractionFail,
+  resumeExtractionGet,
+  resumeExtractionProgress,
+  resumeExtractionRecoverOrphans,
+  resumeExtractionStart,
+} from "./resume-extractions.mjs";
 export { ExportFailedError, kvGet, kvUpsert, NotFoundError } from "./shared.mjs";
 export {
   skillChatDecisionSet,

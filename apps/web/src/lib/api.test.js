@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyOnSite,
   completeDiscovery,
+  extractResumeAi,
   finishOnboarding,
+  getResumeExtraction,
   getRuntimeConfig,
   getSourcingRun,
   markCommSent,
@@ -28,6 +30,61 @@ import {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("durable resume extraction", () => {
+  it("returns the completed operation with a server-saved seed", async () => {
+    const operation = { id: "resume-extraction-1", status: "completed" };
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            ok: true,
+            data: { profileSeed: { candidate: { full_name: "Jordan Rivera" } } },
+            operation,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await extractResumeAi({ name: "resume.pdf" });
+
+    expect(result).toEqual({
+      profileSeed: { candidate: { full_name: "Jordan Rivera" } },
+      operation,
+      seedSaved: true,
+    });
+  });
+
+  it("reloads one exact extraction operation by id or upload digest", async () => {
+    const operation = {
+      id: "resume-extraction-1",
+      uploadDigest: "a".repeat(64),
+      status: "running",
+    };
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true, operation }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getResumeExtraction({ id: operation.id })).resolves.toEqual(operation);
+    await expect(getResumeExtraction({ digest: operation.uploadDigest })).resolves.toEqual(
+      operation
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/onboard/resume-ai/operation?id=resume-extraction-1",
+      expect.any(Object)
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/onboard/resume-ai/operation?digest=${"a".repeat(64)}`,
+      expect.any(Object)
+    );
+  });
 });
 
 describe("finishOnboarding", () => {

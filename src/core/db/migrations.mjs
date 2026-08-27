@@ -25,6 +25,7 @@ import { migration011 } from "./migrations/011-linkedin-profile-proposals.mjs";
 import { migration012 } from "./migrations/012-chat-first-workspace.mjs";
 import { migration013 } from "./migrations/013-durable-skill-chat.mjs";
 import { migration014 } from "./migrations/014-chat-first-preferences.mjs";
+import { migration015 } from "./migrations/015-resume-extractions.mjs";
 
 // Add new migrations here, in ascending id order, as the schema evolves.
 export const ALL_MIGRATIONS = [
@@ -42,6 +43,7 @@ export const ALL_MIGRATIONS = [
   migration012,
   migration013,
   migration014,
+  migration015,
 ];
 
 function readUserVersion(db) {

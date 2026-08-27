@@ -7,6 +7,7 @@
 // tempdir, never the real repo's candidate/ directory).
 
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import {
   copyFileSync,
   existsSync,
@@ -39,7 +40,11 @@ import {
   sourcingRunFail,
   sourcingRunStart,
 } from "../src/core/db/verbs/sourcing-runs.mjs";
-import { candidateArtifactGet, candidateConfigGet } from "../src/core/db/verbs.mjs";
+import {
+  candidateArtifactGet,
+  candidateConfigGet,
+  resumeExtractionStart,
+} from "../src/core/db/verbs.mjs";
 import {
   extractDocxResumeMarkdown,
   extractDocxResumeText,
@@ -148,6 +153,19 @@ function mountDirectRoutes(repoRoot, env = {}, extra = {}) {
     ...extra,
   });
   return routes;
+}
+
+function mountDirectRuntime(repoRoot, env = {}, extra = {}) {
+  const routes = new Map();
+  const runtime = mountOnboardRoutes({
+    addRoute(method, path, handler) {
+      routes.set(`${method} ${path}`, handler);
+    },
+    repoRoot,
+    env,
+    ...extra,
+  });
+  return { routes, runtime };
 }
 
 async function postDirect(routes, path, body, headers = {}) {
@@ -1814,7 +1832,11 @@ describe("POST /api/onboard/resume-ai", () => {
   it("happy path: returns the shared envelope with seed data under body.data and exact AI labels", async () => {
     const repoRoot = buildTempRoot();
     const runSkillStream = fakeRunSkillStream([VALID_FENCED_REPLY]);
-    const routes = mountDirectRoutes(repoRoot, {}, { runSkillStream });
+    const routes = mountDirectRoutes(
+      repoRoot,
+      { ANTHROPIC_API_KEY: "test-key" },
+      { runSkillStream }
+    );
     try {
       await postJsonDirect(routes, "/api/onboard/init", {});
       const { status, body } = await postResumeAiDirect(routes, "resume.pdf", FAKE_PDF_BYTES);
@@ -1870,6 +1892,26 @@ describe("POST /api/onboard/resume-ai", () => {
 
       const state = (await getDirect(routes, "/api/onboard/state")).body;
       assert.equal(state.sourceResumePresent, true);
+      assert.equal(state.resumeExtraction.status, "completed");
+      assert.equal(state.resumeExtraction.uploadDigest.length, 64);
+      assert.equal(state.resumeExtraction.result.profileSeed.candidate.full_name, "Jane Doe");
+      assert.equal(state.resumeExtraction.executionPlan.operation, "structured.extraction");
+      assert.equal(state.data.profile.candidate.full_name, "Jane Doe");
+      assert.equal(state.data.profile.candidate.email, "jane.doe@example.com");
+      assert.equal(state.data.evidence.claims.length, 1);
+      assert.deepEqual(state.data.targeting.role_buckets, [
+        {
+          name: "Engineering leadership",
+          priority: "primary",
+          titles: ["Engineering Manager", "Staff Software Engineer"],
+          notes: "Matches recent team leadership and architecture scope.",
+        },
+        {
+          name: "Platform",
+          priority: "secondary",
+          titles: ["Platform Engineer"],
+        },
+      ]);
       assert.equal(
         state.data.setup.missing.search_ready.includes("source resume"),
         false,
@@ -1895,6 +1937,162 @@ describe("POST /api/onboard/resume-ai", () => {
       assert.equal(body.data.targetingSeed.role_buckets.length, 2);
       assert.match(body.data.savedPath, /-resume\.txt$/);
       assert.ok(readFileSync(candidatePath(repoRoot, body.data.savedPath)).equals(textBytes));
+    } finally {
+      closeAll();
+    }
+  });
+
+  it("rolls back the resume artifact and every candidate seed when completion validation fails", async () => {
+    const repoRoot = buildTempRoot();
+    const invalidReply = JSON.stringify({
+      ...JSON.parse(VALID_REPLY),
+      claims: [
+        {
+          claim: "My current_base is private.",
+          evidence: "Resume, Experience section.",
+        },
+      ],
+    });
+    const runSkillStream = fakeRunSkillStream([invalidReply]);
+    const routes = mountDirectRoutes(repoRoot, {}, { runSkillStream });
+    try {
+      await postJsonDirect(routes, "/api/onboard/init", {});
+      const { status, body } = await postResumeAiDirect(routes, "resume.pdf", FAKE_PDF_BYTES);
+
+      assert.equal(status, 500);
+      assert.equal(body.ok, false);
+      assert.equal(body.operation.status, "failed");
+      assert.equal(candidateArtifactGet({ repoRoot, id: "source-resume" }), null);
+
+      const state = (await getDirect(routes, "/api/onboard/state")).body;
+      assert.equal(state.sourceResumePresent, false);
+      assert.equal(state.data.profile.candidate.full_name, "");
+      assert.equal(state.data.evidence.claims.length, 0);
+      assert.equal(state.data.targeting.role_buckets.length, 0);
+    } finally {
+      closeAll();
+    }
+  });
+
+  it("treats a renderer disconnect as the end of observation, not the end of extraction", async () => {
+    const repoRoot = buildTempRoot();
+    let runtimeStarted;
+    let finishRuntime;
+    const started = new Promise((resolve) => {
+      runtimeStarted = resolve;
+    });
+    const finish = new Promise((resolve) => {
+      finishRuntime = resolve;
+    });
+    const runSkillStream = async ({ onEvent }) => {
+      runtimeStarted();
+      await finish;
+      onEvent({
+        type: "assistant",
+        data: { message: { content: [{ type: "text", text: VALID_REPLY }] } },
+      });
+    };
+    const routes = mountDirectRoutes(repoRoot, {}, { runSkillStream });
+    try {
+      await postJsonDirect(routes, "/api/onboard/init", {});
+      const handler = routes.get("POST /api/onboard/resume-ai");
+      const req = Readable.from([FAKE_PDF_BYTES]);
+      req.method = "POST";
+      req.url = "/api/onboard/resume-ai?name=resume.pdf";
+      req.headers = {};
+      let responseBody = "";
+      const res = Object.assign(new EventEmitter(), {
+        writeHead() {
+          return this;
+        },
+        end(chunk = "") {
+          responseBody += String(chunk);
+        },
+      });
+
+      const request = handler(req, res);
+      await started;
+      res.emit("close");
+      finishRuntime();
+      await request;
+
+      assert.equal(responseBody, "");
+      const state = (await getDirect(routes, "/api/onboard/state")).body;
+      assert.equal(state.resumeExtraction.status, "completed");
+      assert.equal(state.sourceResumePresent, true);
+      assert.equal(state.data.profile.candidate.full_name, "Jane Doe");
+    } finally {
+      closeAll();
+    }
+  });
+
+  it("keeps extraction app-owned when the observer goes away and settles it on shutdown", async () => {
+    const repoRoot = buildTempRoot();
+    const env = { ANTHROPIC_API_KEY: "test-key" };
+    let runtimeStarted;
+    const started = new Promise((resolve) => {
+      runtimeStarted = resolve;
+    });
+    const runSkillStream = async ({ signal }) => {
+      runtimeStarted();
+      await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+      return { ok: false, aborted: true };
+    };
+    const { routes, runtime } = mountDirectRuntime(repoRoot, env, { runSkillStream });
+    try {
+      await postJsonDirect(routes, "/api/onboard/init", {});
+      const pendingResponse = postResumeAiDirect(routes, "resume.pdf", FAKE_PDF_BYTES);
+      await started;
+
+      const active = (await getDirect(routes, "/api/onboard/resume-ai/operation")).body.operation;
+      assert.equal(active.status, "running");
+      assert.equal(active.executionPlan.operation, "structured.extraction");
+      assert.equal(active.progress.phase, "reading");
+      assert.match(active.lease.heartbeatAt, /^\d{4}-\d{2}-\d{2}T/);
+
+      await runtime.shutdownResumeExtractions();
+      const response = await pendingResponse;
+      assert.equal(response.status, 500);
+      assert.equal(response.body.code, "RESUME_EXTRACTION_SERVER_STOPPED");
+      const stopped = (await getDirect(routes, "/api/onboard/resume-ai/operation")).body.operation;
+      assert.equal(stopped.status, "failed");
+      assert.equal(stopped.error.code, "RESUME_EXTRACTION_SERVER_STOPPED");
+      assert.equal(candidateArtifactGet({ repoRoot, id: "source-resume" }), null);
+    } finally {
+      closeAll();
+    }
+  });
+
+  it("recovers a prior app process's unfinished extraction without replaying it", async () => {
+    const repoRoot = buildTempRoot();
+    const routes = mountDirectRoutes(repoRoot);
+    try {
+      await postJsonDirect(routes, "/api/onboard/init", {});
+      const old = resumeExtractionStart({
+        repoRoot,
+        uploadDigest: "b".repeat(64),
+        uploadPath: "workspace/intake/resume-uploads/old-resume.pdf",
+        filename: "old-resume.pdf",
+        executionPlan: { operation: "structured.extraction", runtimeId: "claude" },
+        ownerId: "old-app-process",
+      }).operation;
+      const { runtime } = mountDirectRuntime(
+        repoRoot,
+        {},
+        {
+          resumeWorkerOwnerId: "new-app-process",
+        }
+      );
+
+      const recovered = runtime.recoverResumeExtractions();
+      const operation = (await getDirect(routes, "/api/onboard/resume-ai/operation")).body
+        .operation;
+
+      assert.equal(recovered.recovered.length, 1);
+      assert.equal(recovered.recovered[0].id, old.id);
+      assert.equal(operation.status, "failed");
+      assert.equal(operation.error.code, "RESUME_EXTRACTION_SERVER_STOPPED");
+      assert.equal(candidateArtifactGet({ repoRoot, id: "source-resume" }), null);
     } finally {
       closeAll();
     }
@@ -2235,12 +2433,13 @@ describe("POST /api/onboard/resume-ai-stream", () => {
       assert.match(result.contentType, /^text\/event-stream/);
       assert.deepEqual(
         result.frames.map((frame) => frame.type),
-        ["saved", "activity", "activity", "activity", "json", "done"]
+        ["saved", "started", "activity", "activity", "activity", "json", "done"]
       );
-      assert.equal(result.frames[1].message, "Warming up the reader…");
-      assert.equal(result.frames[2].message, "Reading resume.pdf…");
-      assert.equal(result.frames[3].message, "Analyzing your resume…");
-      assert.equal(result.frames[4].chunk, VALID_REPLY);
+      assert.equal(result.frames[1].operation.status, "queued");
+      assert.equal(result.frames[2].message, "Warming up the reader…");
+      assert.equal(result.frames[3].message, "Reading resume.pdf…");
+      assert.equal(result.frames[4].message, "Analyzing your resume…");
+      assert.equal(result.frames[5].chunk, VALID_REPLY);
 
       const done = result.frames.at(-1).data;
       assert.deepEqual(Object.keys(done).sort(), [
@@ -2316,7 +2515,7 @@ describe("POST /api/onboard/resume-ai-stream", () => {
       assert.equal(result.status, 200);
       assert.deepEqual(
         result.frames.map((frame) => frame.type),
-        ["saved", "activity", "error"]
+        ["saved", "started", "activity", "error"]
       );
       assert.equal(errorFrame.status, 502);
       assert.equal(errorFrame.message.includes(secret), false);
@@ -2346,7 +2545,7 @@ describe("POST /api/onboard/resume-ai-stream", () => {
 
       assert.deepEqual(
         result.frames.map((frame) => frame.type),
-        ["saved", "activity", "json", "error"]
+        ["saved", "started", "activity", "json", "error"]
       );
       const errorFrame = result.frames.at(-1);
       assert.equal(errorFrame.status, 422);
@@ -2375,7 +2574,7 @@ describe("POST /api/onboard/resume-ai-stream", () => {
 
       assert.deepEqual(
         result.frames.map((frame) => frame.type),
-        ["saved", "activity", "json", "restart", "json", "done"]
+        ["saved", "started", "activity", "json", "restart", "json", "done"]
       );
       assert.equal(calls.length, 2);
       assert.equal(calls[0].env.ANTHROPIC_MODEL, "claude-haiku-4-5-20251001");

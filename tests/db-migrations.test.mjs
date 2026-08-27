@@ -54,9 +54,9 @@ test("re-running against a db already at the latest version is a no-op", () => {
   assert.equal(after, before, "no new _migrations rows on a no-op re-run");
 });
 
-test("migration 009-014 preserve public intel, agent, proposal, workspace, chat, then preferences order", () => {
+test("migration 009-015 preserve public intel through resume extraction order", () => {
   assert.deepEqual(
-    ALL_MIGRATIONS.slice(-6).map((migration) => [migration.id, migration.name]),
+    ALL_MIGRATIONS.slice(-7).map((migration) => [migration.id, migration.name]),
     [
       [9, "public-intel"],
       [10, "workspace-agent"],
@@ -64,8 +64,30 @@ test("migration 009-014 preserve public intel, agent, proposal, workspace, chat,
       [12, "chat-first-workspace"],
       [13, "durable-skill-chat"],
       [14, "chat-first-preferences"],
+      [15, "resume-extractions"],
     ]
   );
+});
+
+test("migration 015 creates digest-indexed durable resume extractions", () => {
+  const db = freshDb();
+  runMigrations(db);
+  const columns = new Map(
+    db
+      .prepare("PRAGMA table_xinfo('resume_extractions')")
+      .all()
+      .map((column) => [column.name, column])
+  );
+  for (const generated of ["upload_digest", "status", "updated_at"]) {
+    assert.ok(columns.has(generated), `expected generated column ${generated}`);
+    assert.notEqual(columns.get(generated).hidden, 0, `${generated} must be generated`);
+  }
+  const indexes = db
+    .prepare("PRAGMA index_list('resume_extractions')")
+    .all()
+    .map((row) => row.name);
+  assert.ok(indexes.includes("idx_resume_extractions_digest"));
+  assert.ok(indexes.includes("idx_resume_extractions_status"));
 });
 
 test("migration 014 creates JSON-backed chat-first preferences", () => {

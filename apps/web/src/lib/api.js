@@ -333,8 +333,24 @@ export async function extractResumeAi(file) {
     }
   }
   if (!res.ok) throw new ApiError(res.status, body);
-  if (body?.ok === true && body?.data && typeof body.data === "object") return body.data;
+  if (body?.ok === true && body?.data && typeof body.data === "object") {
+    return {
+      ...body.data,
+      ...(body.operation ? { operation: body.operation } : {}),
+      seedSaved: body.operation?.status === "completed",
+    };
+  }
   return body;
+}
+
+export async function getResumeExtraction({ id, digest } = {}) {
+  const query = new URLSearchParams();
+  if (id) query.set("id", id);
+  if (digest) query.set("digest", digest);
+  const body = await apiFetch(
+    `/api/onboard/resume-ai/operation${query.size ? `?${query.toString()}` : ""}`
+  );
+  return body.operation || null;
 }
 
 // Shared SSE-over-fetch frame parser: frames are `data: <json>\n\n`, plus

@@ -46,7 +46,7 @@
 // interview) owns it exclusively. The non-AI wizard seeds/validates candidate
 // files but never claims to have run the interview.
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import {
@@ -54,8 +54,10 @@ import {
   workspaceOnboardingHandoff,
 } from "../core/agent/workspace-thread.mjs";
 import { writeLocalAiKey } from "../core/ai/ai-env.mjs";
+import { loadAIPreferences } from "../core/ai/ai-preferences.mjs";
 import { makeBoundedAIEnvelope, runBoundedAI } from "../core/ai/bounded-ai.mjs";
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
+import { aiRuntimeIdForRoute, resolveAIExecutionPlan } from "../core/ai/operation-policy.mjs";
 import { validateAiProviderKey } from "../core/ai/provider-validation.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
 import { readUsageEvents, summarizeUsageEvents } from "../core/ai/usage-log.mjs";
@@ -71,6 +73,12 @@ import {
   candidateSetupInitialize,
   publicSyncPreferenceGet,
   publicSyncPreferenceSet,
+  resumeExtractionComplete,
+  resumeExtractionFail,
+  resumeExtractionGet,
+  resumeExtractionProgress,
+  resumeExtractionRecoverOrphans,
+  resumeExtractionStart,
   skillChatThreadRead,
   sourceConfigGet,
   sourceConfigPut,
@@ -1244,8 +1252,12 @@ export function mountOnboardRoutes({
   startFirstSearchImpl = startFirstSearchRun,
   runSearchInBackgroundImpl = runFirstSearchInBackground,
   finishOnboardingImpl = finishOnboarding,
+  resumeWorkerOwnerId = `resume-worker-${process.pid}-${randomUUID()}`,
+  setIntervalImpl = setInterval,
+  clearIntervalImpl = clearInterval,
 }) {
   const pathCtx = { repoRoot, env };
+  const activeResumeExtractions = new Map();
 
   // -------------------------------------------------------------------------
   // GET /api/onboard/state — report-only; never runs ensureCandidateFiles.
@@ -1268,6 +1280,7 @@ export function mountOnboardRoutes({
           dbSourceResumePresent(pathCtx) ||
           existsSync(userPath(pathCtx, "candidate/SOURCE_RESUME.md"));
         const dbKeyConfigured = resolveAIRoute(env, { repoRoot }).type !== "none";
+        const resumeExtraction = resumeExtractionGet(pathCtx).operation;
         const stateData = {
           profile: config.profile,
           targeting: config.targeting,
@@ -1299,6 +1312,7 @@ export function mountOnboardRoutes({
           deepIngest,
           sourcing: { firstSearchRun },
           deterministicSources,
+          resumeExtraction,
           sourceResumePresent: dbSourceResumePresentValue,
           keyConfigured: dbKeyConfigured,
           searchSourcesPresent: dbSearchSourcesPresent(pathCtx, config),
@@ -1831,8 +1845,229 @@ export function mountOnboardRoutes({
     // and would corrupt binary data.
     if (!reused) writeFileSync(savedPath, bytes);
 
-    return { ok: true, savedRelPath, savedPath, reused };
+    return {
+      ok: true,
+      savedRelPath,
+      savedPath,
+      reused,
+      uploadDigest: createHash("sha256").update(bytes).digest("hex"),
+    };
   }
+
+  function resolvedResumeExecutionPlan() {
+    const route = resolveAIRoute(env, { repoRoot });
+    const runtimeId = aiRuntimeIdForRoute(route);
+    if (!runtimeId) return null;
+    return resolveAIExecutionPlan({
+      operation: "structured.extraction",
+      runtimeId,
+      preferences: loadAIPreferences({ repoRoot, env }),
+    });
+  }
+
+  function resumeExtractionData({ extracted, savedRelPath, reused }) {
+    const fullText = normalizeDocxResumeText(extracted.full_text || "");
+    const claims = (extracted.claims || []).map((claim, index) => ({
+      id: `resume-${String(index + 1).padStart(3, "0")}`,
+      claim: String(claim?.claim ?? ""),
+      evidence: String(claim?.evidence ?? ""),
+    }));
+    return {
+      fullText,
+      profileSeed: { candidate: extracted.candidate || {} },
+      evidenceSeed: { claims },
+      sections: extracted.sections || {},
+      targetingSeed: normalizeTargetingSeed(extracted.targeting_suggestions),
+      source: "ai",
+      savedPath: savedRelPath,
+      reused,
+    };
+  }
+
+  function startResumeExtractionWorker({ operation, savedPath, savedRelPath, name, reused }) {
+    const existing = activeResumeExtractions.get(operation.id);
+    if (existing) return existing;
+
+    const controller = new AbortController();
+    const listeners = new Set();
+    const execution = { controller, listeners, shutdownRequested: false, promise: null };
+    activeResumeExtractions.set(operation.id, execution);
+
+    const notify = (event) => {
+      for (const listener of listeners) listener(event);
+      if (event?.type === "activity" && event.message) {
+        try {
+          resumeExtractionProgress({
+            ...pathCtx,
+            id: operation.id,
+            ownerId: resumeWorkerOwnerId,
+            progress: { phase: "reading", message: String(event.message) },
+          });
+        } catch {
+          // A shutdown or terminal write may win this progress-only race.
+        }
+      }
+    };
+
+    execution.promise = Promise.resolve().then(async () => {
+      const heartbeat = setIntervalImpl(() => {
+        try {
+          resumeExtractionProgress({
+            ...pathCtx,
+            id: operation.id,
+            ownerId: resumeWorkerOwnerId,
+            progress: { phase: "reading" },
+          });
+        } catch {
+          // A shutdown or terminal write may win this progress-only race.
+        }
+      }, 30000);
+      try {
+        resumeExtractionProgress({
+          ...pathCtx,
+          id: operation.id,
+          ownerId: resumeWorkerOwnerId,
+          progress: { phase: "reading", message: `Reading ${sanitizeUploadFilename(name)}…` },
+        });
+        const outcome = await runResumeExtractBounded({
+          savedPath,
+          originalName: name,
+          onProgress: notify,
+          signal: controller.signal,
+          executionPlan: operation.executionPlan,
+        });
+        if (controller.signal.aborted) {
+          const error =
+            controller.signal.reason instanceof Error
+              ? controller.signal.reason
+              : new Error("CareerRat stopped reading this resume. Try it again.");
+          error.code ||= "RESUME_EXTRACTION_SERVER_STOPPED";
+          throw error;
+        }
+        if (!outcome.body.ok) {
+          const failed = resumeExtractionFail({
+            ...pathCtx,
+            id: operation.id,
+            ownerId: resumeWorkerOwnerId,
+            error: {
+              code: outcome.body.code || "RESUME_EXTRACTION_FAILED",
+              message:
+                outcome.body.error?.message || "CareerRat couldn't read that resume. Try again.",
+            },
+          }).operation;
+          notify({
+            type: "error",
+            message:
+              outcome.body.error?.message || "CareerRat couldn't read that resume. Try again.",
+            status: outcome.status,
+            operation: failed,
+          });
+          return { status: outcome.status, body: { ...outcome.body, operation: failed } };
+        }
+
+        const data = resumeExtractionData({
+          extracted: outcome.body.data || {},
+          savedRelPath,
+          reused,
+        });
+        const completed = resumeExtractionComplete({
+          ...pathCtx,
+          id: operation.id,
+          ownerId: resumeWorkerOwnerId,
+          artifact: {
+            path: savedRelPath,
+            filename: sanitizeUploadFilename(name),
+            savedAt: new Date().toISOString(),
+            source: "resume-ai",
+            text: data.fullText,
+          },
+          result: data,
+          ai: outcome.body.ai,
+          manual: outcome.body.manual,
+        }).operation;
+        notify({ type: "done", data, operation: completed });
+        return {
+          status: outcome.status,
+          body: { ...outcome.body, data, operation: completed },
+        };
+      } catch (error) {
+        const stopped = execution.shutdownRequested || controller.signal.aborted;
+        const safeError = {
+          code: stopped
+            ? "RESUME_EXTRACTION_SERVER_STOPPED"
+            : error?.code || "RESUME_EXTRACTION_FAILED",
+          message: stopped
+            ? "CareerRat stopped before it finished reading this resume. Try it again."
+            : "CareerRat couldn't read that resume. Try again.",
+        };
+        let failed = null;
+        try {
+          failed = resumeExtractionFail({
+            ...pathCtx,
+            id: operation.id,
+            ownerId: resumeWorkerOwnerId,
+            error: safeError,
+          }).operation;
+        } catch {
+          failed = resumeExtractionGet({ ...pathCtx, id: operation.id }).operation;
+        }
+        const body = {
+          ok: false,
+          code: safeError.code,
+          error: { message: safeError.message },
+          manual: RESUME_AI_MANUAL,
+          operation: failed,
+        };
+        notify({ type: "error", message: safeError.message, status: 500, operation: failed });
+        return { status: 500, body };
+      } finally {
+        clearIntervalImpl(heartbeat);
+        activeResumeExtractions.delete(operation.id);
+      }
+    });
+    return execution;
+  }
+
+  function startDurableResumeExtraction(upload, name) {
+    const started = resumeExtractionStart({
+      ...pathCtx,
+      uploadDigest: upload.uploadDigest,
+      uploadPath: upload.savedRelPath,
+      filename: sanitizeUploadFilename(name),
+      executionPlan: resolvedResumeExecutionPlan(),
+      ownerId: resumeWorkerOwnerId,
+    });
+    if (started.operation.status === "completed") {
+      return { started, execution: null };
+    }
+    return {
+      started,
+      execution: startResumeExtractionWorker({
+        operation: started.operation,
+        savedPath: upload.savedPath,
+        savedRelPath: upload.savedRelPath,
+        name,
+        reused: upload.reused,
+      }),
+    };
+  }
+
+  addRoute("GET", "/api/onboard/resume-ai/operation", (req, res) => {
+    try {
+      const requestUrl = new URL(req.url, "http://127.0.0.1");
+      const operation = resumeExtractionGet({
+        ...pathCtx,
+        id: requestUrl.searchParams.get("id") || undefined,
+        uploadDigest: requestUrl.searchParams.get("digest") || undefined,
+      }).operation;
+      sendJson(res, 200, { ok: true, operation });
+    } catch (error) {
+      sendJson(res, error?.code === "NOT_FOUND" ? 404 : 500, {
+        ok: false,
+        error: { message: error?.message || "Resume extraction could not be loaded." },
+      });
+    }
+  });
 
   // -------------------------------------------------------------------------
   // POST /api/onboard/resume-ai?name=<filename> — raw PDF/image bytes.
@@ -1864,6 +2099,30 @@ export function mountOnboardRoutes({
       return;
     }
     const { savedRelPath, savedPath, reused } = upload;
+
+    if (dbExists(pathCtx)) {
+      let closed = false;
+      res.on?.("close", () => {
+        closed = true;
+      });
+      const { started, execution } = startDurableResumeExtraction(upload, name);
+      if (!execution) {
+        if (!closed) {
+          const operation = started.operation;
+          sendJson(res, 200, {
+            ok: true,
+            data: operation.result,
+            ai: operation.ai,
+            manual: operation.manual || RESUME_AI_MANUAL,
+            operation,
+          });
+        }
+        return;
+      }
+      const response = await execution.promise;
+      if (!closed) sendJson(res, response.status, response.body);
+      return;
+    }
 
     const outcome = await runResumeExtractBounded({ savedPath });
 
@@ -1964,6 +2223,44 @@ export function mountOnboardRoutes({
       return;
     }
     const { savedRelPath, savedPath, reused } = upload;
+
+    if (dbExists(pathCtx)) {
+      let closed = false;
+      res.on("close", () => {
+        closed = true;
+      });
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-store",
+        Connection: "keep-alive",
+      });
+      res.flushHeaders?.();
+      const emit = (payload) => {
+        if (closed) return;
+        try {
+          res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        } catch {
+          closed = true;
+        }
+      };
+      emit({
+        type: "saved",
+        savedPath: savedRelPath,
+        reused,
+        uploadDigest: upload.uploadDigest,
+      });
+      const { started, execution } = startDurableResumeExtraction(upload, name);
+      emit({ type: "started", operation: started.operation });
+      if (!execution) {
+        emit({ type: "done", data: started.operation.result, operation: started.operation });
+      } else {
+        execution.listeners.add(emit);
+        await execution.promise;
+        execution.listeners.delete(emit);
+      }
+      if (!closed) res.end();
+      return;
+    }
 
     // Client-disconnect guard: `res.on("close")`, not `req.on("close")` —
     // see skill-run-route.mjs's own comment on this exact choice (req's own
@@ -2093,7 +2390,13 @@ export function mountOnboardRoutes({
   // bounded-AI fallback helper. `originalName`/`onProgress` are optional —
   // the two buffered callers omit them (byte-identical to before this
   // change), while the SSE route above passes both to narrate the run.
-  async function runResumeExtractBounded({ savedPath, originalName, onProgress } = {}) {
+  async function runResumeExtractBounded({
+    savedPath,
+    originalName,
+    onProgress,
+    signal,
+    executionPlan,
+  } = {}) {
     const schema = JSON.parse(readFileSync(join(repoRoot, RESUME_EXTRACT_SCHEMA_PATH), "utf8"));
 
     // Speed: résumé extraction is a well-bounded transcription+classification
@@ -2140,6 +2443,8 @@ export function mountOnboardRoutes({
         tools: ["Read"],
         approvedReadPaths: [savedPath],
         outputSchema: schema,
+        signal,
+        executionPlan: executionPlan || undefined,
         onEvent: (evt) => {
           if (onProgress) {
             if (evt.type === "system") {
@@ -2566,4 +2871,30 @@ export function mountOnboardRoutes({
       summary: summarizeUsageEvents(readUsageEvents({ root: repoRoot })),
     });
   });
+
+  async function shutdownResumeExtractions() {
+    const active = [...activeResumeExtractions.values()];
+    for (const execution of active) {
+      execution.shutdownRequested = true;
+      const error = new Error(
+        "CareerRat stopped before it finished reading this resume. Try it again."
+      );
+      error.code = "RESUME_EXTRACTION_SERVER_STOPPED";
+      execution.controller.abort(error);
+    }
+    await Promise.all(active.map((execution) => execution.promise));
+  }
+
+  function recoverResumeExtractions() {
+    if (!dbExists(pathCtx)) return { ok: true, recovered: [] };
+    return resumeExtractionRecoverOrphans({
+      ...pathCtx,
+      ownerId: resumeWorkerOwnerId,
+    });
+  }
+
+  return {
+    shutdownResumeExtractions,
+    recoverResumeExtractions,
+  };
 }

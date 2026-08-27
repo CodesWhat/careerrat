@@ -129,6 +129,7 @@ function createApi(draft = { transcript: [] }) {
     }),
     getOnboardingDraft: vi.fn().mockResolvedValue({ draft }),
     getOnboardState: vi.fn().mockResolvedValue(ONBOARD_STATE),
+    getResumeExtraction: vi.fn().mockResolvedValue(null),
     initOnboard: vi.fn().mockResolvedValue({ ok: true }),
     parseResumeText: vi.fn().mockResolvedValue({ profileSeed: {}, evidenceSeed: { claims: [] } }),
     probeInstalledAiRuntime: vi.fn().mockResolvedValue({ ok: true }),
@@ -2191,6 +2192,101 @@ describe("FirstRunController chat event reconciliation", () => {
     expect(api.sendChatMessage.mock.calls.at(-1)[1]).toContain(
       'The resume "jordan-resume.md" was uploaded and parsed'
     );
+  });
+
+  it("does not replay candidate writes after the server commits an AI resume operation", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    api.extractResumeAi.mockResolvedValue({
+      seedSaved: true,
+      operation: { id: "resume-extraction-1", status: "completed" },
+      profileSeed: { candidate: { full_name: "Jordan Rivera" } },
+      evidenceSeed: {
+        claims: [{ claim: "Led a platform team", evidence: "Candidate resume" }],
+      },
+      targetingSeed: {
+        role_buckets: [
+          { name: "Primary", priority: "primary", titles: ["Staff Software Engineer"] },
+        ],
+      },
+    });
+    const view = await bootController(module, api);
+
+    await view.props.onResumeFile({
+      name: "jordan-resume.pdf",
+      size: 42,
+      lastModified: 1,
+    });
+
+    expect(api.saveCandidateFile).not.toHaveBeenCalled();
+    expect(api.saveEvidenceSeed).not.toHaveBeenCalled();
+    expect(api.sendChatMessage.mock.calls.at(-1)[1]).toContain(
+      'The resume "jordan-resume.pdf" was uploaded and parsed'
+    );
+  });
+
+  it("follows the exact durable resume operation after a reload", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    const runningState = {
+      ...ONBOARD_STATE,
+      resumeExtraction: {
+        id: "resume-extraction-1",
+        uploadDigest: "a".repeat(64),
+        filename: "jordan-resume.pdf",
+        status: "running",
+      },
+    };
+    api.getResumeExtraction.mockResolvedValue({
+      ...runningState.resumeExtraction,
+      status: "completed",
+      result: { evidenceSeed: { claims: [] } },
+    });
+    api.getOnboardState.mockResolvedValue({
+      ...ONBOARD_STATE,
+      sourceResumePresent: true,
+      resumeExtraction: {
+        ...runningState.resumeExtraction,
+        status: "completed",
+      },
+    });
+
+    await bootController(module, api, {
+      startInterview: false,
+      controllerProps: { initialOnboardState: runningState },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(api.getResumeExtraction).toHaveBeenCalledWith({ id: "resume-extraction-1" });
+    expect(api.getOnboardState).toHaveBeenCalled();
+  });
+
+  it("surfaces a resume operation that startup reconciled as stopped", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    const stoppedState = {
+      ...ONBOARD_STATE,
+      resumeExtraction: {
+        id: "resume-extraction-stopped",
+        filename: "jordan-resume.pdf",
+        status: "failed",
+        error: {
+          code: "RESUME_EXTRACTION_SERVER_STOPPED",
+          message: "CareerRat stopped before it finished reading this resume. Try it again.",
+        },
+      },
+    };
+
+    const view = await bootController(module, api, {
+      startInterview: false,
+      controllerProps: { initialOnboardState: stoppedState },
+    });
+
+    expect(view.props.error).toBe(
+      "CareerRat stopped before it finished reading this resume. Try it again."
+    );
+    expect(api.getResumeExtraction).not.toHaveBeenCalled();
   });
 
   it("keeps one unanswered work-mode prompt when a resume upload triggers the same gap again", async () => {

@@ -58,7 +58,9 @@ test("tracker-dev exposes the durable AI-search shutdown lifecycle", async () =>
   const dev = createDevServer({ repoRoot });
   try {
     assert.equal(typeof dev.shutdownAiWebSearch, "function");
+    assert.equal(typeof dev.shutdownResumeExtractions, "function");
     await dev.shutdownAiWebSearch();
+    await dev.shutdownResumeExtractions();
   } finally {
     dev.chatRuntime.shutdown();
     rmSync(repoRoot, { recursive: true, force: true });

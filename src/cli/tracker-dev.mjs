@@ -278,7 +278,7 @@ export function createDevServer({
   // (candidate file seeding, resume parsing, BYOK key storage) —
   // src/cli/onboard-route.mjs. No page mounted here — apps/web's SPA
   // onboarding wizard is the only client.
-  mountOnboardRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
+  const onboardRoutes = mountOnboardRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
 
   // M8 — the /app/onboarding SPA wizard's AI-assist surface: server-side
   // prompt templates for the Targeting step's "Roland-suggest" chips
@@ -620,6 +620,7 @@ export function createDevServer({
       workspaceAgentRuntime.recoverOrphanedSourcingRuns();
       await workspaceAgentRuntime.recoverAdjacentRoleCoaching?.();
       intakeRoutes.recoverOrphans();
+      onboardRoutes.recoverResumeExtractions();
       return boundPort;
     } catch (error) {
       await new Promise((resolve) => server.close(resolve));
@@ -642,6 +643,7 @@ export function createDevServer({
     shutdownAiWebSearch: searchRoutes.shutdownAiWebSearch,
     shutdownSourcingWorkers: workspaceAgentRuntime.shutdownSourcingWorkers,
     shutdownIntake: intakeRoutes.shutdownLaneB,
+    shutdownResumeExtractions: onboardRoutes.shutdownResumeExtractions,
   };
 }
 
@@ -692,6 +694,7 @@ async function main() {
     await dev.shutdownSourcingWorkers();
     await dev.shutdownAiWebSearch();
     await dev.shutdownIntake();
+    await dev.shutdownResumeExtractions();
     await dev.browserSessionManager.shutdown();
     dev.server.close(() => process.exit(0));
     // Don't hang on a lingering socket.
