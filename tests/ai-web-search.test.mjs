@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -103,6 +111,58 @@ test("runAiWebSearch caps saved prompts by lean, standard, and full mode", async
     const kickoff = assistantJson.inputs[0];
     assert.equal(kickoff.prompts.length, expected);
   }
+});
+
+test("a successful zero-result AI search revalidates active rows against the current policy", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: { compensation: { minimum_base: 180000 } },
+  });
+  const artifact = "workspace/jobs/stale-ai-result.md";
+  mkdirSync(userPath({ repoRoot }, "workspace/jobs"), { recursive: true });
+  writeFileSync(
+    userPath({ repoRoot }, artifact),
+    "---\ncompany: Stale AI Co\nrole: Staff Engineer\npartial: true\n---\n\nSalary range: $120,000 - $150,000 annually.\n"
+  );
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "stale-ai-result",
+        company: "Stale AI Co",
+        role: "Staff Engineer",
+        status: "sourced",
+        source: "ai-web-search",
+        channel: "board",
+        link: "https://jobs.example.test/stale-ai",
+        loc: "USA (Remote)",
+        base: "verify",
+        fitScore: 80,
+        fitBucket: "med",
+        fitBasis: "triage",
+        gate: "review",
+        sourcedAt: "2026-08-27T12:00:00.000Z",
+        updatedAt: "2026-08-27T12:00:00.000Z",
+        artifacts: { jd: artifact },
+        scanner: { bodyPartial: true },
+      },
+    ],
+  });
+
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: assistantJson({ roles: [], queries_run: [] }),
+  });
+
+  assert.equal(result.new, 0);
+  assert.deepEqual(result.revalidatedExisting.hiddenIds, ["stale-ai-result"]);
+  assert.equal(
+    readDbScannerRows({ repoRoot }).find((row) => row.id === "stale-ai-result").status,
+    "cut"
+  );
 });
 
 test("runAiWebSearch gives installed runtimes the same structured output schema it validates", async () => {

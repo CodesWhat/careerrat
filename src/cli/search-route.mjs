@@ -49,6 +49,7 @@ import { resolveAIRoute } from "../core/ai/call-ai.mjs";
 import { readDbScannerRows } from "../core/db/scan-context.mjs";
 import { sourceConfigGet } from "../core/db/verbs/source-config.mjs";
 import {
+  assertSourcingRunActiveInDb,
   sourcingRunComplete,
   sourcingRunFail,
   sourcingRunProgress,
@@ -601,6 +602,7 @@ export function mountSearchRoutes({
           }
         },
         signal: controller.signal,
+        writeGuard: (db) => assertSourcingRunActiveInDb(db, durableRun.id),
       });
       if (controller.signal.aborted) {
         const err = new Error("AI web search was cancelled.");

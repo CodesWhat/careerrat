@@ -54,7 +54,10 @@ import {
   extractReqId,
   postingIdentityIsSeen,
 } from "../scoring/sourced-identity.mjs";
-import { captureAndPersistOffersIfDb } from "../scoring/sourced-persistence.mjs";
+import {
+  captureAndPersistOffersIfDb,
+  revalidatePersistedSourcedRows,
+} from "../scoring/sourced-persistence.mjs";
 import { normalizeCompanyRoleKey, requalifyCanonicalOffers } from "../scoring/sourced-scanner.mjs";
 import { buildSearchPromptContext, getSearchPrompts } from "./search-prompts.mjs";
 
@@ -318,6 +321,7 @@ export async function runAiWebSearch({
   resolveHost,
   resolveJobUrlImpl,
   signal,
+  writeGuard,
 } = {}) {
   if (!dbExists({ repoRoot, env })) {
     throwPreconditionError(
@@ -632,6 +636,14 @@ export async function runAiWebSearch({
   // A disconnect that lands after the model finished but before this point
   // must not write a partial result or return a success-shaped summary.
   throwIfSearchAborted(signal);
+  const savedAt = new Date();
+  const revalidatedExisting = revalidatePersistedSourcedRows({
+    repoRoot,
+    env,
+    config,
+    now: savedAt,
+    guard: writeGuard,
+  });
   if (survivors.length) {
     onProgress?.({
       type: "activity",
@@ -643,7 +655,8 @@ export async function runAiWebSearch({
         repoRoot,
         env,
         offers: survivors,
-        savedAt: new Date(),
+        savedAt,
+        guard: writeGuard,
         dedupeCanonical: true,
       })?.offers || []
     : [];
@@ -665,6 +678,7 @@ export async function runAiWebSearch({
         ]
       : [],
     captureFailures: captureFailures.slice(0, 10),
+    revalidatedExisting,
     offers: persistedOffers.map((offer) => ({
       company: offer.company,
       title: offer.title,

@@ -2,13 +2,107 @@ import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { dbExists } from "../db/connection.mjs";
-import { buildDbSeenSets } from "../db/scan-context.mjs";
-import { sourcedUpsertBatch } from "../db/verbs/sourced.mjs";
+import { buildDbSeenSets, readDbScannerRows } from "../db/scan-context.mjs";
+import { sourcedReconcilePolicyBatch, sourcedUpsertBatch } from "../db/verbs/sourced.mjs";
+import { readJobDescriptionArtifact } from "../jobs/job-description.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { atomicWriteFile } from "../profile/gate-writer.mjs";
 import { stringifyYaml } from "../profile/yaml.mjs";
 import { trimEdgeCharacter } from "../text/slug.mjs";
 import { addPostingIdentity, postingIdentityIsSeen } from "./sourced-identity.mjs";
+import { requalifyCanonicalOffers } from "./sourced-scanner.mjs";
+
+const ACTIVE_SOURCED_STATUSES = new Set(["sourced", "prospect", "saved", "gated"]);
+const POLICY_FAILURE_BUCKETS = Object.freeze([
+  ["seniority", "filteredSeniority"],
+  ["location", "filteredLocation"],
+  ["age", "filteredAge"],
+  ["salary", "filteredSalary"],
+  ["eligibility", "filteredEligibility"],
+]);
+
+function activeSourcedRows(rows) {
+  return (Array.isArray(rows) ? rows : []).filter((row) =>
+    ACTIVE_SOURCED_STATUSES.has(String(row?.status || "sourced").toLowerCase())
+  );
+}
+
+function persistedRowOffer(row, artifact) {
+  return {
+    id: row.id,
+    company: row.company,
+    title: row.role || row.title,
+    url: row.link || row.url,
+    location: row.loc || row.location || row.mode || "",
+    postedAt: row.postedAt,
+    bodyText: artifact.markdown,
+    bodyPartial: artifact.completeness === "partial",
+  };
+}
+
+export function revalidatePersistedSourcedRows({
+  repoRoot,
+  env,
+  config,
+  now = new Date(),
+  locationFilter,
+  guard,
+} = {}) {
+  const empty = {
+    examined: 0,
+    readable: 0,
+    unreadable: 0,
+    hidden: 0,
+    hiddenIds: [],
+  };
+  if (!dbExists({ repoRoot, env })) return empty;
+
+  const activeRows = activeSourcedRows(readDbScannerRows({ repoRoot, env }));
+  const rowsById = new Map(activeRows.map((row) => [String(row.id), row]));
+  const offers = [];
+  let unreadable = 0;
+  for (const row of activeRows) {
+    try {
+      const capture = readJobDescriptionArtifact({ repoRoot, env, source: "sourced", id: row.id });
+      offers.push(persistedRowOffer(row, capture.artifact));
+    } catch {
+      // A missing or unsafe capture is unknown, never evidence for hiding a row.
+      unreadable += 1;
+    }
+  }
+
+  const qualification = requalifyCanonicalOffers(offers, {
+    config,
+    now: now instanceof Date ? now.getTime() : Number(now),
+    locationFilter,
+  });
+  const decisions = [];
+  for (const [bucket, resultKey] of POLICY_FAILURE_BUCKETS) {
+    for (const offer of qualification[resultKey]) {
+      const row = rowsById.get(String(offer.id));
+      if (!row) continue;
+      decisions.push({
+        id: row.id,
+        bucket,
+        reason: offer.qualificationReason,
+        expectedStatus: row.status || "sourced",
+        expectedUpdatedAt: row.updatedAt || "",
+        expectedJobArtifact: row.artifacts?.jd || "",
+      });
+    }
+  }
+
+  const reconciled = decisions.length
+    ? sourcedReconcilePolicyBatch({ repoRoot, env, decisions, guard })
+    : { hidden: 0, hiddenIds: [] };
+  return {
+    examined: activeRows.length,
+    readable: offers.length,
+    unreadable,
+    hidden: reconciled.hidden,
+    hiddenIds: reconciled.hiddenIds,
+  };
+}
 
 function slug(value, fallback = "unknown") {
   const collapsed = String(value || "")
@@ -122,6 +216,7 @@ function renderCapturedJob({ offer, savedAt }) {
     location: offer.location || null,
     source: offer.url || "",
     sourceName: offer.source || "capture",
+    postedAt: offer.postedAt ?? null,
     dateSaved,
     channel: "board",
     status: "sourced",
@@ -217,6 +312,9 @@ export function sourcedRowsFromScanOffers(offers, nowIso = new Date().toISOStrin
       gate: offer.gate || "review",
       sourcedAt: nowIso,
       updatedAt: nowIso,
+      ...(offer.postedAt === null || offer.postedAt === undefined || offer.postedAt === ""
+        ? {}
+        : { postedAt: offer.postedAt }),
       artifacts: offer.artifacts || {},
       note: compactNote(offer),
       ...(sourceMeta ? { sourceMeta } : {}),

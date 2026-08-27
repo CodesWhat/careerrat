@@ -1512,6 +1512,233 @@ test("a successful no-op source advances while a failed sibling remains retryabl
   }
 });
 
+test("a writable DB search hides stale sourced rows that fail the current compensation floor", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: {
+        compensation: { minimum_base: 180000 },
+        authorization: { work_authorized: false, requires_sponsorship: true },
+        location: {
+          home: "Brooklyn, NY",
+          remote: true,
+          remote_scope: "home-country",
+          hybrid: true,
+          onsite: false,
+          max_commute_days_per_week: 2,
+          relocation: [],
+        },
+      },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "targeting",
+      patch: {
+        role_buckets: [
+          {
+            name: "Platform engineering",
+            titles: ["Staff Platform Engineer", "Senior Software Engineer"],
+          },
+        ],
+        search_preferences: { posting_age: { mode: "fixed-days", days: 30 } },
+      },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "sourced-scan",
+      data: { title_filter: { positive: [], negative: [] }, tracked_companies: [] },
+    });
+    sourceConfigPut({ repoRoot, name: "search-sources", data: { searches: [] } });
+
+    const jobsDir = userPath({ repoRoot }, "workspace/jobs");
+    mkdirSync(jobsDir, { recursive: true });
+    const saved = [
+      {
+        id: "sourced-below-floor",
+        company: "Credence Example",
+        role: "Senior Software Engineer",
+        status: "sourced",
+        link: "https://jobs.example.test/credence",
+        loc: "Tysons Corner, VA (Remote)",
+        artifact: "workspace/jobs/credence-example.md",
+        body: "Salary Range: $120,000 - $150,000 annually.",
+      },
+      {
+        id: "sourced-clears-floor",
+        company: "Eligible Example",
+        role: "Staff Platform Engineer",
+        status: "sourced",
+        link: "https://jobs.example.test/eligible",
+        loc: "USA (Remote)",
+        artifact: "workspace/jobs/eligible-example.md",
+        body: "The base salary range is $190,000 - $240,000 annually.",
+      },
+      {
+        id: "sourced-comp-unknown",
+        company: "Unknown Example",
+        role: "Staff Platform Engineer",
+        status: "sourced",
+        link: "https://jobs.example.test/unknown",
+        loc: "USA (Remote)",
+        artifact: "workspace/jobs/unknown-example.md",
+        body: "Compensation depends on experience.",
+      },
+      {
+        id: "sourced-reviewed-hold",
+        company: "Reviewed Example",
+        role: "Senior Software Engineer",
+        status: "reviewed-hold",
+        link: "https://jobs.example.test/reviewed",
+        loc: "USA (Remote)",
+        artifact: "workspace/jobs/reviewed-example.md",
+        body: "Salary Range: $100,000 - $140,000 annually.",
+      },
+      {
+        id: "sourced-below-seniority",
+        company: "Junior Example",
+        role: "Junior Software Engineer",
+        status: "sourced",
+        link: "https://jobs.example.test/junior",
+        loc: "USA (Remote)",
+        artifact: "workspace/jobs/junior-example.md",
+        body: "The base salary range is $190,000 - $220,000 annually.",
+      },
+      {
+        id: "sourced-foreign-remote",
+        company: "Europe Example",
+        role: "Staff Platform Engineer",
+        status: "sourced",
+        link: "https://jobs.example.test/europe",
+        loc: "Europe (Remote)",
+        artifact: "workspace/jobs/europe-example.md",
+        body: "The base salary range is $190,000 - $220,000 annually.",
+      },
+      {
+        id: "sourced-too-many-office-days",
+        company: "Hybrid Example",
+        role: "Staff Platform Engineer",
+        status: "sourced",
+        link: "https://jobs.example.test/hybrid",
+        loc: "New York, NY (Hybrid)",
+        artifact: "workspace/jobs/hybrid-example.md",
+        body: "This role requires working in the office 3 days per week. Base salary: $190,000 - $220,000.",
+      },
+      {
+        id: "sourced-too-old",
+        company: "Old Example",
+        role: "Staff Platform Engineer",
+        status: "sourced",
+        link: "https://jobs.example.test/old",
+        loc: "USA (Remote)",
+        postedAt: "2026-06-01T00:00:00.000Z",
+        artifact: "workspace/jobs/old-example.md",
+        body: "The base salary range is $190,000 - $220,000 annually.",
+      },
+      {
+        id: "sourced-no-sponsorship",
+        company: "Authorization Example",
+        role: "Staff Platform Engineer",
+        status: "sourced",
+        link: "https://jobs.example.test/no-sponsorship",
+        loc: "USA (Remote)",
+        artifact: "workspace/jobs/authorization-example.md",
+        body: "The base salary range is $190,000 - $220,000 annually. We do not offer visa sponsorship.",
+      },
+      {
+        id: "sourced-unsafe-artifact",
+        company: "Unknown Capture Example",
+        role: "Staff Platform Engineer",
+        status: "sourced",
+        link: "https://jobs.example.test/unsafe-artifact",
+        loc: "USA (Remote)",
+        artifact: "workspace/jobs/../outside.md",
+        body: "Salary range: $100,000 - $120,000 annually.",
+      },
+    ];
+    for (const row of saved) {
+      writeFileSync(
+        userPath({ repoRoot }, row.artifact),
+        `---\ncompany: ${row.company}\nrole: ${row.role}\npartial: true\n---\n\n${row.body}\n`
+      );
+    }
+    sourcedUpsertBatch({
+      repoRoot,
+      rows: saved.map(({ artifact, body: _body, ...row }) => ({
+        ...row,
+        source: "fixture",
+        channel: "board",
+        base: "verify",
+        fitScore: 80,
+        fitBucket: "med",
+        fitBasis: "triage",
+        gate: "review",
+        sourcedAt: "2026-08-27T12:00:00.000Z",
+        updatedAt: "2026-08-27T12:00:00.000Z",
+        artifacts: { jd: artifact },
+        scanner: { bodyPartial: true },
+      })),
+    });
+
+    const db = openDb({ repoRoot });
+    const beforeMeta = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+    const beforeEvents = db.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count;
+    let guardCalls = 0;
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: true,
+      writeGuard: () => {
+        guardCalls += 1;
+      },
+    });
+
+    const rows = new Map(
+      db
+        .prepare("SELECT id, data FROM sourced ORDER BY id")
+        .all()
+        .map((row) => [row.id, JSON.parse(row.data)])
+    );
+    assert.equal(summary.revalidatedExisting.examined, 9);
+    assert.equal(summary.revalidatedExisting.readable, 8);
+    assert.equal(summary.revalidatedExisting.unreadable, 1);
+    assert.deepEqual(
+      new Set(summary.revalidatedExisting.hiddenIds),
+      new Set([
+        "sourced-below-floor",
+        "sourced-below-seniority",
+        "sourced-foreign-remote",
+        "sourced-too-many-office-days",
+        "sourced-too-old",
+        "sourced-no-sponsorship",
+      ])
+    );
+    assert.equal(summary.revalidatedExisting.hidden, 6);
+    assert.equal(rows.get("sourced-below-floor").status, "cut");
+    assert.equal(rows.get("sourced-below-floor").policyRevalidation.reason, "comp-below-floor");
+    assert.equal(rows.get("sourced-clears-floor").status, "sourced");
+    assert.equal(rows.get("sourced-comp-unknown").status, "sourced");
+    assert.equal(rows.get("sourced-reviewed-hold").status, "reviewed-hold");
+    assert.equal(rows.get("sourced-below-seniority").status, "cut");
+    assert.equal(rows.get("sourced-foreign-remote").status, "cut");
+    assert.equal(rows.get("sourced-too-many-office-days").status, "cut");
+    assert.equal(rows.get("sourced-too-old").status, "cut");
+    assert.equal(rows.get("sourced-no-sponsorship").status, "cut");
+    assert.equal(rows.get("sourced-unsafe-artifact").status, "sourced");
+    assert.equal(db.prepare("SELECT version FROM meta WHERE id = 1").get().version, beforeMeta + 1);
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count,
+      beforeEvents + 1
+    );
+    assert.equal(guardCalls, 1);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("DB mode merges board offers, filters their titles, and stamps board watermarks", async () => {
   const repoRoot = tempRepo();
   try {

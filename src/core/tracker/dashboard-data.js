@@ -1586,6 +1586,11 @@ function buildStoryEnrichmentSteps(trackerData) {
     .filter(Boolean);
 }
 
+function sourcedRoleIsActive(role) {
+  const status = String(role?.status || "sourced").toLowerCase();
+  return status !== "reviewed-hold" && !TERMINAL_STAGES.has(classifyStage(status));
+}
+
 function buildLatestRoles(trackerData) {
   const sourced = trackerData?.sourced || trackerData?.prospects || [];
   return [...sourced]
@@ -5352,6 +5357,7 @@ function buildReviewHoldRoles(trackerData) {
 function buildSourcedRoles(trackerData) {
   const sourced = trackerData?.sourced || trackerData?.prospects || [];
   return [...sourced]
+    .filter((role) => sourcedRoleIsActive(role))
     .sort((a, b) => Number(b.fitScore || 0) - Number(a.fitScore || 0))
     .map((role, index) => ({
       id: role.id || `sourced-${index + 1}`,

@@ -7,7 +7,7 @@ import { Readable } from "node:stream";
 import { after, test } from "node:test";
 
 import { mountSearchRoutes } from "../src/cli/search-route.mjs";
-import { closeAll } from "../src/core/db/connection.mjs";
+import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { candidateSetupInitialize, sourcingRunLatest } from "../src/core/db/verbs.mjs";
 import { saveSearchPrompts } from "../src/core/search/search-prompts.mjs";
 
@@ -131,7 +131,9 @@ test("AI web-search route streams activity before done and emits heartbeat comme
     const res = response();
     const handler = handlerFor({
       repoRoot,
-      runAiWebSearch: async ({ onProgress }) => {
+      runAiWebSearch: async ({ onProgress, writeGuard }) => {
+        assert.equal(typeof writeGuard, "function");
+        assert.doesNotThrow(() => writeGuard(openDb({ repoRoot })));
         onProgress({ type: "activity", message: "Searching saved prompt…" });
         return { searched: 1, found: 2, new: 1, duplicates: 1, errors: [] };
       },

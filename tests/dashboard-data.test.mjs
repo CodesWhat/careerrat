@@ -1947,6 +1947,36 @@ test("Dashboard adapter keeps an explicit sourced status in the pre-application 
   assert.equal(vm.jobs.funnel[1].id, "sourced");
 });
 
+test("Dashboard active sourced list excludes terminal and reviewed-hold rows", () => {
+  const vm = buildDashboardViewModel(
+    {
+      applications: [],
+      sourced: [
+        { id: "fresh", company: "Fresh Co", role: "Staff Engineer", status: "sourced" },
+        { id: "cut", company: "Cut Co", role: "Staff Engineer", status: "cut" },
+        {
+          id: "reviewed",
+          company: "Reviewed Co",
+          role: "Staff Engineer",
+          status: "reviewed-hold",
+        },
+      ],
+      sources: [],
+      communications: [],
+    },
+    { now: new Date("2026-08-27T12:00:00.000Z") }
+  );
+
+  assert.deepEqual(
+    vm.sourcedRoles.map((role) => role.id),
+    ["fresh"]
+  );
+  assert.deepEqual(
+    vm.reviewHoldRoles.map((role) => role.detailId),
+    ["reviewed"]
+  );
+});
+
 test("Dashboard adapter warns sourced roles when the same company has an active application", () => {
   const vm = buildDashboardViewModel({
     applications: [

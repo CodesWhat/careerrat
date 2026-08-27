@@ -42,6 +42,7 @@ import {
   relationshipLeadSetStatus,
   relationshipLeadUpsertBatch,
   sourcedPromote,
+  sourcedReconcilePolicyBatch,
   sourcedSetStatus,
   sourcedUpsertBatch,
   sourceWatermarkUpsert,
@@ -1042,6 +1043,50 @@ test("sourcedSetStatus patches status and note, refreshes analytics, and rejects
   assert.throws(
     () => sourcedSetStatus({ repoRoot, id: "missing-role", to: "cut" }),
     (err) => err?.code === "NOT_FOUND"
+  );
+});
+
+test("sourced policy reconciliation rolls back when the active-search guard rejects the write", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+  const before = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-promote-me").data
+  );
+  const beforeMeta = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+  const beforeEvents = db.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count;
+
+  assert.throws(
+    () =>
+      sourcedReconcilePolicyBatch({
+        repoRoot,
+        decisions: [
+          {
+            id: "sourced-promote-me",
+            bucket: "salary",
+            reason: "comp-below-floor",
+            expectedStatus: "sourced",
+            expectedUpdatedAt: "",
+            expectedJobArtifact: "",
+          },
+        ],
+        guard: () => {
+          const error = new Error("the search is no longer active");
+          error.code = "SOURCING_RUN_NOT_ACTIVE";
+          throw error;
+        },
+      }),
+    (error) => error?.code === "SOURCING_RUN_NOT_ACTIVE"
+  );
+
+  const after = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-promote-me").data
+  );
+  assert.deepEqual(after, before);
+  assert.equal(db.prepare("SELECT version FROM meta WHERE id = 1").get().version, beforeMeta);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count,
+    beforeEvents
   );
 });
 

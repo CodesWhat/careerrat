@@ -40,6 +40,7 @@ import {
 import {
   captureAndPersistOffersIfDb,
   offersWithCapturedJobs,
+  revalidatePersistedSourcedRows,
   sourcedRowsFromScanOffers,
 } from "../src/core/scoring/sourced-persistence.mjs";
 import {
@@ -553,6 +554,17 @@ export async function runSourcedScan({
   }
 
   if (write) ensureActive();
+  const revalidatedExisting =
+    write && !standaloneConfigMode
+      ? revalidatePersistedSourcedRows({
+          repoRoot,
+          env,
+          config: candidateConfig,
+          now: savedAt,
+          locationFilter,
+          guard: writeGuard,
+        })
+      : { examined: 0, readable: 0, unreadable: 0, hidden: 0, hiddenIds: [] };
   const persistedOffers = write
     ? standaloneConfigMode
       ? offersWithCapturedJobs({ repoRoot, env, offers: filtered.kept, savedAt })
@@ -638,6 +650,7 @@ export async function runSourcedScan({
       filtered.overflow.length,
     errors: scanned.errors,
     coldFamilies,
+    revalidatedExisting,
     offers: outputOffers,
   };
 

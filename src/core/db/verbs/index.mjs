@@ -138,7 +138,12 @@ export {
   sourceConfigGet,
   sourceConfigPut,
 } from "./source-config.mjs";
-export { sourcedPromote, sourcedSetStatus, sourcedUpsertBatch } from "./sourced.mjs";
+export {
+  sourcedPromote,
+  sourcedReconcilePolicyBatch,
+  sourcedSetStatus,
+  sourcedUpsertBatch,
+} from "./sourced.mjs";
 export {
   SOURCING_RUN_STATUSES,
   sourcingRunComplete,
