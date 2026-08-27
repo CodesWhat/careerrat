@@ -203,6 +203,46 @@ test("runAiWebSearch rejects aggregator result pages and expired redirects befor
   assert.deepEqual(resolvedUrls, [directUrl]);
 });
 
+test("runAiWebSearch rejects generic employer career hubs before their page copy can impersonate a posting", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  const resolvedUrls = [];
+  const genericCareersUrl = "https://careers.example.test/careers/";
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: assistantJson({
+      roles: [
+        role({
+          company: "Example Hospitality",
+          title: "General Manager (New City location)",
+          url: genericCareersUrl,
+          body_text:
+            "General Manager is one option in this employer's multi-role application form.",
+        }),
+      ],
+      queries_run: [{ prompt_id: "p1", query: "hospitality management jobs" }],
+    }),
+    resolveJobUrlImpl: async (url) => {
+      resolvedUrls.push(url);
+      return canonicalResolver({
+        bodyText: fullJd(
+          "Join our team. Select from General Manager, Barista, Shift Lead, and Team Member, then submit the shared application form"
+        ),
+      })(url);
+    },
+  });
+
+  assert.equal(result.found, 1);
+  assert.deepEqual(
+    { invalid: result.invalid, persisted: result.new, resolvedUrls },
+    { invalid: 1, persisted: 0, resolvedUrls: [] }
+  );
+  assert.equal(
+    readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search").length,
+    0
+  );
+});
+
 test("AI web search distinguishes posting details from known aggregator result pages", () => {
   for (const url of [
     "https://www.linkedin.com/jobs/view/assistant-general-manager-5186736008",
@@ -211,6 +251,8 @@ test("AI web search distinguishes posting details from known aggregator result p
     "https://wellfound.com/jobs/123456-platform-engineer",
     "https://www.ziprecruiter.com/c/Acme/Job/Bar-Manager/-in-New-York,NY?jid=abc123",
     "https://careers.aquarestaurantgroup.com/new-york",
+    "https://careers.example.test/careers/general-manager-new-york",
+    "https://careers.example.test/careers?gh_jid=123456",
   ]) {
     assert.equal(isPostingEvidenceUrl(url), true, url);
   }
@@ -223,6 +265,12 @@ test("AI web search distinguishes posting details from known aggregator result p
     "https://www.indeed.com/q-head-bartender-l-new-york-ny-jobs.html",
     "https://www.glassdoor.com/Job/new-york-bar-manager-jobs-SRCH_IL.0,8_IC1132348.htm",
     "https://wellfound.com/jobs",
+    "https://careers.example.test/",
+    "https://careers.example.test/careers/",
+    "https://example.test/careers/apply/",
+    "https://example.test/careers/application/",
+    "https://example.test/jobs/openings/",
+    "https://example.test/jobs/open-positions/",
   ]) {
     assert.equal(isPostingEvidenceUrl(url), false, url);
   }

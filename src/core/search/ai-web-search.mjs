@@ -247,6 +247,58 @@ function sourceHost(url) {
   }
 }
 
+const GENERIC_CAREER_HUB_SEGMENTS = new Set([
+  "application",
+  "applications",
+  "apply",
+  "career",
+  "careers",
+  "employment",
+  "index",
+  "index.html",
+  "job",
+  "jobs",
+  "join-our-team",
+  "join-us",
+  "openings",
+  "open-positions",
+  "opportunities",
+  "positions",
+  "search",
+  "work-for-us",
+  "work-with-us",
+]);
+
+const POSTING_ID_QUERY_KEYS = new Set([
+  "gh_jid",
+  "jid",
+  "jk",
+  "jl",
+  "job_id",
+  "jobid",
+  "joblistingid",
+  "req_id",
+  "reqid",
+  "requisition_id",
+  "requisitionid",
+  "vjk",
+]);
+
+function isGenericCareerHubUrl(url) {
+  const hasPostingId = [...url.searchParams].some(
+    ([key, value]) => POSTING_ID_QUERY_KEYS.has(key.toLowerCase()) && value.trim()
+  );
+  if (hasPostingId) return false;
+
+  const segments = url.pathname
+    .split("/")
+    .map((segment) => segment.trim().toLowerCase())
+    .filter(Boolean);
+  return (
+    segments.length === 0 || segments.every((segment) => GENERIC_CAREER_HUB_SEGMENTS.has(segment))
+  );
+}
+
 export function isPostingEvidenceUrl(rawUrl) {
   let url;
   try {
@@ -265,6 +317,7 @@ export function isPostingEvidenceUrl(rawUrl) {
 
   const host = url.hostname.replace(/^www\./i, "").toLowerCase();
   const path = url.pathname.toLowerCase();
+  if (isGenericCareerHubUrl(url)) return false;
   if (host === "linkedin.com" || host.endsWith(".linkedin.com")) {
     return /^\/jobs\/view\/[^/]*\d+\/?$/i.test(path);
   }
