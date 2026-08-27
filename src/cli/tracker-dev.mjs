@@ -353,7 +353,7 @@ export function createDevServer({
   // (POST /api/intake/confirm), and the read/dismiss/re-classify routes
   // alongside it. Interactive dispatches go through workspaceAgentRuntime so
   // buttons preserve workspace-main context.
-  mountIntakeRoutes({
+  const intakeRoutes = mountIntakeRoutes({
     addRoute,
     repoRoot,
     env,
@@ -606,6 +606,7 @@ export function createDevServer({
     stopRuntimeSignIns: stopInstalledRuntimeSignIns,
     shutdownAiWebSearch: searchRoutes.shutdownAiWebSearch,
     shutdownSourcingWorkers: workspaceAgentRuntime.shutdownSourcingWorkers,
+    shutdownIntake: intakeRoutes.shutdownLaneB,
   };
 }
 
@@ -655,6 +656,7 @@ async function main() {
     dev.stopRuntimeSignIns();
     await dev.shutdownSourcingWorkers();
     await dev.shutdownAiWebSearch();
+    await dev.shutdownIntake();
     await dev.browserSessionManager.shutdown();
     dev.server.close(() => process.exit(0));
     // Don't hang on a lingering socket.

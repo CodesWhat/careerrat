@@ -265,7 +265,7 @@ function bootServer(repoRoot, opts = {}) {
   function addRoute(method, path, handler) {
     routes.set(`${method} ${path}`, handler);
   }
-  mountIntakeRoutes({
+  const intakeRuntime = mountIntakeRoutes({
     addRoute,
     repoRoot,
     env: opts.env ?? PROXY_ENV,
@@ -275,6 +275,7 @@ function bootServer(repoRoot, opts = {}) {
     chatRuntime: opts.chatRuntime,
     workspaceAgentRuntime: opts.workspaceAgentRuntime,
     captureTextImpl: opts.captureTextImpl,
+    heartbeatMs: opts.heartbeatMs,
   });
 
   const server = createServer((req, res) => {
@@ -286,6 +287,7 @@ function bootServer(repoRoot, opts = {}) {
     }
     dispatchHttpRoute(route, req, res);
   });
+  server.intakeRuntime = intakeRuntime;
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => resolve(server));
   });
@@ -1737,6 +1739,77 @@ test("POST /api/intake/confirm: Lane B settles to 'error' when the background ru
     await waitForPredicate(() => intakeOne({ repoRoot, id }).status === "error");
     const settled = intakeOne({ repoRoot, id });
     assert.match(settled.error, /skill run blew up/);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("Lane B heartbeats while quiet and settles to a retryable error during server shutdown", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const { id } = intakeCapture({ repoRoot, rawInput: "a JD", inputKind: "text" });
+  intakeUpdate({
+    repoRoot,
+    id,
+    patch: {
+      status: "proposed",
+      kind: "jd-text",
+      classification: classificationFixture(),
+      trackerMatch: null,
+      dispatch: { lane: "B", action: "run_skill", params: { skill: "evaluate-job" } },
+    },
+  });
+
+  const server = await bootServer(repoRoot, {
+    heartbeatMs: 5,
+    runSkillStream: async ({ signal }) =>
+      new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }),
+  });
+  try {
+    const { body } = await postJson(server, "/api/intake/confirm", { id });
+    assert.equal(body.item.status, "running");
+    assert.equal(server.intakeRuntime.ownsLaneB(id), true);
+    const startedAt = body.item.operation.heartbeatAt;
+    await waitForPredicate(() => intakeOne({ repoRoot, id }).operation.heartbeatAt !== startedAt);
+
+    await server.intakeRuntime.shutdownLaneB();
+    const settled = intakeOne({ repoRoot, id });
+    assert.equal(server.intakeRuntime.ownsLaneB(id), false);
+    assert.equal(settled.status, "error");
+    assert.equal(settled.operation.error.code, "INTAKE_SERVER_STOPPED");
+    assert.match(settled.error, /app closed/i);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("mounting intake routes immediately recovers an orphaned Lane B run", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const { id } = intakeCapture({ repoRoot, rawInput: "a JD", inputKind: "text" });
+  intakeUpdate({
+    repoRoot,
+    id,
+    patch: {
+      status: "running",
+      operation: {
+        id: `${id}:attempt-old`,
+        status: "running",
+        skill: "evaluate-job",
+        startedAt: "2026-08-27T12:00:00.000Z",
+        heartbeatAt: "2026-08-27T12:00:30.000Z",
+      },
+    },
+  });
+
+  const server = await bootServer(repoRoot);
+  try {
+    const settled = intakeOne({ repoRoot, id });
+    assert.equal(settled.status, "error");
+    assert.equal(settled.operation.error.code, "INTAKE_SERVER_RESTARTED");
+    assert.match(settled.error, /restarted/i);
   } finally {
     await closeServer(server);
   }
