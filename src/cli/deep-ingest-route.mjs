@@ -138,13 +138,26 @@ function operationView(operation) {
   return visible;
 }
 
-function sendOperation(res, started) {
+function operationSubject(operation, fallback = {}) {
+  const request = { ...(operation?.request || {}), ...(fallback || {}) };
+  const sourceId = String(request.sourceId || fallback.sourceId || "").trim();
+  const sourceVersion = Number(request.sourceVersion || fallback.sourceVersion);
+  const targetShape = String(request.targetShape || fallback.targetShape || "").trim();
+  return {
+    ...(sourceId ? { sourceId } : {}),
+    ...(Number.isInteger(sourceVersion) && sourceVersion > 0 ? { sourceVersion } : {}),
+    ...(targetShape ? { targetShape } : {}),
+  };
+}
+
+function sendOperation(res, started, fallbackSubject) {
   const active = ["queued", "running"].includes(started.operation.status);
   sendJson(res, active ? 202 : 200, {
     ok: true,
     data: {
       reused: started.reused,
       operation: operationView(started.operation),
+      subject: operationSubject(started.operation, fallbackSubject),
     },
   });
 }
@@ -216,7 +229,7 @@ export function mountDeepIngestRoutes({
           input: prepared.request,
         });
         prepared = { ...prepared, created: false };
-        sendOperation(res, started);
+        sendOperation(res, started, prepared.request);
         return;
       }
       const scanned = await scanSource({ input: body, fetchImpl });
@@ -339,7 +352,7 @@ export function mountDeepIngestRoutes({
         });
         prepared = { ...prepared, created: false };
         artifactPersisted = true;
-        sendOperation(res, started);
+        sendOperation(res, started, prepared.request);
         return;
       }
       const scanned = await scanSource({ input, fetchImpl });
@@ -381,7 +394,7 @@ export function mountDeepIngestRoutes({
           kind: DEEP_INGEST_PROPOSAL_BUILD_KIND,
           input: body,
         });
-        sendOperation(res, started);
+        sendOperation(res, started, body);
         return;
       }
       const data = await buildAndPersistProposals({

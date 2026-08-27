@@ -626,6 +626,9 @@ test("Deep Ingest routes delegate source scans, linked retries, and proposal bui
   });
   assert.equal(source.status, 202);
   assert.equal(source.body.data.operation.kind, "deep-ingest-source-scan");
+  assert.match(source.body.data.subject.sourceId, /^deep_src_/);
+  assert.equal(source.body.data.subject.sourceVersion, 1);
+  assert.equal(source.body.data.subject.targetShape, "evidence");
   assert.equal("request" in source.body.data.operation, false);
   assert.equal("ownerId" in source.body.data.operation, false);
   assert.equal("fence" in source.body.data.operation, false);
@@ -636,12 +639,17 @@ test("Deep Ingest routes delegate source scans, linked retries, and proposal bui
   });
   assert.equal(proposals.status, 202);
   assert.equal(proposals.body.data.operation.kind, "deep-ingest-proposal-build");
+  assert.deepEqual(proposals.body.data.subject, {
+    sourceId: "deep-src-owned",
+    targetShape: "evidence",
+  });
 
   const retry = await postJsonDirect(routes, "/api/deep-ingest/sources/retry", {
     operationId: "operation-1",
   });
   assert.equal(retry.status, 202);
   assert.equal(retry.body.data.operation.retryOf, "operation-1");
+  assert.equal(retry.body.data.subject.sourceId, "deep-src-owned");
   assert.equal(calls[0][0], "start");
   assert.equal(calls[0][1].kind, "deep-ingest-source-scan");
   assert.match(calls[0][1].input.sourceId, /^deep_src_/);

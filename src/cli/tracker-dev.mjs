@@ -44,6 +44,7 @@ import {
   sourceRelationshipsInApp,
   syncStatusesInApp,
 } from "../core/automation/browser-workflows.mjs";
+import { createDeepIngestAppOperationKinds } from "../core/deep-ingest/app-operations.mjs";
 import {
   COMPANY_DISCOVERY_OPERATION_KIND,
   createCompanyDiscoveryOperationKind,
@@ -275,6 +276,7 @@ export function createDevServer({
     env,
     kinds: {
       [COMPANY_DISCOVERY_OPERATION_KIND]: createCompanyDiscoveryOperationKind({ repoRoot, env }),
+      ...createDeepIngestAppOperationKinds({ repoRoot, env }),
       ...appOperationKinds,
     },
   });
@@ -356,7 +358,7 @@ export function createDevServer({
   // yet" error until `careerrat data init`/`import` creates one; there is no
   // page mounted here (no /data view), just the API surface CLI verbs mirror.
   mountDataRoutes({ addRoute, repoRoot, env });
-  mountDeepIngestRoutes({ addRoute, repoRoot, env });
+  mountDeepIngestRoutes({ addRoute, repoRoot, env, appOperations });
 
   // Productization — the first "app calls AI -> structured result -> typed DB
   // write" pipeline for application state (src/cli/track-outcome-route.mjs):
