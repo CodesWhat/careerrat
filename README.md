@@ -315,9 +315,10 @@ npm link
 careerrat start claude
 ```
 
-The repository convention is in [AGENTS.md](AGENTS.md). Architecture, release,
-and product direction live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
-[docs/RELEASE.md](docs/RELEASE.md), and [docs/ROADMAP.md](docs/ROADMAP.md).
+The repository convention is in [AGENTS.md](AGENTS.md). Public architecture and
+release documentation live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
+[docs/RELEASE.md](docs/RELEASE.md). Working product planning stays local in
+`.planning/`.
 
 ## Community and trust
 

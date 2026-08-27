@@ -69,7 +69,6 @@ const systemPrereqs = [
   "AGENTS.md",
   "CLAUDE.md",
   "docs/DATA_CONTRACT.md",
-  "docs/ROADMAP.md",
   ".agents/skills/ingest-profile/SKILL.md",
   ".agents/skills/evaluate-job/SKILL.md",
   ".agents/skills/email-comms/SKILL.md",

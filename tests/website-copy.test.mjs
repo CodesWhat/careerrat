@@ -181,8 +181,6 @@ test("public copy keeps local Application defaults and plain-English onboarding 
     browserAutomation: "apps/docs/content/docs/advanced/browser-automation.mdx",
     architecture: "docs/ARCHITECTURE.md",
     changelog: "CHANGELOG.md",
-    roadmap: "docs/ROADMAP.md",
-    acceptance: ".planning/QA-ACCEPTANCE.md",
   };
   const copy = Object.fromEntries(
     await Promise.all(
@@ -190,7 +188,7 @@ test("public copy keeps local Application defaults and plain-English onboarding 
     )
   );
 
-  for (const name of ["readme", "docsIndex", "changelog", "roadmap"]) {
+  for (const name of ["readme", "docsIndex", "changelog"]) {
     assert.match(
       copy[name],
       /what would make one job worth applying to before another/i,
@@ -225,20 +223,6 @@ test("public copy keeps local Application defaults and plain-English onboarding 
 
   assert.match(copy.architecture, /excluded from AI drafting/i);
   assert.match(copy.architecture, /explicit saved local policy or exact answer/i);
-  for (const name of ["roadmap", "acceptance"]) {
-    assert.match(
-      copy[name],
-      /(?:PASS:[^\n]*Application defaults|Application defaults[\s\S]{0,500}(?:implemented|now offers)|implemented[\s\S]{0,500}Application defaults)/i
-    );
-    assert.match(
-      copy[name],
-      /Application defaults[\s\S]{0,1200}(?:follow-up )?live (?:Greenhouse )?run[\s\S]{0,220}filled 22 fields[\s\S]{0,180}zero\s+unresolved fields/i
-    );
-    assert.doesNotMatch(
-      copy[name],
-      /Application defaults[\s\S]{0,500}(?:needs implementation plus fresh live acceptance|live (?:application )?retest[\s\S]{0,120}(?:is |remains )?pending)/i
-    );
-  }
 });
 
 test("website sections keep a calm vertical rhythm", async () => {
@@ -258,7 +242,6 @@ test("public surfaces keep the provider-neutral installed-runtime contract align
     runtime: "docs/CHAT_FIRST_RUNTIME.md",
     windows: "docs/WINDOWS.md",
     architecture: "docs/ARCHITECTURE.md",
-    roadmap: "docs/ROADMAP.md",
   };
   const copy = Object.fromEntries(
     await Promise.all(
@@ -282,9 +265,6 @@ test("public surfaces keep the provider-neutral installed-runtime contract align
     );
     assert.doesNotMatch(copy[name], /Gemini CLI|OpenCode|GitHub Copilot|Hermes Agent/);
   }
-
-  assert.match(copy.roadmap, /Claude Code and Codex are the only supported runtime choices/);
-  assert.match(copy.roadmap, /packaged app invokes the selected\s+installed CLI directly/i);
 
   assert.doesNotMatch(
     combined,

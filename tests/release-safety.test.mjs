@@ -104,11 +104,7 @@ test("product apps and archived prototypes are consolidated out of the repositor
       `${staleRoot}/ should not remain at the repository root`
     );
   }
-  for (const expected of [
-    "apps/website/package.json",
-    "apps/docs/package.json",
-    ".planning/archive/mockups/index.html",
-  ]) {
+  for (const expected of ["apps/website/package.json", "apps/docs/package.json"]) {
     assert.equal(existsSync(join(root, expected)), true, `${expected} should exist`);
   }
   assert.equal(
@@ -118,6 +114,11 @@ test("product apps and archived prototypes are consolidated out of the repositor
   );
   const trackedPaths = new Set(
     execFileSync("git", ["ls-files"], { cwd: root, encoding: "utf8" }).trim().split("\n")
+  );
+  assert.equal(
+    [...trackedPaths].some((path) => path.startsWith(".planning/")),
+    false,
+    ".planning/ is local-only and must not be tracked"
   );
   assert.equal(
     trackedPaths.has("apps/docs/next-env.d.ts"),
@@ -154,10 +155,9 @@ test("product apps and archived prototypes are consolidated out of the repositor
 test("onboarding does not ask candidates to choose implementation modes", async () => {
   const router = await readText("AGENTS.md");
   const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
-  const roadmap = await readText("docs/ROADMAP.md");
   const setup = await readText("docs/SETUP.md");
   const installGuide = await readText("apps/docs/content/docs/getting-started/install.mdx");
-  for (const text of [router, skill, roadmap, setup, installGuide]) {
+  for (const text of [router, skill, setup, installGuide]) {
     assert.doesNotMatch(text, /Basic vs Advanced/i);
     assert.doesNotMatch(text, /\b(?:Basic|Advanced) mode\b/i);
     assert.doesNotMatch(text, /Do you want \*\*(?:Basic|Deep|Simple)/i);

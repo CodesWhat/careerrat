@@ -124,7 +124,7 @@ test("desktop staging retains the documentation required by cold-start doctor", 
   ]);
   const pkg = JSON.parse(packageText);
 
-  for (const path of ["docs/DATA_CONTRACT.md", "docs/ROADMAP.md"]) {
+  for (const path of ["docs/DATA_CONTRACT.md"]) {
     assert.match(
       doctor,
       new RegExp(escapeRegExp(path)),

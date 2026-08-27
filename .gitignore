@@ -72,18 +72,16 @@ tracker-*.png
 # Design handoff archives dropped at repo root — extracted where needed, never committed.
 /*.zip
 
-# Private working roadmap + internal planning docs (names the private origin,
-# competitor analysis, and personal context). The PUBLIC roadmap is docs/ROADMAP.md.
-# Anchor to root with a leading slash — a bare "ROADMAP.md" also ignores the public
-# docs/ROADMAP.md (matches in every directory), which must stay tracked.
+# Private working roadmap + internal planning docs.
+/.planning/
+# Anchor root-only legacy names so matching files elsewhere keep their own policy.
 /ROADMAP.md
 /ROADMAP-ARCHIVE.md
 /CLI-PARITY-EXEC-SUMMARY.html
 /RUNTIME-PARITY-PLAN.md
 /CODE-REVIEW-FINDINGS.md
 docs/COMPARISON.md
-# Internal build-spec artifacts — name the private origin / competitor.
-# Moved from docs/ to .internal/ so they never sit in a committed directory.
+# Internal build-spec artifacts.
 .internal/
 
 # Consolidated local user data root (candidate/workspace/generated config/internal).

@@ -47,9 +47,8 @@ test("public setup docs expose the neutral direct Claude Code and Codex contract
 });
 
 test("v0.16.5 docs record the verified public release and preserve v0.16.4 history", async () => {
-  const [changelog, roadmap, readme, install] = await Promise.all([
+  const [changelog, readme, install] = await Promise.all([
     readFile("CHANGELOG.md", "utf8"),
-    readFile("docs/ROADMAP.md", "utf8"),
     readFile("README.md", "utf8"),
     readFile("apps/docs/content/docs/getting-started/install.mdx", "utf8"),
   ]);
@@ -84,38 +83,6 @@ test("v0.16.5 docs record the verified public release and preserve v0.16.4 histo
     changelog,
     /PR review, publication, production deployment[^.]*remain pending/i
   );
-
-  assert.match(roadmap, /Superseding v0\.16 release ledger/i);
-  assert.match(roadmap, /v0\.16\.1 hotfix checkpoint/i);
-  assert.match(roadmap, /v0\.16\.2 guided setup checkpoint/i);
-  assert.match(roadmap, /never used an agentic CLI/i);
-  assert.match(roadmap, /packaged-app-only, macOS-only, and Claude-only/i);
-  assert.match(roadmap, /I already use another AI tool/i);
-  assert.match(roadmap, /hosted-access email and send controls/i);
-  assert.match(roadmap, /website runtime-marketing sentence/i);
-  assert.match(roadmap, /calmer section spacing/i);
-  assert.match(roadmap, /duplicate onboarding prompt repair/i);
-  assert.match(roadmap, /completed homes/i);
-  assert.match(roadmap, /internal résumé-upload/i);
-  assert.match(roadmap, /TERM-ignoring child/i);
-  assert.match(roadmap, /ACP adapters remain diagnostic-only/i);
-  assert.match(roadmap, /v0\.16\.0 is released and deployed/i);
-  assert.match(roadmap, /Packaging and release \| Released and verified/i);
-  assert.match(roadmap, /protected PRs #217 and #218 merged/i);
-  assert.match(roadmap, /signed v0\.16\.0 tag points to the exact promotion merge on `main`/i);
-  assert.match(roadmap, /Homebrew cask is 0\.16\.0/i);
-  assert.match(roadmap, /Windows build, install, launch, export, and uninstall QA are green/i);
-  assert.match(roadmap, /SignPath requires project reputation/i);
-  assert.doesNotMatch(roadmap, /fresh packaged rebuild and install/i);
-  assert.doesNotMatch(roadmap, /release publication is still pending/i);
-  assert.doesNotMatch(roadmap, /not released or deployed/i);
-  assert.doesNotMatch(roadmap, /Publication pending/i);
-  assert.match(roadmap, /v0\.16\.4 is released and verified/i);
-  assert.match(roadmap, /v0\.16\.5 is released and verified/i);
-  assert.match(roadmap, /protected\s+PRs #232, #233, and #234 merged/i);
-  assert.match(roadmap, /native\s+signed 0\.16\.3-to-0\.16\.4 update/i);
-  assert.match(roadmap, /signed `v0\.16\.5` tag points to the exact `main` promotion merge/i);
-  assert.match(roadmap, /native signed 0\.16\.4-to-0\.16\.5 update/i);
 
   for (const publicCopy of [readme, install]) {
     assert.match(publicCopy, /v0\.16\.5 is the current public release/i);
