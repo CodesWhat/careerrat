@@ -23,6 +23,7 @@ import {
 } from "../src/core/db/verbs.mjs";
 import {
   buildSearchPromptContext,
+  generateSearchPrompts,
   getSearchPrompts,
   saveSearchPrompts,
 } from "../src/core/search/search-prompts.mjs";
@@ -76,6 +77,58 @@ test("saved search prompts carry the candidate-input fingerprint they were gener
   const stale = getSearchPrompts({ repoRoot });
   assert.notEqual(stale.inputFingerprint, fresh.inputFingerprint);
   assert.equal(stale.savedInputFingerprint, fresh.savedInputFingerprint);
+});
+
+test("generateSearchPrompts uses the exact frozen research.web execution plan", async () => {
+  const repoRoot = repo();
+  const executionPlan = {
+    policyVersion: 1,
+    operation: "research.web",
+    runtimeId: "codex",
+    adapterVersion: 1,
+    requested: { quality: "balanced", reasoning: "medium" },
+    resolved: {
+      quality: "balanced",
+      reasoning: "medium",
+      model: "gpt-5.6-terra",
+      modelSource: "alias",
+      effort: "medium",
+      speedTier: null,
+    },
+    fallback: null,
+  };
+  const signal = new AbortController().signal;
+  let received;
+
+  const outcome = await generateSearchPrompts({
+    repoRoot,
+    config: {
+      targeting: {
+        role_buckets: [{ name: "Engineering", titles: ["Staff Software Engineer"] }],
+      },
+      profile: {},
+    },
+    executionPlan,
+    signal,
+    call: async (options) => {
+      received = options;
+      return {
+        text: JSON.stringify({
+          prompts: [
+            { text: "Find Staff Software Engineer roles." },
+            { text: "Find senior software engineering openings." },
+          ],
+        }),
+        executionPlan: options.executionPlan,
+      };
+    },
+  });
+
+  assert.equal(outcome.body.ok, true);
+  assert.deepEqual(received.executionPlan, executionPlan);
+  assert.equal(received.useExecutionPlanRoute, true);
+  assert.equal(received.signal, signal);
+  assert.deepEqual(outcome.body.ai.executionPlan, executionPlan);
 });
 
 test("buildSearchPromptContext: omits application_limits/company_history by default", () => {

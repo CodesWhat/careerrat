@@ -82,7 +82,12 @@ import { captureIntakeText, mountIntakeRoutes } from "./intake-route.mjs";
 import { mountInterviewPrepRoutes } from "./interview-prep-route.mjs";
 import { mountJobArtifactRoutes } from "./job-artifact-route.mjs";
 import { mountLogoRoutes } from "./logo-route.mjs";
-import { mountOnboardRoutes } from "./onboard-route.mjs";
+import {
+  createOnboardingSearchPromptOperationKind,
+  mountOnboardRoutes,
+  ONBOARDING_SEARCH_PROMPTS_OPERATION_KIND,
+  recoverOnboardingSearchPromptOperations,
+} from "./onboard-route.mjs";
 import { mountPacketRoutes } from "./packet-route.mjs";
 import { mountSearchRoutes } from "./search-route.mjs";
 import { mountSkillRunRoute } from "./skill-run-route.mjs";
@@ -291,6 +296,10 @@ export function createDevServer({
           startCompanyDiscoveryOperation({ appOperations, input }),
       }),
       [COMPANY_DISCOVERY_OPERATION_KIND]: createCompanyDiscoveryOperationKind({ repoRoot, env }),
+      [ONBOARDING_SEARCH_PROMPTS_OPERATION_KIND]: createOnboardingSearchPromptOperationKind({
+        repoRoot,
+        env,
+      }),
       ...createDeepIngestAppOperationKinds({ repoRoot, env }),
       ...appOperationKinds,
     },
@@ -311,7 +320,13 @@ export function createDevServer({
   // (candidate file seeding, resume parsing, BYOK key storage) —
   // src/cli/onboard-route.mjs. No page mounted here — apps/web's SPA
   // onboarding wizard is the only client.
-  const onboardRoutes = mountOnboardRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
+  const onboardRoutes = mountOnboardRoutes({
+    addRoute,
+    repoRoot,
+    env,
+    workspaceAgentRuntime,
+    appOperations,
+  });
 
   // M8 — the /app/onboarding SPA wizard's AI-assist surface: server-side
   // prompt templates for the Targeting step's "Roland-suggest" chips
@@ -658,7 +673,11 @@ export function createDevServer({
 
     try {
       runtimeOwnership = acquireWorkspaceRuntimeOwnership({ repoRoot, env });
-      appOperations.recoverOrphans();
+      const recoveredAppOperations = appOperations.recoverOrphans();
+      await recoverOnboardingSearchPromptOperations({
+        appOperations,
+        recovered: recoveredAppOperations,
+      });
       workspaceAgentRuntime.recoverOrphanedSourcingRuns();
       await workspaceAgentRuntime.recoverAdjacentRoleCoaching?.();
       intakeRoutes.recoverOrphans();

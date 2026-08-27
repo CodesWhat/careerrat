@@ -314,8 +314,16 @@ function normalizePromptTexts(prompts) {
 // and the onboarding best-effort hook) pass the result to saveSearchPrompts.
 // ---------------------------------------------------------------------------
 
-export async function generateSearchPrompts({ repoRoot, env = process.env, call, config } = {}) {
-  const context = buildSearchPromptContext({ repoRoot, env, config });
+export async function generateSearchPrompts({
+  repoRoot,
+  env = process.env,
+  call,
+  config,
+  context: frozenContext,
+  executionPlan,
+  signal,
+} = {}) {
+  const context = frozenContext || buildSearchPromptContext({ repoRoot, env, config });
   if (!Object.keys(context).length) {
     return makeBoundedAIEnvelope({
       ok: false,
@@ -342,6 +350,8 @@ export async function generateSearchPrompts({ repoRoot, env = process.env, call,
     root: repoRoot,
     env,
     call,
+    executionPlan,
+    signal,
     system:
       "You generate AI job-search prompt JSON for CareerRat's search-jobs route. Return only JSON matching the supplied schema — no prose outside the JSON.",
     messages: [

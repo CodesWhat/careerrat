@@ -3383,6 +3383,88 @@ describe("POST /api/onboard/quick-start", () => {
     }
   });
 
+  it("product quick-start enqueues durable AI prompt generation and exposes its plan receipt", async () => {
+    const repoRoot = buildTempRoot();
+    const operation = {
+      id: "app-operation-onboarding-search-prompts",
+      kind: "onboarding.search-prompts",
+      status: "running",
+      executionPlan: {
+        policyVersion: 1,
+        operation: "research.web",
+        runtimeId: "codex",
+        adapterVersion: 1,
+        requested: { quality: "balanced", reasoning: "medium" },
+        resolved: {
+          quality: "balanced",
+          reasoning: "medium",
+          model: "gpt-5.6-terra",
+          modelSource: "alias",
+          effort: "medium",
+          speedTier: null,
+        },
+        fallback: null,
+      },
+    };
+    const starts = [];
+    const appOperations = {
+      async start(input) {
+        starts.push(input);
+        return { reused: false, operation };
+      },
+    };
+    const workspaceAgentRuntime = {
+      startsSearchInBackground: true,
+      async executeIntent() {
+        return {
+          operationResult: {
+            ok: true,
+            reused: true,
+            run: {
+              id: "first-search-with-prompt-operation",
+              purpose: "first-search",
+              status: "completed",
+            },
+            sources: { deterministicSources: { attempted: 1 } },
+          },
+        };
+      },
+    };
+    const { server } = await bootServer(repoRoot, {}, { workspaceAgentRuntime, appOperations });
+    try {
+      await postJson(server, "/api/onboard/init", {});
+      await postJson(server, "/api/onboard/resume", {
+        text: "Ada Lovelace\nada@example.com\nNew York, NY\n\nBuilt agent workflows.",
+        save: true,
+      });
+      await postJson(server, "/api/onboard/candidate/profile", {
+        data: {
+          candidate: {
+            full_name: "Ada Lovelace",
+            email: "ada@example.com",
+            domain: "software engineering",
+          },
+          location: { home: "New York, NY", remote: true },
+        },
+      });
+      await postJson(server, "/api/onboard/candidate/targeting", {
+        data: {
+          role_buckets: [
+            { name: "Applied AI", priority: "primary", titles: ["Applied AI Engineer"] },
+          ],
+        },
+      });
+
+      const { status, body } = await postJson(server, "/api/onboard/quick-start", {});
+
+      assert.equal(status, 200);
+      assert.deepEqual(starts, [{ kind: "onboarding.search-prompts", input: {} }]);
+      assert.deepEqual(body.searchPromptsOperation, operation);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
   it("quick-start preserves existing DB source config entries and watermarks", async () => {
     const repoRoot = buildTempRoot();
     const { server } = await bootServer(repoRoot, {}, { fetchImpl: firstSearchFetchStub() });

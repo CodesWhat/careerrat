@@ -57,7 +57,11 @@ import { writeLocalAiKey } from "../core/ai/ai-env.mjs";
 import { loadAIPreferences } from "../core/ai/ai-preferences.mjs";
 import { makeBoundedAIEnvelope, runBoundedAI } from "../core/ai/bounded-ai.mjs";
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
-import { aiRuntimeIdForRoute, resolveAIExecutionPlan } from "../core/ai/operation-policy.mjs";
+import {
+  aiRuntimeIdForRoute,
+  assertAIExecutionPlanForOperation,
+  resolveAIExecutionPlan,
+} from "../core/ai/operation-policy.mjs";
 import { validateAiProviderKey } from "../core/ai/provider-validation.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
 import { readUsageEvents, summarizeUsageEvents } from "../core/ai/usage-log.mjs";
@@ -125,6 +129,7 @@ import {
 import { validate } from "../core/profile/schema-validator.mjs";
 import { parseYaml, stringifyYaml } from "../core/profile/yaml.mjs";
 import {
+  buildSearchPromptContext,
   generateSearchPrompts,
   getSearchPrompts,
   saveSearchPrompts,
@@ -141,6 +146,7 @@ const MAX_BODY_BYTES = 1024 * 1024; // 1MB — same cap skill-run-route.mjs uses
 const RESUME_MAX_BODY_BYTES = 2 * 1024 * 1024; // 2MB — resume text can be long.
 const ONBOARDING_DRAFT_PATH = ".internal/onboarding-draft.json";
 const ONBOARDING_DRAFT_MAX_STEP = 7;
+export const ONBOARDING_SEARCH_PROMPTS_OPERATION_KIND = "onboarding.search-prompts";
 
 // POST /api/onboard/resume-ai's binary-upload cap (frozen M8 contract: 5MB)
 // and the extensions it accepts. Uploaded text résumés use the same structured
@@ -1085,12 +1091,176 @@ export function prepareQuickStartSourcing({ repoRoot, env = process.env } = {}) 
   };
 }
 
+function resolveOnboardingSearchPromptExecutionPlan({ repoRoot, env }) {
+  const route = resolveAIRoute(env, { repoRoot });
+  const runtimeId = aiRuntimeIdForRoute(route);
+  if (!runtimeId) {
+    const error = new Error(route.error || "Select a ready AI provider before generating prompts.");
+    error.code = "NO_AI_ROUTE";
+    throw error;
+  }
+  return resolveAIExecutionPlan({
+    operation: "research.web",
+    runtimeId,
+    preferences: loadAIPreferences({ repoRoot, env }),
+  });
+}
+
+function searchPromptOperationResultRef({ request, executionPlan, state = "saved" }) {
+  return {
+    type: "search-prompts",
+    id: request.inputFingerprint,
+    state,
+    executionPlan,
+  };
+}
+
+export function createOnboardingSearchPromptOperationKind({
+  repoRoot,
+  env = process.env,
+  buildContext = () => buildSearchPromptContext({ repoRoot, env }),
+  resolveExecutionPlan = () => resolveOnboardingSearchPromptExecutionPlan({ repoRoot, env }),
+  generateSearchPromptsImpl = generateSearchPrompts,
+  getSearchPromptsImpl = getSearchPrompts,
+  saveSearchPromptsImpl = saveSearchPrompts,
+} = {}) {
+  return {
+    parseRequest(input = {}) {
+      if (
+        !input ||
+        typeof input !== "object" ||
+        Array.isArray(input) ||
+        Object.keys(input).length
+      ) {
+        const error = new Error("onboarding search-prompt input must be empty");
+        error.code = "BAD_REQUEST";
+        throw error;
+      }
+      const context = buildContext();
+      if (!context || typeof context !== "object" || Array.isArray(context)) {
+        const error = new Error("onboarding search-prompt context is unavailable");
+        error.code = "SEARCH_PROMPTS_NO_TARGETING";
+        throw error;
+      }
+      return {
+        context,
+        inputFingerprint: createHash("sha256").update(JSON.stringify(context)).digest("hex"),
+      };
+    },
+    resolveExecutionPlan() {
+      return assertAIExecutionPlanForOperation(resolveExecutionPlan(), "research.web");
+    },
+    isCompletedResultReusable({ request }) {
+      const current = getSearchPromptsImpl({ repoRoot, env });
+      return (
+        current.prompts?.length > 0 && current.savedInputFingerprint === request.inputFingerprint
+      );
+    },
+    normalizeError(error) {
+      return {
+        code: String(error?.code || "SEARCH_PROMPTS_GENERATION_FAILED"),
+        message: "CareerRat couldn't generate the initial search prompts. Try again.",
+        retryable: error?.retryable !== false,
+      };
+    },
+    async execute({ request, executionPlan, signal, reportProgress }) {
+      const frozenPlan = assertAIExecutionPlanForOperation(executionPlan, "research.web");
+      const existing = getSearchPromptsImpl({ repoRoot, env });
+      if (existing.prompts?.length) {
+        return {
+          resultRef: searchPromptOperationResultRef({
+            request,
+            executionPlan: frozenPlan,
+            state: "preserved",
+          }),
+        };
+      }
+      await reportProgress?.({
+        phase: "generating",
+        message: "CareerRat is preparing search prompts from your targeting.",
+      });
+      const outcome = await generateSearchPromptsImpl({
+        repoRoot,
+        env,
+        context: request.context,
+        executionPlan: frozenPlan,
+        signal,
+      });
+      if (!outcome?.body?.ok) {
+        const error = new Error(
+          outcome?.body?.error?.message || "CareerRat couldn't generate search prompts."
+        );
+        error.code = outcome?.body?.code || "SEARCH_PROMPTS_GENERATION_FAILED";
+        throw error;
+      }
+      if (!getSearchPromptsImpl({ repoRoot, env }).prompts?.length) {
+        saveSearchPromptsImpl({
+          repoRoot,
+          env,
+          prompts: outcome.body.data.prompts,
+          defaultSource: "generated",
+        });
+      }
+      return {
+        resultRef: searchPromptOperationResultRef({ request, executionPlan: frozenPlan }),
+      };
+    },
+  };
+}
+
+export async function recoverOnboardingSearchPromptOperations({
+  appOperations,
+  recovered = [],
+} = {}) {
+  if (!appOperations?.retry) return [];
+  const restarted = [];
+  for (const operation of recovered) {
+    if (
+      operation?.kind !== ONBOARDING_SEARCH_PROMPTS_OPERATION_KIND ||
+      operation?.status !== "failed" ||
+      operation?.error?.retryable !== true
+    ) {
+      continue;
+    }
+    try {
+      restarted.push(await appOperations.retry({ id: operation.id }));
+    } catch {
+      // Another process may already own the linked retry.
+    }
+  }
+  return restarted;
+}
+
+function visibleAppOperation(operation) {
+  if (!operation) return null;
+  return Object.fromEntries(
+    [
+      "id",
+      "kind",
+      "status",
+      "executionPlan",
+      "progress",
+      "resultRef",
+      "error",
+      "retryOf",
+      "attempt",
+      "createdAt",
+      "startedAt",
+      "completedAt",
+      "updatedAt",
+    ]
+      .filter((key) => operation[key] !== undefined)
+      .map((key) => [key, operation[key]])
+  );
+}
+
 export async function prepareQuickStartFirstSearch({
   repoRoot,
   env = process.env,
   fetchImpl = fetch,
   retry = false,
   workspaceAgentRuntime,
+  appOperations,
   startFirstSearchImpl = startFirstSearchRun,
   runSearchInBackgroundImpl = runFirstSearchInBackground,
 } = {}) {
@@ -1182,29 +1352,17 @@ export async function prepareQuickStartFirstSearch({
         .catch(() => {});
     }
 
-    // Best-effort: seed AI search prompts from the now-ready targeting/profile
-    // alongside the first-search kickoff, but only when nothing is stored yet
-    // (repeat quick-start calls must never clobber a user's own edits). Fully
-    // fire-and-forget — a prompt-generation failure (no AI route, model
-    // error) never blocks or fails the quick-start response; the user can
-    // still generate/edit prompts later from the Jobs page.
+    let searchPromptsOperation = null;
     try {
-      if (!getSearchPrompts({ repoRoot, env }).prompts.length) {
-        void generateSearchPrompts({ repoRoot, env })
-          .then((outcome) => {
-            if (outcome.body?.ok) {
-              saveSearchPrompts({
-                repoRoot,
-                env,
-                prompts: outcome.body.data.prompts,
-                defaultSource: "generated",
-              });
-            }
-          })
-          .catch(() => {});
+      if (!getSearchPrompts({ repoRoot, env }).prompts.length && appOperations?.start) {
+        const started = await appOperations.start({
+          kind: ONBOARDING_SEARCH_PROMPTS_OPERATION_KIND,
+          input: {},
+        });
+        searchPromptsOperation = visibleAppOperation(started.operation);
       }
     } catch {
-      // best-effort only — never fails quick-start
+      // Prompt generation stays optional and never blocks the deterministic first search.
     }
 
     return {
@@ -1215,6 +1373,7 @@ export async function prepareQuickStartFirstSearch({
           gateReady: setup.readiness?.gate_ready === true,
           applyReady: setup.readiness?.apply_ready === true,
         },
+        ...(searchPromptsOperation ? { searchPromptsOperation } : {}),
       },
     };
   } catch (err) {
@@ -1249,6 +1408,7 @@ export function mountOnboardRoutes({
   extractDocxResumeMarkdown = defaultExtractDocxResumeMarkdown,
   fetchImpl = fetch,
   workspaceAgentRuntime,
+  appOperations,
   startFirstSearchImpl = startFirstSearchRun,
   runSearchInBackgroundImpl = runFirstSearchInBackground,
   finishOnboardingImpl = finishOnboarding,
@@ -2834,6 +2994,7 @@ export function mountOnboardRoutes({
       fetchImpl,
       retry: body?.retry === true,
       workspaceAgentRuntime,
+      appOperations,
       startFirstSearchImpl,
       runSearchInBackgroundImpl,
     });
