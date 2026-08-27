@@ -185,6 +185,7 @@ describe("chat-first durable actions", () => {
     await createChatFirstMission(mission);
     await runChatFirstMission("mission-1");
     await resumeChatFirstMission("mission-1");
+    await resumeChatFirstMission("mission-1", { focusApplicationId: "app-1" });
     await setChatFirstMissionStatus({ id: "mission-1", status: "paused" });
     await setChatFirstMissionStepStatus({
       missionId: "mission-1",
@@ -198,6 +199,7 @@ describe("chat-first durable actions", () => {
       ["/api/chat-first/missions", mission],
       ["/api/chat-first/missions/run", { id: "mission-1" }],
       ["/api/chat-first/missions/resume", { id: "mission-1" }],
+      ["/api/chat-first/missions/resume", { id: "mission-1", focusApplicationId: "app-1" }],
       ["/api/chat-first/missions/status", { id: "mission-1", status: "paused" }],
       [
         "/api/chat-first/missions/step",

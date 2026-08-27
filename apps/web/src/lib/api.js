@@ -563,6 +563,34 @@ export function createCompanyProposals(payload = {}) {
   });
 }
 
+export async function getAppOperation(id) {
+  const body = await apiFetch(
+    `/api/app-operations/operation?id=${encodeURIComponent(String(id || ""))}`
+  );
+  return body.operation || null;
+}
+
+export function retryAppOperation(id) {
+  return apiFetch("/api/app-operations/retry", {
+    method: "POST",
+    body: JSON.stringify({ id }),
+  });
+}
+
+export async function getCompanyProposalBatch(batchId) {
+  const body = await apiFetch(
+    `/api/discovery/company-proposals?id=${encodeURIComponent(String(batchId || ""))}`
+  );
+  return body?.data?.batch || null;
+}
+
+export function decideCompanyProposal(payload = {}) {
+  return apiFetch("/api/discovery/company-proposal-decisions", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 // POST /api/assist/suggest — AI-suggest chips. `kind` is "titles" or
 // "keywords"; 501 when no AI route is configured, 422 when the model never
 // produces valid structured output after one retry — both are ordinary
@@ -966,10 +994,10 @@ export function runChatFirstMission(id) {
   });
 }
 
-export function resumeChatFirstMission(id) {
+export function resumeChatFirstMission(id, { focusApplicationId } = {}) {
   return apiFetch("/api/chat-first/missions/resume", {
     method: "POST",
-    body: JSON.stringify({ id }),
+    body: JSON.stringify({ id, ...(focusApplicationId ? { focusApplicationId } : {}) }),
   });
 }
 

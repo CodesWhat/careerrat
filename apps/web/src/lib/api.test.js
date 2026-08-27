@@ -87,6 +87,61 @@ describe("durable resume extraction", () => {
   });
 });
 
+describe("durable company discovery", () => {
+  it("starts, follows, retries, and loads one exact proposal batch", async () => {
+    const api = await import("./api.js");
+    const operation = {
+      id: "app-operation-company-1",
+      kind: "company.discovery",
+      status: "running",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, operation }), {
+          status: 202,
+          headers: { "content-type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, operation }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, operation: { ...operation, attempt: 2 } }), {
+          status: 202,
+          headers: { "content-type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, data: { batch: { batchId: "cpb_exact" } } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      api.createCompanyProposals({ manualSeeds: [{ name: "Acme" }] })
+    ).resolves.toMatchObject({ operation });
+    await expect(api.getAppOperation(operation.id)).resolves.toEqual(operation);
+    await expect(api.retryAppOperation(operation.id)).resolves.toMatchObject({
+      operation: { attempt: 2 },
+    });
+    await expect(api.getCompanyProposalBatch("cpb_exact")).resolves.toEqual({
+      batchId: "cpb_exact",
+    });
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      "/api/discovery/company-proposals",
+      "/api/app-operations/operation?id=app-operation-company-1",
+      "/api/app-operations/retry",
+      "/api/discovery/company-proposals?id=cpb_exact",
+    ]);
+  });
+});
+
 describe("finishOnboarding", () => {
   it("commits onboarding graduation before the app navigates", async () => {
     const fetchMock = vi.fn(
