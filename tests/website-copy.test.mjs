@@ -122,11 +122,18 @@ test("public copy keeps AI discovery broad and evaluation honest", async () => {
     assert.match(copy[name], /open[- ]web/i, `${paths[name]} should name open-web discovery`);
     assert.match(copy[name], /unverified/i, `${paths[name]} should label discovery honestly`);
     assert.match(copy[name], /Evaluate/i, `${paths[name]} should hand verification to Evaluate`);
-    assert.match(copy[name], /hospitality/i, `${paths[name]} should name hospitality coverage`);
-    assert.match(copy[name], /engineering/i, `${paths[name]} should name engineering coverage`);
+    assert.match(
+      copy[name],
+      /(?:built-in|public)[^.]{0,32}(?:job[- ]board|ATS) source/i,
+      `${paths[name]} should name the built-in source layer`
+    );
+    assert.doesNotMatch(
+      copy[name],
+      /engineering and hospitality|hospitality and engineering|hospitality sources?[^.]{0,100}engineering|engineering sources?[^.]{0,100}hospitality/i,
+      `${paths[name]} should not position source coverage around two job families`
+    );
   }
   assert.match(copy.website, /roles you set/i);
-  assert.doesNotMatch(copy.website, /(?:cover|for) engineering and hospitality work/i);
 });
 
 test("public docs explain durable background work without claiming interrupted work completed", async () => {

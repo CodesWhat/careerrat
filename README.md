@@ -74,8 +74,8 @@ diagnostics, browser-workflow cards, Search status, and browser setup.
 v0.16.6 is an unreleased release candidate. It fixes AI web searches that ran
 past the old two-minute limit, preserves credible AI open-web discoveries as
 clearly unverified leads, and leaves full-posting verification to Evaluate. It
-adds deterministic hospitality sources alongside the existing engineering and
-general-source coverage, then rechecks readable canonical job descriptions
+expands the built-in job-board source layer selected from the candidate's saved
+roles, then rechecks readable canonical job descriptions
 against location, office-day, compensation, seniority, eligibility, and saved
 fit-band rules before results are treated as verified. It also adds durable
 choice prompts, provider-neutral AI quality and thinking controls,
@@ -132,12 +132,12 @@ and writing without a wall of approval prompts.
 
 ## Search and Evaluate
 
-CareerRat combines deterministic public sources with broad AI open-web
-discovery. The shipped baseline covers engineering and remote work, and v0.16.6
-adds hospitality sources including OysterLink, Hcareers, Hospitality Online,
-and iHireHospitality. AI search can also keep a credible role from a specialist
-board, employer page, or aggregator when automated fetching cannot read the
-whole job description.
+CareerRat combines built-in public job-board and ATS sources with broad AI
+open-web discovery. Source setup selects the applicable built-in sources from
+the candidate's saved roles. CareerRat then discovers additional specialist
+boards and employer pages for that search. AI search can also keep a credible
+role from a board, employer page, or aggregator when automated fetching cannot
+read the whole job description.
 
 Those partial discoveries are not presented as proven jobs. Search labels them
 **AI · unverified** and preserves the visible title, company, location, pay,

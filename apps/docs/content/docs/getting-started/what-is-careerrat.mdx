@@ -32,9 +32,10 @@ The agent does.
    boundaries, and writing-style calibration. SQLite is authoritative in new
    workspaces; `candidate/` files are compatibility exports.
 2. **Source** — `setup-searches` + `search-jobs` build searches from your targets,
-   combine deterministic public sources with AI open-web discovery, dedupe, and
-   produce a coarse-triage queue. Engineering and hospitality searches use the
-   same candidate rules. A credible result whose full description is not yet
+   combine built-in public job-board sources with AI open-web discovery, find
+   additional specialist boards and employer pages, dedupe, and produce a
+   coarse-triage queue. Every role family uses the same candidate rules. A
+   credible result whose full description is not yet
    readable is saved as an unverified lead, not treated as a verified posting.
 3. **Gate** — `evaluate-job` reads the full posting and returns a verdict: keep or
    cut the job, how well it fits, whether the pay clears your floor, and what to

@@ -18,10 +18,10 @@ owns the body-read gate.
 
 ## AI Open-Web Discovery
 
-AI search broadens the deterministic baseline across specialist boards,
-employer career pages, and useful aggregators. It is domain-neutral; engineering
-and hospitality searches follow the same candidate location, compensation,
-eligibility, and fit rules.
+AI search broadens the built-in public job-board source layer across specialist
+boards, employer career pages, and useful aggregators. It is domain-neutral;
+every search follows the same candidate location, compensation, eligibility,
+and fit rules.
 
 Discovery and verification are separate stages. When AI finds a specific role
 and employer but automated fetching cannot read the full description, CareerRat
@@ -33,15 +33,14 @@ the full posting, and runs the body-read gate before tailoring or application
 work. Known expired roles, hard-filter violations, duplicates, and results with
 no specific role or employer are still dropped.
 
-## Hospitality Baseline
+## Targeted Built-In Sources
 
-Hospitality candidates receive deterministic public sources alongside the
-general provider set. The current baseline includes OysterLink, Hcareers,
-Hospitality Online, and iHireHospitality. Each adapter validates its host and URL
-shape, reads structured job-posting data, rejects expired postings, and
+Source setup selects applicable built-in public job-board and ATS adapters from
+the candidate's saved roles and location. Every adapter validates its host and
+URL shape, reads structured job-posting data, rejects expired postings, and
 normalizes title, employer, location, compensation, date, and the full visible
-description. Engineering candidates continue to receive the engineering,
-remote, ATS, and general sources matched to their targeting.
+description. `research-boards` and `discover-companies` add specialist boards
+and employer career pages that are useful for the candidate's actual search.
 
 ## Public Company Intelligence
 
