@@ -1,4 +1,5 @@
 import { errorState } from "../lib/errorCopy.js";
+import { safeExternalHttpUrl } from "../lib/safeExternalUrl.js";
 import {
   buildCartView,
   fitBarWidth,
@@ -33,6 +34,36 @@ function safeArray(value) {
 
 function buttonLabel(label, count) {
   return Number.isFinite(Number(count)) ? `${label} · ${Number(count)}` : label;
+}
+
+const MISSING_COMPENSATION = /^(?:comp not listed|n\/a|none|null|pending|tbd|unknown|verify)$/i;
+
+function compactDollarAmount(amount, suffix) {
+  if (suffix) return `$${amount}${suffix.toLowerCase()}`;
+
+  const dollars = Number(amount.replaceAll(",", ""));
+  if (dollars < 1_000) return `$${amount}`;
+
+  const divisor = dollars >= 1_000_000 ? 1_000_000 : 1_000;
+  const unit = dollars >= 1_000_000 ? "m" : "k";
+  return `$${Number((dollars / divisor).toFixed(2))}${unit}`;
+}
+
+function searchCompensationLabel(job) {
+  const value = [job?.compCompact, job?.comp, job?.base].find(
+    (candidate) =>
+      typeof candidate === "string" &&
+      candidate.trim() &&
+      !MISSING_COMPENSATION.test(candidate.trim())
+  );
+  if (!value) return "Comp not listed";
+
+  return value
+    .trim()
+    .replace(/\$([\d,]+(?:\.\d+)?)([kKmM]?)/g, (_, amount, suffix) =>
+      compactDollarAmount(amount, suffix)
+    )
+    .replace(/(\$\d+(?:\.\d+)?[km]?)\s*[-–—]\s*(?=\$?\d)/gi, "$1–");
 }
 
 function EmptyPanel({ children }) {
@@ -371,6 +402,8 @@ function LocationScope({ policy = {} }) {
 export function SearchJobRow({ job, selected, onToggleSelection }) {
   const width = fitBarWidth(job?.fit);
   const label = `Select ${job?.company || "job"}, ${job?.role || "role not provided"}`;
+  const link = safeExternalHttpUrl(job?.link);
+  const role = job?.role || "Role not provided";
   return (
     <label className={`cf-job-row${selected ? " cf-job-row--selected" : ""}`}>
       <input
@@ -400,7 +433,13 @@ export function SearchJobRow({ job, selected, onToggleSelection }) {
           ) : null}
           {job?.company || "Unknown company"}
         </div>
-        <div className="cf-job-row__role">{job?.role || "Role not provided"}</div>
+        {link ? (
+          <a className="cf-job-row__role" href={link} target="_blank" rel="noopener noreferrer">
+            {role}
+          </a>
+        ) : (
+          <div className="cf-job-row__role">{role}</div>
+        )}
       </div>
       <div className="cf-job-row__meta">
         {job?.stage && job.stage !== job?.location ? (
@@ -408,9 +447,10 @@ export function SearchJobRow({ job, selected, onToggleSelection }) {
         ) : null}
         <strong>{job?.modeLabel || job?.mode || "Location"}</strong>
         <span>{job?.location || "Location not provided"}</span>
+        <span>{searchCompensationLabel(job)}</span>
       </div>
       <div className="cf-job-row__fit">
-        <strong>{Number(job?.fit) || 0}</strong>
+        <strong>Fit {Number(job?.fit) || 0}</strong>
         <span className="cf-job-row__fit-track">
           <span className="cf-job-row__fit-fill" style={{ "--cf-fit-width": `${width}%` }} />
         </span>

@@ -302,18 +302,63 @@ describe("WorkspaceBrowser", () => {
     expect(complete).not.toContain("Partial description");
   });
 
-  it("marks open-web AI leads as unverified until evaluation", async () => {
+  it("shows the actionable details for a local AI posting with listed compensation", async () => {
     const { SearchJobRow } = await loadBrowser();
     const html = renderToStaticMarkup(
       <SearchJobRow
-        job={{ ...JOBS[0], aiDiscovered: true, descriptionPartial: true }}
+        job={{
+          id: "nyc-ai",
+          company: "NYC AI Co",
+          role: "AI Engineer",
+          modeLabel: "Hybrid",
+          location: "New York, NY",
+          fit: 82,
+          link: "https://jobs.example.test/nyc-ai-engineer",
+          base: "$85,000 - $100,000",
+          aiDiscovered: true,
+          descriptionPartial: true,
+        }}
         selected={false}
       />
     );
 
-    expect(html).toContain("AI · unverified");
-    expect(html).toContain("Found by AI on the open web. Evaluate it to verify the posting");
-    expect(html).not.toContain("Partial description");
+    expect.soft(html).toContain('href="https://jobs.example.test/nyc-ai-engineer"');
+    expect.soft(html).toContain('target="_blank"');
+    expect.soft(html).toContain('rel="noopener noreferrer"');
+    expect.soft(html).toContain("$85k–$100k");
+    expect.soft(html).toContain("AI · unverified");
+    expect.soft(html).toContain("Found by AI on the open web. Evaluate it to verify the posting");
+    expect.soft(html).toContain("Fit 82");
+    expect.soft(html).toContain("New York, NY");
+    expect.soft(html).toContain("Hybrid");
+    expect.soft(html).not.toContain("Partial description");
+  });
+
+  it("shows the actionable details for a US-remote posting without listed compensation", async () => {
+    const { SearchJobRow } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <SearchJobRow
+        job={{
+          id: "us-remote",
+          company: "Remote Co",
+          role: "Platform Engineer",
+          modeLabel: "Remote",
+          location: "United States (Remote)",
+          fit: 76,
+          link: "https://jobs.example.test/us-remote-platform-engineer",
+          base: null,
+        }}
+        selected={false}
+      />
+    );
+
+    expect.soft(html).toContain('href="https://jobs.example.test/us-remote-platform-engineer"');
+    expect.soft(html).toContain('target="_blank"');
+    expect.soft(html).toContain('rel="noopener noreferrer"');
+    expect.soft(html).toContain("Comp not listed");
+    expect.soft(html).toContain("Fit 76");
+    expect.soft(html).toContain("United States (Remote)");
+    expect.soft(html).toContain("Remote");
   });
 
   it("renders coordinated lane progress from typed state and never invents a timer", async () => {
