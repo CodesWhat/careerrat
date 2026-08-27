@@ -44,6 +44,8 @@ function safeResult(result) {
     searched: result.searched,
     found: result.found,
     new: result.new,
+    presented: result.presented,
+    fitFloor: result.fitFloor,
     duplicates: result.duplicates,
     disqualified: result.disqualified,
     reasonCounts: result.reasonCounts,
@@ -91,7 +93,7 @@ const FIXTURES = {
           name: "Hospitality operations",
           priority: "secondary",
           titles: [
-            "Operations Manager, Food and Beverage",
+            "Operations Manager, Food & Beverage",
             "Assistant General Manager",
             "General Manager",
           ],
@@ -111,6 +113,14 @@ const FIXTURES = {
       ],
       cut_signals: ["local role outside New York City", "remote role unavailable in New York"],
       excluded_companies: [],
+      fit_bands: { high_min: 85, med_min: 65, fit_floor: 65 },
+    },
+    formDefaults: {
+      voluntary_self_identification: {
+        enabled: true,
+        default_action: "decline_when_available",
+        confirmed_at: "2026-08-27T00:00:00.000Z",
+      },
     },
     prompts: [
       {
@@ -199,6 +209,14 @@ try {
     name: "targeting",
     patch: fixture.targeting,
   });
+  if (fixture.formDefaults) {
+    candidateConfigPatch({
+      repoRoot,
+      env,
+      name: "form-defaults",
+      patch: fixture.formDefaults,
+    });
+  }
   candidateConfigPatch({
     repoRoot,
     env,
