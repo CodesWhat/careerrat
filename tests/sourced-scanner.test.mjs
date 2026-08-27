@@ -123,6 +123,36 @@ test("coarse scoring does not promote a GTM engineer from backend and platform e
   assert.ok(result.ruleFlags.includes("title-target-mismatch"));
 });
 
+test("coarse scoring recognizes reordered non-engineering target titles", () => {
+  const result = scoreSourcedOffer(
+    {
+      company: "Hospitality Corp",
+      title: "Food and Beverage Operations Manager",
+      location: "New York, NY",
+      bodyText:
+        "Lead beverage service, venue operations, training, and day-to-day hospitality workflows.",
+    },
+    {
+      targeting: {
+        role_buckets: [
+          { name: "Hospitality operations", titles: ["Operations Manager, Food & Beverage"] },
+        ],
+        fit_bands: { high_min: 85, med_min: 65, fit_floor: 65 },
+      },
+      profile: {
+        compensation: { minimum_base: 85000 },
+        location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+      },
+    }
+  );
+
+  assert.ok(
+    result.score >= 65,
+    `expected the reordered target to clear fit 65, got ${result.score}`
+  );
+  assert.match(result.ratingReason, /matches target title/i);
+});
+
 test("coarse scoring does not treat a generic staff engineer as a platform title match", () => {
   const result = scoreSourcedOffer(
     {
@@ -1615,6 +1645,35 @@ test("qualification recognizes an annual salary sentence below the saved floor",
 
   assert.equal(result.kept.length, 0);
   assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
+});
+
+test("qualification recognizes a single annual salary below the saved floor", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Single Salary Hospitality",
+        title: "Bar Manager",
+        url: "https://jobs.example.test/single-salary-hospitality",
+        location: "New York, NY",
+        bodyText: "Salary: $60,000 per year. Lead a high-volume beverage program in Manhattan.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_base: 85000 },
+          location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
+  assert.deepEqual(result.filteredSalary[0]?.compBand, { min: 60000, max: 60000 });
 });
 
 // ---------------------------------------------------------------------------

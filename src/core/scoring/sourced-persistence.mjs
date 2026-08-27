@@ -323,6 +323,10 @@ export function sourcedRowsFromScanOffers(offers, nowIso = new Date().toISOStrin
         key: offer.key || null,
         bodyChars: Number.isFinite(Number(offer.bodyChars)) ? Number(offer.bodyChars) : null,
         bodyPartial: jobDescriptionIsPartial(offer),
+        qualificationUnknowns: Array.isArray(offer.qualificationUnknowns)
+          ? [...new Set(offer.qualificationUnknowns.map(String).filter(Boolean))].slice(0, 8)
+          : [],
+        unverified: offer.source === "ai-web-search",
         possibleDuplicate: Boolean(offer.possibleDuplicate),
       },
     };

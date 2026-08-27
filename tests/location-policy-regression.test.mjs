@@ -526,6 +526,11 @@ test("NYC plus US-remote policy handles office labels and multisite postings wit
       offer("nyc-hybrid", "NYC Hybrid", "New York, NY (Hybrid)"),
       offer("remote-us", "Remote US", "Remote · United States"),
       offer(
+        "remote-us-except-ny",
+        "Remote Except New York",
+        "Remote · United States, except New York"
+      ),
+      offer(
         "remote-nyc-multisite",
         "Remote NYC Multisite",
         "Remote · United States · New York City Office · New York"
@@ -551,10 +556,43 @@ test("NYC plus US-remote policy handles office labels and multisite postings wit
     "Remote US",
   ]);
   assert.deepEqual(result.filteredLocation.map((row) => row.company).sort(), [
+    "Remote Except New York",
     "San Francisco Only",
     "Seattle Only",
     "West Coast Multisite",
   ]);
+  assert.equal(
+    result.filteredLocation.find((row) => row.company === "Remote Except New York")
+      ?.qualificationReason,
+    "remote-home-region-excluded"
+  );
+});
+
+test("US remote body exclusions reject a New York resident without false positives", () => {
+  const profile = {
+    candidate: { domain: "hospitality operations" },
+    location: {
+      home: "New York, NY",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: true,
+      onsite: true,
+      relocation: [],
+    },
+  };
+  const excluded = offer("body-excludes-ny", "Excluded Corp", "Remote · United States");
+  excluded.bodyText = "This role is remote across the United States, except New York residents.";
+  const included = offer("body-includes-ny", "Included Corp", "Remote · United States");
+  included.bodyText = "This role is available to remote workers in New York, with no exceptions.";
+
+  const result = qualifyByLocation(profile, [excluded, included], { generatedFilter: false });
+
+  assert.deepEqual(
+    result.kept.map((row) => row.company),
+    ["Included Corp"]
+  );
+  assert.equal(result.filteredLocation[0]?.company, "Excluded Corp");
+  assert.equal(result.filteredLocation[0]?.qualificationReason, "remote-home-region-excluded");
 });
 
 test("remote-only RSS provenance keeps a USA-scoped role eligible", () => {

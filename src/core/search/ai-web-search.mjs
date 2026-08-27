@@ -785,6 +785,11 @@ export async function runAiWebSearch({
       company: offer.company,
       title: offer.title,
       url: offer.url,
+      fitScore: Number.isFinite(Number(offer.score)) ? Number(offer.score) : null,
+      qualificationUnknowns: Array.isArray(offer.qualificationUnknowns)
+        ? [...offer.qualificationUnknowns]
+        : [],
+      unverified: true,
     })),
     ...coverage,
     sources: mergeSourceReceipts(toolTrace, recoveredSources),

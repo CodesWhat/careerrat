@@ -89,3 +89,17 @@ test("partial bodies do not infer compensation but existing offer compensation s
   assert.equal(rows[0].base, "verify");
   assert.equal(rows[1].base, "$240,000 - $280,000 base");
 });
+
+test("sourced rows preserve qualification unknowns and unverified search status", () => {
+  const [row] = sourcedRowsFromScanOffers([
+    offer({
+      qualificationUnknowns: ["compensation", "location"],
+      source: "ai-web-search",
+      bodyPartial: true,
+      bodyText: "Unverified open-web evidence for a specific employer and role.",
+    }),
+  ]);
+
+  assert.deepEqual(row.scanner.qualificationUnknowns, ["compensation", "location"]);
+  assert.equal(row.scanner.unverified, true);
+});

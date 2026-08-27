@@ -263,10 +263,18 @@ try {
       location: row.loc,
       fitScore: row.fitScore,
       partial: row.scanner?.bodyPartial === true,
+      qualificationUnknowns: row.scanner?.qualificationUnknowns || [],
+      unverified: row.scanner?.unverified === true,
       source: row.link,
     }));
   console.log(JSON.stringify({ summary: safeResult(result), rows }, null, 2));
-  if (result.errors?.length || result.failedPromptIds?.length || rows.length === 0)
+  if (
+    result.errors?.length ||
+    result.failedPromptIds?.length ||
+    rows.length === 0 ||
+    Number(result.presented || 0) < 1 ||
+    rows.some((row) => row.unverified !== true)
+  )
     process.exitCode = 1;
 } catch (error) {
   console.error(`[${runtimeId}/${fixtureId}] ${error?.message || String(error)}`);

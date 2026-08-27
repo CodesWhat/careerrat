@@ -357,6 +357,61 @@ const NO_SPONSORSHIP_RE =
   /\b(?:no|not|cannot|can't|unable to|do not|does not|won't|will not)\b[^.\n]{0,50}\b(?:visa )?sponsor(?:ship)?\b|\b(?:visa )?sponsorship\b[^.\n]{0,50}\b(?:not available|is unavailable)\b/i;
 const US_STATE_RE =
   /(?:^|[,\s])(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC)(?:$|[,\s])/i;
+const US_STATE_NAMES = Object.freeze([
+  ["AL", "Alabama"],
+  ["AK", "Alaska"],
+  ["AZ", "Arizona"],
+  ["AR", "Arkansas"],
+  ["CA", "California"],
+  ["CO", "Colorado"],
+  ["CT", "Connecticut"],
+  ["DE", "Delaware"],
+  ["FL", "Florida"],
+  ["GA", "Georgia"],
+  ["HI", "Hawaii"],
+  ["ID", "Idaho"],
+  ["IL", "Illinois"],
+  ["IN", "Indiana"],
+  ["IA", "Iowa"],
+  ["KS", "Kansas"],
+  ["KY", "Kentucky"],
+  ["LA", "Louisiana"],
+  ["ME", "Maine"],
+  ["MD", "Maryland"],
+  ["MA", "Massachusetts"],
+  ["MI", "Michigan"],
+  ["MN", "Minnesota"],
+  ["MS", "Mississippi"],
+  ["MO", "Missouri"],
+  ["MT", "Montana"],
+  ["NE", "Nebraska"],
+  ["NV", "Nevada"],
+  ["NH", "New Hampshire"],
+  ["NJ", "New Jersey"],
+  ["NM", "New Mexico"],
+  ["NY", "New York"],
+  ["NC", "North Carolina"],
+  ["ND", "North Dakota"],
+  ["OH", "Ohio"],
+  ["OK", "Oklahoma"],
+  ["OR", "Oregon"],
+  ["PA", "Pennsylvania"],
+  ["RI", "Rhode Island"],
+  ["SC", "South Carolina"],
+  ["SD", "South Dakota"],
+  ["TN", "Tennessee"],
+  ["TX", "Texas"],
+  ["UT", "Utah"],
+  ["VT", "Vermont"],
+  ["VA", "Virginia"],
+  ["WA", "Washington"],
+  ["WV", "West Virginia"],
+  ["WI", "Wisconsin"],
+  ["WY", "Wyoming"],
+  ["DC", "District of Columbia"],
+]);
+const REMOTE_REGION_EXCLUSION_RE =
+  /\b(?:except|excluding|excluded|unavailable|not\s+available|cannot\s+hire|can't\s+hire|do\s+not\s+hire|does\s+not\s+hire|won't\s+hire|not\s+eligible|ineligible)\b/i;
 const EXPLICIT_ONSITE_BODY_RE =
   /\b(?:fully|entirely|100%|strictly)\s+(?:on[ -]?site|in[ -]?office|office[ -]?based|in[ -]?person)\b|\b(?:on[ -]?site|in[ -]?office)\s+only\b|\b(?:location|workplace)\s*:\s*[^.\n]{0,80}\b(?:on[ -]?site|in[ -]?office|office[ -]?based|in[ -]?person)\b|\b(?:role|position|work)\s+(?:is|will be)\s+(?:fully\s+)?(?:on[ -]?site|in[ -]?office|office[ -]?based|in[ -]?person)\b|\bin[ -]?person\s+(?:role|position|work)\b/i;
 const OFFICE_CONTEXT_RE = /\b(?:office|on[ -]?site|in[ -]?office|in[ -]?person)\b/i;
@@ -496,6 +551,37 @@ function homeLooksUs(home) {
   );
 }
 
+function homeRegionAliases(home) {
+  const source = String(home || "");
+  const normalized = normalizePlace(source);
+  const aliases = new Set();
+  for (const [code, name] of US_STATE_NAMES) {
+    const codeMatch = new RegExp(`(?:^|[^a-z])${code.toLowerCase()}(?:$|[^a-z])`, "i").test(source);
+    const normalizedName = name.toLowerCase();
+    if (codeMatch || normalized.includes(normalizedName)) {
+      aliases.add(code.toLowerCase());
+      aliases.add(normalizedName);
+    }
+  }
+  if (NEW_YORK_CITY_ALIASES.has(normalized)) {
+    aliases.add("ny");
+    aliases.add("new york");
+  }
+  return [...aliases];
+}
+
+function remoteExcludesHomeRegion(value, home) {
+  const aliases = homeRegionAliases(home);
+  if (!aliases.length) return false;
+  return String(value || "")
+    .split(/[.!?;\n]+/)
+    .some(
+      (clause) =>
+        REMOTE_REGION_EXCLUSION_RE.test(clause) &&
+        aliases.some((alias) => new RegExp(`\\b${escapeRegExp(alias)}\\b`, "i").test(clause))
+    );
+}
+
 function placeMatchesAllowed(location, places) {
   const normalized = normalizePlace(location);
   if (!normalized) return false;
@@ -593,6 +679,9 @@ function locationEligibility(offer, config) {
   if (remote && !hybrid && !onsite) {
     if (hasExplicitModes && profileLocation.remote !== true) {
       return { eligible: false, reason: "remote-not-allowed" };
+    }
+    if (remoteExcludesHomeRegion(`${location}\n${body}`, profileLocation.home)) {
+      return { eligible: false, reason: "remote-home-region-excluded" };
     }
     if (profileLocation.remote_scope === "worldwide") return { eligible: true };
     if (homeLooksUs(profileLocation.home)) {
@@ -882,7 +971,7 @@ function scoreSourcedOfferFromConfig(
     }
   }
   for (const term of bucketTitles.filter(Boolean)) {
-    if (keywordMatches(title, term) || boundedRoleTitleEquivalent(title, term)) {
+    if (targetRoleTitleMatches(title, [term])) {
       setBase(82, `matches target title: ${term}`);
     }
   }
@@ -1099,11 +1188,26 @@ export function extractCompBand(text = "") {
     const normalized = line.replace(/,/g, "");
     const re =
       /(?:usd\s*)?\$?\s*(\d{2,6}(?:\.\d+)?)(\s*k)?\s*(?:-|–|—|to)\s*(?:usd\s*)?\$?\s*(\d{2,6}(?:\.\d+)?)(\s*k)?/gi;
+    let foundRange = false;
     for (const match of normalized.matchAll(re)) {
       const min = normalizeMoney(match[1], match[2]);
       const max = normalizeMoney(match[3], match[4]);
-      if (min >= 50000 && max >= min && max <= 1200000) candidates.push({ min, max });
+      if (min >= 50000 && max >= min && max <= 1200000) {
+        candidates.push({ min, max });
+        foundRange = true;
+      }
     }
+    if (foundRange) continue;
+    if (!/\b(?:salary|base\s+(?:salary|pay)|annual\s+(?:salary|pay|compensation))\b/i.test(line)) {
+      continue;
+    }
+    if (/\b(?:hourly|per\s+hour|bonus|equity|commission|ote|total\s+compensation)\b/i.test(line)) {
+      continue;
+    }
+    const single = normalized.match(/(?:USD\s*)?\$\s*(\d{2,7}(?:\.\d+)?)(\s*k)?\b/i);
+    if (!single) continue;
+    const amount = normalizeMoney(single[1], single[2]);
+    if (amount >= 50000 && amount <= 1200000) candidates.push({ min: amount, max: amount });
   }
 
   return candidates.sort((a, b) => b.max - b.min - (a.max - a.min) || b.max - a.max)[0] || null;

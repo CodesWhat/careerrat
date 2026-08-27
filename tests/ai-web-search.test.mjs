@@ -937,6 +937,21 @@ test("runAiWebSearch preserves an open-web lead when canonical recovery defers",
   assert.equal(result.partial, 1);
   assert.equal(result.unreadable, 0);
   assert.deepEqual(result.errors, [], JSON.stringify(result));
+  assert.deepEqual(
+    {
+      ...result.offers[0],
+      fitScore: Number.isFinite(result.offers[0].fitScore),
+      qualificationUnknowns: [...result.offers[0].qualificationUnknowns].sort(),
+    },
+    {
+      company: "Dante NYC",
+      title: "Bartender",
+      url: "https://culinaryagents.com/jobs/12345/bartender",
+      fitScore: true,
+      qualificationUnknowns: ["compensation", "postedAt"],
+      unverified: true,
+    }
+  );
   const [saved] = readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search");
   assert.equal(saved.company, "Dante NYC");
   assert.equal(saved.scanner.bodyPartial, true);
