@@ -34,7 +34,7 @@ const BOT_CHALLENGE_PATTERNS = [
   /needs to review the security of your connection/i,
 ];
 
-const EXPIRED_URL_PATTERNS = [/[?&]error=true/i];
+const EXPIRED_URL_PATTERNS = [/[?&]error=true/i, /[?&][^#]*expired[_-]?jd[_-]?redirect/i];
 
 const APPLY_PATTERNS = [/\bapply\b/i, /submit application/i, /easy apply/i, /start application/i];
 

@@ -217,6 +217,46 @@ function sourceHost(url) {
   }
 }
 
+export function isPostingEvidenceUrl(rawUrl) {
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+  if (
+    !new Set(["http:", "https:"]).has(url.protocol) ||
+    url.username ||
+    url.password ||
+    /expired[_-]?jd[_-]?redirect/i.test(url.href)
+  ) {
+    return false;
+  }
+
+  const host = url.hostname.replace(/^www\./i, "").toLowerCase();
+  const path = url.pathname.toLowerCase();
+  if (host === "linkedin.com" || host.endsWith(".linkedin.com")) {
+    return /^\/jobs\/view\/[^/]*\d+\/?$/i.test(path);
+  }
+  if (host === "ziprecruiter.com" || host.endsWith(".ziprecruiter.com")) {
+    return !/^\/jobs(?:\/|$)/i.test(path);
+  }
+  if (host === "indeed.com" || host.endsWith(".indeed.com")) {
+    const hasPostingId = Boolean(url.searchParams.get("jk") || url.searchParams.get("vjk"));
+    return hasPostingId || !/^\/(?:jobs(?:\/|$)|q-[^/]+-jobs(?:\.html)?(?:\/|$))/i.test(path);
+  }
+  if (host === "glassdoor.com" || host.endsWith(".glassdoor.com")) {
+    const hasPostingId = Boolean(
+      url.searchParams.get("jl") || url.searchParams.get("jobListingId")
+    );
+    return hasPostingId || !/^\/job(?:\/|$)/i.test(path) || /\/job-listing(?:\/|$)/i.test(path);
+  }
+  if (host === "wellfound.com" || host.endsWith(".wellfound.com")) {
+    return /^\/jobs\/\d+(?:[-/]|$)/i.test(path);
+  }
+  return true;
+}
+
 function mergeSourceReceipts(toolTrace, recoveredSources) {
   const byUrl = new Map();
   for (const source of [
@@ -625,7 +665,7 @@ export async function runAiWebSearch({
   let duplicates = 0;
   let invalid = 0;
   for (const role of roles) {
-    if (!role?.company || !role?.title || !role?.url) {
+    if (!role?.company || !role?.title || !role?.url || !isPostingEvidenceUrl(role.url)) {
       invalid += 1;
       continue;
     }

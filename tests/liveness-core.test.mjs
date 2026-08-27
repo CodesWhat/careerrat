@@ -27,6 +27,18 @@ test("expired body text wins even when generic apply text is present", () => {
   assert.equal(result.code, "expired_body");
 });
 
+test("an expired LinkedIn redirect is expired even when the destination has apply controls", () => {
+  const result = classifyLiveness({
+    status: 200,
+    finalUrl: "https://www.linkedin.com/jobs/lead-bartender-jobs?trk=expired_jd_redirect",
+    bodyText: "Lead bartender jobs in New York. Browse current opportunities.",
+    applyControls: ["Apply"],
+  });
+
+  assert.equal(result.result, "expired");
+  assert.equal(result.code, "expired_url");
+});
+
 test("bare expired and archived date banners win over recommendation apply controls", () => {
   for (const banner of ["Expired: Apr 21, 2026", "Archived: May 8, 2026"]) {
     const result = classifyLiveness({

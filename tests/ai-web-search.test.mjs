@@ -20,7 +20,7 @@ import {
   sourcedUpsertBatch,
 } from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
-import { runAiWebSearch } from "../src/core/search/ai-web-search.mjs";
+import { isPostingEvidenceUrl, runAiWebSearch } from "../src/core/search/ai-web-search.mjs";
 import { saveSearchPrompts } from "../src/core/search/search-prompts.mjs";
 
 const roots = [];
@@ -148,6 +148,70 @@ test("AI web search uses the provider-neutral web research policy without changi
   assert.equal(calls.length, 1, "lean usage mode still controls prompt breadth only");
   assert.equal(calls[0].aiOperation, undefined);
   assert.equal(calls[0].executionPlan, executionPlan);
+});
+
+test("runAiWebSearch rejects aggregator result pages and expired redirects before hydration", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  const directUrl = "https://www.linkedin.com/jobs/view/assistant-general-manager-5186736008";
+  const resolvedUrls = [];
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: assistantJson({
+      roles: [
+        role({
+          company: "Gracious Hospitality",
+          title: "Assistant General Manager",
+          url: directUrl,
+        }),
+        role({
+          company: "Manhattan Mixology",
+          title: "Head Bartender",
+          url: "https://www.linkedin.com/jobs/lead-bartender-jobs?trk=expired_jd_redirect",
+        }),
+        role({
+          company: "Compass Group",
+          title: "Head Bartender",
+          url: "https://www.ziprecruiter.com/Jobs/Head-Bartender/--in-New-York",
+        }),
+      ],
+      queries_run: [{ prompt_id: "p1", query: "NYC hospitality management jobs" }],
+    }),
+    resolveJobUrlImpl: async (url) => {
+      resolvedUrls.push(url);
+      return canonicalResolver()(url);
+    },
+  });
+
+  assert.equal(result.found, 3);
+  assert.equal(result.invalid, 2);
+  assert.equal(result.new, 1);
+  assert.deepEqual(resolvedUrls, [directUrl]);
+});
+
+test("AI web search distinguishes posting details from known aggregator result pages", () => {
+  for (const url of [
+    "https://www.linkedin.com/jobs/view/assistant-general-manager-5186736008",
+    "https://www.indeed.com/viewjob?jk=abc123",
+    "https://www.glassdoor.com/job-listing/bar-manager-acme-JV_IC1132348_KO0,11_KE12,16.htm?jl=123",
+    "https://wellfound.com/jobs/123456-platform-engineer",
+    "https://www.ziprecruiter.com/c/Acme/Job/Bar-Manager/-in-New-York,NY?jid=abc123",
+    "https://careers.aquarestaurantgroup.com/new-york",
+  ]) {
+    assert.equal(isPostingEvidenceUrl(url), true, url);
+  }
+
+  for (const url of [
+    "https://www.linkedin.com/jobs/search/?keywords=bar%20manager",
+    "https://www.linkedin.com/jobs/lead-bartender-jobs?trk=expired_jd_redirect",
+    "https://www.ziprecruiter.com/Jobs/Head-Bartender/--in-New-York",
+    "https://www.indeed.com/jobs?q=bar+manager&l=New+York",
+    "https://www.indeed.com/q-head-bartender-l-new-york-ny-jobs.html",
+    "https://www.glassdoor.com/Job/new-york-bar-manager-jobs-SRCH_IL.0,8_IC1132348.htm",
+    "https://wellfound.com/jobs",
+  ]) {
+    assert.equal(isPostingEvidenceUrl(url), false, url);
+  }
 });
 
 test("a successful zero-result AI search revalidates active rows against the current policy", async () => {
@@ -355,6 +419,7 @@ test("AI web-search skill gives each saved prompt a small exploration budget", (
   );
   assert.match(skill, /at most 2 `WebSearch` calls per saved prompt/i);
   assert.match(skill, /at most 4 job-posting `WebFetch` calls per saved prompt/i);
+  assert.match(skill, /never emit an aggregator search\/results page/i);
 });
 
 test("runAiWebSearch reports structured prompt lifecycle and periodic health", async () => {
