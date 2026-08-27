@@ -306,7 +306,7 @@ describe("WorkspaceBrowser", () => {
     );
 
     expect(html).toContain("Searching for jobs…");
-    expect(html).toContain("Searching configured sources and the web");
+    expect(html).toContain("Searching your saved job sites and the web");
     expect(html).toContain('role="status" aria-label="Search lane status"');
     expect(html).toContain("Saved job sites: searching");
     expect(html).toContain("AI search: searching");
@@ -363,6 +363,98 @@ describe("WorkspaceBrowser", () => {
     expect(html).not.toContain("Search for jobs to start building your list.");
   });
 
+  it("keeps technical top-level search status out of no-lane recovery copy", async () => {
+    const { SearchToolbar } = await loadBrowser();
+    const onRunSweep = vi.fn();
+    const failed = SearchToolbar({
+      sourceSweep: {
+        status: "error",
+        summary:
+          "SQLITE_BUSY while reading /Users/person/code/careerrat/.careerrat/db/careerrat.db",
+      },
+      onRunSweep,
+    });
+    const retry = findElement(
+      failed,
+      (node) => node.type === "button" && textOf(node) === "Retry search"
+    );
+    const failedHtml = renderToStaticMarkup(failed);
+    const runningHtml = renderToStaticMarkup(
+      <SearchToolbar
+        sourceSweep={{
+          status: "running",
+          detail: "provider_route=ai_web /Users/person/code/careerrat/src/core/search/run.mjs:74",
+          lanes: {
+            deterministic: {
+              label: "Configured sources",
+              status: "running",
+            },
+          },
+        }}
+      />
+    );
+
+    expect(failedHtml).toContain("Search couldn&#x27;t finish. Try again.");
+    expect(failedHtml).not.toContain("SQLITE_BUSY");
+    expect(failedHtml).not.toContain("/Users/person");
+    expect(retry).toBeTruthy();
+    retry.props.onClick();
+    expect(onRunSweep).toHaveBeenCalledOnce();
+    expect(runningHtml).toContain("Searching your saved job sites");
+    expect(runningHtml).not.toContain("provider_route");
+    expect(runningHtml).not.toContain("/Users/person");
+  });
+
+  it("turns skipped lane reasons into plain-English status and omits unknown reasons", async () => {
+    const { SearchToolbar } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <SearchToolbar
+        sourceSweep={{
+          status: "error",
+          reason: "no-configured-lane",
+          summary: "CareerRat needs at least one job site or a connected AI before it can search.",
+          lanes: {
+            deterministic: {
+              label: "Configured sources",
+              status: "skipped",
+              reason: "not-configured",
+            },
+            aiWeb: {
+              label: "AI web search",
+              status: "skipped",
+              reason: "not-consented",
+            },
+            backup: {
+              label: "Backup search",
+              status: "skipped",
+              reason: "unavailable",
+            },
+            cancelled: {
+              label: "Paused search",
+              status: "skipped",
+              reason: "cancelled",
+            },
+            internal: {
+              label: "Internal lane",
+              status: "skipped",
+              reason: "provider_route_disabled",
+            },
+          },
+        }}
+      />
+    );
+
+    expect(html).toContain("Saved job sites: not set up");
+    expect(html).toContain("AI search: permission needed");
+    expect(html).toContain("Backup search: not available");
+    expect(html).toContain("Paused search: stopped");
+    expect(html).not.toContain("Internal lane");
+    expect(html).not.toContain("skipped");
+    expect(html).not.toContain("not-configured");
+    expect(html).not.toContain("not-consented");
+    expect(html).not.toContain("provider_route_disabled");
+  });
+
   it("replaces technical lane errors with candidate-safe retry copy", async () => {
     const { SearchToolbar } = await loadBrowser();
     const html = renderToStaticMarkup(
@@ -415,6 +507,30 @@ describe("WorkspaceBrowser", () => {
     expect(html).toContain("Retry search");
     expect(html).not.toContain("route schema");
     expect(html).not.toContain("search lanes");
+    expect(html).not.toContain("succeeded");
+  });
+
+  it("keeps the reverse mixed-result search out of lane bookkeeping copy", async () => {
+    const { SearchToolbar } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <SearchToolbar
+        sourceSweep={{
+          status: "complete",
+          summary: "1 search lane finished · 1 lane needs retry",
+          lanes: {
+            deterministic: {
+              label: "Configured sources",
+              status: "failed",
+              error: "source worker failed",
+            },
+            aiWeb: { label: "AI web search", status: "succeeded" },
+          },
+        }}
+      />
+    );
+
+    expect(html).toContain("The AI search finished. Your saved job sites need another try.");
+    expect(html).not.toContain("search lane");
     expect(html).not.toContain("succeeded");
   });
 

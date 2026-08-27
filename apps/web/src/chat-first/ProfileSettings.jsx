@@ -497,21 +497,71 @@ function browserPresenceLabel(status) {
   );
 }
 
-function browserProviderHelp(selectedProvider) {
-  if (selectedProvider?.id === "playwright") {
-    return "CareerRat opens a supervised browser when a workflow needs it.";
-  }
-  return selectedProvider?.needs || "Choose which supervised browser CareerRat uses.";
+function browserChoiceLabel(id) {
+  return (
+    {
+      auto: "Let CareerRat choose",
+      extension: "Use this browser window",
+      orca: "Use the workspace browser",
+      playwright: "Use CareerRat browser",
+    }[id] || "Browser option"
+  );
 }
 
-function browserPresenceDetail(browser, playwright) {
-  if (browser?.effectiveProviderId === "playwright" || browser?.providerId === "playwright") {
-    if (playwright?.ready || browser?.presenceStatus === "ready") {
-      return "CareerRat opens a supervised browser when a workflow needs it.";
-    }
-    return playwright?.detail || "The CareerRat browser is not available yet.";
+function browserChoiceHelp(id) {
+  return (
+    {
+      auto: "CareerRat chooses the browser that works in this app.",
+      extension: "CareerRat uses the browser you already have open.",
+      orca: "CareerRat uses the browser built into this workspace.",
+      playwright: "CareerRat opens a separate browser when a job needs one.",
+    }[id] || "Choose how CareerRat opens job sites."
+  );
+}
+
+function browserPresenceDetail(status, browser) {
+  if (
+    status === "missing" &&
+    [browser?.providerId, browser?.effectiveProviderId].includes("playwright")
+  ) {
+    return "Close and reopen CareerRat. If the browser is still unavailable, reinstall the latest version.";
   }
-  return browser?.presenceDetail || "Browser readiness has not been checked yet.";
+  if (
+    status === "unverified" &&
+    [browser?.providerId, browser?.effectiveProviderId].includes("orca")
+  ) {
+    return "Start an application and CareerRat will check the workspace browser then.";
+  }
+  return (
+    {
+      ready: "CareerRat can open a browser when a job needs one.",
+      unverified: "CareerRat needs one more setup step before it can help with job forms.",
+      missing: "CareerRat's browser isn't ready yet.",
+      unknown: "CareerRat couldn't check the browser. Try again.",
+    }[status] || "CareerRat couldn't check the browser. Try again."
+  );
+}
+
+function browserRecoveryStep(browser, providerOptions) {
+  if (browser?.presenceStatus === "ready" || browser?.nextStep?.kind !== "choose") return null;
+  const requestedProvider = String(browser?.nextStep?.provider || "");
+  const provider = providerOptions.some((option) => option.id === requestedProvider)
+    ? requestedProvider
+    : providerOptions.some((option) => option.id === "playwright")
+      ? "playwright"
+      : browser?.providerId || providerOptions[0]?.id;
+  if (!provider || provider === browser?.providerId) return null;
+  return {
+    provider,
+    label: provider === "playwright" ? "Use CareerRat browser" : "Use another browser option",
+  };
+}
+
+function automaticFillCopy(browser, presenceStatus) {
+  if (!browser?.automaticFillSupported) return "Unavailable with this browser connection";
+  if (presenceStatus === "ready") return "Available with this browser connection";
+  if (presenceStatus === "missing") return "Available after browser setup is fixed";
+  return "Available once CareerRat confirms the browser";
 }
 
 function TechnicalDetails({
@@ -522,11 +572,11 @@ function TechnicalDetails({
   onProviderChange,
   onClose,
 }) {
-  const playwright = browser?.playwright || {};
   const presenceStatus = browser?.presenceStatus || "unknown";
   const providerOptions = safeArray(browser?.options);
   const selectedProvider =
     providerOptions.find((option) => option.id === browser?.providerId) || providerOptions[0];
+  const recoveryStep = browserRecoveryStep(browser, providerOptions);
   return (
     <SettingsDialog title="Technical details" onClose={onClose}>
       <div className="cf-settings-dialog__technical">
@@ -536,22 +586,22 @@ function TechnicalDetails({
         </p>
         <p>Your candidate files stay on this computer. The selected tool uses its own login.</p>
         <div className="cf-settings-dialog__technical-row">
-          <label htmlFor="cf-browser-automation-provider">
-            <strong>Browser automation provider</strong>
+          <label htmlFor="cf-browser-setup">
+            <strong>Browser setup</strong>
           </label>
           <select
-            id="cf-browser-automation-provider"
+            id="cf-browser-setup"
             value={browser?.providerId || ""}
             disabled={providerBusy || providerOptions.length === 0}
             onChange={(event) => onProviderChange?.(event.target.value)}
           >
             {providerOptions.map((option) => (
               <option key={option.id} value={option.id}>
-                {option.label}
+                {browserChoiceLabel(option.id)}
               </option>
             ))}
           </select>
-          <small>{browserProviderHelp(selectedProvider)}</small>
+          <small>{browserChoiceHelp(selectedProvider?.id)}</small>
         </div>
         <div className="cf-settings-dialog__technical-row">
           <div className="cf-settings-dialog__technical-heading">
@@ -562,26 +612,20 @@ function TechnicalDetails({
               {browserPresenceLabel(presenceStatus)}
             </span>
           </div>
-          <span>
-            {browser?.provider || "Not configured"}
-            {browser?.effectiveProvider && browser.effectiveProvider !== browser.provider
-              ? ` · using ${browser.effectiveProvider}`
-              : ""}
-          </span>
-          <small>{browserPresenceDetail(browser, playwright)}</small>
-        </div>
-        <div className="cf-settings-dialog__technical-row">
-          <strong>Playwright</strong>
-          <span>{playwright?.ready ? "Ready" : "Not ready"}</span>
-          <small>{playwright?.detail || "Playwright readiness has not been checked yet."}</small>
+          <small>{browserPresenceDetail(presenceStatus, browser)}</small>
+          {recoveryStep ? (
+            <button
+              type="button"
+              disabled={providerBusy}
+              onClick={() => onProviderChange?.(recoveryStep.provider)}
+            >
+              {recoveryStep.label}
+            </button>
+          ) : null}
         </div>
         <div className="cf-settings-dialog__technical-row">
           <strong>Automatic application fill</strong>
-          <span>
-            {browser?.automaticFillSupported
-              ? "Available with this browser connection"
-              : "Unavailable with this browser connection"}
-          </span>
+          <span>{automaticFillCopy(browser, presenceStatus)}</span>
           <small>CareerRat still stops at the final submit button every time.</small>
         </div>
       </div>

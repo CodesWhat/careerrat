@@ -1133,19 +1133,21 @@ describe("ChatFirstAppView", () => {
       "CareerRat couldn&#x27;t find that company among your saved jobs. Name it exactly as it appears there."
     );
     expect(html).toContain("Technical details");
-    expect(html.indexOf("Technical details")).toBeLessThan(
-      html.indexOf("application table lookup failed")
+    expect(html).toContain(
+      "CareerRat hides raw technical details here because they can include private information."
     );
+    expect(html).not.toContain("application table lookup failed");
     expect(html).not.toContain("[object Object]");
   });
 
-  it("renders mapped recovery actions and keeps raw diagnostics in a disclosure", async () => {
+  it("renders mapped recovery actions without exposing raw diagnostics", async () => {
     const { ChatFirstAppView } = await import("./ChatFirstApp.jsx");
     const retry = vi.fn();
     const error = {
       message: "Something went wrong on the server. Try again in a moment.",
       action: { label: "Try again", retry: true, onRetry: retry },
-      detail: "SQLITE_BUSY: applications table at /Users/person/workspace",
+      detail:
+        "SQLITE_BUSY: route schema parser failed at /Users/person/workspace. password=hunter2\n    at loadDashboard (dashboard.mjs:18:4)",
     };
     const tree = ChatFirstAppView({
       view: VIEW,
@@ -1178,7 +1180,12 @@ describe("ChatFirstAppView", () => {
     expect(html).toContain("Something went wrong on the server. Try again in a moment.");
     expect(html).toContain("<details");
     expect(html).toContain("Technical details");
-    expect(html.indexOf("Technical details")).toBeLessThan(html.indexOf("SQLITE_BUSY"));
+    expect(html).toContain(
+      "CareerRat hides raw technical details here because they can include private information."
+    );
+    expect(html).not.toMatch(
+      /SQLITE_BUSY|route schema|parser failed|\/Users\/person|hunter2|loadDashboard|dashboard\.mjs/i
+    );
   });
 
   it("surfaces dashboard load failures ahead of the setup fallback", async () => {

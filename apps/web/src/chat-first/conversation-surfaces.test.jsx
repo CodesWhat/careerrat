@@ -218,6 +218,179 @@ describe("TodayConversation", () => {
     expect(html).not.toContain("[object Object]");
   });
 
+  it("replaces browser-workflow failure summaries with actionable candidate copy", () => {
+    const html = markup(
+      <MessageTranscript
+        onMessageAction={() => undefined}
+        messages={[
+          {
+            id: "browser-failed",
+            role: "assistant",
+            kind: "action_result",
+            text: "Browser failed at /Users/person/workspace with password=hunter2 and route schema output.",
+            metadata: {
+              mark: "secret=receipt-mark",
+              actionLabel: "/Users/person/open-debug-log",
+            },
+            artifacts: [
+              {
+                kind: "browser_workflow_result",
+                state: "needs-user",
+                title: "parser.mjs:42 provider openai secret=abc123",
+                icon: "password=icon-secret",
+                actionLabel: "Open /Users/person/private/report",
+                secondaryActions: [
+                  { id: "raw", label: "bearer auxiliary-secret", onAction: () => undefined },
+                ],
+                summary:
+                  "Model output did not match the route schema for provider openai at /Users/person/workspace. password=hunter2\n    at parseResponse (parser.mjs:42:9)",
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    expect(html).toContain(
+      "CareerRat couldn&#x27;t finish this browser task. Try again. If it still doesn&#x27;t work, open Settings and check the browser connection."
+    );
+    expect(html).toContain("Browser task needs attention");
+    expect(html).toContain("<strong>Browser task</strong>");
+    expect(html).toContain(">🌐</span>");
+    expect(html).not.toMatch(
+      /route schema|provider openai|\/Users\/person|hunter2|secret=abc123|parseResponse|parser\.mjs|receipt-mark|icon-secret|auxiliary-secret/i
+    );
+  });
+
+  it("does not trust a browser-workflow summary even when the result says it completed", () => {
+    const html = markup(
+      <MessageTranscript
+        messages={[
+          {
+            id: "browser-complete",
+            role: "assistant",
+            kind: "action_result",
+            text: "Browser task complete.",
+            artifacts: [
+              {
+                kind: "browser_workflow_result",
+                state: "completed",
+                title: "Webmail check",
+                summary: "Saved 2 messages. Debug route: /api/mail?secret=abc123",
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    expect(html).toContain("Browser task finished. Review what CareerRat saved.");
+    expect(html).not.toMatch(/\/api\/mail|secret=abc123/i);
+  });
+
+  it("does not render diagnostic text from a non-receipt browser-workflow message", () => {
+    const html = markup(
+      <MessageTranscript
+        messages={[
+          {
+            id: "browser-text-message",
+            role: "assistant",
+            kind: "text",
+            text: "Provider failed at /Users/person/private with secret=abc123.",
+            artifacts: [
+              {
+                kind: "browser_workflow_result",
+                state: "needs-user",
+                blockers: [{ code: "BROWSER_UNAVAILABLE" }],
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    expect(html).toContain(
+      "CareerRat can&#x27;t open the browser yet. Open Settings, check the browser connection, then retry."
+    );
+    expect(html).toContain("Browser task needs attention");
+    expect(html).not.toMatch(/provider failed|\/Users\/person|secret=abc123/i);
+  });
+
+  it("maps typed browser blockers to the right safe recovery step", () => {
+    const html = markup(
+      <MessageTranscript
+        messages={[
+          {
+            id: "browser-consent",
+            role: "assistant",
+            kind: "action_result",
+            text: "raw consent backend output",
+            artifacts: [
+              {
+                kind: "browser_workflow_result",
+                skill: "optimize-linkedin",
+                state: "needs-user",
+                blockers: [{ code: "CONSENT_REQUIRED" }],
+              },
+            ],
+          },
+          {
+            id: "browser-status-url",
+            role: "assistant",
+            kind: "action_result",
+            text: "raw status backend output",
+            artifacts: [
+              {
+                kind: "browser_workflow_result",
+                skill: "sync-status",
+                state: "needs-user",
+                blockers: [{ code: "STATUS_URL_REQUIRED" }],
+              },
+            ],
+          },
+          {
+            id: "browser-auth",
+            role: "assistant",
+            kind: "action_result",
+            text: "raw auth backend output",
+            artifacts: [
+              {
+                kind: "browser_workflow_result",
+                skill: "ingest-mail",
+                state: "needs-user",
+                blockers: [{ code: "AUTH_REQUIRED" }],
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    expect(html).toContain("CareerRat needs your permission for this browser task");
+    expect(html).toContain("signed-in application dashboard link");
+    expect(html).toContain("Sign in or finish the verification step in the CareerRat browser");
+    expect(html).not.toMatch(/raw (?:consent|status|auth) backend output/i);
+  });
+
+  it("keeps a malformed persisted artifact field from crashing the transcript", () => {
+    const html = markup(
+      <MessageTranscript
+        messages={[
+          {
+            id: "legacy-malformed-artifacts",
+            role: "assistant",
+            kind: "action_result",
+            text: "Action updated",
+            artifacts: { kind: "browser_workflow_result", title: "/Users/person/private" },
+          },
+        ]}
+      />
+    );
+
+    expect(html).toContain("Action updated");
+    expect(html).not.toContain("/Users/person/private");
+  });
+
   it("does not claim a dedupe-only refresh found zero useful jobs", () => {
     const html = markup(
       <MessageTranscript
@@ -1498,7 +1671,7 @@ describe("SubmitGateModal", () => {
 });
 
 describe("EngineDownCover", () => {
-  it("covers the workspace without implying that local data is lost", () => {
+  it("covers the workspace without implying that local data is lost or exposing diagnostics", () => {
     const html = markup(
       <EngineDownCover
         open
@@ -1506,7 +1679,9 @@ describe("EngineDownCover", () => {
         onRetry={() => {}}
         onOpenSettings={() => {}}
         onShowTechnical={() => {}}
-        technicalDetails="Selected runtime returned RUNTIME_UNAVAILABLE."
+        technicalDetails={
+          "Provider route schema parser failed with RUNTIME_UNAVAILABLE at /Users/person/workspace. api_key=secret\n    at runAgent (runtime.mjs:18:4)"
+        }
       />
     );
 
@@ -1517,6 +1692,11 @@ describe("EngineDownCover", () => {
     expect(html).toContain("Retry");
     expect(html).toContain("Open settings");
     expect(html).toContain("what happened, technically");
-    expect(html).toContain("Selected runtime returned RUNTIME_UNAVAILABLE.");
+    expect(html).toContain(
+      "CareerRat hides raw technical details here because they can include private information."
+    );
+    expect(html).not.toMatch(
+      /provider route|schema parser|RUNTIME_UNAVAILABLE|\/Users\/person|api_key|secret|runAgent|runtime\.mjs/i
+    );
   });
 });

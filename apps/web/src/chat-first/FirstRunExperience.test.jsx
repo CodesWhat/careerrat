@@ -310,7 +310,7 @@ describe("FirstRunExperience", () => {
     expect(html).toContain("Claude Code needs a paid Claude plan. Pro is enough");
     expect(html).toContain("Get Claude through Scott’s referral");
     expect(html).toContain('href="https://claude.ai/referral/rOLHwxlsfA"');
-    expect(html).toContain("curl -fsSL https://claude.ai/install.sh | bash");
+    expect(html).not.toMatch(/curl|install\.sh|\| bash/i);
     expect(html).toContain("Install inside CareerRat");
     expect(html).toContain("Check setup");
     expect(html).toContain("I already use another AI tool");
@@ -342,16 +342,20 @@ describe("FirstRunExperience", () => {
       guidedSetup: {
         runtimeId: "claude",
         status: "installing",
-        lines: ["Downloading Claude Code…", "Installing…"],
+        lines: [
+          "npm ERR! auth failed",
+          "/Users/person/.npm/_logs/debug.log",
+          "at install (/private/tmp/setup.js:42:9)",
+        ],
       },
       onRefreshEngines,
     });
     const html = renderToStaticMarkup(tree);
 
     expect(html).toContain("Installing inside CareerRat");
-    expect(html).toContain("Downloading Claude Code…");
-    expect(html).toContain("Installing…");
+    expect(html).toContain("CareerRat is installing Claude Code");
     expect(html).toContain("CareerRat setup");
+    expect(html).not.toMatch(/npm|auth failed|\/Users\/person|private\/tmp|setup\.js/i);
 
     const guide = findElement(tree, (node) => node.type?.name === "ClaudeSetupGuide");
     const checkSetup = findElement(
@@ -371,13 +375,18 @@ describe("FirstRunExperience", () => {
       guidedSetup: {
         runtimeId: "claude",
         status: "failed",
-        lines: ["The download could not finish."],
+        lines: [
+          "SSE stream closed with 401 Unauthorized",
+          "npm ERR! /Users/person/.npm/_logs/debug.log",
+        ],
       },
       onStartGuidedSetup,
     });
     const html = renderToStaticMarkup(tree);
 
-    expect(html).toContain("The download could not finish.");
+    expect(html).toContain("CareerRat couldn&#x27;t finish installing Claude Code");
+    expect(html).toContain("Nothing in your setup was lost");
+    expect(html).not.toMatch(/SSE|401|Unauthorized|npm|\/Users\/person/i);
     expect(html).toContain("RETRY");
     const guide = findElement(tree, (node) => node.type?.name === "ClaudeSetupGuide");
     const retry = findElement(
@@ -386,6 +395,39 @@ describe("FirstRunExperience", () => {
     );
     retry.props.onClick();
     expect(onStartGuidedSetup).toHaveBeenCalledWith("claude");
+  });
+
+  it("does not loop back into an unavailable in-app installer", async () => {
+    const { FirstRunExperience } = await loadFirstRun();
+    const onStartGuidedSetup = vi.fn();
+    const onRefreshEngines = vi.fn();
+    const tree = FirstRunExperience({
+      stage: "engine",
+      engines: [],
+      guidedSetup: { runtimeId: "claude", status: "unavailable" },
+      onStartGuidedSetup,
+      onRefreshEngines,
+    });
+    const html = renderToStaticMarkup(tree);
+    const guide = findElement(tree, (node) => node.type?.name === "ClaudeSetupGuide");
+    const checkSetup = findElement(
+      guide.type(guide.props),
+      (node) => node.type === "button" && textOf(node) === "Check setup"
+    );
+
+    expect(html).toContain("In-app installation isn&#x27;t available here");
+    expect(html).toContain("Install Claude Code from its setup guide");
+    expect(html).toContain("finish installation, then choose Check setup");
+    expect(html).not.toContain("Let CareerRat install Claude Code");
+    expect(html).not.toContain("CareerRat can install Claude Code here");
+    expect(html).toContain('href="https://code.claude.com/docs/en/quickstart"');
+    expect(html).toContain("Open Claude setup guide");
+    expect(html).not.toContain("Try installation again");
+    expect(html).toContain(">SETUP</span>");
+    expect(html).not.toContain(">RETRY</span>");
+    checkSetup.props.onClick();
+    expect(onRefreshEngines).toHaveBeenCalledOnce();
+    expect(onStartGuidedSetup).not.toHaveBeenCalled();
   });
 
   it("retries inventory discovery from the empty state", async () => {

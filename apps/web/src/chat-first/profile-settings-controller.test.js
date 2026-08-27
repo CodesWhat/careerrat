@@ -134,6 +134,11 @@ describe("profile settings controller mapping", () => {
           presence: {
             status: "unverified",
             detail: "Google Chrome detected. Confirm the extension is signed in.",
+            nextStep: {
+              kind: "choose",
+              provider: "playwright",
+              label: "Use CareerRat browser",
+            },
           },
           options: [
             {
@@ -269,6 +274,11 @@ describe("profile settings controller mapping", () => {
       effectiveProvider: "Chrome extension",
       presenceStatus: "unverified",
       presenceDetail: "Google Chrome detected. Confirm the extension is signed in.",
+      nextStep: {
+        kind: "choose",
+        provider: "playwright",
+        label: "Use CareerRat browser",
+      },
       automaticFillSupported: false,
       options: [
         {

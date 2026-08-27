@@ -9,6 +9,7 @@ import {
   runJobsPageSearch,
 } from "../jobs/jobsSearch.js";
 import { resolveErrorCopy } from "../lib/errorCopy.js";
+import { safeDisplayDetail } from "../lib/safe-display-details.js";
 import { useEventSource } from "../lib/sse.js";
 import { chatFirstApi } from "./api.js";
 import { filterFiles, filterPeople, filterSearchJobs } from "./browser-model.js";
@@ -843,7 +844,7 @@ function ChatFirstControllerAlert({ error, onAction }) {
   const message = controllerErrorMessage(error);
   if (!message) return null;
   const action = error && typeof error === "object" ? error.action : null;
-  const detail = controllerErrorDetail(error);
+  const detail = safeDisplayDetail(controllerErrorDetail(error));
   const canRunAction = Boolean(action?.onRetry || action?.onAction || (action?.to && onAction));
   const runAction = () => {
     if (action?.onRetry) return action.onRetry();

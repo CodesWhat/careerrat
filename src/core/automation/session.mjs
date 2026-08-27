@@ -257,21 +257,21 @@ export function detectSession({ data, env = process.env, playwrightToolingDepend
       presence = tooling.ready
         ? {
             status: "ready",
-            detail: "Playwright opens a supervised browser when a workflow needs it.",
+            detail: "CareerRat can open a browser when a job needs one.",
           }
         : {
             status: "missing",
-            detail: tooling.detail,
+            detail: "CareerRat's browser isn't ready yet.",
           };
     } else if (base.provider === "orca") {
       presence = env?.ORCA_WORKTREE_ID
         ? {
             status: "ready",
-            detail: "Orca workspace detected; browser readiness is verified when Apply starts",
+            detail: "CareerRat can open a browser when a job needs one.",
           }
         : {
             status: "unverified",
-            detail: "Orca provider selected; browser readiness is verified when Apply starts",
+            detail: "CareerRat will check the browser when you start an application.",
           };
     } else {
       const browsers = detectChromeFamily();
@@ -279,17 +279,29 @@ export function detectSession({ data, env = process.env, playwrightToolingDepend
         ? {
             status: "unverified",
             browsers,
-            detail: `${browsers.join(", ")} detected. Confirm the extension is installed and signed in (can't be verified from outside the browser). Automatic apply isn't available on this provider yet; \`careerrat automation status\` lists the providers that support it.`,
+            detail: "CareerRat needs one more setup step before it can help with job forms.",
+            nextStep: {
+              kind: "choose",
+              provider: "playwright",
+              label: "Use CareerRat browser",
+            },
           }
         : {
             status: "missing",
             browsers: [],
-            detail:
-              "No Chrome-family browser found. Install Chrome and the session-browser extension, or pick a different provider with `careerrat automation status`. Automatic apply isn't available on this provider yet either way.",
+            detail: "CareerRat needs a browser connection before it can help with job forms.",
+            nextStep: {
+              kind: "choose",
+              provider: "playwright",
+              label: "Use CareerRat browser",
+            },
           };
     }
   } catch {
-    presence = { status: "unknown", detail: "presence check failed (non-fatal)" };
+    presence = {
+      status: "unknown",
+      detail: "CareerRat couldn't check the browser. Try again.",
+    };
   }
   return { ...base, presence };
 }
