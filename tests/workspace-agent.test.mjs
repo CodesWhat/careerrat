@@ -55,7 +55,11 @@ import {
 import { relationshipLeadUpsertBatch } from "../src/core/db/verbs/relationship.mjs";
 import { sourceWatermarkUpsert } from "../src/core/db/verbs/source.mjs";
 import { sourcedUpsertBatch } from "../src/core/db/verbs/sourced.mjs";
-import { sourcingRunLatest, sourcingRunStart } from "../src/core/db/verbs/sourcing-runs.mjs";
+import {
+  sourcingRunComplete,
+  sourcingRunLatest,
+  sourcingRunStart,
+} from "../src/core/db/verbs/sourcing-runs.mjs";
 import { buildCompanySeedContext } from "../src/core/discovery/company-context.mjs";
 import { companyDiscoveryFingerprint } from "../src/core/discovery/company-discovery-cadence.mjs";
 import { draftOneOffScreeningAnswers } from "../src/core/packet/one-off-answer.mjs";
@@ -4292,7 +4296,7 @@ test("the workspace runtime starts the job sweep before recurring company discov
   await turn;
 });
 
-test("the workspace runtime owns sourcing workers and settles them during shutdown", async () => {
+test("the workspace runtime leaves an interrupted search resumable during shutdown", async () => {
   const repoRoot = tempRepo();
   let started;
   let startedWorker;
@@ -4327,28 +4331,54 @@ test("the workspace runtime owns sourcing workers and settles them during shutdo
 
   await runtime.shutdownSourcingWorkers();
   assert.equal(runtime.ownsSourcingRun(started.run.id), false);
-  const terminal = sourcingRunLatest({ repoRoot, purpose: "manual-search" }).run;
-  assert.equal(terminal.status, "failed");
-  assert.equal(terminal.error.code, "SOURCING_RUN_SERVER_STOPPED");
-  assert.match(terminal.error.message, /app closed/i);
+  const resumable = sourcingRunLatest({ repoRoot, purpose: "manual-search" }).run;
+  assert.equal(resumable.status, "running");
+  assert.equal(resumable.id, started.run.id);
   const thread = workspaceThreadRead({ repoRoot, env: {} });
-  assert.equal(thread.messages.at(-1).metadata.searchTerminal, true);
-  assert.equal(thread.messages.at(-1).metadata.searchRunId, started.run.id);
+  assert.equal(thread.messages.at(-1).metadata.searchTerminal, false);
 });
 
-test("the workspace owner explicitly recovers orphaned sourcing runs after startup", () => {
+test("the workspace owner resumes an orphaned sourcing run after startup", async () => {
   const repoRoot = tempRepo();
   const orphan = sourcingRunStart({ repoRoot, purpose: "first-search" }).run;
+  const db = openDb({ repoRoot, env: {} });
+  const stale = {
+    ...orphan,
+    updated_at: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+  };
+  db.prepare("UPDATE sourcing_runs SET data = ? WHERE id = ?").run(
+    JSON.stringify(stale),
+    orphan.id
+  );
+  let recoveredRunId;
+  const recovered = new Promise((resolve) => {
+    recoveredRunId = resolve;
+  });
 
-  const runtime = createWorkspaceAgentRuntime({ repoRoot, env: {} });
+  const runtime = createWorkspaceAgentRuntime({
+    repoRoot,
+    env: {},
+    runSearchInBackgroundImpl: async ({ runId }) => {
+      recoveredRunId(runId);
+      return sourcingRunComplete({
+        repoRoot,
+        env: {},
+        id: runId,
+        summary: { scanned: 1, new: 1, presented: 1 },
+      }).run;
+    },
+  });
 
   assert.equal(runtime.ownsSourcingRun(orphan.id), false);
-  assert.equal(sourcingRunLatest({ repoRoot, purpose: "first-search" }).run.status, "running");
   runtime.recoverOrphanedSourcingRuns();
-  const terminal = sourcingRunLatest({ repoRoot, purpose: "first-search" }).run;
-  assert.equal(terminal.status, "failed");
-  assert.equal(terminal.error.code, "SOURCING_RUN_SERVER_RESTARTED");
-  assert.match(terminal.error.message, /restarted/i);
+  assert.equal(await recovered, orphan.id);
+  while (runtime.ownsSourcingRun(orphan.id)) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  const completed = sourcingRunLatest({ repoRoot, purpose: "first-search" }).run;
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.id, orphan.id);
+  assert.equal(completed.metadata.recoveryCount, 1);
 });
 
 test("a manual search reopens pending company proposals instead of creating a duplicate batch", async () => {

@@ -61,7 +61,11 @@ import {
 } from "../db/verbs/linkedin-proposals.mjs";
 import { relationshipLeadUpsertBatch } from "../db/verbs/relationship.mjs";
 import { sourcedPromote, sourcedSetStatus, sourcedUpsertBatch } from "../db/verbs/sourced.mjs";
-import { sourcingRunFail, sourcingRunLatest } from "../db/verbs/sourcing-runs.mjs";
+import {
+  sourcingRunFail,
+  sourcingRunLatest,
+  sourcingRunRecoverRunning,
+} from "../db/verbs/sourcing-runs.mjs";
 import { companyDiscoveryCadenceState } from "../discovery/company-discovery-cadence.mjs";
 import { applyCompanyProposalDecision } from "../discovery/company-proposal-decisions.mjs";
 import { createCompanyProposalBatch } from "../discovery/company-proposals.mjs";
@@ -10253,6 +10257,7 @@ export function createWorkspaceAgentRuntime({
       )
       .then((terminalRun) => runtime.recordSearchCompletion({ run: terminalRun }))
       .catch((error) => {
+        if (error?.code === "SOURCING_RUN_SERVER_STOPPED") return undefined;
         let terminalRun;
         try {
           terminalRun = sourcingRunFail({
@@ -10276,17 +10281,9 @@ export function createWorkspaceAgentRuntime({
   function reconcileOrphanedSourcingRuns() {
     for (const purpose of ["first-search", "manual-search"]) {
       try {
-        const run = sourcingRunLatest({ repoRoot, env, purpose }).run;
+        const run = sourcingRunRecoverRunning({ repoRoot, env, purpose }).run;
         if (run?.status !== "running" || sourcingWorkers.has(run.id)) continue;
-        sourcingRunFail({
-          repoRoot,
-          env,
-          id: run.id,
-          error: {
-            code: "SOURCING_RUN_SERVER_RESTARTED",
-            message: "CareerRat restarted before this search finished. Start it again to continue.",
-          },
-        });
+        startSearchInBackground({ operation: { reused: false }, run });
       } catch {
         // A workspace without a database has no durable sourcing runs to recover.
       }

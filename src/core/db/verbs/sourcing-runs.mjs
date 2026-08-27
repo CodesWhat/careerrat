@@ -220,6 +220,28 @@ export function sourcingRunLatest({ repoRoot, env, purpose = "first-search" } = 
   });
 }
 
+export function sourcingRunRecoverRunning({ repoRoot, env, purpose = "first-search" } = {}) {
+  const normalizedPurpose = assertPurpose(purpose);
+  const db = requireDb({ repoRoot, env });
+  return withTransaction(db, () => {
+    const run = latestRunForPurpose(db, normalizedPurpose);
+    if (run?.status !== SOURCING_RUN_STATUSES.RUNNING) {
+      return { ok: true, recovered: false, run };
+    }
+    const now = nextTimestampIso(run.updated_at);
+    const recovered = updateRun(db, {
+      ...clone(run),
+      updated_at: now,
+      metadata: {
+        ...(run.metadata && typeof run.metadata === "object" ? clone(run.metadata) : {}),
+        recoveredAt: now,
+        recoveryCount: Number(run.metadata?.recoveryCount || 0) + 1,
+      },
+    });
+    return { ok: true, recovered: true, run: recovered };
+  });
+}
+
 export function sourcingRunGet({ repoRoot, env, id, purpose } = {}) {
   const runId = assertRunId(id, "sourcingRunGet");
   const normalizedPurpose = purpose == null ? null : assertPurpose(purpose);

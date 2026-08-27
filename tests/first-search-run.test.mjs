@@ -971,11 +971,16 @@ test("background first search publishes a growing found count before completion"
     });
 
     await betaRequested.promise;
-
-    const running = latestSourcingRunForUi({
-      repoRoot,
-      purpose: "first-search",
-    }).run;
+    const deadline = Date.now() + 1000;
+    let running;
+    do {
+      running = latestSourcingRunForUi({
+        repoRoot,
+        purpose: "first-search",
+      }).run;
+      if (running.progress?.foundCount === 1) break;
+      await new Promise((resolve) => setImmediate(resolve));
+    } while (Date.now() < deadline);
     assert.equal(running.status, "running");
     assert.equal(running.progress.foundCount, 1);
     assert.equal(running.progress.offerCount, 1);
@@ -1005,7 +1010,7 @@ test("background first search publishes a growing found count before completion"
   }
 });
 
-test("background sourcing heartbeats while quiet and stops cleanly when the app shuts down", async () => {
+test("background sourcing heartbeats while quiet and stays resumable when the app shuts down", async () => {
   const repoRoot = tempRepo();
   const requested = deferred();
   sourceConfigPut({
@@ -1049,10 +1054,10 @@ test("background sourcing heartbeats while quiet and stops cleanly when the app 
   assert.equal(heartbeat.progress.totalSources, 1);
 
   controller.abort(stopped);
-  const terminal = await background;
-  assert.equal(terminal.status, "failed");
-  assert.equal(terminal.error.code, "SOURCING_RUN_SERVER_STOPPED");
-  assert.match(terminal.error.message, /app closed/i);
+  await assert.rejects(background, (error) => error?.code === "SOURCING_RUN_SERVER_STOPPED");
+  const resumable = sourcingRunLatest({ repoRoot, purpose: "manual-search" }).run;
+  assert.equal(resumable.status, "running");
+  assert.equal(resumable.id, started.run.id);
 });
 
 test("a superseded background search cannot write stale watermarks, offers, or completion", async () => {

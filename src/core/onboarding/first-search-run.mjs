@@ -998,6 +998,7 @@ export async function runFirstSearchInBackground({
     }).run;
   } catch (error) {
     const failure = signal?.aborted && signal.reason ? signal.reason : error;
+    if (failure?.code === "SOURCING_RUN_SERVER_STOPPED") throw failure;
     try {
       return sourcingRunFail({
         ...pathCtx,
