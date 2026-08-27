@@ -48,6 +48,40 @@ function offerBodyText(offer) {
   return String(offer?.bodyText || offer?.description || offer?.rawText || "").trim();
 }
 
+const EXPLICIT_BASE_COMPENSATION_RE = /\b(?:base\s+(?:salary|pay)|salary(?:\s+(?:range|band))?)\b/i;
+const ADJACENT_BASE_COMPENSATION_LABEL_RE =
+  /^(?:(?:estimated|annual|posted)\s+)*(?:base\s+(?:salary|pay)|salary)\s+(?:range|band)\s*:?$/i;
+const NON_BASE_COMPENSATION_RE =
+  /\b(?:bonus(?:es)?|ote|on[- ]target\s+earnings?|equity|stock(?:\s+(?:options?|grants?))?|total\s+(?:cash\s+)?comp(?:ensation)?|commission|variable\s+comp(?:ensation)?|incentive)\b/i;
+const COMPENSATION_RANGE_RE =
+  /(?:(?:USD|CAD|MXN|EUR|GBP)\s*)?[$£€]?\s*(\d{2,6}(?:,\d{3})*(?:\.\d+)?)\s*([kK])?\s*(?:-|–|—|to)\s*(?:(?:USD|CAD|MXN|EUR|GBP)\s*)?[$£€]?\s*(\d{2,6}(?:,\d{3})*(?:\.\d+)?)\s*([kK])?(?:\s*(?:USD|CAD|MXN|EUR|GBP))?/g;
+
+function normalizedCompensationAmount(value, suffix) {
+  const numeric = Number(String(value || "").replace(/,/g, ""));
+  if (!Number.isFinite(numeric)) return null;
+  return suffix || numeric < 1000 ? numeric * 1000 : numeric;
+}
+
+function explicitBaseCompensationRange(bodyText) {
+  const clauses = String(bodyText || "")
+    .split(/\n+|[.;!?]\s+/)
+    .map((clause) => clause.trim())
+    .filter(Boolean);
+  for (const [index, clause] of clauses.entries()) {
+    const adjacentLabel = ADJACENT_BASE_COMPENSATION_LABEL_RE.test(clauses[index - 1] || "");
+    if (!EXPLICIT_BASE_COMPENSATION_RE.test(clause) && !adjacentLabel) continue;
+    if (NON_BASE_COMPENSATION_RE.test(clause)) continue;
+    for (const match of clause.matchAll(COMPENSATION_RANGE_RE)) {
+      const min = normalizedCompensationAmount(match[1], match[2]);
+      const max = normalizedCompensationAmount(match[3], match[4]);
+      if (min >= 50_000 && max >= min && max <= 1_200_000) {
+        return match[0].trim().replace(/\s+/g, " ");
+      }
+    }
+  }
+  return null;
+}
+
 function sourceMetaFromOffer(offer) {
   const meta = {};
   for (const key of [
@@ -173,7 +207,10 @@ export function sourcedRowsFromScanOffers(offers, nowIso = new Date().toISOStrin
       channel: "board",
       link: offer.url,
       loc: offer.location || "",
-      base: offer.comp || "verify",
+      base:
+        offer.comp ||
+        (offer.bodyPartial === true ? null : explicitBaseCompensationRange(offerBodyText(offer))) ||
+        "verify",
       fitScore: Number.isFinite(fitScore) ? fitScore : 0,
       fitBucket: offer.fit || "",
       fitBasis: "triage",
