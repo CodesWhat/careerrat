@@ -41,6 +41,7 @@ const MISSION_MODES = new Set(["draft", "prepare-to-submit"]);
 const MOCK_ROLES = new Set(["user", "assistant", "system"]);
 const MOCK_KINDS = new Set(["question", "answer", "coaching", "status", "text"]);
 const DEEP_INGEST_PROMPT_PREFERENCE_ID = "deep-ingest-prompt";
+const CHAT_FIRST_HISTORY_LIMIT = 200;
 const CLOSED_JOB_STATUSES = new Set([
   "accepted",
   "archived",
@@ -168,6 +169,120 @@ function readJsonRows(db, sql, ...params) {
     .prepare(sql)
     .all(...params)
     .map((row) => JSON.parse(row.data));
+}
+
+function groupJsonRows(rows) {
+  const grouped = new Map();
+  for (const row of rows) {
+    const values = grouped.get(row.parent_id) || [];
+    values.push(JSON.parse(row.data));
+    grouped.set(row.parent_id, values);
+  }
+  return grouped;
+}
+
+function recentJobMessagesByThread(db) {
+  return groupJsonRows(
+    db
+      .prepare(
+        `SELECT thread.id AS parent_id, message.data
+         FROM job_threads AS thread
+         JOIN job_thread_messages AS message ON message.id IN (
+           SELECT recent.id
+           FROM job_thread_messages AS recent
+           WHERE recent.thread_id = thread.id
+           ORDER BY recent.sequence DESC
+           LIMIT ?
+         )
+         ORDER BY thread.id ASC, message.sequence ASC`
+      )
+      .all(CHAT_FIRST_HISTORY_LIMIT)
+  );
+}
+
+function missionStepsByMission(db) {
+  return groupJsonRows(
+    db
+      .prepare(
+        `SELECT mission_id AS parent_id, data
+         FROM mission_steps
+         ORDER BY mission_id ASC, sequence ASC`
+      )
+      .all()
+  );
+}
+
+function recentMockMessagesBySession(db) {
+  return groupJsonRows(
+    db
+      .prepare(
+        `SELECT session.id AS parent_id, message.data
+         FROM mock_interview_sessions AS session
+         JOIN mock_interview_messages AS message ON message.id IN (
+           SELECT recent.id
+           FROM mock_interview_messages AS recent
+           WHERE recent.session_id = session.id
+           ORDER BY recent.sequence DESC
+           LIMIT ?
+         )
+         ORDER BY session.id ASC, message.sequence ASC`
+      )
+      .all(CHAT_FIRST_HISTORY_LIMIT)
+  );
+}
+
+function recentMockFeedbackBySession(db) {
+  return groupJsonRows(
+    db
+      .prepare(
+        `SELECT session.id AS parent_id, feedback.data
+         FROM mock_interview_sessions AS session
+         JOIN mock_interview_feedback AS feedback ON feedback.id IN (
+           SELECT recent.id
+           FROM mock_interview_feedback AS recent
+           WHERE recent.session_id = session.id
+           ORDER BY recent.question_number DESC, recent.created_at DESC, recent.id DESC
+           LIMIT ?
+         )
+         ORDER BY session.id ASC, feedback.question_number ASC,
+           feedback.created_at ASC, feedback.id ASC`
+      )
+      .all(CHAT_FIRST_HISTORY_LIMIT)
+  );
+}
+
+function recentSkillMessagesByThread(db) {
+  return groupJsonRows(
+    db
+      .prepare(
+        `SELECT thread.id AS parent_id, message.data
+         FROM skill_chat_threads AS thread
+         JOIN skill_chat_messages AS message ON message.id IN (
+           SELECT recent.id
+           FROM skill_chat_messages AS recent
+           WHERE recent.thread_id = thread.id
+           ORDER BY recent.sequence DESC
+           LIMIT ?
+         )
+         ORDER BY thread.id ASC, message.sequence ASC`
+      )
+      .all(CHAT_FIRST_HISTORY_LIMIT)
+  );
+}
+
+function recentWorkspaceMessages(db) {
+  return readJsonRows(
+    db,
+    `SELECT data FROM (
+       SELECT sequence, data
+       FROM workspace_messages
+       WHERE thread_id = 'workspace-main'
+       ORDER BY sequence DESC
+       LIMIT ?
+     )
+     ORDER BY sequence ASC`,
+    CHAT_FIRST_HISTORY_LIMIT
+  );
 }
 
 function applicationRequired(db, applicationId) {
@@ -3590,6 +3705,7 @@ export function chatFirstStateFromDb(db, { now = new Date() } = {}) {
     rows.push(communication);
     communicationsByApplication.set(communication.applicationId, rows);
   }
+  const jobMessagesByThread = recentJobMessagesByThread(db);
   const jobThreads = readJsonRows(db, "SELECT data FROM job_threads ORDER BY updated_at DESC").map(
     (thread) => {
       const application = applicationById.get(thread.applicationId) || {};
@@ -3611,11 +3727,7 @@ export function chatFirstStateFromDb(db, { now = new Date() } = {}) {
         archiveReason: archiveEligible ? "job-closed" : manuallyArchived ? "user" : null,
         conversations: Array.isArray(application.conversations) ? application.conversations : [],
         communications: communicationsByApplication.get(thread.applicationId) || [],
-        messages: readJsonRows(
-          db,
-          "SELECT data FROM job_thread_messages WHERE thread_id = ? ORDER BY sequence ASC",
-          thread.id
-        ),
+        messages: jobMessagesByThread.get(thread.id) || [],
       };
     }
   );
@@ -3624,36 +3736,35 @@ export function chatFirstStateFromDb(db, { now = new Date() } = {}) {
       Number(right.pinned) - Number(left.pinned) ||
       String(right.updatedAt).localeCompare(String(left.updatedAt))
   );
+  const stepsByMission = missionStepsByMission(db);
   const missions = readJsonRows(db, "SELECT data FROM missions ORDER BY updated_at DESC").map(
-    (mission) => hydrateMission(db, mission)
+    (mission) => ({ ...mission, steps: stepsByMission.get(mission.id) || [] })
   );
   const sourced = readJsonRows(db, "SELECT data FROM sourced ORDER BY rowid ASC");
+  const mockMessagesBySession = recentMockMessagesBySession(db);
+  const mockFeedbackBySession = recentMockFeedbackBySession(db);
   const mockSessions = readJsonRows(
     db,
     "SELECT data FROM mock_interview_sessions ORDER BY updated_at DESC"
-  ).map((session) => hydrateMockSession(db, session));
+  ).map((session) => ({
+    ...session,
+    messages: mockMessagesBySession.get(session.id) || [],
+    feedback: mockFeedbackBySession.get(session.id) || [],
+  }));
   const workspaceThread = parseRow(
     db.prepare("SELECT data FROM workspace_threads WHERE id = 'workspace-main'").get()
   );
   const workspaceMessages = workspaceThread
-    ? workspaceMessagesForDisplay(
-        readJsonRows(
-          db,
-          "SELECT data FROM workspace_messages WHERE thread_id = 'workspace-main' ORDER BY sequence ASC"
-        )
-      )
+    ? workspaceMessagesForDisplay(recentWorkspaceMessages(db))
     : [];
+  const skillMessagesByThread = recentSkillMessagesByThread(db);
   const skillChats = readJsonRows(
     db,
     "SELECT data FROM skill_chat_threads ORDER BY updated_at DESC"
   ).map((thread) => ({
     ...thread,
     decisions: Array.isArray(thread.decisions) ? thread.decisions : [],
-    messages: readJsonRows(
-      db,
-      "SELECT data FROM skill_chat_messages WHERE thread_id = ? ORDER BY sequence ASC",
-      thread.id
-    ),
+    messages: skillMessagesByThread.get(thread.id) || [],
   }));
   const touchDue = deriveTouchDue(db, applications, communications, current);
   const needsYou = [

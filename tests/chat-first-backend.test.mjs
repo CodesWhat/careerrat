@@ -75,6 +75,166 @@ function seedApplication(repoRoot, row) {
   });
 }
 
+function insertChatFirstReadModel(db, index, { messageCount = 1 } = {}) {
+  const suffix = String(index).padStart(3, "0");
+  const applicationId = `app-read-${suffix}`;
+  const threadId = `job:${applicationId}`;
+  const missionId = `mission-read-${suffix}`;
+  const mockId = `mock-read-${suffix}`;
+  const skill = `read-skill-${suffix}`;
+  const skillThreadId = `skill:${skill}`;
+  const at = `2026-08-27T12:${String(index % 60).padStart(2, "0")}:00.000Z`;
+  const application = {
+    id: applicationId,
+    company: `Read Model ${suffix}`,
+    role: "Platform Engineer",
+    status: "applied",
+    createdAt: at,
+    updatedAt: at,
+  };
+  const thread = {
+    id: threadId,
+    applicationId,
+    status: "active",
+    pinned: false,
+    earnedBy: ["human-entered"],
+    createdAt: at,
+    updatedAt: at,
+  };
+  const mission = {
+    id: missionId,
+    title: `Mission ${suffix}`,
+    status: "completed",
+    createdAt: at,
+    updatedAt: at,
+  };
+  const mock = {
+    id: mockId,
+    applicationId,
+    title: `Mock ${suffix}`,
+    status: "ended",
+    questionTotal: 1,
+    currentQuestion: 1,
+    startedAt: at,
+    endedAt: at,
+    updatedAt: at,
+  };
+  const skillThread = {
+    id: skillThreadId,
+    skill,
+    status: "active",
+    messageCount,
+    createdAt: at,
+    updatedAt: at,
+  };
+
+  db.prepare("INSERT INTO applications (id, data) VALUES (?, ?)").run(
+    applicationId,
+    JSON.stringify(application)
+  );
+  db.prepare("INSERT INTO job_threads (id, application_id, data) VALUES (?, ?, ?)").run(
+    threadId,
+    applicationId,
+    JSON.stringify(thread)
+  );
+  db.prepare("INSERT INTO missions (id, data) VALUES (?, ?)").run(
+    missionId,
+    JSON.stringify(mission)
+  );
+  db.prepare("INSERT INTO mission_steps (id, mission_id, sequence, data) VALUES (?, ?, ?, ?)").run(
+    `step-${suffix}`,
+    missionId,
+    1,
+    JSON.stringify({
+      id: `step-${suffix}`,
+      missionId,
+      sequence: 1,
+      label: "Finished",
+      status: "completed",
+      createdAt: at,
+      updatedAt: at,
+    })
+  );
+  db.prepare("INSERT INTO mock_interview_sessions (id, application_id, data) VALUES (?, ?, ?)").run(
+    mockId,
+    applicationId,
+    JSON.stringify(mock)
+  );
+  db.prepare("INSERT INTO skill_chat_threads (id, data) VALUES (?, ?)").run(
+    skillThreadId,
+    JSON.stringify(skillThread)
+  );
+
+  const insertJobMessage = db.prepare(
+    "INSERT INTO job_thread_messages (id, thread_id, sequence, data) VALUES (?, ?, ?, ?)"
+  );
+  const insertMockMessage = db.prepare(
+    "INSERT INTO mock_interview_messages (id, session_id, sequence, data) VALUES (?, ?, ?, ?)"
+  );
+  const insertMockFeedback = db.prepare(
+    "INSERT INTO mock_interview_feedback (id, session_id, message_id, data) VALUES (?, ?, ?, ?)"
+  );
+  const insertSkillMessage = db.prepare(
+    "INSERT INTO skill_chat_messages (id, thread_id, sequence, data) VALUES (?, ?, ?, ?)"
+  );
+  for (let sequence = 1; sequence <= messageCount; sequence += 1) {
+    const jobMessage = {
+      id: `job-message-${suffix}-${sequence}`,
+      threadId,
+      sequence,
+      role: sequence % 2 ? "user" : "assistant",
+      kind: "text",
+      text: `Job message ${sequence}`,
+      createdAt: at,
+    };
+    insertJobMessage.run(jobMessage.id, threadId, sequence, JSON.stringify(jobMessage));
+    const mockMessage = {
+      id: `mock-message-${suffix}-${sequence}`,
+      sessionId: mockId,
+      sequence,
+      role: sequence % 2 ? "assistant" : "user",
+      kind: sequence % 2 ? "question" : "answer",
+      questionNumber: Math.ceil(sequence / 2),
+      text: `Mock message ${sequence}`,
+      createdAt: at,
+    };
+    insertMockMessage.run(mockMessage.id, mockId, sequence, JSON.stringify(mockMessage));
+    const feedback = {
+      id: `mock-feedback-${suffix}-${sequence}`,
+      sessionId: mockId,
+      messageId: mockMessage.id,
+      questionNumber: sequence,
+      worked: `Worked ${sequence}`,
+      tighten: `Tighten ${sequence}`,
+      createdAt: at,
+    };
+    insertMockFeedback.run(feedback.id, mockId, mockMessage.id, JSON.stringify(feedback));
+    const skillMessage = {
+      id: `skill-message-${suffix}-${sequence}`,
+      threadId: skillThreadId,
+      sequence,
+      role: sequence % 2 ? "assistant" : "user",
+      text: `Skill message ${sequence}`,
+      createdAt: at,
+    };
+    insertSkillMessage.run(skillMessage.id, skillThreadId, sequence, JSON.stringify(skillMessage));
+  }
+}
+
+function preparedStatementsDuring(db, read) {
+  const originalPrepare = db.prepare;
+  const statements = [];
+  db.prepare = function measuredPrepare(sql, ...args) {
+    statements.push(sql);
+    return originalPrepare.call(this, sql, ...args);
+  };
+  try {
+    return { value: read(), statements };
+  } finally {
+    db.prepare = originalPrepare;
+  }
+}
+
 test("migration 012 creates durable chat-first thread, mission, and mock interview tables", () => {
   assert.equal(
     ALL_MIGRATIONS.find((migration) => migration.id === 12)?.name,
@@ -99,6 +259,87 @@ test("migration 012 creates durable chat-first thread, mission, and mock intervi
     "mock_interview_feedback",
   ]) {
     assert.equal(tables.has(table), true, `${table} should exist`);
+  }
+});
+
+test("chat-first dashboard state uses a constant number of database statements as thread counts grow", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+  insertChatFirstReadModel(db, 1);
+
+  const small = preparedStatementsDuring(db, () => api.chatFirstStateFromDb(db));
+  for (let index = 2; index <= 24; index += 1) insertChatFirstReadModel(db, index);
+  const large = preparedStatementsDuring(db, () => api.chatFirstStateFromDb(db));
+
+  assert.equal(small.value.jobThreads.length, 1);
+  assert.equal(large.value.jobThreads.length, 24);
+  assert.equal(large.value.missions.length, 24);
+  assert.equal(large.value.mockSessions.length, 24);
+  assert.equal(large.value.skillChats.length, 24);
+  assert.equal(
+    large.statements.length,
+    small.statements.length,
+    `chat-first state grew from ${small.statements.length} to ${large.statements.length} statements`
+  );
+});
+
+test("chat-first dashboard state returns only the newest bounded message history without deleting durable rows", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+  insertChatFirstReadModel(db, 1, { messageCount: 225 });
+  const workspaceThread = {
+    id: "workspace-main",
+    title: "Career workspace",
+    status: "active",
+    createdAt: "2026-08-27T12:00:00.000Z",
+    updatedAt: "2026-08-27T12:00:00.000Z",
+  };
+  db.prepare("INSERT INTO workspace_threads (id, data) VALUES (?, ?)").run(
+    workspaceThread.id,
+    JSON.stringify(workspaceThread)
+  );
+  const insertWorkspaceMessage = db.prepare(
+    "INSERT INTO workspace_messages (id, thread_id, sequence, data) VALUES (?, ?, ?, ?)"
+  );
+  for (let sequence = 1; sequence <= 225; sequence += 1) {
+    const message = {
+      id: `workspace-message-${sequence}`,
+      threadId: workspaceThread.id,
+      sequence,
+      role: sequence % 2 ? "user" : "assistant",
+      kind: "text",
+      text: `Workspace message ${sequence}`,
+      createdAt: "2026-08-27T12:00:00.000Z",
+    };
+    insertWorkspaceMessage.run(message.id, workspaceThread.id, sequence, JSON.stringify(message));
+  }
+
+  const state = api.chatFirstStateFromDb(db);
+  const assertBounded = (rows, label) => {
+    assert.equal(rows.length, 200, `${label} should be bounded`);
+    assert.equal(rows[0].sequence ?? rows[0].questionNumber, 26);
+    assert.equal(rows.at(-1).sequence ?? rows.at(-1).questionNumber, 225);
+  };
+  assertBounded(state.jobThreads[0].messages, "job messages");
+  assertBounded(state.mainThread.messages, "workspace messages");
+  assertBounded(state.skillChats[0].messages, "skill messages");
+  assertBounded(state.mockSessions[0].messages, "mock messages");
+  assertBounded(state.mockSessions[0].feedback, "mock feedback");
+
+  for (const table of [
+    "job_thread_messages",
+    "workspace_messages",
+    "skill_chat_messages",
+    "mock_interview_messages",
+    "mock_interview_feedback",
+  ]) {
+    assert.equal(
+      db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count,
+      225,
+      `${table} must remain durable`
+    );
   }
 });
 
