@@ -24,6 +24,7 @@ import {
   deepIngestLaneSetState,
   deepIngestProposalPut,
   deepIngestSourceCreate,
+  deepIngestStateGet,
 } from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
@@ -97,6 +98,7 @@ async function bootServer(repoRoot, opts = {}) {
     fetchImpl: opts.fetchImpl,
     scanSource: opts.scanSource,
     proposalBuilders: opts.proposalBuilders,
+    appOperations: opts.appOperations,
   });
 
   const server = createServer((req, res) => {
@@ -123,6 +125,7 @@ async function mountDirectRoutes(repoRoot, opts = {}) {
     fetchImpl: opts.fetchImpl,
     scanSource: opts.scanSource,
     proposalBuilders: opts.proposalBuilders,
+    appOperations: opts.appOperations,
   });
   return routes;
 }
@@ -165,6 +168,7 @@ async function bootDeepAndOnboardServer(repoRoot, opts = {}) {
     fetchImpl: opts.fetchImpl,
     scanSource: opts.scanSource,
     proposalBuilders: opts.proposalBuilders,
+    appOperations: opts.appOperations,
   });
   mountOnboardRoutes({
     addRoute,
@@ -573,6 +577,126 @@ test("POST /api/deep-ingest/sources validates target/source input, body caps, an
   } finally {
     await closeServer(server);
   }
+});
+
+test("Deep Ingest routes delegate source scans, linked retries, and proposal builds to injected app operations", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+  const calls = [];
+  const appOperations = {
+    async start(value) {
+      calls.push(["start", value]);
+      return {
+        reused: false,
+        operation: {
+          id: `operation-${calls.length}`,
+          kind: value.kind,
+          request: { sourceId: "deep-src-owned" },
+          ownerId: "server-owner",
+          fence: 1,
+          status: "queued",
+          progress: { phase: "queued" },
+        },
+      };
+    },
+    async retry(value) {
+      calls.push(["retry", value]);
+      return {
+        reused: false,
+        operation: {
+          id: "operation-retry",
+          kind: "deep-ingest-source-scan",
+          request: { sourceId: "deep-src-owned" },
+          ownerId: "server-owner",
+          fence: 2,
+          retryOf: value.id,
+          status: "queued",
+          progress: { phase: "queued" },
+        },
+      };
+    },
+  };
+  const routes = await mountDirectRoutes(repoRoot, { appOperations });
+
+  const source = await postJsonDirect(routes, "/api/deep-ingest/sources", {
+    targetShape: "evidence",
+    sourceKind: "text",
+    text: "Built app-owned Deep Ingest work.",
+  });
+  assert.equal(source.status, 202);
+  assert.equal(source.body.data.operation.kind, "deep-ingest-source-scan");
+  assert.equal("request" in source.body.data.operation, false);
+  assert.equal("ownerId" in source.body.data.operation, false);
+  assert.equal("fence" in source.body.data.operation, false);
+
+  const proposals = await postJsonDirect(routes, "/api/deep-ingest/proposals", {
+    sourceId: "deep-src-owned",
+    targetShape: "evidence",
+  });
+  assert.equal(proposals.status, 202);
+  assert.equal(proposals.body.data.operation.kind, "deep-ingest-proposal-build");
+
+  const retry = await postJsonDirect(routes, "/api/deep-ingest/sources/retry", {
+    operationId: "operation-1",
+  });
+  assert.equal(retry.status, 202);
+  assert.equal(retry.body.data.operation.retryOf, "operation-1");
+  assert.equal(calls[0][0], "start");
+  assert.equal(calls[0][1].kind, "deep-ingest-source-scan");
+  assert.match(calls[0][1].input.sourceId, /^deep_src_/);
+  assert.match(calls[0][1].input.sourceDigest, /^[a-f0-9]{64}$/);
+  assert.equal(calls[0][1].input.sourceVersion, 1);
+  assert.deepEqual(calls[1], [
+    "start",
+    {
+      kind: "deep-ingest-proposal-build",
+      input: { sourceId: "deep-src-owned", targetShape: "evidence" },
+    },
+  ]);
+  assert.deepEqual(calls[2], ["retry", { id: "operation-1" }]);
+});
+
+test("an injected upload start failure removes the unowned staged upload", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+  const routes = await mountDirectRoutes(repoRoot, {
+    appOperations: {
+      async start() {
+        const error = new Error("CareerRat could not queue this upload.");
+        error.code = "APP_OPERATION_MANAGER_STOPPED";
+        throw error;
+      },
+    },
+  });
+
+  const handler = routes.get("POST /api/deep-ingest/sources/upload");
+  const req = Readable.from([Buffer.from("Upload bytes must not be orphaned.")]);
+  req.method = "POST";
+  req.url = "/api/deep-ingest/sources/upload?targetShape=evidence&name=owned.md";
+  req.headers = { "content-type": "application/octet-stream" };
+  let status = 200;
+  let text = "";
+  const res = {
+    writeHead(value) {
+      status = value;
+      return this;
+    },
+    end(value = "") {
+      text += String(value);
+    },
+  };
+  await handler(req, res);
+
+  assert.equal(status, 400);
+  assert.match(JSON.parse(text).error, /could not queue/i);
+  const state = deepIngestStateGet({ repoRoot });
+  assert.equal(state.sources.length, 0);
+  assert.equal(state.laneStates.source_coverage.status, "not_started");
+  assert.equal(state.laneStates.open_gaps.status, "not_started");
+  const uploadDir = userPath({ repoRoot }, "workspace/deep-ingest/sources");
+  assert.deepEqual(existsSync(uploadDir) ? readdirSync(uploadDir) : [], []);
 });
 
 test("POST /api/deep-ingest/sources persists exactly one visible outcome and never starts skill/chat runtime", async () => {

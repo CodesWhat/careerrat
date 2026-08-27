@@ -285,6 +285,10 @@ function sourceFromInput(input = {}) {
   const now = nowIso();
   const source = {
     id: input.id ? String(input.id) : `deep_src_${randomUUID()}`,
+    version:
+      Number.isInteger(Number(input.version)) && Number(input.version) > 0
+        ? Number(input.version)
+        : 1,
     targetShape: normalizeTargetShape(input.targetShape),
     sourceKind: normalizeSourceKind(input.sourceKind),
     status: String(input.status || "proposal_ready"),
@@ -341,7 +345,16 @@ function sourceOutcome(source) {
   };
 }
 
-function proposalFromInput({ source, sourceId, targetShape, lane, proposal }) {
+function proposalFromInput({
+  source,
+  sourceId,
+  sourceVersion,
+  targetShape,
+  lane,
+  proposal,
+  proposalId,
+  proposalSetId,
+}) {
   if (!proposal || typeof proposal !== "object") {
     throw makeError("deepIngestProposalPut requires proposal");
   }
@@ -350,8 +363,13 @@ function proposalFromInput({ source, sourceId, targetShape, lane, proposal }) {
   const normalizedLane = normalizeLane(lane);
   const normalizedTargetShape = normalizeTargetShape(targetShape || source?.targetShape);
   return {
-    id: `deep_prop_${randomUUID()}`,
+    id: proposalId ? String(proposalId) : `deep_prop_${randomUUID()}`,
     sourceId: String(sourceId),
+    sourceVersion:
+      Number.isInteger(Number(sourceVersion)) && Number(sourceVersion) > 0
+        ? Number(sourceVersion)
+        : Number(source?.version || 1),
+    proposalSetId: proposalSetId ? String(proposalSetId) : null,
     targetShape: normalizedTargetShape,
     lane: normalizedLane,
     status: "review_needed",
@@ -593,8 +611,12 @@ function markLaneCompleted(db, lane, updatedAt) {
 }
 
 function createDeepIngestSource(db, input) {
-  const source = sourceFromInput(input);
-  const previous = readRow(db, SOURCE_TABLE, source.id);
+  const previous = input?.id ? readRow(db, SOURCE_TABLE, String(input.id)) : null;
+  const source = sourceFromInput({
+    ...input,
+    createdAt: input?.createdAt || previous?.createdAt,
+    version: input?.version || previous?.version || 1,
+  });
   if (input?.text != null) source._sourceText = String(input.text || "");
   putRow(db, SOURCE_TABLE, source.id, source);
   const chunks = replaceSourceChunks(db, source, input?.chunks);
@@ -604,7 +626,7 @@ function createDeepIngestSource(db, input) {
   putRow(db, LANE_TABLE, "source_coverage", {
     id: "source_coverage",
     lane: "source_coverage",
-    status: "review_needed",
+    status: source.status === "scanning" ? "scanning" : "review_needed",
     reason: null,
     createdAt: sourceCoverage?.createdAt || source.createdAt,
     updatedAt: source.updatedAt,
@@ -632,10 +654,28 @@ function createDeepIngestSource(db, input) {
   };
 }
 
-function putDeepIngestProposal(db, { sourceId, targetShape, lane, proposal }) {
+function putDeepIngestProposal(
+  db,
+  { sourceId, sourceVersion, targetShape, lane, proposal, proposalId, proposalSetId }
+) {
   if (!String(sourceId || "").trim()) throw makeError("deepIngestProposalPut requires sourceId");
   const source = requireRow(db, SOURCE_TABLE, sourceId, "Deep ingest source");
-  const row = proposalFromInput({ source, sourceId, targetShape, lane, proposal });
+  const row = proposalFromInput({
+    source,
+    sourceId,
+    sourceVersion,
+    targetShape,
+    lane,
+    proposal,
+    proposalId,
+    proposalSetId,
+  });
+  const current = readRow(db, PROPOSAL_TABLE, row.id);
+  if (current && current.status !== "review_needed") return current;
+  if (current) {
+    row.createdAt = current.createdAt;
+    row.version = current.version;
+  }
   putRow(db, PROPOSAL_TABLE, row.id, row);
   return readRow(db, PROPOSAL_TABLE, row.id);
 }
@@ -650,9 +690,12 @@ export function deepIngestScannedSourcePersist({ repoRoot, env, input, proposalI
     const proposal = proposalInput
       ? putDeepIngestProposal(db, {
           sourceId: created.source.id,
+          sourceVersion: proposalInput.sourceVersion,
           targetShape: proposalInput.targetShape,
           lane: proposalInput.lane,
           proposal: proposalInput.proposal,
+          proposalId: proposalInput.proposalId,
+          proposalSetId: proposalInput.proposalSetId,
         })
       : null;
     return { ...created, proposal };
@@ -723,17 +766,121 @@ export function deepIngestSourceRemove({ repoRoot, env, sourceId, id } = {}) {
   });
 }
 
+export function deepIngestPreparedSourceRollback({
+  repoRoot,
+  env,
+  sourceId,
+  sourceDigest,
+  previousLaneStates,
+} = {}) {
+  const rowId = String(sourceId || "").trim();
+  const expectedDigest = String(sourceDigest || "").trim();
+  if (!rowId || !expectedDigest) {
+    throw makeError("deepIngestPreparedSourceRollback requires source identity");
+  }
+
+  return runDeepIngestVerb({ repoRoot, env }, (db) => {
+    const source = readRow(db, SOURCE_TABLE, rowId);
+    if (source?.status !== "scanning" || source.metadata?.sourceDigest !== expectedDigest) {
+      return { ok: true, rolledBack: false, artifactPath: null };
+    }
+    db.prepare(`DELETE FROM ${PROPOSAL_TABLE} WHERE source_id = ?`).run(rowId);
+    db.prepare(`DELETE FROM ${CHUNK_TABLE} WHERE source_id = ?`).run(rowId);
+    db.prepare(`DELETE FROM ${SOURCE_TABLE} WHERE id = ?`).run(rowId);
+
+    for (const lane of ["source_coverage", "open_gaps"]) {
+      const previous = previousLaneStates?.[lane];
+      if (previous?.createdAt) putRow(db, LANE_TABLE, lane, previous);
+      else db.prepare(`DELETE FROM ${LANE_TABLE} WHERE id = ?`).run(lane);
+    }
+    return {
+      ok: true,
+      rolledBack: true,
+      artifactPath: source.metadata?.ownedUpload === true ? source.artifactPath || null : null,
+    };
+  });
+}
+
 export function deepIngestProposalPut({
   repoRoot,
   env,
   sourceId,
+  sourceVersion,
   targetShape,
   lane,
   proposal,
+  proposalId,
+  proposalSetId,
 } = {}) {
   return runDeepIngestVerb({ repoRoot, env }, (db) =>
-    putDeepIngestProposal(db, { sourceId, targetShape, lane, proposal })
+    putDeepIngestProposal(db, {
+      sourceId,
+      sourceVersion,
+      targetShape,
+      lane,
+      proposal,
+      proposalId,
+      proposalSetId,
+    })
   );
+}
+
+export function deepIngestProposalSetPut({
+  repoRoot,
+  env,
+  sourceId,
+  sourceVersion,
+  targetShape,
+  proposalSetId,
+  rows,
+} = {}) {
+  const normalizedSetId = String(proposalSetId || "").trim();
+  if (!normalizedSetId) throw makeError("deepIngestProposalSetPut requires proposalSetId");
+  if (!Array.isArray(rows) || !rows.length) {
+    throw makeError("deepIngestProposalSetPut requires reviewable rows");
+  }
+
+  return runDeepIngestVerb({ repoRoot, env }, (db) => {
+    const source = requireRow(db, SOURCE_TABLE, sourceId, "Deep ingest source");
+    const expectedVersion = Number(sourceVersion);
+    if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
+      throw makeError("deepIngestProposalSetPut requires sourceVersion");
+    }
+    if (Number(source.version || 1) !== expectedVersion) {
+      throw makeError(
+        `Deep ingest source version conflict: expected ${expectedVersion}, found ${Number(source.version || 1)}`,
+        "VERSION_CONFLICT"
+      );
+    }
+
+    const proposals = rows.map((row, index) => {
+      const proposalId = `${normalizedSetId}_${String(index + 1).padStart(3, "0")}`;
+      return putDeepIngestProposal(db, {
+        sourceId,
+        sourceVersion: expectedVersion,
+        targetShape,
+        lane: row.lane,
+        proposal: row.proposal,
+        proposalId,
+        proposalSetId: normalizedSetId,
+      });
+    });
+    const desiredIds = new Set(proposals.map((proposal) => proposal.id));
+    const priorRows = db
+      .prepare(`SELECT data FROM ${PROPOSAL_TABLE} WHERE source_id = ?`)
+      .all(String(sourceId))
+      .map((row) => JSON.parse(row.data));
+    for (const prior of priorRows) {
+      if (
+        prior.proposalSetId === normalizedSetId &&
+        prior.status === "review_needed" &&
+        !desiredIds.has(prior.id)
+      ) {
+        db.prepare(`DELETE FROM ${PROPOSAL_TABLE} WHERE id = ?`).run(prior.id);
+      }
+    }
+    return { ok: true, proposalSetId: normalizedSetId, proposals };
+  });
 }
 
 export function deepIngestProposalDecision({
