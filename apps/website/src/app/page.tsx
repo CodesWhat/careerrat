@@ -43,7 +43,7 @@ const features = [
   },
   {
     title: "Search broadly, verify honestly",
-    copy: "Public sources and AI open-web discovery cover engineering and hospitality work. Every AI lead stays unverified until Evaluate reads the posting.",
+    copy: "Built-in sources include hospitality and engineering boards, while AI open-web discovery searches the roles you set across job families. Every AI lead stays unverified until Evaluate reads the posting.",
     Icon: Radar,
   },
   {
@@ -124,7 +124,7 @@ export default function Home() {
             <article className="step-card">
               <span className="step-card__number">03</span>
               <h3>It hunts, you decide</h3>
-              <p>Search opens when setup is ready. CareerRat searches public sources and the open web for engineering and hospitality work. AI discoveries are clearly unverified until Evaluate reads the full posting for location, office days, pay, and fit. It fills safe application fields only after you review missing answers. Voluntary questions stay blank by default; local Application defaults can choose a decline option when available. CAPTCHAs and Submit stay with you.</p>
+              <p>Search opens when setup is ready. Built-in hospitality and engineering sources join AI open-web discovery, which searches the roles you set across job families. AI discoveries are clearly unverified until Evaluate reads the full posting for location, office days, pay, and fit. It fills safe application fields only after you review missing answers. Voluntary questions stay blank by default; local Application defaults can choose a decline option when available. CAPTCHAs and Submit stay with you.</p>
               <span className="status-pill">SWEEP · 9 CUT · 12 RANKED</span>
             </article>
           </div>

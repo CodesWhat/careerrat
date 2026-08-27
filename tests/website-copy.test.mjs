@@ -125,6 +125,8 @@ test("public copy keeps AI discovery broad and evaluation honest", async () => {
     assert.match(copy[name], /hospitality/i, `${paths[name]} should name hospitality coverage`);
     assert.match(copy[name], /engineering/i, `${paths[name]} should name engineering coverage`);
   }
+  assert.match(copy.website, /roles you set/i);
+  assert.doesNotMatch(copy.website, /(?:cover|for) engineering and hospitality work/i);
 });
 
 test("public docs explain durable background work without claiming interrupted work completed", async () => {
