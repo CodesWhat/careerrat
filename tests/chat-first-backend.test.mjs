@@ -1978,6 +1978,70 @@ test("an operational job mission promotes sourced roles, evaluates applications,
   );
 });
 
+test("recording an application as applied resolves its durable submit gate and completes the mission", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-submit-resolved",
+    company: "Resolved Gate Corp",
+    status: "manual-apply",
+  });
+  api.missionCreateForJobs({
+    repoRoot,
+    id: "mission-submit-resolved",
+    jobs: [{ type: "application", id: "app-submit-resolved" }],
+  });
+  await api.missionRun({
+    repoRoot,
+    id: "mission-submit-resolved",
+    executeIntent: async ({ intent }) => ({
+      operationResult: { ok: true },
+      ...(intent.type === "job.prepare-submit"
+        ? { messages: [{ metadata: { state: "awaiting-submit" } }] }
+        : {}),
+    }),
+  });
+
+  const before = api
+    .chatFirstStateGet({ repoRoot })
+    .missions.find((mission) => mission.id === "mission-submit-resolved");
+  assert.equal(before.status, "paused");
+  assert.equal(before.steps.find((step) => step.action === "submit-gate").status, "blocked");
+
+  appSetStatus({
+    repoRoot,
+    id: "app-submit-resolved",
+    to: "applied",
+    appliedAt: "2026-08-27T20:00:00.000Z",
+  });
+
+  const state = api.chatFirstStateGet({ repoRoot });
+  const after = state.missions.find((mission) => mission.id === "mission-submit-resolved");
+  const gate = after.steps.find((step) => step.action === "submit-gate");
+  assert.equal(after.status, "completed");
+  assert.equal(gate.status, "completed");
+  assert.deepEqual(
+    {
+      requiresUserSubmit: gate.result.requiresUserSubmit,
+      submissionRecorded: gate.result.submissionRecorded,
+      applicationStatus: gate.result.applicationStatus,
+      appliedAt: gate.result.appliedAt,
+    },
+    {
+      requiresUserSubmit: false,
+      submissionRecorded: true,
+      applicationStatus: "applied",
+      appliedAt: "2026-08-27T20:00:00.000Z",
+    }
+  );
+  assert.equal(
+    state.needsYou.some(
+      (item) => item.kind === "submit-gate" && item.applicationId === "app-submit-resolved"
+    ),
+    false
+  );
+});
+
 test("mission pause requests stop the runner before it claims the next step", async () => {
   const api = await chatFirstApi();
   const repoRoot = tempRepo();

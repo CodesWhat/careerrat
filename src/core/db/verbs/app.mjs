@@ -16,9 +16,9 @@
 
 import { packetManifestSchema } from "../../packet/schemas/packet-schemas.mjs";
 import { validate } from "../../profile/schema-validator.mjs";
-import { classifyStage } from "../../tracker/dashboard.mjs";
+import { classifyStage, isKnownStatusLabel } from "../../tracker/dashboard.mjs";
 import { buildReevaluationAnalytics } from "../../tracker/outcome-analysis.mjs";
-import { ensureJobThreadInDb } from "./chat-first.mjs";
+import { completeSubmitGatesForApplicationInDb, ensureJobThreadInDb } from "./chat-first.mjs";
 import {
   bumpMeta,
   getRow,
@@ -181,6 +181,24 @@ function activityStatusLabel(status) {
   );
 }
 
+function statusProvesApplicationWasSubmitted(status) {
+  if (!isKnownStatusLabel(status)) return false;
+  return new Set(["applied", "screen", "interview", "final", "offer", "accepted", "rejected"]).has(
+    classifyStage(status).id
+  );
+}
+
+function reconcileSubmitGates(db, application) {
+  if (!statusProvesApplicationWasSubmitted(application?.status)) {
+    return { completedStepIds: [], completedMissionIds: [] };
+  }
+  return completeSubmitGatesForApplicationInDb(db, {
+    applicationId: application.id,
+    applicationStatus: application.status,
+    appliedAt: application.appliedAt || null,
+  });
+}
+
 function applyStatusUpdate(app, { to, note, round, appliedAt, followUpDueAt, clearInterview, at }) {
   const from = app.status;
   const wasInterview = classifyStage(from).id === "interview";
@@ -234,6 +252,7 @@ export function appSetStatus({
     });
 
     putRow(db, "applications", id, updated);
+    const submitGates = reconcileSubmitGates(db, updated);
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "status_change",
@@ -243,7 +262,16 @@ export function appSetStatus({
       tags: [`status:${to}`, "operation:application:status-update"],
     });
     const analytics = refreshAnalytics(db);
-    return { id, from, to, appliedAt: updated.appliedAt || null, meta, event, analytics };
+    return {
+      id,
+      from,
+      to,
+      appliedAt: updated.appliedAt || null,
+      submitGates,
+      meta,
+      event,
+      analytics,
+    };
   });
 }
 
@@ -286,6 +314,7 @@ export function appRecordOutcome({ repoRoot, env, id, to, note, round, at } = {}
       updated.followUp = { ...updated.followUp, draft: null };
     }
     putRow(db, "applications", id, updated);
+    const submitGates = reconcileSubmitGates(db, updated);
 
     const clearedCommunicationIds = [];
     if (communicationStatus) {
@@ -341,7 +370,7 @@ export function appRecordOutcome({ repoRoot, env, id, to, note, round, at } = {}
       { now: new Date(timestamp) }
     );
     const analytics = refreshAnalytics(db, new Date(timestamp));
-    return { id, from, to, clearedCommunicationIds, meta, event, analytics };
+    return { id, from, to, clearedCommunicationIds, submitGates, meta, event, analytics };
   });
 }
 
@@ -393,6 +422,7 @@ export function appApplySyncedStatus({ repoRoot, env, id, to, rawStatus, round, 
     const wasInterview = classifyStage(from).id === "interview";
     if (wasInterview && to !== from) Object.assign(updated, applyRoundCompletionClearing(app));
     putRow(db, "applications", id, updated);
+    const submitGates = reconcileSubmitGates(db, updated);
 
     const clearedCommunicationIds = [];
     const commRows = db
@@ -446,6 +476,7 @@ export function appApplySyncedStatus({ repoRoot, env, id, to, rawStatus, round, 
       from,
       to,
       clearedCommunicationIds,
+      submitGates,
       meta,
       event,
       analytics,

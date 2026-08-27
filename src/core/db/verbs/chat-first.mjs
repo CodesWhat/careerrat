@@ -1210,6 +1210,78 @@ function writeMissionStep(db, step) {
   ).run(step.id, step.missionId, step.sequence, JSON.stringify(step));
 }
 
+// Transaction-local application-status hook. A submit gate belongs to the
+// application row, so recording that the application landed must resolve the
+// same durable gate instead of leaving a ghost "Review & submit" action. The
+// caller owns deciding whether the status proves submission; this helper owns
+// the mission/step write in the caller's existing transaction.
+export function completeSubmitGatesForApplicationInDb(
+  db,
+  { applicationId, applicationStatus, appliedAt = null, now } = {}
+) {
+  const id = cleanId(applicationId, "applicationId");
+  const status = cleanText(applicationStatus, "applicationStatus", { max: 120 });
+  const rows = db
+    .prepare(
+      `SELECT data
+         FROM mission_steps
+        WHERE json_extract(data, '$.action') = 'submit-gate'
+          AND json_extract(data, '$.status') = 'blocked'
+          AND (
+            json_extract(data, '$.result.applicationId') = ?
+            OR json_extract(data, '$.jobRef.id') = ?
+          )
+        ORDER BY mission_id, sequence`
+    )
+    .all(id, id);
+  if (!rows.length) return { completedStepIds: [], completedMissionIds: [] };
+
+  const completedStepIds = [];
+  const touchedMissionIds = new Set();
+  for (const row of rows) {
+    const step = parseRow(row);
+    if (!step) continue;
+    const at = nextIso(step.updatedAt, now);
+    const updatedStep = {
+      ...step,
+      status: "completed",
+      updatedAt: at,
+      completedAt: at,
+      result: {
+        ...(step.result || {}),
+        requiresUserSubmit: false,
+        submissionRecorded: true,
+        applicationStatus: status,
+        appliedAt: appliedAt || null,
+      },
+    };
+    writeMissionStep(db, updatedStep);
+    completedStepIds.push(step.id);
+    touchedMissionIds.add(step.missionId);
+  }
+
+  const completedMissionIds = [];
+  for (const missionId of touchedMissionIds) {
+    const mission = missionRequired(db, missionId);
+    const steps = missionSteps(db, missionId);
+    if (
+      TERMINAL_MISSION_STATUSES.has(mission.status) ||
+      !steps.every((step) => new Set(["completed", "skipped"]).has(step.status))
+    ) {
+      continue;
+    }
+    const at = nextIso(mission.updatedAt, now);
+    writeMission(db, {
+      ...mission,
+      status: "completed",
+      updatedAt: at,
+      completedAt: at,
+    });
+    completedMissionIds.push(missionId);
+  }
+  return { completedStepIds, completedMissionIds };
+}
+
 function normalizeMissionSteps(steps, missionId, at) {
   if (!Array.isArray(steps) || steps.length === 0 || steps.length > 100) {
     throw makeError("mission steps must be a non-empty array with at most 100 entries");
