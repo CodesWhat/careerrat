@@ -374,7 +374,7 @@ export function feedItemsToOffers(items, { source } = {}) {
   return (Array.isArray(items) ? items : []).map((item) => {
     const url = item.link || item.guid || null;
     const rawTitle = item.title || "";
-    const { company, role: _role } = parseCompanyFromTitle(rawTitle);
+    const { company, role } = parseCompanyFromTitle(rawTitle);
     const parsedLocation =
       parseLocationFromDescription(item.description) || parseLocationFromTitle(rawTitle);
     const location = remoteOnly
@@ -386,7 +386,7 @@ export function feedItemsToOffers(items, { source } = {}) {
       : parsedLocation;
 
     return {
-      title: rawTitle,
+      title: role,
       url,
       company,
       location,

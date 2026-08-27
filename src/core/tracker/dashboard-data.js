@@ -4748,6 +4748,24 @@ function sourcedJobRow(role, index, now = new Date(), profileComp = {}) {
   return { ...row, drawer: jobDetailFromRow(row, role, [], now, profileComp) };
 }
 
+function appendJobWarning(current, warning) {
+  const existing = String(current || "").trim();
+  if (!existing) return warning;
+  if (existing.includes(warning)) return existing;
+  return `${existing} ${warning}`;
+}
+
+function sourcedRoleWithCompanyWarning(role, activeApplicationCompanies) {
+  if (TERMINAL_STAGES.has(classifyStage(role?.status))) return role;
+  const company = activeApplicationCompanies.get(normalizeName(role?.company));
+  if (!company) return role;
+  const warning = `You already have an active application at ${company}. Review it before applying to another role.`;
+  return {
+    ...role,
+    warn: appendJobWarning(role?.warn, warning),
+  };
+}
+
 function communicationsForApplication(app, communications = []) {
   const appCompany = String(app.company || "").toLowerCase();
   const appRole = String(app.role || "").toLowerCase();
@@ -5255,7 +5273,8 @@ function buildJobsRail(rows) {
 
 function buildJobs(trackerData, { now = new Date(), activityEvents = [], profileComp = {} } = {}) {
   const communications = trackerData?.communications || [];
-  const applicationRows = (trackerData?.applications || []).map((app, index) =>
+  const applications = trackerData?.applications || [];
+  const applicationRows = applications.map((app, index) =>
     applicationJobRow(
       app,
       index,
@@ -5264,8 +5283,18 @@ function buildJobs(trackerData, { now = new Date(), activityEvents = [], profile
       profileComp
     )
   );
+  const activeApplicationCompanies = new Map(
+    applications
+      .filter((app) => app?.company && !TERMINAL_STAGES.has(classifyStage(app.status)))
+      .map((app) => [normalizeName(app.company), app.company])
+  );
   const sourcedRows = (trackerData?.sourced || trackerData?.prospects || []).map((role, index) =>
-    sourcedJobRow(role, index, now, profileComp)
+    sourcedJobRow(
+      sourcedRoleWithCompanyWarning(role, activeApplicationCompanies),
+      index,
+      now,
+      profileComp
+    )
   );
   const activeRows = applicationRows.filter((row) => !row.terminal);
   const activeSourcedRows = sourcedRows.filter((row) => !row.terminal);

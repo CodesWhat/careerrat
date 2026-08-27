@@ -1947,6 +1947,59 @@ test("Dashboard adapter keeps an explicit sourced status in the pre-application 
   assert.equal(vm.jobs.funnel[1].id, "sourced");
 });
 
+test("Dashboard adapter warns sourced roles when the same company has an active application", () => {
+  const vm = buildDashboardViewModel({
+    applications: [
+      {
+        id: "hightouch-reviewed",
+        company: "Hightouch",
+        role: "Distributed Systems Engineer",
+        status: "reviewed-hold",
+      },
+      {
+        id: "closed-application",
+        company: "Closed Co",
+        role: "Platform Engineer",
+        status: "rejected",
+      },
+    ],
+    sourced: [
+      {
+        id: "hightouch-sibling",
+        company: "HIGHTOUCH!",
+        role: "Control Plane Engineer",
+        status: "sourced",
+        warn: "Compensation needs review.",
+      },
+      {
+        id: "closed-sibling",
+        company: "Closed Co",
+        role: "Backend Engineer",
+        status: "sourced",
+      },
+      {
+        id: "unrelated",
+        company: "Other Co",
+        role: "Staff Engineer",
+        status: "sourced",
+      },
+    ],
+    sources: [],
+    communications: [],
+  });
+
+  const byId = new Map(vm.jobs.rows.map((row) => [row.id, row]));
+  const sibling = byId.get("hightouch-sibling");
+  assert.equal(
+    sibling.warn,
+    "Compensation needs review. You already have an active application at Hightouch. Review it before applying to another role."
+  );
+  assert.equal(sibling.drawer.warn, sibling.warn);
+  assert.deepEqual(sibling.drawer.gaps, [sibling.warn]);
+  assert.equal(byId.get("closed-sibling").warn, "");
+  assert.equal(byId.get("unrelated").warn, "");
+});
+
 test("Dashboard adapter projects partial job-description capture status onto its sourced row", () => {
   const vm = buildDashboardViewModel({
     applications: [],
