@@ -33,7 +33,9 @@ The thread rail keeps each workflow recoverable:
 
 - The main thread holds briefs, questions, and active missions.
 - Job conversations keep the posting, evaluation, artifacts, recruiter history,
-  and interview work together.
+  interview work, and application-answer review together. When a packet needs a
+  candidate answer, choose **Answer** in the right panel and respond through the
+  normal composer; the saved question disappears after CareerRat rebuilds the packet.
 - Research skills open visible threads that can be left and resumed later.
 - Deep ingest has its own thread for turning past work into grounded evidence,
   stories, role signals, and honesty boundaries.
@@ -50,7 +52,9 @@ continue without creating a long stack of separate approval cards.
 The left rail opens focused views without replacing the conversation:
 
 - **Search** shows sourced roles, fit, location, compensation, and the next gated
-  action.
+  action. Before a result is saved, CareerRat rechecks the canonical posting body
+  against the candidate's location, office-day, compensation, seniority,
+  eligibility, and configured fit-band rules.
 - **Pipeline** groups active applications by stage and opens the owning job
   conversation.
 - **Files** holds résumés, job descriptions, tailored packets, interview dossiers,
@@ -73,6 +77,8 @@ finishes. The assistant only speaks to ask a question or hand you a result.
 
 ![A search step in Ask with its spinner still running next to the "Searching the web" label](./chat-activity-pending.png)
 
-Application preparation can inspect and fill supported forms, but the final
-Submit action always stays with you. External-account changes remain
+Application preparation can inspect and fill supported forms. Once the answer
+review is clear, the job panel checks its opt-in permission, offers **Allow form
+preparation** when needed, and resumes the exact paused application mission. The
+final Submit action always stays with you. External-account changes remain
 confirmation-gated.

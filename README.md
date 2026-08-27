@@ -64,12 +64,16 @@ validated application entry points, and signed in-app Mac updates from v0.16.4.
 It also closes the remaining raw-error paths in guided installation, expanded
 diagnostics, browser-workflow cards, Search status, and browser setup.
 
-v0.16.6 is the verified release candidate. It fixes AI web searches that ran
-past the old two-minute limit, keeps long searches alive while CareerRat saves
-their job descriptions, hides internal runtime and schema details, and shows
-Yes/No buttons only for questions that can actually be answered Yes or No. The
-public-version claims above stay on 0.16.5 until the signed v0.16.6 artifacts and
-distribution channels are live.
+v0.16.6 is an unreleased release candidate. It fixes AI web searches that ran
+past the old two-minute limit and rechecks canonical job descriptions against
+location, office-day, compensation, seniority, eligibility, and saved fit-band
+rules before results are saved. It also adds candidate-facing application-answer
+review inside each job thread, an in-place opt-in for supervised form preparation,
+and exact mission resume after the answers are complete. Claude Code and Codex
+keep the same supported workflow boundary, and CareerRat still never presses the
+final Submit control. Source-level verification is green, but fresh packaged
+desktop acceptance, signing, and distribution have not rerun. The public-version
+claims above stay on v0.16.5 until that work is complete.
 
 The Windows x64 installer passed build, install, launch, export, and uninstall
 QA. A public Windows installer will ship only after SignPath Foundation signing
@@ -146,11 +150,13 @@ the [chat-first runtime](docs/CHAT_FIRST_RUNTIME.md).
 - Authenticated browser, mail, calendar, and message access is opt-in when a
   specific workflow needs it.
 - Application automation fills safe, confirmed fields and can attach the
-  generated résumé. Voluntary demographic and self-identification questions stay
-  blank by default. In **Profile > Application defaults**, you can leave them
-  blank or choose the form's decline option when one is available. CareerRat
-  never infers an answer. Exact sensitive answers stay hidden in this editor,
-  and the setting never goes through Paul.
+  generated résumé. When an application needs a candidate answer, the job thread
+  shows that question in its review panel and saves the response against the
+  exact form question before preparation resumes. Voluntary demographic and
+  self-identification questions stay blank by default. In **Profile > Application defaults**,
+  you can leave them blank or choose the form's decline option when
+  one is available. CareerRat never infers an answer. Exact sensitive answers
+  stay hidden in this editor, and the setting never goes through Paul.
 - CAPTCHA, two-factor authentication, sensitive attestations, uncertainty, and
   final submission stop for the user. CareerRat never presses Submit.
 - Durable state changes go through the same local domain layer whether they came

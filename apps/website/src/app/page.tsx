@@ -33,7 +33,7 @@ function BrandMark({ compact = false }: { compact?: boolean }) {
 const features = [
   {
     title: "Rate before you apply",
-    copy: "Every posting is scored against your constraints first. No cover letters for jobs that don't fit.",
+    copy: "Every full posting is checked against your location, pay, and fit constraints first. No cover letters for jobs that don't fit.",
     Icon: ClipboardList,
   },
   {
@@ -124,7 +124,7 @@ export default function Home() {
             <article className="step-card">
               <span className="step-card__number">03</span>
               <h3>It hunts, you decide</h3>
-              <p>Search opens when setup is ready. CareerRat ranks the matches and fills safe application fields. Voluntary questions stay blank by default; local Application defaults can choose a decline option when available. CAPTCHAs and Submit stay with you.</p>
+              <p>Search opens when setup is ready. CareerRat rechecks the full posting for location, office days, pay, and fit, then fills safe application fields only after you review any missing answers beside the job. Voluntary questions stay blank by default; local Application defaults can choose a decline option when available. CAPTCHAs and Submit stay with you.</p>
               <span className="status-pill">SWEEP · 9 CUT · 12 RANKED</span>
             </article>
           </div>

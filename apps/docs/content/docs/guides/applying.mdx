@@ -62,26 +62,33 @@ The `apply-job` skill:
 2. Captures public Greenhouse or Ashby application questions before building the packet.
 3. For other ATS forms, captures rendered questions from the supervised browser and
    rebuilds the answer sheet without restarting the application. Paste remains the fallback.
-4. Shows the generated résumé, cover letter, answers, unresolved facts, and safe site link.
-5. Uses the session browser to fill safe, confirmed fields and attach generated documents when
+4. Shows unresolved candidate answers in the job thread's right-side **Application answers**
+   review. Choose **Answer**, respond through the normal composer, and CareerRat saves the
+   response against that exact form question before rebuilding the packet.
+5. Shows the generated résumé, cover letter, answers, unresolved facts, and safe site link.
+6. Uses the session browser to fill safe, confirmed fields and attach generated documents when
    that executor is available. Most public forms do not require a login.
    Otherwise, it gives you a concrete supervised handoff instead of claiming automation ran.
-6. Keeps voluntary demographic and self-identification questions blank by default. The local-only
+   If permission is off, the application review explains the boundary and offers **Allow form
+   preparation** in place before it resumes the matching paused mission.
+7. Keeps voluntary demographic and self-identification questions blank by default. The local-only
    **Profile > Application defaults** editor has two policy choices: leave them blank, or choose
    the form's decline option when available. Existing exact answers stay hidden and local.
    The policy never goes through Paul, and CareerRat never infers an answer.
-7. **Halts before final submission** so you can review the form and press submit.
-8. Halts on CAPTCHAs, two-factor authentication, and unsupported auth prompts.
-9. Records the application through the canonical data layer only after submission is
+8. **Halts before final submission** so you can review the form and press submit.
+9. Halts on CAPTCHAs, two-factor authentication, and unsupported auth prompts.
+10. Records the application through the canonical data layer only after submission is
    verified or you explicitly report that you applied. The app and Activity Pulse update
    in the same transaction.
 
 ### LinkedIn Easy Apply
 
 For LinkedIn postings, `apply-job` supports opt-in supervised form preparation via
-the session browser. This requires the `authenticated_apply_preparation`
-capability to be enabled in `careerrat automation status`. It fills and advances
-the modal but never presses the final submit control.
+the session browser. In the desktop app, the job's application review offers
+**Allow form preparation** when the permission is off. Terminal users can inspect
+the same `authenticated_apply_preparation` capability with `careerrat automation
+status`. CareerRat fills and advances the modal but never presses the final submit
+control.
 
 ## Application limits
 

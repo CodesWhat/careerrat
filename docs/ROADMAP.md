@@ -609,11 +609,13 @@ evidence is under `.internal/review/search-quality-*.json`.
   partial instead of being mislabeled complete. Source receipts come from
   app-owned recovery even when the runtime emits no tool trace or every result
   is already known.
-- Deterministic and AI hydration now use ordered four-worker pools. The
-  presentation limit is applied before expensive deterministic hydration, AI
-  output is schema-capped at 40 roles, and one run shares exact-URL and
-  provider-board reads. Cancellation reaches DNS-pinned public and provider
-  fetches and a cancelled lane writes no rows or false completion.
+- Deterministic and AI hydration now use ordered four-worker pools. Deterministic
+  run and per-company presentation caps apply after canonical hydration and
+  requalification, so rejected previews do not consume a visible slot or inflate
+  the qualified count. AI output remains schema-capped at 40 roles, and one run
+  shares exact-URL and provider-board reads. Cancellation reaches DNS-pinned
+  public and provider fetches and a cancelled lane writes no rows or false
+  completion.
 - Parallel discovery lanes now reconcile at the shared persistence
   transaction. If both lanes find the same normalized company and role, the
   winning lane writes the row and JD artifact, the losing lane reports zero
@@ -750,26 +752,56 @@ queue.
 
 ## Release status (v0.16.6 candidate, updated August 27, 2026)
 
-**v0.16.6 is the verified release candidate.** It fixes the AI web-search
-failure captured during final user QA. The installed runtime used to stop at
-120 seconds, the search layer then treated the empty result as invalid schema,
-and Paul exposed that internal diagnosis in chat. The fixed path gives Claude
-Code, Codex, and the BYOK/proxy route the same explicit eight-minute bound,
-stops immediately on real runtime failures instead of rerunning the search,
-refreshes the sourcing lease during JD capture, and keeps raw diagnostics in
-the internal sourcing ledger. Chat now offers Yes/No buttons only for genuinely
-binary questions.
+**v0.16.6 remains an in-progress candidate. v0.16.5 is the current public
+release.** The earlier eight-minute AI-search timeout, runtime-failure handling,
+lease refresh, safe error copy, and binary-question work passed its own source
+and production-path checks. The local branch has since added the fixes below,
+so that earlier evidence does not qualify the current HEAD for promotion.
 
-Real production-path verification passed on both supported runtimes. Claude
-Code 2.1.247 completed in 123.592 seconds with two roles, four recorded queries,
-two saved JDs, and no retry or error. Codex CLI 0.150.1 completed in 29.445
-seconds with one role, one recorded query, one saved JD, and no retry or error.
-Both runs used isolated workspaces, passed data verification, left the real
-databases unchanged, and cleaned up their processes and temporary data. The
-repository suite passed 3,865 tests with 15 intentional skips and no failures;
-the web suite passed all 778 tests; lint, Qlty, Knip, `git diff --check`, and the
-production builds passed. v0.16.5 remains the current public release until the
-signed v0.16.6 artifacts and distribution channels are live.
+- **Duplicate onboarding follow-up** — a question followed by a short plain-English
+  consequence, such as the salary-floor explanation, remains the one unanswered
+  turn instead of causing Paul to ask it again. Draft repair keeps only the latest
+  duplicate copy.
+- **Canonical search qualification** — configured and AI-web candidates are
+  rechecked from the hydrated canonical posting before persistence. In-person and
+  office-day requirements, saved location scope, compensation floor, sponsorship,
+  saved fit bands, and AI review/cut gates now use canonical facts. Partial
+  configured-source previews defer body-dependent policy only in the coarse pass;
+  canonical requalification is mandatory. Run and per-company caps apply after
+  that gate so valid later candidates can backfill rejected previews.
+- **Partial-JD provenance** — a capped Remote Vibe body remains marked partial,
+  including in company proposal evidence. Following a canonical ATS posting can
+  replace it with a complete capture; handing application work to another URL does
+  not silently relabel the preview complete.
+- **Job identity and sibling warning** — RSS `Role at Company` titles now store a
+  clean company and role. Strong URL and requisition identity still keep distinct
+  openings separate, while a sourced role at a company with another active
+  application gets a visible review warning instead of being silently collapsed.
+- **Application answer review** — packet gaps are visible in the job thread and
+  right-side review, exact answers write through the typed screening-answer path,
+  and the paused mission resumes only after gaps clear. Form preparation asks for
+  its permission in place, states that the candidate still presses Submit, and
+  resumes the existing mission instead of spawning an orphan preparation action.
+  Saved North American locations can answer the matching location screen without
+  inventing unknown facts.
+
+The current search-focused group passes 131 tests with no failures, and the new
+onboarding, partial-capture, identity, packet, and job-thread paths have focused
+regressions. This is source-tree evidence, not current packaged acceptance. The
+README and install guide still summarize the earlier timeout/Yes-No v0.16.6
+tranche while correctly naming v0.16.5 as public; the website still keeps safe
+form filling separate from the candidate-owned Submit action.
+
+Current promotion gates are: run the complete repository and web suites, lint,
+analysis, and production builds from the final branch; build a new signed and
+notarized Mac candidate from that exact commit; then exercise a fresh isolated
+workspace with a selected installed CLI through realistic résumé onboarding,
+configured plus AI search, local JD and identity review, application-answer
+review, the permission handoff, mission resume, restart, and a real ATS
+preparation that stops at Submit without clicking it or recording a false
+application. Only after that evidence is attached should the exact commit be
+reviewed, tagged, and promoted through GitHub artifacts, the updater feed, npm,
+Homebrew, the website, and versioned docs.
 
 ### v0.16.5 public release verification
 
