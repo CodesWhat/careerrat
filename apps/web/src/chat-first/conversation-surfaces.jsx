@@ -1033,13 +1033,29 @@ export function JobContextPanel({
                 {!gap.answerable && gap.message ? <small>{gap.message}</small> : null}
               </div>
               {gap.answerable ? (
-                <button
-                  type="button"
-                  disabled={packetBusy || activePacketGapId === gap.id}
-                  onClick={() => onAnswerGap?.(gap)}
-                >
-                  {activePacketGapId === gap.id ? "Answer below" : "Answer"}
-                </button>
+                Array.isArray(gap.options) && gap.options.length > 1 ? (
+                  <fieldset className="chat-first-packet-review__choices">
+                    <legend className="sr-only">{gap.label}</legend>
+                    {gap.options.map((option) => (
+                      <button
+                        type="button"
+                        key={option}
+                        disabled={packetBusy || activePacketGapId === gap.id}
+                        onClick={() => onAnswerGap?.(gap, option)}
+                      >
+                        {option}
+                      </button>
+                    ))}
+                  </fieldset>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={packetBusy || activePacketGapId === gap.id}
+                    onClick={() => onAnswerGap?.(gap)}
+                  >
+                    {activePacketGapId === gap.id ? "Answer below" : "Answer"}
+                  </button>
+                )
               ) : null}
             </div>
           ))}

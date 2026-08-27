@@ -396,6 +396,17 @@ test("job threads expose live packet gaps without leaking the packet manifest", 
       status: "reviewable",
       uploadReady: false,
       gapCount: 2,
+      questions: {
+        answerable: [
+          {
+            id: "north-america",
+            label: "Are you currently located in North America?",
+            type: "select",
+            required: true,
+            options: ["Yes", "No"],
+          },
+        ],
+      },
       artifacts: { answersSource: "workspace/private-answer-path.md" },
       gaps: [
         {
@@ -442,6 +453,7 @@ test("job threads expose live packet gaps without leaking the packet manifest", 
         label: "Are you currently located in North America?",
         message: "Answer “Are you currently located in North America?”.",
         answerable: true,
+        options: ["Yes", "No"],
       },
     ],
   });

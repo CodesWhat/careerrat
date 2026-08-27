@@ -830,6 +830,30 @@ export function appRegisterPacketQuestionCapture({
     artifacts.packetQuestionCount = questions.length;
     artifacts.packetQuestionExcludedCount = excluded.length;
 
+    const answerable = questions.flatMap((question) => {
+      const questionId = String(question?.id || "").trim();
+      const label = String(question?.label || "").trim();
+      if (!questionId || !label) return [];
+      const seen = new Set();
+      const options = Array.isArray(question?.options)
+        ? question.options.flatMap((option) => {
+            if (typeof option !== "string") return [];
+            const optionLabel = option.trim();
+            if (!optionLabel || seen.has(optionLabel) || seen.size >= 12) return [];
+            seen.add(optionLabel);
+            return [optionLabel];
+          })
+        : [];
+      return [
+        {
+          id: questionId,
+          label,
+          type: String(question?.type || "text").trim() || "text",
+          required: question?.required !== false,
+          ...(options.length ? { options } : {}),
+        },
+      ];
+    });
     const questionSummary = {
       source: path,
       capturedAt: artifacts.packetQuestionsCapturedAt,
@@ -838,6 +862,7 @@ export function appRegisterPacketQuestionCapture({
       answerableIds: questions.map((q) => String(q.id)),
       excludedIds: excluded.map((q) => String(q.id)),
       demographicSectionPresent: Boolean(demographicSectionPresent),
+      answerable,
     };
 
     const packetManifest = {

@@ -1296,6 +1296,7 @@ describe("JobConversation and JobContextPanel", () => {
           label: "Are you currently located in North America?",
           message: "Answer the location question.",
           answerable: true,
+          options: ["Yes", "No"],
         },
       ],
     };
@@ -1335,6 +1336,11 @@ describe("JobConversation and JobContextPanel", () => {
     expect(buttons.map((button) => button.props.children)).toContain("Answer");
     buttons.find((button) => button.props.children === "Answer").props.onClick();
     expect(onAnswerGap).toHaveBeenCalledWith(packetReview.gaps[0]);
+    expect(buttons.map((button) => button.props.children)).toEqual(
+      expect.arrayContaining(["Yes", "No"])
+    );
+    buttons.find((button) => button.props.children === "No").props.onClick();
+    expect(onAnswerGap).toHaveBeenCalledWith(packetReview.gaps[1], "No");
   });
 
   it("offers resume only after the packet gaps are cleared", () => {

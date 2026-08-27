@@ -2129,6 +2129,18 @@ form.chat-first-choice-actions > fieldset {
   cursor: pointer;
 }
 
+.chat-first-packet-review__choices {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
 .chat-first-packet-review__permission {
   display: flex;
   flex-direction: column;

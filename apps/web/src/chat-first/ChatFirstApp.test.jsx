@@ -1533,6 +1533,37 @@ describe("ChatFirstAppView", () => {
     });
   });
 
+  it("resolves ordinary text only for the exact sole finite application question", async () => {
+    const { resolvePacketGapTextAnswer } = await import("./ChatFirstApp.jsx");
+    const gap = {
+      id: "north-america",
+      questionId: "north-america",
+      label: "Are you currently located in North America?",
+      answerable: true,
+      options: ["Yes", "No"],
+    };
+
+    expect(resolvePacketGapTextAnswer({ gaps: [gap] }, " no ")).toEqual({ gap, answer: "No" });
+    expect(
+      resolvePacketGapTextAnswer(
+        {
+          gaps: [
+            gap,
+            {
+              id: "travel",
+              questionId: "travel",
+              label: "Can you travel?",
+              answerable: true,
+              options: ["Yes", "No"],
+            },
+          ],
+        },
+        "No"
+      )
+    ).toBeNull();
+    expect(resolvePacketGapTextAnswer({ gaps: [gap] }, "Maybe")).toBeNull();
+  });
+
   it("submits named review options through the same sequential batch writers", async () => {
     const { submitConversationalReviewText } = await import("./ChatFirstApp.jsx");
     const sourceDecision = vi.fn(async () => true);

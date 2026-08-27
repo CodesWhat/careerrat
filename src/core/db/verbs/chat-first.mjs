@@ -3333,6 +3333,25 @@ function packetGapLabel(gap) {
   return quoted?.[1]?.trim() || message || "Application item";
 }
 
+function packetQuestionOptions(manifest, questionId) {
+  if (!questionId) return [];
+  const questions = Array.isArray(manifest?.questions?.answerable)
+    ? manifest.questions.answerable
+    : [];
+  const question = questions.find((candidate) => String(candidate?.id || "").trim() === questionId);
+  if (!Array.isArray(question?.options)) return [];
+  const seen = new Set();
+  const options = [];
+  for (const option of question.options) {
+    const label = typeof option === "string" ? option.trim() : "";
+    if (!label || seen.has(label)) continue;
+    seen.add(label);
+    options.push(label);
+    if (options.length === 12) break;
+  }
+  return options;
+}
+
 function packetReviewFromApplication(application) {
   const manifest = application?.packetManifest;
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) return null;
@@ -3354,6 +3373,7 @@ function packetReviewFromApplication(application) {
       const questionId = String(gap?.questionId || "").trim() || null;
       const kind = String(gap?.kind || "").trim() || "packet";
       const code = String(gap?.code || "").trim() || null;
+      const options = packetQuestionOptions(manifest, questionId);
       return {
         id: questionId || `${kind}:${code || index + 1}`,
         ...(questionId ? { questionId } : {}),
@@ -3362,6 +3382,7 @@ function packetReviewFromApplication(application) {
         label: packetGapLabel(gap),
         message: String(gap?.message || "").trim(),
         answerable: kind.toLowerCase() === "answers" && Boolean(questionId),
+        ...(options.length > 1 ? { options } : {}),
       };
     });
   return {

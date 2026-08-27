@@ -158,6 +158,7 @@ export const packetManifestSchema = {
         answerableIds: { type: "array", items: { type: "string" } },
         excludedIds: { type: "array", items: { type: "string" } },
         demographicSectionPresent: { type: "boolean" },
+        answerable: { type: "array", items: packetQuestionSchema },
       },
     },
     answerLineage: {

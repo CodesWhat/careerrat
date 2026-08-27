@@ -588,6 +588,20 @@ function list(value) {
   return Array.isArray(value) ? value : EMPTY_LIST;
 }
 
+export function resolvePacketGapTextAnswer(packetReview, text) {
+  const answerable = list(packetReview?.gaps).filter((gap) => gap?.answerable === true);
+  if (answerable.length !== 1) return null;
+  const gap = answerable[0];
+  const normalized = String(text || "")
+    .trim()
+    .toLocaleLowerCase();
+  if (!normalized) return null;
+  const answer = list(gap.options).find(
+    (option) => typeof option === "string" && option.trim().toLocaleLowerCase() === normalized
+  );
+  return answer ? { gap, answer: answer.trim() } : null;
+}
+
 function titleCase(value, fallback = "In play") {
   const text = String(value || "").trim();
   if (!text) return fallback;
@@ -2535,6 +2549,29 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     );
   }
 
+  async function persistPacketGapAnswer(gap, answer, { clearComposer = false } = {}) {
+    if (!activeJob?.applicationId || !gap || workspaceSubmissionRef.current) return null;
+    const requestId = createWorkspaceRequestId();
+    workspaceSubmissionRef.current = requestId;
+    const result = await run(() =>
+      confirmPacketGapAnswer({
+        api,
+        applicationId: activeJob.applicationId,
+        gap,
+        answer,
+        requestId,
+      })
+    );
+    if (workspaceSubmissionRef.current === requestId) workspaceSubmissionRef.current = null;
+    if (!result) return null;
+    const operation = workspaceOperationFromResponse(result);
+    if (operation) replaceWorkspaceOperation(operation.id);
+    if (clearComposer) setComposerValue("");
+    setPacketAnswerGap((current) => (current?.id === gap.id ? null : current));
+    navigateForeground({ packetGapId: null }, { replace: true });
+    return result;
+  }
+
   async function submitComposer(text, choice) {
     const clean = String(text || "").trim();
     if (!clean || busy) return;
@@ -2558,25 +2595,14 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       return;
     }
     if (activeJob?.applicationId && packetAnswerGap) {
-      if (workspaceSubmissionRef.current) return;
-      const requestId = createWorkspaceRequestId();
-      workspaceSubmissionRef.current = requestId;
-      const result = await run(() =>
-        confirmPacketGapAnswer({
-          api,
-          applicationId: activeJob.applicationId,
-          gap: packetAnswerGap,
-          answer: clean,
-          requestId,
-        })
-      );
-      if (workspaceSubmissionRef.current === requestId) workspaceSubmissionRef.current = null;
-      if (result) {
-        const operation = workspaceOperationFromResponse(result);
-        if (operation) replaceWorkspaceOperation(operation.id);
-        setComposerValue("");
-        setPacketAnswerGap(null);
-      }
+      await persistPacketGapAnswer(packetAnswerGap, clean, { clearComposer: true });
+      return;
+    }
+    const packetChoice = activeJob?.applicationId
+      ? resolvePacketGapTextAnswer(activeJob.packetReview, clean)
+      : null;
+    if (packetChoice) {
+      await persistPacketGapAnswer(packetChoice.gap, packetChoice.answer, { clearComposer: true });
       return;
     }
     if (activeJob?.applicationId && isMockInterviewStartRequest(clean)) {
@@ -3308,7 +3334,11 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     applicationPreparation: packetApplicationId
       ? applicationPreparation || { status: "checking", ready: false }
       : null,
-    startPacketAnswer: (gap) => {
+    startPacketAnswer: (gap, answer) => {
+      if (String(answer || "").trim()) {
+        void persistPacketGapAnswer(gap, answer);
+        return;
+      }
       setPacketAnswerGap(gap);
       navigateForeground({ packetGapId: gap?.id || null });
     },
