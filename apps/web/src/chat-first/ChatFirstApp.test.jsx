@@ -1704,6 +1704,67 @@ describe("ChatFirstAppView", () => {
     expect(html).not.toContain("Run mock interview");
   });
 
+  it("wires packet-gap review into the job thread and its composer", async () => {
+    const packetGap = {
+      id: "linkedin-profile",
+      questionId: "linkedin-profile",
+      label: "LinkedIn Profile",
+      answerable: true,
+    };
+    const html = await renderView({
+      view: {
+        ...VIEW,
+        threads: [
+          {
+            ...VIEW.threads[0],
+            messages: [],
+            communications: [],
+            packetReview: {
+              status: "reviewable",
+              uploadReady: false,
+              gapCount: 1,
+              canResume: false,
+              gaps: [packetGap],
+            },
+          },
+        ],
+      },
+      ui: { ...BASE_UI, activeThread: "app-1", activeApplicationId: "app-1" },
+      packetAnswerGap: packetGap,
+    });
+
+    expect(html).toContain("I need 1 application answer before I can continue");
+    expect(html).toContain("APPLICATION ANSWERS · 1 NEEDED");
+    expect(html).toContain('placeholder="Answer LinkedIn Profile…"');
+  });
+
+  it("keeps packet resume behind a clear application-preparation permission action", async () => {
+    const html = await renderView({
+      view: {
+        ...VIEW,
+        threads: [
+          {
+            ...VIEW.threads[0],
+            packetReview: {
+              status: "upload-ready",
+              uploadReady: true,
+              gapCount: 0,
+              canResume: true,
+              gaps: [],
+            },
+          },
+        ],
+      },
+      ui: { ...BASE_UI, activeThread: "app-1", activeApplicationId: "app-1" },
+      actions: {
+        applicationPreparation: { status: "blocked", ready: false },
+      },
+    });
+
+    expect(html).toContain("Allow form preparation");
+    expect(html).not.toContain("Resume preparation");
+  });
+
   it("labels each canonical job date by what happened", async () => {
     for (const [field, expected] of [
       ["sourcedAt", "Ashby · found Aug 20"],

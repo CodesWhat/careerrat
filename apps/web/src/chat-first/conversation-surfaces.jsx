@@ -704,6 +704,7 @@ export function TodayConversation({
 
 export function JobConversation({
   eyebrow,
+  notice,
   inbound,
   agentName = "Paul",
   agentReply,
@@ -723,6 +724,7 @@ export function JobConversation({
   return (
     <div className="chat-first-conversation-flow">
       <div className="chat-first-conversation-eyebrow">{eyebrow}</div>
+      {notice ? <AgentBubble agentName={agentName}>{notice}</AgentBubble> : null}
       {inbound ? (
         <blockquote className="chat-first-inbound">
           <strong>✉ {inbound.sender}</strong>
@@ -799,6 +801,7 @@ export function CanonicalJobConversation({
   intentBusy = false,
   onAnswer,
   answerBusy = false,
+  packetReview = null,
 }) {
   const draft = communication?.draft;
   const actions = draft
@@ -816,6 +819,11 @@ export function CanonicalJobConversation({
   return (
     <JobConversation
       eyebrow={eyebrow}
+      notice={
+        packetReview?.gaps?.length
+          ? `I need ${packetReview.gaps.length} application answer${packetReview.gaps.length === 1 ? "" : "s"} before I can continue. Use the application review on the right, then resume preparation.`
+          : null
+      }
       inbound={canonicalInbound(communication)}
       agentName={agentName}
       agentReply={draft?.body || null}
@@ -831,8 +839,22 @@ export function CanonicalJobConversation({
   );
 }
 
-export function JobContextPanel({ job, summary, files = EMPTY_LIST, note, action }) {
+export function JobContextPanel({
+  job,
+  summary,
+  files = EMPTY_LIST,
+  note,
+  action,
+  packetReview = null,
+  activePacketGapId = null,
+  packetBusy = false,
+  onAnswerGap,
+  onResumePacket,
+  applicationPreparation = null,
+  onEnableApplicationPreparation,
+}) {
   const location = jobLocationCopy(job);
+  const preparationReady = applicationPreparation == null || applicationPreparation.ready === true;
 
   return (
     <aside className="chat-first-context-stack" aria-label="This job">
@@ -898,6 +920,63 @@ export function JobContextPanel({ job, summary, files = EMPTY_LIST, note, action
                 ))}
               </ul>
             </div>
+          ) : null}
+        </section>
+      ) : null}
+      {packetReview ? (
+        <section className="chat-first-packet-review" aria-label="Application answers">
+          <div className="chat-first-eyebrow">
+            {packetReview.gaps?.length
+              ? `APPLICATION ANSWERS · ${packetReview.gaps.length} NEEDED`
+              : "APPLICATION ANSWERS · READY"}
+          </div>
+          {(packetReview.gaps || EMPTY_LIST).map((gap) => (
+            <div className="chat-first-packet-review__gap" key={gap.id}>
+              <div>
+                <strong>{gap.label}</strong>
+                {!gap.answerable && gap.message ? <small>{gap.message}</small> : null}
+              </div>
+              {gap.answerable ? (
+                <button
+                  type="button"
+                  disabled={packetBusy || activePacketGapId === gap.id}
+                  onClick={() => onAnswerGap?.(gap)}
+                >
+                  {activePacketGapId === gap.id ? "Answer below" : "Answer"}
+                </button>
+              ) : null}
+            </div>
+          ))}
+          {applicationPreparation?.status === "checking" ? (
+            <small>Checking form permission…</small>
+          ) : null}
+          {applicationPreparation?.ready === false &&
+          applicationPreparation?.status !== "checking" ? (
+            <div className="chat-first-packet-review__permission">
+              <strong>Allow CareerRat to prepare the form</strong>
+              <small>
+                CareerRat needs permission to open and fill application forms. You still press
+                Submit.
+              </small>
+              <button
+                className="chat-first-context-action"
+                type="button"
+                disabled={packetBusy}
+                onClick={onEnableApplicationPreparation}
+              >
+                Allow form preparation
+              </button>
+            </div>
+          ) : null}
+          {packetReview.canResume && preparationReady ? (
+            <button
+              className="chat-first-context-action"
+              type="button"
+              disabled={packetBusy}
+              onClick={onResumePacket}
+            >
+              Resume preparation
+            </button>
           ) : null}
         </section>
       ) : null}

@@ -3177,6 +3177,40 @@ function touchDueNeeds(touches) {
   });
 }
 
+function packetGapLabel(gap) {
+  const direct = String(gap?.question || gap?.label || "").trim();
+  if (direct) return direct;
+  const message = String(gap?.message || "").trim();
+  const quoted = message.match(/(?:Answer|Confirm)\s+[“"](.+?)[”"]/i);
+  return quoted?.[1]?.trim() || message || "Application item";
+}
+
+function packetReviewFromApplication(application) {
+  const manifest = application?.packetManifest;
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) return null;
+  const gaps = (Array.isArray(manifest.gaps) ? manifest.gaps : []).map((gap, index) => {
+    const questionId = String(gap?.questionId || "").trim() || null;
+    const kind = String(gap?.kind || "").trim() || "packet";
+    const code = String(gap?.code || "").trim() || null;
+    return {
+      id: questionId || `${kind}:${code || index + 1}`,
+      ...(questionId ? { questionId } : {}),
+      kind,
+      ...(code ? { code } : {}),
+      label: packetGapLabel(gap),
+      message: String(gap?.message || "").trim(),
+      answerable: kind.toLowerCase() === "answers" && Boolean(questionId),
+    };
+  });
+  return {
+    status: String(manifest.status || "reviewable"),
+    uploadReady: manifest.uploadReady === true,
+    gapCount: gaps.length,
+    canResume: manifest.uploadReady === true && gaps.length === 0,
+    gaps,
+  };
+}
+
 export function chatFirstStateFromDb(db, { now = new Date() } = {}) {
   const current = now instanceof Date ? now : new Date(now);
   if (!Number.isFinite(current.getTime())) throw makeError("invalid date", "BAD_DATE");
@@ -3195,6 +3229,7 @@ export function chatFirstStateFromDb(db, { now = new Date() } = {}) {
       const application = applicationById.get(thread.applicationId) || {};
       const archiveEligible = isJobClosed(application.status);
       const manuallyArchived = thread.status === "archived";
+      const packetReview = packetReviewFromApplication(application);
       return {
         ...thread,
         company: application.company || null,
@@ -3204,6 +3239,7 @@ export function chatFirstStateFromDb(db, { now = new Date() } = {}) {
         location: applicationLocation(application),
         mode: applicationMode(application),
         comp: applicationCompensation(application),
+        ...(packetReview ? { packetReview } : {}),
         archived: archiveEligible || manuallyArchived,
         archiveEligible,
         archiveReason: archiveEligible ? "job-closed" : manuallyArchived ? "user" : null,

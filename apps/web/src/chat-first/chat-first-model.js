@@ -78,7 +78,8 @@ function normalizeThread(thread, nextActionIds, applicationRow) {
     needsAction:
       Boolean(thread?.needsAction) ||
       nextActionIds.has(thread?.applicationId) ||
-      communicationNeedsAction,
+      communicationNeedsAction ||
+      list(thread?.packetReview?.gaps).length > 0,
   };
 }
 

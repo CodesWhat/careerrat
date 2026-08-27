@@ -1,12 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import * as controller from "./chat-first-app-controller.js";
 import {
+  applicationPreparationPermission,
   calendarAction,
   commitComposerTurn,
   commitJobThreadComposer,
+  confirmPacketGapAnswer,
   createMissionAndRun,
   downloadBinaryArtifact,
   downloadTextArtifact,
+  enableApplicationPreparation,
   engineUnavailable,
   findGate,
   focusApplicationHandoff,
@@ -19,6 +22,7 @@ import {
   packetExportReceipt,
   resolveNeedDecision,
   resolvePersonAction,
+  resumePacketPreparation,
   selectedSourcedDismissal,
   selectMockSession,
   sourceSweepPresentation,
@@ -468,6 +472,204 @@ describe("chat-first app controller", () => {
       metadata: { state: "reviewable", nextActions },
       artifacts,
     });
+  });
+
+  it("persists an exact packet-gap answer through the typed writer and mirrors the result into the job thread", async () => {
+    const response = {
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Confirmed this answer. 1 packet item still needs review.",
+            metadata: { state: "confirmed", persisted: true, gapCount: 1 },
+          },
+        ],
+      },
+    };
+    const api = {
+      appendJobThreadMessage: vi.fn().mockResolvedValue({ ok: true }),
+      runWorkspaceIntent: vi.fn().mockResolvedValue(response),
+    };
+    const gap = {
+      id: "linkedin-profile",
+      questionId: "linkedin-profile",
+      label: "LinkedIn Profile",
+    };
+
+    await confirmPacketGapAnswer({
+      api,
+      applicationId: "app-hightouch",
+      gap,
+      answer: "https://www.linkedin.com/in/riley",
+    });
+
+    expect(api.runWorkspaceIntent).toHaveBeenCalledWith(
+      "screening.answer-confirm",
+      { type: "application", id: "app-hightouch" },
+      {
+        questionId: "linkedin-profile",
+        question: "LinkedIn Profile",
+        answer: "https://www.linkedin.com/in/riley",
+      }
+    );
+    expect(api.appendJobThreadMessage).toHaveBeenNthCalledWith(1, {
+      applicationId: "app-hightouch",
+      role: "user",
+      kind: "text",
+      text: "LinkedIn Profile: https://www.linkedin.com/in/riley",
+    });
+    expect(api.appendJobThreadMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        applicationId: "app-hightouch",
+        role: "assistant",
+        text: "Confirmed this answer. 1 packet item still needs review.",
+        metadata: { state: "confirmed", persisted: true, gapCount: 1 },
+      })
+    );
+  });
+
+  it("resumes the paused mission that owns a packet instead of starting an orphan prepare action", async () => {
+    const api = {
+      resumeChatFirstMission: vi.fn().mockResolvedValue({ data: { mission: { id: "mission-1" } } }),
+      runWorkspaceIntent: vi.fn(),
+    };
+    const missions = [
+      {
+        id: "mission-1",
+        status: "paused",
+        steps: [
+          {
+            id: "prepare",
+            action: "prepare-submit",
+            status: "blocked",
+            result: { applicationId: "app-hightouch", state: "blocked" },
+          },
+        ],
+      },
+    ];
+
+    await expect(
+      resumePacketPreparation({ api, missions, applicationId: "app-hightouch" })
+    ).resolves.toMatchObject({ data: { mission: { id: "mission-1" } } });
+    expect(api.resumeChatFirstMission).toHaveBeenCalledWith("mission-1");
+    expect(api.runWorkspaceIntent).not.toHaveBeenCalled();
+  });
+
+  it("ignores unrelated or completed paused missions when resuming packet preparation", async () => {
+    const api = {
+      resumeChatFirstMission: vi.fn().mockResolvedValue({ ok: true }),
+    };
+    const missions = [
+      {
+        id: "mission-unrelated",
+        status: "paused",
+        updatedAt: "2026-08-27T12:00:00.000Z",
+        steps: [
+          {
+            action: "evaluate",
+            status: "blocked",
+            result: { applicationId: "app-hightouch" },
+          },
+        ],
+      },
+      {
+        id: "mission-finished-prepare",
+        status: "paused",
+        updatedAt: "2026-08-27T11:00:00.000Z",
+        steps: [
+          {
+            action: "prepare-submit",
+            status: "completed",
+            result: { applicationId: "app-hightouch" },
+          },
+        ],
+      },
+      {
+        id: "mission-current-prepare",
+        status: "paused",
+        updatedAt: "2026-08-27T10:00:00.000Z",
+        steps: [
+          {
+            action: "prepare-submit",
+            status: "blocked",
+            result: { applicationId: "app-hightouch" },
+          },
+        ],
+      },
+    ];
+
+    await resumePacketPreparation({ api, missions, applicationId: "app-hightouch" });
+
+    expect(api.resumeChatFirstMission).toHaveBeenCalledWith("mission-current-prepare");
+  });
+
+  it("treats form preparation as ready only when its supported application sites are allowed", () => {
+    expect(applicationPreparationPermission({ capabilities: [] })).toMatchObject({
+      status: "blocked",
+      ready: false,
+    });
+    expect(
+      applicationPreparationPermission({
+        capabilities: [
+          {
+            capability: "authenticated_apply_preparation",
+            enabled: true,
+            platforms: [
+              { platform: "greenhouse", allowed: true },
+              { platform: "external_ats", allowed: false },
+            ],
+          },
+        ],
+      })
+    ).toMatchObject({ status: "blocked", ready: false });
+    expect(
+      applicationPreparationPermission({
+        capabilities: [
+          {
+            capability: "authenticated_apply_preparation",
+            enabled: true,
+            platforms: [
+              { platform: "greenhouse", allowed: true },
+              { platform: "external_ats", allowed: true },
+            ],
+          },
+        ],
+      })
+    ).toMatchObject({ status: "ready", ready: true });
+  });
+
+  it("enables supervised form preparation in place and re-reads the effective permission", async () => {
+    const automation = {
+      capabilities: [
+        {
+          capability: "authenticated_apply_preparation",
+          enabled: true,
+          platforms: [{ platform: "greenhouse", allowed: true }],
+        },
+      ],
+    };
+    const api = {
+      saveCandidateFile: vi.fn().mockResolvedValue({ ok: true }),
+      getAutomationSettings: vi.fn().mockResolvedValue(automation),
+    };
+
+    await expect(enableApplicationPreparation({ api })).resolves.toMatchObject({
+      status: "ready",
+      ready: true,
+    });
+    expect(api.saveCandidateFile).toHaveBeenCalledWith(
+      "automation",
+      expect.objectContaining({
+        setup_mode: "advanced",
+        consent: expect.objectContaining({ greenhouse: true, external_ats: true }),
+        capabilities: {
+          authenticated_apply_preparation: expect.objectContaining({ enabled: true }),
+        },
+      })
+    );
+    expect(api.getAutomationSettings).toHaveBeenCalledOnce();
   });
 
   it("creates draft-only and prepare-to-submit cart missions from current rows", async () => {

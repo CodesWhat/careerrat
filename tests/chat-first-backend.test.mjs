@@ -354,6 +354,70 @@ test("pinning, messaging, and manual archive state survive restart without copyi
   assert.equal(stored.touchDue, undefined);
 });
 
+test("job threads expose live packet gaps without leaking the packet manifest", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-packet-review",
+    company: "Hightouch",
+    status: "reviewed-hold",
+    packetManifest: {
+      applicationId: "app-packet-review",
+      status: "reviewable",
+      uploadReady: false,
+      gapCount: 2,
+      artifacts: { answersSource: "workspace/private-answer-path.md" },
+      gaps: [
+        {
+          kind: "answers",
+          code: "ANSWER_CONFIRMATION_REQUIRED",
+          questionId: "linkedin-profile",
+          message: "Answer “LinkedIn Profile”.",
+        },
+        {
+          kind: "answers",
+          code: "ANSWER_CONFIRMATION_REQUIRED",
+          questionId: "north-america",
+          message: "Answer “Are you currently located in North America?”.",
+        },
+      ],
+    },
+  });
+  api.jobThreadSetPinned({ repoRoot, applicationId: "app-packet-review" });
+
+  const thread = api
+    .chatFirstStateGet({ repoRoot })
+    .jobThreads.find((row) => row.applicationId === "app-packet-review");
+
+  assert.deepEqual(thread.packetReview, {
+    status: "reviewable",
+    uploadReady: false,
+    gapCount: 2,
+    canResume: false,
+    gaps: [
+      {
+        id: "linkedin-profile",
+        questionId: "linkedin-profile",
+        kind: "answers",
+        code: "ANSWER_CONFIRMATION_REQUIRED",
+        label: "LinkedIn Profile",
+        message: "Answer “LinkedIn Profile”.",
+        answerable: true,
+      },
+      {
+        id: "north-america",
+        questionId: "north-america",
+        kind: "answers",
+        code: "ANSWER_CONFIRMATION_REQUIRED",
+        label: "Are you currently located in North America?",
+        message: "Answer “Are you currently located in North America?”.",
+        answerable: true,
+      },
+    ],
+  });
+  assert.equal(JSON.stringify(thread.packetReview).includes("private-answer-path"), false);
+});
+
 test("scanner rows preserve whether the saved job description is partial", async () => {
   const { sourcedRowsFromScanOffers } = await import("../src/core/scoring/sourced-persistence.mjs");
   const rows = sourcedRowsFromScanOffers([

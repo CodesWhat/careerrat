@@ -14,12 +14,15 @@ import { useEventSource } from "../lib/sse.js";
 import { chatFirstApi } from "./api.js";
 import { filterFiles, filterPeople, filterSearchJobs } from "./browser-model.js";
 import {
+  applicationPreparationPermission,
   calendarAction,
   commitComposerTurn,
   commitJobThreadComposer,
+  confirmPacketGapAnswer,
   createMissionAndStart,
   downloadBinaryArtifact,
   downloadTextArtifact,
+  enableApplicationPreparation,
   engineUnavailable,
   findGate,
   focusApplicationHandoff,
@@ -36,6 +39,7 @@ import {
   resolveNeedDecision,
   resolvePersonAction,
   resumeHydratedMission,
+  resumePacketPreparation,
   scheduleApplicationId,
   selectedSourcedDismissal,
   selectMockSession,
@@ -1044,6 +1048,13 @@ function jobContext(view, thread, mockSession, actions) {
           : null
       }
       files={files}
+      packetReview={thread.packetReview}
+      activePacketGapId={actions.packetAnswerGap?.id || null}
+      packetBusy={actions.packetBusy}
+      onAnswerGap={actions.startPacketAnswer}
+      onResumePacket={() => actions.resumePacketPreparation?.(thread.applicationId)}
+      applicationPreparation={actions.applicationPreparation}
+      onEnableApplicationPreparation={actions.enableApplicationPreparation}
       note="Every run, draft, and round for this job lives here, not in the main chat."
       action={
         mockAction ||
@@ -1058,7 +1069,7 @@ function jobContext(view, thread, mockSession, actions) {
   );
 }
 
-function composerFor({ view, ui, composerValue, busy, activeSkillChat, actions }) {
+function composerFor({ view, ui, composerValue, busy, activeSkillChat, packetAnswerGap, actions }) {
   const chips = mapComposerChips(ui.composerChips, [
     ...view.browser.search,
     ...view.threads,
@@ -1068,6 +1079,7 @@ function composerFor({ view, ui, composerValue, busy, activeSkillChat, actions }
     <Composer
       agentName={view.agentName}
       value={composerValue}
+      placeholder={packetAnswerGap?.label ? `Answer ${packetAnswerGap.label}…` : undefined}
       disabled={busy || skillChatSubmitBlocked(activeSkillChat)}
       chips={chips}
       onChange={actions.setComposer}
@@ -1099,13 +1111,22 @@ export function ChatFirstAppView({
   busy = false,
   error = null,
   activeSkillChat = null,
+  packetAnswerGap = null,
   actions = {},
 }) {
   const activeJob = threadForUi(view, ui);
   const activeMission = missionForView(view);
   const railActive =
     ui.activeThread === "mock" && activeJob ? activeJob.id : activeJob?.id || ui.activeThread;
-  const composer = composerFor({ view, ui, composerValue, busy, activeSkillChat, actions });
+  const composer = composerFor({
+    view,
+    ui,
+    composerValue,
+    busy,
+    activeSkillChat,
+    packetAnswerGap,
+    actions,
+  });
   const topBar = (
     <TopBar
       agentName={view.agentName}
@@ -1326,6 +1347,7 @@ export function ChatFirstAppView({
           eyebrow={`${activeJob.company || activeJob.title} · ${activeJob.role || "Role"} · ${titleCase(activeJob.stage)}`.toUpperCase()}
           agentName={view.agentName}
           communication={communication}
+          packetReview={activeJob.packetReview}
           threadMessages={activeJob.messages}
           onApproveAndCopy={actions.copyCommunicationDraft}
           onEditDraft={actions.editCommunicationDraft}
@@ -1417,6 +1439,8 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   const navigate = useNavigate();
   const [ui, dispatch] = useReducer(chatFirstReducer, undefined, createChatFirstState);
   const [composerValue, setComposerValue] = useState("");
+  const [packetAnswerGap, setPacketAnswerGap] = useState(null);
+  const [applicationPreparation, setApplicationPreparation] = useState(null);
   const [query, setQuery] = useState("");
   const [pipelineStage, setPipelineStage] = useState(null);
   const [browserFilters, setBrowserFilters] = useState(() => ({ ...DEFAULT_BROWSER_FILTERS }));
@@ -1465,6 +1489,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     };
   }, [baseView, newSearchIds]);
   const activeJob = threadForUi(view, ui);
+  const packetApplicationId = activeJob?.packetReview ? activeJob.applicationId : null;
   const persistedSkillChat = list(view.skillChats).find((thread) => thread.id === ui.activeThread);
   const activeSkillChat = persistedSkillChat
     ? skillChatState?.id === persistedSkillChat.id
@@ -1513,6 +1538,32 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     }),
     onDismiss: dismissGithubStarPrompt,
   };
+
+  useEffect(() => {
+    if (!packetApplicationId) {
+      setApplicationPreparation(null);
+      return;
+    }
+    if (typeof api.getAutomationSettings !== "function") {
+      setApplicationPreparation({ status: "blocked", ready: false });
+      return;
+    }
+    let cancelled = false;
+    setApplicationPreparation({ status: "checking", ready: false });
+    void api
+      .getAutomationSettings()
+      .then((automation) => {
+        if (!cancelled) {
+          setApplicationPreparation(applicationPreparationPermission(automation));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setApplicationPreparation({ status: "blocked", ready: false });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, packetApplicationId]);
 
   useEffect(() => {
     if (dashboard.loading || ui.searchSelectionSeeded || !baseView.browser.search.length) return;
@@ -1745,6 +1796,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   }
 
   function openThread(id) {
+    setPacketAnswerGap(null);
     dispatch({ type: "thread.open", id });
   }
 
@@ -1752,6 +1804,21 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     const clean = String(text || "").trim();
     if (!clean || busy) return;
     if (persistedSkillChat && skillChatSubmitBlocked(activeSkillChat)) return;
+    if (activeJob?.applicationId && packetAnswerGap) {
+      const result = await run(() =>
+        confirmPacketGapAnswer({
+          api,
+          applicationId: activeJob.applicationId,
+          gap: packetAnswerGap,
+          answer: clean,
+        })
+      );
+      if (result) {
+        setComposerValue("");
+        setPacketAnswerGap(null);
+      }
+      return;
+    }
     if (activeJob?.applicationId && isMockInterviewStartRequest(clean)) {
       if (rawMock?.applicationId === activeJob.applicationId) {
         setComposerValue("");
@@ -2168,8 +2235,29 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         navigate("/settings", {
           state: { activeTab: "settings", ...(section ? { section } : {}) },
         }),
-      runWorkspaceIntent: (typedIntent) =>
-        run(async () => {
+      runWorkspaceIntent: (typedIntent) => {
+        if (
+          typedIntent?.type === "job.prepare-submit" &&
+          activeJob?.applicationId &&
+          typedIntent.entity?.id === activeJob.applicationId
+        ) {
+          if (applicationPreparation?.ready !== true) {
+            setError("Allow form preparation in the application review on the right first.");
+            return false;
+          }
+          return run(async () => {
+            const resumed = await resumePacketPreparation({
+              api,
+              missions: view.missions,
+              applicationId: activeJob.applicationId,
+            });
+            if (resumed === false) {
+              throw new Error("This application has no paused form-preparation run to resume.");
+            }
+            return resumed;
+          });
+        }
+        return run(async () => {
           const response = await api.runWorkspaceIntent(
             typedIntent.type,
             typedIntent.entity,
@@ -2188,7 +2276,8 @@ export function ChatFirstApp({ api = chatFirstApi }) {
             });
           }
           return response;
-        }),
+        });
+      },
     });
     const launchedSkillChat = skillChatFromWorkspaceResult(result);
     if (launchedSkillChat) dispatch({ type: "thread.open", id: launchedSkillChat.id });
@@ -2257,6 +2346,31 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     chatAboutSelection: () => dispatch({ type: "selection.chat" }),
     runCartMission,
     runMessageIntent,
+    packetAnswerGap,
+    packetBusy: busy,
+    applicationPreparation: packetApplicationId
+      ? applicationPreparation || { status: "checking", ready: false }
+      : null,
+    startPacketAnswer: (gap) => {
+      setPacketAnswerGap(gap);
+      setComposerValue("");
+    },
+    resumePacketPreparation: async (applicationId) => {
+      if (applicationPreparation?.ready !== true) {
+        setError("Allow form preparation in the application review on the right first.");
+        return false;
+      }
+      const resumed = await run(() =>
+        resumePacketPreparation({ api, missions: view.missions, applicationId })
+      );
+      if (resumed === false) setError("The supervised application mission is not available yet.");
+      return resumed;
+    },
+    enableApplicationPreparation: async () => {
+      const updated = await run(() => enableApplicationPreparation({ api }));
+      if (updated) setApplicationPreparation(updated);
+      return updated;
+    },
     decideSkillChatDiscovery,
     completeSkillChatDiscovery,
     openSourceReview: (artifact) => setSourceReview(artifact),
@@ -2538,6 +2652,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       busy={busy || dashboard.loading}
       error={controllerError}
       activeSkillChat={activeSkillChat}
+      packetAnswerGap={packetAnswerGap}
       actions={actions}
     />
   );

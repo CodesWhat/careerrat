@@ -1,6 +1,7 @@
 import { safeExternalHttpUrl } from "../lib/safeExternalUrl.js";
 import { buildMissionPayload, resolveComposerCommit } from "./chat-first-controller.js";
 import { artifactEmoji } from "./chat-first-model.js";
+import { permissionPatch } from "./profile-settings-controller.js";
 
 function list(value) {
   return Array.isArray(value) ? value : [];
@@ -330,6 +331,92 @@ export async function commitJobThreadComposer({ api, applicationId, text }) {
         : `${preview.action.label || "That action"} is complete.`,
   });
   return result;
+}
+
+export async function confirmPacketGapAnswer({ api, applicationId, gap, answer }) {
+  const id = String(applicationId || "").trim();
+  const questionId = String(gap?.questionId || "").trim();
+  const question = String(gap?.label || gap?.question || "").trim();
+  const cleanAnswer = String(answer || "").trim();
+  if (!id || !questionId || !question) throw new Error("This application question is unavailable");
+  if (!cleanAnswer) throw new Error("Write an answer first");
+
+  await api.appendJobThreadMessage({
+    applicationId: id,
+    role: "user",
+    kind: "text",
+    text: `${question}: ${cleanAnswer}`,
+  });
+  const response = await api.runWorkspaceIntent(
+    "screening.answer-confirm",
+    { type: "application", id },
+    { questionId, question, answer: cleanAnswer }
+  );
+  await projectWorkspaceResultToJobThread({
+    api,
+    applicationId: id,
+    response,
+    fallbackText: "That application answer is saved.",
+  });
+  return response;
+}
+
+function missionApplicationIds(mission) {
+  const ids = new Set();
+  for (const step of list(mission?.steps)) {
+    if (step?.jobRef?.type === "application" && step.jobRef.id) ids.add(step.jobRef.id);
+    for (const value of [step?.result?.applicationId, step?.result?.id]) {
+      const id = String(value || "").trim();
+      if (id) ids.add(id);
+    }
+  }
+  return ids;
+}
+
+function resumablePacketStep(mission, applicationId) {
+  return list(mission?.steps).some(
+    (step) =>
+      step?.action === "prepare-submit" &&
+      ["blocked", "pending"].includes(step?.status) &&
+      missionApplicationIds({ steps: [step] }).has(applicationId)
+  );
+}
+
+export async function resumePacketPreparation({ api, missions, applicationId }) {
+  const id = String(applicationId || "").trim();
+  if (!id) return false;
+  const mission = [...list(missions)]
+    .sort((left, right) => Date.parse(right?.updatedAt || 0) - Date.parse(left?.updatedAt || 0))
+    .find((candidate) => candidate?.status === "paused" && resumablePacketStep(candidate, id));
+  if (!mission?.id || typeof api?.resumeChatFirstMission !== "function") return false;
+  return api.resumeChatFirstMission(mission.id);
+}
+
+export function applicationPreparationPermission(automation) {
+  const value = automation?.automation || automation?.data || automation || {};
+  const capability = list(value.capabilities).find(
+    (row) => row?.capability === "authenticated_apply_preparation"
+  );
+  const platforms = list(capability?.platforms);
+  const ready =
+    capability?.enabled === true &&
+    platforms.length > 0 &&
+    platforms.every((platform) => platform?.allowed === true);
+  return { status: ready ? "ready" : "blocked", ready };
+}
+
+export async function enableApplicationPreparation({ api }) {
+  if (
+    typeof api?.saveCandidateFile !== "function" ||
+    typeof api?.getAutomationSettings !== "function"
+  ) {
+    throw new Error("Application form permission is unavailable");
+  }
+  await api.saveCandidateFile(
+    "automation",
+    permissionPatch("authenticated_apply_preparation", true)
+  );
+  return applicationPreparationPermission(await api.getAutomationSettings());
 }
 
 export function isMockInterviewStartRequest(text) {

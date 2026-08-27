@@ -1132,6 +1132,124 @@ describe("SkillChatConversation", () => {
 });
 
 describe("JobConversation and JobContextPanel", () => {
+  it("surfaces packet gaps in an empty job thread and routes each answer into the composer", () => {
+    const onAnswerGap = vi.fn();
+    const packetReview = {
+      status: "reviewable",
+      uploadReady: false,
+      gapCount: 2,
+      gaps: [
+        {
+          id: "linkedin-profile",
+          label: "LinkedIn Profile",
+          message: "Answer LinkedIn Profile.",
+          answerable: true,
+        },
+        {
+          id: "north-america",
+          label: "Are you currently located in North America?",
+          message: "Answer the location question.",
+          answerable: true,
+        },
+      ],
+    };
+    const conversation = markup(
+      <CanonicalJobConversation
+        eyebrow="HIGHTOUCH · SOFTWARE ENGINEER"
+        packetReview={packetReview}
+      />
+    );
+    expect(conversation).toContain("I need 2 application answers before I can continue");
+    expect(conversation).toContain("Use the application review on the right");
+
+    const tree = JobContextPanel({
+      job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },
+      packetReview,
+      onAnswerGap,
+    });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) {
+        node.forEach(visit);
+        return;
+      }
+      if (typeof node.type === "function") {
+        visit(node.type(node.props));
+        return;
+      }
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+    const html = markup(tree);
+    expect(html).toContain("APPLICATION ANSWERS · 2 NEEDED");
+    expect(html).toContain("LinkedIn Profile");
+    expect(html).toContain("Are you currently located in North America?");
+    expect(buttons.map((button) => button.props.children)).toContain("Answer");
+    buttons.find((button) => button.props.children === "Answer").props.onClick();
+    expect(onAnswerGap).toHaveBeenCalledWith(packetReview.gaps[0]);
+  });
+
+  it("offers resume only after the packet gaps are cleared", () => {
+    const onResumePacket = vi.fn();
+    const tree = JobContextPanel({
+      job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },
+      packetReview: {
+        status: "upload-ready",
+        uploadReady: true,
+        gapCount: 0,
+        canResume: true,
+        gaps: [],
+      },
+      applicationPreparation: { status: "ready", ready: true },
+      onResumePacket,
+    });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(visit);
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+    const resume = buttons.find((button) => button.props.children === "Resume preparation");
+    expect(resume).toBeTruthy();
+    resume.props.onClick();
+    expect(onResumePacket).toHaveBeenCalledOnce();
+  });
+
+  it("explains and enables form preparation before offering resume", () => {
+    const onEnableApplicationPreparation = vi.fn();
+    const tree = JobContextPanel({
+      job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },
+      packetReview: {
+        status: "upload-ready",
+        uploadReady: true,
+        gapCount: 0,
+        canResume: true,
+        gaps: [],
+      },
+      applicationPreparation: { status: "blocked", ready: false },
+      onEnableApplicationPreparation,
+    });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(visit);
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+    const html = markup(tree);
+    expect(html).toContain("CareerRat needs permission to open and fill application forms");
+    expect(html).toContain("You still press Submit");
+    expect(html).not.toContain("Resume preparation");
+    const enable = buttons.find((button) => button.props.children === "Allow form preparation");
+    expect(enable).toBeTruthy();
+    enable.props.onClick();
+    expect(onEnableApplicationPreparation).toHaveBeenCalledOnce();
+  });
   it("presents canonical inbound communication and its saved reply draft", () => {
     const onApproveAndCopy = vi.fn();
     const onEditDraft = vi.fn();
