@@ -691,7 +691,7 @@ const QUALIFICATION_BUCKETS = Object.freeze({
   eligibility: "filteredEligibility",
 });
 
-export function qualifyCandidateOffer(
+function qualifyCandidateOffer(
   offer,
   {
     config = {},
