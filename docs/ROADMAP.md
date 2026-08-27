@@ -1533,6 +1533,35 @@ Ingest can currently treat a typed decision as a new source. Navigation and relo
 the foreground choice while background work continues. The older sweep remains the record of
 what passed then; it is not evidence that this newly audited contract is closed.
 
+Current implementation ledger, August 27:
+
+- The generic durable choice foundation now spans workspace, job, and skill threads with stable
+  IDs/versions, binary/single/multi modes, click/text parity, allowlisted actions, idempotent
+  resolution, stale/replay rejection, reload hydration, and keyboard-accessible rendering. Deep
+  Ingest typed Confirm/Defer/Reject decisions use their existing versioned decision writer.
+- Deterministic sourcing and Universal Intake Lane B now have app-owned controllers, durable
+  operation IDs, 30-second heartbeats, active-run fencing, retry lineage, ordered shutdown, and
+  startup reconciliation. Electron shutdown and same-workspace ownership remain under the final
+  release review gate.
+- Provider-neutral operation policy now maps quality/thinking choices to native Claude Code and
+  Codex per-run controls, keeps Paul and coaching on their stronger operation policies, freezes
+  bounded retries and AI searches to one plan, and persists the AI-search plan. Settings
+  preference storage/UI and provenance on the remaining durable operations are still in progress.
+- AI discovery now keeps specific open-web leads when the first full-JD fetch is deferred, marks
+  them `AI · unverified`, captures the visible search evidence as a partial artifact, and leaves
+  liveness/full-JD verification to Evaluate. Known-expired postings still fail closed. The exact
+  twelve-role NYC hospitality batch reported from Career Ops is a regression fixture.
+- Live isolated acceptance used the same NYC hospitality profile and prompt on Claude Code 2.1.247
+  and Codex CLI 0.150.1. Claude discovered 5 roles and persisted 3 (2 partial); Codex discovered 7
+  and persisted 2 (1 partial) while rejecting 2 out-of-location roles. Both runs completed with
+  zero prompt/runtime errors and no provider fallback. `scripts/qa-live-runtime-search.mjs`
+  reproduces this acceptance without reading or writing real candidate data.
+- Public deterministic hospitality seeding now covers common NYC location spellings, up to four
+  deduplicated target titles per query board, and a state-wide fallback, while explicit software
+  domains no longer trip hospitality inference. Career-coach adjacent-role expansion, remaining
+  typed-choice migrations, full packaged desktop/browser QA, and release/update acceptance remain
+  open.
+
 This gate blocks the next release until:
 
 1. **One typed choice contract** carries a stable prompt ID/version, binary/single/multi/confirm
@@ -1557,7 +1586,7 @@ This gate blocks the next release until:
    both routes make the same reviewed setting change. No dead-end instruction to hunt through
    generic Settings rows.
 6. **Provider-neutral model routing and Settings are first class.** Paul quality is Automatic,
-   Fast, Balanced, or Best, with a separate plain-English thinking-depth preference. Both are
+   Faster, Balanced, or Best, with a separate plain-English thinking-depth preference. Both are
    clickable and naturally configurable, separate from automation `usage_mode`, and durable after
    restart. Operation policy sends main Paul coaching to the strongest suitable model, while
    bounded web search, extraction, and classification use faster/cheaper capable models. Claude
