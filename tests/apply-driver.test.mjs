@@ -26,6 +26,10 @@ function refsOf(entries) {
   return refs;
 }
 
+function writeTestPdf(path) {
+  writeFileSync(path, "%PDF-1.4\nfake test document\n%%EOF\n");
+}
+
 // Fake ops: `steps` is the sequence of NormalizedSnapshot fixtures ops.snapshot()
 // cycles through. clickButton advances the cursor (wrapping, so short fixture
 // lists can be reused across a longer step cap test) and every call — in
@@ -247,7 +251,7 @@ test("Ashby detail pages open the Application tab before filling and uploading, 
   try {
     const resumePath = join(repoRoot, "workspace", "tailored", "resume.pdf");
     mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
-    writeFileSync(resumePath, "fake resume");
+    writeTestPdf(resumePath);
     const detailPage = {
       origin: ASHBY_URL,
       pageText: "Overview\nApply for this Job",
@@ -295,6 +299,92 @@ test("Ashby detail pages open the Application tab before filling and uploading, 
     assert.deepEqual(
       log.filter((entry) => entry.op === "upload"),
       [{ op: "upload", pageId: "page-1", ref: "e6", files: resumePath }]
+    );
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("a text file disguised as a PDF is never uploaded to a required resume control", async () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-apply-driver-"));
+  try {
+    const resumePath = join(repoRoot, "workspace", "tailored", "resume.pdf");
+    mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
+    writeFileSync(resumePath, "# Resume\n\nThis is markdown, not a PDF.\n");
+    const snapshot = {
+      origin: GREENHOUSE_URL,
+      pageText: 'Application form\n- button "Resume" [required, ref=e1]\nSubmit application',
+      refs: refsOf([
+        ["e1", "button", "Resume", true],
+        ["e2", "button", "Submit Application", false],
+      ]),
+    };
+    const { ops, log } = createFakeOps([snapshot]);
+    const execute = makeDriver({ ops, repoRoot });
+
+    const result = await execute({
+      applicationId: "app-invalid-pdf",
+      application: {
+        id: "app-invalid-pdf",
+        link: GREENHOUSE_URL,
+        artifacts: { resumePdf: "workspace/tailored/resume.pdf" },
+      },
+      postingUrl: GREENHOUSE_URL,
+      questionCapture: { state: "captured" },
+      prepareOnly: true,
+    });
+
+    assert.equal(result.session.uploadedCount, 0);
+    assert.equal(
+      log.some((entry) => entry.op === "upload"),
+      false
+    );
+    assert.equal(
+      result.session.unresolved.some((entry) => entry.label === "Resume"),
+      true
+    );
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("a text file disguised as a DOCX is never uploaded to a required Workday resume control", async () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-apply-driver-"));
+  try {
+    const resumePath = join(repoRoot, "workspace", "tailored", "resume.docx");
+    mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
+    writeFileSync(resumePath, "# Resume\n\nThis is markdown, not a DOCX package.\n");
+    const snapshot = {
+      origin: WORKDAY_URL,
+      pageText: 'Application form\n- button "Resume" [required, ref=e1]\nSubmit application',
+      refs: refsOf([
+        ["e1", "button", "Resume", true],
+        ["e2", "button", "Submit Application", false],
+      ]),
+    };
+    const { ops, log } = createFakeOps([snapshot]);
+    const execute = makeDriver({ ops, repoRoot });
+
+    const result = await execute({
+      applicationId: "app-invalid-docx",
+      application: {
+        id: "app-invalid-docx",
+        link: WORKDAY_URL,
+        artifacts: { resumeDocx: "workspace/tailored/resume.docx" },
+      },
+      postingUrl: WORKDAY_URL,
+      questionCapture: { state: "captured" },
+      prepareOnly: true,
+    });
+
+    assert.equal(result.session.uploadedCount, 0);
+    assert.equal(
+      log.some((entry) => entry.op === "upload"),
+      false
+    );
+    assert.equal(
+      result.session.unresolved.some((entry) => entry.label === "Resume"),
+      true
     );
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
@@ -630,7 +720,7 @@ test("a Greenhouse captcha is the final handoff after safe fields and the resume
   try {
     const resumePath = join(repoRoot, "workspace", "tailored", "resume.pdf");
     mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
-    writeFileSync(resumePath, "fake resume");
+    writeTestPdf(resumePath);
     const snapshot = {
       origin: GREENHOUSE_URL,
       pageText:

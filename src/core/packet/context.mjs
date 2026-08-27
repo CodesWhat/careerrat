@@ -208,6 +208,7 @@ export function buildPacketContext({
       interviewNote: app.interviewNote ?? null,
       conversations: Array.isArray(app.conversations) ? app.conversations : [],
       artifacts: { ...(app.artifacts || {}) },
+      evaluation: app.evaluation ? { ...app.evaluation } : null,
       packetManifest: app.packetManifest || null,
     },
     job: {

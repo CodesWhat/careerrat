@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -10,10 +11,25 @@ import {
   WORKSPACE_INTENT_ENTITY_TYPES,
 } from "../src/core/agent/workspace-thread.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
-import { appRegisterPacketQuestionCapture, appUpsert } from "../src/core/db/verbs/app.mjs";
+import {
+  appPersistEvaluation,
+  appRegisterPacketQuestionCapture,
+  appUpsert,
+} from "../src/core/db/verbs/app.mjs";
 import { missionCreate } from "../src/core/db/verbs/chat-first.mjs";
+import { capturePacketJobBody } from "../src/core/packet/context.mjs";
 
 const cleanupRoots = [];
+
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, stableValue(value[key])])
+  );
+}
 
 function tempRepo() {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-prepare-submit-"));
@@ -23,6 +39,49 @@ function tempRepo() {
 }
 
 function seedPreparedApplication(repoRoot, overrides = {}) {
+  const evaluatedAt = "2026-08-19T00:00:00.000Z";
+  const evaluation = { gate: "keep", fitScore: 91, evaluatedAt };
+  const jdBody = "Build reliable platform systems for enterprise customers in production.";
+  const jdPath = "workspace/jobs/example-platform-engineer.md";
+  mkdirSync(join(repoRoot, "workspace", "jobs"), { recursive: true });
+  writeFileSync(
+    join(repoRoot, jdPath),
+    [
+      "---",
+      'company: "Example Labs"',
+      'role: "Platform Engineer"',
+      "---",
+      "",
+      "# Job Description",
+      "",
+      jdBody,
+      "",
+    ].join("\n")
+  );
+  const basePacketManifest = {
+    applicationId: "app-prepared",
+    uploadReady: true,
+    gaps: [],
+    artifacts: { resumePdf: "workspace/tailored/example-resume.pdf" },
+    provenance: {
+      jd: {
+        path: jdPath,
+        sha256: createHash("sha256").update(jdBody).digest("hex"),
+      },
+      evaluation: {
+        evaluatedAt,
+        sha256: createHash("sha256")
+          .update(JSON.stringify(stableValue(evaluation)))
+          .digest("hex"),
+      },
+    },
+  };
+  const packetManifest = Object.hasOwn(overrides, "packetManifest")
+    ? overrides.packetManifest == null
+      ? overrides.packetManifest
+      : { ...basePacketManifest, ...overrides.packetManifest }
+    : basePacketManifest;
+  const { packetManifest: _packetManifestOverride, ...rowOverrides } = overrides;
   appUpsert({
     repoRoot,
     env: {},
@@ -32,14 +91,10 @@ function seedPreparedApplication(repoRoot, overrides = {}) {
       role: "Platform Engineer",
       status: "reviewed-hold",
       link: "https://jobs.example.test/platform-engineer/apply",
-      evaluation: { gate: "keep", fitScore: 91 },
-      packetManifest: {
-        applicationId: "app-prepared",
-        uploadReady: true,
-        gaps: [],
-        artifacts: { resumePdf: "workspace/tailored/example-resume.pdf" },
-      },
-      ...overrides,
+      evaluation,
+      artifacts: { jd: jdPath },
+      packetManifest,
+      ...rowOverrides,
     },
   });
 }
@@ -372,6 +427,92 @@ test("job.prepare-submit blocks before opening a browser when persisted safety s
   assert.equal(result.messages.at(-1).metadata.state, "blocked");
   assert.match(result.messages.at(-1).text, /packet/i);
   assert.equal(readApplication(repoRoot).status, "reviewed-hold");
+});
+
+test("job.prepare-submit rebuilds a legacy packet with no JD and evaluation provenance", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot, {
+    packetManifest: {
+      applicationId: "app-prepared",
+      uploadReady: true,
+      gaps: [],
+      artifacts: { resumePdf: "workspace/tailored/example-resume.pdf" },
+      provenance: undefined,
+    },
+  });
+  let generateCalls = 0;
+  let applyCalls = 0;
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    generateDocumentsImpl: async () => {
+      generateCalls += 1;
+      return {
+        status: "reviewable",
+        uploadReady: false,
+        gaps: [{ kind: "review", code: "PACKET_PROVENANCE_REQUIRED", message: "Rebuild." }],
+        artifacts: {},
+      };
+    },
+    applyJobImpl: async () => {
+      applyCalls += 1;
+      return { available: true, verified: false, state: "awaiting-submit" };
+    },
+  });
+
+  assert.equal(generateCalls, 1);
+  assert.equal(applyCalls, 0);
+  assert.equal(result.messages.at(-1).metadata.state, "blocked");
+  assert.match(result.messages.at(-1).text, /packet inputs changed|rebuilt/i);
+});
+
+test("job.prepare-submit rebuilds after the JD is recaptured and reevaluated", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+  capturePacketJobBody({
+    repoRoot,
+    env: {},
+    applicationId: "app-prepared",
+    body: "Lead a newly expanded platform reliability and customer migration program.",
+    sourceUrl: "https://jobs.example.test/platform-engineer/apply",
+  });
+  const reevaluation = {
+    gate: "keep",
+    fitScore: 94,
+    evaluatedAt: "2026-08-20T00:00:00.000Z",
+  };
+  appPersistEvaluation({
+    repoRoot,
+    env: {},
+    id: "app-prepared",
+    evaluation: reevaluation,
+    projection: { evaluation: reevaluation },
+  });
+  const generations = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    generateDocumentsImpl: async ({ body }) => {
+      generations.push(body);
+      return {
+        status: "reviewable",
+        uploadReady: false,
+        gaps: [{ kind: "review", code: "PACKET_PROVENANCE_STALE", message: "Rebuild." }],
+        artifacts: {},
+      };
+    },
+    applyJobImpl: async () => {
+      throw new Error("stale documents reached the browser");
+    },
+  });
+
+  assert.equal(generations.length, 1);
+  assert.equal(generations[0].force, true);
+  assert.equal(result.messages.at(-1).metadata.state, "blocked");
 });
 
 test("job.prepare-submit never records an application even if an executor claims submission", async () => {

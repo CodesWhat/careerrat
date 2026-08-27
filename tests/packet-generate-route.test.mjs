@@ -4,7 +4,8 @@
 // POST routes and src/core/packet/* owners planned for later Phase 10 waves.
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -81,7 +82,12 @@ function importTrackerFixture(repoRoot, applications) {
 
 function seedPacketReadyApp(
   repoRoot,
-  { sourceResume = true, packetGate = "keep", evaluatedAt, reviewApproval } = {}
+  {
+    sourceResume = true,
+    packetGate = "keep",
+    evaluatedAt = "2026-07-06T14:00:00.000Z",
+    reviewApproval,
+  } = {}
 ) {
   const jdPath = writeWorkspaceFile(
     repoRoot,
@@ -1066,6 +1072,30 @@ test("POST /api/packet/generate: stamps packet source/export artifacts through D
     assert.equal(artifacts.coverLetter, artifacts.coverLetterSource);
     assert.equal(artifacts.answers, artifacts.answersSource);
     assert.match(artifacts.coverLetterPdf, /-cover-letter\.pdf$/);
+    const resumePdf = readFileSync(join(repoRoot, artifacts.resumePdf));
+    assert.equal(resumePdf.subarray(0, 5).toString(), "%PDF-");
+    assert.match(resumePdf.subarray(-32).toString(), /%%EOF/);
+
+    const provenance = app.packetManifest.provenance;
+    assert.equal(provenance.jd.path, app.artifacts.jd);
+    assert.equal(provenance.evaluation.evaluatedAt, app.evaluation.evaluatedAt);
+    assert.equal(provenance.jd.sha256.length, 64);
+    assert.equal(provenance.evaluation.sha256.length, 64);
+    assert.equal(
+      provenance.jd.sha256,
+      createHash("sha256")
+        .update(
+          "Build agentic workflow prototypes with customers and turn them into deployed tools."
+        )
+        .digest("hex")
+    );
+    const storedManifest = JSON.parse(
+      readFileSync(join(repoRoot, artifacts.packetManifest), "utf8")
+    );
+    assert.equal(storedManifest.uploadReady, app.packetManifest.uploadReady);
+    assert.equal(storedManifest.artifacts.resumePdf, artifacts.resumePdf);
+    assert.equal(storedManifest.artifacts.coverLetterPdf, artifacts.coverLetterPdf);
+    assert.equal(storedManifest.provenance.jd.sha256, provenance.jd.sha256);
 
     const readBack = await getJson(server, "/api/packet?id=app-packet");
     assert.equal(readBack.status, 200);

@@ -75,6 +75,7 @@ import {
   startFirstSearchRun,
   startManualSearchRun,
 } from "../onboarding/first-search-run.mjs";
+import { buildPacketContext } from "../packet/context.mjs";
 import { evaluateAndPersistPacketGate } from "../packet/evaluate.mjs";
 import { exportPacketArtifacts } from "../packet/exports.mjs";
 import {
@@ -87,6 +88,7 @@ import {
   matchSuppliedScreeningAnswers,
   saveOneOffScreeningAnswer,
 } from "../packet/one-off-answer.mjs";
+import { packetProvenanceForContext, packetProvenanceMatches } from "../packet/provenance.mjs";
 import { capturePacketQuestions } from "../packet/questions.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { findCompLeak, findCurrentBaseToken } from "../profile/comp-guard.mjs";
@@ -1755,13 +1757,16 @@ function blockingPacketGaps(gaps) {
 // come straight off the application row — no AI call, no doc regeneration —
 // so resumeSession still skips the REDUNDANT re-evaluate/re-generate work,
 // just never the safety checks themselves.
-function applicationApplySafetyBlockReason(application) {
+function applicationApplySafetyBlockReason({ repoRoot, env, application }) {
   if (!applicationPacketGatePasses(application)) {
     return "This application does not have a passing gate verdict on record.";
   }
   const manifest = application?.packetManifest;
   if (!manifest) {
     return "This application's packet has not been generated yet.";
+  }
+  if (packetProvenanceIsStale({ repoRoot, env, application })) {
+    return "This application's packet was generated from older job or evaluation details.";
   }
   const gaps = Array.isArray(manifest.gaps) ? manifest.gaps : null;
   const packetComplete = gaps
@@ -1894,6 +1899,20 @@ function packetQuestionLineageIsStale(application) {
   const capturedCount =
     (Number(summary.answerableCount) || 0) + (Number(summary.excludedCount) || 0);
   return capturedCount > 0 && capturedCount !== lineageIds.size;
+}
+
+function packetProvenanceIsStale({ repoRoot, env, application }) {
+  try {
+    const context = buildPacketContext({
+      repoRoot,
+      env,
+      applicationId: application?.id,
+    });
+    const current = packetProvenanceForContext(context);
+    return !packetProvenanceMatches(application?.packetManifest?.provenance, current);
+  } catch {
+    return true;
+  }
 }
 
 function siteRequiredQuestionCapture(extra = {}) {
@@ -7731,9 +7750,14 @@ export async function executeWorkspaceIntent({
         fetchImpl: searchFetchImpl,
         signal,
       });
+      application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
     }
 
-    if (resumeApplicationSession && packetQuestionLineageIsStale(application)) {
+    const staleQuestionLineage = packetQuestionLineageIsStale(application);
+    const stalePacketProvenance =
+      Boolean(application?.packetManifest) &&
+      packetProvenanceIsStale({ repoRoot, env, application });
+    if (resumeApplicationSession && (staleQuestionLineage || stalePacketProvenance)) {
       const { packet, questionCaptureDeferred } = await generateDocumentsWithQuestionFallback({
         repoRoot,
         env,
@@ -7753,7 +7777,11 @@ export async function executeWorkspaceIntent({
           env,
           normalized,
           intentMessage,
-          text: `The captured application questions changed, so CareerRat rebuilt the packet. ${packetGapText(
+          text: `${
+            staleQuestionLineage
+              ? "The captured application questions changed"
+              : "The packet inputs changed"
+          }, so CareerRat rebuilt the packet. ${packetGapText(
             gaps,
             questionCaptureDeferred
           )} The application was not marked Applied.`,
@@ -7794,7 +7822,7 @@ export async function executeWorkspaceIntent({
     }
 
     const applySafetyBlockReason = resumeApplicationSession
-      ? applicationApplySafetyBlockReason(application)
+      ? applicationApplySafetyBlockReason({ repoRoot, env, application })
       : null;
     if (typeof applyJobImpl !== "function" && (!prepareSubmit || !applySafetyBlockReason)) {
       return appendActionResult({

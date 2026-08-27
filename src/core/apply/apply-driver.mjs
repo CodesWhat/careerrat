@@ -3,6 +3,7 @@ import { isAbsolute, join, normalize, relative, sep } from "node:path";
 
 import { mayRun } from "../automation/consent.mjs";
 import { candidateConfigGet } from "../db/verbs/candidate.mjs";
+import { validDocumentArtifact } from "../documents/artifact-validation.mjs";
 import {
   capturePacketQuestions,
   classifySelfIdentificationQuestion,
@@ -418,7 +419,7 @@ function uploadArtifacts({ repoRoot, env, application, postingUrl }) {
     Object.entries(candidates).map(([kind, values]) => {
       const path = values
         .map((stored) => safeWorkspaceArtifact(repoRoot, env, stored))
-        .find((candidate) => candidate && /\.(?:pdf|docx)$/i.test(candidate));
+        .find((candidate) => candidate && validDocumentArtifact(candidate));
       return [kind, path || null];
     })
   );

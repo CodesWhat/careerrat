@@ -121,6 +121,31 @@ export const packetManifestSchema = {
     uploadReady: { type: "boolean" },
     status: { type: "string" },
     gapCount: { type: "integer", minimum: 0 },
+    provenance: {
+      type: "object",
+      additionalProperties: false,
+      required: ["jd", "evaluation"],
+      properties: {
+        jd: {
+          type: "object",
+          additionalProperties: false,
+          required: ["path", "sha256"],
+          properties: {
+            path: workspacePath,
+            sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
+          },
+        },
+        evaluation: {
+          type: "object",
+          additionalProperties: false,
+          required: ["evaluatedAt", "sha256"],
+          properties: {
+            evaluatedAt: { type: "string" },
+            sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
+          },
+        },
+      },
+    },
     artifacts: {
       type: "object",
       additionalProperties: false,

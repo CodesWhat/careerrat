@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -88,6 +89,60 @@ function seedApplication(repoRoot, overrides = {}) {
   };
   appUpsert({ repoRoot, env: {}, row });
   return row;
+}
+
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, stableValue(value[key])])
+  );
+}
+
+function preparedPacketOverrides(
+  repoRoot,
+  { evaluation = {}, artifacts = {}, packetManifest = {} } = {}
+) {
+  const currentEvaluation = {
+    ...evaluation,
+    evaluatedAt: evaluation.evaluatedAt || "2026-08-24T11:00:00.000Z",
+  };
+  const body = "Build durable AI infrastructure and customer-facing production workflows.";
+  const jdPath = "workspace/jobs/temporal-applied-ai-engineer.md";
+  mkdirSync(join(repoRoot, "workspace", "jobs"), { recursive: true });
+  writeFileSync(
+    join(repoRoot, jdPath),
+    [
+      "---",
+      'company: "Temporal Labs"',
+      'role: "Applied AI Engineer"',
+      "---",
+      "",
+      "# Job Description",
+      "",
+      body,
+      "",
+    ].join("\n"),
+    "utf8"
+  );
+  return {
+    evaluation: currentEvaluation,
+    artifacts: { ...artifacts, jd: jdPath },
+    packetManifest: {
+      ...packetManifest,
+      provenance: {
+        jd: { path: jdPath, sha256: createHash("sha256").update(body).digest("hex") },
+        evaluation: {
+          evaluatedAt: currentEvaluation.evaluatedAt,
+          sha256: createHash("sha256")
+            .update(JSON.stringify(stableValue(currentEvaluation)))
+            .digest("hex"),
+        },
+      },
+    },
+  };
 }
 
 function readApplication(repoRoot, id) {
@@ -7134,26 +7189,29 @@ test("confirming a job-specific screening answer clears its packet gap and unblo
   const answerPath = "workspace/tailored/temporal-answers.md";
   mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
   writeFileSync(join(repoRoot, answerPath), "# Application answers\n", "utf8");
-  seedApplication(repoRoot, {
-    evaluation: { gate: "keep", fitScore: 92 },
-    artifacts: { answersSource: answerPath },
-    packetManifest: {
-      applicationId: "app-temporal",
-      generatedAt: "2026-08-24T12:00:00.000Z",
-      uploadReady: false,
-      status: "reviewable",
-      gapCount: 1,
-      gaps: [
-        {
-          kind: "answers",
-          code: "ANSWER_CONFIRMATION_REQUIRED",
-          questionId: "q-motivation",
-          message: "Answer “Why do you want to work at Temporal Labs?”.",
-        },
-      ],
+  seedApplication(
+    repoRoot,
+    preparedPacketOverrides(repoRoot, {
+      evaluation: { gate: "keep", fitScore: 92 },
       artifacts: { answersSource: answerPath },
-    },
-  });
+      packetManifest: {
+        applicationId: "app-temporal",
+        generatedAt: "2026-08-24T12:00:00.000Z",
+        uploadReady: false,
+        status: "reviewable",
+        gapCount: 1,
+        gaps: [
+          {
+            kind: "answers",
+            code: "ANSWER_CONFIRMATION_REQUIRED",
+            questionId: "q-motivation",
+            message: "Answer “Why do you want to work at Temporal Labs?”.",
+          },
+        ],
+        artifacts: { answersSource: answerPath },
+      },
+    })
+  );
 
   let confirmed;
   await assert.doesNotReject(async () => {
@@ -7638,23 +7696,26 @@ test("Apply on site keeps an active supervised browser session without treating 
 
 test("permission-blocked preparation offers a fresh retry instead of a missing session return", async () => {
   const repoRoot = tempRepo();
-  seedApplication(repoRoot, {
-    evaluation: { gate: "keep", fitScore: 92 },
-    packetManifest: {
-      applicationId: "app-temporal",
-      generatedAt: "2026-08-27T12:00:00.000Z",
-      status: "reviewable",
-      uploadReady: false,
-      gaps: [
-        {
-          kind: "answers",
-          code: "QUESTION_CAPTURE_DEFERRED",
-          message: "internal packet diagnostic",
-        },
-      ],
-      artifacts: {},
-    },
-  });
+  seedApplication(
+    repoRoot,
+    preparedPacketOverrides(repoRoot, {
+      evaluation: { gate: "keep", fitScore: 92 },
+      packetManifest: {
+        applicationId: "app-temporal",
+        generatedAt: "2026-08-27T12:00:00.000Z",
+        status: "reviewable",
+        uploadReady: false,
+        gaps: [
+          {
+            kind: "answers",
+            code: "QUESTION_CAPTURE_DEFERRED",
+            message: "internal packet diagnostic",
+          },
+        ],
+        artifacts: {},
+      },
+    })
+  );
 
   const result = await executeWorkspaceIntent({
     repoRoot,
@@ -7746,20 +7807,23 @@ test("job.apply refuses a resumeSession request when the persisted packet still 
 
 test("job.apply resumeSession accepts a persisted REVIEW only with explicit approval", async () => {
   const repoRoot = tempRepo();
-  seedApplication(repoRoot, {
-    evaluation: {
-      gate: "review",
-      fitScore: 76,
-      evaluatedAt: "2026-08-25T12:00:00.000Z",
-    },
-    packetManifest: {
-      applicationId: "app-temporal",
-      generatedAt: "2026-08-09T00:00:00.000Z",
-      uploadReady: true,
-      gaps: [],
-      artifacts: {},
-    },
-  });
+  seedApplication(
+    repoRoot,
+    preparedPacketOverrides(repoRoot, {
+      evaluation: {
+        gate: "review",
+        fitScore: 76,
+        evaluatedAt: "2026-08-25T12:00:00.000Z",
+      },
+      packetManifest: {
+        applicationId: "app-temporal",
+        generatedAt: "2026-08-09T00:00:00.000Z",
+        uploadReady: true,
+        gaps: [],
+        artifacts: {},
+      },
+    })
+  );
   let applyCalls = 0;
 
   const result = await executeWorkspaceIntent({
@@ -7791,16 +7855,19 @@ test("job.apply resumeSession accepts a persisted REVIEW only with explicit appr
 
 test("job.apply's resumeSession proceeds straight to the executor once the persisted gate and packet both corroborate", async () => {
   const repoRoot = tempRepo();
-  seedApplication(repoRoot, {
-    evaluation: { gate: "keep", fitScore: 92 },
-    packetManifest: {
-      applicationId: "app-temporal",
-      generatedAt: "2026-08-09T00:00:00.000Z",
-      uploadReady: true,
-      gaps: [],
-      artifacts: {},
-    },
-  });
+  seedApplication(
+    repoRoot,
+    preparedPacketOverrides(repoRoot, {
+      evaluation: { gate: "keep", fitScore: 92 },
+      packetManifest: {
+        applicationId: "app-temporal",
+        generatedAt: "2026-08-09T00:00:00.000Z",
+        uploadReady: true,
+        gaps: [],
+        artifacts: {},
+      },
+    })
+  );
   let applyCalls = 0;
 
   const result = await executeWorkspaceIntent({
