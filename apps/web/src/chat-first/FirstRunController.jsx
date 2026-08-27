@@ -227,6 +227,7 @@ function restoredMessages(payload) {
   const messages = list(payload?.draft?.transcript).map((message, index) => {
     const id = message?.id || `restored-${index + 1}`;
     if (message?.role === "assistant") {
+      const { answerMode: _answerMode, ...restoredMessage } = message;
       const parsed = firstRunAssistantMessage(message?.text || "", id);
       const answerMode =
         parsed.answerMode ||
@@ -251,13 +252,14 @@ function restoredMessages(payload) {
             };
           })
         : restoredBlocks;
+      const options = blocks.length ? confirmationOptions(blocks) : parsed.options;
       return {
-        ...message,
+        ...restoredMessage,
         ...parsed,
         id,
         blocks,
-        ...(answerMode ? { answerMode } : {}),
-        options: blocks.length ? confirmationOptions(blocks) : parsed.options,
+        ...(options.length === 0 && answerMode ? { answerMode } : {}),
+        options,
       };
     }
     return {
@@ -694,12 +696,13 @@ export function FirstRunController({
       if (!text) return;
       const id = stableEventMessageId(chatId, eventId, `assistant-${Date.now()}`);
       const parsedMessage = firstRunAssistantMessage(text, id);
+      const options = parsedMessage.blocks.length
+        ? confirmationOptions(parsedMessage.blocks)
+        : parsedMessage.options;
       const next = {
         ...parsedMessage,
-        ...(data?.answerMode === "yes-no" ? { answerMode: "yes-no" } : {}),
-        options: parsedMessage.blocks.length
-          ? confirmationOptions(parsedMessage.blocks)
-          : parsedMessage.options,
+        ...(options.length === 0 && data?.answerMode === "yes-no" ? { answerMode: "yes-no" } : {}),
+        options,
         ...(chatId && eventId !== null ? { chatId, eventId } : {}),
       };
       updateMessages((current) => {
@@ -894,7 +897,7 @@ export function FirstRunController({
     if (message) void saveExtractedProfile(message);
   }, [chatId, messages, saveExtractedProfile, stage]);
 
-  async function sendAnswer(text) {
+  async function sendChatAnswer(text) {
     const answer = String(text || "").trim();
     if (!answer || submitting) return;
     updateMessages((current) => [
@@ -928,6 +931,23 @@ export function FirstRunController({
     }
   }
 
+  async function sendAnswer(text) {
+    const answer = String(text || "").trim();
+    if (!answer || submitting) return;
+    const currentMessage = [...messagesRef.current]
+      .reverse()
+      .find((message) => message?.role === "assistant" || message?.role === "user");
+    const matchingOptions =
+      currentMessage?.role === "assistant"
+        ? list(currentMessage.options).filter((option) => option?.label === answer)
+        : [];
+    if (matchingOptions.length === 1) {
+      await chooseOption(currentMessage.id, matchingOptions[0].id);
+      return;
+    }
+    await sendChatAnswer(answer);
+  }
+
   async function chooseOption(messageId, optionId) {
     const message = messages.find((candidate) => candidate.id === messageId);
     const [action, rawIndex] = String(optionId).split(":");
@@ -935,7 +955,7 @@ export function FirstRunController({
     const block = message?.blocks?.[blockIndex];
     if (!block || !["confirm", "decline"].includes(action)) {
       const option = message?.options?.find((candidate) => candidate.id === optionId);
-      if (option) await sendAnswer(option.label);
+      if (option) await sendChatAnswer(option.label);
       return;
     }
     setEngineError(null);

@@ -335,22 +335,25 @@ export function firstRunAssistantMessage(raw, id) {
     blocks.length === 0 && /what kind of role are you actually after/i.test(text)
       ? [FIRST_ROLE_SUGGESTION]
       : [];
+  const options = blocks.length
+    ? blocks.flatMap((block, index) =>
+        isFirstRunExtractedFact(block)
+          ? []
+          : (EXPLICIT_ACTION_LABELS[block.kind] || []).map((label, actionIndex) => ({
+              id: `${actionIndex === 0 ? "confirm" : "decline"}:${index}`,
+              label,
+            }))
+      )
+    : suggested;
   return {
     id,
     role: "assistant",
     text,
     blocks,
-    ...(parsedAnswer.answerMode ? { answerMode: parsedAnswer.answerMode } : {}),
-    options: blocks.length
-      ? blocks.flatMap((block, index) =>
-          isFirstRunExtractedFact(block)
-            ? []
-            : (EXPLICIT_ACTION_LABELS[block.kind] || []).map((label, actionIndex) => ({
-                id: `${actionIndex === 0 ? "confirm" : "decline"}:${index}`,
-                label,
-              }))
-        )
-      : suggested,
+    ...(options.length === 0 && parsedAnswer.answerMode
+      ? { answerMode: parsedAnswer.answerMode }
+      : {}),
+    options,
     allowTypedAnswer: true,
   };
 }

@@ -1823,6 +1823,27 @@ describe("FirstRunController chat event reconciliation", () => {
     });
   });
 
+  it("applies a typed exact confirmation label through the durable confirmation path", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    let view = await bootController(module, api);
+    sse.calls.at(-1).options.onEvent("assistant", assistantPayload(companyAddReply()), {
+      lastEventId: "2",
+    });
+    view = rerender(module, api);
+
+    expect(view.props.messages.at(-1).options.map((option) => option.label)).toEqual([
+      "Add company",
+      "Not now",
+    ]);
+    await view.props.onSubmitAnswer("Add company");
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("targeting", {
+      company_preferences: { confirmed: true, examples: ["Acme"] },
+    });
+    expect(api.sendChatMessage).not.toHaveBeenCalledWith("chat-1", "Add company");
+  });
+
   it("keeps a failed decline visible and retryable without claiming a save", async () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi();

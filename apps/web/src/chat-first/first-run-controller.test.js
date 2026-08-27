@@ -416,6 +416,24 @@ describe("chat-first onboarding controller", () => {
     }
   );
 
+  it("keeps an explicit company confirmation from also becoming a yes-no question", () => {
+    const message = firstRunAssistantMessage(
+      [
+        "```careerrat:confirm",
+        '{"kind":"company_add","summary":"Acme","payload":{"name":"Acme"}}',
+        "```",
+        "Should I add it?",
+        "```careerrat:answer",
+        '{"mode":"yes-no"}',
+        "```",
+      ].join("\n"),
+      "assistant-company-add"
+    );
+
+    expect(message.options.map((option) => option.label)).toEqual(["Add company", "Not now"]);
+    expect(message).not.toHaveProperty("answerMode");
+  });
+
   it("fills canonical knowledge sections from persisted partial facts before a section is done", () => {
     const state = {
       setupProgress: {
