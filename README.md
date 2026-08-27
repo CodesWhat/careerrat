@@ -53,15 +53,16 @@ directly and never falls back to or silently switches providers. A runtime
 becomes `Ready` only after local availability, authentication, and its readiness
 check pass.
 
-v0.16.3 is the current public release. It keeps Claude Code and OpenAI Codex as
-equal complete product choices, hands completed setup directly to a
-location-aware first search, keeps voluntary demographic defaults local, and
-strengthens supervised application filling without touching Submit. The GitHub
-release includes the signed, notarized, and stapled Mac DMG plus its SBOM;
-`careerrat@latest` is 0.16.3 on npm; and careerrat.com is running the production
-release. The Homebrew cask is 0.16.3. The released app installs at
-`/Applications/CareerRat.app`, reports version 0.16.3, passes Gatekeeper, and
-passed launch and visual inspection.
+v0.16.3 is the current public release. Its signed, notarized, and stapled Mac
+DMG and SBOM are on GitHub; `careerrat@latest` is 0.16.3 on npm; the Homebrew
+cask is 0.16.3; and the installed app reports version 0.16.3, passes Gatekeeper,
+and passed launch and visual inspection.
+
+v0.16.4 is the verified release candidate. It gives every recoverable failure a
+plain-English explanation and next step, enforces remote and office-day limits
+from the captured job description, resolves validated application entry points,
+and adds signed in-app Mac updates. The public-version claims above stay on
+0.16.3 until the signed 0.16.4 artifacts and distribution channels are live.
 
 The Windows x64 installer passed build, install, launch, export, and uninstall
 QA. A public Windows installer will ship only after SignPath Foundation signing
@@ -160,10 +161,13 @@ product boundaries:
   and privacy terms.
 - Search, research, and browser skills fetch the public or authenticated pages
   needed for the task you started.
-- The desktop app checks GitHub's public latest-release endpoint at most once a
-  day. It sends no candidate data, shows a notice when an update exists, and
-  never downloads or installs the update. Automatic checks can be disabled in
-  Settings, and “Check for Updates…” remains available as a manual action.
+- The Mac app checks GitHub's `latest-mac.yml` SHA-512 checksum metadata at most
+  once a day. It sends no candidate data and no unique installation or device
+  identifier. When a newer version exists, it downloads the signed and notarized
+  app update. Nothing installs until you choose **Restart and install**.
+  Automatic checks can be disabled in Settings, and “Check for Updates…” still
+  works as a manual check-and-download action. Windows self-update stays off until
+  its installed app and final installer share a complete signing chain.
 - The public website uses cookieless, privacy-limited aggregate analytics. The
   local app does not load that website analytics client.
 

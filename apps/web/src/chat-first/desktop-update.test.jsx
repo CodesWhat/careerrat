@@ -10,8 +10,6 @@ describe("desktop update bridge", () => {
     vi.resetModules();
     delete globalThis.careerratDesktopUpdate;
     const module = await loadDesktopUpdate();
-    expect(typeof module.useDesktopUpdate).toBe("function");
-
     let captured;
     function Consumer() {
       captured = module.useDesktopUpdate();
@@ -23,7 +21,7 @@ describe("desktop update bridge", () => {
     expect(captured.notice.visible).toBe(false);
   });
 
-  it("subscribes before reading state and exposes notice, preference, and force-check actions", async () => {
+  it("subscribes before reading state and exposes the downloaded update action", async () => {
     vi.resetModules();
     const calls = [];
     let push;
@@ -42,25 +40,26 @@ describe("desktop update bridge", () => {
       }),
       setEnabled: vi.fn().mockResolvedValue({ enabled: false }),
       checkNow: vi.fn().mockResolvedValue({
-        notify: false,
+        supported: true,
         enabled: false,
-        version: "0.14.0",
-        manualResult: "current",
+        phase: "current",
+        version: "0.16.3",
       }),
       skipVersion: vi.fn().mockResolvedValue({ notify: false, enabled: false }),
-      openRelease: vi.fn().mockResolvedValue(undefined),
+      restartAndInstall: vi.fn().mockResolvedValue({ accepted: true }),
     };
     const module = await loadDesktopUpdate();
-    expect(typeof module.useDesktopUpdate).toBe("function");
     expect(calls).toEqual(["subscribe"]);
 
     push({
+      supported: true,
       notify: true,
       enabled: true,
-      version: "0.14.1",
-      manualResult: null,
+      phase: "ready",
+      version: "0.16.4",
+      progress: 100,
     });
-    resolveInitial({ notify: false, enabled: true, version: null });
+    resolveInitial({ supported: true, phase: "idle", enabled: true });
     await Promise.resolve();
     await Promise.resolve();
 
@@ -71,43 +70,38 @@ describe("desktop update bridge", () => {
     }
     renderToStaticMarkup(<Consumer />);
 
-    expect(captured.available).toBe(true);
     expect(captured.notice).toMatchObject({
       visible: true,
-      kind: "available",
-      version: "0.14.1",
+      kind: "ready",
+      version: "0.16.4",
+      primaryLabel: "Restart and install",
     });
 
+    await captured.notice.onPrimary();
+    expect(globalThis.careerratDesktopUpdate.restartAndInstall).toHaveBeenCalledOnce();
     await captured.setEnabled(false);
-    expect(globalThis.careerratDesktopUpdate.setEnabled).toHaveBeenCalledWith(false);
     await captured.checkNow();
     expect(globalThis.careerratDesktopUpdate.checkNow).toHaveBeenCalledOnce();
 
     renderToStaticMarkup(<Consumer />);
-    expect(captured.enabled).toBe(false);
     expect(captured.status).toBe("CareerRat is up to date.");
 
     delete globalThis.careerratDesktopUpdate;
   });
 
-  it("shows a manually checked skipped version and reports a missing release link", async () => {
+  it("shows download progress and people-shaped recovery without raw native errors", async () => {
     vi.resetModules();
+    let push;
     globalThis.careerratDesktopUpdate = {
       getState: vi.fn().mockResolvedValue(null),
       onUpdate: vi.fn((callback) => {
-        callback({
-          notify: false,
-          enabled: false,
-          version: "0.14.1",
-          releaseUrl: null,
-          manualResult: "available",
-        });
+        push = callback;
         return () => {};
       }),
       setEnabled: vi.fn(),
       checkNow: vi.fn(),
       skipVersion: vi.fn(),
-      openRelease: vi.fn(),
+      restartAndInstall: vi.fn(),
     };
     const module = await loadDesktopUpdate();
     let captured;
@@ -115,34 +109,46 @@ describe("desktop update bridge", () => {
       captured = module.useDesktopUpdate();
       return null;
     }
-    renderToStaticMarkup(<Consumer />);
 
+    push({ supported: true, phase: "downloading", version: "0.16.4", progress: 37 });
+    renderToStaticMarkup(<Consumer />);
     expect(captured.notice).toMatchObject({
       visible: true,
-      kind: "available",
-      version: "0.14.1",
-      canOpenRelease: false,
+      kind: "downloading",
+      message: "Downloading CareerRat 0.16.4… 37%",
     });
-    expect(captured.status).toContain("release link is unavailable");
+    expect(captured.notice.primaryLabel).toBeNull();
+
+    push({
+      supported: true,
+      phase: "error",
+      errorKind: "verification",
+      message: "CareerRat couldn't verify that update, so it wasn't installed. Try again later.",
+    });
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice).toMatchObject({
+      visible: true,
+      kind: "error",
+      primaryLabel: "Try again",
+    });
+    expect(captured.status).not.toMatch(/sha|yaml|squirrel|shipit/i);
 
     delete globalThis.careerratDesktopUpdate;
   });
 
-  it("applies the authoritative toggle response and accepts later check updates", async () => {
+  it("keeps a dismissed download hidden through later progress but shows when ready", async () => {
     vi.resetModules();
+    let push;
     globalThis.careerratDesktopUpdate = {
       getState: vi.fn().mockResolvedValue(null),
       onUpdate: vi.fn((callback) => {
-        callback({ enabled: true });
+        push = callback;
         return () => {};
       }),
-      setEnabled: vi.fn().mockResolvedValue({
-        enabled: true,
-        error: "Update checks are required by this installation.",
-      }),
-      checkNow: vi.fn().mockResolvedValue({ enabled: false, manualResult: "current" }),
+      setEnabled: vi.fn(),
+      checkNow: vi.fn(),
       skipVersion: vi.fn(),
-      openRelease: vi.fn(),
+      restartAndInstall: vi.fn(),
     };
     const module = await loadDesktopUpdate();
     let captured;
@@ -150,16 +156,84 @@ describe("desktop update bridge", () => {
       captured = module.useDesktopUpdate();
       return null;
     }
+
+    push({ supported: true, phase: "downloading", version: "0.16.4", progress: 21 });
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice.visible).toBe(true);
+
+    await captured.notice.onDismiss();
+    push({ supported: true, phase: "downloading", version: "0.16.4", progress: 64 });
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice.visible).toBe(false);
+
+    push({
+      supported: true,
+      enabled: true,
+      notify: true,
+      phase: "ready",
+      version: "0.16.4",
+      progress: 100,
+    });
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice).toMatchObject({ visible: true, kind: "ready" });
+    expect(globalThis.careerratDesktopUpdate.skipVersion).not.toHaveBeenCalled();
+
+    delete globalThis.careerratDesktopUpdate;
+  });
+
+  it("explains unsupported Windows updates without pretending to check", async () => {
+    vi.resetModules();
+    let push;
+    globalThis.careerratDesktopUpdate = {
+      getState: vi.fn().mockResolvedValue(null),
+      onUpdate: vi.fn((callback) => {
+        push = callback;
+        return () => {};
+      }),
+      setEnabled: vi.fn(),
+      checkNow: vi.fn(),
+      skipVersion: vi.fn(),
+      restartAndInstall: vi.fn(),
+    };
+    const module = await loadDesktopUpdate();
+    let captured;
+    function Consumer() {
+      captured = module.useDesktopUpdate();
+      return null;
+    }
+    push({
+      supported: false,
+      enabled: true,
+      phase: "unsupported",
+      message:
+        "CareerRat can't install updates inside the Windows app yet because a signed Windows installer isn't publicly available yet. See Windows release status for availability.",
+      downloadUrl: "https://github.com/CodesWhat/careerrat/blob/main/docs/WINDOWS.md",
+      manual: false,
+    });
     renderToStaticMarkup(<Consumer />);
 
-    await captured.setEnabled(false);
-    renderToStaticMarkup(<Consumer />);
-    expect(captured.enabled).toBe(true);
-    expect(captured.status).toBe("Update checks are required by this installation.");
+    expect(captured.available).toBe(true);
+    expect(captured.supported).toBe(false);
+    expect(captured.status).toMatch(/installer isn't publicly available yet/i);
+    expect(captured.status).not.toMatch(/download the current version|run the installer/i);
+    expect(captured.downloadUrl).toBe(
+      "https://github.com/CodesWhat/careerrat/blob/main/docs/WINDOWS.md"
+    );
+    expect(captured.notice.visible).toBe(false);
 
-    await captured.checkNow();
+    push({ manual: true });
     renderToStaticMarkup(<Consumer />);
-    expect(captured.enabled).toBe(false);
+    expect(captured.notice).toMatchObject({
+      visible: true,
+      kind: "unsupported",
+      primaryLabel: "Windows release status",
+      primaryHref: "https://github.com/CodesWhat/careerrat/blob/main/docs/WINDOWS.md",
+    });
+
+    await captured.notice.onDismiss();
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice.visible).toBe(false);
+    expect(captured.status).toMatch(/installer isn't publicly available yet/i);
 
     delete globalThis.careerratDesktopUpdate;
   });

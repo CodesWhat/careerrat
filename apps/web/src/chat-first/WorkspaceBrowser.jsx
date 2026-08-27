@@ -56,27 +56,59 @@ function searchNeedsRetry(sourceSweep) {
   return sourceSweep?.status === "error" && !searchHasNoConfiguredLane(sourceSweep);
 }
 
+function candidateLaneLabel(label) {
+  if (label === "Configured sources") return "Saved job sites";
+  if (label === "AI web search") return "AI search";
+  return label || "Search";
+}
+
 function candidateSafeLaneError(lane) {
-  const fallback = `${lane.label || "This search"} couldn't finish. Try again.`;
+  const fallback = `${candidateLaneLabel(lane.label)} couldn't finish. Try again.`;
   const raw =
     typeof lane.error === "string" ? lane.error.trim() : String(lane.error?.message || "").trim();
   if (!raw) return fallback;
 
+  if (/model output.*(?:route )?schema|schema.*(?:invalid|mismatch)/i.test(raw)) {
+    return "The AI search returned something CareerRat couldn't use. Try again.";
+  }
+  if (/timed? out|timeout/i.test(raw)) {
+    return lane.label === "AI web search"
+      ? "The AI search took too long. Try again."
+      : "One of your saved job sites took too long to respond. Try again.";
+  }
+  if (/could not be reached|couldn't be reached|unreachable/i.test(raw)) {
+    return lane.label === "Configured sources"
+      ? "CareerRat couldn't reach one of your saved job sites. Try again."
+      : "CareerRat couldn't reach the AI search. Try again.";
+  }
+
   const translated = errorState(new Error(raw), fallback).message;
   if (translated !== fallback) return translated;
-
-  const exposesRuntimeDetails =
-    raw.length > 160 ||
-    raw.includes("\n") ||
-    /(?:\b(?:EACCES|ECONN(?:REFUSED|RESET)|ENOENT|ERR_[A-Z0-9_]+|SQLITE(?:_[A-Z]+)?)\b|(?:Error|TypeError|ReferenceError|SyntaxError):|\/(?:Users|home|private|tmp|var)\/|[A-Za-z]:\\|file:\/\/|https?:\/\/|(?:^|\s)at\s+\S+|(?:^|\s)(?:apps|src)\/|\.[cm]?[jt]sx?(?::\d+)?\b|[{}[\]<>])/i.test(
-      raw
-    );
-  return exposesRuntimeDetails ? fallback : raw;
+  return fallback;
 }
 
 function laneStatusCopy(lane) {
-  if (lane.status !== "failed") return `${lane.label}: ${lane.status}`;
-  return `${lane.label}: ${candidateSafeLaneError(lane)}`;
+  const label = candidateLaneLabel(lane.label);
+  const status = { succeeded: "finished", running: "searching" }[lane.status] || lane.status;
+  if (lane.status !== "failed") return `${label}: ${status}`;
+  return `${label}: ${candidateSafeLaneError(lane)}`;
+}
+
+function candidateSearchSummary(sourceSweep, lanes) {
+  const finished = lanes.filter((lane) => lane.status === "succeeded");
+  const failed = lanes.filter((lane) => lane.status === "failed");
+  const savedSitesFinished = finished.some((lane) => lane.label === "Configured sources");
+  const aiNeedsRetry = failed.some((lane) => lane.label === "AI web search");
+  if (savedSitesFinished && aiNeedsRetry) {
+    return "Your saved job sites finished. The AI search needs another try.";
+  }
+  if (failed.length && !finished.length) {
+    if (failed.length > 1) return "The search needs another try.";
+    return failed[0].label === "Configured sources"
+      ? "Your saved job sites need another try."
+      : "The AI search needs another try.";
+  }
+  return sourceSweep?.summary || "Ready to search";
 }
 
 export function BrowserTabs({
@@ -141,7 +173,7 @@ export function SearchToolbar({ sourceSweep = {}, onRunSweep, onOpenSourceHealth
           ? sourceSweep?.detail || "Loading your saved search"
           : running
             ? sourceSweep?.detail || "Searching for jobs that match your preferences"
-            : sourceSweep?.summary || "Ready to search"}
+            : candidateSearchSummary(sourceSweep, lanes)}
       </span>
       {lanes.length ? (
         <span className="cf-search__lane-status" role="status" aria-label="Search lane status">
@@ -153,7 +185,7 @@ export function SearchToolbar({ sourceSweep = {}, onRunSweep, onOpenSourceHealth
         className="cf-link cf-search__source-health"
         onClick={() => onOpenSourceHealth?.()}
       >
-        source health
+        Check job sites
       </button>
     </div>
   );
@@ -456,7 +488,7 @@ export function SearchPanel({
               <>
                 No search sources are ready yet.{" "}
                 <button type="button" className="cf-link" onClick={() => onOpenSourceHealth?.()}>
-                  Review source health
+                  Check job sites
                 </button>
               </>
             ) : cancelled ? (

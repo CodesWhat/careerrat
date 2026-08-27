@@ -18,19 +18,21 @@ not a service.
 
 ## The packaged desktop app checks for updates
 
-The packaged desktop app makes one outbound request the browser dev app
-and the npm CLI do not: once a day, it sends an unauthenticated `GET` to
-GitHub's public releases API (`api.github.com/repos/CodesWhat/careerrat/releases/latest`)
-to see whether a newer version has shipped. The request carries no candidate
-data, no account or device identifier, and no cookies, only a plain
-User-Agent header GitHub requires of every API caller.
+The packaged Mac app checks GitHub's `latest-mac.yml` release metadata once a
+day. The request carries no candidate data or account identifier. It sends no
+unique installation or device identifier, and it sends no cookies. When a newer
+release is available, the app downloads the signed and notarized app update.
+`latest-mac.yml` is GitHub-hosted SHA-512 checksum metadata that identifies the
+exact updater artifact; it is not an additional signature. The updater verifies
+that checksum before installation. It does not upload anything from your
+workspace.
 
-If a newer version is available, the app shows an in-app notice with a link
-to the GitHub release page. You download and install the update yourself; the
-app never downloads, installs, or auto-updates anything on its own. Turn this
-off any time from Settings.
+Nothing installs during a normal quit. CareerRat waits for you to choose
+**Restart and install**, then closes its local services before the native
+updater runs. Turn automatic checks and downloads off any time from Settings;
+manual **Check for Updates…** still works while that preference is off.
 
-This check is desktop-only. It never runs in the browser dev app, and it has
+This update path is desktop-only. It never runs in the browser dev app, and it has
 nothing to do with the npm CLI's own `careerrat update`, which continues to
 check the npm registry for CLI users.
 

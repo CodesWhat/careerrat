@@ -38,7 +38,7 @@ jobs:
     name: publish npm package
     runs-on: ubuntu-latest
     permissions:
-      contents: read # checkout and exact published-release/DMG verification
+      contents: read # checkout and exact published-release/feed verification
       id-token: write # npm Trusted Publishing OIDC credential and provenance
     env:
       REF_TYPE: ${{ github.ref_type }}
@@ -48,7 +48,7 @@ jobs:
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: block
-          # checkout, exact-release/DMG verification, dependency install, and
+          # checkout, exact-release/feed verification, dependency install, and
           # the provenance publish (Trusted Publishing/OIDC): api.github.com
           # resolves the release, registry.npmjs.org handles the publish, and
           # fulcio.sigstore.dev plus rekor.sigstore.dev handle provenance
@@ -95,7 +95,7 @@ jobs:
             echo "::error::Release ref $REF_NAME does not match package.json ($pkg_tag)."
             exit 1
           fi
-      - name: Verify the exact published release and DMG
+      - name: Verify the exact published release and Mac update feed
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -116,18 +116,33 @@ jobs:
           fi
 
           version="${REF_NAME#v}"
-          matching_dmg=""
+          matching_dmgs=()
+          matching_zips=()
+          manifest_count=0
           while IFS= read -r asset; do
-            if [[ "$asset" == *-"$version"-*.dmg || "$asset" == *-"$version".dmg ]]; then
-              matching_dmg="$asset"
-              break
+            if [[ "$asset" == CareerRat-"$version"-*.dmg || "$asset" == CareerRat-"$version".dmg ]]; then
+              matching_dmgs+=("$asset")
+            fi
+            if [[ "$asset" == CareerRat-"$version"-*.zip || "$asset" == CareerRat-"$version".zip ]]; then
+              matching_zips+=("$asset")
+            fi
+            if [ "$asset" = "latest-mac.yml" ]; then
+              manifest_count=$((manifest_count + 1))
             fi
           done < <(jq -r '.assets[].name' <<<"$release")
-          if [ -z "$matching_dmg" ]; then
-            echo "::error::Release $REF_NAME has no .dmg asset matching version $version."
+          if [ "${#matching_dmgs[@]}" -ne 1 ]; then
+            echo "::error::Release $REF_NAME must have exactly one .dmg asset matching version $version; found ${#matching_dmgs[@]}."
             exit 1
           fi
-          echo "Release gate passed with $matching_dmg."
+          if [ "${#matching_zips[@]}" -ne 1 ]; then
+            echo "::error::Release $REF_NAME must have exactly one updater .zip asset matching version $version; found ${#matching_zips[@]}."
+            exit 1
+          fi
+          if [ "$manifest_count" -ne 1 ]; then
+            echo "::error::Release $REF_NAME must have exactly one latest-mac.yml asset; found $manifest_count."
+            exit 1
+          fi
+          echo "Release feed gate passed with ${matching_dmgs[0]}, ${matching_zips[0]}, and latest-mac.yml."
       - name: Install locked dependencies
         run: corepack npm ci
       - name: Publish to npm (unscoped, public, trusted publishing)

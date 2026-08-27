@@ -1,7 +1,7 @@
 {
   "name": "@careerrat/desktop",
   "productName": "CareerRat",
-  "version": "0.16.3",
+  "version": "0.16.4",
   "private": true,
   "type": "module",
   "description": "CareerRat desktop app for macOS and Windows.",
@@ -11,16 +11,20 @@
     "dev": "node scripts/brand-dev-app.mjs && electron .",
     "smoke": "npm --prefix ../.. run app:build && npm run stage && node scripts/brand-dev-app.mjs && electron . --smoke",
     "stage": "node scripts/stage.mjs",
-    "package:mac": "electron-builder --mac dmg",
+    "package:mac": "electron-builder --mac --publish never",
     "dist:local": "npm --prefix ../.. run app:build && npm run stage && npm run package:mac",
     "dist:windows": "node scripts/windows-package.mjs",
     "verify:windows": "node scripts/verify-windows.mjs",
     "release:dmg": "node scripts/release-dmg.mjs",
     "verify:release": "node scripts/verify-release.mjs",
     "verify:packaged": "node scripts/verify-packaged.mjs",
+    "verify:native-update": "node scripts/verify-native-update.mjs",
     "dist": "npm run dist:local && npm run release:dmg && npm run verify:release && npm run verify:packaged",
     "release:upload": "node scripts/release-upload.mjs",
     "release": "npm run dist && npm run release:upload"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.9"
   },
   "devDependencies": {
     "electron": "43.4.0",

@@ -214,7 +214,7 @@ export default function Home() {
                 </span>
               </div>
               <p className="engine-card__note">
-                A runtime appears ready only when it is available, signed in, and passes its readiness check. CareerRat itself costs nothing, and the app never silently installs an update.
+                A runtime appears ready only when it is available, signed in, and passes its readiness check. CareerRat itself costs nothing. Signed Mac updates download in the app and wait for you to choose Restart and install.
               </p>
             </div>
           </div>

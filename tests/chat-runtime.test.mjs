@@ -469,6 +469,14 @@ test("buildChatKickoffPrompt: routes notice period to its real profile schema pa
   assert.match(prompt, /do not collect an earliest start date during initial setup/i);
 });
 
+test("buildChatKickoffPrompt: gives the agent the exact location patch shape", () => {
+  const prompt = buildChatKickoffPrompt({ skill: "ingest-profile" });
+
+  assert.match(prompt, /profile\.location\.relocation.*array/i);
+  assert.match(prompt, /no relocation.*\[\]/i);
+  assert.match(prompt, /profile\.location\.max_commute_days_per_week/i);
+});
+
 test("buildChatKickoffPrompt: never models final submission as a candidate setting", () => {
   const prompt = buildChatKickoffPrompt({ skill: "ingest-profile" });
 

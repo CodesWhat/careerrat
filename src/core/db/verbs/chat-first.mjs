@@ -612,6 +612,11 @@ function candidatePromptContext(db) {
             : null,
         hybrid: location.hybrid === true,
         onsite: location.onsite === true,
+        maxOfficeDaysPerWeek:
+          Number.isInteger(location.max_commute_days_per_week) &&
+          location.max_commute_days_per_week >= 0
+            ? location.max_commute_days_per_week
+            : null,
         relocation: safePromptList(location.relocation, {
           maxItems: 8,
           maxText: 120,

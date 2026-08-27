@@ -381,7 +381,7 @@ test("macOS release credentials are scoped away from install, verification, and 
   const cleanupAt = mac.indexOf("- name: Remove signing material from the runner");
   const staticVerifyAt = mac.indexOf("- name: Verify the signed and notarized release");
   const packagedVerifyAt = mac.indexOf("- name: Launch the exact signed packaged app");
-  const uploadAt = mac.indexOf("- name: Upload the dmg to the release");
+  const uploadAt = mac.indexOf("- name: Upload the macOS release and updater feed");
 
   for (const section of [header, install, staticVerify, packagedVerify]) {
     assert.doesNotMatch(

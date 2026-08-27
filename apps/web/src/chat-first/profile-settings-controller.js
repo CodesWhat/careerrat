@@ -1,3 +1,4 @@
+import { UserFacingError } from "../lib/errorCopy.js";
 import { runtimePresentation } from "./first-run-controller.js";
 import { buildLocationPolicy } from "./location-policy.js";
 
@@ -24,6 +25,7 @@ function field(id, label, type, value = "", extra = {}) {
 }
 
 function numberValue(value) {
+  if (value === null || value === undefined || String(value).trim() === "") return "";
   const amount = Number(value);
   return Number.isFinite(amount) && amount >= 0 ? String(amount) : "";
 }
@@ -31,8 +33,19 @@ function numberValue(value) {
 function amountOrNull(value, label) {
   if (String(value ?? "").trim() === "") return null;
   const amount = Number(value);
-  if (!Number.isFinite(amount) || amount < 0) throw new Error(`${label} must be a valid amount.`);
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw new UserFacingError(`${label} must be a valid amount.`);
+  }
   return amount;
+}
+
+function officeDaysOrNull(value) {
+  if (String(value ?? "").trim() === "") return null;
+  const days = Number(value);
+  if (!Number.isInteger(days) || days < 0 || days > 7) {
+    throw new UserFacingError("Office days must be a whole number from 0 to 7.");
+  }
+  return days;
 }
 
 function remoteScopeValue(location = {}) {
@@ -322,6 +335,13 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
             field("onsite", "On-site", "checkbox", "", {
               checked: location.onsite === true,
             }),
+            field(
+              "maxOfficeDays",
+              "Maximum office days per week",
+              "number",
+              numberValue(location.max_commute_days_per_week),
+              { min: 0, max: 7, step: 1 }
+            ),
             field("relocation", "Relocation markets", "textarea", lineValue(location.relocation), {
               rows: 4,
               placeholder: "One market per line",
@@ -479,7 +499,7 @@ export function profileSectionSavePlan(
           },
         ];
     if (!roleBuckets.some((bucket) => bucket.titles.length)) {
-      throw new Error("Add at least one target role.");
+      throw new UserFacingError("Add at least one target role.");
     }
     return [
       {
@@ -493,7 +513,7 @@ export function profileSectionSavePlan(
     const minimumBase = amountOrNull(values.minimumBase, "Minimum base");
     const targetBase = amountOrNull(values.targetBase, "Target base");
     if (minimumBase !== null && targetBase !== null && targetBase < minimumBase) {
-      throw new Error("Target base must be at least the floor.");
+      throw new UserFacingError("Target base must be at least the floor.");
     }
     return [
       {
@@ -529,6 +549,7 @@ export function profileSectionSavePlan(
             remote_scope: remoteScope,
             hybrid: values.hybrid === true,
             onsite: values.onsite === true,
+            max_commute_days_per_week: officeDaysOrNull(values.maxOfficeDays),
             relocation: lines(values.relocation),
             mode_preferences_confirmed: true,
           },
@@ -538,7 +559,7 @@ export function profileSectionSavePlan(
   }
   if (section === "writing-style") {
     const summary = String(values.summary || "").trim();
-    if (!summary) throw new Error("Describe how drafts should sound.");
+    if (!summary) throw new UserFacingError("Describe how drafts should sound.");
     return [
       {
         kind: "deep-ingest",
@@ -555,7 +576,7 @@ export function profileSectionSavePlan(
   if (section === "search-rules") {
     const fitFloor = Number(values.fitFloor);
     if (!Number.isFinite(fitFloor) || fitFloor < 0 || fitFloor > 100) {
-      throw new Error("Fit floor must be between 0 and 100.");
+      throw new UserFacingError("Fit floor must be between 0 and 100.");
     }
     const cadence = new Set(["daily", "every-3-days", "weekly", "manual"]).has(values.cadence)
       ? values.cadence

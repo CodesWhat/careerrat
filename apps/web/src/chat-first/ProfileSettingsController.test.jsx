@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../lib/api.js";
 
 const hooks = vi.hoisted(() => ({
   cursor: 0,
@@ -98,9 +99,108 @@ function settingsProps(view) {
   return children.at(-1).props;
 }
 
+function controllerAlertText(view) {
+  const children = Array.isArray(view.props.children) ? view.props.children : [view.props.children];
+  return children[0]?.props?.children || null;
+}
+
 beforeEach(() => {
   hooks.clear();
   vi.clearAllMocks();
+});
+
+describe("ProfileSettingsController error copy", () => {
+  it("does not render raw settings-load exceptions", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    const raw = "SQLITE_ERROR: no such table at /Users/person/private/careerrat.db";
+    api.getOnboardState.mockRejectedValue(new Error(raw));
+
+    renderController(module, api);
+    await flushEffects();
+    const view = renderController(module, api);
+
+    expect(controllerAlertText(view)).toBe("CareerRat couldn't load Settings. Try again.");
+    expect(controllerAlertText(view)).not.toContain(raw);
+  });
+
+  it("preserves mapped typed errors when a settings action fails", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.setAutomationSessionProvider.mockRejectedValue(
+      new ApiError(409, { code: "NO_AI_ROUTE", error: "provider route missing" })
+    );
+
+    renderController(module, api);
+    await flushEffects();
+    let view = renderController(module, api);
+    await settingsProps(view).onBrowserProviderChange("playwright");
+    view = renderController(module, api);
+
+    expect(controllerAlertText(view)).toBe("No AI engine is connected yet. Open Settings.");
+    expect(controllerAlertText(view)).not.toContain("provider route missing");
+  });
+
+  it("preserves mapped HTTP recovery instead of replacing it with a call-site fallback", async () => {
+    const { profileSettingsErrorMessage } = await import("./ProfileSettingsController.jsx");
+
+    expect(
+      profileSettingsErrorMessage(new ApiError(401, { error: "raw auth failure" }), "Retry.")
+    ).toBe("CareerRat couldn't complete that request safely. Reload CareerRat, then try again.");
+  });
+
+  it("shows a people-shaped recovery when saving a profile section returns 500", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    const raw = "SQLITE_BUSY: database is locked at /Users/person/private/careerrat.db";
+    api.getOnboardState.mockResolvedValue({
+      data: {
+        targeting: {
+          role_buckets: [
+            { name: "Primary targets", priority: "primary", titles: ["Staff Engineer"] },
+          ],
+        },
+      },
+      publicSyncPreference: { enabled: true, source: "default", updatedAt: null },
+    });
+    api.saveCandidateFile.mockRejectedValue(new ApiError(500, { error: raw }));
+
+    renderController(module, api);
+    await flushEffects();
+    let view = renderController(module, api);
+    settingsProps(view).onEditSection("targets");
+    view = renderController(module, api);
+    await settingsProps(view).onSaveEditor();
+    view = renderController(module, api);
+
+    expect(controllerAlertText(view)).toBe(
+      "CareerRat hit a problem while doing that. Try again. If it keeps happening, restart CareerRat."
+    );
+    expect(controllerAlertText(view)).not.toContain(raw);
+  });
+
+  it("shows intentional section validation while hiding unexpected implementation details", async () => {
+    const { profileSettingsErrorMessage } = await import("./ProfileSettingsController.jsx");
+    const { profileSectionSavePlan } = await import("./profile-settings-controller.js");
+    const fallback = "CareerRat couldn't save that profile section. Check it and try again.";
+    let validationError;
+
+    try {
+      profileSectionSavePlan("targets", { titles: "" });
+    } catch (cause) {
+      validationError = cause;
+    }
+
+    expect(profileSettingsErrorMessage(validationError, fallback)).toBe(
+      "Add at least one target role."
+    );
+    expect(
+      profileSettingsErrorMessage(
+        new Error("SQLITE_ERROR: no such table at /Users/person/private/careerrat.db"),
+        fallback
+      )
+    ).toBe(fallback);
+  });
 });
 
 describe("ProfileSettingsController public metadata preference", () => {

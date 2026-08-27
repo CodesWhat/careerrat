@@ -865,6 +865,7 @@ describe("runCoordinatedJobSearch", () => {
     expect(states.at(-1)).toMatchObject({
       status: "error",
       reason: "no-configured-lane",
+      summary: "CareerRat needs at least one job site or a connected AI before it can search.",
       lanes: {
         deterministic: { configured: true, executable: false, status: "skipped" },
         aiWeb: {

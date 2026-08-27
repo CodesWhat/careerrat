@@ -79,24 +79,25 @@ describe("TopBar", () => {
   });
 
   it("shows desktop update status and actions without adding controls to browser mode", () => {
-    const onOpenRelease = vi.fn();
+    const onPrimary = vi.fn();
     const onDismiss = vi.fn();
     const desktop = TopBar({
       agentName: "Mina",
       showActivity: false,
       desktopUpdate: {
         visible: true,
-        kind: "available",
+        kind: "ready",
         version: "0.14.1",
-        onOpenRelease,
+        primaryLabel: "Restart and install",
+        onPrimary,
         onDismiss,
       },
     });
     const desktopHtml = markup(desktop);
 
     expect(desktopHtml).toContain('aria-label="CareerRat update available"');
-    expect(desktopHtml).toContain("CareerRat 0.14.1 is ready");
-    expect(desktopHtml).toContain("Download");
+    expect(desktopHtml).toContain("CareerRat 0.14.1 is downloaded and ready to install");
+    expect(desktopHtml).toContain("Restart and install");
     expect(desktopHtml).toContain("Later");
 
     const buttons = [];
@@ -108,9 +109,9 @@ describe("TopBar", () => {
       visit(node.props?.children);
     }
     visit(desktop);
-    buttons.find((node) => node?.props?.children === "Download").props.onClick();
+    buttons.find((node) => node?.props?.children === "Restart and install").props.onClick();
     buttons.find((node) => node?.props?.children === "Later").props.onClick();
-    expect(onOpenRelease).toHaveBeenCalledOnce();
+    expect(onPrimary).toHaveBeenCalledOnce();
     expect(onDismiss).toHaveBeenCalledOnce();
 
     const browserHtml = markup(<TopBar agentName="Mina" showActivity={false} />);
@@ -118,24 +119,74 @@ describe("TopBar", () => {
     expect(browserHtml).not.toContain("Check for updates");
   });
 
-  it("hides Download and explains recovery when an available release has no safe URL", () => {
+  it("shows update progress without pretending the update can install yet", () => {
     const html = markup(
       <TopBar
         showActivity={false}
         desktopUpdate={{
           visible: true,
-          kind: "available",
+          kind: "downloading",
           version: "0.14.1",
-          canOpenRelease: false,
-          message:
-            "CareerRat 0.14.1 is available, but its release link is unavailable. Check again.",
+          progress: 37,
+          message: "Downloading CareerRat 0.14.1… 37%",
         }}
       />
     );
 
-    expect(html).toContain("release link is unavailable");
-    expect(html).not.toContain(">Download</button>");
-    expect(html).toContain(">Later</button>");
+    expect(html).toContain("Downloading CareerRat 0.14.1… 37%");
+    expect(html).not.toContain("Restart and install");
+    expect(html).toContain(">Dismiss</button>");
+  });
+
+  it("puts a clear retry action beside update failures", () => {
+    const html = markup(
+      <TopBar
+        showActivity={false}
+        desktopUpdate={{
+          visible: true,
+          kind: "error",
+          message: "CareerRat couldn't download the update. Check your connection and try again.",
+          primaryLabel: "Try again",
+        }}
+      />
+    );
+
+    expect(html).toContain("Check your connection and try again");
+    expect(html).toContain(">Try again</button>");
+  });
+
+  it("opens the fixed Windows download fallback as an external link", () => {
+    const html = markup(
+      <TopBar
+        showActivity={false}
+        desktopUpdate={{
+          visible: true,
+          kind: "unsupported",
+          message:
+            "CareerRat can't install updates inside the Windows app yet because a signed Windows installer isn't publicly available yet. See Windows release status for availability.",
+          primaryLabel: "Windows release status",
+          primaryHref: "https://github.com/CodesWhat/careerrat/blob/main/docs/WINDOWS.md",
+          onDismiss: () => {},
+        }}
+      />
+    );
+
+    expect(html).toContain("a signed Windows installer isn&#x27;t publicly available yet");
+    expect(html).toContain(
+      'href="https://github.com/CodesWhat/careerrat/blob/main/docs/WINDOWS.md"'
+    );
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain('rel="noopener noreferrer"');
+    expect(html).not.toContain(">Windows release status</button>");
+  });
+
+  it("styles the updater states the desktop bridge actually emits", () => {
+    const css = readFileSync(fileURLToPath(new URL("./chat-first.css", import.meta.url)), "utf8");
+
+    expect(css).toMatch(/\.chat-first-update-notice--error\s*\{/);
+    expect(css).toMatch(/\.chat-first-update-notice--ready button:first-of-type\s*\{/);
+    expect(css).not.toContain(".chat-first-update-notice--failed");
+    expect(css).not.toContain(".chat-first-update-notice--available");
   });
 
   it("keeps a full day of activity inside the fixed desktop window", () => {

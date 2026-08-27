@@ -752,6 +752,20 @@ export function submitDeepIngestSource(payload = {}) {
   });
 }
 
+export function removeDeepIngestSource({ sourceId } = {}) {
+  return apiFetch("/api/deep-ingest/sources/remove", {
+    method: "POST",
+    body: JSON.stringify({ sourceId }),
+  });
+}
+
+export function retryDeepIngestSource({ sourceId } = {}) {
+  return apiFetch("/api/deep-ingest/sources/retry", {
+    method: "POST",
+    body: JSON.stringify({ sourceId }),
+  });
+}
+
 // POST /api/deep-ingest/sources/upload uses raw bytes as the body; targetShape
 // and the filename travel as query params.
 export async function uploadDeepIngestFile(file, { targetShape } = {}) {

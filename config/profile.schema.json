@@ -66,6 +66,7 @@
         "commute_radius_miles": { "type": ["number", "null"], "exclusiveMinimum": 0 },
         "home_latitude": { "type": ["number", "null"], "minimum": -90, "maximum": 90 },
         "home_longitude": { "type": ["number", "null"], "minimum": -180, "maximum": 180 },
+        "max_commute_days_per_week": { "type": ["integer", "null"], "minimum": 0, "maximum": 7 },
         "relocation": { "type": "array", "items": { "type": "string" } },
         "travel_tolerance": { "type": "string" }
       }

@@ -57,10 +57,14 @@ and Store-readiness details are in [Windows installation and release status](WIN
 
 Pushing a tag `vX.Y.Z` runs the whole desktop release:
 `.github/workflows/desktop-release.yml` builds the app, signs and notarizes the
-DMG, uploads it to that tag's GitHub release, and flips the release from draft
-to published. macOS is unattended after its one-time setup. An enabled Windows
-signing request waits for the required SignPath approval. The Windows lane
-builds and fully smokes an
+DMG, builds the exact-version updater ZIP and `latest-mac.yml`, uploads that
+atomic macOS release bundle to the tag's GitHub release, and flips the release
+from draft to published only after all three assets are present. The DMG remains
+the direct-download and Homebrew artifact; the ZIP and manifest are the in-app
+update feed. All three must land before the workflow may publish the release.
+macOS is unattended after its one-time setup. An enabled Windows
+signing request waits for the required SignPath approval. The Windows lane builds
+and fully smokes an
 NSIS package too, but attaches it only after a valid SignPath Foundation
 Authenticode signature. Until Windows signing is approved and configured, that
 unsigned installer remains an Actions-only QA artifact. Five jobs enforce the
@@ -79,10 +83,22 @@ order:
    build if the tag doesn't match `apps/desktop/package.json`'s version,
    installs dependencies, and builds and stages the app before any signing
    material exists. It then checks the required secrets, imports the signing
-   identity into a short-lived keychain, signs and notarizes the app and DMG,
-   and removes the API key, certificate, and keychain. Only after that cleanup
-   does it Gatekeeper-verify, launch the exact signed app for its PDF and
-   bundled-browser smoke, and upload the DMG.
+   identity into a short-lived keychain, and signs and notarizes the app and
+   DMG. While that same identity is still available, it downloads the greatest
+   earlier stable release's updater ZIP and manifest, verifies their checksum,
+   extracts and Gatekeeper-checks the actual prior app, and requires its bundled
+   acceptance hook to perform a real native update from the final ZIP over a
+   loopback feed. The one bootstrap after public 0.16.3 may build a synthetic
+   0.16.3 fixture because that release predates the updater ZIP and acceptance
+   hook. Every later missing feed or incompatible prior app fails closed. The
+   restarted app must report the release version without losing its isolated
+   data. It removes the API key, certificate, and keychain only after that
+   transition passes. The job then Gatekeeper-verifies and launches the
+   exact signed app for its PDF and bundled-browser smoke. The release verifier
+   selects exactly one ZIP carrying
+   the package version, recomputes its SHA-512 and size, and requires both to
+   match `latest-mac.yml`. It then uploads the DMG, exact-version updater ZIP,
+   manifest, and generated blockmaps to the same immutable draft release.
 4. **`build-windows-upload`** (`windows-latest`, x64), checks out the same tag,
    builds the NSIS installer with publishing forced off, then installs it and
    runs the packaged app/PDF/bundled-Chromium smoke before uninstalling. The
@@ -93,15 +109,16 @@ order:
    before every macOS or Windows asset upload, the uploader resolves one exact
    tag match again and requires both the prepared release id and `draft:true`.
    Uploads do not replace an existing asset.
-5. **`publish-release`**, waits for both platform jobs, confirms the `.dmg`
-   landed, requires the `.exe` too when Windows signing reported success, then
-   publishes it and explicitly dispatches `publish.yml` (npm publish),
-   `release-assets.yml` (the .dmg detector below), and `sbom.yml`. GitHub
+5. **`publish-release`**, waits for both platform jobs and confirms the DMG,
+   exact-version updater ZIP, and single `latest-mac.yml` all landed before it
+   may publish. It requires the `.exe` too when Windows signing reported success,
+   then publishes and explicitly dispatches `publish.yml` (npm publish),
+   `release-assets.yml` (the release-bundle verifier below), and `sbom.yml`. GitHub
    suppresses workflows triggered by events created with `GITHUB_TOKEN`, but
    explicitly permits `workflow_dispatch`, so each dispatch is pinned to the
-   validated release tag after the release and DMG are both present. The job
+   validated release tag after the complete macOS release bundle is present. The job
    waits for all three dispatched runs and fails if any one fails, so a green
-   desktop release means npm, the DMG check, and the SBOM all completed.
+   desktop release means npm, the complete Mac feed check, and the SBOM all completed.
 
 The Homebrew cask is not updated from this repo. `CodesWhat/homebrew-tap`
 carries its own `update-careerrat-cask.yml` (cron plus manual dispatch) that
@@ -122,7 +139,7 @@ verify a step in isolation.
 
 #### One-time CI signing setup
 
-The pipeline needs five repository secrets, set once
+The pipeline needs six repository secrets, set once
 (`gh secret set <name> --repo CodesWhat/careerrat --body ...` or the
 Settings → Secrets and variables → Actions UI):
 
@@ -133,9 +150,10 @@ Settings → Secrets and variables → Actions UI):
 | `APPLE_API_KEY` | Base64 of the App Store Connect API key `.p8` | `base64 -i AuthKey_XXXXXXXXXX.p8 \| pbcopy` |
 | `APPLE_API_KEY_ID` | The API key's Key ID | App Store Connect → Users and Access → Integrations → Team Keys |
 | `APPLE_API_ISSUER` | The API key's Issuer ID | Same Integrations page, above the key list |
+| `NATIVE_UPDATE_ACCEPTANCE_PRIVATE_KEY` | Stable Ed25519 PKCS#8 PEM matching the public key bundled in CareerRat | Preserve the private half of the acceptance signing pair as the multiline secret |
 
 After dependency installation and credential-free app staging,
-`build-notarize-upload` checks all five secrets and fails with a clear list of
+`build-notarize-upload` checks all six secrets and fails with a clear list of
 what's missing before it materializes any signing file or starts
 electron-builder or notarytool.
 
@@ -167,33 +185,64 @@ install the SignPath GitHub App for this repository if SignPath requires it.
 Keep `SIGNPATH_ENABLED` false until SignPath has issued and tested every value
 above. An unsigned `.exe` is never a manual substitute for this gate.
 
+Windows self-update stays disabled even when an Authenticode-signed installer is
+published. SignPath signs the NSIS installer after electron-builder creates it,
+which changes the bytes after its update metadata and blockmap were generated.
+Enable Windows self-update only after the workflow produces and verifies a feed
+against the exact signed installer users receive. Never publish an unsigned or
+metadata-mismatched update as a fallback.
+
 #### Manual fallback: building and verifying locally
 
 1. Build the desktop artifact with `npm run desktop:dist`. The command signs and notarizes the app
    and DMG container, staples the DMG ticket, and fails unless Gatekeeper verification and the
    exact signed app's packaged smoke both pass.
-2. Confirm the output includes a signed and notarized macOS DMG.
+2. Confirm the output includes a signed and notarized macOS DMG, exactly one
+   updater ZIP carrying the package version, and `latest-mac.yml`.
 3. Verify signing and notarization evidence:
    - `codesign -dv --verbose=2 apps/desktop/dist/mac-arm64/CareerRat.app`
    - `xcrun stapler validate apps/desktop/dist/*.dmg`
    - `spctl --assess --type open --context context:primary-signature apps/desktop/dist/*.dmg`
-4. Run packaged smoke checks for a fresh workspace and an existing workspace.
+4. Run `npm run verify:release --workspace apps/desktop`. In addition to the
+   signature checks above, it recomputes the updater ZIP's SHA-512 and size and
+   requires both to match `latest-mac.yml` before any upload.
+5. Run `npm run verify:native-update --workspace apps/desktop` while the same
+   Developer ID, notarization credentials, GitHub release credential, and
+   `NATIVE_UPDATE_ACCEPTANCE_PRIVATE_KEY` remain available. It signs the exact
+   request bytes, downloads and verifies the actual prior updater ZIP, checks
+   the extracted app with codesign and Gatekeeper. It performs a native N-to-N+1 update
+   from a loopback feed, waits for the updated app to restart and report
+   the new version, and verifies that a CAREERRAT_HOME sentinel survived. Only
+   the first release after public 0.16.3 may use the synthetic bootstrap; later
+   missing or incompatible prior artifacts fail. The launched app receives none
+   of the release, Apple, Developer ID, GitHub, or acceptance-signing secrets.
+   The workflow runs this before removing its signing material and before
+   uploading any asset.
+6. Run packaged smoke checks for a fresh workspace and an existing workspace.
    Both should open the chat-first shell at `/app`; the fresh workspace should
    begin the conversational intake flow inside that shell.
-5. Verify the packaged app runs without the source checkout and writes user data
+7. Verify the packaged app runs without the source checkout and writes user data
    under the packaged `CAREERRAT_HOME` data root, not inside signed resources.
-6. Confirm no Apple credentials, candidate data, workspace files, private paths,
+8. Confirm no Apple credentials, candidate data, workspace files, private paths,
    or local keychain-profile values are tracked or included in release notes.
-7. Record final rollup evidence for the signed/notarized artifact, stapling,
+9. Record final rollup evidence for the signed/notarized artifact, stapling,
    Gatekeeper assessment, fresh/existing workspace smoke, and checkout
    independence.
 
+Packaged macOS builds check at most once a day when automatic checks are enabled.
+An available release downloads in the background, then waits at **Restart and
+install**. That action first shuts down CareerRat's app services and agent child
+processes, then hands the ready update to the native installer. An ordinary quit
+does not install a downloaded update. The current version keeps working after a
+download, verification, or install-start failure.
+
 #### Manual fallback: publishing a desktop release
 
-A GitHub release with no `.dmg` attached is a defect, not a formality:
-nobody can download the app from it. Publishing the release is what fires
-`publish.yml`, so the .dmg has to be uploaded before that happens, not after.
-Follow this order:
+A GitHub release without the complete macOS bundle is a defect, not a
+formality. The DMG is the direct installer and Homebrew input; the exact-version
+updater ZIP plus `latest-mac.yml` make in-app updates work. Publishing the
+release is what fires `publish.yml`, so all three must be uploaded before that
+happens, not after. Follow this order:
 
 Resolve the tag once and reuse it, so nothing below depends on retyping a
 version correctly:
@@ -206,21 +255,24 @@ tag="$(git describe --tags --exact-match)"
    `gh release create "$tag" --draft --title "$tag" --generate-notes`.
 2. Run `npm run desktop:release` from the repo root. It builds, signs,
    notarizes, staples, verifies (fails closed on Gatekeeper and the exact signed
-   app smoke), and uploads the
-   `.dmg` to the draft release via `gh release upload`.
+   app smoke, plus manifest SHA-512 and size parity), and uploads the DMG,
+   exact-version updater ZIP, `latest-mac.yml`, and generated blockmaps to the
+   draft release via `gh release upload`.
 3. Confirm the upload: `gh release view "$tag" --json assets` should list a
-   `.dmg` whose name carries the version.
+   versioned `.dmg`, exactly one `.zip` carrying the same version, and exactly
+   one `latest-mac.yml`.
 4. Only then publish the release: `gh release edit "$tag" --draft=false`.
    This is the step that fires `publish.yml` and pushes to npm.
 
 `publish.yml` independently resolves that exact tag's GitHub Release and
-refuses to publish unless the release is public and already carries a
-version-matching `.dmg`. The same gate applies to a direct tag-pinned
+refuses to publish unless the release is public and already carries the
+version-matching DMG, exact-version updater ZIP, and `latest-mac.yml`. The same gate applies to a direct tag-pinned
 `workflow_dispatch`, so a manual retry cannot bypass signing and artifact
 publication order.
 
-The `release-assets` workflow checks every published release for a matching
-`.dmg` asset and fails loudly if one is missing. It runs alongside
+The `release-assets` workflow checks every published release for the matching
+DMG, exact-version updater ZIP, and single `latest-mac.yml`, and fails loudly
+if any part is missing. It runs alongside
 `publish.yml`, not before it, so it is a detector, not a blocker: it cannot
 stop npm publish from firing. If it flags a release, run
 `npm run desktop:release` to upload the missing asset. A manual

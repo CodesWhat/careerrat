@@ -173,17 +173,29 @@ function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-const LOCATION_MODE_FIELDS = ["remote", "remote_scope", "hybrid", "onsite", "relocation"];
+const LOCATION_MODE_FIELDS = [
+  "remote",
+  "remote_scope",
+  "hybrid",
+  "onsite",
+  "relocation",
+  "max_commute_days_per_week",
+];
 
 function normalizeCandidateProfilePatch(patch) {
   const location = patch?.location;
-  if (!isPlainObject(location) || Object.hasOwn(location, "mode_preferences_confirmed")) {
-    return patch;
+  if (!isPlainObject(location)) return patch;
+  const normalizedLocation = { ...location };
+  if (normalizedLocation.relocation === false) normalizedLocation.relocation = [];
+  if (
+    !Object.hasOwn(normalizedLocation, "mode_preferences_confirmed") &&
+    LOCATION_MODE_FIELDS.some((field) => Object.hasOwn(normalizedLocation, field))
+  ) {
+    normalizedLocation.mode_preferences_confirmed = true;
   }
-  if (!LOCATION_MODE_FIELDS.some((field) => Object.hasOwn(location, field))) return patch;
   return {
     ...patch,
-    location: { ...location, mode_preferences_confirmed: true },
+    location: normalizedLocation,
   };
 }
 

@@ -61,6 +61,7 @@ export const CANDIDATE_DEFAULTS = Object.freeze({
       remote_scope: "home-country",
       hybrid: false,
       onsite: false,
+      max_commute_days_per_week: null,
       relocation: [],
       travel_tolerance: "",
     },

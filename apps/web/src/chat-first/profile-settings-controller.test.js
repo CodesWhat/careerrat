@@ -32,6 +32,29 @@ describe("profile settings controller mapping", () => {
     });
   });
 
+  it("renders an unset maximum office-day preference as a blank field", () => {
+    const model = buildProfileSettingsModel({
+      onboard: {
+        data: {
+          profile: {
+            location: {
+              home: "NYC",
+              remote: true,
+              hybrid: true,
+              onsite: false,
+              max_commute_days_per_week: null,
+            },
+          },
+        },
+      },
+    });
+
+    expect(
+      model.profile.editors["location-policy"].fields.find((entry) => entry.id === "maxOfficeDays")
+        ?.value
+    ).toBe("");
+  });
+
   it("maps canonical candidate, engine, source, and permission state into the handoff", () => {
     const model = buildProfileSettingsModel({
       onboard: {
@@ -50,6 +73,7 @@ describe("profile settings controller mapping", () => {
               remote_scope: "worldwide",
               hybrid: true,
               onsite: true,
+              max_commute_days_per_week: 2,
               relocation: [],
               mode_preferences_confirmed: true,
             },
@@ -548,6 +572,7 @@ describe("profile settings controller mapping", () => {
         remoteScope: "worldwide",
         hybrid: true,
         onsite: false,
+        maxOfficeDays: "2",
         relocation: "Boston, MA\nSeattle, WA",
       })
     ).toEqual([
@@ -562,6 +587,7 @@ describe("profile settings controller mapping", () => {
             remote_scope: "worldwide",
             hybrid: true,
             onsite: false,
+            max_commute_days_per_week: 2,
             relocation: ["Boston, MA", "Seattle, WA"],
             mode_preferences_confirmed: true,
           },
@@ -574,6 +600,7 @@ describe("profile settings controller mapping", () => {
         remoteScope: "off",
         hybrid: false,
         onsite: false,
+        maxOfficeDays: "",
         relocation: "",
       })
     ).toEqual([
@@ -588,6 +615,7 @@ describe("profile settings controller mapping", () => {
             remote_scope: "home-country",
             hybrid: false,
             onsite: false,
+            max_commute_days_per_week: null,
             relocation: [],
             mode_preferences_confirmed: true,
           },

@@ -104,30 +104,30 @@ typed workspace workflows. The retained `POST /api/skill/run` path exposes only
 `intake-extract` and `resume-extract`, each with one canonical uploaded file.
 It is not a generic workflow or tool-heavy back door for `/app` buttons.
 
-Auto-update readiness means this package is signed/notarized and the release
-process can later attach an updater safely. The current desktop app does not
-install updates itself; users still update the open-core CLI with
-`careerrat update`.
+## In-app updates
 
-## Update notifications
+The packaged Mac app uses pinned `electron-updater 6.8.9`. It checks the
+GitHub release feed shortly after launch and then once every 24 hours, on by
+default with an opt-out in Settings. “Check for Updates…” in the CareerRat
+menu and “Check now” in Settings run one immediate check even when automatic
+checks are off without changing that preference.
 
-The packaged app checks GitHub's public releases API
-(`api.github.com/repos/CodesWhat/careerrat/releases/latest`) shortly after
-launch and then once every 24 hours, on by default with an opt-out in
-Settings. “Check for Updates…” in the CareerRat menu and “Check now” in
-Settings run one immediate check even when automatic checks are off without
-changing that preference. This is notify-only: on finding a newer version it shows an in-app
-notice linking to the GitHub release page, the user downloads and installs
-the `.dmg` themselves, and nothing is downloaded, staged, or installed by the
-app. The request is unauthenticated and carries no candidate data.
+When a newer signed version exists, CareerRat downloads it in the app and
+shows progress. Only the native `update-downloaded` event enables **Restart and install**.
+CareerRat closes its chat runtime, browser sessions, PDF
+renderer, file watchers, and local server before handing the completed update
+to the native installer. Normal quits do not install a downloaded update.
 
-`apps/desktop/update-check.mjs` holds the pure comparison, resolver, and
-scheduling logic (see `tests/desktop-update-check.test.mjs`); `main.mjs` owns
-the actual fetch, the recurring timer, and reading/writing persisted state
-(last checked time, skipped version, enabled flag) as
-`desktop-update-check.json` under the same `CAREERRAT_HOME` data root
-described above, never inside the signed Resources tree. The renderer never
-talks to GitHub directly: `preload/update-check-preload.cjs` exposes a
-`window.careerratDesktopUpdate` bridge over Electron's contextBridge/IPC, so
-the notice only ever renders inside this Electron shell and never in the
-browser dev app.
+The Mac release is one atomic feed: signed/notarized DMG, signed updater ZIP,
+and `latest-mac.yml`. Release verification recomputes the manifest SHA-512 and
+byte size against the exact ZIP before publication. Windows self-update stays
+disabled until both the installed executable and final installer are signed
+and the manifest is generated from those final signed bytes.
+
+`apps/desktop/update-check.mjs` owns the typed updater state machine and daily
+cadence. `main.mjs` owns native events, shutdown, and persisted settings in
+`desktop-update-check.json` under `CAREERRAT_HOME`. The renderer never talks to
+GitHub directly. `preload/update-check-preload.cjs` exposes only typed state,
+check, preference, dismissal, and restart/install operations through Electron
+IPC. Native updater errors remain in desktop logs; the app shows plain-English
+recovery copy.

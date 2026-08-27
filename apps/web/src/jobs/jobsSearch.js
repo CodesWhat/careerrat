@@ -332,7 +332,7 @@ export async function runCoordinatedJobSearch({
     const state = {
       status: "error",
       reason: "no-configured-lane",
-      summary: "No configured search lane is available. Review source and AI settings.",
+      summary: "CareerRat needs at least one job site or a connected AI before it can search.",
     };
     publish(state);
     return { ok: false, skipped: true, lanes };

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { inlineErrorMessage } from "../lib/errorCopy.js";
 import { profileSettingsApi } from "./api.js";
 import { useDesktopUpdate } from "./desktop-update.js";
 import { firstRunRuntimeChoices } from "./first-run-controller.js";
@@ -22,6 +23,10 @@ function buildSettingsModel(input = {}) {
 }
 
 const EMPTY_MODEL = buildSettingsModel();
+
+export function profileSettingsErrorMessage(error, fallback) {
+  return inlineErrorMessage(error, fallback);
+}
 
 export function ProfileSettingsController({ api = profileSettingsApi }) {
   const navigate = useNavigate();
@@ -74,7 +79,11 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
         setModel(buildSettingsModel(next));
       })
       .catch((cause) => {
-        if (!cancelled) setError(cause?.message || "Profile settings could not load.");
+        if (!cancelled) {
+          setError(
+            profileSettingsErrorMessage(cause, "CareerRat couldn't load Settings. Try again.")
+          );
+        }
       });
     return () => {
       cancelled = true;
@@ -124,7 +133,12 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
       setEditingSection(null);
       setEditorValues({});
     } catch (cause) {
-      setError(cause?.message || "That profile section could not be saved.");
+      setError(
+        profileSettingsErrorMessage(
+          cause,
+          "CareerRat couldn't save that profile section. Check it and try again."
+        )
+      );
     } finally {
       setEditorBusy(false);
     }
@@ -137,7 +151,9 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
       await api.saveCandidateFile("automation", patch);
       await load();
     } catch (cause) {
-      setError(cause?.message || "That permission could not be saved.");
+      setError(
+        profileSettingsErrorMessage(cause, "CareerRat couldn't save that permission. Try again.")
+      );
     }
   }
 
@@ -148,7 +164,12 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
       await api.setPublicSyncPreference(enabled);
       await load();
     } catch (cause) {
-      setError(cause?.message || "That public metadata setting could not be saved.");
+      setError(
+        profileSettingsErrorMessage(
+          cause,
+          "CareerRat couldn't save that sharing setting. Try again."
+        )
+      );
     } finally {
       setPublicSyncBusy(false);
     }
@@ -161,7 +182,12 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
       await api.setAutomationSessionProvider(provider);
       await load();
     } catch (cause) {
-      setError(cause?.message || "That browser automation provider could not be saved.");
+      setError(
+        profileSettingsErrorMessage(
+          cause,
+          "CareerRat couldn't change the browser choice. Try again."
+        )
+      );
     } finally {
       setBrowserProviderBusy(false);
     }
@@ -178,7 +204,7 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
       await action();
       return await load();
     } catch (cause) {
-      setError(cause?.message || fallback);
+      setError(profileSettingsErrorMessage(cause, fallback));
     } finally {
       setEnginePickerBusy(false);
     }
@@ -187,7 +213,7 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   async function selectEngine(runtimeId) {
     const result = await updateRuntime(
       () => api.selectInstalledAiRuntime({ runtimeId }),
-      "That AI engine could not be selected."
+      "CareerRat couldn't select that AI. Check it again or choose another one."
     );
     if (result) setEngineSignInId(null);
   }
@@ -196,14 +222,14 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
     const result = await updateRuntime(async () => {
       await api.startInstalledAiRuntimeSignIn(runtimeId);
       setEngineSignInId(runtimeId);
-    }, "That AI sign-in could not be started.");
+    }, "CareerRat couldn't start sign-in. Try again, or sign in from the AI tool.");
     if (!result) setEngineSignInId(null);
   }
 
   async function retryEngine(runtimeId) {
     const result = await updateRuntime(
       () => api.probeInstalledAiRuntime(runtimeId),
-      "CareerRat could not check that AI engine."
+      "CareerRat couldn't check that AI. Make sure it's installed and signed in, then check again."
     );
     if (
       result?.runtimes?.runtimes?.some(
@@ -237,7 +263,12 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
       setSourceDraft("");
       setSourceDialogOpen(false);
     } catch (cause) {
-      setError(cause?.message || "That source could not be added.");
+      setError(
+        profileSettingsErrorMessage(
+          cause,
+          "CareerRat couldn't add that board. Check the link and try again."
+        )
+      );
     } finally {
       setSourceDialogBusy(false);
     }
@@ -271,10 +302,12 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
         publicSyncBusy={publicSyncBusy}
         desktopUpdate={{
           available: desktopUpdate.available,
+          supported: desktopUpdate.supported,
           enabled: desktopUpdate.enabled,
           saving: desktopUpdate.saving,
           checking: desktopUpdate.checking,
           status: desktopUpdate.status,
+          downloadUrl: desktopUpdate.downloadUrl,
           onEnabledChange: desktopUpdate.setEnabled,
           onCheckNow: desktopUpdate.checkNow,
         }}
@@ -291,7 +324,10 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
         onConnectEngine={connectEngine}
         onRetryEngine={retryEngine}
         onRefreshEngines={() =>
-          updateRuntime(() => Promise.resolve(), "CareerRat could not refresh the AI engine list.")
+          updateRuntime(
+            () => Promise.resolve(),
+            "CareerRat couldn't refresh the AI list. Make sure Claude Code or Codex is installed, then try again."
+          )
         }
         sourceDialogOpen={sourceDialogOpen}
         sourceDialogBusy={sourceDialogBusy}

@@ -345,6 +345,34 @@ const NO_SPONSORSHIP_RE =
   /\b(?:no|not|cannot|can't|unable to|do not|does not|won't|will not)\b[^.\n]{0,50}\b(?:visa )?sponsor(?:ship)?\b|\b(?:visa )?sponsorship\b[^.\n]{0,50}\b(?:not available|is unavailable)\b/i;
 const US_STATE_RE =
   /(?:^|[,\s])(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC)(?:$|[,\s])/i;
+const EXPLICIT_ONSITE_BODY_RE =
+  /\b(?:fully|entirely|100%|strictly)\s+(?:on[ -]?site|in[ -]?office|office[ -]?based)\b|\b(?:on[ -]?site|in[ -]?office)\s+only\b/i;
+const OFFICE_CONTEXT_RE = /\b(?:office|on[ -]?site|in[ -]?office)\b/i;
+const REQUIRED_OFFICE_DAYS_RE = /\b(?:must|require(?:d|s)?|expect(?:ed|s)?|mandatory)\b/i;
+const OFFICE_DAYS_RE =
+  /\b(one|two|three|four|five|six|seven|[1-7])\s*days?\s*(?:\/\s*week|(?:per|a|each)\s+week)\b/gi;
+const OFFICE_DAY_WORDS = Object.freeze({
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+});
+
+function requiredOfficeDaysPerWeek(value) {
+  let maximum = null;
+  for (const sentence of String(value || "").split(/[.!?;\n]+/)) {
+    if (!OFFICE_CONTEXT_RE.test(sentence) || !REQUIRED_OFFICE_DAYS_RE.test(sentence)) continue;
+    for (const match of sentence.matchAll(OFFICE_DAYS_RE)) {
+      const raw = match[1].toLowerCase();
+      const days = OFFICE_DAY_WORDS[raw] || Number(raw);
+      if (Number.isInteger(days)) maximum = Math.max(maximum || 0, days);
+    }
+  }
+  return maximum;
+}
 
 // Small offline centroid registry for the metro aliases most likely to differ
 // between a candidate's neighborhood and an ATS display label. Exact locality
@@ -476,6 +504,7 @@ function commuteEligibility(location, profileLocation) {
 function locationEligibility(offer, config) {
   const location = String(offer?.location || "").trim();
   const title = String(offer?.title || "");
+  const body = String(offer?.bodyText || offer?.description || offer?.body || "");
   const profileLocation = config?.profile?.location || {};
   const hasLocationPolicy =
     Boolean(String(profileLocation?.home || "").trim()) ||
@@ -484,12 +513,31 @@ function locationEligibility(offer, config) {
   if (!hasLocationPolicy) return { eligible: true };
   if (!location) return { eligible: true, unknown: "location" };
 
-  const remote = REMOTE_RE.test(`${title}\n${location}`);
-  const hybrid = HYBRID_RE.test(`${title}\n${location}`);
-  const onsite = ONSITE_RE.test(`${title}\n${location}`);
+  const officeDays = requiredOfficeDaysPerWeek(body);
+  const bodyOnsite = EXPLICIT_ONSITE_BODY_RE.test(body) || (officeDays != null && officeDays >= 4);
+  const bodyHybrid = !bodyOnsite && officeDays != null && officeDays > 0;
+  const remote = REMOTE_RE.test(`${title}\n${location}`) && !bodyHybrid && !bodyOnsite;
+  const hybrid = HYBRID_RE.test(`${title}\n${location}`) || bodyHybrid;
+  const onsite = ONSITE_RE.test(`${title}\n${location}`) || bodyOnsite;
   const hasExplicitModes = ["remote", "hybrid", "onsite"].some(
     (mode) => typeof profileLocation?.[mode] === "boolean"
   );
+
+  const savedMaxOfficeDays = profileLocation.max_commute_days_per_week;
+  const maxOfficeDays =
+    savedMaxOfficeDays === null ||
+    savedMaxOfficeDays === undefined ||
+    String(savedMaxOfficeDays).trim() === ""
+      ? null
+      : Number(savedMaxOfficeDays);
+  if (
+    officeDays != null &&
+    Number.isInteger(maxOfficeDays) &&
+    maxOfficeDays >= 0 &&
+    officeDays > maxOfficeDays
+  ) {
+    return { eligible: false, reason: "office-days-exceed-preference" };
+  }
 
   // Worldwide scope applies only to fully remote work. Explicit hybrid or
   // on-site labels stay subject to the saved home/relocation commute policy,

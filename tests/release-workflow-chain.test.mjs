@@ -88,17 +88,73 @@ test("desktop signing uses the supported pinned arm64 macOS runner", async () =>
   assert.doesNotMatch(releaseDocs, /build-notarize-upload[^\n]*macos-14/);
 });
 
-test("desktop release explicitly dispatches every post-release workflow after the DMG gate", async () => {
+test("desktop release blocks upload on a signed native N-to-N+1 acceptance transition", async () => {
+  const [source, releaseDocs] = await Promise.all([
+    workflow("desktop-release.yml"),
+    readFile(new URL("../docs/RELEASE.md", import.meta.url), "utf8"),
+  ]);
+  const macJob = source.slice(
+    source.indexOf("  build-notarize-upload:"),
+    source.indexOf("  build-windows-upload:")
+  );
+  const buildAt = macJob.indexOf("- name: Build and notarize the app");
+  const acceptanceAt = macJob.indexOf("- name: Verify native N-to-N+1 update");
+  const removeSigningAt = macJob.indexOf("- name: Remove signing material from the runner");
+  const uploadAt = macJob.indexOf("- name: Upload the macOS release and updater feed");
+
+  assert.ok(acceptanceAt > buildAt, "native acceptance must use the final signed N+1 app");
+  assert.ok(
+    removeSigningAt > acceptanceAt,
+    "the separately signed N fixture needs the same signing identity"
+  );
+  assert.ok(uploadAt > acceptanceAt, "no release asset may upload before native acceptance passes");
+  assert.match(
+    macJob.slice(acceptanceAt, removeSigningAt),
+    /npm --workspace apps\/desktop run verify:native-update/
+  );
+  assert.match(macJob.slice(acceptanceAt, removeSigningAt), /CSC_LINK:/);
+  assert.match(macJob.slice(acceptanceAt, removeSigningAt), /APPLE_API_KEY:/);
+  assert.match(
+    macJob.slice(acceptanceAt, removeSigningAt),
+    /NATIVE_UPDATE_ACCEPTANCE_PRIVATE_KEY:\s*\$\{\{ secrets\.NATIVE_UPDATE_ACCEPTANCE_PRIVATE_KEY \}\}/
+  );
+  assert.match(macJob.slice(acceptanceAt, removeSigningAt), /GH_TOKEN:/);
+  assert.match(
+    macJob,
+    /missing\+=\("NATIVE_UPDATE_ACCEPTANCE_PRIVATE_KEY"\)/,
+    "the new signing secret must fail before release packaging starts"
+  );
+  assert.match(
+    releaseDocs,
+    /native N-to-N\+1 update[\s\S]*loopback feed[\s\S]*CAREERRAT_HOME sentinel/i
+  );
+  assert.match(releaseDocs, /NATIVE_UPDATE_ACCEPTANCE_PRIVATE_KEY[\s\S]*PKCS#8 PEM/i);
+});
+
+test("desktop release publishes only after the complete macOS updater feed is attached", async () => {
   const source = await workflow("desktop-release.yml");
   const publishJob = source.slice(source.indexOf("  publish-release:"));
   const dmgGateAt = publishJob.indexOf('endswith(".dmg")');
+  const zipGateAt = publishJob.indexOf('endswith(".zip")');
+  const metadataGateAt = publishJob.indexOf('== "latest-mac.yml"');
   const publishAt = publishJob.indexOf("-F draft=false");
   const dispatchAt = publishJob.indexOf("actions/workflows/$workflow/dispatches");
 
   assert.match(publishJob, /permissions:[\s\S]*?contents: write[\s\S]*?actions: write/);
   assert.ok(dmgGateAt >= 0, "the release must verify a DMG asset before publication");
-  assert.ok(publishAt > dmgGateAt, "the DMG gate must run before the release is published");
+  assert.ok(zipGateAt >= 0, "the release must verify the updater ZIP before publication");
+  assert.ok(metadataGateAt >= 0, "the release must verify latest-mac.yml before publication");
+  assert.ok(
+    publishAt > Math.max(dmgGateAt, zipGateAt, metadataGateAt),
+    "the complete macOS feed gate must run before the release is published"
+  );
   assert.ok(dispatchAt > publishAt, "downstream workflows must start only after publication");
+  assert.match(publishJob, /version="\$\{TAG#v\}"/);
+  assert.match(
+    publishJob,
+    /"\$mac_zip_name" != \*-"\$version"-\*\.zip/,
+    "the updater ZIP must carry this release's exact version as a filename segment"
+  );
   assert.match(publishJob, /for workflow in publish\.yml release-assets\.yml sbom\.yml/);
   assert.match(
     publishJob,
@@ -110,6 +166,25 @@ test("desktop release explicitly dispatches every post-release workflow after th
     "the dispatch API must opt into the typed run-details response instead of returning 204"
   );
   assert.match(publishJob, /GITHUB_TOKEN[\s\S]*workflow_dispatch/i);
+});
+
+test("macOS release upload requires one version-matching ZIP and latest-mac metadata", async () => {
+  const upload = await readFile(
+    new URL("../apps/desktop/scripts/release-upload.mjs", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(upload, /name\.endsWith\("\.zip"\)/);
+  assert.match(upload, /latest-mac\.yml/);
+  assert.match(upload, /matchingZips\.length !== 1/);
+  assert.match(upload, /filesToUpload = \[metadataPath, matchingZips\[0\]/);
+  assert.match(upload, /zipBlockmap/);
+  assert.doesNotMatch(
+    upload,
+    /\$\{dmgFile\}\.blockmap/,
+    "post-builder DMG blockmaps are stale after container signing and stapling"
+  );
+  assert.doesNotMatch(upload, /--clobber/);
 });
 
 test("desktop release waits for every dispatched workflow and propagates child failures", async () => {
@@ -166,13 +241,13 @@ test("post-release workflow dispatches stay pinned to the release tag", async ()
   }
 });
 
-test("npm publish requires the exact published release and its version-matching DMG", async () => {
+test("npm publish requires the exact published release and complete version-matching Mac feed", async () => {
   const publish = await workflow("publish.yml");
-  const releaseGateAt = publish.indexOf("Verify the exact published release and DMG");
+  const releaseGateAt = publish.indexOf("Verify the exact published release and Mac update feed");
   const npmPublishAt = publish.indexOf("npm publish --provenance");
 
-  assert.ok(releaseGateAt >= 0, "publish must have a GitHub Release and DMG gate");
-  assert.ok(npmPublishAt > releaseGateAt, "the release and DMG gate must run before npm publish");
+  assert.ok(releaseGateAt >= 0, "publish must have a complete GitHub Release feed gate");
+  assert.ok(npmPublishAt > releaseGateAt, "the complete feed gate must run before npm publish");
   assert.match(
     publish,
     /gh api "repos\/\$REPO\/releases" --paginate --slurp[\s\S]*--arg tag "\$REF_NAME"/,
@@ -181,14 +256,24 @@ test("npm publish requires the exact published release and its version-matching 
   assert.match(publish, /select\(\.tag_name==\$tag\)/);
   assert.match(publish, /\.draft == false/);
   assert.match(publish, /\.published_at != null/);
-  assert.match(
-    publish,
-    /"\$asset" == \*-"\$version"-\*\.dmg/,
-    "the gate must require a DMG carrying this release's version as a whole filename segment"
-  );
-  assert.match(
-    publish,
-    /Release \$REF_NAME has no \.dmg asset matching version \$version/,
-    "a missing or stale-version DMG must fail closed"
-  );
+  assert.match(publish, /matching_dmgs\+=\("\$asset"\)/);
+  assert.match(publish, /matching_zips\+=\("\$asset"\)/);
+  assert.match(publish, /manifest_count=\$\(\(manifest_count \+ 1\)\)/);
+  assert.match(publish, /"\$\{#matching_dmgs\[@\]\}" -ne 1/);
+  assert.match(publish, /"\$\{#matching_zips\[@\]\}" -ne 1/);
+  assert.match(publish, /"\$manifest_count" -ne 1/);
+  assert.match(publish, /exactly one \.dmg asset matching version \$version/i);
+  assert.match(publish, /exactly one updater \.zip asset matching version \$version/i);
+  assert.match(publish, /exactly one latest-mac\.yml asset/i);
+});
+
+test("published-release asset verification independently requires the complete Mac feed", async () => {
+  const releaseAssets = await workflow("release-assets.yml");
+
+  assert.match(releaseAssets, /matching_dmgs\+=\("\$asset"\)/);
+  assert.match(releaseAssets, /matching_zips\+=\("\$asset"\)/);
+  assert.match(releaseAssets, /manifest_count=\$\(\(manifest_count \+ 1\)\)/);
+  assert.match(releaseAssets, /"\$\{#matching_dmgs\[@\]\}" -ne 1/);
+  assert.match(releaseAssets, /"\$\{#matching_zips\[@\]\}" -ne 1/);
+  assert.match(releaseAssets, /"\$manifest_count" -ne 1/);
 });

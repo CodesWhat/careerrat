@@ -610,6 +610,78 @@ test("POST /api/deep-ingest/sources persists exactly one visible outcome and nev
   }
 });
 
+test("POST /api/deep-ingest/sources/retry rescans the saved source instead of drafting from failed chunks", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const sourceUrl = "https://example.com/career-notes";
+  const inputs = [];
+  const server = await bootServer(repoRoot, {
+    scanSource: async ({ input }) => {
+      inputs.push(input);
+      if (inputs.length === 1) {
+        return {
+          status: "failed",
+          reason: "request timed out",
+          source: {
+            id: "deep_source_retry",
+            kind: "url",
+            sourceKind: "url",
+            targetShape: "auto",
+            status: "failed",
+            label: sourceUrl,
+            metadata: { url: sourceUrl },
+          },
+          outcome: { id: "outcome_retry", sourceId: "deep_source_retry", status: "failed" },
+          chunks: [],
+        };
+      }
+      return {
+        status: "proposal_ready",
+        source: {
+          id: "different_scan_id",
+          kind: "url",
+          sourceKind: "url",
+          targetShape: "auto",
+          status: "proposal_ready",
+          label: sourceUrl,
+          metadata: { url: sourceUrl },
+        },
+        outcome: { id: "outcome_success", status: "proposal_ready" },
+        chunks: [{ id: "chunk_retry", text: "Grounded career evidence." }],
+        proposal: {
+          id: "proposal_retry",
+          targetShape: "auto",
+          lane: "open_gaps",
+          status: "review_needed",
+          validation: { status: "source_scanned" },
+        },
+      };
+    },
+  });
+  try {
+    const first = await postJson(server, "/api/deep-ingest/sources", {
+      targetShape: "auto",
+      sourceKind: "url",
+      url: sourceUrl,
+    });
+    assert.equal(first.status, 200);
+    assert.equal(first.body.data.source.status, "failed");
+
+    const retried = await postJson(server, "/api/deep-ingest/sources/retry", {
+      sourceId: "deep_source_retry",
+    });
+    assert.equal(retried.status, 200);
+    assert.equal(inputs.length, 2);
+    assert.equal(inputs[1].sourceKind, "url");
+    assert.equal(inputs[1].url, sourceUrl);
+    assert.equal(retried.body.data.source.id, "deep_source_retry");
+    assert.equal(retried.body.data.source.status, "proposal_ready");
+    assert.equal(retried.body.data.chunks.length, 1);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/deep-ingest/sources rejects unsafe/private URLs and exposes deferred/gap states", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
