@@ -8,7 +8,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SINGLE_ROLE_SCHEMA } from "../scripts/eval/lib/single-role-schema.mjs";
-import { LANES } from "../scripts/eval/skill-shape-qa.mjs";
+import {
+  LANES,
+  parseSkillShapeQaArgs,
+  selectSkillShapeRuntimes,
+} from "../scripts/eval/skill-shape-qa.mjs";
 import { coachingPlanSchema } from "../src/core/coaching/schemas.mjs";
 import { validateCompanyHealth } from "../src/core/db/verbs/company-health.mjs";
 import { packetGateAiVerdictSchema } from "../src/core/packet/schemas/packet-schemas.mjs";
@@ -304,4 +308,39 @@ test("skill-shape-qa LANES: enumerates exactly the four AI-shaped lanes", () => 
     assert.equal(typeof lane.buildPrompt, "function");
     assert.equal(typeof lane.check, "function");
   }
+});
+
+test("skill-shape-qa defaults to every supported installed runtime", () => {
+  assert.deepEqual(parseSkillShapeQaArgs([]), { list: false, lane: null, runtime: "all" });
+  const runtimes = selectSkillShapeRuntimes(
+    [
+      { id: "claude", available: true },
+      { id: "codex", available: true },
+      { id: "gemini", available: true },
+    ],
+    "all"
+  );
+  assert.deepEqual(
+    runtimes.map((runtime) => runtime.id),
+    ["claude", "codex"]
+  );
+});
+
+test("skill-shape-qa can target one supported runtime explicitly", () => {
+  assert.deepEqual(parseSkillShapeQaArgs(["--runtime", "codex", "--lane", "search-jobs"]), {
+    list: false,
+    lane: "search-jobs",
+    runtime: "codex",
+  });
+  assert.deepEqual(
+    selectSkillShapeRuntimes(
+      [
+        { id: "claude", available: true },
+        { id: "codex", available: true },
+      ],
+      "codex"
+    ).map((runtime) => runtime.id),
+    ["codex"]
+  );
+  assert.throws(() => parseSkillShapeQaArgs(["--runtime", "gemini"]), /claude, codex, or all/);
 });

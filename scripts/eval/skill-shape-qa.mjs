@@ -30,7 +30,8 @@
 // Usage:
 //   node scripts/eval/skill-shape-qa.mjs --list        # enumerate lanes, no AI calls
 //   node scripts/eval/skill-shape-qa.mjs --lane <name>  # run one lane
-//   node scripts/eval/skill-shape-qa.mjs                # run every lane (default)
+//   node scripts/eval/skill-shape-qa.mjs --runtime codex # run one supported runtime
+//   node scripts/eval/skill-shape-qa.mjs                # run every lane and runtime (default)
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -350,13 +351,26 @@ export const LANES = Object.freeze([
 // CLI
 // ---------------------------------------------------------------------------
 
-function parseArgs(argv) {
-  const out = { list: false, lane: null };
+const SUPPORTED_RUNTIME_IDS = new Set(["claude", "codex"]);
+
+export function parseSkillShapeQaArgs(argv) {
+  const out = { list: false, lane: null, runtime: "all" };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--list") out.list = true;
     if (argv[i] === "--lane" && argv[i + 1]) out.lane = argv[++i];
+    if (argv[i] === "--runtime" && argv[i + 1]) out.runtime = argv[++i];
+  }
+  if (out.runtime !== "all" && !SUPPORTED_RUNTIME_IDS.has(out.runtime)) {
+    throw new Error("--runtime must be claude, codex, or all.");
   }
   return out;
+}
+
+export function selectSkillShapeRuntimes(runtimes, requested = "all") {
+  const supported = (Array.isArray(runtimes) ? runtimes : []).filter(
+    (runtime) => SUPPORTED_RUNTIME_IDS.has(runtime?.id) && runtime.available
+  );
+  return requested === "all" ? supported : supported.filter((runtime) => runtime.id === requested);
 }
 
 async function runLane(lane, { runtime, candidate }) {
@@ -372,11 +386,17 @@ async function runLane(lane, { runtime, candidate }) {
       timeoutMs: RUNTIME_TIMEOUT_MS,
     });
   } catch (error) {
-    return { lane: lane.name, pass: false, message: `AI call failed: ${error.message}` };
+    return {
+      lane: lane.name,
+      runtime: runtime.id,
+      pass: false,
+      message: `AI call failed: ${error.message}`,
+    };
   }
   const outcome = lane.check(result.structured);
   return {
     lane: lane.name,
+    runtime: runtime.id,
     pass: outcome.valid,
     message: outcome.valid ? null : formatErrors(outcome.errors),
     costUsd: result.costUsd,
@@ -384,7 +404,13 @@ async function runLane(lane, { runtime, candidate }) {
 }
 
 async function main() {
-  const args = parseArgs(process.argv.slice(2));
+  let args;
+  try {
+    args = parseSkillShapeQaArgs(process.argv.slice(2));
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
 
   if (args.list) {
     console.log("skill-shape-qa lanes (one real AI call each — none made by --list):\n");
@@ -401,15 +427,11 @@ async function main() {
     process.exit(1);
   }
 
-  const runtimes = detectInstalledRuntimes();
-  const claude = runtimes.find((runtime) => runtime.id === "claude" && runtime.available);
-  if (!claude) {
+  const runtimes = selectSkillShapeRuntimes(detectInstalledRuntimes(), args.runtime);
+  if (runtimes.length === 0) {
     console.error(
-      "STOP: no installed 'claude' CLI runtime is available on this machine " +
-        "(src/core/ai/installed-runtimes.mjs detectInstalledRuntimes() found no usable " +
-        "'claude' binary). skill-shape-qa cannot run without a live AI route, and this " +
-        "harness refuses to simulate results. Install/authenticate the Claude Code CLI and " +
-        "re-run."
+      `STOP: no installed ${args.runtime === "all" ? "Claude Code or OpenAI Codex" : args.runtime} runtime is available. ` +
+        "skill-shape-qa requires a live supported AI route and refuses to simulate results."
     );
     process.exit(1);
   }
@@ -417,25 +439,27 @@ async function main() {
   const candidate = loadCandidateContext();
 
   console.log(
-    `skill-shape-qa — ${lanesToRun.length} lane(s) against ${claude.commandShape}, one real ` +
-      "AI call each.\n"
+    `skill-shape-qa — ${lanesToRun.length} lane(s) across ${runtimes.length} runtime(s).`
   );
 
   const results = [];
-  for (const lane of lanesToRun) {
-    process.stdout.write(`[${lane.name}] `);
-    const result = await runLane(lane, { runtime: claude, candidate });
-    results.push(result);
-    console.log(
-      `${result.pass ? "PASS" : "FAIL"}${result.costUsd != null ? ` (cost=$${result.costUsd.toFixed(4)})` : ""}`
-    );
-    if (!result.pass) {
+  for (const runtime of runtimes) {
+    console.log(`\n${runtime.id} — ${runtime.commandShape}`);
+    for (const lane of lanesToRun) {
+      process.stdout.write(`[${lane.name}] `);
+      const result = await runLane(lane, { runtime, candidate });
+      results.push(result);
       console.log(
-        result.message
-          .split("\n")
-          .map((line) => `    ${line}`)
-          .join("\n")
+        `${result.pass ? "PASS" : "FAIL"}${result.costUsd != null ? ` (cost=$${result.costUsd.toFixed(4)})` : ""}`
       );
+      if (!result.pass) {
+        console.log(
+          result.message
+            .split("\n")
+            .map((line) => `    ${line}`)
+            .join("\n")
+        );
+      }
     }
   }
 
