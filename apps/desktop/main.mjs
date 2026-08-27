@@ -44,9 +44,12 @@ import { configureCareerRatAppIdentity } from "./desktop-identity.mjs";
 import { buildCareerRatMenuTemplate, runMenuUpdateCheck } from "./menu-template.mjs";
 import {
   beginNativeUpdateAcceptance,
+  bootNativeUpdateAcceptance,
   completeNativeUpdateAcceptance,
+  inspectNativeUpdateAcceptanceState,
   NATIVE_UPDATE_ACCEPTANCE_ARG,
   resolveNativeUpdateAcceptance,
+  seedNativeUpdateAcceptanceState,
 } from "./native-update-acceptance.mjs";
 import {
   choosePreferredPort,
@@ -690,18 +693,38 @@ app.whenReady().then(async () => {
   if (nativeUpdateAcceptanceError) throw nativeUpdateAcceptanceError;
 
   if (nativeUpdateAcceptance?.mode === "complete") {
+    const { url } = await bootNativeUpdateAcceptance({ boot, timeoutMs: 60_000 });
+    const canonicalState = await inspectNativeUpdateAcceptanceState({
+      acceptance: nativeUpdateAcceptance,
+      baseUrl: url,
+      async readMigrationState() {
+        const [{ requireDb }, { ALL_MIGRATIONS }] = await Promise.all([
+          loadEngineModule("src/core/db/connection.mjs"),
+          loadEngineModule("src/core/db/migrations.mjs"),
+        ]);
+        const db = requireDb({ repoRoot });
+        return {
+          version: db.prepare("PRAGMA user_version").get().user_version,
+          ceiling: ALL_MIGRATIONS.at(-1)?.id || 0,
+        };
+      },
+    });
     const result = completeNativeUpdateAcceptance({
       acceptance: nativeUpdateAcceptance,
       currentVersion: app.getVersion(),
+      canonicalState,
     });
     log(
       `NATIVE UPDATE ACCEPTANCE ${result.ok ? "OK" : "FAILED"} ${result.fromVersion} -> ${result.observedVersion}`
     );
+    await shutdown();
     app.exit(result.ok ? 0 : 1);
     return;
   }
 
   if (nativeUpdateAcceptance?.mode === "start") {
+    const { url } = await bootNativeUpdateAcceptance({ boot, timeoutMs: 60_000 });
+    await seedNativeUpdateAcceptanceState({ acceptance: nativeUpdateAcceptance, baseUrl: url });
     await beginNativeUpdateAcceptance({
       acceptance: nativeUpdateAcceptance,
       updater: autoUpdater,

@@ -63,6 +63,13 @@ function nonemptyString(value, label) {
   return text;
 }
 
+function positiveInteger(value, label) {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`${label} must be a positive integer.`);
+  }
+  return value;
+}
+
 function literalLoopbackFeed(value) {
   let url;
   try {
@@ -97,6 +104,14 @@ function loadRequest(requestPath, publicKey) {
     throw new Error("Native update acceptance requires two different app versions.");
   }
   const sentinel = nonemptyString(request.sentinel, "Acceptance sentinel");
+  const durableCandidateName = nonemptyString(
+    request.durableCandidateName,
+    "Acceptance durable candidate name"
+  );
+  const expectedMigrationCeiling = positiveInteger(
+    request.expectedMigrationCeiling,
+    "Acceptance migration ceiling"
+  );
   return {
     requestPath: canonicalRequestPath,
     root,
@@ -104,9 +119,92 @@ function loadRequest(requestPath, publicKey) {
     fromVersion,
     expectedVersion,
     sentinel,
+    durableCandidateName,
+    expectedMigrationCeiling,
     homeDir: join(root, "careerrat-home"),
     sentinelPath: join(root, "careerrat-home", "acceptance-sentinel.txt"),
     resultPath: join(root, "result.json"),
+  };
+}
+
+async function fetchJson(url, { method = "GET", body } = {}) {
+  const response = await fetch(url, {
+    method,
+    headers: body === undefined ? undefined : { "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const payload = await response.json();
+  if (!response.ok || payload?.ok !== true) {
+    throw new Error(
+      payload?.error || `Native update acceptance request failed (${response.status}).`
+    );
+  }
+  return payload;
+}
+
+export async function bootNativeUpdateAcceptance({ boot, timeoutMs = 60_000 } = {}) {
+  if (typeof boot !== "function") throw new TypeError("boot must be a function");
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
+    throw new TypeError("timeoutMs must be a positive integer");
+  }
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(boot),
+      new Promise((_, rejectPromise) => {
+        timer = setTimeout(
+          () =>
+            rejectPromise(
+              new Error(`Native update normal boot timed out after ${timeoutMs}ms.`)
+            ),
+          timeoutMs
+        );
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function seedNativeUpdateAcceptanceState({
+  acceptance,
+  baseUrl,
+  requestJson = fetchJson,
+} = {}) {
+  if (acceptance?.mode !== "start") {
+    throw new Error("Native update acceptance start context is required.");
+  }
+  const origin = new URL(baseUrl).origin;
+  await requestJson(`${origin}/api/data/candidate/init`, { method: "POST", body: {} });
+  await requestJson(`${origin}/api/data/candidate/config`, {
+    method: "POST",
+    body: {
+      name: "profile",
+      patch: { candidate: { full_name: acceptance.durableCandidateName } },
+    },
+  });
+}
+
+export async function inspectNativeUpdateAcceptanceState({
+  acceptance,
+  baseUrl,
+  readMigrationState,
+  requestJson = fetchJson,
+} = {}) {
+  if (acceptance?.mode !== "complete") {
+    throw new Error("Native update acceptance restart context is required.");
+  }
+  if (typeof readMigrationState !== "function") {
+    throw new TypeError("readMigrationState must be a function");
+  }
+  const origin = new URL(baseUrl).origin;
+  const config = await requestJson(`${origin}/api/data/candidate/config`);
+  const migration = await readMigrationState();
+  return {
+    durableCandidateName: config?.data?.profile?.candidate?.full_name || null,
+    migrationVersion: migration?.version,
+    migrationCeiling: migration?.ceiling,
   };
 }
 
@@ -228,6 +326,7 @@ export async function beginNativeUpdateAcceptance({
 export function completeNativeUpdateAcceptance({
   acceptance,
   currentVersion,
+  canonicalState,
   removePointer = (path) => rmSync(path, { force: true }),
   writeResult = writeFileAtomic,
 } = {}) {
@@ -240,12 +339,26 @@ export function completeNativeUpdateAcceptance({
   } catch {
     sentinelPreserved = false;
   }
+  const durableRowPreserved =
+    canonicalState?.durableCandidateName === acceptance.durableCandidateName;
+  const observedMigrationVersion = canonicalState?.migrationVersion;
+  const migrationCeilingRespected =
+    observedMigrationVersion === acceptance.expectedMigrationCeiling &&
+    canonicalState?.migrationCeiling === acceptance.expectedMigrationCeiling;
   const result = {
-    ok: currentVersion === acceptance.expectedVersion && sentinelPreserved,
+    ok:
+      currentVersion === acceptance.expectedVersion &&
+      sentinelPreserved &&
+      durableRowPreserved &&
+      migrationCeilingRespected,
     fromVersion: acceptance.fromVersion,
     expectedVersion: acceptance.expectedVersion,
     observedVersion: currentVersion,
     sentinelPreserved,
+    durableRowPreserved,
+    observedMigrationVersion,
+    expectedMigrationCeiling: acceptance.expectedMigrationCeiling,
+    migrationCeilingRespected,
   };
   removePointer(acceptance.pointerPath);
   writeResult(acceptance.resultPath, `${JSON.stringify(result)}\n`);

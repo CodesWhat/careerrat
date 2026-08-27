@@ -29,6 +29,7 @@ files:
   - desktop-routing.mjs
   - desktop-smoke.mjs
   - native-update-acceptance.mjs
+  - native-update-data-contract-v2.json
   - update-check.mjs
   - window-options.mjs
   - preload/update-check-preload.cjs

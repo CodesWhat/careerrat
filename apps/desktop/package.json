@@ -18,6 +18,7 @@
     "release:dmg": "node scripts/release-dmg.mjs",
     "verify:release": "node scripts/verify-release.mjs",
     "verify:packaged": "node scripts/verify-packaged.mjs",
+    "verify:mounted": "node scripts/verify-mounted.mjs",
     "verify:native-update": "node scripts/verify-native-update.mjs",
     "dist": "npm run dist:local && npm run release:dmg && npm run verify:release && npm run verify:packaged",
     "release:upload": "node scripts/release-upload.mjs",

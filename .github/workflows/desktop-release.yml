@@ -339,8 +339,8 @@ jobs:
           security delete-keychain "$RUNNER_TEMP/desktop-release.keychain-db" 2>/dev/null || true
       - name: Verify the signed and notarized release
         run: npm --workspace apps/desktop run verify:release
-      - name: Launch the exact signed packaged app
-        run: npm --workspace apps/desktop run verify:packaged
+      - name: Mount and smoke the canonical notarized DMG
+        run: npm --workspace apps/desktop run verify:mounted
       - name: Upload the macOS release and updater feed
         env:
           CAREERRAT_RELEASE_ID: ${{ needs.prepare-draft-release.outputs.release-id }}
@@ -540,15 +540,18 @@ jobs:
             echo "::error::Release $TAG is no longer the prepared draft; refusing to publish or dispatch."
             exit 1
           fi
-          if ! jq -er '[.assets[].name | select(endswith(".dmg"))] | length > 0' <<<"$release" >/dev/null; then
-            echo "::error::Release $TAG has no .dmg asset attached; refusing to publish."
+          version="${TAG#v}"
+          canonical_dmg="CareerRat-$version-arm64.dmg"
+          dmg_count="$(jq --arg name "$canonical_dmg" '[.assets[].name | select(. == $name)] | length' <<<"$release")"
+          unexpected_dmg_count="$(jq --arg name "$canonical_dmg" '[.assets[].name | select(endswith(".dmg") and . != $name)] | length' <<<"$release")"
+          if [ "$dmg_count" -ne 1 ] || [ "$unexpected_dmg_count" -ne 0 ]; then
+            echo "::error::Release $TAG must contain exactly $canonical_dmg and no other DMG."
             exit 1
           fi
           if ! jq -er '[.assets[].name | select(endswith(".zip"))] | length == 1' <<<"$release" >/dev/null; then
             echo "::error::Release $TAG must have exactly one macOS updater .zip attached."
             exit 1
           fi
-          version="${TAG#v}"
           mac_zip_name="$(jq -er '[.assets[].name | select(endswith(".zip"))][0]' <<<"$release")"
           if [[ "$mac_zip_name" != *-"$version"-*.zip ]]; then
             echo "::error::Updater ZIP $mac_zip_name does not match release version $version."
