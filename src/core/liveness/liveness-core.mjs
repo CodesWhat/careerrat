@@ -12,6 +12,9 @@ const HARD_EXPIRED_PATTERNS = [
   /applications?\s+(?:(?:have|are|is)\s+)?closed/i,
   /closed on \d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i,
   /closed on (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2}/i,
+];
+
+const PRIMARY_EXPIRED_PATTERNS = [
   /\b(?:expired|archived):\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2},?\s+\d{4}\b/i,
 ];
 
@@ -58,6 +61,15 @@ export function classifyLiveness({
   const expiredUrl = firstMatch(EXPIRED_URL_PATTERNS, finalUrl);
   if (expiredUrl) {
     return { result: "expired", code: "expired_url", reason: `redirect to ${finalUrl}` };
+  }
+
+  const primaryExpired = firstMatch(PRIMARY_EXPIRED_PATTERNS, bodyText.slice(0, 2000));
+  if (primaryExpired) {
+    return {
+      result: "expired",
+      code: "expired_body",
+      reason: `pattern matched: ${primaryExpired.source}`,
+    };
   }
 
   const expiredBody = firstMatch(HARD_EXPIRED_PATTERNS, bodyText);

@@ -41,6 +41,18 @@ test("bare expired and archived date banners win over recommendation apply contr
   }
 });
 
+test("an archived recommendation card does not close the active primary posting", () => {
+  const result = classifyLiveness({
+    status: 200,
+    finalUrl: "https://jobs.example.com/active-role",
+    bodyText: `Active Bar Manager\nApply now\n${"Primary job details. ".repeat(140)}\nOther jobs you might like\nArchived: May 8, 2026`,
+    applyControls: ["Apply now"],
+  });
+
+  assert.equal(result.result, "active");
+  assert.equal(result.code, "apply_control_visible");
+});
+
 test("short pages without apply controls are treated as expired shell pages", () => {
   const result = classifyLiveness({
     status: 200,
