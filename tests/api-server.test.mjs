@@ -15,7 +15,14 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { createDevServer } from "../src/cli/tracker-dev.mjs";
 import { openDb } from "../src/core/db/connection.mjs";
-import { sourceConfigGet } from "../src/core/db/verbs.mjs";
+import {
+  intakeCapture,
+  intakeOne,
+  intakeUpdate,
+  sourceConfigGet,
+  sourcingRunLatest,
+  sourcingRunStart,
+} from "../src/core/db/verbs.mjs";
 import { resolveUserPaths } from "../src/core/paths/workspace.mjs";
 import { defaultAdapter } from "../src/core/storage/storage-adapter.mjs";
 import { resolveTrackerBindHost } from "../src/core/tracker/request-security.mjs";
@@ -54,6 +61,67 @@ test("tracker-dev exposes the durable AI-search shutdown lifecycle", async () =>
     await dev.shutdownAiWebSearch();
   } finally {
     dev.chatRuntime.shutdown();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("only the listening workspace owner can recover durable background work", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const first = createDevServer({ repoRoot });
+  const second = createDevServer({ repoRoot });
+
+  assert.equal(typeof first.listen, "function");
+  await first.listen({ port: 0, host: "127.0.0.1" });
+
+  const liveSearch = sourcingRunStart({
+    repoRoot,
+    purpose: "manual-search",
+    id: "manual-search-owned-by-first",
+  }).run;
+  const { id: liveIntakeId } = intakeCapture({
+    repoRoot,
+    rawInput: "A live intake operation",
+    inputKind: "text",
+  });
+  intakeUpdate({
+    repoRoot,
+    id: liveIntakeId,
+    patch: {
+      status: "running",
+      operation: {
+        id: `${liveIntakeId}:owned-by-first`,
+        status: "running",
+        skill: "evaluate-job",
+        startedAt: "2026-08-27T12:00:00.000Z",
+        heartbeatAt: "2026-08-27T12:00:30.000Z",
+      },
+    },
+  });
+
+  try {
+    await assert.rejects(
+      second.listen({ port: 0, host: "127.0.0.1" }),
+      (error) => error?.code === "WORKSPACE_RUNTIME_IN_USE"
+    );
+    assert.equal(sourcingRunLatest({ repoRoot, purpose: "manual-search" }).run.status, "running");
+    assert.equal(intakeOne({ repoRoot, id: liveIntakeId }).status, "running");
+
+    await new Promise((resolve) => first.server.close(resolve));
+    await second.listen({ port: 0, host: "127.0.0.1" });
+
+    const recoveredSearch = sourcingRunLatest({ repoRoot, purpose: "manual-search" }).run;
+    assert.equal(recoveredSearch.id, liveSearch.id);
+    assert.equal(recoveredSearch.status, "failed");
+    assert.equal(recoveredSearch.error.code, "SOURCING_RUN_SERVER_RESTARTED");
+    const recoveredIntake = intakeOne({ repoRoot, id: liveIntakeId });
+    assert.equal(recoveredIntake.status, "error");
+    assert.equal(recoveredIntake.operation.error.code, "INTAKE_SERVER_RESTARTED");
+  } finally {
+    first.chatRuntime.shutdown();
+    second.chatRuntime.shutdown();
+    if (first.server.listening) await new Promise((resolve) => first.server.close(resolve));
+    if (second.server.listening) await new Promise((resolve) => second.server.close(resolve));
     rmSync(repoRoot, { recursive: true, force: true });
   }
 });

@@ -4194,13 +4194,15 @@ test("the workspace runtime owns sourcing workers and settles them during shutdo
   assert.equal(thread.messages.at(-1).metadata.searchRunId, started.run.id);
 });
 
-test("creating a workspace runtime immediately recovers orphaned sourcing runs", () => {
+test("the workspace owner explicitly recovers orphaned sourcing runs after startup", () => {
   const repoRoot = tempRepo();
   const orphan = sourcingRunStart({ repoRoot, purpose: "first-search" }).run;
 
   const runtime = createWorkspaceAgentRuntime({ repoRoot, env: {} });
 
   assert.equal(runtime.ownsSourcingRun(orphan.id), false);
+  assert.equal(sourcingRunLatest({ repoRoot, purpose: "first-search" }).run.status, "running");
+  runtime.recoverOrphanedSourcingRuns();
   const terminal = sourcingRunLatest({ repoRoot, purpose: "first-search" }).run;
   assert.equal(terminal.status, "failed");
   assert.equal(terminal.error.code, "SOURCING_RUN_SERVER_RESTARTED");

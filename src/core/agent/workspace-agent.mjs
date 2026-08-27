@@ -9320,6 +9320,7 @@ export function createWorkspaceAgentRuntime({
       for (const { controller } of sourcingWorkers.values()) controller.abort(stopped);
       await Promise.allSettled([...sourcingWorkers.values()].map(({ promise }) => promise));
     },
+    recoverOrphanedSourcingRuns: reconcileOrphanedSourcingRuns,
     runTurn(input = {}) {
       return enqueue(() => runWorkspaceAgentTurn({ repoRoot, env, callAIImpl, ...input }));
     },
@@ -9378,6 +9379,5 @@ export function createWorkspaceAgentRuntime({
       return enqueue(() => captureWorkspaceIntake({ repoRoot, env, captureIntakeImpl, ...input }));
     },
   };
-  reconcileOrphanedSourcingRuns();
   return runtime;
 }

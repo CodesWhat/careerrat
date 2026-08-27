@@ -1785,7 +1785,7 @@ test("Lane B heartbeats while quiet and settles to a retryable error during serv
   }
 });
 
-test("mounting intake routes immediately recovers an orphaned Lane B run", async () => {
+test("the intake owner explicitly recovers an orphaned Lane B run after startup", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
   const { id } = intakeCapture({ repoRoot, rawInput: "a JD", inputKind: "text" });
@@ -1806,6 +1806,8 @@ test("mounting intake routes immediately recovers an orphaned Lane B run", async
 
   const server = await bootServer(repoRoot);
   try {
+    assert.equal(intakeOne({ repoRoot, id }).status, "running");
+    server.intakeRuntime.recoverOrphans();
     const settled = intakeOne({ repoRoot, id });
     assert.equal(settled.status, "error");
     assert.equal(settled.operation.error.code, "INTAKE_SERVER_RESTARTED");

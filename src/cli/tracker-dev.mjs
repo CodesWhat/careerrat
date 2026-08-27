@@ -45,6 +45,7 @@ import {
   syncStatusesInApp,
 } from "../core/automation/browser-workflows.mjs";
 import { resolveUserPaths } from "../core/paths/workspace.mjs";
+import { acquireWorkspaceRuntimeOwnership } from "../core/runtime/workspace-runtime-ownership.mjs";
 import { securityHeaders } from "../core/security/browser-policy.mjs";
 import { mimeFor, resolvePort, safeAssetPath } from "../core/tracker/dev-server.mjs";
 import {
@@ -593,8 +594,41 @@ export function createDevServer({
     clients.clear();
   }
 
+  let runtimeOwnership = null;
+  server.on("close", () => {
+    runtimeOwnership?.release();
+    runtimeOwnership = null;
+  });
+
+  async function listen({ port, host = "127.0.0.1" } = {}) {
+    const boundPort = await new Promise((resolve, reject) => {
+      function onError(error) {
+        server.removeListener("listening", onListening);
+        reject(error);
+      }
+      function onListening() {
+        server.removeListener("error", onError);
+        resolve(server.address().port);
+      }
+      server.once("error", onError);
+      server.once("listening", onListening);
+      server.listen(port, host);
+    });
+
+    try {
+      runtimeOwnership = acquireWorkspaceRuntimeOwnership({ repoRoot, env });
+      workspaceAgentRuntime.recoverOrphanedSourcingRuns();
+      intakeRoutes.recoverOrphans();
+      return boundPort;
+    } catch (error) {
+      await new Promise((resolve) => server.close(resolve));
+      throw error;
+    }
+  }
+
   return {
     server,
+    listen,
     pathCtx,
     addRoute,
     startWatching,
@@ -630,21 +664,21 @@ async function main() {
   // runtimes. Keep its native-client trust assumption confined to loopback;
   // public previews are built as inert static bundles by build-demo.mjs.
   const host = resolveTrackerBindHost(process.env);
-  dev.server.listen(port, host, () => {
-    const url = `http://localhost:${port}`;
+  try {
+    const boundPort = await dev.listen({ port, host });
+    const url = `http://localhost:${boundPort}`;
     log(`serving ${url}`);
     log("watching workspace/tracker.json and workspace/activity.jsonl for app data updates.");
     log("Ctrl-C to stop.");
     if (wantOpen) openBrowser(url);
-  });
-  dev.server.on("error", (err) => {
+  } catch (err) {
     if (err.code === "EADDRINUSE") {
       log(`port ${port} is in use. Pick another: careerrat tracker-dev --port ${port + 1}`);
     } else {
       log(`server error: ${err.message}`);
     }
     process.exit(1);
-  });
+  }
 
   async function shutdown() {
     dev.closeClients();

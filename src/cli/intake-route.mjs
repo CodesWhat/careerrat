@@ -751,9 +751,9 @@ function createLaneBManager({ repoRoot, env, runSkillStream, heartbeatMs = 30_00
     await Promise.allSettled(active.map(({ promise }) => promise));
   }
 
-  recoverOrphans();
   return {
     start,
+    recoverOrphans,
     ownsLaneB(id) {
       return workers.has(id);
     },
