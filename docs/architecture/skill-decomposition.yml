@@ -189,7 +189,7 @@ skills:
           - "D-10"
           - "D-11"
       - step: "Present high-confidence and borderline company proposals before writes; keep unsupported pages as cached intel until generic extraction can use them."
-        owner: "planned:src/cli/company-discovery-route.mjs"
+        owner: "src/cli/discovery-route.mjs"
         owner_type: "api_route"
         decisions:
           - "D-13"
