@@ -330,6 +330,27 @@ test("runAiWebSearch gives installed web research enough time and preserves runt
   assert.deepEqual(result.failedPromptIds, ["p1"]);
 });
 
+test("runAiWebSearch explains a selected-provider usage cap without exposing runtime text", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async () => ({
+      ok: false,
+      code: "RUNTIME_USAGE_LIMIT",
+      error:
+        "Claude Code has reached its usage limit. It resets at 4pm (America/New_York). " +
+        "raw CLI schema secret",
+    }),
+  });
+
+  assert.deepEqual(result.errors, [
+    "The selected AI provider has reached its usage limit. It resets at 4pm (America/New_York). Try again after the reset.",
+  ]);
+  assert.deepEqual(result.failedPromptIds, ["p1"]);
+  assert.doesNotMatch(result.errors[0], /Claude|CLI|schema|secret|RUNTIME_/i);
+});
+
 test("runAiWebSearch isolates a failed prompt and preserves successful siblings in saved order", async () => {
   const repoRoot = repo({ prompts: 3 });
   const callCount = new Map();

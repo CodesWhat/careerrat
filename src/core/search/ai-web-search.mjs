@@ -40,6 +40,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BOUNDED_AI_CODES, runBoundedAI } from "../ai/bounded-ai.mjs";
+import { candidateSafeRuntimeUsageLimit } from "../ai/installed-runtimes.mjs";
 import {
   runSkillStream as defaultRunSkillStream,
   resolveAllowedSkills,
@@ -201,6 +202,12 @@ function throwIfSearchAborted(signal) {
 function safePromptFailure({ outcome, runtimeFailure }) {
   if (runtimeFailure?.code === "RUNTIME_TIMEOUT") {
     return "AI search took too long to finish. Try it again.";
+  }
+  if (runtimeFailure?.code === "RUNTIME_USAGE_LIMIT") {
+    return (
+      candidateSafeRuntimeUsageLimit(runtimeFailure.message)?.message ||
+      "The selected AI provider has reached its usage limit. Try again later."
+    );
   }
   if (outcome?.body?.code === BOUNDED_AI_CODES.AI_SCHEMA_INVALID) {
     return "AI search returned unusable results. Try it again.";

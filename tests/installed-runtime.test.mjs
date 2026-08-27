@@ -1926,6 +1926,37 @@ test("runInstalledRuntime surfaces a redacted Claude JSON failure from stdout on
   );
 });
 
+test("runInstalledRuntime classifies a provider usage cap without exposing raw CLI text", async () => {
+  await assert.rejects(
+    runInstalledRuntime({
+      runtime: verifiedRuntime({ id: "claude", path: "/safe/claude" }),
+      prompt: "hello",
+      timeoutMs: 2000,
+      spawnImpl: () =>
+        fakeInstalledChild({
+          status: 1,
+          stdout: JSON.stringify({
+            type: "result",
+            subtype: "error_during_execution",
+            is_error: true,
+            result:
+              "You've hit your weekly limit · resets 4pm (America/New_York) · internal schema secret",
+          }),
+        }),
+    }),
+    (error) => {
+      assert.equal(error.code, "RUNTIME_USAGE_LIMIT");
+      assert.equal(
+        error.message,
+        "Claude Code has reached its usage limit. It resets at 4pm (America/New_York). Try again after the reset."
+      );
+      assert.equal(error.resetAt, "4pm (America/New_York)");
+      assert.doesNotMatch(error.message, /weekly|schema|secret|exited with status/i);
+      return true;
+    }
+  );
+});
+
 // P0 regression: runInstalledRuntime's `timeoutMs` has two named tiers (see
 // installed-runtimes.mjs's own comment above their definitions). Bounded
 // one-shot calls (evaluate-job, tailor-application, resume-extract, ...) must

@@ -283,6 +283,42 @@ test("AI web-search route persists exact failed prompts and accepts retry prompt
   assert.equal(durable.error.sources[0].url, "https://jobs.example.test");
 });
 
+test("AI web-search route preserves candidate-safe provider-cap guidance", async () => {
+  const repoRoot = tempRepo();
+  const message =
+    "The selected AI provider has reached its usage limit. It resets at 4pm (America/New_York). Try again after the reset.";
+  const res = response();
+  await handlerFor({
+    repoRoot,
+    runAiWebSearch: async () => ({
+      searched: 1,
+      found: 0,
+      new: 0,
+      duplicates: 0,
+      errors: [message],
+      failedPromptIds: ["p1"],
+      queryResults: [
+        {
+          promptId: "p1",
+          prompt: "Find AI roles",
+          status: "failed",
+          queries: [{ query: "Find AI roles", status: "failed", error: message }],
+          error: message,
+        },
+      ],
+      sources: [],
+    }),
+  })(request(), res);
+
+  const frames = sseFrames(res);
+  assert.equal(frames.at(-1).type, "done");
+  assert.deepEqual(frames.at(-1).data.errors, [message]);
+  const durable = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+  assert.equal(durable.status, "failed");
+  assert.equal(durable.error.message, message);
+  assert.doesNotMatch(JSON.stringify(durable.error), /CLI|schema|RUNTIME_/i);
+});
+
 test("AI web-search route freezes the saved provider-neutral preferences at run start", async () => {
   const repoRoot = tempRepo();
   writeAIPreferences({ repoRoot, env: {}, quality: "best", reasoning: "high" });

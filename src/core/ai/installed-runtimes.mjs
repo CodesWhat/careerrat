@@ -1671,6 +1671,30 @@ function safeRuntimeDiagnostic(value) {
     .slice(0, 4000);
 }
 
+export function candidateSafeRuntimeUsageLimit(
+  value,
+  { providerName = "The selected AI provider" } = {}
+) {
+  const diagnostic = safeRuntimeDiagnostic(value);
+  if (
+    !/(?:\byou(?:'ve| have)\s+hit\b|\bhas\s+reached\b|\breached\b|\bexceeded\b)[^\n\r]{0,60}\b(?:weekly\s+|monthly\s+|usage\s+)?limit\b|\busage limit\b[^\n\r]{0,40}\b(?:reached|exceeded)\b/i.test(
+      diagnostic
+    )
+  ) {
+    return null;
+  }
+  const resetMatch = diagnostic.match(
+    /\bresets?(?:\s+at)?\s+((?:\d{1,2}(?::\d{2})?\s*(?:am|pm))(?:\s*\([A-Za-z][A-Za-z0-9_+/-]{0,63}\))?)/i
+  );
+  const resetAt = resetMatch?.[1]?.replace(/\s+/g, " ").trim() || null;
+  return {
+    message: resetAt
+      ? `${providerName} has reached its usage limit. It resets at ${resetAt}. Try again after the reset.`
+      : `${providerName} has reached its usage limit. Try again later.`,
+    resetAt,
+  };
+}
+
 function claudeFailureDiagnostic(value) {
   let envelope = value;
   if (typeof value === "string") {
@@ -2012,6 +2036,19 @@ export async function runInstalledRuntime({
             const diagnostic =
               (definition?.protocol === "claude-json" ? claudeFailureDiagnostic(stdout) : "") ||
               safeRuntimeDiagnostic(stderr);
+            const usageLimit = candidateSafeRuntimeUsageLimit(diagnostic, {
+              providerName: definition?.name || "The selected AI provider",
+            });
+            if (usageLimit) {
+              reject(
+                runtimeError(usageLimit.message, "RUNTIME_USAGE_LIMIT", {
+                  exitStatus: status,
+                  signal: closeSignal || null,
+                  resetAt: usageLimit.resetAt,
+                })
+              );
+              return;
+            }
             reject(
               runtimeError(
                 `Installed AI CLI exited with status ${status}${diagnostic ? `: ${diagnostic}` : "."}`,
@@ -2447,6 +2484,19 @@ export async function runInstalledRuntimeStream({
               (definition?.protocol === "claude-json"
                 ? claudeFailureDiagnostic(finalResult)
                 : "") || safeRuntimeDiagnostic(stderr);
+            const usageLimit = candidateSafeRuntimeUsageLimit(diagnostic, {
+              providerName: definition?.name || "The selected AI provider",
+            });
+            if (usageLimit) {
+              reject(
+                runtimeError(usageLimit.message, "RUNTIME_USAGE_LIMIT", {
+                  exitStatus: status,
+                  signal: closeSignal || null,
+                  resetAt: usageLimit.resetAt,
+                })
+              );
+              return;
+            }
             reject(
               runtimeError(
                 `Installed AI CLI exited with status ${status}${diagnostic ? `: ${diagnostic}` : "."}`,
