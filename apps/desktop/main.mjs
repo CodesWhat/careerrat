@@ -409,6 +409,13 @@ function registerUpdateCheckHandlers() {
     log,
   });
 
+  if (updateController.needsStartupCheck()) {
+    updateController
+      .reconcileStartup()
+      .catch((err) => log(`update recovery failed: ${err.message}`))
+      .finally(() => scheduleNextUpdateCheck());
+  }
+
   ipcMain.handle(UPDATE_IPC.getState, () => currentUpdateNoticePayload());
 
   ipcMain.handle(UPDATE_IPC.skipVersion, (_event, version) => {
