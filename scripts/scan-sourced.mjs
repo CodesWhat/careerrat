@@ -429,6 +429,9 @@ export async function runSourcedScan({
   const sourceTasks = searchSourceTasks(searchSources);
   const totalSources = companies.length + sourceTasks.length;
   let completedSources = 0;
+  let progressFoundCount = 0;
+  let progressErrorCount = scanned.errors.length;
+  let progressQueue = Promise.resolve();
   const successfulCompanySources = [];
   const successfulSearchSources = [];
   const remainingTasksBySource = new Map();
@@ -440,22 +443,29 @@ export async function runSourcedScan({
     );
   }
 
-  async function acceptBatch(result, batch) {
+  function reportBatch(result, batch) {
+    progressQueue = progressQueue.then(async () => {
+      progressFoundCount += result.offers.length;
+      progressErrorCount += result.errors.length;
+      completedSources += 1;
+      if (typeof onProgress === "function") {
+        await onProgress({
+          foundCount: progressFoundCount,
+          offerCount: progressFoundCount,
+          scannedCount: progressFoundCount,
+          errorCount: progressErrorCount,
+          completedSources,
+          totalSources,
+          batch,
+        });
+      }
+    });
+    return progressQueue;
+  }
+
+  function acceptBatch(result) {
     scanned.offers.push(...result.offers);
     scanned.errors.push(...result.errors);
-    completedSources += 1;
-
-    if (typeof onProgress === "function") {
-      await onProgress({
-        foundCount: scanned.offers.length,
-        offerCount: scanned.offers.length,
-        scannedCount: scanned.offers.length,
-        errorCount: scanned.errors.length,
-        completedSources,
-        totalSources,
-        batch,
-      });
-    }
   }
 
   const companyResults = await mapWithConcurrency(
@@ -467,12 +477,13 @@ export async function runSourcedScan({
         { fetchImpl: fetchForRun, resolveHost, companyFilter: null }
       );
       ensureActive();
+      await reportBatch(result, { kind: "company", label: company.name });
       return { company, result };
     },
     SOURCE_SCAN_CONCURRENCY
   );
   for (const { company, result } of companyResults) {
-    await acceptBatch(result, { kind: "company", label: company.name });
+    acceptBatch(result);
     if (write && !standaloneConfigMode && result.errors.length === 0) {
       successfulCompanySources.push(company);
     }
@@ -490,15 +501,16 @@ export async function runSourcedScan({
           ? await scanSearchSources(singleton, { fetchImpl: fetchForRun, resolveHost })
           : await scanBoards(singleton, { fetchImpl: fetchForRun, resolveHost });
       ensureActive();
+      await reportBatch(result, {
+        kind: task.kind,
+        label: task.source.label || task.source.provider || task.kind,
+      });
       return { task, result };
     },
     SOURCE_SCAN_CONCURRENCY
   );
   for (const { task, result } of searchSourceResults) {
-    await acceptBatch(result, {
-      kind: task.kind,
-      label: task.source.label || task.source.provider || task.kind,
-    });
+    acceptBatch(result);
 
     if (result.errors.length > 0) failedSourceIndexes.add(task.sourceIndex);
     const remaining = (remainingTasksBySource.get(task.sourceIndex) || 1) - 1;
