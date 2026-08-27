@@ -45,6 +45,7 @@
 
 import { createHash } from "node:crypto";
 import { runSourcedScan } from "../../scripts/scan-sourced.mjs";
+import { loadAIPreferences } from "../core/ai/ai-preferences.mjs";
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
 import { aiRuntimeIdForRoute, resolveAIExecutionPlan } from "../core/ai/operation-policy.mjs";
 import { readDbScannerRows } from "../core/db/scan-context.mjs";
@@ -454,6 +455,7 @@ export function mountSearchRoutes({
     const aiExecutionPlan = resolveAIExecutionPlan({
       operation: "research.web",
       runtimeId: aiRuntimeIdForRoute(route),
+      preferences: loadAIPreferences({ repoRoot, env }),
     });
 
     let storedPrompts;

@@ -7,6 +7,7 @@ import { Readable } from "node:stream";
 import { after, test } from "node:test";
 
 import { mountSearchRoutes } from "../src/cli/search-route.mjs";
+import { writeAIPreferences } from "../src/core/ai/ai-preferences.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { candidateSetupInitialize, sourcingRunLatest } from "../src/core/db/verbs.mjs";
 import { saveSearchPrompts } from "../src/core/search/search-prompts.mjs";
@@ -280,6 +281,28 @@ test("AI web-search route persists exact failed prompts and accepts retry prompt
   assert.deepEqual(durable.error.failedPromptIds, ["p1"]);
   assert.equal(durable.error.queryResults[0].queries[0].query, "AI jobs");
   assert.equal(durable.error.sources[0].url, "https://jobs.example.test");
+});
+
+test("AI web-search route freezes the saved provider-neutral preferences at run start", async () => {
+  const repoRoot = tempRepo();
+  writeAIPreferences({ repoRoot, env: {}, quality: "best", reasoning: "high" });
+  let receivedExecutionPlan;
+  const res = response();
+  await handlerFor({
+    repoRoot,
+    runAiWebSearch: async ({ executionPlan }) => {
+      receivedExecutionPlan = executionPlan;
+      return { searched: 1, found: 1, new: 1, duplicates: 0, errors: [] };
+    },
+  })(request(), res);
+
+  assert.equal(res.status, 200);
+  assert.equal(receivedExecutionPlan.requested.quality, "best");
+  assert.equal(receivedExecutionPlan.requested.reasoning, "high");
+  assert.equal(receivedExecutionPlan.resolved.quality, "best");
+  assert.equal(receivedExecutionPlan.resolved.effort, "high");
+  const durable = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+  assert.deepEqual(durable.metadata.aiExecutionPlan, receivedExecutionPlan);
 });
 
 test("AI web-search route rejects a concurrent run with 409", async () => {
