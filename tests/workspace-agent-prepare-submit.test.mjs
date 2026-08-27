@@ -328,8 +328,70 @@ test("job.prepare-submit never hands a live-question recovery off to job.apply",
   assert.equal(last.metadata.state, "blocked");
   assert.equal(last.metadata.submissionVerified, false);
   assert.equal(JSON.stringify(last).includes('"type":"job.apply"'), false);
-  assert.equal(last.metadata.nextActions[1].intent.type, "job.prepare-submit");
+  assert.equal(
+    last.metadata.nextActions.some((action) => action.intent?.type === "job.prepare-submit"),
+    false
+  );
   assert.equal(readApplication(repoRoot).status, "reviewed-hold");
+});
+
+test("job.prepare-submit treats open answer gaps as current packet lineage", async () => {
+  const repoRoot = tempRepo();
+  const openGap = {
+    kind: "answers",
+    code: "ANSWER_CONFIRMATION_REQUIRED",
+    questionId: "rendered-travel",
+    message: "Answer “Would you be willing to travel?”.",
+  };
+  seedPreparedApplication(repoRoot, {
+    packetManifest: {
+      applicationId: "app-prepared",
+      uploadReady: false,
+      status: "reviewable",
+      gapCount: 1,
+      gaps: [openGap],
+      questions: {
+        source: "workspace/jobs/example-rendered.questions.json",
+        answerableCount: 2,
+        excludedCount: 0,
+        answerableIds: ["q1", "rendered-travel"],
+        excludedIds: [],
+      },
+      answerLineage: {
+        answeredQuestionIds: ["q1"],
+        skippedQuestionIds: [],
+        excludedQuestionIds: [],
+        source: "workspace/jobs/example-rendered.questions.json",
+      },
+      artifacts: { resumePdf: "workspace/tailored/example-resume.pdf" },
+    },
+  });
+  let generateCalls = 0;
+  let applyCalls = 0;
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(),
+    generateDocumentsImpl: async () => {
+      generateCalls += 1;
+      return {
+        status: "reviewable",
+        uploadReady: false,
+        gaps: [openGap],
+        artifacts: {},
+      };
+    },
+    applyJobImpl: async () => {
+      applyCalls += 1;
+      return { available: true, verified: false, state: "awaiting-submit" };
+    },
+  });
+
+  assert.equal(generateCalls, 0);
+  assert.equal(applyCalls, 0);
+  assert.equal(result.messages.at(-1).metadata.state, "blocked");
+  assert.match(result.messages.at(-1).text, /open items/i);
 });
 
 test("job.prepare-submit rebuilds a packet whose answer lineage predates its saved live questions", async () => {

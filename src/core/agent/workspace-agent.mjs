@@ -1775,11 +1775,15 @@ function packetQuestionLineageIsStale(application) {
       .filter(Boolean)
   );
   const lineage = manifest.answerLineage;
+  const openGapIds = idsFrom(manifest.gaps)
+    .map((gap) => String(gap?.questionId || "").trim())
+    .filter(Boolean);
   const lineageIds = new Set(
     [
       ...idsFrom(lineage?.answeredQuestionIds),
       ...idsFrom(lineage?.skippedQuestionIds),
       ...idsFrom(lineage?.excludedQuestionIds),
+      ...openGapIds,
     ]
       .map((id) => String(id || "").trim())
       .filter(Boolean)
@@ -6912,17 +6916,6 @@ export async function executeWorkspaceIntent({
                 entityType: "application",
                 entityId: normalized.entity.id,
               }),
-              {
-                label: "Resume supervised preparation",
-                intent: {
-                  type: "job.prepare-submit",
-                  entity: { type: "application", id: normalized.entity.id },
-                  input: {
-                    resumeSession: true,
-                    ...carriedReviewApproval(input),
-                  },
-                },
-              },
             ],
           },
           operationResult: { ...packet, gaps },
@@ -7075,17 +7068,6 @@ export async function executeWorkspaceIntent({
                 entityType: "application",
                 entityId: normalized.entity.id,
               }),
-              {
-                label: "Resume supervised preparation",
-                intent: {
-                  type: "job.prepare-submit",
-                  entity: { type: "application", id: normalized.entity.id },
-                  input: {
-                    resumeSession: true,
-                    ...carriedReviewApproval(input),
-                  },
-                },
-              },
             ],
           },
           operationResult: { ...packet, gaps },
