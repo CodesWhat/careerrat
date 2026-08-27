@@ -7,7 +7,14 @@ import {
   chatFirstReducer,
   createChatFirstState,
   filterPipelineJobs,
+  foregroundDraftKey,
   highFitSearchIds,
+  parseChatFirstForeground,
+  readForegroundDraft,
+  reconcileChatFirstForeground,
+  resolveForegroundStorage,
+  serializeChatFirstForeground,
+  writeForegroundDraft,
 } from "./chat-first-model.js";
 
 const dashboard = {
@@ -866,6 +873,214 @@ describe("chatFirstReducer", () => {
     state = chatFirstReducer(state, { type: "mock.close" });
     expect(state.gateId).toBeNull();
     expect(state.activeThread).toBe("app-1");
+  });
+
+  it("hydrates foreground navigation without resetting unrelated shell state", () => {
+    const current = {
+      ...createChatFirstState(),
+      activityOpen: true,
+      archiveOpen: true,
+    };
+    const state = chatFirstReducer(current, {
+      type: "foreground.hydrate",
+      foreground: {
+        activeThread: "job:app-1",
+        activeApplicationId: "app-1",
+        browse: "pipeline",
+        pipeView: "list",
+        selection: ["sourced-1"],
+        composerChips: ["app-1"],
+        gateId: "submit-app-1",
+      },
+    });
+
+    expect(state).toMatchObject({
+      activeThread: "job:app-1",
+      activeApplicationId: "app-1",
+      browse: "pipeline",
+      pipeView: "list",
+      selection: ["sourced-1"],
+      composerChips: ["app-1"],
+      gateId: "submit-app-1",
+      activityOpen: true,
+      archiveOpen: true,
+    });
+  });
+});
+
+describe("chat-first foreground location", () => {
+  it("round-trips stable foreground state through the URL", () => {
+    const search = serializeChatFirstForeground({
+      activeThread: "job:app-1",
+      activeApplicationId: "app-1",
+      browse: "search",
+      pipeView: "list",
+      selection: ["job-2", "job-1", "job-2"],
+      composerChips: ["job-1"],
+      gateId: "submit-app-1",
+      packetGapId: "gap-1",
+      deepEditId: "proposal-1",
+      deepInputMode: "paste",
+      query: "staff platform",
+      pipelineStage: "technical",
+      filters: {
+        fit80: true,
+        comp: true,
+        remote: false,
+        stage: "offer",
+        source: "greenhouse",
+        posted: "7d",
+        files: "resume",
+        people: "needs-touch",
+      },
+    });
+
+    expect(parseChatFirstForeground(search)).toEqual({
+      activeThread: "job:app-1",
+      activeApplicationId: "app-1",
+      browse: "search",
+      pipeView: "list",
+      selection: ["job-2", "job-1"],
+      composerChips: ["job-1"],
+      gateId: "submit-app-1",
+      packetGapId: "gap-1",
+      deepEditId: "proposal-1",
+      deepInputMode: "paste",
+      query: "staff platform",
+      pipelineStage: "technical",
+      filters: {
+        fit80: true,
+        comp: true,
+        remote: false,
+        stage: "offer",
+        source: "greenhouse",
+        posted: "7d",
+        files: "resume",
+        people: "needs-touch",
+      },
+    });
+  });
+
+  it("preserves the default Fit 80+ filter and an explicit show-all choice", () => {
+    expect(parseChatFirstForeground("").filters.fit80).toBe(true);
+    expect(parseChatFirstForeground("").filters.files).toBe("All");
+    expect(serializeChatFirstForeground({ filters: { fit80: true, files: "All" } })).toBe("");
+    const search = serializeChatFirstForeground({ filters: { fit80: false } });
+    expect(search).toBe("?fit=all");
+    expect(parseChatFirstForeground(search).filters.fit80).toBe(false);
+  });
+
+  it("rehydrates the exact prior surface for browser back and forward", () => {
+    const threadLocation = parseChatFirstForeground("?thread=job%3Aapp-1&application=app-1");
+    const browserLocation = parseChatFirstForeground("?browse=people&people=needs-touch");
+    let state = chatFirstReducer(createChatFirstState(), {
+      type: "foreground.hydrate",
+      foreground: browserLocation,
+    });
+    state = chatFirstReducer(state, {
+      type: "foreground.hydrate",
+      foreground: threadLocation,
+    });
+
+    expect(state).toMatchObject({
+      activeThread: "job:app-1",
+      activeApplicationId: "app-1",
+      browse: false,
+    });
+
+    state = chatFirstReducer(state, {
+      type: "foreground.hydrate",
+      foreground: browserLocation,
+    });
+    expect(state).toMatchObject({ activeThread: "today", browse: "people" });
+    expect(browserLocation.filters.people).toBe("needs-touch");
+  });
+
+  it("falls back clearly when a URL references entities that disappeared", () => {
+    const result = reconcileChatFirstForeground(
+      {
+        ...createChatFirstState(),
+        activeThread: "job:gone",
+        activeApplicationId: "gone",
+        selection: ["live", "gone"],
+        composerChips: ["gone"],
+        gateId: "gate-gone",
+      },
+      {
+        threads: [{ id: "job:live", applicationId: "live" }],
+        archivedThreads: [],
+        skillChats: [],
+        browser: { search: [{ id: "live" }] },
+        missions: [],
+      }
+    );
+
+    expect(result.state).toMatchObject({
+      activeThread: "today",
+      activeApplicationId: null,
+      selection: ["live"],
+      composerChips: [],
+      gateId: null,
+    });
+    expect(result.notice).toBe("That saved workspace item no longer exists. You're back in Today.");
+  });
+
+  it("does not let newly completed background work hijack the foreground", () => {
+    const foreground = {
+      ...createChatFirstState(),
+      activeThread: "job:app-1",
+      activeApplicationId: "app-1",
+      browse: false,
+      selection: ["kept"],
+    };
+    const view = {
+      threads: [{ id: "job:app-1", applicationId: "app-1" }],
+      archivedThreads: [],
+      skillChats: [],
+      needsYou: [],
+      browser: { search: [{ id: "kept" }, { id: "background-result" }] },
+    };
+
+    expect(reconcileChatFirstForeground(foreground, view)).toEqual({
+      state: foreground,
+      notice: null,
+    });
+  });
+
+  it("keys private drafts to the stable foreground surface", () => {
+    expect(foregroundDraftKey({ activeThread: "job:app-1", packetGapId: "gap-2" })).toBe(
+      "careerrat:draft:job%3Aapp-1:gap-2"
+    );
+    expect(foregroundDraftKey({ activeThread: "today", browse: "people" })).toBe(
+      "careerrat:draft:browser:people"
+    );
+  });
+
+  it("restores bounded local drafts and removes empty ones", () => {
+    const values = new Map();
+    const storage = {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => values.set(key, value),
+      removeItem: (key) => values.delete(key),
+    };
+    const key = "careerrat:draft:today";
+
+    writeForegroundDraft(storage, key, "A useful unsent reply");
+    expect(readForegroundDraft(storage, key)).toBe("A useful unsent reply");
+    writeForegroundDraft(storage, key, "");
+    expect(readForegroundDraft(storage, key)).toBe("");
+    expect(values.has(key)).toBe(false);
+  });
+
+  it("degrades safely when a managed browser blocks local storage access", () => {
+    const scope = {};
+    Object.defineProperty(scope, "localStorage", {
+      get() {
+        throw new Error("blocked");
+      },
+    });
+
+    expect(resolveForegroundStorage(scope)).toBeNull();
   });
 });
 

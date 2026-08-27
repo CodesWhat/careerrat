@@ -13,6 +13,192 @@ function list(value) {
   return Array.isArray(value) ? value : [];
 }
 
+const BROWSER_TABS = new Set(["search", "pipeline", "files", "people", "schedule"]);
+const MAX_FOREGROUND_IDS = 24;
+
+function stableIds(value) {
+  return [
+    ...new Set(
+      list(value)
+        .map(String)
+        .map((id) => id.trim())
+        .filter(Boolean)
+    ),
+  ].slice(0, MAX_FOREGROUND_IDS);
+}
+
+function setParam(params, name, value, fallback = null) {
+  const clean = String(value ?? "").trim();
+  if (clean && clean !== fallback) params.set(name, clean);
+}
+
+export function parseChatFirstForeground(search = "") {
+  const params = new URLSearchParams(String(search).replace(/^\?/, ""));
+  const browse = params.get("browse");
+  const deepInputMode = params.get("ingest");
+  return {
+    activeThread: params.get("thread") || "today",
+    activeApplicationId: params.get("application") || null,
+    browse: BROWSER_TABS.has(browse) ? browse : false,
+    pipeView: params.get("pipe") === "list" ? "list" : "funnel",
+    selection: stableIds(params.getAll("selected")),
+    composerChips: stableIds(params.getAll("context")),
+    gateId: params.get("gate") || null,
+    packetGapId: params.get("answer") || null,
+    deepEditId: params.get("edit") || null,
+    deepInputMode: ["paste", "repo"].includes(deepInputMode) ? deepInputMode : null,
+    query: params.get("q") || "",
+    pipelineStage: params.get("pipeline") || null,
+    filters: {
+      fit80: params.get("fit") !== "all",
+      comp: params.get("comp") === "1",
+      remote: params.get("remote") === "1",
+      stage: params.get("stage") || "all",
+      source: params.get("source") || "all",
+      posted: params.get("posted") || "all",
+      files: params.get("files") || "All",
+      people: params.get("people") || "all",
+    },
+  };
+}
+
+export function serializeChatFirstForeground(foreground = {}) {
+  const params = new URLSearchParams();
+  setParam(params, "thread", foreground.activeThread, "today");
+  setParam(params, "application", foreground.activeApplicationId);
+  if (BROWSER_TABS.has(foreground.browse)) params.set("browse", foreground.browse);
+  setParam(params, "pipe", foreground.pipeView, "funnel");
+  for (const id of stableIds(foreground.selection)) params.append("selected", id);
+  for (const id of stableIds(foreground.composerChips)) params.append("context", id);
+  setParam(params, "gate", foreground.gateId);
+  setParam(params, "answer", foreground.packetGapId);
+  setParam(params, "edit", foreground.deepEditId);
+  if (["paste", "repo"].includes(foreground.deepInputMode)) {
+    params.set("ingest", foreground.deepInputMode);
+  }
+  setParam(params, "q", foreground.query);
+  setParam(params, "pipeline", foreground.pipelineStage);
+  const filters = foreground.filters || {};
+  if (filters.fit80 === false) params.set("fit", "all");
+  if (filters.comp) params.set("comp", "1");
+  if (filters.remote) params.set("remote", "1");
+  setParam(params, "stage", filters.stage, "all");
+  setParam(params, "source", filters.source, "all");
+  setParam(params, "posted", filters.posted, "all");
+  if (String(filters.files || "").toLowerCase() !== "all") {
+    setParam(params, "files", filters.files);
+  }
+  setParam(params, "people", filters.people, "all");
+  const value = params.toString();
+  return value ? `?${value}` : "";
+}
+
+export function foregroundDraftKey({ activeThread = "today", browse = false, packetGapId } = {}) {
+  const surface = browse ? `browser:${browse}` : encodeURIComponent(activeThread || "today");
+  const focus = packetGapId ? `:${encodeURIComponent(packetGapId)}` : "";
+  return `careerrat:draft:${surface}${focus}`;
+}
+
+export function resolveForegroundStorage(scope = globalThis) {
+  try {
+    return scope?.localStorage || null;
+  } catch {
+    return null;
+  }
+}
+
+export function readForegroundDraft(storage, key) {
+  if (!storage || !key) return "";
+  try {
+    return String(storage.getItem(key) || "").slice(0, 12_000);
+  } catch {
+    return "";
+  }
+}
+
+export function writeForegroundDraft(storage, key, value) {
+  if (!storage || !key) return;
+  try {
+    const draft = String(value || "").slice(0, 12_000);
+    if (draft) storage.setItem(key, draft);
+    else storage.removeItem(key);
+  } catch {
+    // Private browsing and managed desktops can reject local storage writes.
+  }
+}
+
+export function reconcileChatFirstForeground(foreground, view = {}) {
+  const threadIds = new Set([
+    "today",
+    "ingest",
+    ...list(view.threads).map((thread) => String(thread?.id || "")),
+    ...list(view.archivedThreads).map((thread) => String(thread?.id || "")),
+    ...list(view.skillChats).map((thread) => String(thread?.id || "")),
+  ]);
+  const searchIds = new Set(list(view.browser?.search).map((row) => String(row?.id || "")));
+  const applicationIds = new Set(
+    [...list(view.threads), ...list(view.archivedThreads)]
+      .map((thread) => String(thread?.applicationId || ""))
+      .filter(Boolean)
+  );
+  const state = { ...foreground };
+  let missing = false;
+  let threadMissing = false;
+  if (state.activeThread === "mock") {
+    if (!state.activeApplicationId || !applicationIds.has(String(state.activeApplicationId))) {
+      state.activeThread = "today";
+      state.activeApplicationId = null;
+      missing = true;
+      threadMissing = true;
+    }
+  } else if (!threadIds.has(String(state.activeThread || "today"))) {
+    state.activeThread = "today";
+    state.activeApplicationId = null;
+    missing = true;
+    threadMissing = true;
+  } else if (!["today", "ingest"].includes(state.activeThread)) {
+    const thread = [...list(view.threads), ...list(view.archivedThreads)].find(
+      (candidate) => String(candidate?.id || "") === state.activeThread
+    );
+    state.activeApplicationId = thread?.applicationId || null;
+  } else {
+    state.activeApplicationId = null;
+  }
+  if (state.activeThread !== "ingest") {
+    if ("deepEditId" in state) state.deepEditId = null;
+    if ("deepInputMode" in state) state.deepInputMode = null;
+  }
+  const selection = stableIds(state.selection).filter((id) => searchIds.has(id));
+  const composerChips = stableIds(state.composerChips).filter(
+    (id) => searchIds.has(id) || applicationIds.has(id)
+  );
+  if (selection.length !== stableIds(state.selection).length) missing = true;
+  if (composerChips.length !== stableIds(state.composerChips).length) missing = true;
+  state.selection = selection;
+  state.composerChips = composerChips;
+  if (state.gateId) {
+    const gateExists =
+      list(view.needsYou).some((need) => String(need?.id || "") === state.gateId) ||
+      list(view.missions).some((mission) =>
+        list(mission?.steps).some(
+          (step) => `${String(mission?.id || "")}:${String(step?.id || "")}` === state.gateId
+        )
+      );
+    if (!gateExists) {
+      state.gateId = null;
+      missing = true;
+    }
+  }
+  return {
+    state,
+    notice: threadMissing
+      ? "That saved workspace item no longer exists. You're back in Today."
+      : missing
+        ? "Some saved workspace items no longer exist. The rest of your work is still here."
+        : null,
+  };
+}
+
 export function artifactEmoji(kind) {
   const value = String(kind || "").toLowerCase();
   if (value.includes("cover")) return "✉️";
@@ -596,6 +782,8 @@ export function createChatFirstState() {
 
 export function chatFirstReducer(state, action) {
   switch (action?.type) {
+    case "foreground.hydrate":
+      return { ...state, ...(action.foreground || {}) };
     case "browser.open":
       return { ...state, browse: action.tab || "search" };
     case "browser.close":

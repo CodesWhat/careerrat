@@ -18,6 +18,15 @@ const TAB_LABELS = {
   schedule: "Schedule",
 };
 
+export function nextBrowserTab(activeTab, key) {
+  if (key === "Home") return TAB_ORDER[0];
+  if (key === "End") return TAB_ORDER.at(-1);
+  if (!["ArrowLeft", "ArrowRight"].includes(key)) return null;
+  const current = Math.max(0, TAB_ORDER.indexOf(activeTab));
+  const offset = key === "ArrowRight" ? 1 : -1;
+  return TAB_ORDER[(current + offset + TAB_ORDER.length) % TAB_ORDER.length];
+}
+
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -155,17 +164,35 @@ export function BrowserTabs({
   onTabChange,
   onPipelineViewChange,
 }) {
+  function moveTab(event, tab) {
+    const next = nextBrowserTab(tab, event.key);
+    if (!next) return;
+    event.preventDefault();
+    onTabChange?.(next);
+    event.currentTarget.parentElement?.querySelector(`[data-workspace-tab="${next}"]`)?.focus();
+  }
+
   return (
     <div className="cf-browser__tabs-wrap">
-      <div className="cf-browser__tabs" role="tablist" aria-label="Browse workspace">
+      <div
+        className="cf-browser__tabs"
+        role="tablist"
+        aria-label="Browse workspace"
+        aria-orientation="horizontal"
+      >
         {TAB_ORDER.map((tab) => (
           <button
             key={tab}
+            id={`workspace-tab-${tab}`}
             type="button"
             role="tab"
             aria-selected={activeTab === tab}
+            aria-controls={`workspace-panel-${tab}`}
+            tabIndex={activeTab === tab ? 0 : -1}
+            data-workspace-tab={tab}
             className="cf-browser__tab"
             onClick={() => onTabChange?.(tab)}
+            onKeyDown={(event) => moveTab(event, tab)}
           >
             {buttonLabel(TAB_LABELS[tab], counts?.[tab])}
           </button>
@@ -467,7 +494,12 @@ export function SearchPanel({
             ? "You're all set. The first search finished without a match. Use Search for jobs to try again."
             : "You're all set. Start your first job search with Search for jobs above.";
   return (
-    <section className="cf-browser__panel" role="tabpanel" aria-label="Search">
+    <section
+      id="workspace-panel-search"
+      className="cf-browser__panel"
+      role="tabpanel"
+      aria-labelledby="workspace-tab-search"
+    >
       <SearchToolbar
         sourceSweep={sourceSweep}
         onRunSweep={onRunSweep}
@@ -646,7 +678,12 @@ function PipelineList({ jobs = [], onOpenJob }) {
 
 export function PipelinePanel({ pipeline = {}, view = "funnel", onStageSelect, onOpenJob }) {
   return (
-    <section className="cf-browser__panel cf-pipeline" role="tabpanel" aria-label="Pipeline">
+    <section
+      id="workspace-panel-pipeline"
+      className="cf-browser__panel cf-pipeline"
+      role="tabpanel"
+      aria-labelledby="workspace-tab-pipeline"
+    >
       {view === "list" ? (
         <PipelineList jobs={pipeline?.jobs} onOpenJob={onOpenJob} />
       ) : (
@@ -666,7 +703,12 @@ export function FilesPanel({
 }) {
   const rows = safeArray(files);
   return (
-    <section className="cf-browser__panel cf-resource" role="tabpanel" aria-label="Files">
+    <section
+      id="workspace-panel-files"
+      className="cf-browser__panel cf-resource"
+      role="tabpanel"
+      aria-labelledby="workspace-tab-files"
+    >
       <div className="cf-resource__filters">
         {["All", "Resumes", "Cover letters", "Stories", "Evidence", "Job ▾"].map((label) => (
           <button
@@ -738,7 +780,12 @@ export function PeoplePanel({
   const rows = safeArray(people);
   const dueCount = rows.filter((person) => person?.needsTouch).length;
   return (
-    <section className="cf-browser__panel cf-resource" role="tabpanel" aria-label="People">
+    <section
+      id="workspace-panel-people"
+      className="cf-browser__panel cf-resource"
+      role="tabpanel"
+      aria-labelledby="workspace-tab-people"
+    >
       <div className="cf-resource__filters">
         <button
           type="button"
@@ -803,7 +850,12 @@ export function SchedulePanel({ groups = [], onAction, onCalendarAction }) {
     safeArray(group?.items).some((item) => item?.export)
   );
   return (
-    <section className="cf-browser__panel cf-schedule" role="tabpanel" aria-label="Schedule">
+    <section
+      id="workspace-panel-schedule"
+      className="cf-browser__panel cf-schedule"
+      role="tabpanel"
+      aria-labelledby="workspace-tab-schedule"
+    >
       <div className="cf-schedule__days">
         {days.length > 0 ? (
           days.map((group) => (

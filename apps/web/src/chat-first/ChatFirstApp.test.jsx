@@ -1413,7 +1413,7 @@ describe("ChatFirstAppView", () => {
 
     expect(railHtml).toContain("searching now");
     expect(railHtml).toContain("chat-first-browser-launcher--lime");
-    expect(searchHtml).toMatch(/aria-selected="true" class="cf-browser__tab"/);
+    expect(searchHtml).toMatch(/aria-selected="true"[^>]*class="cf-browser__tab"/);
     expect(searchHtml).not.toMatch(/aria-selected="true"[^>]*disabled/);
     expect(searchHtml).toContain("Your first job search is running now.");
   });

@@ -53,6 +53,13 @@ import {
   chatFirstReducer,
   createChatFirstState,
   filterPipelineJobs,
+  foregroundDraftKey,
+  parseChatFirstForeground,
+  readForegroundDraft,
+  reconcileChatFirstForeground,
+  resolveForegroundStorage,
+  serializeChatFirstForeground,
+  writeForegroundDraft,
 } from "./chat-first-model.js";
 import {
   CompanyProposalReview,
@@ -1438,13 +1445,30 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   const dashboard = useDashboardSnapshot();
   const location = useLocation();
   const navigate = useNavigate();
-  const [ui, dispatch] = useReducer(chatFirstReducer, undefined, createChatFirstState);
-  const [composerValue, setComposerValue] = useState("");
+  const draftStorage = resolveForegroundStorage();
+  const locationForeground = useMemo(
+    () => parseChatFirstForeground(location.search),
+    [location.search]
+  );
+  const [ui, dispatch] = useReducer(chatFirstReducer, locationForeground, (foreground) => ({
+    ...createChatFirstState(),
+    activeThread: foreground.activeThread,
+    activeApplicationId: foreground.activeApplicationId,
+    browse: foreground.browse,
+    pipeView: foreground.pipeView,
+    selection: foreground.selection,
+    searchSelectionSeeded: foreground.selection.length > 0,
+    composerChips: foreground.composerChips,
+    gateId: foreground.gateId,
+  }));
   const [packetAnswerGap, setPacketAnswerGap] = useState(null);
   const [applicationPreparation, setApplicationPreparation] = useState(null);
-  const [query, setQuery] = useState("");
-  const [pipelineStage, setPipelineStage] = useState(null);
-  const [browserFilters, setBrowserFilters] = useState(() => ({ ...DEFAULT_BROWSER_FILTERS }));
+  const [query, setQuery] = useState(locationForeground.query);
+  const [pipelineStage, setPipelineStage] = useState(locationForeground.pipelineStage);
+  const [browserFilters, setBrowserFilters] = useState(() => ({
+    ...DEFAULT_BROWSER_FILTERS,
+    ...locationForeground.filters,
+  }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [engineDown, setEngineDown] = useState(false);
@@ -1458,8 +1482,17 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   const sweepRetryRef = useRef(null);
   const missionExecutionRef = useRef(new Set());
   const [deepState, setDeepState] = useState(null);
-  const [deepInputMode, setDeepInputMode] = useState(null);
-  const [deepInputValue, setDeepInputValue] = useState("");
+  const [deepInputMode, setDeepInputMode] = useState(locationForeground.deepInputMode);
+  const [deepInputValue, setDeepInputValue] = useState(() =>
+    locationForeground.deepInputMode
+      ? readForegroundDraft(
+          draftStorage,
+          foregroundDraftKey({
+            activeThread: `ingest-input:${locationForeground.deepInputMode}`,
+          })
+        )
+      : ""
+  );
   const [deepEditingId, setDeepEditingId] = useState(null);
   const [deepEditDraft, setDeepEditDraft] = useState({});
   const [deepReceipt, setDeepReceipt] = useState(null);
@@ -1473,11 +1506,41 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   );
   const skillChatCursorsRef = useRef(new Map());
   const skillChatSessionResolutionRef = useRef(new Map());
+  const applyingLocationRef = useRef(false);
+  const draftKey = foregroundDraftKey({
+    activeThread: ui.activeThread,
+    browse: ui.browse,
+    packetGapId: packetAnswerGap?.id || locationForeground.packetGapId,
+  });
+  const [composerDrafts, setComposerDrafts] = useState({});
+  const composerValue = composerDrafts[draftKey] ?? readForegroundDraft(draftStorage, draftKey);
+  const setDraftValue = useCallback(
+    (key, nextValue) => {
+      setComposerDrafts((current) => {
+        const previous = current[key] ?? readForegroundDraft(draftStorage, key);
+        const next = typeof nextValue === "function" ? nextValue(previous) : nextValue;
+        const value = String(next || "");
+        writeForegroundDraft(draftStorage, key, value);
+        return { ...current, [key]: value };
+      });
+    },
+    [draftStorage]
+  );
+  const setComposerValue = useCallback(
+    (nextValue) => setDraftValue(draftKey, nextValue),
+    [draftKey, setDraftValue]
+  );
+  const setForegroundComposer = useCallback(
+    (foreground, value) => setDraftValue(foregroundDraftKey(foreground), value),
+    [setDraftValue]
+  );
 
   const baseView = useMemo(
     () => buildChatFirstView(dashboard.data || {}, dashboard.data?.chatFirst || {}),
     [dashboard.data]
   );
+  const baseViewRef = useRef(baseView);
+  baseViewRef.current = baseView;
   const view = useMemo(() => {
     if (!newSearchIds.length) return baseView;
     const ids = new Set(newSearchIds);
@@ -1540,6 +1603,132 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     onDismiss: dismissGithubStarPrompt,
   };
 
+  const foregroundSnapshot = useMemo(
+    () => ({
+      activeThread: ui.activeThread,
+      activeApplicationId: ui.activeApplicationId,
+      browse: ui.browse,
+      pipeView: ui.pipeView,
+      selection: ui.selection,
+      composerChips: ui.composerChips,
+      gateId: ui.gateId,
+      packetGapId: packetAnswerGap?.id || null,
+      deepEditId: deepEditingId,
+      deepInputMode,
+      query,
+      pipelineStage,
+      filters: browserFilters,
+    }),
+    [
+      browserFilters,
+      deepEditingId,
+      deepInputMode,
+      packetAnswerGap?.id,
+      pipelineStage,
+      query,
+      ui.activeApplicationId,
+      ui.activeThread,
+      ui.browse,
+      ui.composerChips,
+      ui.gateId,
+      ui.pipeView,
+      ui.selection,
+    ]
+  );
+
+  const navigateForeground = useCallback(
+    (patch, { replace = false } = {}) => {
+      const next = {
+        ...foregroundSnapshot,
+        ...patch,
+        filters: patch.filters
+          ? { ...foregroundSnapshot.filters, ...patch.filters }
+          : foregroundSnapshot.filters,
+      };
+      navigate({ pathname: "/", search: serializeChatFirstForeground(next) }, { replace });
+    },
+    [foregroundSnapshot, navigate]
+  );
+
+  useEffect(() => {
+    if (location.pathname !== "/" || dashboard.loading) return;
+    applyingLocationRef.current = true;
+    const foreground = {
+      ...createChatFirstState(),
+      ...locationForeground,
+      searchSelectionSeeded: locationForeground.selection.length > 0,
+    };
+    const currentView = baseViewRef.current;
+    const reconciled = reconcileChatFirstForeground(foreground, currentView);
+    dispatch({ type: "foreground.hydrate", foreground: reconciled.state });
+    setQuery(locationForeground.query);
+    setPipelineStage(locationForeground.pipelineStage);
+    setBrowserFilters({ ...DEFAULT_BROWSER_FILTERS, ...locationForeground.filters });
+    setDeepInputMode(reconciled.state.deepInputMode);
+    setDeepInputValue(
+      reconciled.state.deepInputMode
+        ? readForegroundDraft(
+            draftStorage,
+            foregroundDraftKey({
+              activeThread: `ingest-input:${reconciled.state.deepInputMode}`,
+            })
+          )
+        : ""
+    );
+    if (!reconciled.state.deepEditId) {
+      setDeepEditingId(null);
+      setDeepEditDraft({});
+    }
+
+    const foregroundThread = [...currentView.threads, ...currentView.archivedThreads].find(
+      (thread) =>
+        thread.id === reconciled.state.activeThread ||
+        thread.applicationId === reconciled.state.activeApplicationId
+    );
+    const requestedGap = locationForeground.packetGapId
+      ? list(foregroundThread?.packetReview?.gaps).find(
+          (gap) => String(gap?.id || "") === locationForeground.packetGapId
+        )
+      : null;
+    setPacketAnswerGap(requestedGap || null);
+    if (reconciled.notice) setError(reconciled.notice);
+    else if (locationForeground.packetGapId && foregroundThread && !requestedGap) {
+      setError("That saved application question no longer exists. The rest of the packet is here.");
+    }
+
+    const canonicalSearch = serializeChatFirstForeground({
+      ...reconciled.state,
+      packetGapId: requestedGap?.id || null,
+      deepEditId: reconciled.state.deepEditId,
+      deepInputMode: reconciled.state.deepInputMode,
+      query: locationForeground.query,
+      pipelineStage: locationForeground.pipelineStage,
+      filters: locationForeground.filters,
+    });
+    if (canonicalSearch !== location.search) {
+      navigate({ pathname: "/", search: canonicalSearch }, { replace: true });
+    }
+  }, [
+    dashboard.loading,
+    draftStorage,
+    location.pathname,
+    location.search,
+    locationForeground,
+    navigate,
+  ]);
+
+  useEffect(() => {
+    if (location.pathname !== "/" || dashboard.loading) return;
+    if (applyingLocationRef.current) {
+      applyingLocationRef.current = false;
+      return;
+    }
+    const search = serializeChatFirstForeground(foregroundSnapshot);
+    if (search !== location.search) {
+      navigate({ pathname: "/", search }, { replace: true });
+    }
+  }, [dashboard.loading, foregroundSnapshot, location.pathname, location.search, navigate]);
+
   useEffect(() => {
     if (!packetApplicationId) {
       setApplicationPreparation(null);
@@ -1583,9 +1772,20 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     if (next.browse) dispatch({ type: "browser.open", tab: next.browse });
     if (next.onboardingComplete === true) setOnboardingHandoff(true);
     if (next.composerDraft) setComposerValue(String(next.composerDraft));
-    if (next.browse || next.composerDraft || next.onboardingComplete)
-      navigate(location.pathname, { replace: true, state: null });
-  }, [location.pathname, location.state, navigate]);
+    if (next.browse || next.composerDraft || next.onboardingComplete) {
+      const search = next.browse
+        ? serializeChatFirstForeground({ ...foregroundSnapshot, browse: next.browse })
+        : location.search;
+      navigate({ pathname: location.pathname, search }, { replace: true, state: null });
+    }
+  }, [
+    foregroundSnapshot,
+    location.pathname,
+    location.search,
+    location.state,
+    navigate,
+    setComposerValue,
+  ]);
 
   useEffect(() => {
     if (typeof api.getSourcingRun !== "function") return;
@@ -1671,6 +1871,45 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       cancelled = true;
     };
   }, [api, ui.activeThread]);
+
+  useEffect(() => {
+    const proposalId = locationForeground.deepEditId;
+    if (ui.activeThread !== "ingest" || !proposalId || !deepState) return;
+    const proposal = buildDeepIngestReview(deepState).proposals.find(
+      (candidate) => String(candidate?.id || "") === proposalId
+    );
+    if (!proposal) {
+      setDeepEditingId(null);
+      setDeepEditDraft({});
+      setError("That saved Deep Ingest edit no longer exists. The review queue is still here.");
+      navigateForeground({ deepEditId: null }, { replace: true });
+      return;
+    }
+    if (deepEditingId === proposal.id) return;
+    const saved = readForegroundDraft(
+      draftStorage,
+      foregroundDraftKey({ activeThread: `ingest-edit:${proposal.id}` })
+    );
+    let restored = null;
+    try {
+      restored = saved ? JSON.parse(saved) : null;
+    } catch {
+      restored = null;
+    }
+    setDeepEditingId(proposal.id);
+    setDeepEditDraft({
+      title: restored?.title ?? proposal.title ?? "",
+      summary: restored?.summary ?? proposal.summary ?? "",
+      supportingQuote: restored?.supportingQuote ?? proposal.supportingQuote ?? "",
+    });
+  }, [
+    deepEditingId,
+    deepState,
+    draftStorage,
+    locationForeground.deepEditId,
+    navigateForeground,
+    ui.activeThread,
+  ]);
 
   useEffect(() => {
     if (typeof api.getInstalledAiRuntimes !== "function") return;
@@ -1799,6 +2038,21 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   function openThread(id) {
     setPacketAnswerGap(null);
     dispatch({ type: "thread.open", id });
+    navigateForeground({
+      activeThread: id || "today",
+      activeApplicationId: null,
+      browse: false,
+      packetGapId: null,
+      deepEditId: null,
+    });
+  }
+
+  function threadIdForApplication(applicationId) {
+    return (
+      [...view.threads, ...view.archivedThreads].find(
+        (thread) => thread.applicationId === applicationId
+      )?.id || `job:${applicationId}`
+    );
   }
 
   async function submitComposer(text, choice) {
@@ -2003,13 +2257,39 @@ export function ChatFirstApp({ api = chatFirstApi }) {
 
   function openDeepInput(kind) {
     setDeepInputMode(kind);
-    setDeepInputValue("");
+    setDeepInputValue(
+      readForegroundDraft(
+        draftStorage,
+        foregroundDraftKey({ activeThread: `ingest-input:${kind}` })
+      )
+    );
     setError(null);
+    navigateForeground({ deepInputMode: kind, deepEditId: null });
   }
 
   function cancelDeepInput() {
+    if (deepInputMode) {
+      writeForegroundDraft(
+        draftStorage,
+        foregroundDraftKey({ activeThread: `ingest-input:${deepInputMode}` }),
+        ""
+      );
+    }
     setDeepInputMode(null);
     setDeepInputValue("");
+    navigateForeground({ deepInputMode: null }, { replace: true });
+  }
+
+  function changeDeepInput(value) {
+    const next = String(value || "");
+    setDeepInputValue(next);
+    if (deepInputMode) {
+      writeForegroundDraft(
+        draftStorage,
+        foregroundDraftKey({ activeThread: `ingest-input:${deepInputMode}` }),
+        next
+      );
+    }
   }
 
   async function submitDeepInput() {
@@ -2063,16 +2343,33 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   }
 
   function editDeepProposal(proposal) {
-    setDeepEditingId(proposal.id);
-    setDeepEditDraft({
+    const draft = {
       title: proposal.title || "",
       summary: proposal.summary || "",
       supportingQuote: proposal.supportingQuote || "",
-    });
+    };
+    setDeepEditingId(proposal.id);
+    setDeepEditDraft(draft);
+    writeForegroundDraft(
+      draftStorage,
+      foregroundDraftKey({ activeThread: `ingest-edit:${proposal.id}` }),
+      JSON.stringify(draft)
+    );
+    navigateForeground({ deepEditId: proposal.id });
   }
 
   function changeDeepProposalEdit(field, value) {
-    setDeepEditDraft((current) => ({ ...current, [field]: value }));
+    setDeepEditDraft((current) => {
+      const next = { ...current, [field]: value };
+      if (deepEditingId) {
+        writeForegroundDraft(
+          draftStorage,
+          foregroundDraftKey({ activeThread: `ingest-edit:${deepEditingId}` }),
+          JSON.stringify(next)
+        );
+      }
+      return next;
+    });
   }
 
   async function decideDeepProposal(proposal, decision) {
@@ -2098,8 +2395,14 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       `${labels[decision]} ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} still need review.`
     );
     if (decision !== "save_edits") {
+      writeForegroundDraft(
+        draftStorage,
+        foregroundDraftKey({ activeThread: `ingest-edit:${proposal.id}` }),
+        ""
+      );
       setDeepEditingId(null);
       setDeepEditDraft({});
+      navigateForeground({ deepEditId: null }, { replace: true });
     }
     return result;
   }
@@ -2173,6 +2476,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     if (!resolved) return;
     if (resolved.kind === "open-gate") {
       dispatch({ type: "gate.open", id: resolved.gateId });
+      navigateForeground({ gateId: resolved.gateId });
       return;
     }
     if (resolved.kind === "open-application") {
@@ -2184,9 +2488,16 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       return;
     }
     if (resolved.kind === "draft-touch") {
-      setComposerValue(resolved.prompt);
-      if (resolved.applicationId) await openJob(resolved.applicationId);
-      else dispatch({ type: "thread.open", id: "today" });
+      if (resolved.applicationId) {
+        setForegroundComposer(
+          { activeThread: threadIdForApplication(resolved.applicationId) },
+          resolved.prompt
+        );
+        await openJob(resolved.applicationId);
+      } else {
+        setForegroundComposer({ activeThread: "today" }, resolved.prompt);
+        openThread("today");
+      }
       return;
     }
     if (resolved.kind === "sourced-decision") {
@@ -2355,8 +2666,14 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     },
     toggleArchive: () => dispatch({ type: "archive.toggle" }),
     openThread,
-    openBrowser: (tab) => dispatch({ type: "browser.open", tab }),
-    closeBrowser: () => dispatch({ type: "browser.close" }),
+    openBrowser: (tab) => {
+      dispatch({ type: "browser.open", tab });
+      navigateForeground({ browse: tab || "search" });
+    },
+    closeBrowser: () => {
+      dispatch({ type: "browser.close" });
+      navigateForeground({ browse: false });
+    },
     changePipelineView: (viewName) => dispatch({ type: "browser.pipeline-view", view: viewName }),
     toggleSelection: (id) => dispatch({ type: "selection.toggle", id }),
     clearSelection: () => dispatch({ type: "selection.clear" }),
@@ -2371,7 +2688,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       : null,
     startPacketAnswer: (gap) => {
       setPacketAnswerGap(gap);
-      setComposerValue("");
+      navigateForeground({ packetGapId: gap?.id || null });
     },
     resumePacketPreparation: async (applicationId) => {
       if (applicationPreparation?.ready !== true) {
@@ -2464,16 +2781,16 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       }
       const kind = String(artifact?.kind || "").toLowerCase();
       if (kind.includes("search")) {
-        dispatch({ type: "browser.open", tab: "search" });
+        actions.openBrowser?.("search");
         return;
       }
       if (["research_chat", "board_discovery_chat"].includes(artifact?.kind)) {
         const launched = skillChatFromWorkspaceResult({ messages: [{ artifacts: [artifact] }] });
-        if (launched) dispatch({ type: "thread.open", id: launched.id });
+        if (launched) openThread(launched.id);
         return;
       }
       if (kind.includes("evidence") || kind.includes("story")) {
-        dispatch({ type: "browser.open", tab: "files" });
+        actions.openBrowser?.("files");
         return;
       }
       const applicationId = thread?.applicationId || artifact?.applicationId;
@@ -2513,20 +2830,24 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         void openJob(person.applicationId);
         return;
       }
-      setComposerValue(
+      setForegroundComposer(
+        { activeThread: "today" },
         `Help me with ${person.name || "this contact"}${person.company ? ` at ${person.company}` : ""}.`
       );
-      dispatch({ type: "browser.close" });
-      dispatch({ type: "thread.open", id: "today" });
+      openThread("today");
     },
     draftNudge: (id) => {
       const person = view.browser.people.find((candidate) => candidate.id === id);
       const decision = resolvePersonAction(person);
-      setComposerValue(decision.prompt);
-      if (decision.applicationId) void openJob(decision.applicationId);
-      else {
-        dispatch({ type: "browser.close" });
-        dispatch({ type: "thread.open", id: "today" });
+      if (decision.applicationId) {
+        setForegroundComposer(
+          { activeThread: threadIdForApplication(decision.applicationId) },
+          decision.prompt
+        );
+        void openJob(decision.applicationId);
+      } else {
+        setForegroundComposer({ activeThread: "today" }, decision.prompt);
+        openThread("today");
       }
     },
     openScheduleItem: (id) => {
@@ -2539,13 +2860,13 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         return;
       }
       if (!item) return;
-      setComposerValue(
+      setForegroundComposer(
+        { activeThread: "today" },
         item.actionLabel === "Get script"
           ? `Draft the script for ${item.title || "this follow-up"}.`
           : `Help me with ${item.title || "this scheduled item"}.`
       );
-      dispatch({ type: "browser.close" });
-      dispatch({ type: "thread.open", id: "today" });
+      openThread("today");
     },
     calendarAction: (label) => {
       if (!calendarAction(label, view.browser.schedule)) {
@@ -2555,17 +2876,17 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     openIngest: async () => {
       if (typeof api.openDeepIngestThread !== "function") return;
       const result = await run(() => api.openDeepIngestThread());
-      if (result) dispatch({ type: "ingest.open" });
+      if (result) openThread("ingest");
     },
     dismissIngestPrompt: async () => {
       if (typeof api.dismissDeepIngestPrompt !== "function") return;
       await run(() => api.dismissDeepIngestPrompt());
     },
-    closeIngest: () => dispatch({ type: "ingest.close" }),
+    closeIngest: () => openThread("today"),
     ingestFiles,
     ingestPaste: () => openDeepInput("paste"),
     ingestLink: () => openDeepInput("repo"),
-    setDeepInput: setDeepInputValue,
+    setDeepInput: changeDeepInput,
     submitDeepInput,
     cancelDeepInput,
     analyzeDeepSource,
@@ -2578,20 +2899,40 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     deferDeepProposal: (proposal) => decideDeepProposal(proposal, "defer"),
     rejectDeepProposal: (proposal) => decideDeepProposal(proposal, "reject"),
     startMock,
-    openMock: (applicationId) => dispatch({ type: "mock.open", applicationId }),
+    openMock: (applicationId) => {
+      dispatch({ type: "mock.open", applicationId });
+      navigateForeground({
+        activeThread: "mock",
+        activeApplicationId: applicationId,
+        browse: false,
+      });
+    },
     endMock,
     pauseMission: (id) => run(() => api.setChatFirstMissionStatus({ id, status: "paused" })),
     resumeMission: (id) => run(() => api.resumeChatFirstMission(id)),
     decideNeed,
-    closeGate: () => dispatch({ type: "gate.close" }),
+    closeGate: () => {
+      dispatch({ type: "gate.close" });
+      navigateForeground({ gateId: null }, { replace: true });
+    },
     viewGateArtifact,
     requestGateChanges: () => {
-      setComposerValue(`Change the application packet for ${activeGate?.company || "this job"}.`);
+      setForegroundComposer(
+        { activeThread: "today" },
+        `Change the application packet for ${activeGate?.company || "this job"}.`
+      );
       dispatch({ type: "gate.close" });
       dispatch({ type: "thread.open", id: "today" });
       dispatch({
         type: "composer.set-context",
         ids: activeGate?.applicationId ? [activeGate.applicationId] : [],
+      });
+      navigateForeground({
+        activeThread: "today",
+        activeApplicationId: null,
+        browse: false,
+        gateId: null,
+        composerChips: activeGate?.applicationId ? [activeGate.applicationId] : [],
       });
     },
     openGateHandoff: async () => {

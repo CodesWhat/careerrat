@@ -102,6 +102,35 @@ function baseProps(overrides = {}) {
 }
 
 describe("WorkspaceBrowser", () => {
+  it("renders a complete roving workspace tab pattern", async () => {
+    const { WorkspaceBrowser } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <WorkspaceBrowser {...baseProps({ activeTab: "pipeline" })} />
+    );
+
+    expect(html).toContain('role="tablist"');
+    expect(html).toContain('aria-orientation="horizontal"');
+    expect(html).toMatch(
+      /id="workspace-tab-pipeline"[^>]*role="tab"[^>]*aria-selected="true"[^>]*aria-controls="workspace-panel-pipeline"[^>]*tabindex="0"/
+    );
+    expect(html).toMatch(
+      /id="workspace-tab-search"[^>]*role="tab"[^>]*aria-selected="false"[^>]*aria-controls="workspace-panel-search"[^>]*tabindex="-1"/
+    );
+    expect(html).toMatch(
+      /id="workspace-panel-pipeline"[^>]*role="tabpanel"[^>]*aria-labelledby="workspace-tab-pipeline"/
+    );
+  });
+
+  it("moves workspace tabs with arrows, Home, and End", async () => {
+    const { nextBrowserTab } = await loadBrowser();
+
+    expect(nextBrowserTab("search", "ArrowLeft")).toBe("schedule");
+    expect(nextBrowserTab("pipeline", "ArrowRight")).toBe("files");
+    expect(nextBrowserTab("people", "Home")).toBe("search");
+    expect(nextBrowserTab("people", "End")).toBe("schedule");
+    expect(nextBrowserTab("people", "Enter")).toBeNull();
+  });
+
   it("keeps missing-source recovery inside the new Settings source surface", async () => {
     const { SearchToolbar } = await loadBrowser();
     const onOpenSourceHealth = vi.fn();
