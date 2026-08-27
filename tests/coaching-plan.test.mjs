@@ -161,17 +161,23 @@ test("coachingPlanSchema caps gaps at 3, gapText at 80 chars, and forbids extra 
 test("buildCoachingPlan grounds an evidence-claim suggestion and keeps gapText verbatim from fitRisks", async () => {
   const repoRoot = tempRepo();
   seedReviewApp(repoRoot);
+  let seenOptions;
 
   const result = await buildCoachingPlan({
     repoRoot,
     applicationId: "app-coach",
-    runAI: async () => ({
-      body: { ok: true, ai: { used: true, model: "claude-test" }, data: typedPlanVerdict() },
-    }),
+    runAI: async (options) => {
+      seenOptions = options;
+      return {
+        body: { ok: true, ai: { used: true, model: "claude-test" }, data: typedPlanVerdict() },
+      };
+    },
   });
 
   assert.equal(result.status, 200);
   assert.equal(result.body.ok, true);
+  assert.equal(seenOptions.aiOperation, "coach.deep");
+  assert.equal(seenOptions.effort, undefined);
   const plan = result.body.data;
   assert.equal(plan.gaps.length, 1);
   assert.equal(

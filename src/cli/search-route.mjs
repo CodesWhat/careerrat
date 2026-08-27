@@ -46,6 +46,7 @@
 import { createHash } from "node:crypto";
 import { runSourcedScan } from "../../scripts/scan-sourced.mjs";
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
+import { aiRuntimeIdForRoute, resolveAIExecutionPlan } from "../core/ai/operation-policy.mjs";
 import { readDbScannerRows } from "../core/db/scan-context.mjs";
 import { sourceConfigGet } from "../core/db/verbs/source-config.mjs";
 import {
@@ -450,6 +451,10 @@ export function mountSearchRoutes({
       sendJson(res, 501, { ok: false, error: { message: route.error } });
       return;
     }
+    const aiExecutionPlan = resolveAIExecutionPlan({
+      operation: "research.web",
+      runtimeId: aiRuntimeIdForRoute(route),
+    });
 
     let storedPrompts;
     try {
@@ -493,6 +498,7 @@ export function mountSearchRoutes({
         metadata: {
           promptIds: requested.map((prompt) => prompt.id),
           prompts: requested.map((prompt) => ({ id: prompt.id, text: prompt.text })),
+          aiExecutionPlan,
           ...(searchExecutionId ? { searchExecutionId } : {}),
         },
         trigger: promptIds?.length ? "retry-failed" : "jobs-search",
@@ -614,6 +620,7 @@ export function mountSearchRoutes({
           env,
           fetchImpl,
           promptIds,
+          executionPlan: aiExecutionPlan,
           onProgress: (event) => {
             emit(event);
             if (event?.type !== "activity" || !event.message) return;

@@ -1128,6 +1128,81 @@ test("runSkillStream: a selected installed CLI bypasses the Agent SDK and stream
   }
 });
 
+test("runSkillStream resolves a named operation once for the selected installed runtime", async () => {
+  const repoRoot = tempRepoWithSkill("search-jobs");
+  const env = { CAREERRAT_RUNTIME_SKILLS: "search-jobs" };
+  writeInstalledRuntimeSelection({ repoRoot, env, runtimeId: "codex" });
+  try {
+    const calls = [];
+    const result = await runSkillStream({
+      skill: "search-jobs",
+      input: "find roles",
+      repoRoot,
+      env,
+      aiOperation: "research.web",
+      runtimeInventory: [
+        {
+          id: "codex",
+          name: "Codex",
+          path: "/safe/codex",
+          available: true,
+          capabilities: {
+            completion: true,
+            structuredOutput: true,
+            appWorkflows: true,
+            exactRead: true,
+            publicWeb: true,
+            liveActivity: true,
+            resumable: true,
+          },
+        },
+      ],
+      runInstalledRuntimeImpl: async (input) => {
+        calls.push(input);
+        return { text: "{}", runtimeId: "codex", usage: null };
+      },
+      onEvent: () => {},
+    });
+
+    assert.equal(calls[0].model, "gpt-5.6-terra");
+    assert.equal(calls[0].effort, "medium");
+    assert.equal(result.executionPlan.runtimeId, "codex");
+    assert.equal(result.executionPlan.operation, "research.web");
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("runSkillStream passes provider-neutral operation effort to the Claude SDK route", async () => {
+  const repoRoot = tempRepoWithSkill("evaluate-job");
+  try {
+    let sdkOptions;
+    const result = await runSkillStream({
+      skill: "evaluate-job",
+      input: "evaluate",
+      repoRoot,
+      env: {
+        ANTHROPIC_API_KEY: "sk-ant-test",
+        CAREERRAT_RUNTIME_SKILLS: "evaluate-job",
+      },
+      aiOperation: "application.judgment",
+      onEvent: () => {},
+      loadSdk: async () => ({
+        query: ({ options }) => {
+          sdkOptions = options;
+          return fakeSdk(SAMPLE_RUN).query({ options });
+        },
+      }),
+    });
+
+    assert.equal(sdkOptions.effort, "high");
+    assert.equal(result.executionPlan.runtimeId, "anthropic-api");
+    assert.equal(result.executionPlan.resolved.quality, "best");
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // buildPrompt — Lane A / R1, R4, R6: the confirm-block posture-text addition.
 // Conversational mode only (the one-shot embedded runtime has nobody to click

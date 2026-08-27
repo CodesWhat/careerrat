@@ -559,7 +559,8 @@ test("packet gate reserves output budget for model reasoning plus the typed verd
     seenOptions.maxTokens >= 4096,
     "the packet gate must leave room for model reasoning before its JSON verdict"
   );
-  assert.equal(seenOptions.effort, "low");
+  assert.equal(seenOptions.aiOperation, "application.judgment");
+  assert.equal(seenOptions.effort, undefined);
 });
 
 test("POST /api/packet/gate: keeps budget-limited evaluation copy readable", async () => {

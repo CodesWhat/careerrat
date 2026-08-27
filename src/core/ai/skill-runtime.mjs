@@ -39,6 +39,11 @@ import { resolveModelConfig } from "./ai-config.mjs";
 import { resolveAIRoute } from "./call-ai.mjs";
 import { CHAT_ANSWER_MODE_GUIDANCE } from "./chat-answer-mode.mjs";
 import { runInstalledRuntime } from "./installed-runtimes.mjs";
+import {
+  aiRuntimeIdForRoute,
+  assertAIExecutionPlanForRuntime,
+  resolveAIExecutionPlan,
+} from "./operation-policy.mjs";
 import { createRuntimeToolPolicy } from "./runtime-tool-policy.mjs";
 import {
   APP_SAFE_RUNTIME_TOOLS,
@@ -542,6 +547,11 @@ export async function runSkillStream({
   timeoutMs,
   model,
   effort,
+  aiOperation,
+  quality = "automatic",
+  reasoning = "automatic",
+  aiCapabilities = null,
+  executionPlan = null,
   runtimeInventory = null,
   runInstalledRuntimeImpl = runInstalledRuntime,
 } = {}) {
@@ -569,6 +579,23 @@ export async function runSkillStream({
     err.code = "NO_AI_ROUTE";
     throw err;
   }
+
+  const routeRuntimeId = aiRuntimeIdForRoute(route);
+  const resolvedExecutionPlan = executionPlan
+    ? assertAIExecutionPlanForRuntime(executionPlan, routeRuntimeId)
+    : aiOperation
+      ? resolveAIExecutionPlan({
+          operation: aiOperation,
+          runtimeId: routeRuntimeId,
+          quality,
+          reasoning,
+          capabilities: aiCapabilities,
+          modelOverride: model,
+          effortOverride: effort,
+        })
+      : null;
+  const requestModel = resolvedExecutionPlan?.resolved?.model ?? model;
+  const requestEffort = resolvedExecutionPlan?.resolved?.effort ?? effort;
 
   const runtimeTools = resolveRuntimeTools({ tools, toolProfile });
   const candidateNote = agentApplicationDefaultsNote({ repoRoot, env, skill });
@@ -607,12 +634,12 @@ export async function runSkillStream({
         // cross-provider; the Anthropic override is Claude-only.
         model:
           String(
-            model ||
+            requestModel ||
               env.CAREERRAT_INSTALLED_AI_MODEL ||
               (route.runtime.id === "claude" ? env.ANTHROPIC_MODEL : "") ||
               ""
           ).trim() || undefined,
-        effort: effort || undefined,
+        effort: requestEffort || undefined,
         tools: installedRuntimeTools,
         approvedReadPaths,
         outputSchema,
@@ -623,7 +650,11 @@ export async function runSkillStream({
         type: "assistant",
         data: { message: { content: [{ type: "text", text: result.text }] } },
       });
-      const resultData = { ok: true, aborted: false };
+      const resultData = {
+        ok: true,
+        aborted: false,
+        ...(resolvedExecutionPlan ? { executionPlan: resolvedExecutionPlan } : {}),
+      };
       onEvent({ type: "result", data: resultData });
       if (result.usage) {
         appendUsageEvent(
@@ -697,8 +728,8 @@ export async function runSkillStream({
     options: {
       cwd: repoRoot,
       env: childEnv,
-      ...(model ? { model } : {}),
-      ...(effort ? { effort } : {}),
+      ...(requestModel ? { model: requestModel } : {}),
+      ...(requestEffort ? { effort: requestEffort } : {}),
       abortController: controller,
       settingSources: ["project"],
       skills: [skill],
@@ -762,7 +793,9 @@ export async function runSkillStream({
     }
   }
 
-  return resultData;
+  return resolvedExecutionPlan && resultData
+    ? { ...resultData, executionPlan: resolvedExecutionPlan }
+    : resultData;
 }
 
 // The proxy meters its own traffic server-side (ai-proxy.mjs's

@@ -156,9 +156,11 @@ test("AI web-search route streams activity before done and emits heartbeat comme
   globalThis.clearInterval = (id) => cleared.push(id);
   try {
     const res = response();
+    let receivedExecutionPlan;
     const handler = handlerFor({
       repoRoot,
-      runAiWebSearch: async ({ onProgress, writeGuard }) => {
+      runAiWebSearch: async ({ onProgress, writeGuard, executionPlan }) => {
+        receivedExecutionPlan = executionPlan;
         assert.equal(typeof writeGuard, "function");
         assert.doesNotThrow(() => writeGuard(openDb({ repoRoot })));
         onProgress({ type: "activity", message: "Searching saved prompt…" });
@@ -184,6 +186,11 @@ test("AI web-search route streams activity before done and emits heartbeat comme
     assert.equal(durable.summary.new, 1);
     assert.deepEqual(durable.metadata.promptIds, ["p1"]);
     assert.equal(durable.metadata.searchExecutionId, "search-execution-ai");
+    assert.equal(durable.metadata.aiExecutionPlan.operation, "research.web");
+    assert.equal(durable.metadata.aiExecutionPlan.runtimeId, "anthropic-api");
+    assert.equal(durable.metadata.aiExecutionPlan.resolved.quality, "balanced");
+    assert.equal(durable.metadata.aiExecutionPlan.resolved.effort, "medium");
+    assert.deepEqual(receivedExecutionPlan, durable.metadata.aiExecutionPlan);
     assert.match(durable.metadata.inputFingerprint, /^[a-f0-9]{64}$/);
     assert.deepEqual(scheduled, [10000, 30000]);
     assert.deepEqual(

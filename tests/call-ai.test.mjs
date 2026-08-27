@@ -585,6 +585,62 @@ test("callAI (installed): an explicit model always wins", async () => {
   }
 });
 
+test("callAI resolves the same product policy into Claude and Codex model flags", async () => {
+  for (const [runtimeId, expectedModel] of [
+    ["claude", "sonnet"],
+    ["codex", "gpt-5.6-terra"],
+  ]) {
+    const root = tempRoot();
+    try {
+      writeInstalledRuntimeSelection({ repoRoot: root, env: {}, runtimeId });
+      const calls = [];
+      const result = await callAI({
+        aiOperation: "research.web",
+        messages: [{ role: "user", content: "find roles" }],
+        root,
+        env: { CAREERRAT_DESKTOP_SHELL: "1" },
+        runtimeInventory: [verifiedInstalled(runtimeId, runtimeId, `/safe/${runtimeId}`)],
+        runInstalledRuntimeImpl: async (input) => {
+          calls.push(input);
+          return { text: "ok", runtimeId, usage: null };
+        },
+      });
+
+      assert.equal(calls[0].model, expectedModel);
+      assert.equal(calls[0].effort, "medium");
+      assert.equal(result.executionPlan.runtimeId, runtimeId);
+      assert.equal(result.executionPlan.operation, "research.web");
+      assert.equal(result.executionPlan.resolved.model, expectedModel);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("callAI rejects a frozen plan when the selected runtime changed", async () => {
+  const root = tempRoot();
+  try {
+    writeInstalledRuntimeSelection({ repoRoot: root, env: {}, runtimeId: "codex" });
+    await assert.rejects(
+      callAI({
+        executionPlan: {
+          operation: "research.web",
+          runtimeId: "claude",
+          resolved: { model: "sonnet", effort: "medium" },
+        },
+        messages: [{ role: "user", content: "find roles" }],
+        root,
+        env: { CAREERRAT_DESKTOP_SHELL: "1" },
+        runtimeInventory: [verifiedInstalled("codex", "Codex", "/safe/codex")],
+        runInstalledRuntimeImpl: async () => ({ text: "wrong runtime", usage: null }),
+      }),
+      { code: "AI_EXECUTION_PLAN_RUNTIME_MISMATCH" }
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("callAI (installed): tier smallFast on the claude runtime resolves config/ai.json#smallFastModel, not the env base default", async () => {
   const root = tempRoot();
   mkdirSync(join(root, "config"), { recursive: true });

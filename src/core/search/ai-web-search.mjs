@@ -334,6 +334,7 @@ export async function runAiWebSearch({
   resolveJobUrlImpl,
   signal,
   writeGuard,
+  executionPlan,
 } = {}) {
   if (!dbExists({ repoRoot, env })) {
     throwPreconditionError(
@@ -431,6 +432,7 @@ export async function runAiWebSearch({
           skill: AI_WEB_SEARCH_LABELS.skill,
           action: AI_WEB_SEARCH_LABELS.action,
           operation: AI_WEB_SEARCH_LABELS.operation,
+          ...(executionPlan ? { executionPlan } : { aiOperation: "research.web" }),
           input: correction ? `${JSON.stringify(kickoffInput)}\n\n${correction}` : kickoffInput,
           repoRoot,
           env: skillEnv,

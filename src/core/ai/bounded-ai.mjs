@@ -70,6 +70,9 @@ function normalizeAI(ai = {}) {
     if (value) output[field] = value;
   }
   if (Object.hasOwn(ai, "retried")) output.retried = Boolean(ai.retried);
+  if (ai.executionPlan && typeof ai.executionPlan === "object") {
+    output.executionPlan = ai.executionPlan;
+  }
   return output;
 }
 
@@ -128,11 +131,17 @@ export function extractAIText(content) {
 }
 
 function unwrapInvocationResult(result) {
-  if (typeof result === "string") return { text: result, model: null };
-  if (!result || typeof result !== "object") return { text: String(result ?? ""), model: null };
+  if (typeof result === "string") return { text: result, model: null, executionPlan: null };
+  if (!result || typeof result !== "object") {
+    return { text: String(result ?? ""), model: null, executionPlan: null };
+  }
   return {
     text: extractAIText(result.text ?? result.rawText ?? result.raw ?? result.content ?? ""),
     model: trimString(result.model) || null,
+    executionPlan:
+      result.executionPlan && typeof result.executionPlan === "object"
+        ? result.executionPlan
+        : null,
   };
 }
 
@@ -159,6 +168,7 @@ function aiMetadata({
   retried = false,
   model = null,
   mode = BOUNDED_AI_MODES.fallback,
+  executionPlan = null,
 }) {
   const base = labels
     ? {
@@ -174,6 +184,7 @@ function aiMetadata({
     mode,
     retried,
     ...(model ? { model } : {}),
+    ...(executionPlan ? { executionPlan } : {}),
   };
 }
 
@@ -213,6 +224,11 @@ async function runNativePreferred({
   model: requestedModel,
   effort,
   tier,
+  aiOperation,
+  quality,
+  reasoning,
+  aiCapabilities,
+  executionPlan,
   maxTokens,
   outputName,
   root,
@@ -224,6 +240,7 @@ async function runNativePreferred({
   let attempt = 0;
   let lastErrors = null;
   let responseModel = null;
+  let responseExecutionPlan = executionPlan || null;
   // Grows one {assistant, user} turn pair per retry so roles strictly
   // alternate (the Messages API rejects two consecutive "user" turns) — the
   // model's own prior (invalid) reply becomes the assistant turn the
@@ -241,11 +258,27 @@ async function runNativePreferred({
           outputMode: "native",
           outputSchema: schema,
         },
-        { system, model: requestedModel, effort, tier, maxTokens, outputName, root, env, signal }
+        {
+          system,
+          model: requestedModel,
+          effort,
+          tier,
+          aiOperation: responseExecutionPlan ? undefined : aiOperation,
+          quality,
+          reasoning,
+          aiCapabilities,
+          executionPlan: responseExecutionPlan || undefined,
+          maxTokens,
+          outputName,
+          root,
+          env,
+          signal,
+        }
       )
     );
     const unwrapped = unwrapInvocationResult(response);
     if (unwrapped.model) responseModel = unwrapped.model;
+    if (unwrapped.executionPlan) responseExecutionPlan = unwrapped.executionPlan;
     const parsed = parseStructuredJson(unwrapped.text, schema, validateData);
     if (parsed.ok) {
       return makeBoundedAIEnvelope({
@@ -258,6 +291,7 @@ async function runNativePreferred({
           mode: BOUNDED_AI_MODES.native,
           retried: attempt > 0,
           model: responseModel,
+          executionPlan: responseExecutionPlan,
         }),
         manual,
       });
@@ -285,6 +319,7 @@ async function runNativePreferred({
       mode: BOUNDED_AI_MODES.native,
       retried: maxRetries > 0,
       model: responseModel,
+      executionPlan: responseExecutionPlan,
     }),
     manual,
   });
@@ -304,6 +339,11 @@ export async function runBoundedAI({
   model,
   effort,
   tier,
+  aiOperation,
+  quality,
+  reasoning,
+  aiCapabilities,
+  executionPlan,
   maxTokens,
   outputName,
   root,
@@ -336,6 +376,11 @@ export async function runBoundedAI({
         model,
         effort,
         tier,
+        aiOperation,
+        quality,
+        reasoning,
+        aiCapabilities,
+        executionPlan,
         maxTokens,
         outputName,
         root,

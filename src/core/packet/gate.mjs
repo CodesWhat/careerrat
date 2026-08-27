@@ -308,7 +308,7 @@ export async function evaluatePacketGate({
               "Return only JSON for a local application packet gate. Do not include raw prompt text.",
             outputName: "packet_gate_verdict",
             maxTokens: 4096,
-            effort: "low",
+            aiOperation: "application.judgment",
             root: repoRoot,
             env,
           }),

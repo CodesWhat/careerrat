@@ -29,6 +29,11 @@ import {
   installedRuntimeCapabilities,
   runInstalledRuntime,
 } from "./installed-runtimes.mjs";
+import {
+  aiRuntimeIdForRoute,
+  assertAIExecutionPlanForRuntime,
+  resolveAIExecutionPlan,
+} from "./operation-policy.mjs";
 import { loadInstalledRuntimeSelection } from "./runtime-selection.mjs";
 import { appendUsageEvent } from "./usage-log.mjs";
 
@@ -553,11 +558,32 @@ export async function callAI({
   outputName,
   outputMode = null,
   effort = null,
+  aiOperation = null,
+  quality = "automatic",
+  reasoning = "automatic",
+  aiCapabilities = null,
+  executionPlan = null,
   runtimeInventory = null,
   runInstalledRuntimeImpl = runInstalledRuntime,
 } = {}) {
   const route = resolveAIRoute(env, { repoRoot: root, runtimeInventory });
   if (route.type === "none") throw new Error(route.error);
+  const routeRuntimeId = aiRuntimeIdForRoute(route);
+  const resolvedExecutionPlan = executionPlan
+    ? assertAIExecutionPlanForRuntime(executionPlan, routeRuntimeId)
+    : aiOperation
+      ? resolveAIExecutionPlan({
+          operation: aiOperation,
+          runtimeId: routeRuntimeId,
+          quality,
+          reasoning,
+          capabilities: aiCapabilities,
+          modelOverride: model,
+          effortOverride: effort,
+        })
+      : null;
+  const requestModel = resolvedExecutionPlan?.resolved?.model ?? model;
+  const requestEffort = resolvedExecutionPlan?.resolved?.effort ?? effort;
 
   if (route.type === "installed") {
     const options = {
@@ -572,9 +598,9 @@ export async function callAI({
       skill,
       action,
       operation,
-      model,
+      model: requestModel,
       tier,
-      effort,
+      effort: requestEffort,
       runInstalledRuntimeImpl,
     };
     if (stream) return streamInstalledAI(options);
@@ -586,6 +612,7 @@ export async function callAI({
       usage: result.usage,
       elapsedMs: result.elapsedMs,
       engine: result.engine,
+      ...(resolvedExecutionPlan ? { executionPlan: resolvedExecutionPlan } : {}),
     };
   }
 
@@ -597,7 +624,7 @@ export async function callAI({
   // falling back to the same default.
   const modelConfig = resolveModelConfig({ root, env });
   const resolvedModel =
-    model || (tier === "smallFast" ? modelConfig.smallFastModel : null) || modelConfig.model;
+    requestModel || (tier === "smallFast" ? modelConfig.smallFastModel : null) || modelConfig.model;
 
   const { url, headers, body } = buildRequest(route, {
     model: resolvedModel,
@@ -612,7 +639,7 @@ export async function callAI({
     outputSchema,
     outputName,
     outputMode,
-    effort,
+    effort: requestEffort,
   });
 
   const startedAt = performance.now();
@@ -676,5 +703,6 @@ export async function callAI({
     usage: data.usage,
     elapsedMs,
     engine: describeAIEngine(route),
+    ...(resolvedExecutionPlan ? { executionPlan: resolvedExecutionPlan } : {}),
   };
 }

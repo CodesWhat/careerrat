@@ -126,6 +126,30 @@ test("runAiWebSearch caps saved prompts by lean, standard, and full mode", async
   }
 });
 
+test("AI web search uses the provider-neutral web research policy without changing usage breadth", async () => {
+  const repoRoot = repo({ mode: "lean", prompts: 3 });
+  const calls = [];
+  const executionPlan = Object.freeze({
+    operation: "research.web",
+    runtimeId: "codex",
+    resolved: Object.freeze({ model: "gpt-5.6-terra", effort: "medium" }),
+  });
+  const respond = assistantJson({ roles: [], queries_run: [] });
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    executionPlan,
+    runSkillStream: async (options) => {
+      calls.push(options);
+      return respond(options);
+    },
+  });
+
+  assert.equal(calls.length, 1, "lean usage mode still controls prompt breadth only");
+  assert.equal(calls[0].aiOperation, undefined);
+  assert.equal(calls[0].executionPlan, executionPlan);
+});
+
 test("a successful zero-result AI search revalidates active rows against the current policy", async () => {
   const repoRoot = repo({ prompts: 1 });
   candidateConfigPatch({

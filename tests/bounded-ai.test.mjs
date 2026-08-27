@@ -192,6 +192,44 @@ test("runBoundedAI native-preferred passes operation labels into callAI for usag
   assert.equal(seen.operation, "company-seeds");
 });
 
+test("runBoundedAI freezes a named operation plan across schema correction retries", async () => {
+  const executionPlan = Object.freeze({
+    policyVersion: 1,
+    operation: "application.judgment",
+    runtimeId: "codex",
+    resolved: Object.freeze({ model: "gpt-5.6-sol", effort: "high" }),
+  });
+  const calls = [];
+  const result = await runBoundedAI({
+    labels: LABELS,
+    schema: SEED_SCHEMA,
+    manual: MANUAL,
+    structuredMode: "native-preferred",
+    aiOperation: "application.judgment",
+    call: async (options) => {
+      calls.push(options);
+      return {
+        content: [
+          {
+            type: "text",
+            text: calls.length === 1 ? "not json" : '{"seeds":[]}',
+          },
+        ],
+        model: "gpt-5.6-sol",
+        executionPlan,
+      };
+    },
+    messages: [{ role: "user", content: "Judge this application." }],
+    root: ROOT,
+  });
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].aiOperation, "application.judgment");
+  assert.equal(calls[0].executionPlan, undefined);
+  assert.equal(calls[1].executionPlan, executionPlan);
+  assert.equal(result.body.ai.executionPlan, executionPlan);
+});
+
 test("runBoundedAI native-preferred mode calls callAI with native output options and validates locally", async () => {
   const calls = [];
   const result = await runBoundedAI({
