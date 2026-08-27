@@ -34,6 +34,11 @@ const TECH_DOMAINS = new Set([
 const TECH_TITLE_RE =
   /\b(engineer(ing)?|developer|software|devops|sre|data|machine learning|ml|ai|cloud|platform|infrastructure|systems?|architect)\b/i;
 
+const HOSPITALITY_DOMAIN_RE =
+  /\b(hospitality|food service|food and beverage|restaurant|hotel|lodging|catering|events?|venues?|nightlife|bar operations)\b/i;
+const HOSPITALITY_TITLE_RE =
+  /\b(bartender|barback|bar manager|server|waiter|waitress|hostess?|cook|chef|kitchen|restaurant|hospitality|hotel|guest service|front desk|food and beverage|banquet|catering|events?|venues?|sommelier|concierge|housekeeping|reservations?|beverage)\b/i;
+
 // General geo vocabulary used only to interpret the candidate's own location
 // strings. This is deliberately data-driven: no candidate locale is a default,
 // and adding recognition means adding a country/region row rather than branching
@@ -303,6 +308,36 @@ function inferTechFromTargeting(targeting) {
   return techMatches > titles.length / 2;
 }
 
+function hospitalityTarget(targeting, domain) {
+  if (HOSPITALITY_DOMAIN_RE.test(String(domain || ""))) return true;
+  return (targeting?.role_buckets || []).some((bucket) =>
+    (bucket?.titles || []).some((title) => HOSPITALITY_TITLE_RE.test(String(title || "")))
+  );
+}
+
+function slugify(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function usLocationParts(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^(.*?),\s*([A-Za-z]{2})(?:\s+\d{5}(?:-\d{4})?)?$/);
+  if (!match) return null;
+  const state = US_STATES.find(([, abbreviation]) => abbreviation === match[2].toUpperCase());
+  if (!state) return null;
+  const city = match[1].trim();
+  const citySlug = slugify(/^(?:nyc|new york city)$/i.test(city) ? "New York" : city);
+  return {
+    queryLocation: `${city}, ${state[1]}`,
+    citySlug: `${citySlug}-${state[1].toLowerCase()}`,
+    stateNameSlug: slugify(state[0]),
+  };
+}
+
 function generatedRecency(targeting) {
   const postingAge = targeting?.search_preferences?.posting_age;
   if (postingAge?.mode === "fixed-days") {
@@ -368,6 +403,7 @@ export function buildSearchSources(targeting, profile) {
   // never overridden by title inference); only an absent/empty domain falls
   // back to reading the candidate's own configured titles.
   const techDomain = hasExplicitDomain ? isTechDomain(domain) : inferTechFromTargeting(targeting);
+  const hospitalityDomain = hospitalityTarget(targeting, domain);
 
   // One HiringCafe entry per deduplicated title (order-preserved across buckets).
   const searches = [];
@@ -438,6 +474,53 @@ export function buildSearchSources(targeting, profile) {
     }
   }
 
+  const hospitalityLocation = usLocationParts(loc.home);
+  const hospitalityQuery = positiveTitles[0] || "";
+  if (hospitalityDomain && hospitalityLocation && hospitalityQuery) {
+    const what = new URLSearchParams({
+      what: hospitalityQuery,
+      where: hospitalityLocation.queryLocation,
+    }).toString();
+    searches.push(
+      {
+        provider: "oysterlink",
+        source_type: "board",
+        label: `OysterLink · ${hospitalityQuery}`,
+        url: `https://oysterlink.com/jobs/${slugify(hospitalityQuery)}/${hospitalityLocation.citySlug}/`,
+        enabled: true,
+        enabled_reason: "hospitality-domain",
+        max_results: 25,
+      },
+      {
+        provider: "hcareers",
+        source_type: "board",
+        label: `Hcareers · ${hospitalityQuery}`,
+        url: `https://www.hcareers.com/jobs?${what}`,
+        enabled: true,
+        enabled_reason: "hospitality-domain",
+        max_results: 25,
+      },
+      {
+        provider: "hospitalityonline",
+        source_type: "board",
+        label: `Hospitality Online · ${hospitalityQuery}`,
+        url: `https://www.hospitalityonline.com/jobs?${what}`,
+        enabled: true,
+        enabled_reason: "hospitality-domain",
+        max_results: 25,
+      },
+      {
+        provider: "ihirehospitality",
+        source_type: "board",
+        label: "iHireHospitality",
+        url: `https://www.ihirehospitality.com/t-hospitality-s-${hospitalityLocation.stateNameSlug}-jobs.html`,
+        enabled: true,
+        enabled_reason: "hospitality-domain",
+        max_results: 25,
+      }
+    );
+  }
+
   // Board-wide remote aggregator feeds (RemoteOK / Remotive / Working Nomads): unlike
   // RemoteVibeCodingJobs/Wellfound above (tech-only, omitted entirely for other
   // domains), these three are seeded for EVERY domain so the user can enable
@@ -478,7 +561,7 @@ export function buildSearchSources(targeting, profile) {
   // title and location gates keep its broad results candidate-specific. One
   // page bounds first-run cost while still giving Paul a real deterministic
   // lane instead of graduating into a zero-source repair screen.
-  if (positiveTitles.length > 0 && !location_filter.needs_location) {
+  if (positiveTitles.length > 0 && !location_filter.needs_location && !hospitalityDomain) {
     searches.push({
       provider: "arbeitnow",
       source_type: "board",

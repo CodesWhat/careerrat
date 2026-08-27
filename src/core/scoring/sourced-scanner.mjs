@@ -9,6 +9,12 @@ import {
   inferCareerOpsProvider,
   isCareerOpsProviderSupported,
 } from "../providers/career-ops-registry.mjs";
+import {
+  fetchHcareers,
+  fetchHospitalityOnline,
+  fetchIHireHospitality,
+  fetchOysterLink,
+} from "../providers/hospitality-public.mjs";
 import { fetchRemoteOk } from "../providers/remoteok.mjs";
 import { fetchRemotive } from "../providers/remotive.mjs";
 import { feedItemsToOffers, parseFeed } from "../providers/rss.mjs";
@@ -33,9 +39,13 @@ const RSS_TIMEOUT_MS = 15_000;
 // as a small registry (rather than inline in scanBoards) so countDeterministicSources
 // in first-search-run.mjs can check provider support without duplicating the list.
 const BOARD_PROVIDERS = {
-  remoteok: fetchRemoteOk,
-  remotive: fetchRemotive,
-  workingnomads: fetchWorkingNomads,
+  remoteok: (entry, { fetchImpl }) => fetchRemoteOk(entry, fetchImpl),
+  remotive: (entry, { fetchImpl }) => fetchRemotive(entry, fetchImpl),
+  workingnomads: (entry, { fetchImpl }) => fetchWorkingNomads(entry, fetchImpl),
+  oysterlink: fetchOysterLink,
+  hcareers: fetchHcareers,
+  hospitalityonline: fetchHospitalityOnline,
+  ihirehospitality: fetchIHireHospitality,
 };
 
 export function isBoardProviderSupported(provider) {
@@ -1577,7 +1587,11 @@ export async function scanBoards(
     const provider = BOARD_PROVIDERS[providerId];
     try {
       const offers = provider
-        ? await provider(source, fetchImpl)
+        ? await provider(source, {
+            fetchImpl,
+            resolveHost,
+            dispatcherFactory,
+          })
         : await fetchProvider(providerId, source, { fetchImpl, resolveHost, dispatcherFactory });
       const sourceKind = source.source_type === "ats" ? "api" : "board";
       results.push(...offers.map((offer) => ({ ...offer, source: `${providerId}-${sourceKind}` })));
