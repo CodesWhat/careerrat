@@ -330,6 +330,32 @@ describe("ChatFirstAppView", () => {
     expect(runAiLane).toHaveBeenCalledWith(expect.objectContaining({ promptIds: ["p2"] }));
   });
 
+  it("runs AI search when the candidate has not pinned any job boards", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const runDeterministicLane = vi.fn(async () => ({ ok: true }));
+    const runAiLane = vi.fn(async () => ({ ok: true, data: { new: 3 } }));
+
+    const result = await module.runChatFirstJobSearch({
+      api: {
+        getSearchSourceStatus: vi.fn(async () => ({
+          searches: { enabled: 0 },
+          enabledTrackedCompanies: 0,
+          deterministicSources: { attempted: 0 },
+        })),
+        getRuntimeConfig: vi.fn(async () => ({ ai: { available: true } })),
+      },
+      runDeterministicLane,
+      runAiLane,
+      createSearchExecutionId: () => "search-tester-fixture",
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(runDeterministicLane).not.toHaveBeenCalled();
+    expect(runAiLane).toHaveBeenCalledWith(
+      expect.objectContaining({ searchExecutionId: "search-tester-fixture" })
+    );
+  });
+
   it("does not combine an unrelated durable AI failure with a newer deterministic search", async () => {
     const module = await import("./ChatFirstApp.jsx");
     const hydrated = module.hydrateVisibleSearchRuns({
