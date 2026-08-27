@@ -345,7 +345,7 @@ export function automationStatus({
   });
 
   const liveCount = capabilities.reduce((n, c) => n + c.liveCount, 0);
-  const detectedSession = detectSession({ data: cfg, env });
+  const detectedSession = detectSession({ data: cfg, repoRoot: root, env });
   const session = {
     provider: detectedSession.configuredProvider,
     effectiveProvider: detectedSession.provider,

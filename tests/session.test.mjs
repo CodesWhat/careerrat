@@ -1,6 +1,4 @@
-// tests/session.test.mjs — defaultProfileRoot() (src/core/automation/session.mjs).
-// `~/.careerrat/board-profiles` is the default for fresh installs. Controls
-// os.homedir() via the HOME env var, which Node honors on POSIX.
+// tests/session.test.mjs — browser session identity and readiness.
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -40,20 +38,39 @@ after(() => {
   }
 });
 
-test("defaultProfileRoot resolves under ~/.careerrat/board-profiles for a fresh home", () => {
-  const home = tempHome();
-  assert.equal(defaultProfileRoot(), join(home, ".careerrat", "board-profiles"));
+test("defaultProfileRoot isolates browser identity by active CareerRat home", () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-session-repo-"));
+  cleanupRoots.push(repoRoot);
+  const firstHome = join(repoRoot, "candidate-a");
+  const secondHome = join(repoRoot, "candidate-b");
+
+  const first = defaultProfileRoot({ repoRoot, env: { CAREERRAT_HOME: firstHome } });
+  const retry = defaultProfileRoot({ repoRoot, env: { CAREERRAT_HOME: firstHome } });
+  const second = defaultProfileRoot({ repoRoot, env: { CAREERRAT_HOME: secondHome } });
+
+  assert.equal(first, join(firstHome, "board-profiles"));
+  assert.equal(retry, first, "one workspace must reuse its persistent browser identity");
+  assert.equal(second, join(secondHome, "board-profiles"));
+  assert.notEqual(first, second, "different CareerRat homes must not share authenticated state");
 });
 
-test("profilePath joins the platform onto the resolved default root", () => {
-  const home = tempHome();
-  assert.equal(profilePath("linkedin"), join(home, ".careerrat", "board-profiles", "linkedin"));
+test("profilePath joins the platform under the active private data root", () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-session-repo-"));
+  cleanupRoots.push(repoRoot);
+  const dataRoot = join(repoRoot, "candidate-a");
+  assert.equal(
+    profilePath("linkedin", { repoRoot, env: { CAREERRAT_HOME: dataRoot } }),
+    join(dataRoot, "board-profiles", "linkedin")
+  );
 });
 
 test("profilePath honors an explicit profileRoot override, ignoring the default entirely", () => {
-  tempHome();
   assert.equal(
-    profilePath("linkedin", { profileRoot: "/custom/root" }),
+    profilePath("linkedin", {
+      profileRoot: "/custom/root",
+      repoRoot: "/repo",
+      env: { CAREERRAT_HOME: "/private/candidate" },
+    }),
     join("/custom/root", "linkedin")
   );
 });
@@ -84,13 +101,18 @@ test("automatic session setup falls back to the browser extension outside Orca",
 });
 
 test("automatic session setup uses bundled Playwright in a packaged desktop workspace", () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-session-repo-"));
+  cleanupRoots.push(repoRoot);
+  const dataRoot = join(repoRoot, "desktop-home");
   const session = resolveSession({
+    repoRoot,
     data: { session: { provider: "auto" } },
-    env: { CAREERRAT_PACKAGED_DESKTOP: "1" },
+    env: { CAREERRAT_PACKAGED_DESKTOP: "1", CAREERRAT_HOME: dataRoot },
   });
   assert.equal(session.configuredProvider, "auto");
   assert.equal(session.provider, "playwright");
   assert.equal(session.descriptor.automatedApply, true);
+  assert.equal(session.profileRoot, join(dataRoot, "board-profiles"));
 });
 
 test("Playwright is ready before any persistent profile exists when Chromium can launch", () => {

@@ -211,6 +211,51 @@ test("batch snapshots keep raw scanned count when output offers are limited", as
   assert.equal(snapshot.source, "hiringcafe-browser");
 });
 
+test("browser capture defaults isolate persistent profiles by CareerRat home", async () => {
+  async function launchedProfileDir(dataRoot) {
+    let capturedProfileDir = null;
+    const page = {
+      async bringToFront() {},
+      async goto() {},
+      async waitForLoadState() {},
+      async waitForTimeout() {},
+      async evaluate() {
+        return [];
+      },
+      url() {
+        return "https://example.com/jobs";
+      },
+    };
+    await captureSearchSources({
+      repoRoot: "/repo",
+      env: { CAREERRAT_HOME: dataRoot },
+      sources: [
+        { id: "generic", provider: "generic", label: "Generic", url: "https://example.com/jobs" },
+      ],
+      chromium: {
+        async launchPersistentContext(profileDir) {
+          capturedProfileDir = profileDir;
+          return {
+            pages: () => [page],
+            async close() {},
+          };
+        },
+      },
+      waitMs: 0,
+    });
+    return capturedProfileDir;
+  }
+
+  const firstHome = tempRepo();
+  const secondHome = tempRepo();
+  const first = await launchedProfileDir(firstHome);
+  const second = await launchedProfileDir(secondHome);
+
+  assert.equal(first, join(firstHome, "board-profiles", "generic"));
+  assert.equal(second, join(secondHome, "board-profiles", "generic"));
+  assert.notEqual(first, second);
+});
+
 test("HiringCafe Vercel security checkpoint is reported as a capture error", async () => {
   const page = {
     async bringToFront() {},

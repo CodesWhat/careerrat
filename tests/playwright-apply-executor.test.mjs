@@ -1942,3 +1942,42 @@ test("createPlaywrightApplyExecutor uses a custom session.profile_root even when
     rmSync(customRoot, { recursive: true, force: true });
   }
 });
+
+test("createPlaywrightApplyExecutor isolates its default profile by CareerRat home", async () => {
+  async function launchedProfileDir(dataRoot) {
+    const { launchImpl } = createFakeBrowser({ controls: FORM_CONTROLS });
+    let capturedProfileDir = null;
+    const execute = createPlaywrightApplyExecutor({
+      repoRoot: "/repo",
+      env: { CAREERRAT_HOME: dataRoot },
+      loadAutomationImpl: () => ({ data: { session: { provider: "playwright" } } }),
+      launchImpl: async (args) => {
+        capturedProfileDir = args.profileDir;
+        return launchImpl(args);
+      },
+      mayRunImpl: () => ({ allowed: true }),
+      candidateConfigGetImpl: () => ({ profile: {}, honesty: {}, "form-defaults": {} }),
+      loadAnswerMapImpl: async () => new Map(),
+      captureQuestionsImpl: async ({ questions }) => ({
+        questions,
+        excluded: [],
+        demographicSectionPresent: false,
+      }),
+    });
+
+    await execute({
+      applicationId: "app-1",
+      application: { id: "app-1" },
+      postingUrl: GREENHOUSE_URL,
+      questionCapture: { state: "captured" },
+    });
+    return capturedProfileDir;
+  }
+
+  const first = await launchedProfileDir("/private/candidate-a");
+  const second = await launchedProfileDir("/private/candidate-b");
+
+  assert.equal(first, join("/private/candidate-a", "board-profiles", "apply"));
+  assert.equal(second, join("/private/candidate-b", "board-profiles", "apply"));
+  assert.notEqual(first, second);
+});

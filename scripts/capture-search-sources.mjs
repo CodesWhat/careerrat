@@ -16,7 +16,6 @@ import { extractReqId } from "../src/core/scoring/sourced-scanner.mjs";
 
 const pathCtx = { repoRoot: ROOT };
 const DEFAULT_CONFIG = userPath(pathCtx, "config/search-sources.yml");
-const DEFAULT_PROFILE_ROOT = defaultProfileRoot();
 
 export function hiringCafeSearchUrl(searchQuery, searchState = {}) {
   const url = new URL("https://hiring.cafe/");
@@ -92,7 +91,7 @@ export async function captureSearchSources({
   sources,
   sourceName = "search-sources",
   browserChannel = "chromium",
-  profileRoot = DEFAULT_PROFILE_ROOT,
+  profileRoot,
   headless = false,
   login = false,
   manualEach = false,
@@ -108,7 +107,7 @@ export async function captureSearchSources({
   if (!Array.isArray(sources) || sources.length === 0)
     throw new Error("No search sources selected");
 
-  mkdirSync(profileRoot, { recursive: true });
+  const resolvedProfileRoot = profileRoot || defaultProfileRoot({ repoRoot, env });
 
   const normalizedSources = sources.map(normalizeSearchSource);
   const offers = [];
@@ -168,11 +167,12 @@ export async function captureSearchSources({
     }
     if (allowedSources.length === 0) continue;
 
+    mkdirSync(resolvedProfileRoot, { recursive: true });
     const context = await launchContext({
       chromium,
       provider,
       browserChannel,
-      profileRoot,
+      profileRoot: resolvedProfileRoot,
       headless,
     });
     let loginPaused = false;
@@ -298,6 +298,8 @@ export async function runCli(argv = process.argv.slice(2)) {
   const sourceName = options.sourceName || options.provider || "search-sources";
   const { chromium } = await import("playwright");
   const snapshot = await captureSearchSources({
+    repoRoot: ROOT,
+    env: process.env,
     sources,
     sourceName,
     browserChannel: options.browserChannel,
@@ -347,7 +349,7 @@ function parseArgs(args) {
       process.env.BOARD_BROWSER ||
       "chromium"
     ).toLowerCase(),
-    profileRoot: valueAfter(args, "--profile-root") || DEFAULT_PROFILE_ROOT,
+    profileRoot: valueAfter(args, "--profile-root"),
     headless: args.includes("--headless"),
     login: args.includes("--login"),
     manualEach: args.includes("--manual") || args.includes("--manual-each"),
@@ -785,7 +787,7 @@ Options:
   --manual               Pause before every configured source capture.
   --browser NAME         Playwright channel. Use chrome for saved auth. Default: chromium.
   --headless             Run without a visible browser.
-  --profile-root DIR     Persistent profile root. Default: ~/.careerrat/board-profiles
+  --profile-root DIR     Persistent profile root. Default: ${defaultProfileRoot({ repoRoot: ROOT, env: process.env })}
   --per-source-limit N   Max offers per source. Default: 250.
   --limit N              Max offers in the combined snapshot. Default: unlimited.
   --scroll-pages N       Scroll result pages before extraction. Default: 0.

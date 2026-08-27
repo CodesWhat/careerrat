@@ -50,7 +50,7 @@ export function createConfiguredApplyExecutor({
   let provider = "extension";
   try {
     const data = loadAutomationImpl({ root: repoRoot, env }).data;
-    provider = resolveSession({ data, env }).provider;
+    provider = resolveSession({ data, repoRoot, env }).provider;
   } catch {
     return null;
   }

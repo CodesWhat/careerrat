@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import {
@@ -98,5 +99,47 @@ test("configured Playwright sessions forward an explicit browser channel", async
 
   await session.open("http://127.0.0.1/fixture");
   assert.equal(launchOptions.channel, "chrome");
+  assert.equal(
+    launchOptions.profileDir,
+    "/tmp/careerrat-browser-channel-test/profiles/gmail",
+    "an explicit session.profile_root must remain authoritative"
+  );
   await session.close();
+});
+
+test("configured Playwright sessions isolate default profiles by CareerRat home", async () => {
+  async function launchedProfileDir(dataRoot) {
+    let launchOptions = null;
+    const page = {
+      async goto() {},
+      url: () => "http://127.0.0.1/fixture",
+      title: async () => "Fixture",
+      locator: () => ({ innerText: async () => "Fixture" }),
+    };
+    const session = createConfiguredBrowserSession({
+      repoRoot: "/repo",
+      env: { CAREERRAT_HOME: dataRoot },
+      platform: "linkedin",
+      headless: true,
+      loadAutomationImpl: () => ({ data: { session: { provider: "playwright" } } }),
+      launchImpl: async (options) => {
+        launchOptions = options;
+        return {
+          newPage: async () => page,
+          close: async () => {},
+        };
+      },
+    });
+
+    await session.open("http://127.0.0.1/fixture");
+    await session.close();
+    return launchOptions.profileDir;
+  }
+
+  const first = await launchedProfileDir("/private/candidate-a");
+  const second = await launchedProfileDir("/private/candidate-b");
+
+  assert.equal(first, join("/private/candidate-a", "board-profiles", "linkedin"));
+  assert.equal(second, join("/private/candidate-b", "board-profiles", "linkedin"));
+  assert.notEqual(first, second);
 });

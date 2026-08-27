@@ -158,7 +158,7 @@ const modes = loadModes({ root });
 // best-effort, never-throwing presence probe. `mayRun()` is unaffected: provider is
 // HOW a session runs, not WHETHER a capability is allowed. Never fails doctor.
 const automationData = loadAutomation({ root }).data;
-const sessionBrowser = detectSession({ data: automationData });
+const sessionBrowser = detectSession({ data: automationData, repoRoot: root });
 
 // Setup resume state (workspace/setup-state.json). Written by ingest-profile and
 // the explicit discovery-skip helper; read-only here.

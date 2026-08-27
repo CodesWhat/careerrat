@@ -126,11 +126,13 @@ export function createConfiguredBrowserSession({
   } catch (error) {
     return unavailable("unknown", `Automation settings could not be read: ${error.message}`);
   }
-  const resolved = resolveSession({ data, env });
+  const resolved = resolveSession({ data, repoRoot, env });
   if (resolved.provider === "playwright") {
     return createPlaywrightBrowserSession({
       profileDir: profilePath(platform, {
         profileRoot: data?.session?.profile_root || resolved.profileRoot,
+        repoRoot,
+        env,
       }),
       launchImpl,
       headless,

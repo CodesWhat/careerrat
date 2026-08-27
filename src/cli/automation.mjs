@@ -762,7 +762,7 @@ function fail(msg) {
 function printStatus(asJson) {
   const status = automationStatus({ root: opts.root });
   const loaded = loadAutomation({ root: opts.root });
-  const session = resolveSession({ data: loaded.data });
+  const session = resolveSession({ data: loaded.data, repoRoot: opts.root });
   if (asJson) {
     console.log(JSON.stringify({ ...status, session }, null, 2));
     return;

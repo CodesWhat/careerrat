@@ -18,8 +18,9 @@
 
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
-import { homedir } from "node:os";
 import { join } from "node:path";
+
+import { privateDataRoot } from "../paths/workspace.mjs";
 
 const requireFromSession = createRequire(import.meta.url);
 
@@ -115,15 +116,16 @@ export const PROVIDERS = {
   },
 };
 
-// The persistent-profile root must match scripts/capture-board-snapshot.mjs so the
-// session browser and the headless capture path share one set of logged-in profiles.
-export function defaultProfileRoot() {
-  return join(homedir(), ".careerrat", "board-profiles");
+// The persistent-profile root must match the capture scripts so every browser
+// path for one CareerRat workspace reuses its login state without sharing that
+// authenticated state with another workspace on the same OS account.
+export function defaultProfileRoot({ repoRoot, env = process.env } = {}) {
+  return join(privateDataRoot({ repoRoot, env }), "board-profiles");
 }
 
-// Per-provider/per-platform profile dir, e.g. ~/.careerrat/board-profiles/linkedin.
-export function profilePath(platform, { profileRoot } = {}) {
-  return join(profileRoot || defaultProfileRoot(), String(platform || "default"));
+// Per-provider/per-platform profile dir under the active private data root.
+export function profilePath(platform, { profileRoot, repoRoot, env = process.env } = {}) {
+  return join(profileRoot || defaultProfileRoot({ repoRoot, env }), String(platform || "default"));
 }
 
 // resolveAutoTarget — the one piece of resolveSession()'s logic that decides what
@@ -182,11 +184,11 @@ export function automaticApplyGap(provider) {
 // Resolve the configured session for display. `data` is a loaded automation config
 // (or its absence => defaults). Returns the provider, its descriptor, and the
 // effective Playwright profile root (only meaningful when provider === playwright).
-export function resolveSession({ data, env = process.env } = {}) {
+export function resolveSession({ data, repoRoot, env = process.env } = {}) {
   const configuredProvider = data?.session?.provider || "auto";
   const configured = PROVIDERS[configuredProvider] ? configuredProvider : "auto";
   const provider = configured === "auto" ? resolveAutoTarget(env) : configured;
-  const profileRoot = data?.session?.profile_root || defaultProfileRoot();
+  const profileRoot = data?.session?.profile_root || defaultProfileRoot({ repoRoot, env });
   return {
     provider,
     configuredProvider: configured,
@@ -248,8 +250,13 @@ function detectChromeFamily() {
 //   missing    — nothing launchable was detected.
 //   unknown    — the probe itself failed (informational only; never fatal).
 // This NEVER drives a browser and NEVER throws — doctor must not fail on it.
-export function detectSession({ data, env = process.env, playwrightToolingDependencies } = {}) {
-  const base = resolveSession({ data, env });
+export function detectSession({
+  data,
+  repoRoot,
+  env = process.env,
+  playwrightToolingDependencies,
+} = {}) {
+  const base = resolveSession({ data, repoRoot, env });
   let presence;
   try {
     if (base.provider === "playwright") {
