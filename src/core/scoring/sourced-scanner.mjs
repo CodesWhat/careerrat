@@ -774,7 +774,7 @@ function salaryEligibility(offer, config) {
     [offer?.comp, offer?.bodyText, offer?.description].filter(Boolean).join("\n")
   );
   if (!band) return { eligible: true, unknown: "compensation" };
-  if (Number.isFinite(floor) && floor > 0 && band.max < floor) {
+  if (Number.isFinite(floor) && floor > 0 && band.min < floor) {
     return { eligible: false, reason: "comp-below-floor", band };
   }
   return { eligible: true };

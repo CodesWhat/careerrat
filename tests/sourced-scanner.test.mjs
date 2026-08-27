@@ -1690,6 +1690,35 @@ test("qualification recognizes an annual salary sentence below the saved floor",
   assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
 });
 
+test("qualification rejects a posted range whose lower bound is below the hard floor", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Bazaar Meat",
+        title: "Bar Manager",
+        url: "https://jobs.example.test/bazaar-meat-bar-manager",
+        location: "New York, NY",
+        bodyText: "Base salary: $75,000 - $85,000 per year, plus bonus and benefits.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_base: 85000 },
+          location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
+  assert.deepEqual(result.filteredSalary[0]?.compBand, { min: 75000, max: 85000 });
+});
+
 test("qualification recognizes a single annual salary below the saved floor", () => {
   const result = filterAndDedupeOffers(
     [
