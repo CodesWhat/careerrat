@@ -70,7 +70,7 @@ import {
   mountBoardsRoutes,
   setSearchSourceEnabled,
 } from "./boards-route.mjs";
-import { mountChatFirstRoutes } from "./chat-first-route.mjs";
+import { createChatFirstOperationKinds, mountChatFirstRoutes } from "./chat-first-route.mjs";
 import { mountChatRoute } from "./chat-route.mjs";
 import { mountDashboardRoutes } from "./dashboard-route.mjs";
 import { mountDataRoutes } from "./data-route.mjs";
@@ -295,6 +295,7 @@ export function createDevServer({
         startCompanyDiscoveryOperationImpl: (input) =>
           startCompanyDiscoveryOperation({ appOperations, input }),
       }),
+      ...createChatFirstOperationKinds({ repoRoot, env }),
       [COMPANY_DISCOVERY_OPERATION_KIND]: createCompanyDiscoveryOperationKind({ repoRoot, env }),
       [ONBOARDING_SEARCH_PROMPTS_OPERATION_KIND]: createOnboardingSearchPromptOperationKind({
         repoRoot,
@@ -353,7 +354,7 @@ export function createDevServer({
     captureIntakeImpl: workspaceAgentRuntime.captureIntake,
     appOperations,
   });
-  mountChatFirstRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
+  mountChatFirstRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime, appOperations });
   mountWorkspaceExportRoutes({ addRoute, repoRoot, env });
   // App-facing supervised discovery pipeline. Shares the same chatRuntime as
   // /api/chat/* so Quick Start / Continue Discovery can start or reconnect to

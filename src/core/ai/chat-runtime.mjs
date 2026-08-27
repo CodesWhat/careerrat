@@ -50,6 +50,8 @@ import { dbExists } from "../db/connection.mjs";
 import {
   candidateArtifactExists,
   skillChatMessageAppend,
+  skillChatPendingMessageEnqueue,
+  skillChatPendingMessagesDrain,
   skillChatThreadPrepare,
   skillChatThreadRead,
   skillChatThreadReleaseTurn,
@@ -566,6 +568,7 @@ export function createChatRuntime({
     if (!DURABLE_CHAT_SKILLS.has(skill) || !dbExists({ repoRoot, env })) {
       return { thread: null, transcript: [] };
     }
+    skillChatPendingMessagesDrain({ repoRoot, env, skill, now });
     const stored = skillChatThreadRead({ repoRoot, env, skill });
     return {
       thread: stored.thread,
@@ -577,10 +580,10 @@ export function createChatRuntime({
     session,
     role,
     text,
-    { kind, visibility, metadata, artifacts, choice } = {}
+    { kind, visibility, metadata, artifacts, choice, id } = {}
   ) {
-    if (!session.persistDurably) return;
-    skillChatMessageAppend({
+    if (!session.persistDurably) return null;
+    const result = skillChatMessageAppend({
       repoRoot,
       env,
       skill: session.skill,
@@ -592,8 +595,10 @@ export function createChatRuntime({
       choice,
       artifacts,
       runtimeSessionId: session.id,
+      id,
     });
-    session.durableMessageCount += 1;
+    if (!result.reused) session.durableMessageCount += 1;
+    return result;
   }
 
   function claimDurableTurn(skill, executionPlan) {
@@ -845,14 +850,27 @@ export function createChatRuntime({
   // runInstalledTurn.
   function drainPendingInstalledTurn(session, route) {
     if (!session.pendingMessages.length) return false;
-    const drained = session.pendingMessages.splice(0);
-    for (const pending of drained) {
-      const content = typeof pending === "string" ? pending : pending.text;
-      persistDurableMessage(session, "user", content, {
-        visibility: /^\[SYSTEM\]\s/.test(content) ? "internal" : undefined,
-        choice: typeof pending === "string" ? undefined : pending.choice,
+    const queued = session.pendingMessages.splice(0);
+    if (session.persistDurably) {
+      const drained = skillChatPendingMessagesDrain({
+        repoRoot,
+        env,
+        skill: session.skill,
+        now,
       });
-      session.transcript.push({ role: "user", content });
+      session.durableMessageCount += drained.messages.length;
+      for (const message of drained.messages) {
+        session.transcript.push({ role: "user", content: message.text });
+      }
+      if (!session.turnClaimed) {
+        session.turnClaimed = claimDurableTurn(session.skill, session.executionPlan);
+        startTurnHeartbeat(session);
+      }
+    } else {
+      for (const pending of queued) {
+        const content = typeof pending === "string" ? pending : pending.text;
+        session.transcript.push({ role: "user", content });
+      }
     }
     session.pumpDone = runInstalledTurn(session, route);
     return true;
@@ -1390,7 +1408,7 @@ export function createChatRuntime({
   // anything — purely so the client's typing indicator can flip instantly;
   // the pump's own session_state_changed frame is an idempotent confirmation
   // when it lands a moment later.
-  function postMessage(chatId, text, choice) {
+  function postMessage(chatId, text, choice, requestId) {
     const trimmed = typeof text === "string" ? text.trim() : "";
     if (!trimmed) {
       const err = new Error("text is required");
@@ -1411,11 +1429,20 @@ export function createChatRuntime({
 
     session.lastActivityAt = now();
     if (session.skill === "research-boards") session.sourceReviewResponseSeen = false;
+    const cleanRequestId = String(requestId || randomUUID()).trim();
+    if (!/^[a-z0-9][a-z0-9._:-]{7,159}$/i.test(cleanRequestId)) {
+      const err = new Error("requestId must identify one chat submission");
+      err.code = "BAD_REQUEST_ID";
+      throw err;
+    }
+    const durableMessageId = `skill-chat-user:${cleanRequestId}`;
     if (!(session.route.type === "installed" && session.state === "running")) {
-      persistDurableMessage(session, "user", trimmed, {
+      const persisted = persistDurableMessage(session, "user", trimmed, {
         visibility: /^\[SYSTEM\]\s/.test(trimmed) ? "internal" : undefined,
         choice,
+        id: durableMessageId,
       });
+      if (persisted?.reused) return { accepted: true, reused: true };
       if (session.persistDurably && session.state !== "running") {
         session.turnClaimed = claimDurableTurn(session.skill, session.executionPlan);
         startTurnHeartbeat(session);
@@ -1440,7 +1467,20 @@ export function createChatRuntime({
       // finishes, appending every queued message after that turn's own
       // reply, then kicks exactly one follow-up turn that replays them.
       if (session.state === "running") {
-        session.pendingMessages.push({ text: trimmed, choice });
+        if (session.persistDurably) {
+          const queued = skillChatPendingMessageEnqueue({
+            repoRoot,
+            env,
+            skill: session.skill,
+            text: trimmed,
+            choice,
+            runtimeSessionId: session.id,
+            id: durableMessageId,
+            now,
+          });
+          if (queued.reused) return { accepted: true, reused: true };
+        }
+        session.pendingMessages.push({ text: trimmed, choice, id: durableMessageId });
         return { accepted: true };
       }
       // No push-queue/child process to feed (see runInstalledTurn's own

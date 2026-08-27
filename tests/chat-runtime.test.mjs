@@ -2860,6 +2860,73 @@ test("createChatRuntime.postMessage (installed route): durably replays a queued 
   }
 });
 
+test("createChatRuntime.postMessage (installed route): an accepted queued request survives shutdown and replays once after restart", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  const env = {};
+  candidateSetupInitialize({ repoRoot, env });
+  selectInstalledRuntime({ repoRoot, env });
+
+  let firstRuntime;
+  let replacementRuntime;
+  try {
+    firstRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      runInstalledRuntimeImpl: async ({ signal }) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              const error = new Error("Installed AI request was cancelled.");
+              error.code = "RUNTIME_CANCELLED";
+              reject(error);
+            },
+            { once: true }
+          );
+        }),
+    });
+
+    const { chatId } = await firstRuntime.startSession({ skill: "ingest-profile" });
+    const accepted = firstRuntime.postMessage(
+      chatId,
+      "Remote in the US works for me.",
+      undefined,
+      "chat-request-restart-0001"
+    );
+    assert.equal(accepted.accepted, true);
+
+    firstRuntime.shutdown();
+    firstRuntime = null;
+
+    const prompts = [];
+    replacementRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      runInstalledRuntimeImpl: async ({ prompt }) => {
+        prompts.push(prompt);
+        return { text: "What is your minimum base salary?", usage: null, model: null };
+      },
+    });
+    const resumed = await replacementRuntime.startSession({ skill: "ingest-profile" });
+    assert.equal(resumed.state, "running");
+    await waitForPredicate(() => replacementRuntime.getSession(resumed.chatId)?.state === "idle");
+
+    assert.equal(prompts.length, 1);
+    assert.match(prompts[0], /Remote in the US works for me\./);
+    const stored = skillChatThreadRead({ repoRoot, env, skill: "ingest-profile" });
+    assert.equal(
+      stored.messages.filter(
+        (message) => message.role === "user" && message.text === "Remote in the US works for me."
+      ).length,
+      1
+    );
+  } finally {
+    firstRuntime?.shutdown();
+    replacementRuntime?.shutdown();
+    cleanup(repoRoot);
+  }
+});
+
 test("createChatRuntime.interrupt (installed route): a message queued during the aborted turn is not lost, it drains into one follow-up turn instead of being dropped", async () => {
   const repoRoot = tempRepoWithSkill("ingest-profile");
   try {

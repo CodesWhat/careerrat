@@ -2677,7 +2677,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
           )
         : await run(async () => {
             if (activeSkillChat?.chatId) {
-              return api.sendChatMessage(activeSkillChat.chatId, clean, choice);
+              return api.sendChatMessage(activeSkillChat.chatId, clean, choice, { requestId });
             }
             if (ui.activeThread === "mock" && rawMock?.id && rawMock.status !== "ended") {
               return api.sendMockInterviewTurn({ sessionId: rawMock.id, text: clean });

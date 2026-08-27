@@ -940,6 +940,8 @@ export async function jobThreadTurn({
   applicationId,
   text,
   choice,
+  userMessageId,
+  assistantMessageId,
   call,
   runAI,
   executionPlan,
@@ -958,11 +960,36 @@ export async function jobThreadTurn({
       kind: "text",
       text,
       choice,
+      id: userMessageId,
       metadata: selectedExecutionPlan ? { executionPlan: selectedExecutionPlan } : undefined,
     })
   );
   try {
     const db = requireDb({ repoRoot, env });
+    if (assistantMessageId) {
+      const existingRow = db
+        .prepare("SELECT data FROM job_thread_messages WHERE id = ?")
+        .get(assistantMessageId);
+      if (existingRow) {
+        const assistantMessage = JSON.parse(existingRow.data);
+        if (assistantMessage.threadId !== user.thread.id || assistantMessage.role !== "assistant") {
+          const error = new Error(`job thread message id already exists: ${assistantMessageId}`);
+          error.code = "CONFLICT";
+          throw error;
+        }
+        return {
+          thread: hydrateJobThread(db, user.thread),
+          userMessage: user.message,
+          assistantMessage,
+          ai: assistantMessage.metadata?.ai || null,
+          executionPlan:
+            assistantMessage.metadata?.ai?.executionPlan || selectedExecutionPlan || null,
+          meta: null,
+          event: null,
+          reused: true,
+        };
+      }
+    }
     const context = canonicalTurnContext(db, user.thread.applicationId);
     const generated = await runChatFirstAI({
       repoRoot,
@@ -985,6 +1012,7 @@ export async function jobThreadTurn({
         applicationId: user.thread.applicationId,
         role: "assistant",
         kind: "text",
+        id: assistantMessageId,
         text: cleanJobReply(generated.data.reply),
         metadata: {
           ai: generated.ai,

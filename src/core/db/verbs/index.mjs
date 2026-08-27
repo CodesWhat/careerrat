@@ -149,6 +149,8 @@ export { ExportFailedError, kvGet, kvUpsert, NotFoundError } from "./shared.mjs"
 export {
   skillChatDecisionSet,
   skillChatMessageAppend,
+  skillChatPendingMessageEnqueue,
+  skillChatPendingMessagesDrain,
   skillChatThreadPrepare,
   skillChatThreadRead,
   skillChatThreadReleaseTurn,

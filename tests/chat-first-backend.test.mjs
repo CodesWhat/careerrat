@@ -829,6 +829,46 @@ test("job-thread turns retain authoritative messages and advance an exact rollin
   assert.equal(restarted.checkpoint.throughSequence, 8);
 });
 
+test("job-thread turn reuses one durable request after a lost response without running the model twice", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-idempotent-turn",
+    company: "Idempotent Corp",
+  });
+  let calls = 0;
+  const request = {
+    repoRoot,
+    applicationId: "app-idempotent-turn",
+    text: "What should I emphasize?",
+    userMessageId: "job-thread-user-request-0001",
+    assistantMessageId: "job-thread-assistant-request-0001",
+    call: async () => {
+      calls += 1;
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ reply: "Lead with the measurable result.", answerMode: null }),
+          },
+        ],
+      };
+    },
+  };
+
+  const first = await api.jobThreadTurn(request);
+  const retried = await api.jobThreadTurn(request);
+
+  assert.equal(calls, 1);
+  assert.equal(retried.userMessage.id, first.userMessage.id);
+  assert.equal(retried.assistantMessage.id, first.assistantMessage.id);
+  const thread = api
+    .chatFirstStateGet({ repoRoot })
+    .jobThreads.find((candidate) => candidate.applicationId === "app-idempotent-turn");
+  assert.equal(thread.messages.filter((message) => message.role === "user").length, 1);
+  assert.equal(thread.messages.filter((message) => message.role === "assistant").length, 1);
+});
+
 test("rolling checkpoints keep an early durable decision after later prose exceeds the summary budget", async () => {
   const api = await chatFirstApi();
   const repoRoot = tempRepo();

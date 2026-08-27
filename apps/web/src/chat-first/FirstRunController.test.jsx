@@ -1200,6 +1200,27 @@ describe("FirstRunController chat event reconciliation", () => {
     ).toEqual(["chat-chat-1-event-2", "chat-chat-1-event-6"]);
   });
 
+  it("reuses the accepted chat request identity when a lost response is retried", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    let view = await bootController(module, api);
+    api.sendChatMessage.mockRejectedValueOnce(new Error("response lost"));
+
+    await view.props.onSubmitAnswer("Remote in the US works for me.");
+    view = rerender(module, api);
+    await view.props.onSubmitAnswer("Remote in the US works for me.");
+
+    const requestIds = api.sendChatMessage.mock.calls.map((call) => call[3]?.requestId);
+    expect(requestIds).toHaveLength(2);
+    expect(requestIds[0]).toBeTruthy();
+    expect(requestIds[1]).toBe(requestIds[0]);
+    expect(
+      rerender(module, api).props.messages.filter(
+        (message) => message.role === "user" && message.text === "Remote in the US works for me."
+      )
+    ).toHaveLength(1);
+  });
+
   it("keeps the server-provided binary answer mode on the assistant message", async () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi();

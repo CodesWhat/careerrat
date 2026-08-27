@@ -264,12 +264,25 @@ describe("chat-first durable actions", () => {
     const fetchMock = okFetch();
     const choice = { promptId: "choice-offer", version: 1, optionIds: ["yes"] };
 
-    await sendJobThreadTurn({ applicationId: "app-1", text: "Yes", choice });
+    await sendJobThreadTurn({
+      applicationId: "app-1",
+      text: "Yes",
+      choice,
+      requestId: "job-thread-request-choice-0001",
+    });
     await sendMockInterviewTurn({ sessionId: "mock-1", text: "I led the migration." });
 
     const calls = fetchMock.mock.calls.map(([path, options]) => [path, JSON.parse(options.body)]);
     expect(calls).toEqual([
-      ["/api/chat-first/job-thread/turn", { applicationId: "app-1", text: "Yes", choice }],
+      [
+        "/api/chat-first/job-thread/turn",
+        {
+          applicationId: "app-1",
+          text: "Yes",
+          choice,
+          requestId: "job-thread-request-choice-0001",
+        },
+      ],
       ["/api/chat-first/mock/turn", { sessionId: "mock-1", text: "I led the migration." }],
     ]);
   });

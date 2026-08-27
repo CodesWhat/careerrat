@@ -361,11 +361,11 @@ export async function projectWorkspaceResultToJobThread({
 }
 
 export async function commitJobThreadComposer({ api, applicationId, text, choice, requestId }) {
-  if (choice) return api.sendJobThreadTurn({ applicationId, text, choice });
+  if (choice) return api.sendJobThreadTurn({ applicationId, text, choice, requestId });
   const context = { pathname: "/jobs", jobId: applicationId };
   const previewResponse = await api.previewWorkspaceQuery(text, context);
   const preview = previewResponse?.data || previewResponse;
-  if (!preview?.action?.intent) return api.sendJobThreadTurn({ applicationId, text });
+  if (!preview?.action?.intent) return api.sendJobThreadTurn({ applicationId, text, requestId });
 
   await api.appendJobThreadMessage({
     applicationId,

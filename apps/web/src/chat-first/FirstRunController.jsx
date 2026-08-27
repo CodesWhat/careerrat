@@ -14,6 +14,7 @@ import {
   setupNeedsVoluntaryDefaults,
 } from "../onboarding/onboardingSetup.js";
 import { firstRunApi } from "./api.js";
+import { createWorkspaceRequestId } from "./chat-first-app-controller.js";
 import {
   clearCompanyDiscoveryOperation,
   companyProposalArtifact,
@@ -333,6 +334,7 @@ export function FirstRunController({
   const reportedResumeExtractionFailuresRef = useRef(new Set());
   const companyReviewRequestedRef = useRef(false);
   const messagesRef = useRef([]);
+  const pendingChatSubmissionRef = useRef(null);
   const updateMessages = useCallback((update) => {
     const current = messagesRef.current;
     const next = typeof update === "function" ? update(current) : update;
@@ -709,8 +711,10 @@ export function FirstRunController({
         if (current.some((message) => message.id === id)) return current;
         return [...current, next];
       });
+      pendingChatSubmissionRef.current = null;
       setSubmitting(false);
     } else if (type === "chat_state" && data?.state === "idle") {
+      pendingChatSubmissionRef.current = null;
       setSubmitting(false);
       void refreshOnboard();
     } else if (type === "error") {
@@ -900,18 +904,26 @@ export function FirstRunController({
   async function sendChatAnswer(text) {
     const answer = String(text || "").trim();
     if (!answer || submitting) return;
-    updateMessages((current) => [
-      ...current,
-      { id: `user-${Date.now()}`, role: "user", text: answer },
-    ]);
+    const previous = pendingChatSubmissionRef.current;
+    const retrying = previous?.chatId === chatId && previous?.text === answer;
+    const requestId = retrying ? previous.requestId : createWorkspaceRequestId();
+    pendingChatSubmissionRef.current = { chatId, text: answer, requestId };
+    if (!retrying) {
+      updateMessages((current) => [
+        ...current,
+        { id: `user-${requestId}`, role: "user", text: answer },
+      ]);
+    }
     setDraft("");
     setSubmitting(true);
     try {
       if (chatId) {
-        await api.sendChatMessage(chatId, answer);
+        await api.sendChatMessage(chatId, answer, undefined, { requestId });
+        pendingChatSubmissionRef.current = null;
         connectChat(chatId);
       } else {
         const session = await api.startChat(INTERVIEW_SKILL, { input: answer });
+        pendingChatSubmissionRef.current = null;
         connectChat(session.chatId);
       }
     } catch (error) {

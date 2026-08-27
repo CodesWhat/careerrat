@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { executeWorkspaceIntent } from "../core/agent/workspace-agent.mjs";
 import { loadAIPreferences } from "../core/ai/ai-preferences.mjs";
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
@@ -25,6 +26,7 @@ import { exportInterviewDossierPdf } from "../core/documents/dossier-pdf.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024;
+export const JOB_THREAD_TURN_OPERATION_KIND = "job-thread.turn";
 
 function selectedMissionExecutionPlan({ repoRoot, env, operation }) {
   const route = resolveAIRoute(env, { repoRoot });
@@ -71,6 +73,114 @@ function sendResult(res, status, result) {
   sendJson(res, status, { ok: operationOk, meta, data });
 }
 
+function operationView(operation) {
+  if (!operation) return null;
+  const { request: _request, ownerId: _ownerId, fence: _fence, ...visible } = operation;
+  return visible;
+}
+
+function jobThreadRequestId(value) {
+  const id = String(value || "").trim();
+  if (!/^[a-z0-9][a-z0-9._:-]{7,159}$/i.test(id)) {
+    const error = new Error("requestId must identify one job-thread submission");
+    error.code = "BAD_REQUEST";
+    throw error;
+  }
+  return id;
+}
+
+function parseJobThreadTurnRequest(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    const error = new Error("job-thread turn must be an object");
+    error.code = "BAD_REQUEST";
+    throw error;
+  }
+  if (
+    Object.keys(input).some(
+      (key) => !["applicationId", "text", "choice", "requestId"].includes(key)
+    )
+  ) {
+    const error = new Error("job-thread turn contains unsupported fields");
+    error.code = "BAD_REQUEST";
+    throw error;
+  }
+  const applicationId = String(input.applicationId || "").trim();
+  const text = String(input.text || "").trim();
+  if (!applicationId || !text) {
+    const error = new Error("applicationId and text are required");
+    error.code = "BAD_REQUEST";
+    throw error;
+  }
+  const requestId = jobThreadRequestId(input.requestId);
+  let choice;
+  if (input.choice !== undefined) {
+    try {
+      choice = JSON.parse(JSON.stringify(input.choice));
+    } catch {
+      const error = new Error("choice must be valid JSON");
+      error.code = "BAD_REQUEST";
+      throw error;
+    }
+  }
+  const digest = createHash("sha256")
+    .update(`job-thread.turn:${requestId}`)
+    .digest("hex")
+    .slice(0, 32);
+  return {
+    requestId,
+    applicationId,
+    text,
+    ...(choice === undefined ? {} : { choice }),
+    userMessageId: `job-thread-operation-user-${digest}`,
+    assistantMessageId: `job-thread-operation-assistant-${digest}`,
+  };
+}
+
+export function createChatFirstOperationKinds({
+  repoRoot,
+  env = process.env,
+  resolveExecutionPlan = selectedMissionExecutionPlan,
+  callAIImpl,
+} = {}) {
+  return {
+    [JOB_THREAD_TURN_OPERATION_KIND]: {
+      parseRequest: parseJobThreadTurnRequest,
+      resolveExecutionPlan: ({ request }) =>
+        resolveExecutionPlan({ repoRoot, env, operation: "paul.conversation", request }),
+      normalizeError(error) {
+        return {
+          code: String(error?.code || "JOB_THREAD_TURN_FAILED"),
+          message:
+            error?.code === "NO_AI_ROUTE"
+              ? "Choose a ready AI provider in Settings, then try again."
+              : "CareerRat couldn't finish that reply. Your message is saved, so you can try again.",
+          retryable: error?.retryable !== false,
+        };
+      },
+      async execute({ request, executionPlan }) {
+        const result = await jobThreadTurn({
+          repoRoot,
+          env,
+          applicationId: request.applicationId,
+          text: request.text,
+          choice: request.choice,
+          userMessageId: request.userMessageId,
+          assistantMessageId: request.assistantMessageId,
+          executionPlan,
+          call: callAIImpl,
+        });
+        return {
+          resultRef: {
+            type: "job-thread-message",
+            id: result.assistantMessage.id,
+            threadId: result.thread.id,
+          },
+        };
+      },
+    },
+  };
+}
+
 function safeDownloadName(value) {
   const name = String(value || "interview-dossier.pdf")
     .replace(/["\r\n\\/]/g, "_")
@@ -103,6 +213,7 @@ export function mountChatFirstRoutes({
   executeMissionIntent,
   resolveMissionExecutionPlan = selectedMissionExecutionPlan,
   callAIImpl,
+  appOperations,
   exportInterviewDossierPdfImpl = exportInterviewDossierPdf,
 } = {}) {
   const pathCtx = { repoRoot, env };
@@ -154,15 +265,30 @@ export function mountChatFirstRoutes({
   );
 
   addRoute("POST", "/api/chat-first/job-thread/turn", (req, res) =>
-    withBody(req, res, (body) =>
-      jobThreadTurn({
-        ...pathCtx,
-        applicationId: body.applicationId,
-        text: body.text,
-        choice: body.choice,
-        resolveExecutionPlan: resolveMissionExecutionPlan,
-        call: callAIImpl,
-      })
+    withBody(
+      req,
+      res,
+      async (body) => {
+        if (appOperations?.start && body.requestId) {
+          const started = await appOperations.start({
+            kind: JOB_THREAD_TURN_OPERATION_KIND,
+            input: body,
+          });
+          return {
+            reused: started.reused,
+            operation: operationView(started.operation),
+          };
+        }
+        return jobThreadTurn({
+          ...pathCtx,
+          applicationId: body.applicationId,
+          text: body.text,
+          choice: body.choice,
+          resolveExecutionPlan: resolveMissionExecutionPlan,
+          call: callAIImpl,
+        });
+      },
+      { status: appOperations ? 202 : 200 }
     )
   );
 

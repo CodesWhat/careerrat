@@ -442,11 +442,16 @@ describe("sendChatMessage", () => {
     vi.stubGlobal("fetch", fetchMock);
     const choice = { promptId: "choice-1", version: 1, optionIds: ["no"] };
 
-    await sendChatMessage("chat-1", "No", choice);
+    await sendChatMessage("chat-1", "No", choice, { requestId: "chat-request-choice-0001" });
 
     expect(fetchMock).toHaveBeenCalledWith("/api/chat/message", {
       method: "POST",
-      body: JSON.stringify({ chatId: "chat-1", text: "No", choice }),
+      body: JSON.stringify({
+        chatId: "chat-1",
+        text: "No",
+        choice,
+        requestId: "chat-request-choice-0001",
+      }),
       headers: { "content-type": "application/json" },
     });
   });

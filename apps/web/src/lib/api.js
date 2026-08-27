@@ -656,10 +656,15 @@ export function startChat(skill, input) {
   });
 }
 
-export function sendChatMessage(chatId, text, choice) {
+export function sendChatMessage(chatId, text, choice, { requestId } = {}) {
   return apiFetch("/api/chat/message", {
     method: "POST",
-    body: JSON.stringify({ chatId, text, ...(choice ? { choice } : {}) }),
+    body: JSON.stringify({
+      chatId,
+      text,
+      ...(choice ? { choice } : {}),
+      requestId: durableWorkspaceRequestId(requestId),
+    }),
   });
 }
 
@@ -990,10 +995,15 @@ export function appendJobThreadMessage({
   });
 }
 
-export function sendJobThreadTurn({ applicationId, text, choice } = {}) {
+export function sendJobThreadTurn({ applicationId, text, choice, requestId } = {}) {
   return apiFetch("/api/chat-first/job-thread/turn", {
     method: "POST",
-    body: JSON.stringify({ applicationId, text, ...(choice ? { choice } : {}) }),
+    body: JSON.stringify({
+      applicationId,
+      text,
+      ...(choice ? { choice } : {}),
+      requestId: durableWorkspaceRequestId(requestId),
+    }),
   });
 }
 

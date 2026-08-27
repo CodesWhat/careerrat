@@ -7,6 +7,7 @@ import { after, test } from "node:test";
 
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { appUpsert, commUpsert, sourcedUpsertBatch } from "../src/core/db/verbs.mjs";
+import { createAppOperationManager } from "../src/core/runtime/app-operation-manager.mjs";
 
 const cleanupRoots = [];
 const testExecutionPlan = (operation) => ({
@@ -521,6 +522,73 @@ test("job-thread turn persists both sides and grounds bounded AI in canonical ap
   assert.match(prompt, /Staff Platform Engineer/);
   assert.match(prompt, /How should I frame my migration story/);
   assert.doesNotMatch(prompt, /987654|current_base/);
+});
+
+test("job-thread route reuses one in-flight durable operation for a lost-response retry", async () => {
+  const repoRoot = tempRepo();
+  appUpsert({
+    repoRoot,
+    row: {
+      id: "app-inflight-turn",
+      company: "One Call Corp",
+      role: "Operations Lead",
+      status: "applied",
+    },
+  });
+  const routeModule = await import("../src/cli/chat-first-route.mjs");
+  let calls = 0;
+  let releaseCall;
+  const callGate = new Promise((resolve) => {
+    releaseCall = resolve;
+  });
+  const callAIImpl = async () => {
+    calls += 1;
+    await callGate;
+    return aiReply({ reply: "Lead with the operating result.", answerMode: null });
+  };
+  const appOperations = createAppOperationManager({
+    repoRoot,
+    env: {},
+    kinds: routeModule.createChatFirstOperationKinds({
+      repoRoot,
+      env: {},
+      resolveExecutionPlan: ({ operation }) => testExecutionPlan(operation),
+      callAIImpl,
+    }),
+  });
+  const routes = await boot(repoRoot, { appOperations, callAIImpl });
+  const payload = {
+    applicationId: "app-inflight-turn",
+    text: "What should I emphasize?",
+    requestId: "job-thread-request-inflight-0001",
+  };
+
+  try {
+    const first = await invoke(routes, "POST", "/api/chat-first/job-thread/turn", payload);
+    const retried = await invoke(routes, "POST", "/api/chat-first/job-thread/turn", payload);
+    for (let attempt = 0; calls < 1 && attempt < 100; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+
+    assert.equal(first.status, 202);
+    assert.equal(retried.status, 202);
+    assert.equal(retried.body.data.reused, true);
+    assert.equal(retried.body.data.operation.id, first.body.data.operation.id);
+    assert.equal(calls, 1);
+
+    releaseCall();
+    const completed = await appOperations.wait(first.body.data.operation.id);
+    assert.equal(completed.status, "completed");
+    const state = (await import("../src/core/db/verbs.mjs")).chatFirstStateGet({ repoRoot });
+    const thread = state.jobThreads.find(
+      (candidate) => candidate.applicationId === "app-inflight-turn"
+    );
+    assert.equal(thread.messages.filter((message) => message.role === "user").length, 1);
+    assert.equal(thread.messages.filter((message) => message.role === "assistant").length, 1);
+  } finally {
+    releaseCall();
+    await appOperations.shutdown();
+  }
 });
 
 test("job-thread choice clicks enforce the durable prompt version before appending", async () => {

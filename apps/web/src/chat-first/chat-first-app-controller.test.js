@@ -502,6 +502,26 @@ describe("chat-first app controller", () => {
     expect(result.kind).toBe("mission");
   });
 
+  it("keeps the composer request identity on a normal job-thread turn", async () => {
+    const api = {
+      previewWorkspaceQuery: vi.fn().mockResolvedValue({ data: { action: null } }),
+      sendJobThreadTurn: vi.fn().mockResolvedValue({ accepted: true }),
+    };
+
+    await commitJobThreadComposer({
+      api,
+      applicationId: "app-curri",
+      text: "What should I emphasize?",
+      requestId: "job-thread-request-0001",
+    });
+
+    expect(api.sendJobThreadTurn).toHaveBeenCalledWith({
+      applicationId: "app-curri",
+      text: "What should I emphasize?",
+      requestId: "job-thread-request-0001",
+    });
+  });
+
   it("routes job-thread mock-interview language into the durable mock API", async () => {
     expect(controller.isMockInterviewStartRequest).toBeTypeOf("function");
     expect(controller.startMockFromJobThread).toBeTypeOf("function");
