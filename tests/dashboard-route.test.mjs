@@ -37,7 +37,10 @@ import {
 } from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { loadModes } from "../src/core/profile/modes.mjs";
-import { loadAgentGuidanceSnapshot } from "../src/core/tracker/agent-guidance-snapshot.mjs";
+import {
+  createAgentGuidanceSnapshotLoader,
+  loadAgentGuidanceSnapshot,
+} from "../src/core/tracker/agent-guidance-snapshot.mjs";
 import { buildDashboardViewModel } from "../src/core/tracker/dashboard-data.js";
 import { loadLibrarySnapshot } from "../src/core/tracker/library-snapshot.mjs";
 import { loadSettingsSnapshot } from "../src/core/tracker/settings-snapshot.mjs";
@@ -77,7 +80,10 @@ after(() => {
   }
 });
 
-function bootServer(repoRoot, { now, candidateConfigGet } = {}) {
+function bootServer(
+  repoRoot,
+  { now, candidateConfigGet, automationStatus: automationStatusForRoute } = {}
+) {
   const routes = new Map();
   function addRoute(method, path, handler) {
     routes.set(`${method} ${path}`, handler);
@@ -88,10 +94,52 @@ function bootServer(repoRoot, { now, candidateConfigGet } = {}) {
     env: {},
     ...(now ? { now } : {}),
     ...(candidateConfigGet ? { candidateConfigGet } : {}),
+    ...(automationStatusForRoute ? { automationStatus: automationStatusForRoute } : {}),
   });
   mountDataRoutes({ addRoute, repoRoot, env: {} });
   return { routes };
 }
+
+test("GET /api/data/dashboard keeps every DB-derived slice on one committed snapshot", async () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot, {
+    meta: {},
+    applications: [
+      {
+        id: "app-snapshot",
+        company: "Snapshot Systems",
+        role: "Platform Engineer",
+        status: "interview",
+      },
+    ],
+    sourced: [],
+    sources: [],
+    communications: [],
+  });
+  const db = openDb({ repoRoot });
+  const beforeVersion = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+  let wroteDuringAssembly = false;
+  const server = bootServer(repoRoot, {
+    automationStatus() {
+      if (!wroteDuringAssembly) {
+        wroteDuringAssembly = true;
+        jobThreadSetPinned({ repoRoot, applicationId: "app-snapshot" });
+      }
+      return { capabilities: [] };
+    },
+  });
+
+  const first = await getJson(server, "/api/data/dashboard");
+  assert.equal(first.status, 200);
+  assert.equal(first.body.meta.version, beforeVersion);
+  assert.equal(first.body.data.chatFirst.jobThreads.length, 0);
+
+  const second = await getJson(server, "/api/data/dashboard");
+  assert.equal(second.status, 200);
+  assert.equal(second.body.meta.version, beforeVersion + 1);
+  assert.equal(second.body.data.chatFirst.jobThreads[0].applicationId, "app-snapshot");
+  assert.equal(second.body.data.chatFirst.jobThreads[0].pinned, true);
+});
 
 function closeServer(_server) {
   return Promise.resolve();
@@ -172,6 +220,50 @@ test("loadAgentGuidanceSnapshot forces Electron's child into Node mode and prese
     electronRunAsNode: "1",
     callerEnv: "preserved",
   });
+});
+
+test("dashboard agent guidance loads asynchronously with one shared refresh per root", async () => {
+  let finishRun;
+  let currentTime = 1_000;
+  let runs = 0;
+  const loader = createAgentGuidanceSnapshotLoader({
+    now: () => currentTime,
+    ttlMs: 30_000,
+    async runDoctor({ root, env }) {
+      runs += 1;
+      await new Promise((resolve) => {
+        finishRun = resolve;
+      });
+      return { root, caller: env.CAREERRAT_TEST_CALLER_ENV, run: runs };
+    },
+  });
+
+  const first = loader({ root: "/tmp/careerrat-a", env: { CAREERRAT_TEST_CALLER_ENV: "a" } });
+  const concurrent = loader({
+    root: "/tmp/careerrat-a",
+    env: { CAREERRAT_TEST_CALLER_ENV: "a" },
+  });
+  await Promise.resolve();
+  assert.equal(runs, 1);
+  finishRun();
+  assert.deepEqual(await first, { root: "/tmp/careerrat-a", caller: "a", run: 1 });
+  assert.deepEqual(await concurrent, { root: "/tmp/careerrat-a", caller: "a", run: 1 });
+
+  assert.deepEqual(
+    await loader({ root: "/tmp/careerrat-a", env: { CAREERRAT_TEST_CALLER_ENV: "a" } }),
+    { root: "/tmp/careerrat-a", caller: "a", run: 1 }
+  );
+  assert.equal(runs, 1);
+
+  currentTime += 30_001;
+  const refreshed = loader({
+    root: "/tmp/careerrat-a",
+    env: { CAREERRAT_TEST_CALLER_ENV: "a" },
+  });
+  await Promise.resolve();
+  assert.equal(runs, 2);
+  finishRun();
+  assert.deepEqual(await refreshed, { root: "/tmp/careerrat-a", caller: "a", run: 2 });
 });
 
 // ---------------------------------------------------------------------------
