@@ -77,13 +77,21 @@ tracker-*.png
 # Anchor to root with a leading slash — a bare "ROADMAP.md" also ignores the public
 # docs/ROADMAP.md (matches in every directory), which must stay tracked.
 /ROADMAP.md
+# The whole planning tree is local. It was tracked until 2026-08-27, which put
+# competitor intel and product plans in a public repo. Anything under here that
+# CI needs has been moved out to docs/ instead: contracts belong somewhere the
+# tests can read them on a fresh clone, and nothing untracked survives one.
+.planning/
 /ROADMAP-ARCHIVE.md
 /CLI-PARITY-EXEC-SUMMARY.html
 /RUNTIME-PARITY-PLAN.md
 /CODE-REVIEW-FINDINGS.md
 docs/COMPARISON.md
-# Internal build-spec artifacts — name the private origin / competitor.
-# Moved from docs/ to .internal/ so they never sit in a committed directory.
+# CLI-owned runtime state: ai.env (chmod 0600, loaded at server boot), the
+# tracker-dev pid/log, and update caches. Not documents — the review write-ups
+# that used to live here moved to .planning/review/ on 2026-08-27. This is one
+# of four legacy roots (candidate/, workspace/, config/, .internal/) that
+# src/core/paths/workspace.mjs is folding into .careerrat/; don't add a fifth.
 .internal/
 
 # Consolidated local user data root (candidate/workspace/generated config/internal).

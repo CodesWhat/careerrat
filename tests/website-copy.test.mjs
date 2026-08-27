@@ -95,7 +95,7 @@ test("public copy keeps local Application defaults and plain-English onboarding 
     architecture: "docs/ARCHITECTURE.md",
     changelog: "CHANGELOG.md",
     roadmap: "docs/ROADMAP.md",
-    acceptance: ".planning/QA-ACCEPTANCE.md",
+    acceptance: "docs/QA-ACCEPTANCE.md",
   };
   const copy = Object.fromEntries(
     await Promise.all(

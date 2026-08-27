@@ -246,8 +246,8 @@ nurse, a driver, and an engineer each bring their own config.
   research threads, and manual operation when no AI runtime is ready.
 
 - **Repository structure and hygiene** — product packages now live together under `apps/`
-  (`web`, `desktop`, `website`, and `docs`), design-only landing-page mockups are retained under
-  `.planning/archive/mockups`, shared fonts live under `assets/fonts`, and the monorepo uses one
+  (`web`, `desktop`, `website`, and `docs`), design-only landing-page mockups are retained
+  locally under `.planning/archive/mockups`, shared fonts live under `assets/fonts`, and the monorepo uses one
   root lockfile and one Turbo build graph. Release guards reject the old root directories,
   app-local lockfiles, tracked generated Next wiring, and stale build-output paths.
 - **Universal conversation intake**: paste or drop a résumé, job description,
@@ -310,7 +310,7 @@ nurse, a driver, and an engineer each bring their own config.
 
 This checkpoint consolidates `CLI-PARITY-EXEC-SUMMARY.html`,
 `RUNTIME-PARITY-PLAN.md`, the current branch audit, and live Codex canary
-evidence. The raw reviews are local evidence under `.internal/review/`; this
+evidence. The raw reviews are local evidence under `.planning/review/`; this
 section is the durable public release record. It passed packaged and release
 acceptance and shipped as v0.16.0.
 
@@ -565,7 +565,7 @@ adapter-owned boundary plus the evidence named above.
 The live fictional-résumé acceptance run exposed a false-zero search: 360 jobs
 scanned, zero presented. Three independent audits compared the live pipeline,
 the pre-chat-first CareerRat search, and `santifer/career-ops`. The exact local
-evidence is under `.internal/review/search-quality-*.json`.
+evidence is under `.planning/review/search-quality-*.json`.
 
 #### Verified findings and closures
 
@@ -669,7 +669,7 @@ executes the separate agent-owned `search_queries` lane.
 ### Code review remediation checkpoint (August 25, 2026)
 
 The verified review is archived locally at
-`.internal/review/CODE-REVIEW-FINDINGS.md`. Its fabricated finder output was
+`.planning/review/CODE-REVIEW-FINDINGS.md`. Its fabricated finder output was
 discarded before handoff; the findings below were rechecked against the named
 code paths. The refuted `call-ai` `outputName` report is intentionally excluded.
 
@@ -918,7 +918,9 @@ Renovate's Dependency Dashboard, which is permanent by design and is not a task.
   is on copy a person reads.
 - **#122**: the old phase-tracking planning scaffolding is gone, 225 files, including
   `.planning/phases/` and `STATE.md`. `QA-ACCEPTANCE.md`, `architecture/`, and
-  `archive/mockups/` stayed, the last two because tests read them.
+  `archive/mockups/` stayed. Superseded on 2026-08-27: the whole `.planning/` tree is
+  local now, and the two the tests read moved to `docs/QA-ACCEPTANCE.md` and
+  `docs/architecture/` so a fresh clone still has them.
 
 ### Picking this up cold
 
@@ -958,9 +960,9 @@ Open work, none of it blocking the release:
 - **QA re-runs are done.** `research-company`, `research-comp`, `research-boards`, and
   the `discover-companies` fourth leg were all re-run August 19, 2026 against a live
   installed Claude Code CLI runtime, with every write confirmed in durable storage and
-  verified across a server restart. The record is in `.planning/QA-ACCEPTANCE.md`.
+  verified across a server restart. The record is in `docs/QA-ACCEPTANCE.md`.
   G-09 was decided (rehydrate on reload) and shipped in #159; its decision record
-  is checked off in `.planning/QA-ACCEPTANCE.md`.
+  is checked off in `docs/QA-ACCEPTANCE.md`.
 - **Security hardening, partially landed:** the two GitHub-only jobs in
   desktop-release.yml run harden-runner in `block` mode with an allowlist built
   from the v0.11.0 runs' audit traces (#155); the macOS build job and every
@@ -1213,8 +1215,8 @@ failure instead of a runtime throw in front of a user.
 ### Skill-to-screen product coherence gate (active August 14, 2026)
 
 The completed acceptance sweep proved the released surfaces and distribution artifacts. A
-broader behavior audit is now active: [`.planning/SKILL-UX-AUDIT.md`](../.planning/SKILL-UX-AUDIT.md)
-maps every original CareerRat skill to its natural-language entry, visible progress, confirmation
+broader behavior audit is now active. `SKILL-UX-AUDIT.md` is a local working document
+rather than a published one, and it maps every original CareerRat skill to its natural-language entry, visible progress, confirmation
 boundary, durable result, and next action. Backend or external-agent availability alone does not
 count as native app support.
 
@@ -1467,7 +1469,7 @@ cleanly after reload, and the fresh browser context reported zero errors and war
 
 ### Product-surface acceptance sweep (updated August 17, 2026)
 
-The live result ledger is [`.planning/QA-ACCEPTANCE.md`](../.planning/QA-ACCEPTANCE.md); this
+The live result ledger is [`docs/QA-ACCEPTANCE.md`](QA-ACCEPTANCE.md); this
 section remains the release-level source of truth. All 103 recorded findings are fixed and
 live-retested. The broader skill-to-screen audit above remains active until every user-facing
 original skill has a coherent native path.
@@ -1550,8 +1552,8 @@ that acceptance pass actually proved.
   dashboard must agree; never say "already hunting" until a durable sourcing run exists.
 - **Fresh-install regression** — automate clean-home setup through completion, first search,
   restart, and dashboard entry, with no unexpected 404/409/5xx responses or silent failures.
-- **Repository hygiene** — keep the website and docs under `apps/`, design history under
-  `.planning/archive`, fonts under `assets/fonts`, generated output ignored, the legacy brand
+- **Repository hygiene** — keep the website and docs under `apps/`, design history local
+  under `.planning/archive`, fonts under `assets/fonts`, generated output ignored, the legacy brand
   absent from paths and content, and the repository-wide lint gate green.
 
 - **Conversational first ingestion** — accept a résumé, learn desired jobs and hard gates,
@@ -1602,7 +1604,7 @@ that acceptance pass actually proved.
   selection through the installed-CLI runtime path (the small-fast tier hint already works
   for API-key users but is dropped when a subscription CLI runs the call) and pass the
   orchestrator's computed context digest to fan-out subagents instead of re-reading config
-  per call. Plan and findings: `.planning/SEARCH-SHAPE-EVAL.md`.
+  per call. Plan and findings live locally in `.planning/SEARCH-SHAPE-EVAL.md`.
 - **Desktop public distribution** — completed August 14, 2026. The restored local Keychain profile
   and permanent `release:dmg` stage produce a signed, Apple-notarized, stapled, and
   Gatekeeper-approved DMG in one command. Runtime/path ownership, navigation, clean-device first

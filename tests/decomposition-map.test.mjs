@@ -10,9 +10,9 @@ import { parseYaml } from "../src/core/profile/yaml.mjs";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const artifactPaths = {
-  decomposition: ".planning/architecture/skill-decomposition.yml",
-  discoverCompanies: ".planning/architecture/discover-companies-target-contract.md",
-  routingPolicy: ".planning/architecture/runtime-routing-policy.md",
+  decomposition: "docs/architecture/skill-decomposition.yml",
+  discoverCompanies: "docs/architecture/discover-companies-target-contract.md",
+  routingPolicy: "docs/architecture/runtime-routing-policy.md",
 };
 
 function readRepoFile(relPath) {
@@ -52,6 +52,7 @@ const privateOwnerRoots = new Set([
   "candidate",
   "workspace",
   ".internal",
+  ".planning",
   ".careerrat",
   "tmp-skill-conversion",
 ]);
