@@ -98,13 +98,18 @@ export async function inspectInstalledRuntimeState({
   detectImpl = detectInstalledRuntimes,
   probeImpl = probeInstalledRuntime,
   autoSelect = true,
+  forceCompletionProbeFor = null,
 } = {}) {
   const runtimes = await Promise.all(
     detectImpl({ env }).map(async (runtime) => {
       const supported = isSupportedInstalledRuntime(runtime.id);
       const probe =
         runtime.available && supported
-          ? await probeImpl(runtime, { env, cwd: repoRoot })
+          ? await probeImpl(runtime, {
+              env,
+              cwd: repoRoot,
+              forceCompletionProbe: runtime.id === forceCompletionProbeFor,
+            })
           : runtime.available
             ? { status: "detected_unverified", ready: false, action: null, capabilities: null }
             : { status: "not_installed", ready: false, action: null, capabilities: null };
@@ -211,13 +216,14 @@ export function mountInstalledRuntimeRoutes({
   probeCustomImpl = probeCustomRuntimeCommand,
   platform = process.platform,
 } = {}) {
-  const inspect = (autoSelect = true) =>
+  const inspect = (autoSelect = true, { forceCompletionProbeFor = null } = {}) =>
     inspectInstalledRuntimeState({
       repoRoot,
       env,
       detectImpl,
       probeImpl,
       autoSelect,
+      forceCompletionProbeFor,
     });
 
   addRoute("GET", "/api/settings/ai-preferences", (_req, res) => {
@@ -278,7 +284,7 @@ export function mountInstalledRuntimeRoutes({
       return;
     }
     const runtimeId = String(body?.runtimeId || "").trim();
-    const state = await inspect(false);
+    const state = await inspect(false, { forceCompletionProbeFor: runtimeId });
     const runtime = state.runtimes.find(({ id }) => id === runtimeId);
     if (!runtime) {
       sendJson(res, 400, { ok: false, code: "RUNTIME_UNKNOWN" });
@@ -343,6 +349,16 @@ export function mountInstalledRuntimeRoutes({
       });
       return;
     }
+    if (!runtime.ready && runtime.status === "completion_probe_failed") {
+      sendJson(res, 409, {
+        ok: false,
+        code: "RUNTIME_PROBE_FAILED",
+        error: runtime.probeMessage || "This AI tool did not finish its connection check.",
+        action: runtime.action || "retry",
+        actionLabel: runtime.actionLabel || "Try again",
+      });
+      return;
+    }
     if (!hasCompleteCareerRatCapabilities(runtime.capabilities, runtime.id)) {
       sendJson(res, 409, {
         ok: false,
@@ -354,8 +370,10 @@ export function mountInstalledRuntimeRoutes({
     if (!runtime.ready) {
       sendJson(res, 409, {
         ok: false,
-        code: "RUNTIME_AUTH_REQUIRED",
-        action: runtime.action || "start_sign_in",
+        code: "RUNTIME_PROBE_FAILED",
+        error: runtime.probeMessage || "This AI tool did not finish its connection check.",
+        action: runtime.action || "retry",
+        actionLabel: runtime.actionLabel || "Try again",
       });
       return;
     }

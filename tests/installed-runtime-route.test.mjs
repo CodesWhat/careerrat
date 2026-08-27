@@ -71,8 +71,8 @@ function boot({
     repoRoot,
     env,
     detectImpl: () => inventory,
-    probeImpl: (runtime) => {
-      onProbe?.(runtime.id);
+    probeImpl: (runtime, options) => {
+      onProbe?.(runtime.id, options);
       return probes[runtime.id];
     },
     startSignInImpl,
@@ -202,6 +202,76 @@ test("inventory auto-selects the sole verified full-workflow CLI", async () => {
     response.body.runtimes.find(({ id }) => id === "gemini").installUrl,
     "https://github.com/google-gemini/gemini-cli"
   );
+});
+
+test("a signed-in CLI without a usable completion stays unselected with a plain retry action", async () => {
+  const probeCalls = [];
+  const failedProbe = {
+    status: "completion_probe_failed",
+    ready: false,
+    action: "retry",
+    actionLabel: "Try again",
+    probeMessage: "Codex is signed in, but it didn't return a usable test reply.",
+    capabilityReason: "Codex is signed in, but it didn't return a usable test reply.",
+    capabilities: {
+      completion: false,
+      structuredOutput: false,
+      appWorkflows: false,
+      exactRead: false,
+      publicWeb: false,
+      liveActivity: false,
+      resumable: false,
+    },
+  };
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {
+      claude: { status: "authentication_required", ready: false, action: "start_sign_in" },
+      codex: failedProbe,
+    },
+    onProbe(runtimeId, options) {
+      probeCalls.push({ runtimeId, options });
+    },
+  });
+
+  const inventory = await request(server, "GET", "/api/settings/ai-runtimes");
+  const codex = inventory.body.runtimes.find(({ id }) => id === "codex");
+  assert.equal(inventory.body.selectedId, null);
+  assert.equal(codex.selectable, false);
+  assert.equal(codex.probeMessage, "Codex is signed in, but it didn't return a usable test reply.");
+  assert.equal(codex.action, "retry");
+  assert.equal(codex.actionLabel, "Try again");
+  assert.equal(
+    probeCalls.find(({ runtimeId }) => runtimeId === "codex").options.forceCompletionProbe,
+    false
+  );
+
+  const retried = await request(server, "POST", "/api/settings/ai-runtime/probe", {
+    runtimeId: "codex",
+  });
+  assert.equal(retried.status, 200);
+  assert.deepEqual(
+    probeCalls.slice(-2).map(({ runtimeId, options }) => ({
+      runtimeId,
+      forceCompletionProbe: options.forceCompletionProbe,
+    })),
+    [
+      { runtimeId: "claude", forceCompletionProbe: false },
+      { runtimeId: "codex", forceCompletionProbe: true },
+    ]
+  );
+
+  const selected = await request(server, "POST", "/api/settings/ai-runtime/select", {
+    runtimeId: "codex",
+  });
+  assert.equal(selected.status, 409);
+  assert.deepEqual(selected.body, {
+    ok: false,
+    code: "RUNTIME_PROBE_FAILED",
+    error: "Codex is signed in, but it didn't return a usable test reply.",
+    action: "retry",
+    actionLabel: "Try again",
+  });
 });
 
 test("AI preference routes load defaults and persist provider-neutral choices", async () => {

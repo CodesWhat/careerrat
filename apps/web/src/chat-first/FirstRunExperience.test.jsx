@@ -275,6 +275,44 @@ describe("FirstRunExperience", () => {
     expect(onSelectEngine).not.toHaveBeenCalled();
   });
 
+  it("shows a failed completion check as a plain retry instead of Ready", async () => {
+    const { FirstRunExperience } = await loadFirstRun();
+    const onRetryEngine = vi.fn();
+    const tree = FirstRunExperience({
+      stage: "engine",
+      engines: [
+        {
+          id: "codex",
+          name: "Codex",
+          supported: true,
+          detected: true,
+          ready: false,
+          selectable: false,
+          status: "completion_probe_failed",
+          action: "retry",
+          actionLabel: "Try again",
+          probeMessage: "Codex is signed in, but it didn't return a usable test reply.",
+        },
+      ],
+      onRetryEngine,
+    });
+    const html = renderToStaticMarkup(tree);
+    const codex = findElement(
+      tree,
+      (node) => node.type?.name === "DetectedEngine" && node.props.engine.id === "codex"
+    );
+    const retry = findElement(
+      codex.type(codex.props),
+      (node) => node.type === "button" && textOf(node) === "Try again"
+    );
+
+    expect(html).toContain("didn&#x27;t return a usable test reply");
+    expect(html).toContain("NEEDS A RETRY");
+    expect(html).not.toContain(">READY</span>");
+    retry.props.onClick();
+    expect(onRetryEngine).toHaveBeenCalledWith("codex");
+  });
+
   it("gives a first-time user a plain-English Claude setup path", async () => {
     const { FirstRunExperience } = await loadFirstRun();
     const onStartGuidedSetup = vi.fn();

@@ -59,6 +59,7 @@ function engineDescription(engine) {
     return "Detected on this computer. Sign in before CareerRat can use it.";
   if (presentation.state === "ready")
     return `Ready to run the complete CareerRat workflow with ${engine.name || "this AI CLI"}.`;
+  if (engine?.probeMessage) return engine.probeMessage;
   return "This provider is not available on this computer.";
 }
 
@@ -105,7 +106,7 @@ function DetectedEngine({
           <strong>{engine.name || "AI engine"}</strong>
         </span>
         <span className="cf-first-run__engine-description">{engineDescription(engine)}</span>
-        {engine.capabilityReason ? (
+        {engine.capabilityReason && engine.capabilityReason !== engine.probeMessage ? (
           <span className="cf-first-run__engine-capability">{engine.capabilityReason}</span>
         ) : null}
       </span>
@@ -149,7 +150,7 @@ function DetectedEngine({
               disabled={submitting}
               onClick={() => onRetryEngine?.(engine.id)}
             >
-              Check again
+              {engine.actionLabel || "Check again"}
             </button>
           ) : null}
         </span>

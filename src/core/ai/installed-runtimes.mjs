@@ -15,12 +15,23 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, delimiter, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  delimiter,
+  dirname,
+  extname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { fetchPublicHttpText, validatePublicHttpUrl } from "../net/public-http-fetch.mjs";
@@ -546,6 +557,223 @@ function versionAtLeast(value, floor) {
 }
 
 const MAX_RUNTIME_PROBE_BYTES = 64 * 1024;
+const COMPLETION_SMOKE_RECEIPT = "CAREERRAT_COMPLETION_READY";
+const COMPLETION_SMOKE_TIMEOUT_MS = 30_000;
+const COMPLETION_SMOKE_SUCCESS_TTL_MS = 24 * 60 * 60 * 1000;
+const COMPLETION_SMOKE_FAILURE_TTL_MS = 30 * 1000;
+const COMPLETION_SMOKE_CACHE_RELPATH = ".internal/runtime-completion-smoke.json";
+const ACTIVE_COMPLETION_SMOKES = new Map();
+
+const COMPLETION_SMOKE_SCHEMA = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    receipt: { type: "string", const: COMPLETION_SMOKE_RECEIPT },
+  },
+  required: ["receipt"],
+});
+
+function runtimeBinaryFingerprint(path) {
+  try {
+    const stats = statSync(path);
+    return `${stats.size}:${Math.trunc(stats.mtimeMs)}`;
+  } catch {
+    return null;
+  }
+}
+
+function completionSmokeCachePath({ cwd, env }) {
+  return userPath({ repoRoot: cwd, env }, COMPLETION_SMOKE_CACHE_RELPATH);
+}
+
+function sanitizedCompletionSmokeEntry(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const path = String(value.path || "").trim();
+  const version = String(value.version || "").trim();
+  const binaryFingerprint = String(value.binaryFingerprint || "").trim();
+  const checkedAt = String(value.checkedAt || "").trim();
+  if (
+    !path ||
+    !version ||
+    !binaryFingerprint ||
+    !checkedAt ||
+    Number.isNaN(Date.parse(checkedAt)) ||
+    typeof value.ok !== "boolean"
+  ) {
+    return null;
+  }
+  return { path, version, binaryFingerprint, checkedAt, ok: value.ok };
+}
+
+function loadCompletionSmokeCache({ runtimeId, cwd, env }) {
+  try {
+    const path = completionSmokeCachePath({ cwd, env });
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    return sanitizedCompletionSmokeEntry(parsed?.runtimes?.[runtimeId]);
+  } catch {
+    return null;
+  }
+}
+
+function saveCompletionSmokeCache({ runtimeId, cwd, env, entry }) {
+  const path = completionSmokeCachePath({ cwd, env });
+  const runtimes = {};
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    if (
+      parsed?.runtimes &&
+      typeof parsed.runtimes === "object" &&
+      !Array.isArray(parsed.runtimes)
+    ) {
+      for (const [id, value] of Object.entries(parsed.runtimes)) {
+        if (!installedRuntimeDefinition(id)?.supported) continue;
+        const sanitized = sanitizedCompletionSmokeEntry(value);
+        if (sanitized) runtimes[id] = sanitized;
+      }
+    }
+  } catch {
+    // A missing or damaged cache is replaced by the one bounded receipt below.
+  }
+  runtimes[runtimeId] = sanitizedCompletionSmokeEntry(entry);
+  mkdirSync(dirname(path), { recursive: true });
+  const tmpPath = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmpPath, `${JSON.stringify({ schemaVersion: 1, runtimes }, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  chmodSync(tmpPath, 0o600);
+  renameSync(tmpPath, path);
+  chmodSync(path, 0o600);
+}
+
+function completionSmokeMessage(runtime, ok) {
+  const name = runtime?.name || installedRuntimeDefinition(runtime?.id)?.name || "This AI CLI";
+  return ok
+    ? `${name} returned a test reply and is ready.`
+    : `${name} is installed and signed in, but it didn't return a usable test reply.`;
+}
+
+function completionSmokeResult({ runtime, entry, cached }) {
+  return {
+    ok: entry.ok,
+    cached,
+    checkedAt: entry.checkedAt,
+    probeMessage: completionSmokeMessage(runtime, entry.ok),
+    action: entry.ok ? null : "retry",
+    actionLabel: entry.ok ? null : "Try again",
+  };
+}
+
+function cachedCompletionSmoke({ runtime, version, binaryFingerprint, entry, nowMs }) {
+  if (
+    !entry ||
+    entry.path !== runtime.path ||
+    entry.version !== version ||
+    entry.binaryFingerprint !== binaryFingerprint
+  ) {
+    return null;
+  }
+  const ageMs = nowMs - Date.parse(entry.checkedAt);
+  const ttlMs = entry.ok ? COMPLETION_SMOKE_SUCCESS_TTL_MS : COMPLETION_SMOKE_FAILURE_TTL_MS;
+  return ageMs >= 0 && ageMs < ttlMs
+    ? completionSmokeResult({ runtime, entry, cached: true })
+    : null;
+}
+
+export async function probeInstalledRuntimeCompletion({
+  runtime,
+  version,
+  cwd = process.cwd(),
+  env = process.env,
+  force = false,
+  timeoutMs = COMPLETION_SMOKE_TIMEOUT_MS,
+  nowImpl = Date.now,
+  runtimeFingerprintImpl = runtimeBinaryFingerprint,
+  loadCompletionSmokeCacheImpl = loadCompletionSmokeCache,
+  saveCompletionSmokeCacheImpl = saveCompletionSmokeCache,
+  runInstalledRuntimeImpl = runInstalledRuntime,
+} = {}) {
+  const definition = installedRuntimeDefinition(runtime?.id);
+  if (!definition?.supported || !runtime?.path || !version) {
+    return completionSmokeResult({
+      runtime,
+      cached: false,
+      entry: { ok: false, checkedAt: new Date(nowImpl()).toISOString() },
+    });
+  }
+  const binaryFingerprint = runtimeFingerprintImpl(runtime.path);
+  const nowMs = nowImpl();
+  if (!binaryFingerprint) {
+    return completionSmokeResult({
+      runtime,
+      cached: false,
+      entry: { ok: false, checkedAt: new Date(nowMs).toISOString() },
+    });
+  }
+  if (!force) {
+    const cached = cachedCompletionSmoke({
+      runtime,
+      version,
+      binaryFingerprint,
+      entry: loadCompletionSmokeCacheImpl({ runtimeId: runtime.id, cwd, env }),
+      nowMs,
+    });
+    if (cached) return cached;
+  }
+
+  const key = `${runtime.id}:${runtime.path}:${version}:${binaryFingerprint}`;
+  const active = ACTIVE_COMPLETION_SMOKES.get(key);
+  if (active) return active;
+  const smoke = (async () => {
+    let ok = false;
+    try {
+      const capabilityEvidence = Object.fromEntries(
+        Object.keys(definition.capabilities || {}).map((capability) => [
+          capability,
+          capability === "completion" || capability === "structuredOutput",
+        ])
+      );
+      const result = await runInstalledRuntimeImpl({
+        runtime: { ...runtime, capabilities: capabilityEvidence },
+        prompt:
+          "Return the exact CareerRat readiness receipt requested by the output schema. Do not use tools or inspect files.",
+        outputSchema: COMPLETION_SMOKE_SCHEMA,
+        tools: [],
+        skill: null,
+        repoRoot: null,
+        approvedReadPaths: [],
+        env,
+        timeoutMs: Math.min(COMPLETION_SMOKE_TIMEOUT_MS, Math.max(1, timeoutMs)),
+      });
+      const parsed = JSON.parse(String(result?.text || ""));
+      ok =
+        parsed?.receipt === COMPLETION_SMOKE_RECEIPT &&
+        Object.keys(parsed).length === 1 &&
+        !Array.isArray(parsed);
+    } catch {
+      ok = false;
+    }
+    const entry = {
+      path: runtime.path,
+      version,
+      binaryFingerprint,
+      checkedAt: new Date(nowImpl()).toISOString(),
+      ok,
+    };
+    try {
+      saveCompletionSmokeCacheImpl({ runtimeId: runtime.id, cwd, env, entry });
+    } catch {
+      // Readiness stays factual even when the private optimization cache cannot be written.
+    }
+    return completionSmokeResult({ runtime, entry, cached: false });
+  })();
+  ACTIVE_COMPLETION_SMOKES.set(key, smoke);
+  try {
+    return await smoke;
+  } finally {
+    if (ACTIVE_COMPLETION_SMOKES.get(key) === smoke) ACTIVE_COMPLETION_SMOKES.delete(key);
+  }
+}
 
 async function runInstalledRuntimeProbe(
   invocation,
@@ -725,6 +953,8 @@ export async function probeInstalledRuntime(
     timeoutMs = 5000,
     cwd = process.cwd(),
     probeAcpRuntimeImpl = probeAcpRuntime,
+    completionProbeImpl = probeInstalledRuntimeCompletion,
+    forceCompletionProbe = false,
     platform = process.platform,
   } = {}
 ) {
@@ -734,6 +964,7 @@ export async function probeInstalledRuntime(
   const definition = installedRuntimeDefinition(runtime.id);
   if (!definition) return { status: "unsupported", ready: false, action: null };
   const childEnv = buildInstalledRuntimeChildEnv({ env });
+  let runtimeVersion = null;
 
   if (definition.minimumCompletionVersion) {
     const versionInvocation = runtimeProcessInvocation(runtime.path, ["--version"], {
@@ -765,6 +996,9 @@ export async function probeInstalledRuntime(
         capabilityReason: `Update ${definition.name} to ${definition.minimumCompletionVersion} or newer for the complete CareerRat workflow.`,
       };
     }
+    runtimeVersion = parseVersion(
+      `${versionResult?.stdout || ""}\n${versionResult?.stderr || ""}`
+    )?.join(".");
   }
 
   if (definition.minimumBoundaryVersion) {
@@ -800,6 +1034,9 @@ export async function probeInstalledRuntime(
         capabilityReason: `Update ${definition.name} to ${definition.minimumBoundaryVersion} or newer for secure CareerRat tool runs.`,
       };
     }
+    runtimeVersion = parseVersion(
+      `${versionResult?.stdout || ""}\n${versionResult?.stderr || ""}`
+    )?.join(".");
   }
 
   if (definition.protocol === "acp") {
@@ -849,6 +1086,31 @@ export async function probeInstalledRuntime(
     return { status: "probe_failed", ready: false, action: "retry" };
   }
   if (result?.status === 0) {
+    if (definition.supported === true) {
+      const completionProbe = await completionProbeImpl({
+        runtime: { ...runtime, name: definition.name },
+        version: runtimeVersion,
+        cwd,
+        env: childEnv,
+        force: forceCompletionProbe,
+        timeoutMs: Math.min(COMPLETION_SMOKE_TIMEOUT_MS, Math.max(1, timeoutMs * 6)),
+      });
+      if (completionProbe?.ok !== true) {
+        const capabilityReason =
+          completionProbe?.probeMessage || completionSmokeMessage(runtime, false);
+        return {
+          status: "completion_probe_failed",
+          ready: false,
+          action: completionProbe?.action || "retry",
+          actionLabel: completionProbe?.actionLabel || "Try again",
+          probeMessage: capabilityReason,
+          capabilities: installedRuntimeCapabilities(definition.id, {
+            capabilityEvidence: capabilityEvidenceForProbe(definition, { completion: false }),
+          }).capabilities,
+          capabilityReason,
+        };
+      }
+    }
     const runtimeCapabilities = installedRuntimeCapabilities(definition.id, {
       capabilityEvidence: capabilityEvidenceForProbe(definition),
     }).capabilities;

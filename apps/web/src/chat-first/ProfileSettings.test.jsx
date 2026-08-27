@@ -761,6 +761,45 @@ describe("ProfileSettings", () => {
     expect(onRetryEngine).toHaveBeenCalledWith("claude");
   });
 
+  it("shows the completion probe failure and its retry action in engine settings", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const onRetryEngine = vi.fn();
+    const tree = ProfileSettings({
+      activeTab: "settings",
+      permissions: PERMISSIONS,
+      engine: {
+        name: "Codex",
+        connected: false,
+        choices: [
+          {
+            id: "codex",
+            name: "Codex",
+            supported: true,
+            available: true,
+            ready: false,
+            selectable: false,
+            status: "completion_probe_failed",
+            action: "retry",
+            actionLabel: "Try again",
+            probeMessage: "Codex is signed in, but it didn't return a usable test reply.",
+          },
+        ],
+      },
+      enginePickerOpen: true,
+      onRetryEngine,
+    });
+    const html = renderToStaticMarkup(tree);
+    const retry = findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "Try again"
+    );
+
+    expect(html).toContain("didn&#x27;t return a usable test reply");
+    expect(html).toContain("Needs a retry");
+    retry.props.onClick();
+    expect(onRetryEngine).toHaveBeenCalledWith("codex");
+  });
+
   it("presents supported engines with one Ready contract in settings", async () => {
     const { ProfileSettings } = await loadProfile();
     const html = renderToStaticMarkup(

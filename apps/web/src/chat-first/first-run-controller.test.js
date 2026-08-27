@@ -237,6 +237,34 @@ describe("chat-first onboarding controller", () => {
     });
   });
 
+  it("preserves the runtime completion probe message and retry label for first-run UI", async () => {
+    const controller = await import("./first-run-controller.js");
+    const [choice] = controller.firstRunRuntimeChoices({
+      runtimes: [
+        {
+          id: "codex",
+          name: "Codex",
+          supported: true,
+          available: true,
+          ready: false,
+          selectable: false,
+          status: "completion_probe_failed",
+          action: "retry",
+          actionLabel: "Try again",
+          probeMessage: "Codex is signed in, but it didn't return a usable test reply.",
+        },
+      ],
+    });
+
+    expect(choice).toMatchObject({
+      action: "retry",
+      actionLabel: "Try again",
+      probeMessage: "Codex is signed in, but it didn't return a usable test reply.",
+      presentationState: "check_failed",
+      presentationLabel: "Needs a retry",
+    });
+  });
+
   it("normalizes current and graded provider inventory into honest capability states", async () => {
     const controller = await import("./first-run-controller.js");
 

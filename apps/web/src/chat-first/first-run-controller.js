@@ -22,6 +22,7 @@ const EXPLICIT_ACTION_LABELS = {
 const RUNTIME_PRESENTATION_LABELS = {
   ready: "Ready",
   auth_required: "Auth required",
+  check_failed: "Needs a retry",
   unavailable: "Unavailable",
 };
 
@@ -46,6 +47,12 @@ export function runtimePresentation(runtime = {}) {
     return {
       state: "auth_required",
       label: RUNTIME_PRESENTATION_LABELS.auth_required,
+    };
+  }
+  if (status === "completion_probe_failed") {
+    return {
+      state: "check_failed",
+      label: RUNTIME_PRESENTATION_LABELS.check_failed,
     };
   }
 
@@ -106,6 +113,8 @@ export function firstRunRuntimeChoices(state) {
         selected: runtime.id === state?.selectedId,
         status: runtime.status,
         action: runtime.action,
+        actionLabel: runtime.actionLabel || null,
+        probeMessage: runtime.probeMessage || null,
         installUrl: runtime.installUrl || null,
         capabilityReason: runtime.capabilityReason || null,
       };

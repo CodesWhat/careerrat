@@ -31,7 +31,7 @@ import {
   ONE_SHOT_RUNTIME_TIMEOUT_MS,
   parseCustomCommandString,
   probeCustomRuntimeCommand,
-  probeInstalledRuntime,
+  probeInstalledRuntime as probeInstalledRuntimeCore,
   RUNTIME_TOOL_PROFILE_UNSUPPORTED,
   readInstalledRuntimeScopedFile,
   runInstalledRuntime,
@@ -126,6 +126,20 @@ function executable(path) {
 
 function verifiedClaudeVersion() {
   return { status: 0, stdout: "2.1.241 (Claude Code)", stderr: "" };
+}
+
+function probeInstalledRuntime(runtime, options = {}) {
+  return probeInstalledRuntimeCore(runtime, {
+    completionProbeImpl: async () => ({
+      ok: true,
+      cached: false,
+      checkedAt: "2026-08-27T16:00:00.000Z",
+      probeMessage: "The AI CLI returned a test reply and is ready.",
+      action: null,
+      actionLabel: null,
+    }),
+    ...options,
+  });
 }
 
 test("runtime registry covers the supported installed CLI set", () => {
@@ -384,6 +398,153 @@ test("auth probe exposes only bounded readiness state, never CLI account output"
     action: "start_sign_in",
   });
   assert.equal(JSON.stringify(signedOut).includes("secret"), false);
+});
+
+test("supported runtimes stay unready until the bounded completion smoke succeeds", async () => {
+  const result = await probeInstalledRuntimeCore(
+    { id: "codex", path: "/safe/codex", available: true },
+    {
+      spawnSyncImpl(_path, args) {
+        return args[0] === "--version"
+          ? { status: 0, stdout: "codex-cli 0.149.1", stderr: "" }
+          : { status: 0, stdout: "Logged in", stderr: "" };
+      },
+      completionProbeImpl: async () => ({
+        ok: false,
+        cached: false,
+        checkedAt: "2026-08-27T16:00:00.000Z",
+        probeMessage: "Codex is installed and signed in, but it didn't return a usable test reply.",
+        action: "retry",
+        actionLabel: "Try again",
+      }),
+    }
+  );
+
+  assert.deepEqual(result, {
+    status: "completion_probe_failed",
+    ready: false,
+    action: "retry",
+    actionLabel: "Try again",
+    probeMessage: "Codex is installed and signed in, but it didn't return a usable test reply.",
+    capabilities: {
+      completion: false,
+      structuredOutput: false,
+      appWorkflows: false,
+      exactRead: false,
+      publicWeb: false,
+      liveActivity: false,
+      resumable: false,
+      taskTools: false,
+      research: false,
+    },
+    capabilityReason: "Codex is installed and signed in, but it didn't return a usable test reply.",
+  });
+});
+
+test("completion smoke uses the exact no-tool runtime boundary and caches only a bounded receipt", async () => {
+  const runtimeModule = await import("../src/core/ai/installed-runtimes.mjs");
+  assert.equal(typeof runtimeModule.probeInstalledRuntimeCompletion, "function");
+  const cache = new Map();
+  const calls = [];
+  const runtime = { id: "claude", name: "Claude Code", path: "/safe/claude", available: true };
+  const options = {
+    runtime,
+    version: "2.1.241",
+    cwd: "/safe/repo",
+    env: { HOME: "/safe/home" },
+    nowImpl: () => Date.parse("2026-08-27T16:00:00.000Z"),
+    runtimeFingerprintImpl: () => "120:200",
+    loadCompletionSmokeCacheImpl: ({ runtimeId }) => cache.get(runtimeId) || null,
+    saveCompletionSmokeCacheImpl: ({ runtimeId, entry }) => cache.set(runtimeId, entry),
+    async runInstalledRuntimeImpl(args) {
+      calls.push(args);
+      return { text: '{"receipt":"CAREERRAT_COMPLETION_READY"}' };
+    },
+  };
+
+  const first = await runtimeModule.probeInstalledRuntimeCompletion(options);
+  const second = await runtimeModule.probeInstalledRuntimeCompletion(options);
+
+  assert.equal(first.ok, true);
+  assert.equal(first.cached, false);
+  assert.equal(second.ok, true);
+  assert.equal(second.cached, true);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].tools, []);
+  assert.equal(calls[0].skill, null);
+  assert.equal(calls[0].repoRoot, null);
+  assert.ok(calls[0].timeoutMs > 0 && calls[0].timeoutMs <= 30_000);
+  assert.deepEqual(calls[0].outputSchema.required, ["receipt"]);
+  assert.equal(JSON.stringify(calls[0]).includes("/safe/repo"), false);
+  assert.deepEqual(Object.keys(cache.get("claude")).sort(), [
+    "binaryFingerprint",
+    "checkedAt",
+    "ok",
+    "path",
+    "version",
+  ]);
+});
+
+test("completion smoke rejects a successful process without the exact parseable receipt", async () => {
+  const { probeInstalledRuntimeCompletion } = await import("../src/core/ai/installed-runtimes.mjs");
+  const result = await probeInstalledRuntimeCompletion({
+    runtime: { id: "codex", name: "Codex", path: "/safe/codex", available: true },
+    version: "0.149.1",
+    nowImpl: () => Date.parse("2026-08-27T16:00:00.000Z"),
+    runtimeFingerprintImpl: () => "120:200",
+    loadCompletionSmokeCacheImpl: () => null,
+    saveCompletionSmokeCacheImpl: () => {},
+    runInstalledRuntimeImpl: async () => ({ text: "CAREERRAT_COMPLETION_READY" }),
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.action, "retry");
+  assert.equal(result.actionLabel, "Try again");
+  assert.match(result.probeMessage, /didn't return a usable test reply/i);
+});
+
+test("completion smoke rewrites its private cache with only supported bounded receipts", async () => {
+  const { probeInstalledRuntimeCompletion } = await import("../src/core/ai/installed-runtimes.mjs");
+  const careerratHome = mkdtempSync(join(tmpdir(), "careerrat-completion-cache-"));
+  const cacheDir = join(careerratHome, "internal");
+  const cachePath = join(cacheDir, "runtime-completion-smoke.json");
+  mkdirSync(cacheDir, { recursive: true });
+  writeFileSync(
+    cachePath,
+    JSON.stringify({
+      schemaVersion: 1,
+      runtimes: {
+        attacker: { arbitrary: "this must not survive a cache write" },
+        claude: { path: "/bad/claude", ok: "yes", extra: "also invalid" },
+      },
+    })
+  );
+
+  try {
+    await probeInstalledRuntimeCompletion({
+      runtime: { id: "codex", name: "Codex", path: "/safe/codex", available: true },
+      version: "0.149.1",
+      cwd: careerratHome,
+      env: { CAREERRAT_HOME: careerratHome },
+      nowImpl: () => Date.parse("2026-08-27T16:00:00.000Z"),
+      runtimeFingerprintImpl: () => "120:200",
+      runInstalledRuntimeImpl: async () => ({
+        text: '{"receipt":"CAREERRAT_COMPLETION_READY"}',
+      }),
+    });
+
+    const cache = JSON.parse(readFileSync(cachePath, "utf8"));
+    assert.deepEqual(Object.keys(cache.runtimes), ["codex"]);
+    assert.deepEqual(Object.keys(cache.runtimes.codex).sort(), [
+      "binaryFingerprint",
+      "checkedAt",
+      "ok",
+      "path",
+      "version",
+    ]);
+  } finally {
+    rmSync(careerratHome, { recursive: true, force: true });
+  }
 });
 
 test("Windows readiness probes launch detected Claude and Codex npm shims through fixed cmd argv", async () => {

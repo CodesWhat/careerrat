@@ -533,7 +533,9 @@ function EnginePicker({
                 <div>
                   <strong>{choice.name || "AI engine"}</strong>
                   <span>{runtimeStatus(choice)}</span>
-                  {choice.capabilityReason ? <span>{choice.capabilityReason}</span> : null}
+                  {choice.probeMessage || choice.capabilityReason ? (
+                    <span>{choice.probeMessage || choice.capabilityReason}</span>
+                  ) : null}
                   {signingIn ? (
                     <span role="status">Finish sign-in in your browser, then check again.</span>
                   ) : null}
@@ -552,6 +554,10 @@ function EnginePicker({
               ) : choice.action === "start_sign_in" ? (
                 <button type="button" disabled={busy} onClick={() => onConnect?.(choice.id)}>
                   Sign in
+                </button>
+              ) : choice.action === "retry" ? (
+                <button type="button" disabled={busy} onClick={() => onRetry?.(choice.id)}>
+                  {choice.actionLabel || "Try again"}
                 </button>
               ) : choice.selectable === false ? null : (
                 <button type="button" disabled={busy} onClick={() => onRetry?.(choice.id)}>
