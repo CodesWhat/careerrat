@@ -1538,7 +1538,9 @@ Current implementation ledger, August 27:
 - The generic durable choice foundation now spans workspace, job, and skill threads with stable
   IDs/versions, binary/single/multi modes, click/text parity, allowlisted actions, idempotent
   resolution, stale/replay rejection, reload hydration, and keyboard-accessible rendering. Deep
-  Ingest typed Confirm/Defer/Reject decisions use their existing versioned decision writer.
+  Ingest typed Confirm/Defer/Reject decisions use their existing versioned decision writer. Only
+  the latest pending prompt can resolve; an older hidden prompt now fails stale instead of
+  mutating from an obsolete window.
 - Deterministic sourcing and Universal Intake Lane B now have app-owned controllers, durable
   operation IDs, 30-second heartbeats, active-run fencing, retry lineage, ordered shutdown, and
   startup reconciliation. Electron now awaits both controllers during shutdown, and exclusive
@@ -1549,6 +1551,9 @@ Current implementation ledger, August 27:
   bounded retries and AI searches to one plan, and persists the AI-search plan. The app stores
   Automatic/Faster/Balanced/Best and Automatic/Low/Medium/High preferences privately, exposes
   them in Settings, restores them after restart, and applies them when each search plan is frozen.
+  Direct research-company, research-comp, research-boards, and company-health chats now freeze
+  and pass the same selected-provider model/effort plan through installed Claude Code, installed
+  Codex, and SDK routes. Communication drafting declares and records its operation plan too.
   Provenance on remaining durable operations is still in progress.
 - AI discovery now keeps specific open-web leads when the first full-JD fetch is deferred, marks
   them `AI · unverified`, captures the visible search evidence as a partial artifact, and leaves
@@ -1577,11 +1582,35 @@ Current implementation ledger, August 27:
   rechecked by the native updater before **Restart and install** returns; an interrupted check or
   download restores as a clear retry instead of idle. Installation remains an explicit action
   after verified download and ordered CareerRat shutdown.
+- The saved fit floor is now an actual Jobs-list boundary instead of display copy. Active sourced
+  candidates with a known score below the saved threshold are hidden; unknown-score leads remain
+  visible for evaluation, and applications plus terminal history remain durable even when their
+  old score is lower. The tester's saved 65+ floor is covered at the settings, dashboard-data, and
+  route layers. Search status and adjacent-role coaching use the same visible count, so persisted
+  50–64 leads no longer produce an empty Jobs page with a false success message.
+- Source and company proposal queues now show at most four useful checkbox choices with one
+  **Save choices** action. Decisions run sequentially through the existing stable proposal IDs,
+  batch versions, and fail-closed writers, then collapse to a compact resolved summary. The
+  company review behaves as a real dialog with focus containment/restoration, Escape, and
+  background-scroll prevention. Explicit typed add/track/skip/reject commands use the same stable
+  writes, while questions that merely mention a proposal go to Paul and perform zero mutations.
+- Foreground workspace state now lives in the URL and bounded private drafts. Active thread/job,
+  mock owner, browser tab/query/filters/pipeline, selected/context entities, submit gate,
+  packet-gap focus, and Deep Ingest paste/repo/proposal edits restore across reload and browser
+  navigation. Invalid saved IDs fall back safely, background view refreshes do not rerun location
+  hydration, and workspace tabs have keyboard-complete roving focus. An intentionally cleared job
+  selection stays cleared, and source/company review URLs reopen only the exact pending batch.
+- Résumé extraction is now a DB-backed app operation before model work, with a frozen provider
+  plan, digest, progress, lease, atomic source/profile/evidence/targeting completion, exact follow,
+  and startup reconciliation without replay. PDF/image and configured-runtime DOCX paths share
+  the owner. Desktop quit and update installation await AI search and résumé workers before chat,
+  browser, or server teardown.
 - Public deterministic hospitality seeding now covers common NYC location spellings, up to four
   deduplicated target titles per query board, and a state-wide fallback, while explicit software
-  domains no longer trip hospitality inference. Remaining typed-choice migrations, foreground
-  durability, resume extraction lifecycle, full packaged desktop/browser QA, and release/update
-  acceptance remain open.
+  domains no longer trip hospitality inference. Remaining contextual permissions, shared
+  operation ownership for Workspace Ask/company discovery/Deep Ingest, full packaged
+  desktop/browser QA, and release/update acceptance remain open. Public-intel batching stays
+  follow-up work because no released app surface starts it in the background today.
 
 This gate blocks the next release until:
 
