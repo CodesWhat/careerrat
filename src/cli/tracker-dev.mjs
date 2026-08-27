@@ -315,7 +315,7 @@ export function createDevServer({
   // deterministic (non-AI) ATS-board sweep. Its HTTP surface (run/read the
   // sweep) is src/cli/search-route.mjs. No page mounted here — apps/web's SPA
   // Jobs surface is the only client.
-  mountSearchRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
+  const searchRoutes = mountSearchRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
   mountSourcingRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
 
   // M4 of the paid-POC journey — the /packet view: review a gated
@@ -604,6 +604,7 @@ export function createDevServer({
     chatRuntime,
     browserSessionManager,
     stopRuntimeSignIns: stopInstalledRuntimeSignIns,
+    shutdownAiWebSearch: searchRoutes.shutdownAiWebSearch,
   };
 }
 
@@ -651,6 +652,7 @@ async function main() {
     // child process running.
     dev.chatRuntime.shutdown();
     dev.stopRuntimeSignIns();
+    await dev.shutdownAiWebSearch();
     await dev.browserSessionManager.shutdown();
     dev.server.close(() => process.exit(0));
     // Don't hang on a lingering socket.

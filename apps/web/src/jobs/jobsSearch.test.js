@@ -637,6 +637,75 @@ describe("runAiWebSearchLane", () => {
     expect(state.setStatus.mock.calls).toEqual([["running"], ["idle"]]);
     expect(state.setError).toHaveBeenCalledOnce();
   });
+
+  it("follows the exact durable run to completion when its SSE view disconnects", async () => {
+    const state = stateSpies();
+    const refetch = vi.fn();
+    const done = { searched: 2, found: 4, new: 2, duplicates: 2, errors: [] };
+    const getSourcingRun = vi
+      .fn()
+      .mockResolvedValueOnce({
+        run: { id: "ai-running", purpose: "ai-web-search", status: "running" },
+      })
+      .mockResolvedValueOnce({
+        run: {
+          id: "ai-running",
+          purpose: "ai-web-search",
+          status: "completed",
+          summary: done,
+        },
+      });
+
+    const result = await runAiWebSearchLane({
+      ...state,
+      ...freshPromptsStub(),
+      refetch,
+      getSourcingRun,
+      pollIntervalMs: 0,
+      runAiWebSearchStream: async ({ onEvent }) => {
+        onEvent({
+          type: "started",
+          run: { id: "ai-running", purpose: "ai-web-search", status: "running" },
+        });
+      },
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      data: done,
+      run: expect.objectContaining({ id: "ai-running" }),
+    });
+    expect(state.setStatus).toHaveBeenLastCalledWith("results");
+    expect(state.setCounts).toHaveBeenLastCalledWith(done);
+    expect(state.setError).not.toHaveBeenCalledWith(expect.stringMatching(/ended unexpectedly/i));
+    expect(getSourcingRun).toHaveBeenCalledWith({
+      purpose: "ai-web-search",
+      id: "ai-running",
+      signal: undefined,
+    });
+    expect(refetch).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a disconnected but durable AI search visibly running in the background", async () => {
+    const state = stateSpies();
+    const run = { id: "ai-slow", purpose: "ai-web-search", status: "running" };
+    const result = await runAiWebSearchLane({
+      ...state,
+      ...freshPromptsStub(),
+      getSourcingRun: vi.fn(async () => ({ run })),
+      pollTimeoutMs: 0,
+      runAiWebSearchStream: async ({ onEvent }) => {
+        onEvent({ type: "started", run });
+      },
+    });
+
+    expect(result).toEqual({ ok: true, running: true, run });
+    expect(state.setStatus).toHaveBeenLastCalledWith("running");
+    expect(state.setActivity).toHaveBeenLastCalledWith(
+      "AI search is still running in the background."
+    );
+    expect(state.setError).not.toHaveBeenCalledWith(expect.stringMatching(/ended unexpectedly/i));
+  });
 });
 
 describe("runCoordinatedJobSearch", () => {
@@ -698,6 +767,29 @@ describe("runCoordinatedJobSearch", () => {
           deterministic: expect.objectContaining({ status: "succeeded" }),
           aiWeb: expect.objectContaining({ status: "succeeded" }),
         },
+      })
+    );
+  });
+
+  it("keeps the aggregate search running when a durable AI lane continues in the background", async () => {
+    const setSearchState = vi.fn();
+    const result = await runCoordinatedJobSearch({
+      capabilities,
+      setSearchState,
+      runDeterministic: vi.fn(async () => ({ ok: true, data: { new: 1 } })),
+      runAiWeb: vi.fn(async () => ({
+        ok: true,
+        running: true,
+        run: { id: "ai-slow", purpose: "ai-web-search", status: "running" },
+      })),
+    });
+
+    expect(result).toMatchObject({ ok: true, running: true });
+    expect(result.lanes.aiWeb).toMatchObject({ status: "running" });
+    expect(setSearchState).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        status: "running",
+        detail: "AI web search is still running in the background.",
       })
     );
   });

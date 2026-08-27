@@ -45,6 +45,19 @@ test("tracker-dev refuses non-loopback bind hosts instead of exposing local APIs
   );
 });
 
+test("tracker-dev exposes the durable AI-search shutdown lifecycle", async () => {
+  const repoRoot = tempRepo();
+  writeTracker(repoRoot);
+  const dev = createDevServer({ repoRoot });
+  try {
+    assert.equal(typeof dev.shutdownAiWebSearch, "function");
+    await dev.shutdownAiWebSearch();
+  } finally {
+    dev.chatRuntime.shutdown();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 // A fresh repoRoot with its resolved (non-legacy, .careerrat-backed) workspace dir
 // pre-created — same convention as storage-adapter.test.mjs's tempRepo().
 function tempRepo() {

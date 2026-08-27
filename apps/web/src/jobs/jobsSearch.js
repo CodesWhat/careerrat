@@ -388,35 +388,52 @@ export async function runCoordinatedJobSearch({
     lanes = {
       ...lanes,
       [outcome.id]:
-        outcome.ok && !outcome.partial
-          ? { ...lanes[outcome.id], status: "succeeded", result: outcome.result }
-          : outcome.ok
-            ? {
-                ...lanes[outcome.id],
-                status: "failed",
-                partial: true,
-                error: outcome.error,
-                ...(outcome.failedPromptIds?.length
-                  ? { failedPromptIds: outcome.failedPromptIds }
-                  : {}),
-                result: outcome.result,
-              }
-            : {
-                ...lanes[outcome.id],
-                status: outcome.aborted ? "skipped" : "failed",
-                ...(outcome.aborted
-                  ? { reason: "cancelled" }
-                  : { error: outcome.error || `${SEARCH_LANES[outcome.id].label} failed.` }),
-                ...(outcome.failedPromptIds?.length
-                  ? { failedPromptIds: outcome.failedPromptIds }
-                  : {}),
-              },
+        outcome.ok && outcome.result?.running
+          ? { ...lanes[outcome.id], status: "running", result: outcome.result }
+          : outcome.ok && !outcome.partial
+            ? { ...lanes[outcome.id], status: "succeeded", result: outcome.result }
+            : outcome.ok
+              ? {
+                  ...lanes[outcome.id],
+                  status: "failed",
+                  partial: true,
+                  error: outcome.error,
+                  ...(outcome.failedPromptIds?.length
+                    ? { failedPromptIds: outcome.failedPromptIds }
+                    : {}),
+                  result: outcome.result,
+                }
+              : {
+                  ...lanes[outcome.id],
+                  status: outcome.aborted ? "skipped" : "failed",
+                  ...(outcome.aborted
+                    ? { reason: "cancelled" }
+                    : { error: outcome.error || `${SEARCH_LANES[outcome.id].label} failed.` }),
+                  ...(outcome.failedPromptIds?.length
+                    ? { failedPromptIds: outcome.failedPromptIds }
+                    : {}),
+                },
     };
   }
 
   await refetch?.();
-  const succeeded = outcomes.filter((outcome) => outcome.ok);
+  const stillRunning = outcomes.filter((outcome) => outcome.result?.running);
+  const succeeded = outcomes.filter((outcome) => outcome.ok && !outcome.result?.running);
   const failed = outcomes.filter((outcome) => outcome.error);
+  if (stillRunning.length) {
+    const labels = stillRunning.map((outcome) => SEARCH_LANES[outcome.id].label);
+    const detail =
+      labels.length === 1
+        ? `${labels[0]} is still running in the background.`
+        : `${labels.join(" and ")} are still running in the background.`;
+    publish({ status: "running", detail });
+    return {
+      ok: true,
+      running: true,
+      lanes,
+      results: Object.fromEntries(outcomes.map((outcome) => [outcome.id, outcome.result])),
+    };
+  }
   const newCount = reconciledNewCount(succeeded);
   const unreadableCount = succeeded.reduce(
     (sum, outcome) => sum + resultCount(outcome.result, "unreadable"),
@@ -616,6 +633,46 @@ function describeAiWebSearchError(error) {
 const AI_SEARCH_PREP_ERROR =
   "Couldn't figure out what to search for. Finish your job preferences in Settings.";
 
+async function followDroppedAiWebSearch({
+  getSourcingRunFn,
+  run,
+  signal,
+  pollIntervalMs,
+  pollTimeoutMs,
+}) {
+  const deadline = Date.now() + pollTimeoutMs;
+  let current = run;
+  let misses = 0;
+  for (;;) {
+    if (signal?.aborted) return { aborted: true, run: current };
+    let next = null;
+    let readError = null;
+    try {
+      next = unwrapRun(
+        await getSourcingRunFn({
+          purpose: "ai-web-search",
+          id: run.id,
+          signal,
+        })
+      );
+    } catch (error) {
+      readError = error;
+    }
+    if (next?.id === run.id) {
+      current = next;
+      misses = 0;
+      if (next.status !== "running") return { run: next };
+    } else {
+      misses += 1;
+      if (misses >= 3) {
+        throw readError || new Error(`AI search run ${run.id} could not be read.`);
+      }
+    }
+    if (Date.now() >= deadline) return { timedOut: true, run: current };
+    await sleep(pollIntervalMs, signal);
+  }
+}
+
 // There is no per-prompt/Regenerate UI anymore (Scott, 2026-07-20: the old
 // "AI prompts (N)" button + modal meant nothing to a non-technical job
 // seeker), so nothing ever tells this lane "the prompts are stale". The
@@ -703,6 +760,7 @@ async function ensureFreshSearchPrompts({
 export async function runAiWebSearchLane({
   runAiWebSearchStream: runFn = runAiWebSearchStream,
   getSearchPrompts: getSearchPromptsFn = getSearchPrompts,
+  getSourcingRun: getSourcingRunFn = getSourcingRun,
   generateSearchPrompts: generateSearchPromptsFn = generateSearchPrompts,
   saveSearchPrompts: saveSearchPromptsFn = saveSearchPrompts,
   promptIds,
@@ -718,6 +776,8 @@ export async function runAiWebSearchLane({
   // 41S"). Measured client-side since neither the runtime-config route nor
   // the "done" SSE frame carries a server-side duration.
   setElapsedMs,
+  pollIntervalMs = 2500,
+  pollTimeoutMs = 10 * 60 * 1000,
 } = {}) {
   setError?.(null);
   setCounts?.(null);
@@ -743,6 +803,9 @@ export async function runAiWebSearchLane({
   let doneData = null;
   let sawDone = false;
   let streamErrorMessage = null;
+  let streamFailure = null;
+  let startedRun = null;
+  let recoveredRun = null;
 
   try {
     await runFn({
@@ -752,6 +815,11 @@ export async function runAiWebSearchLane({
       onEvent: (payload) => {
         if (!payload || typeof payload !== "object") return;
         switch (payload.type) {
+          case "started":
+            if (payload.run?.id && payload.run?.purpose === "ai-web-search") {
+              startedRun = payload.run;
+            }
+            break;
           case "activity":
             if (payload.message) setActivity?.(payload.message);
             break;
@@ -772,16 +840,61 @@ export async function runAiWebSearchLane({
       setStatus?.("idle");
       return { ok: false, aborted: true };
     }
-    const message = describeAiWebSearchError(error);
-    setStatus?.("error");
-    setError?.(message);
-    return { ok: false, error: message };
+    streamFailure = error;
   }
 
   if (streamErrorMessage) {
     setStatus?.("error");
     setError?.(streamErrorMessage);
     return { ok: false, error: streamErrorMessage };
+  }
+
+  if (!sawDone && startedRun) {
+    try {
+      const followed = await followDroppedAiWebSearch({
+        getSourcingRunFn,
+        run: startedRun,
+        signal,
+        pollIntervalMs,
+        pollTimeoutMs,
+      });
+      if (followed.aborted || signal?.aborted) {
+        setStatus?.("idle");
+        return { ok: false, aborted: true };
+      }
+      recoveredRun = followed.run;
+      if (followed.timedOut || recoveredRun?.status === "running") {
+        setStatus?.("running");
+        setActivity?.("AI search is still running in the background.");
+        await refetch?.();
+        return { ok: true, running: true, run: recoveredRun || startedRun };
+      }
+      if (recoveredRun?.status === "failed") {
+        const message =
+          recoveredRun.error?.message || "AI web search failed. Run the failed search again.";
+        setStatus?.("error");
+        setError?.(message);
+        return {
+          ok: false,
+          error: message,
+          failedPromptIds: failedPromptIds({ run: recoveredRun }),
+          run: recoveredRun,
+        };
+      }
+      if (recoveredRun?.status === "completed") {
+        doneData = recoveredRun.summary || {};
+        sawDone = true;
+      }
+    } catch (error) {
+      streamFailure ||= error;
+    }
+  }
+
+  if (streamFailure && !sawDone) {
+    const message = describeAiWebSearchError(streamFailure);
+    setStatus?.("error");
+    setError?.(message);
+    return { ok: false, error: message };
   }
 
   // The stream closed without ever emitting a "done" or "error" frame — a
@@ -828,5 +941,6 @@ export async function runAiWebSearchLane({
     ok: true,
     ...(partialError ? { partial: true, error: partialError, failedPromptIds } : {}),
     data: doneData,
+    ...(recoveredRun ? { run: recoveredRun } : {}),
   };
 }

@@ -157,7 +157,7 @@ test("DB-backed search readiness comes from source config, not generated YAML", 
   const searchSourcesRoute = sliceBetween(
     searchRoute,
     'addRoute("GET", "/api/search/sources"',
-    "\n  });\n}",
+    'addRoute("POST", "/api/search/prompts/generate"',
     "search sources route"
   );
   assert.match(configuredSources, /name: "search-sources"/);

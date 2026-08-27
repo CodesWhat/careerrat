@@ -26,16 +26,41 @@ function handlerFor({
   env = { ANTHROPIC_API_KEY: "test-key" },
   runAiWebSearch,
   workspaceAgentRuntime,
+  setIntervalImpl,
+  clearIntervalImpl,
+}) {
+  return mountedRoutesFor({
+    repoRoot,
+    env,
+    runAiWebSearch,
+    workspaceAgentRuntime,
+    setIntervalImpl,
+    clearIntervalImpl,
+  }).handler;
+}
+
+function mountedRoutesFor({
+  repoRoot,
+  env = { ANTHROPIC_API_KEY: "test-key" },
+  runAiWebSearch,
+  workspaceAgentRuntime,
+  setIntervalImpl,
+  clearIntervalImpl,
 }) {
   const routes = new Map();
-  mountSearchRoutes({
+  const lifecycle = mountSearchRoutes({
     addRoute: (method, path, handler) => routes.set(`${method} ${path}`, handler),
     repoRoot,
     env,
     runAiWebSearch,
     workspaceAgentRuntime,
+    ...(setIntervalImpl ? { setIntervalImpl } : {}),
+    ...(clearIntervalImpl ? { clearIntervalImpl } : {}),
   });
-  return routes.get("POST /api/search/ai-web-search/run");
+  return {
+    handler: routes.get("POST /api/search/ai-web-search/run"),
+    lifecycle,
+  };
 }
 
 function request(body = "{}") {
@@ -121,12 +146,14 @@ test("AI web-search route streams activity before done and emits heartbeat comme
   const repoRoot = tempRepo();
   const originalSetInterval = globalThis.setInterval;
   const originalClearInterval = globalThis.clearInterval;
+  const scheduled = [];
+  const cleared = [];
   globalThis.setInterval = (callback, ms) => {
-    assert.equal(ms, 10000);
-    callback();
-    return 17;
+    scheduled.push(ms);
+    if (ms === 10000) callback();
+    return ms;
   };
-  globalThis.clearInterval = (token) => assert.equal(token, 17);
+  globalThis.clearInterval = (id) => cleared.push(id);
   try {
     const res = response();
     const handler = handlerFor({
@@ -141,7 +168,11 @@ test("AI web-search route streams activity before done and emits heartbeat comme
     await handler(request('{"searchExecutionId":"search-execution-ai"}'), res);
     assert.equal(res.status, 200);
     assert.match(res.chunks.join(""), /: ping\n\n/);
-    assert.deepEqual(sseFrames(res), [
+    const frames = sseFrames(res);
+    assert.equal(frames[0].type, "started");
+    assert.equal(frames[0].run.purpose, "ai-web-search");
+    assert.equal(frames[0].run.status, "running");
+    assert.deepEqual(frames.slice(1), [
       { type: "activity", message: "Searching saved prompt…" },
       {
         type: "done",
@@ -154,6 +185,11 @@ test("AI web-search route streams activity before done and emits heartbeat comme
     assert.deepEqual(durable.metadata.promptIds, ["p1"]);
     assert.equal(durable.metadata.searchExecutionId, "search-execution-ai");
     assert.match(durable.metadata.inputFingerprint, /^[a-f0-9]{64}$/);
+    assert.deepEqual(scheduled, [10000, 30000]);
+    assert.deepEqual(
+      cleared.sort((a, b) => a - b),
+      [10000, 30000]
+    );
   } finally {
     globalThis.setInterval = originalSetInterval;
     globalThis.clearInterval = originalClearInterval;
@@ -283,39 +319,109 @@ test("AI web-search route stops writing frames after the response closes", async
   res.emit("close");
   release();
   await running;
-  assert.deepEqual(sseFrames(res), [{ type: "activity", message: "started" }]);
+  const frames = sseFrames(res);
+  assert.equal(frames[0].type, "started");
+  assert.deepEqual(frames.slice(1), [{ type: "activity", message: "started" }]);
 });
 
-test("AI web-search disconnect aborts the underlying run via an AbortSignal", async () => {
+test("AI web-search disconnect leaves the durable worker running to completion", async () => {
   const repoRoot = tempRepo();
-  let sawAbort;
-  const abortSeen = new Promise((resolve) => {
-    sawAbort = resolve;
+  let release;
+  let providerSignal;
+  const blocked = new Promise((resolve) => {
+    release = resolve;
   });
   const handler = handlerFor({
     repoRoot,
-    runAiWebSearch: ({ onProgress, signal }) =>
-      new Promise((resolve) => {
-        onProgress({ type: "activity", message: "started" });
-        signal.addEventListener("abort", () => {
-          sawAbort();
-          resolve({ searched: 1, found: 0, new: 0, duplicates: 0, errors: [] });
-        });
-        // Never resolves on its own — only the abort listener settles it,
-        // simulating a long-running search the client walks away from. See
-        // skill-run-route.test.mjs's matching client-disconnect test for the
-        // same pattern.
-      }),
+    runAiWebSearch: async ({ onProgress, signal }) => {
+      providerSignal = signal;
+      onProgress({ type: "activity", message: "started" });
+      await blocked;
+      return { searched: 1, found: 0, new: 0, duplicates: 0, errors: [] };
+    },
   });
   const res = response();
   const running = handler(request(), res);
   await new Promise((resolve) => setImmediate(resolve));
   res.emit("close");
-  await abortSeen;
+
+  assert.equal(providerSignal.aborted, false);
+  assert.equal(sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run.status, "running");
+
+  release();
   await running;
 
   const durable = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+  assert.equal(durable.status, "completed");
+  assert.equal(durable.error, null);
+});
+
+test("AI web-search refreshes its durable lease while the provider is quiet", async () => {
+  const repoRoot = tempRepo();
+  let release;
+  const blocked = new Promise((resolve) => {
+    release = resolve;
+  });
+  const scheduled = new Map();
+  let nextId = 0;
+  const handler = handlerFor({
+    repoRoot,
+    setIntervalImpl(callback, ms) {
+      nextId += 1;
+      scheduled.set(ms, { id: nextId, callback });
+      return nextId;
+    },
+    clearIntervalImpl(id) {
+      for (const [ms, entry] of scheduled) {
+        if (entry.id === id) scheduled.delete(ms);
+      }
+    },
+    runAiWebSearch: async () => {
+      await blocked;
+      return { searched: 1, found: 0, new: 0, duplicates: 0, errors: [] };
+    },
+  });
+  const res = response();
+  const running = handler(request(), res);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const before = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+  assert.equal(typeof scheduled.get(30000)?.callback, "function");
+  scheduled.get(30000).callback();
+  const refreshed = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+  assert.ok(Date.parse(refreshed.updatedAt) > Date.parse(before.updatedAt));
+  assert.equal(refreshed.progress.workerStatus, "running");
+
+  release();
+  await running;
+});
+
+test("AI web-search lifecycle aborts and settles the durable worker on app shutdown", async () => {
+  const repoRoot = tempRepo();
+  let providerSignal;
+  const { handler, lifecycle } = mountedRoutesFor({
+    repoRoot,
+    runAiWebSearch: ({ signal }) =>
+      new Promise((_resolve, reject) => {
+        providerSignal = signal;
+        signal.addEventListener(
+          "abort",
+          () => reject(signal.reason || new DOMException("Aborted", "AbortError")),
+          { once: true }
+        );
+      }),
+  });
+  const res = response();
+  const running = handler(request(), res);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(providerSignal.aborted, false);
+  await lifecycle.shutdownAiWebSearch();
+  await running;
+
+  assert.equal(providerSignal.aborted, true);
+  const durable = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
   assert.equal(durable.status, "failed");
-  assert.equal(durable.summary, null);
-  assert.equal(durable.error.code, "AI_WEB_SEARCH_ABORTED");
+  assert.equal(durable.error.code, "AI_WEB_SEARCH_SERVER_STOPPED");
+  assert.match(durable.error.message, /stopped while this search was running/i);
 });

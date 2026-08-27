@@ -131,6 +131,8 @@ export function mountSearchRoutes({
   fetchImpl = fetch,
   runAiWebSearch = defaultRunAiWebSearch,
   workspaceAgentRuntime,
+  setIntervalImpl = setInterval,
+  clearIntervalImpl = clearInterval,
 }) {
   const pathCtx = { repoRoot, env };
 
@@ -139,6 +141,19 @@ export function mountSearchRoutes({
   // Same reasoning, separate flag: the deterministic sweep and the AI web
   // search lane are independent operations and may legitimately overlap.
   let aiWebSearchRunning = false;
+  let activeAiWebSearch = null;
+
+  async function shutdownAiWebSearch() {
+    const active = activeAiWebSearch;
+    if (!active) return;
+    active.shutdownRequested = true;
+    const error = new Error(
+      "CareerRat stopped while this search was running. Run the search again."
+    );
+    error.code = "AI_WEB_SEARCH_SERVER_STOPPED";
+    active.controller.abort(error);
+    await active.promise;
+  }
 
   // -------------------------------------------------------------------------
   // POST /api/search/scan
@@ -370,9 +385,8 @@ export function mountSearchRoutes({
   // Runs the search-jobs skill's AI Web Search mode (see that SKILL.md's own
   // section) via the embedded one-shot runtime, streaming progress as
   // Server-Sent Events — the same `data: <json>\n\n` framing, 10s `: ping`
-  // heartbeat, and res.on("close") close-guard as
-  // POST /api/onboard/resume-ai-stream (see onboard-route.mjs's own header
-  // comment on that exact mechanics), but a narrower frame set: there's no
+  // heartbeat, and closed-response write guard as POST
+  // /api/onboard/resume-ai-stream, but a narrower frame set: there's no
   // upload step here, so no "saved" frame; the model's reply is buffered and
   // validated entirely server-side (runAiWebSearch), so no "json"/"restart"
   // frame either.
@@ -535,17 +549,14 @@ export function mountSearchRoutes({
       return;
     }
 
-    // Client-disconnect guard: `res.on("close")`, not `req.on("close")` —
-    // see skill-run-route.mjs's own comment on this exact choice. The
-    // AbortController's signal is threaded into runAiWebSearch (and from
-    // there into runSkillStream's own SDK-query abort) so a disconnect
-    // actually stops the underlying model call instead of just silencing
-    // the now-unreachable SSE writes below.
+    // This response is only a live view onto the durable search worker. A
+    // navigation, reload, or dropped SSE connection stops writes to this
+    // response, but it must not cancel a search that can take many minutes.
+    // The app lifecycle owns the worker AbortController below.
     let closed = false;
     const controller = new AbortController();
     res.on("close", () => {
       closed = true;
-      controller.abort();
     });
 
     res.writeHead(200, {
@@ -564,7 +575,7 @@ export function mountSearchRoutes({
       }
     }
 
-    const heartbeat = setInterval(() => {
+    const streamHeartbeat = setIntervalImpl(() => {
       if (closed) return;
       try {
         res.write(": ping\n\n");
@@ -574,110 +585,157 @@ export function mountSearchRoutes({
     }, 10000);
 
     aiWebSearchRunning = true;
-    let terminalRun = null;
-    try {
-      const activities = [];
-      const result = await runAiWebSearch({
-        repoRoot,
-        env,
-        fetchImpl,
-        promptIds,
-        onProgress: (event) => {
-          emit(event);
-          if (event?.type !== "activity" || !event.message) return;
-          activities.push(String(event.message));
-          try {
-            sourcingRunProgress({
-              repoRoot,
-              env,
-              id: durableRun.id,
-              progress: {
-                lastActivity: String(event.message),
-                activities: activities.slice(-40),
-              },
-            });
-          } catch {
-            // The stream remains usable if a progress-only persistence write
-            // races a shutdown; terminal persistence below still decides the run.
-          }
-        },
-        signal: controller.signal,
-        writeGuard: (db) => assertSourcingRunActiveInDb(db, durableRun.id),
-      });
-      if (controller.signal.aborted) {
-        const err = new Error("AI web search was cancelled.");
-        err.code = "AI_WEB_SEARCH_ABORTED";
-        throw err;
-      }
-      const failedPromptIds = Array.isArray(result?.failedPromptIds) ? result.failedPromptIds : [];
-      const allSelectedPromptsFailed =
-        Number(result?.searched || 0) > 0 && failedPromptIds.length >= Number(result.searched);
-      if (allSelectedPromptsFailed) {
-        terminalRun = sourcingRunFail({
-          repoRoot,
-          env,
-          id: durableRun.id,
-          error: {
-            code: "AI_WEB_SEARCH_QUERIES_FAILED",
-            message:
-              result.errors?.[0] ||
-              "Every selected AI web-search prompt failed or had no reported query coverage.",
-            action: "retry-failed",
-            failedPromptIds,
-            queryResults: result.queryResults || [],
-            sources: result.sources || [],
-            errors: result.errors || [],
-          },
-        }).run;
-      } else {
-        terminalRun = sourcingRunComplete({
-          repoRoot,
-          env,
-          id: durableRun.id,
-          summary: result,
-        }).run;
-      }
-      emit({ type: "done", data: result });
-    } catch (err) {
-      try {
-        terminalRun = sourcingRunFail({
-          repoRoot,
-          env,
-          id: durableRun.id,
-          error: {
-            code:
-              err?.code ||
-              (controller.signal.aborted ? "AI_WEB_SEARCH_ABORTED" : "AI_WEB_SEARCH_FAILED"),
-            message: err?.message || "AI web search failed unexpectedly.",
-            action: "retry-failed",
-            failedPromptIds: requested.map((prompt) => prompt.id),
-            queryResults: requested.map((prompt) => ({
-              promptId: prompt.id,
-              prompt: prompt.text,
-              status: "failed",
-              queries: [],
-              error: err?.message || "AI web search failed unexpectedly.",
-            })),
-          },
-        }).run;
-      } catch {
-        // Preserve the original runtime error in the SSE response.
-      }
-      emit({
-        type: "error",
-        message: err?.message || "AI web search failed unexpectedly.",
-        status: err?.code === "NO_DATABASE" ? 409 : err?.code === "NO_SAVED_PROMPTS" ? 422 : 500,
-      });
-    } finally {
-      aiWebSearchRunning = false;
-      clearInterval(heartbeat);
-      if (terminalRun) {
+    emit({ type: "started", run: durableRun });
+
+    const execution = {
+      controller,
+      shutdownRequested: false,
+      promise: null,
+    };
+    activeAiWebSearch = execution;
+    execution.promise = (async () => {
+      let terminalRun = null;
+      const workerHeartbeat = setIntervalImpl(() => {
         try {
-          await workspaceAgentRuntime?.recordSearchCompletion?.({ run: terminalRun });
+          sourcingRunProgress({
+            repoRoot,
+            env,
+            id: durableRun.id,
+            progress: { workerStatus: "running" },
+          });
         } catch {
-          // The durable sourcing run remains authoritative if history mirroring fails during shutdown.
+          // A terminal write or shutdown may win this race.
+        }
+      }, 30000);
+      try {
+        const activities = [];
+        const result = await runAiWebSearch({
+          repoRoot,
+          env,
+          fetchImpl,
+          promptIds,
+          onProgress: (event) => {
+            emit(event);
+            if (event?.type !== "activity" || !event.message) return;
+            activities.push(String(event.message));
+            const { type: _type, message: _message, ...activity } = event;
+            try {
+              sourcingRunProgress({
+                repoRoot,
+                env,
+                id: durableRun.id,
+                progress: {
+                  lastActivity: String(event.message),
+                  activities: activities.slice(-40),
+                  ...(Object.keys(activity).length ? { activity } : {}),
+                },
+              });
+            } catch {
+              // The stream remains usable if a progress-only persistence write
+              // races a shutdown; terminal persistence below still decides the run.
+            }
+          },
+          signal: controller.signal,
+          writeGuard: (db) => assertSourcingRunActiveInDb(db, durableRun.id),
+        });
+        if (controller.signal.aborted) {
+          const err =
+            controller.signal.reason instanceof Error
+              ? controller.signal.reason
+              : new Error("AI web search was cancelled.");
+          err.code ||= execution.shutdownRequested
+            ? "AI_WEB_SEARCH_SERVER_STOPPED"
+            : "AI_WEB_SEARCH_ABORTED";
+          throw err;
+        }
+        const failedPromptIds = Array.isArray(result?.failedPromptIds)
+          ? result.failedPromptIds
+          : [];
+        const allSelectedPromptsFailed =
+          Number(result?.searched || 0) > 0 && failedPromptIds.length >= Number(result.searched);
+        if (allSelectedPromptsFailed) {
+          terminalRun = sourcingRunFail({
+            repoRoot,
+            env,
+            id: durableRun.id,
+            error: {
+              code: "AI_WEB_SEARCH_QUERIES_FAILED",
+              message:
+                result.errors?.[0] ||
+                "Every selected AI web-search prompt failed or had no reported query coverage.",
+              action: "retry-failed",
+              failedPromptIds,
+              queryResults: result.queryResults || [],
+              sources: result.sources || [],
+              errors: result.errors || [],
+            },
+          }).run;
+        } else {
+          terminalRun = sourcingRunComplete({
+            repoRoot,
+            env,
+            id: durableRun.id,
+            summary: result,
+          }).run;
+        }
+        emit({ type: "done", data: result });
+      } catch (err) {
+        const shutdownError = execution.shutdownRequested
+          ? {
+              code: "AI_WEB_SEARCH_SERVER_STOPPED",
+              message: "CareerRat stopped while this search was running. Run the search again.",
+            }
+          : null;
+        try {
+          terminalRun = sourcingRunFail({
+            repoRoot,
+            env,
+            id: durableRun.id,
+            error: {
+              code:
+                shutdownError?.code ||
+                err?.code ||
+                (controller.signal.aborted ? "AI_WEB_SEARCH_ABORTED" : "AI_WEB_SEARCH_FAILED"),
+              message:
+                shutdownError?.message || err?.message || "AI web search failed unexpectedly.",
+              action: "retry-failed",
+              failedPromptIds: requested.map((prompt) => prompt.id),
+              queryResults: requested.map((prompt) => ({
+                promptId: prompt.id,
+                prompt: prompt.text,
+                status: "failed",
+                queries: [],
+                error:
+                  shutdownError?.message || err?.message || "AI web search failed unexpectedly.",
+              })),
+            },
+          }).run;
+        } catch {
+          // Preserve the original runtime error in the SSE response.
+        }
+        emit({
+          type: "error",
+          message: shutdownError?.message || err?.message || "AI web search failed unexpectedly.",
+          status: err?.code === "NO_DATABASE" ? 409 : err?.code === "NO_SAVED_PROMPTS" ? 422 : 500,
+        });
+      } finally {
+        aiWebSearchRunning = false;
+        clearIntervalImpl(workerHeartbeat);
+        if (terminalRun) {
+          try {
+            await workspaceAgentRuntime?.recordSearchCompletion?.({ run: terminalRun });
+          } catch {
+            // The durable sourcing run remains authoritative if history mirroring fails during shutdown.
+          }
         }
       }
+    })();
+
+    try {
+      await execution.promise;
+    } finally {
+      if (activeAiWebSearch === execution) activeAiWebSearch = null;
+      clearIntervalImpl(streamHeartbeat);
       if (!closed) {
         try {
           res.end();
@@ -687,4 +745,6 @@ export function mountSearchRoutes({
       }
     }
   });
+
+  return { shutdownAiWebSearch };
 }
