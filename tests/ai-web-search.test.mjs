@@ -47,12 +47,21 @@ function repo({ mode = "standard", prompts = 5 } = {}) {
 
 function assistantJson(data) {
   return async ({ input, onEvent }) => {
-    assistantJson.inputs.push(input);
+    const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+    assistantJson.inputs.push(kickoff);
+    const promptIds = new Set((kickoff.prompts || []).map((prompt) => prompt.id));
+    const allQueries = Array.isArray(data.queries_run) ? data.queries_run : [];
+    const queriesRun = allQueries.filter((query) => promptIds.has(query.prompt_id));
+    const scoped = {
+      ...data,
+      roles: !allQueries.length || queriesRun.length ? data.roles : [],
+      queries_run: queriesRun,
+    };
     onEvent({
       type: "assistant",
       data: {
         message: {
-          content: [{ type: "text", text: `\`\`\`json\n${JSON.stringify(data)}\n\`\`\`` }],
+          content: [{ type: "text", text: `\`\`\`json\n${JSON.stringify(scoped)}\n\`\`\`` }],
         },
       },
     });
@@ -108,8 +117,12 @@ test("runAiWebSearch caps saved prompts by lean, standard, and full mode", async
       runSkillStream: assistantJson({ roles: [], queries_run: [] }),
     });
     assert.equal(result.searched, expected);
-    const kickoff = assistantJson.inputs[0];
-    assert.equal(kickoff.prompts.length, expected);
+    assert.equal(assistantJson.inputs.length, expected);
+    assert.ok(assistantJson.inputs.every((kickoff) => kickoff.prompts.length === 1));
+    assert.deepEqual(
+      assistantJson.inputs.map((kickoff) => kickoff.prompts[0].id).sort(),
+      Array.from({ length: expected }, (_, index) => `p${index + 1}`)
+    );
   }
 });
 
@@ -211,10 +224,177 @@ test("runAiWebSearch gives installed web research enough time and preserves runt
   });
 
   assert.equal(calls, 1, "a runtime failure must not be retried as invalid JSON");
-  assert.equal(receivedTimeoutMs, 8 * 60 * 1000);
+  assert.equal(receivedTimeoutMs, 30 * 60 * 1000);
   assert.equal(result.errors[0], "AI search took too long to finish. Try it again.");
   assert.doesNotMatch(result.errors[0], /schema|route|runtime|provider/i);
   assert.deepEqual(result.failedPromptIds, ["p1"]);
+});
+
+test("runAiWebSearch isolates a failed prompt and preserves successful siblings in saved order", async () => {
+  const repoRoot = repo({ prompts: 3 });
+  const callCount = new Map();
+  const receivedPromptIds = [];
+  let active = 0;
+  let maxActive = 0;
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      const promptId = kickoff.prompts[0].id;
+      assert.equal(kickoff.prompts.length, 1);
+      receivedPromptIds.push(promptId);
+      callCount.set(promptId, (callCount.get(promptId) || 0) + 1);
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, promptId === "p1" ? 12 : 6));
+      active -= 1;
+
+      if (promptId === "p2") {
+        return {
+          ok: false,
+          error: "Installed AI request timed out.",
+          code: "RUNTIME_TIMEOUT",
+        };
+      }
+
+      const index = Number(promptId.slice(1));
+      onEvent({
+        type: "tool_use",
+        data: { id: `search-${promptId}`, name: "WebSearch", input: { query: `query ${index}` } },
+      });
+      onEvent({
+        type: "tool_use",
+        data: {
+          id: `fetch-${promptId}`,
+          name: "WebFetch",
+          input: { url: `https://jobs.example.test/${promptId}` },
+        },
+      });
+      onEvent({
+        type: "assistant",
+        data: {
+          message: {
+            content: [
+              {
+                type: "text",
+                text: `\`\`\`json\n${JSON.stringify({
+                  roles: [
+                    role({
+                      company: `Company ${index}`,
+                      title: `Platform Engineer ${index}`,
+                      url: `https://jobs.example.test/${promptId}`,
+                    }),
+                  ],
+                  queries_run: [
+                    { prompt_id: promptId, query: `query ${index}`, status: "completed" },
+                  ],
+                })}\n\`\`\``,
+              },
+            ],
+          },
+        },
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver(),
+  });
+
+  assert.deepEqual(Object.fromEntries(callCount), { p1: 1, p2: 1, p3: 1 });
+  assert.deepEqual(receivedPromptIds.slice().sort(), ["p1", "p2", "p3"]);
+  assert.equal(maxActive, 2);
+  assert.equal(result.found, 2);
+  assert.equal(result.new, 2);
+  assert.deepEqual(result.failedPromptIds, ["p2"]);
+  assert.deepEqual(
+    result.queryResults.map(({ promptId, status }) => ({ promptId, status })),
+    [
+      { promptId: "p1", status: "completed" },
+      { promptId: "p2", status: "failed" },
+      { promptId: "p3", status: "completed" },
+    ]
+  );
+  assert.deepEqual(
+    result.offers.map(({ company }) => company),
+    ["Company 1", "Company 3"]
+  );
+  assert.deepEqual(
+    result.sources.slice(0, 2).map(({ url }) => url),
+    ["https://jobs.example.test/p1", "https://jobs.example.test/p3"]
+  );
+});
+
+test("AI web-search skill gives each saved prompt a small exploration budget", () => {
+  const skill = readFileSync(
+    new URL("../.agents/skills/search-jobs/SKILL.md", import.meta.url),
+    "utf8"
+  );
+  assert.match(skill, /at most 2 `WebSearch` calls per saved prompt/i);
+  assert.match(skill, /at most 4 job-posting `WebFetch` calls per saved prompt/i);
+});
+
+test("runAiWebSearch reports structured prompt lifecycle and periodic health", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  const progress = [];
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  const heartbeatHandle = { unref() {} };
+  globalThis.setInterval = (callback, ms) => {
+    assert.equal(ms, 30 * 1000);
+    callback();
+    return heartbeatHandle;
+  };
+  globalThis.clearInterval = (handle) => assert.equal(handle, heartbeatHandle);
+
+  try {
+    await runAiWebSearch({
+      repoRoot,
+      env: {},
+      runSkillStream: assistantJson({
+        roles: [],
+        queries_run: [{ prompt_id: "p1", query: "platform jobs", status: "completed" }],
+      }),
+      onProgress: (event) => progress.push(event),
+    });
+  } finally {
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+  }
+
+  assert.deepEqual(
+    progress
+      .filter((event) => event.phase === "prompt")
+      .map(({ promptId, promptIndex, promptTotal, promptStatus, heartbeat = false }) => ({
+        promptId,
+        promptIndex,
+        promptTotal,
+        promptStatus,
+        heartbeat,
+      })),
+    [
+      {
+        promptId: "p1",
+        promptIndex: 1,
+        promptTotal: 1,
+        promptStatus: "running",
+        heartbeat: false,
+      },
+      {
+        promptId: "p1",
+        promptIndex: 1,
+        promptTotal: 1,
+        promptStatus: "running",
+        heartbeat: true,
+      },
+      {
+        promptId: "p1",
+        promptIndex: 1,
+        promptTotal: 1,
+        promptStatus: "completed",
+        heartbeat: false,
+      },
+    ]
+  );
 });
 
 test("runAiWebSearch hydrates a bounded number of roles concurrently and preserves input receipt order", async () => {
@@ -286,6 +466,8 @@ test("runAiWebSearch refreshes durable activity through hydration and before per
   assert.equal(result.new, 1);
   assert.deepEqual(timeline, [
     "Running 1 saved search prompt…",
+    "Searching saved prompt 1 of 1…",
+    "Finished saved prompt 1 of 1.",
     "Checking details for 1 discovered job…",
     "hydrating",
     "Checked details for 1 of 1 discovered jobs…",
@@ -861,7 +1043,7 @@ test("runAiWebSearch aborts a blocked provider fetch promptly", async () => {
 });
 
 test("runAiWebSearch retries schema-invalid output once and returns the safe error envelope on exhaustion", async () => {
-  const repoRoot = repo();
+  const repoRoot = repo({ prompts: 1 });
   let calls = 0;
   const retrying = async ({ onEvent }) => {
     calls += 1;
@@ -889,14 +1071,66 @@ test("runAiWebSearch retries schema-invalid output once and returns the safe err
       new: failed.new,
       duplicates: failed.duplicates,
     },
-    { searched: 3, found: 0, new: 0, duplicates: 0 }
+    { searched: 1, found: 0, new: 0, duplicates: 0 }
   );
   assert.equal(failed.errors.length, 1);
   assert.match(failed.errors[0], /schema|usable|match/i);
-  assert.deepEqual(failed.failedPromptIds, ["p1", "p2", "p3"]);
-  assert.equal(failed.queryResults.length, 3);
+  assert.deepEqual(failed.failedPromptIds, ["p1"]);
+  assert.equal(failed.queryResults.length, 1);
   assert.ok(failed.queryResults.every((item) => item.status === "failed"));
   assert.ok(failed.queryResults.every((item) => item.queries[0].query === item.prompt));
+});
+
+test("runAiWebSearch scopes a schema correction retry to the prompt that produced invalid output", async () => {
+  const repoRoot = repo({ prompts: 2 });
+  const calls = new Map();
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      const promptId = kickoff.prompts[0].id;
+      const attempt = (calls.get(promptId) || 0) + 1;
+      calls.set(promptId, attempt);
+      if (promptId === "p1" && attempt === 1) {
+        onEvent({
+          type: "assistant",
+          data: { message: { content: [{ type: "text", text: "not json" }] } },
+        });
+        return { ok: true };
+      }
+      onEvent({
+        type: "assistant",
+        data: {
+          message: {
+            content: [
+              {
+                type: "text",
+                text: `\`\`\`json\n${JSON.stringify({
+                  roles: [],
+                  queries_run: [
+                    { prompt_id: promptId, query: `query ${promptId}`, status: "completed" },
+                  ],
+                })}\n\`\`\``,
+              },
+            ],
+          },
+        },
+      });
+      return { ok: true };
+    },
+  });
+
+  assert.deepEqual(Object.fromEntries(calls), { p1: 2, p2: 1 });
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.failedPromptIds, []);
+  assert.deepEqual(
+    result.queryResults.map(({ promptId, status }) => ({ promptId, status })),
+    [
+      { promptId: "p1", status: "completed" },
+      { promptId: "p2", status: "completed" },
+    ]
+  );
 });
 
 test("runAiWebSearch reports exact failed saved prompts and successful queries", async () => {

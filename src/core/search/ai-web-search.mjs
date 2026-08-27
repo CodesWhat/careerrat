@@ -81,7 +81,9 @@ const MANUAL_FALLBACK = Object.freeze({
 // standard cap rather than either extreme.
 const PROMPT_CAP_BY_MODE = Object.freeze({ lean: 1, standard: 3, full: 5 });
 const HYDRATION_CONCURRENCY = 4;
-const AI_WEB_SEARCH_RUNTIME_TIMEOUT_MS = 8 * 60 * 1000;
+const AI_WEB_SEARCH_PROMPT_CONCURRENCY = 2;
+const AI_WEB_SEARCH_PROMPT_TIMEOUT_MS = 30 * 60 * 1000;
+const AI_WEB_SEARCH_HEARTBEAT_MS = 30 * 1000;
 
 // Sourced-row `gate` for an AI-web-search survivor. This mode's `candidate`
 // context (buildSearchPromptContext) never carries company-history or
@@ -146,6 +148,19 @@ function throwIfSearchAborted(signal) {
   const err = new Error("AI web search was cancelled.");
   err.code = "AI_WEB_SEARCH_ABORTED";
   throw err;
+}
+
+function safePromptFailure({ outcome, runtimeFailure }) {
+  if (runtimeFailure?.code === "RUNTIME_TIMEOUT") {
+    return "AI search took too long to finish. Try it again.";
+  }
+  if (outcome?.body?.code === BOUNDED_AI_CODES.AI_SCHEMA_INVALID) {
+    return "AI search returned unusable results. Try it again.";
+  }
+  if (outcome?.body?.code === BOUNDED_AI_CODES.AI_CAP_EXCEEDED) {
+    return outcome.body.error?.message;
+  }
+  return "AI search couldn't finish. Try it again.";
 }
 
 function safeToolError(content) {
@@ -299,17 +314,14 @@ function buildAiWebSearchEnv({ repoRoot, env }) {
 //   SQLite candidate setup yet) or "NO_SAVED_PROMPTS" (nothing to run).
 //
 //   `onProgress`, if given, is called with { type: "activity", message }
-//   narration lines as the run progresses (mode-cap notice, per-prompt
-//   WebSearch/WebFetch activity, retry notice) — the SSE route
-//   (search-route.mjs) forwards these straight through as "activity" frames.
+//   narration lines as the run progresses. Per-prompt lifecycle events also
+//   carry phase/promptId/promptIndex/promptTotal/promptStatus fields so the
+//   durable route can persist exact progress independently of the live SSE.
 //
-//   `signal`, if given, is a client-disconnect AbortSignal (search-route.mjs
-//   wires one up from the SSE request's res.on("close")) — passed straight
-//   through to runSkillStream (which aborts the underlying SDK query on it)
-//   and checked before each structured-output retry so an already-aborted
-//   run never starts a second attempt, and again right before persisting so
-//   an abort that lands after the model finished but before persistence
-//   never writes a partial result.
+//   `signal`, if given, cancels the whole durable run. It is passed through to
+//   every provider call and checked before each structured-output retry and
+//   again before persistence, so cancellation never starts another attempt
+//   or writes a partial result.
 // ---------------------------------------------------------------------------
 export async function runAiWebSearch({
   repoRoot,
@@ -369,150 +381,212 @@ export async function runAiWebSearch({
     config,
     includeSearchLimits: true,
   });
-  const kickoffInput = {
-    mode: "ai-web-search",
-    prompts: selected.map((p) => ({ id: p.id, text: p.text })),
-    candidate: candidateContext,
-  };
   // Scoped once for the whole run, not per-attempt — see buildAiWebSearchEnv's
   // own comment on why search-jobs needs a per-call override here rather
   // than living in the embedded runtime's own default allowlist.
   const skillEnv = buildAiWebSearchEnv({ repoRoot, env });
   const outputSchema = loadSchema(repoRoot);
-  const toolCalls = new Map();
-  const toolTrace = [];
-  let runtimeFailure = null;
+  const promptTotal = selected.length;
 
-  async function invokeAiWebSearch({ correction }) {
-    // A disconnect that landed between retry attempts (see
-    // runStructuredOneshot's attempt loop) — bail before spending another
-    // model call on a client that's already gone.
-    throwIfSearchAborted(signal);
-    let rawText = "";
-    let runtimeResult;
-    try {
-      runtimeResult = await runSkillStream({
-        skill: AI_WEB_SEARCH_LABELS.skill,
-        action: AI_WEB_SEARCH_LABELS.action,
-        operation: AI_WEB_SEARCH_LABELS.operation,
-        input: correction ? `${JSON.stringify(kickoffInput)}\n\n${correction}` : kickoffInput,
-        repoRoot,
-        env: skillEnv,
-        signal,
-        toolProfile: "chat",
-        outputSchema,
-        timeoutMs: AI_WEB_SEARCH_RUNTIME_TIMEOUT_MS,
-        onEvent: (evt) => {
-          if (evt.type === "tool_use") {
-            if (evt.data?.name === "WebSearch") {
-              const query = String(evt.data?.input?.query || "").trim();
-              if (query) {
-                const item = { kind: "query", query, status: "completed", error: null };
-                toolTrace.push(item);
-                if (evt.data?.id) toolCalls.set(evt.data.id, item);
-                onProgress?.({ type: "activity", message: `Searching: ${query}…` });
-              }
-            } else if (evt.data?.name === "WebFetch") {
-              const rawUrl = String(evt.data?.input?.url || "").trim();
-              if (rawUrl) {
-                let host = rawUrl;
-                try {
-                  host = new URL(rawUrl).hostname || rawUrl;
-                } catch {
-                  // not a parseable URL — narrate the raw string as a fallback
+  async function runSavedPrompt(prompt, promptIndex) {
+    const promptNumber = promptIndex + 1;
+    const lifecycle = {
+      phase: "prompt",
+      promptId: prompt.id,
+      promptIndex: promptNumber,
+      promptTotal,
+    };
+    onProgress?.({
+      type: "activity",
+      message: `Searching saved prompt ${promptNumber} of ${promptTotal}…`,
+      ...lifecycle,
+      promptStatus: "running",
+    });
+
+    const kickoffInput = {
+      mode: "ai-web-search",
+      prompts: [{ id: prompt.id, text: prompt.text }],
+      candidate: candidateContext,
+    };
+    const toolCalls = new Map();
+    const toolTrace = [];
+    let runtimeFailure = null;
+    const heartbeat = setInterval(() => {
+      onProgress?.({
+        type: "activity",
+        message: `Still searching saved prompt ${promptNumber} of ${promptTotal}…`,
+        ...lifecycle,
+        promptStatus: "running",
+        heartbeat: true,
+      });
+    }, AI_WEB_SEARCH_HEARTBEAT_MS);
+    heartbeat.unref?.();
+
+    async function invokeAiWebSearch({ correction }) {
+      throwIfSearchAborted(signal);
+      let rawText = "";
+      let runtimeResult;
+      try {
+        runtimeResult = await runSkillStream({
+          skill: AI_WEB_SEARCH_LABELS.skill,
+          action: AI_WEB_SEARCH_LABELS.action,
+          operation: AI_WEB_SEARCH_LABELS.operation,
+          input: correction ? `${JSON.stringify(kickoffInput)}\n\n${correction}` : kickoffInput,
+          repoRoot,
+          env: skillEnv,
+          signal,
+          toolProfile: "chat",
+          outputSchema,
+          timeoutMs: AI_WEB_SEARCH_PROMPT_TIMEOUT_MS,
+          onEvent: (evt) => {
+            if (evt.type === "tool_use") {
+              if (evt.data?.name === "WebSearch") {
+                const query = String(evt.data?.input?.query || "").trim();
+                if (query) {
+                  const item = { kind: "query", query, status: "completed", error: null };
+                  toolTrace.push(item);
+                  if (evt.data?.id) toolCalls.set(evt.data.id, item);
+                  onProgress?.({
+                    type: "activity",
+                    message: `Searching: ${query}…`,
+                    ...lifecycle,
+                    promptStatus: "running",
+                  });
                 }
-                const item = {
-                  kind: "source",
-                  url: rawUrl,
-                  host,
-                  status: "completed",
-                  error: null,
-                };
-                toolTrace.push(item);
-                if (evt.data?.id) toolCalls.set(evt.data.id, item);
-                onProgress?.({ type: "activity", message: `Reading ${host}…` });
+              } else if (evt.data?.name === "WebFetch") {
+                const rawUrl = String(evt.data?.input?.url || "").trim();
+                if (rawUrl) {
+                  const host = sourceHost(rawUrl);
+                  const item = {
+                    kind: "source",
+                    url: rawUrl,
+                    host,
+                    status: "completed",
+                    error: null,
+                  };
+                  toolTrace.push(item);
+                  if (evt.data?.id) toolCalls.set(evt.data.id, item);
+                  onProgress?.({
+                    type: "activity",
+                    message: `Reading ${host}…`,
+                    ...lifecycle,
+                    promptStatus: "running",
+                  });
+                }
+              }
+              return;
+            }
+            if (evt.type === "tool_result") {
+              const item = toolCalls.get(evt.data?.toolUseId);
+              if (item && evt.data?.isError) {
+                item.status = "failed";
+                item.error = safeToolError(evt.data?.content);
+              }
+              return;
+            }
+            if (evt.type !== "assistant") return;
+            for (const block of evt.data?.message?.content ?? []) {
+              if (block?.type === "text" && typeof block.text === "string") {
+                rawText += block.text;
               }
             }
-            return;
+          },
+        });
+      } catch (error) {
+        runtimeFailure = error;
+        throw error;
+      }
+      if (runtimeResult?.ok === false) {
+        const error = new Error(runtimeResult.error || "AI search could not finish.");
+        error.code = runtimeResult.code || "AI_WEB_SEARCH_RUNTIME_FAILED";
+        runtimeFailure = error;
+        throw error;
+      }
+      return rawText;
+    }
+
+    let outcome;
+    try {
+      outcome = await runBoundedAI({
+        labels: AI_WEB_SEARCH_LABELS,
+        schema: outputSchema,
+        manual: MANUAL_FALLBACK,
+        structuredMode: "fallback",
+        maxRetries: 1,
+        invoke: async ({ correction }) => {
+          if (correction) {
+            onProgress?.({
+              type: "activity",
+              message: `Checking the results for saved prompt ${promptNumber} again…`,
+              ...lifecycle,
+              promptStatus: "running",
+            });
           }
-          if (evt.type === "tool_result") {
-            const item = toolCalls.get(evt.data?.toolUseId);
-            if (item && evt.data?.isError) {
-              item.status = "failed";
-              item.error = safeToolError(evt.data?.content);
-            }
-            return;
-          }
-          if (evt.type !== "assistant") return;
-          for (const block of evt.data?.message?.content ?? []) {
-            if (block?.type === "text" && typeof block.text === "string") {
-              rawText += block.text;
-            }
-          }
+          return invokeAiWebSearch({ correction });
         },
       });
-    } catch (error) {
-      runtimeFailure = error;
-      throw error;
+    } finally {
+      clearInterval(heartbeat);
     }
-    if (runtimeResult?.ok === false) {
-      const error = new Error(runtimeResult.error || "AI search could not finish.");
-      error.code = runtimeResult.code || "AI_WEB_SEARCH_RUNTIME_FAILED";
-      runtimeFailure = error;
-      throw error;
+
+    // runBoundedAI intentionally turns provider exceptions into a safe error
+    // envelope. Cancellation is different and must remain terminal for the
+    // whole durable run rather than becoming one failed prompt.
+    throwIfSearchAborted(signal);
+
+    if (!outcome.body.ok) {
+      const message = safePromptFailure({ outcome, runtimeFailure });
+      const coverage = normalizeQueryResults({
+        selected: [prompt],
+        queriesRun: [],
+        toolTrace,
+        fallbackError: message,
+      });
+      onProgress?.({
+        type: "activity",
+        message: `Saved prompt ${promptNumber} of ${promptTotal} couldn't finish.`,
+        ...lifecycle,
+        promptStatus: "failed",
+        foundCount: 0,
+        error: message,
+      });
+      return { roles: [], toolTrace, errors: [message], ...coverage };
     }
-    return rawText;
+
+    const roles = Array.isArray(outcome.body.data?.roles) ? outcome.body.data.roles : [];
+    const coverage = normalizeQueryResults({
+      selected: [prompt],
+      queriesRun: outcome.body.data?.queries_run,
+      toolTrace,
+    });
+    const promptFailed = coverage.failedPromptIds.length > 0;
+    onProgress?.({
+      type: "activity",
+      message: promptFailed
+        ? `Saved prompt ${promptNumber} of ${promptTotal} finished without complete search coverage.`
+        : `Finished saved prompt ${promptNumber} of ${promptTotal}.`,
+      ...lifecycle,
+      promptStatus: promptFailed ? "failed" : "completed",
+      foundCount: roles.length,
+      ...(promptFailed ? { error: coverage.queryResults[0]?.error } : {}),
+    });
+    return { roles, toolTrace, errors: [], ...coverage };
   }
 
-  const outcome = await runBoundedAI({
-    labels: AI_WEB_SEARCH_LABELS,
-    schema: outputSchema,
-    manual: MANUAL_FALLBACK,
-    structuredMode: "fallback",
-    maxRetries: 1,
-    invoke: async ({ correction }) => {
-      if (correction) onProgress?.({ type: "activity", message: "Retrying with corrections…" });
-      return invokeAiWebSearch({ correction });
-    },
-  });
-
-  // runBoundedAI intentionally turns provider exceptions into a safe error
-  // envelope. A client disconnect is different: it must remain a terminal
-  // cancellation so the route cannot record the run as a normal completion.
+  const promptOutcomes = await mapBounded(
+    selected,
+    AI_WEB_SEARCH_PROMPT_CONCURRENCY,
+    runSavedPrompt
+  );
   throwIfSearchAborted(signal);
 
-  if (!outcome.body.ok) {
-    const message =
-      runtimeFailure?.code === "RUNTIME_TIMEOUT"
-        ? "AI search took too long to finish. Try it again."
-        : outcome.body.code === BOUNDED_AI_CODES.AI_SCHEMA_INVALID
-          ? "AI search returned unusable results. Try it again."
-          : outcome.body.code === BOUNDED_AI_CODES.AI_CAP_EXCEEDED
-            ? outcome.body.error?.message
-            : "AI search couldn't finish. Try it again.";
-    const coverage = normalizeQueryResults({
-      selected,
-      queriesRun: [],
-      toolTrace,
-      fallbackError: message,
-    });
-    return {
-      searched: selected.length,
-      found: 0,
-      new: 0,
-      duplicates: 0,
-      errors: [message],
-      ...coverage,
-      sources: toolTrace.filter((item) => item.kind === "source").map(({ kind, ...item }) => item),
-    };
-  }
-
-  const roles = Array.isArray(outcome.body.data?.roles) ? outcome.body.data.roles : [];
-  const coverage = normalizeQueryResults({
-    selected,
-    queriesRun: outcome.body.data?.queries_run,
-    toolTrace,
-  });
+  const roles = promptOutcomes.flatMap((result) => result.roles);
+  const toolTrace = promptOutcomes.flatMap((result) => result.toolTrace);
+  const promptErrors = [...new Set(promptOutcomes.flatMap((result) => result.errors))];
+  const coverage = {
+    queryResults: promptOutcomes.flatMap((result) => result.queryResults),
+    failedPromptIds: promptOutcomes.flatMap((result) => result.failedPromptIds),
+  };
   const { seenPostingKeys } = buildDbSeenSets({ repoRoot, env });
 
   const preliminary = [];
@@ -672,11 +746,14 @@ export async function runAiWebSearch({
     reasonCounts,
     partial: persistedOffers.filter((offer) => offer.bodyPartial === true).length,
     unreadable: captureFailures.length,
-    errors: captureFailures.length
-      ? [
-          `${captureFailures.length} job description${captureFailures.length === 1 ? "" : "s"} could not be read and ${captureFailures.length === 1 ? "was" : "were"} not added.`,
-        ]
-      : [],
+    errors: [
+      ...promptErrors,
+      ...(captureFailures.length
+        ? [
+            `${captureFailures.length} job description${captureFailures.length === 1 ? "" : "s"} could not be read and ${captureFailures.length === 1 ? "was" : "were"} not added.`,
+          ]
+        : []),
+    ],
     captureFailures: captureFailures.slice(0, 10),
     revalidatedExisting,
     offers: persistedOffers.map((offer) => ({
