@@ -33,10 +33,14 @@ The app stores AI preferences locally in **Profile**. They use the same choices
 with Claude Code and OpenAI Codex, so selecting a provider never means accepting
 a weaker CareerRat workflow.
 
-| Setting | Choices | Effect |
-|---------|---------|--------|
-| Paul quality | **Automatic**, **Faster**, **Balanced**, **Best** | Automatic chooses by task: Paul and high-stakes judgment stay strong, while web search, extraction, and small helpers use the efficient level suited to their work. The other choices set one overall quality preference. |
-| Thinking depth | **Automatic**, **Low**, **Medium**, **High** | Automatic chooses by task. The other choices set how much time the selected runtime spends reasoning. |
+- **Paul quality:** **Automatic**, **Faster**, **Balanced**, or **Best**. Automatic
+  chooses by task: Paul and high-stakes judgment stay strong, while web search,
+  extraction, and small helpers use the efficient level suited to their work.
+  The other choices set one overall quality preference.
+
+- **Thinking depth:** **Automatic**, **Low**, **Medium**, or **High**. Automatic
+  chooses by task. The other choices set how much time the selected runtime
+  spends reasoning.
 
 The controls are provider-neutral product settings, not raw model selectors.
 They affect new replies and tasks only. Work already running keeps the frozen
