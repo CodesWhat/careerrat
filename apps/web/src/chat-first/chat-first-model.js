@@ -32,12 +32,21 @@ function setParam(params, name, value, fallback = null) {
   if (clean && clean !== fallback) params.set(name, clean);
 }
 
+function reviewTarget(value) {
+  const [kind, ...idParts] = String(value || "").split(":");
+  const id = idParts.join(":").trim();
+  return ["source", "company"].includes(kind) && id
+    ? { reviewKind: kind, reviewId: id }
+    : { reviewKind: null, reviewId: null };
+}
+
 export function parseChatFirstForeground(search = "") {
   const params = new URLSearchParams(String(search).replace(/^\?/, ""));
   const browse = params.get("browse");
   const deepInputMode = params.get("ingest");
   const selection = stableIds(params.getAll("selected"));
   const selectionState = params.get("selection");
+  const review = reviewTarget(params.get("review"));
   return {
     activeThread: params.get("thread") || "today",
     activeApplicationId: params.get("application") || null,
@@ -47,6 +56,7 @@ export function parseChatFirstForeground(search = "") {
     searchSelectionSeeded: selection.length > 0 || ["seeded", "cleared"].includes(selectionState),
     composerChips: stableIds(params.getAll("context")),
     gateId: params.get("gate") || null,
+    ...review,
     packetGapId: params.get("answer") || null,
     deepEditId: params.get("edit") || null,
     deepInputMode: ["paste", "repo"].includes(deepInputMode) ? deepInputMode : null,
@@ -78,6 +88,9 @@ export function serializeChatFirstForeground(foreground = {}) {
   for (const id of selection) params.append("selected", id);
   for (const id of stableIds(foreground.composerChips)) params.append("context", id);
   setParam(params, "gate", foreground.gateId);
+  if (["source", "company"].includes(foreground.reviewKind) && foreground.reviewId) {
+    params.set("review", `${foreground.reviewKind}:${foreground.reviewId}`);
+  }
   setParam(params, "answer", foreground.packetGapId);
   setParam(params, "edit", foreground.deepEditId);
   if (["paste", "repo"].includes(foreground.deepInputMode)) {

@@ -919,6 +919,8 @@ describe("chat-first foreground location", () => {
       searchSelectionSeeded: true,
       composerChips: ["job-1"],
       gateId: "submit-app-1",
+      reviewKind: "company",
+      reviewId: "batch-1",
       packetGapId: "gap-1",
       deepEditId: "proposal-1",
       deepInputMode: "paste",
@@ -945,6 +947,8 @@ describe("chat-first foreground location", () => {
       searchSelectionSeeded: true,
       composerChips: ["job-1"],
       gateId: "submit-app-1",
+      reviewKind: "company",
+      reviewId: "batch-1",
       packetGapId: "gap-1",
       deepEditId: "proposal-1",
       deepInputMode: "paste",
@@ -970,6 +974,17 @@ describe("chat-first foreground location", () => {
     const search = serializeChatFirstForeground({ filters: { fit80: false } });
     expect(search).toBe("?fit=all");
     expect(parseChatFirstForeground(search).filters.fit80).toBe(false);
+  });
+
+  it("ignores malformed saved review targets", () => {
+    expect(parseChatFirstForeground("?review=unknown%3Abatch-1")).toMatchObject({
+      reviewKind: null,
+      reviewId: null,
+    });
+    expect(parseChatFirstForeground("?review=company")).toMatchObject({
+      reviewKind: null,
+      reviewId: null,
+    });
   });
 
   it("round-trips an intentionally empty search selection across reload", () => {

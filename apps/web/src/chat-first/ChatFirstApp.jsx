@@ -113,6 +113,7 @@ import {
 } from "./skill-chat-model.js";
 import {
   SourceReview,
+  sourceReviewForArtifact,
   sourceReviewFromMessages,
   sourceReviewTextSelection,
   submitSourceReviewBatch,
@@ -172,6 +173,20 @@ export async function commitCompanyProposalDecision({
     setCompanyProposalReview?.(refreshed?.proposals.length ? refreshed : null);
   }
   return true;
+}
+
+export function foregroundReviewArtifact({ reviewKind, reviewId, messages } = {}) {
+  const id = String(reviewId || "").trim();
+  if (!id) return null;
+  if (reviewKind === "source") {
+    const review = sourceReviewFromMessages(messages);
+    return review?.id === id ? review : null;
+  }
+  if (reviewKind === "company") {
+    const review = companyProposalReviewFromResult({ messages });
+    return review?.batchId === id && review.proposals.length ? review : null;
+  }
+  return null;
 }
 const DEFAULT_BROWSER_FILTERS = Object.freeze({
   fit80: true,
@@ -1658,8 +1673,10 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     onDismiss: dismissGithubStarPrompt,
   };
 
-  const foregroundSnapshot = useMemo(
-    () => ({
+  const foregroundSnapshot = useMemo(() => {
+    const reviewKind = companyProposalReview ? "company" : sourceReview ? "source" : null;
+    const reviewId = companyProposalReview?.batchId || sourceReview?.id || null;
+    return {
       activeThread: ui.activeThread,
       activeApplicationId: ui.activeApplicationId,
       browse: ui.browse,
@@ -1668,30 +1685,33 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       searchSelectionSeeded: ui.searchSelectionSeeded,
       composerChips: ui.composerChips,
       gateId: ui.gateId,
+      reviewKind,
+      reviewId,
       packetGapId: packetAnswerGap?.id || null,
       deepEditId: deepEditingId,
       deepInputMode,
       query,
       pipelineStage,
       filters: browserFilters,
-    }),
-    [
-      browserFilters,
-      deepEditingId,
-      deepInputMode,
-      packetAnswerGap?.id,
-      pipelineStage,
-      query,
-      ui.activeApplicationId,
-      ui.activeThread,
-      ui.browse,
-      ui.composerChips,
-      ui.gateId,
-      ui.pipeView,
-      ui.searchSelectionSeeded,
-      ui.selection,
-    ]
-  );
+    };
+  }, [
+    browserFilters,
+    companyProposalReview,
+    deepEditingId,
+    deepInputMode,
+    packetAnswerGap?.id,
+    pipelineStage,
+    query,
+    sourceReview,
+    ui.activeApplicationId,
+    ui.activeThread,
+    ui.browse,
+    ui.composerChips,
+    ui.gateId,
+    ui.pipeView,
+    ui.searchSelectionSeeded,
+    ui.selection,
+  ]);
 
   const navigateForeground = useCallback(
     (patch, { replace = false } = {}) => {
@@ -1706,6 +1726,54 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     },
     [foregroundSnapshot, navigate]
   );
+
+  useEffect(() => {
+    if (location.pathname !== "/" || dashboard.loading) return;
+    const reviewKind = locationForeground.reviewKind;
+    const reviewId = locationForeground.reviewId;
+    if (!reviewKind || !reviewId) {
+      setCompanyProposalReview(null);
+      setSourceReview(null);
+      return;
+    }
+    const messages =
+      activeSkillChat?.messages || activeJob?.messages || view.mainThread?.messages || [];
+    const review = foregroundReviewArtifact({ reviewKind, reviewId, messages });
+    if (review) {
+      if (reviewKind === "company") {
+        setCompanyProposalReview((current) =>
+          current?.batchId === review.batchId ? current : review
+        );
+        setSourceReview(null);
+      } else {
+        setSourceReview((current) => (current?.id === review.id ? current : review));
+        setCompanyProposalReview(null);
+      }
+      return;
+    }
+    setCompanyProposalReview(null);
+    setSourceReview(null);
+    setError("That saved review is no longer available. The conversation is still here.");
+    navigate(
+      {
+        pathname: "/",
+        search: serializeChatFirstForeground({
+          ...locationForeground,
+          reviewKind: null,
+          reviewId: null,
+        }),
+      },
+      { replace: true }
+    );
+  }, [
+    activeJob?.messages,
+    activeSkillChat?.messages,
+    dashboard.loading,
+    location.pathname,
+    locationForeground,
+    navigate,
+    view.mainThread?.messages,
+  ]);
 
   useEffect(() => {
     if (location.pathname !== "/" || dashboard.loading) return;
@@ -2722,7 +2790,18 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         run(() =>
           api.runWorkspaceIntent(nextIntent.type, nextIntent.entity, nextIntent.input || {})
         ),
-      setCompanyProposalReview,
+      setCompanyProposalReview: (nextReview) => {
+        setCompanyProposalReview(nextReview);
+        if (openReview) {
+          navigateForeground(
+            {
+              reviewKind: nextReview ? "company" : null,
+              reviewId: nextReview?.batchId || null,
+            },
+            { replace: true }
+          );
+        }
+      },
       openReview,
     });
   }
@@ -2744,7 +2823,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
 
   async function completeSkillChatDiscovery(item) {
     if (!activeSkillChat?.skill || !item?.id) return;
-    return runDiscoveryCompletionWithRetry({
+    const completed = await runDiscoveryCompletionWithRetry({
       api,
       activeSkillChat,
       item,
@@ -2753,6 +2832,34 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       setSourceReview,
       refetch: dashboard.refetch,
     });
+    if (completed) {
+      navigateForeground({ reviewKind: null, reviewId: null }, { replace: true });
+    }
+    return completed;
+  }
+
+  function openSourceReview(artifact) {
+    const review = sourceReviewForArtifact(artifact);
+    if (!review) return;
+    setSourceReview(review);
+    navigateForeground({ reviewKind: "source", reviewId: review.id });
+  }
+
+  function closeSourceReview() {
+    setSourceReview(null);
+    navigateForeground({ reviewKind: null, reviewId: null }, { replace: true });
+  }
+
+  function openCompanyProposalReview(artifact) {
+    const review = companyProposalReviewForArtifact(artifact);
+    if (!review) return;
+    setCompanyProposalReview(review);
+    navigateForeground({ reviewKind: "company", reviewId: review.batchId });
+  }
+
+  function closeCompanyProposalReview() {
+    setCompanyProposalReview(null);
+    navigateForeground({ reviewKind: null, reviewId: null }, { replace: true });
   }
 
   const actions = {
@@ -2811,8 +2918,8 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     },
     decideSkillChatDiscovery,
     completeSkillChatDiscovery,
-    openSourceReview: (artifact) => setSourceReview(artifact),
-    closeSourceReview: () => setSourceReview(null),
+    openSourceReview,
+    closeSourceReview,
     runSweep,
     setQuery,
     clearSearchFilters: () => resetBrowserSearchFilters({ setQuery, setBrowserFilters }),
@@ -2863,7 +2970,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     openThreadArtifact: async (thread, artifact) => {
       const proposalReview = companyProposalReviewForArtifact(artifact);
       if (proposalReview) {
-        setCompanyProposalReview(proposalReview);
+        openCompanyProposalReview(proposalReview);
         return;
       }
       if (artifact?.html || artifact?.binary || artifact?.text || artifact?.markdown) {
@@ -3070,7 +3177,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     },
     closeArtifact: () => setArtifactViewer(null),
     decideCompanyProposal,
-    closeCompanyProposalReview: () => setCompanyProposalReview(null),
+    closeCompanyProposalReview,
     retryEngine: async () => {
       const [runtimeState] = await Promise.all([
         typeof api.getInstalledAiRuntimes === "function"

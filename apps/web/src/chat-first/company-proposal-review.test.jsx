@@ -83,6 +83,8 @@ describe("company proposal review", () => {
     ]);
     expect(companyProposalTextSelection(ARTIFACT, "Track Acme")).toBeNull();
     expect(companyProposalTextSelection(ARTIFACT, "Track Already Reviewed")).toBeNull();
+    expect(companyProposalTextSelection(ARTIFACT, "Why is Acme AI relevant?")).toBeNull();
+    expect(companyProposalTextSelection(ARTIFACT, "Reject Acme AI")).toEqual(["proposal-tyrell"]);
     expect(
       companyProposalTextSelection(
         {

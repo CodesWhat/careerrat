@@ -78,6 +78,37 @@ export function resolveVisibleOptionNames(text, options) {
   return matches.length && !ambiguous ? matches.map((match) => match.id) : null;
 }
 
+function explicitReviewMutation(text, { positiveVerbs, negativeVerbs }) {
+  const normalized = normalizedOptionText(text);
+  if (!normalized || /\b(?:don t|do not|not|except)\b/.test(normalized)) return null;
+  const verbs = [...new Set([...positiveVerbs, ...negativeVerbs].map(normalizedOptionText))];
+  const command = normalized.match(
+    /^(?:(?:yes|yeah|yep|sure|okay|ok)\s+)?(?:(?:please|kindly)\s+|(?:can|could|would|will)\s+you\s+(?:please\s+)?|i\s+(?:d\s+like|would\s+like|want)\s+to\s+|i\s+d\s+|let\s+s\s+|go\s+ahead\s+(?:and\s+)?)?([a-z]+)\b/
+  );
+  const verb = command?.[1];
+  if (!verb || !verbs.includes(verb)) return null;
+
+  const hasPositiveVerb = positiveVerbs.some((candidate) =>
+    new RegExp(`\\b${normalizedOptionText(candidate)}\\b`).test(normalized)
+  );
+  const hasNegativeVerb = negativeVerbs.some((candidate) =>
+    new RegExp(`\\b${normalizedOptionText(candidate)}\\b`).test(normalized)
+  );
+  if (hasPositiveVerb && hasNegativeVerb) return null;
+  return positiveVerbs.map(normalizedOptionText).includes(verb) ? "select" : "exclude";
+}
+
+export function resolveReviewMutationSelection(text, options, { positiveVerbs, negativeVerbs }) {
+  const visibleOptions = Array.isArray(options) ? options : [];
+  const mode = explicitReviewMutation(text, { positiveVerbs, negativeVerbs });
+  if (!mode) return null;
+  const matchedIds = resolveVisibleOptionNames(text, visibleOptions);
+  if (!matchedIds) return null;
+  if (mode === "select") return matchedIds;
+  const excluded = new Set(matchedIds);
+  return visibleOptions.map((option) => option.id).filter((id) => !excluded.has(id));
+}
+
 function proposedCandidates(review) {
   return review.candidates
     .filter((candidate) => candidate.status === "proposed")
@@ -113,9 +144,13 @@ export function sourceReviewTextSelection(artifact, text, batchSize = REVIEW_BAT
   const review = sourceReviewForArtifact(artifact);
   if (!review) return null;
   const batch = pendingCandidates(review).slice(0, batchSize);
-  return resolveVisibleOptionNames(
+  return resolveReviewMutationSelection(
     text,
-    batch.map((candidate) => ({ id: candidate.id, aliases: [candidate.label] }))
+    batch.map((candidate) => ({ id: candidate.id, aliases: [candidate.label] })),
+    {
+      positiveVerbs: ["add", "save", "select", "track", "include", "keep", "use"],
+      negativeVerbs: ["skip", "reject", "discard", "exclude", "remove"],
+    }
   );
 }
 

@@ -87,6 +87,12 @@ describe("source review", () => {
     ]);
     expect(sourceReviewTextSelection(review, "Add Built")).toBeNull();
     expect(sourceReviewTextSelection(review, "Add RemotePilot")).toBeNull();
+    expect(sourceReviewTextSelection(review, "Why is LandEarly relevant?")).toBeNull();
+    expect(sourceReviewTextSelection(review, "Skip LandEarly")).toEqual([
+      review.candidates[1].id,
+      review.candidates[2].id,
+      review.candidates[3].id,
+    ]);
   });
 
   it("only restores a pending source review from the active transcript", () => {

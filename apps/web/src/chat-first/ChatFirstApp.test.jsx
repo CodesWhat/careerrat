@@ -1566,6 +1566,7 @@ describe("ChatFirstAppView", () => {
   it("does not consume ordinary chat when visible review names do not match exactly", async () => {
     const { submitConversationalReviewText } = await import("./ChatFirstApp.jsx");
     const sourceDecision = vi.fn();
+    const companyDecision = vi.fn();
 
     await expect(
       submitConversationalReviewText({
@@ -1587,6 +1588,49 @@ describe("ChatFirstAppView", () => {
       })
     ).resolves.toEqual({ handled: false, completed: false });
     expect(sourceDecision).not.toHaveBeenCalled();
+
+    await expect(
+      submitConversationalReviewText({
+        text: "Why is Culinary Agents relevant?",
+        sourceReview: normalizeSourceReviewArtifact({
+          kind: "source_review",
+          candidates: [
+            {
+              label: "Culinary Agents",
+              url: "https://culinaryagents.example/jobs",
+              sourceType: "browser",
+              why: "NYC hospitality roles",
+              status: "proposed",
+              confidence: "high",
+            },
+          ],
+        }),
+        onSourceDecision: sourceDecision,
+      })
+    ).resolves.toEqual({ handled: false, completed: false });
+    expect(sourceDecision).not.toHaveBeenCalled();
+
+    await expect(
+      submitConversationalReviewText({
+        text: "Why is Acme AI relevant?",
+        companyProposalReview: {
+          kind: "company_proposals",
+          batchId: "batch-1",
+          proposals: [
+            {
+              proposalId: "proposal-acme",
+              company: { name: "Acme AI" },
+              classification: "supported_ats",
+              atsProvider: "greenhouse",
+              jobBoardUrl: "https://boards.example/acme",
+              version: 3,
+            },
+          ],
+        },
+        onCompanyIntent: companyDecision,
+      })
+    ).resolves.toEqual({ handled: false, completed: false });
+    expect(companyDecision).not.toHaveBeenCalled();
   });
 
   it("keeps a failed company decision active and only refreshes a successful review", async () => {
@@ -1635,6 +1679,39 @@ describe("ChatFirstAppView", () => {
     expect(setCompanyProposalReview).toHaveBeenLastCalledWith(
       expect.objectContaining({ batchId: "batch-1" })
     );
+  });
+
+  it("restores only the exact saved review artifact from the active conversation", async () => {
+    const { foregroundReviewArtifact } = await import("./ChatFirstApp.jsx");
+    const company = {
+      kind: "company_proposals",
+      batchId: "batch-1",
+      proposals: [{ proposalId: "proposal-1", version: 1 }],
+    };
+    const source = normalizeSourceReviewArtifact({
+      kind: "source_review",
+      candidates: [
+        {
+          label: "Culinary Agents",
+          url: "https://culinaryagents.example/jobs",
+          sourceType: "browser",
+          why: "NYC hospitality roles",
+          status: "proposed",
+          confidence: "high",
+        },
+      ],
+    });
+    const messages = [{ artifacts: [company, source] }];
+
+    expect(
+      foregroundReviewArtifact({ reviewKind: "company", reviewId: "batch-1", messages })
+    ).toMatchObject({ kind: "company_proposals", batchId: "batch-1" });
+    expect(
+      foregroundReviewArtifact({ reviewKind: "source", reviewId: source.id, messages })
+    ).toMatchObject({ kind: "source_review", id: source.id });
+    expect(
+      foregroundReviewArtifact({ reviewKind: "company", reviewId: "stale", messages })
+    ).toBeNull();
   });
 
   it("keeps durable Today artifacts actionable without repeating an activity link", async () => {

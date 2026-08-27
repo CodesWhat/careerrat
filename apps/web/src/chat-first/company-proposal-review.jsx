@@ -2,7 +2,7 @@ import { useRef } from "react";
 
 import {
   handleSourceReviewKeyDown,
-  resolveVisibleOptionNames,
+  resolveReviewMutationSelection,
   useReviewDialog,
 } from "./source-review.jsx";
 
@@ -102,12 +102,16 @@ export function companyProposalBatchIntents(
 export function companyProposalTextSelection(artifact, text, batchSize = REVIEW_BATCH_SIZE) {
   const review = companyProposalReviewForArtifact(artifact);
   if (!review) return null;
-  return resolveVisibleOptionNames(
+  return resolveReviewMutationSelection(
     text,
     review.proposals.slice(0, batchSize).map((proposal) => ({
       id: String(proposal.proposalId),
       aliases: [proposal.company?.name, proposal.company?.domain],
-    }))
+    })),
+    {
+      positiveVerbs: ["track", "add", "save", "select", "include", "keep", "approve"],
+      negativeVerbs: ["skip", "reject", "discard", "exclude", "remove"],
+    }
   );
 }
 
