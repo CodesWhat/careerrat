@@ -1559,13 +1559,17 @@ Current implementation ledger, August 27:
   them `AI · unverified`, captures the visible search evidence as a partial artifact, and leaves
   liveness/full-JD verification to Evaluate. Known-expired postings still fail closed. The exact
   twelve-role NYC hospitality batch reported from Career Ops is a regression fixture.
-- Live isolated acceptance now mirrors the tester's saved profile: eleven bar leadership,
+- Live isolated acceptance mirrors the tester's saved profile: eleven bar leadership,
   food-and-beverage/general-management, and event/venue operations titles; an $85k floor/$100k
-  target; and NYC-local plus US-remote geography. Claude Code 2.1.247 discovered 15 roles and
-  persisted 7 while rejecting 2 by location and 1 by known salary; Codex CLI 0.150.1 discovered
-  14, persisted 6, and rejected 5 by location. Both completed all three saved prompts with zero
-  prompt/runtime errors or provider fallback. Individual dead links remain visible as bounded
-  capture diagnostics instead of poisoning a resultful search lane.
+  target; NYC-local plus US-remote geography; no pinned boards; a 65+ visible fit floor; and the
+  optional-demographics decline policy. The strict canonical rerun now rejects archived, expired,
+  wrong-requisition, foreign/locality-invalid, and known-below-floor postings before display. Codex
+  completed all three prompts with zero fallback or prompt/runtime errors and presented five live,
+  correctly scoped roles with posting-specific links. Claude completed the same prompts and the new
+  same-provider freshness recovery, but presented only one live role after concentrating on stale
+  Culinary Agents pages; the replacement itself was expired. Claude therefore remains a release
+  blocker. Its current receipt is truthful rather than a false success, and source-diversity plus
+  deferred-SPA liveness work is active before this gate can close.
 - The complementary engineering fixture covers Staff Platform/Backend and Developer
   Infrastructure/Experience work across US remote and NYC hybrid. A green Claude rerun completed
   all 3 prompts, found 5, persisted 3, and rejected 2 by location; Codex completed all 3 prompts,
@@ -1600,23 +1604,32 @@ Current implementation ledger, August 27:
   navigation. Invalid saved IDs fall back safely, background view refreshes do not rerun location
   hydration, and workspace tabs have keyboard-complete roving focus. An intentionally cleared job
   selection stays cleared, and source/company review URLs reopen only the exact pending batch.
+- Generic Workspace Ask operation identity is also saved privately outside the route. Opening
+  Settings no longer detaches the exact follower, and a hard reload in Settings can return to the
+  workspace and resume the same operation, terminal result, or retry without stealing the restored
+  route, focus, selection, or draft.
 - Long Workspace Ask messages and executable intents now run through the shared DB-backed app
   operation owner. Each composer submission gets one request identity, frozen provider plan,
   lease/fence, exact result-message identity, candidate-safe terminal error, restart reconciliation,
   and coalesced retry lineage. A completion from an older request cannot replace a newer foreground
-  route or draft. Application preparation still runs inside its corroborated mission attempt and
-  still stops for the user to press Submit.
+  route or draft. The unused public mission-step settlement route is removed, so clients cannot
+  forge a worker result from visible mission state, and shutdown rechecks ownership after async
+  completed-result validation before it may create replacement work. Application preparation still
+  runs inside its corroborated mission attempt and still stops for the user to press Submit.
 - Company discovery launched by Paul now starts the server-owned company operation instead of
   doing model work inside the outer Workspace Ask. Candidate/search/dedupe/comp context and the
   selected provider plan are frozen on the company operation, and the outer result carries its
-  exact child operation and deterministic batch identity. The final main-shell follower that opens
-  that exact finished batch remains in progress; the onboarding follower already has this shape.
+  exact child operation and deterministic batch identity. The main shell resolves only that outer
+  result message, persists and follows the exact child, loads only its exact result batch, and keeps
+  the owner until every proposal is decided. Navigating away turns completion into a passive
+  **Review companies** handoff instead of stealing the current route, focus, or draft.
 - Deep Ingest source scans and proposal builds now share the durable app-operation owner, exact
   source-version/proposal-set results, cancellation, retry, and cleanup contract. Removing and
   re-adding identical pasted or uploaded material starts one new coalesced child attempt instead of
-  reusing a stale completed run and leaving the source stuck in `scanning`. The final main-shell
-  controller hookup and reload follower remain in progress.
-- Contextual permissions are narrow grants instead of a hidden switch to global Advanced mode.
+  reusing a stale completed run and leaving the source stuck in `scanning`. Paste, repository,
+  upload, analyze, and retry now use one main-shell controller; reload resumes only inside Deep, and
+  background work cannot disable or replace another thread's composer, route, focus, or draft.
+- Contextual permissions are narrow grants instead of a hidden switch that widens every capability.
   Allowing Apple Calendar cannot wake a dormant LinkedIn capability, and the email-check action
   stores Gmail and Outlook only, matching its copy. Workspace operation failures keep stable codes
   and people-shaped messages without exposing internal match records.
@@ -1632,15 +1645,25 @@ Current implementation ledger, August 27:
   explicit unverified/unknown-field receipts, recognizes reordered food-and-beverage operations
   titles, rejects known single salaries below $85k, and rejects US-remote postings that exclude New
   York residents. The focused scanner/search/location/persistence suite passes 117 tests. Full
-  packaged desktop/browser QA, the final company/Deep main-shell followers, and release/update
-  acceptance remain open. Public-intel batching stays follow-up work because no released app
-  surface starts it in the background today.
+  packaged desktop/browser QA and release/update acceptance remain open. Public-intel batching
+  stays follow-up work because no released app surface starts it in the background today.
+- Search rows now carry the actionable posting facts before cart selection: a safe direct HTTP(S)
+  role link, compact posted compensation or **Comp not listed**, explicit **Fit N**, locality/work
+  mode, and **AI · unverified** provenance. Opening the posting does not toggle row selection.
+- Upgrade migration 017 removes the retired `auto_submit` form-default field before onboarding
+  writes resume, so an older profile cannot turn a valid work-authorization answer into a raw 400.
+  If a future generated field is unsupported, the UI says what CareerRat skipped and that the user
+  can continue without exposing the internal field name.
+- The live skill-shape harness now defaults to both supported installed runtimes instead of silently
+  testing Claude only. It can still target Claude or Codex explicitly, and its four AI-shaped lanes
+  cover evaluate-job, coach-gaps, search-jobs triage, and company-health using their production
+  schemas and validators.
 
-- The committed operation pass is green at 4,056 backend tests with 15 intentional skips, 877 web
-  tests, production build, and lint. GitHub currently reports zero open code-scanning, Dependabot,
-  or secret-scanning alerts. Those receipts predate the final main-shell integration and do not
-  replace the clean exact-head, packaged-app, live-provider, updater, Windows, and protected-PR
-  gates below.
+- The latest focused provider/runtime/skill matrix is green at 214 tests with 2 intentional live-key
+  skips; the current web suite is green at 891 tests and production build. GitHub currently reports
+  zero open code-scanning, Dependabot, or secret-scanning alerts. The last full backend receipt
+  predates the newest recovery and UI commits, so it does not replace the clean exact-head,
+  packaged-app, live-provider, updater, Windows, and protected-PR gates below.
 
 This gate blocks the next release until:
 
