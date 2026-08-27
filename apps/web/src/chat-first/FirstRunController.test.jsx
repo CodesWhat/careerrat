@@ -1620,6 +1620,27 @@ describe("FirstRunController chat event reconciliation", () => {
     expect(api.sendChatMessage).not.toHaveBeenCalled();
   });
 
+  it("does not advance past a question followed by a safety clarification", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    await bootController(module, api);
+    const reply = [
+      "```careerrat:confirm",
+      '{"kind":"candidate_patch","summary":"Negotiation target","payload":{"doc":"profile","patch":{"compensation":{"target_base":210000}}}}',
+      "```",
+      "What base salary should I enter when an application form requires one? This is never your current salary.",
+    ].join("\n");
+
+    sse.calls.at(-1).options.onEvent("assistant", assistantPayload(reply), { lastEventId: "2" });
+    rerender(module, api);
+    await flushEffects();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("profile", {
+      compensation: { target_base: 210000 },
+    });
+    expect(api.sendChatMessage).not.toHaveBeenCalled();
+  });
+
   it("does not request another turn when the saved assistant turn expects yes or no", async () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi();

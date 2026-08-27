@@ -25,11 +25,12 @@ All notable changes to CareerRat are documented here. This project follows
 - Yes/No buttons appear only for genuinely binary questions. Either-or questions stay as normal text responses, while binary questions with a short lead-in still get buttons.
 - Packet lineage recognizes unanswered question IDs as live review state instead of rebuilding a valid reviewable packet forever. A confirmed final answer resumes the owning paused mission instead of starting an unrelated preparation action.
 - Saved North American home locations can answer the corresponding location screen deterministically, while voluntary demographic and self-identification answers remain explicit, local, and never inferred.
+- Onboarding no longer advances to the next topic while a plain question with a short safety clarification is still waiting for the candidate's answer.
 
 ### Release-candidate verification
 
 - Before the later search and application-review fixes, Claude Code 2.1.247 completed the production AI-search path in 123.592 seconds, beyond the removed 120-second cutoff, with two roles, four recorded queries, two saved job descriptions, and no retry or error. Codex CLI 0.150.1 completed the same isolated source-level path in 29.445 seconds with one role, one recorded query, one saved job description, and no retry or error. Both workspaces passed data verification and left the real CareerRat databases unchanged.
-- After the canonical requalification and application-review fixes above, the repository suite passed 3,892 tests with 15 intentional skips and no failures. The full web suite passed all 790 tests, the focused public-copy set passed all 71 tests, and the production web, docs, and website builds passed. Biome, Qlty, Knip, the placeholder check, and `git diff --check` passed.
+- After the canonical requalification, application-review, and onboarding fixes above, the repository suite passed 3,893 tests with 15 intentional skips and no failures. The full web suite passed all 791 tests, the focused public-copy set passed all 71 tests, and the production web, docs, and website builds passed. Biome, Qlty, Knip, the placeholder check, and `git diff --check` passed.
 - Fresh packaged desktop QA has not rerun against this final candidate. The signed app, real end-to-end search and supervised application click-through, updater path, notarization, public release assets, npm, Homebrew, and production website remain at v0.16.5 until that acceptance and release work completes.
 
 ## [0.16.5] - 2026-08-27

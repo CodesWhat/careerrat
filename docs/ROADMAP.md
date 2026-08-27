@@ -761,7 +761,8 @@ so that earlier evidence does not qualify the current HEAD for promotion.
 - **Duplicate onboarding follow-up** — a question followed by a short plain-English
   consequence, such as the salary-floor explanation, remains the one unanswered
   turn instead of causing Paul to ask it again. Draft repair keeps only the latest
-  duplicate copy.
+  duplicate copy. Short safety clarifications after a question also keep that
+  question pending until the candidate answers it.
 - **Canonical search qualification** — configured and AI-web candidates are
   rechecked from the hydrated canonical posting before persistence. In-person and
   office-day requirements, saved location scope, compensation floor, sponsorship,
@@ -785,8 +786,8 @@ so that earlier evidence does not qualify the current HEAD for promotion.
   Saved North American locations can answer the matching location screen without
   inventing unknown facts.
 
-The repository suite passes 3,892 tests with 15 intentional skips and no failures,
-the full web suite passes all 790 tests, and the final search-focused group passes
+The repository suite passes 3,893 tests with 15 intentional skips and no failures,
+the full web suite passes all 791 tests, and the final search-focused group passes
 131 tests. This is source-tree evidence, not current packaged acceptance. The
 README and install guide still summarize the earlier timeout/Yes-No v0.16.6
 tranche while correctly naming v0.16.5 as public; the website still keeps safe
