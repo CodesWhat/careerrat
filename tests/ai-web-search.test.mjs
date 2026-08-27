@@ -69,6 +69,17 @@ function assistantJson(data) {
 }
 assistantJson.inputs = [];
 
+function emitAssistantJson(onEvent, data) {
+  onEvent({
+    type: "assistant",
+    data: {
+      message: {
+        content: [{ type: "text", text: `\`\`\`json\n${JSON.stringify(data)}\n\`\`\`` }],
+      },
+    },
+  });
+}
+
 function role(overrides = {}) {
   return {
     company: "Acme AI",
@@ -1163,6 +1174,343 @@ test("runAiWebSearch rejects a soft-404 page even when the model supplied a summ
   assert.equal(
     readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search").length,
     0
+  );
+});
+
+test("runAiWebSearch replaces a prompt batch erased by canonical liveness once", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Platform", titles: ["Platform Engineer"] }],
+      fit_bands: { fit_floor: 65 },
+    },
+  });
+  const expiredUrl = "https://jobs.example.test/expired-role";
+  const activeUrl = "https://jobs.example.test/active-role";
+  const inputs = [];
+  const plans = [];
+  const executionPlan = Object.freeze({
+    operation: "research.web",
+    runtimeId: "claude",
+    resolved: Object.freeze({ model: "claude-sonnet-4-6", effort: "medium" }),
+  });
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    executionPlan,
+    runSkillStream: async ({ input, onEvent, executionPlan: receivedPlan }) => {
+      inputs.push(input);
+      plans.push(receivedPlan);
+      const recovery = typeof input === "string";
+      emitAssistantJson(onEvent, {
+        roles: [
+          role(
+            recovery
+              ? { company: "Active Co", title: "Platform Engineer", url: activeUrl }
+              : { company: "Expired Co", title: "Platform Engineer", url: expiredUrl }
+          ),
+        ],
+        queries_run: [
+          {
+            prompt_id: "p1",
+            query: recovery ? "active replacement query" : "initial query",
+            status: "completed",
+          },
+        ],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: async (url) =>
+      url === expiredUrl
+        ? {
+            bodyFetchStatus: "resolved",
+            url,
+            bodyText: fullJd("This posting is no longer available"),
+            liveness: {
+              result: "expired",
+              reason: "The posting is no longer available.",
+            },
+          }
+        : canonicalResolver({
+            bodyText: fullJd("Active direct posting"),
+            liveness: { result: "active", reason: "visible apply control" },
+          })(url),
+  });
+
+  assert.equal(inputs.length, 2);
+  assert.equal(typeof inputs[0], "object");
+  assert.equal(typeof inputs[1], "string");
+  assert.deepEqual(plans, [executionPlan, executionPlan]);
+  assert.match(inputs[1], /replacement|recover|fresh/i);
+  assert.match(inputs[1], /expired-role/);
+  assert.match(inputs[1], /no longer available/i);
+  assert.equal(result.new, 1, JSON.stringify(result));
+  assert.equal(result.presented, 1, JSON.stringify(result));
+  assert.deepEqual(
+    readDbScannerRows({ repoRoot })
+      .filter((row) => row.source === "ai-web-search")
+      .map((row) => row.link),
+    [activeUrl]
+  );
+});
+
+test("runAiWebSearch never rehydrates a rejected URL repeated by recovery", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  const expiredUrl = "https://jobs.example.test/repeated-expired-role";
+  const activeUrl = "https://jobs.example.test/different-active-role";
+  let calls = 0;
+  const hydrationCounts = new Map();
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      calls += 1;
+      const recovery = typeof input === "string";
+      emitAssistantJson(onEvent, {
+        roles: recovery
+          ? [
+              role({ company: "Expired Co", url: expiredUrl }),
+              role({ company: "Replacement Co", url: activeUrl }),
+            ]
+          : [role({ company: "Expired Co", url: expiredUrl })],
+        queries_run: [{ prompt_id: "p1", query: `query ${calls}`, status: "completed" }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: async (url) => {
+      hydrationCounts.set(url, (hydrationCounts.get(url) || 0) + 1);
+      if (url === expiredUrl) {
+        return {
+          bodyFetchStatus: "resolved",
+          url,
+          bodyText: fullJd("This role has expired"),
+          liveness: { result: "expired", reason: "This role has expired." },
+        };
+      }
+      return canonicalResolver({ bodyText: fullJd("Active replacement") })(url);
+    },
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(hydrationCounts.get(expiredUrl), 1);
+  assert.equal(hydrationCounts.get(activeUrl), 1);
+  assert.equal(result.new, 1, JSON.stringify(result));
+  assert.deepEqual(
+    readDbScannerRows({ repoRoot })
+      .filter((row) => row.source === "ai-web-search")
+      .map((row) => row.link),
+    [activeUrl]
+  );
+});
+
+test("runAiWebSearch sends recovery candidates through the existing hard gates", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      compensation: { minimum_base: 85000 },
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Hospitality", titles: ["Bar Manager"] }],
+      fit_bands: { fit_floor: 95 },
+    },
+  });
+  const expiredUrl = "https://jobs.example.test/initial-expired";
+  const outsideUrl = "https://jobs.example.test/outside-nyc";
+  const belowFloorUrl = "https://jobs.example.test/below-floor";
+  const lowFitUrl = "https://jobs.example.test/low-fit";
+  let calls = 0;
+  const hydrated = [];
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      calls += 1;
+      const recovery = typeof input === "string";
+      emitAssistantJson(onEvent, {
+        roles: recovery
+          ? [
+              role({
+                company: "Search Page Co",
+                title: "Bar Manager",
+                url: "https://www.indeed.com/jobs?q=bar+manager&l=New+York",
+                location: "New York, NY",
+              }),
+              role({
+                company: "Expired Redirect Co",
+                title: "Bar Manager",
+                url: "https://www.linkedin.com/jobs/view/123?trk=expired_jd_redirect",
+                location: "New York, NY",
+              }),
+              role({
+                company: "Outside Co",
+                title: "Bar Manager",
+                url: outsideUrl,
+                location: "San Francisco, CA",
+              }),
+              role({
+                company: "Below Floor Co",
+                title: "Bar Manager",
+                url: belowFloorUrl,
+                location: "New York, NY",
+              }),
+              role({
+                company: "Low Fit Co",
+                title: "Bar Manager",
+                url: lowFitUrl,
+                location: "New York, NY",
+                fit_score: 64,
+                fit_bucket: "stretch",
+              }),
+            ]
+          : [role({ company: "Expired Co", title: "Bar Manager", url: expiredUrl })],
+        queries_run: [{ prompt_id: "p1", query: `query ${calls}`, status: "completed" }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: async (url) => {
+      hydrated.push(url);
+      if (url === expiredUrl) {
+        return {
+          bodyFetchStatus: "resolved",
+          url,
+          bodyText: fullJd("Expired posting"),
+          liveness: { result: "expired", reason: "Expired posting." },
+        };
+      }
+      if (url === outsideUrl) {
+        return {
+          bodyFetchStatus: "resolved",
+          url,
+          location: "San Francisco, CA",
+          bodyText: fullJd("This is an in-person San Francisco role"),
+        };
+      }
+      if (url === belowFloorUrl) {
+        return {
+          bodyFetchStatus: "resolved",
+          url,
+          location: "New York, NY",
+          bodyText: fullJd("Base salary: $75,000 - $85,000 per year"),
+        };
+      }
+      return {
+        bodyFetchStatus: "resolved",
+        url,
+        location: "New York, NY",
+        bodyText: fullJd("Compensation to be confirmed"),
+      };
+    },
+  });
+
+  assert.equal(calls, 2);
+  assert.deepEqual(hydrated.sort(), [belowFloorUrl, expiredUrl, lowFitUrl, outsideUrl].sort());
+  assert.equal(result.invalid, 2);
+  assert.deepEqual(result.reasonCounts, { location: 1, salary: 1 });
+  assert.equal(result.new, 1, JSON.stringify(result));
+  assert.equal(result.presented, 0, JSON.stringify(result));
+  const [saved] = readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search");
+  assert.equal(saved.link, lowFitUrl);
+  assert.ok(saved.fitScore < 95);
+});
+
+test("runAiWebSearch caps canonical freshness recovery at one turn", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  let calls = 0;
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ onEvent }) => {
+      calls += 1;
+      const url = `https://jobs.example.test/expired-${calls}`;
+      emitAssistantJson(onEvent, {
+        roles: [role({ company: `Expired ${calls}`, url })],
+        queries_run: [{ prompt_id: "p1", query: `query ${calls}`, status: "completed" }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: async (url) => ({
+      bodyFetchStatus: "resolved",
+      url,
+      bodyText: fullJd("Expired posting"),
+      liveness: { result: "expired", reason: "Expired posting." },
+    }),
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(result.new, 0);
+  assert.equal(result.presented, 0);
+  assert.equal(result.unreadable, 2);
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.failedPromptIds, []);
+});
+
+test("runAiWebSearch retries only a canonically erased sibling and keeps dedupe global", async () => {
+  const repoRoot = repo({ prompts: 2 });
+  const activeUrl = "https://jobs.example.test/already-active";
+  const expiredUrl = "https://jobs.example.test/sibling-expired";
+  const replacementUrl = "https://jobs.example.test/sibling-replacement";
+  const calls = new Map();
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      const promptId = kickoff.prompts[0].id;
+      const attempt = (calls.get(promptId) || 0) + 1;
+      calls.set(promptId, attempt);
+      const roles =
+        promptId === "p1"
+          ? [role({ company: "Active Sibling", url: activeUrl })]
+          : attempt === 1
+            ? [role({ company: "Expired Sibling", url: expiredUrl })]
+            : [
+                role({ company: "Duplicate Sibling", url: activeUrl }),
+                role({ company: "Replacement Sibling", url: replacementUrl }),
+              ];
+      emitAssistantJson(onEvent, {
+        roles,
+        queries_run: [
+          { prompt_id: promptId, query: `${promptId} query ${attempt}`, status: "completed" },
+        ],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: async (url) =>
+      url === expiredUrl
+        ? {
+            bodyFetchStatus: "resolved",
+            url,
+            bodyText: fullJd("Expired sibling"),
+            liveness: { result: "expired", reason: "Expired sibling." },
+          }
+        : canonicalResolver()(url),
+  });
+
+  assert.deepEqual(Object.fromEntries(calls), { p1: 1, p2: 2 });
+  assert.equal(result.new, 2, JSON.stringify(result));
+  assert.ok(result.duplicates >= 1, JSON.stringify(result));
+  assert.deepEqual(
+    readDbScannerRows({ repoRoot })
+      .filter((row) => row.source === "ai-web-search")
+      .map((row) => row.link)
+      .sort(),
+    [activeUrl, replacementUrl].sort()
   );
 });
 

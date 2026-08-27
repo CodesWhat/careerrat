@@ -344,6 +344,42 @@ function normalizeQueryResults({ selected, queriesRun, toolTrace, fallbackError 
   };
 }
 
+function mergePromptCoverage({ selected, outcomes }) {
+  const queryResults = selected.map((prompt) => {
+    const entries = outcomes
+      .flatMap((outcome) => outcome.queryResults || [])
+      .filter((entry) => entry.promptId === prompt.id);
+    const queries = entries.flatMap((entry) => entry.queries || []);
+    const failure = entries.find((entry) => entry.status === "failed");
+    return {
+      promptId: prompt.id,
+      prompt: prompt.text,
+      status: failure ? "failed" : "completed",
+      queries,
+      ...(failure ? { error: failure.error } : {}),
+    };
+  });
+  return {
+    queryResults,
+    failedPromptIds: queryResults
+      .filter((entry) => entry.status === "failed")
+      .map((entry) => entry.promptId),
+  };
+}
+
+function freshnessRecoveryInstruction(rejections) {
+  const rejectedPostings = rejections.slice(0, 40).map(({ offer, reason }) => ({
+    url: offer.url,
+    reason: String(reason || "The canonical posting could not be verified.").slice(0, 240),
+  }));
+  return [
+    "CareerRat's canonical checker rejected every usable candidate from this saved prompt for liveness or posting-identity reasons.",
+    "Run one fresh replacement search on the same provider. Return different, currently active, posting-specific roles that still satisfy every original candidate boundary.",
+    "Do not return any rejected URL below, or another URL for the same rejected requisition. Do not loosen title, location, compensation, freshness, or fit requirements.",
+    JSON.stringify({ rejected_postings: rejectedPostings }),
+  ].join("\n");
+}
+
 // search-jobs is deliberately excluded from the embedded runtime's default
 // allowlist (see skill-runtime.mjs's own DEFAULT_RUNTIME_SKILLS comment) — a
 // blanket CAREERRAT_RUNTIME_SKILLS opt-in shouldn't also hand every other
@@ -457,17 +493,23 @@ export async function runAiWebSearch({
   const outputSchema = loadSchema(repoRoot);
   const promptTotal = selected.length;
 
-  async function runSavedPrompt(prompt, promptIndex) {
+  async function runSavedPrompt(prompt, promptIndex, { rejectedCandidates = [] } = {}) {
     const promptNumber = promptIndex + 1;
+    const recoveryInstruction = rejectedCandidates.length
+      ? freshnessRecoveryInstruction(rejectedCandidates)
+      : null;
     const lifecycle = {
       phase: "prompt",
       promptId: prompt.id,
       promptIndex: promptNumber,
       promptTotal,
+      ...(recoveryInstruction ? { recovery: true } : {}),
     };
     onProgress?.({
       type: "activity",
-      message: `Searching saved prompt ${promptNumber} of ${promptTotal}…`,
+      message: recoveryInstruction
+        ? `Searching for fresh replacements for saved prompt ${promptNumber} of ${promptTotal}…`
+        : `Searching saved prompt ${promptNumber} of ${promptTotal}…`,
       ...lifecycle,
       promptStatus: "running",
     });
@@ -495,13 +537,18 @@ export async function runAiWebSearch({
       throwIfSearchAborted(signal);
       let rawText = "";
       let runtimeResult;
+      const baseInput = recoveryInstruction
+        ? `${JSON.stringify(kickoffInput)}\n\n${recoveryInstruction}`
+        : kickoffInput;
       try {
         runtimeResult = await runSkillStream({
           skill: AI_WEB_SEARCH_LABELS.skill,
           action: AI_WEB_SEARCH_LABELS.action,
           operation: AI_WEB_SEARCH_LABELS.operation,
           ...(executionPlan ? { executionPlan } : { aiOperation: "research.web" }),
-          input: correction ? `${JSON.stringify(kickoffInput)}\n\n${correction}` : kickoffInput,
+          input: correction
+            ? `${typeof baseInput === "string" ? baseInput : JSON.stringify(baseInput)}\n\n${correction}`
+            : baseInput,
           repoRoot,
           env: skillEnv,
           signal,
@@ -582,7 +629,7 @@ export async function runAiWebSearch({
         schema: outputSchema,
         manual: MANUAL_FALLBACK,
         structuredMode: "fallback",
-        maxRetries: 1,
+        maxRetries: recoveryInstruction ? 0 : 1,
         invoke: async ({ correction }) => {
           if (correction) {
             onProgress?.({
@@ -620,7 +667,7 @@ export async function runAiWebSearch({
         foundCount: 0,
         error: message,
       });
-      return { roles: [], toolTrace, errors: [message], ...coverage };
+      return { promptId: prompt.id, roles: [], toolTrace, errors: [message], ...coverage };
     }
 
     const roles = Array.isArray(outcome.body.data?.roles) ? outcome.body.data.roles : [];
@@ -640,7 +687,7 @@ export async function runAiWebSearch({
       foundCount: roles.length,
       ...(promptFailed ? { error: coverage.queryResults[0]?.error } : {}),
     });
-    return { roles, toolTrace, errors: [], ...coverage };
+    return { promptId: prompt.id, roles, toolTrace, errors: [], ...coverage };
   }
 
   const promptOutcomes = await mapBounded(
@@ -650,118 +697,175 @@ export async function runAiWebSearch({
   );
   throwIfSearchAborted(signal);
 
-  const roles = promptOutcomes.flatMap((result) => result.roles);
-  const toolTrace = promptOutcomes.flatMap((result) => result.toolTrace);
-  const promptErrors = [...new Set(promptOutcomes.flatMap((result) => result.errors))];
-  const coverage = {
-    queryResults: promptOutcomes.flatMap((result) => result.queryResults),
-    failedPromptIds: promptOutcomes.flatMap((result) => result.failedPromptIds),
-  };
+  const allPromptOutcomes = [...promptOutcomes];
+  const roles = [];
   const { seenPostingKeys } = buildDbSeenSets({ repoRoot, env });
-
-  const preliminary = [];
-  const receiptOnly = [];
   const preliminaryPostingKeys = new Set(seenPostingKeys);
-  let duplicates = 0;
-  let invalid = 0;
-  for (const role of roles) {
-    if (!role?.company || !role?.title || !role?.url || !isPostingEvidenceUrl(role.url)) {
-      invalid += 1;
-      continue;
-    }
-    const key = normalizeCompanyRoleKey(role.company, role.title);
-    const req = extractReqId(role.url);
-    const offer = toScanOffer(role, { key, reqId: req.id });
-    const isDuplicate = postingIdentityIsSeen(offer, preliminaryPostingKeys);
-    if (isDuplicate) {
-      duplicates += 1;
-      receiptOnly.push(offer);
-      continue;
-    }
-    addPostingIdentity(preliminaryPostingKeys, offer);
-    preliminary.push(offer);
-  }
-
-  let survivors = [];
   const canonicalCandidates = [];
   const captureFailures = [];
   const recoveredSources = [];
-  const hydrationInputs = [
-    ...preliminary.map((offer) => ({ offer, receiptOnly: false })),
-    ...receiptOnly.map((offer) => ({ offer, receiptOnly: true })),
-  ];
   const resolutionCache = new Map();
-  let hydratedCount = 0;
-  if (hydrationInputs.length) {
-    onProgress?.({
-      type: "activity",
-      message: `Checking details for ${hydrationInputs.length} discovered job${hydrationInputs.length === 1 ? "" : "s"}…`,
-    });
-  }
-  const hydratedInputs = await mapBounded(
-    hydrationInputs,
-    HYDRATION_CONCURRENCY,
-    async ({ offer, receiptOnly: isReceiptOnly }) => {
-      throwIfSearchAborted(signal);
-      const hydrated = await hydrateJobOffer(offer, {
-        fetchImpl,
-        resolveHost,
-        resolveJobUrlImpl,
-        force: true,
-        rejectExpired: true,
-        signal,
-        resolutionCache,
-      });
-      throwIfSearchAborted(signal);
-      hydratedCount += 1;
-      onProgress?.({
-        type: "activity",
-        message: `Checked details for ${hydratedCount} of ${hydrationInputs.length} discovered jobs…`,
-      });
-      return { offer, receiptOnly: isReceiptOnly, hydrated };
-    }
-  );
-  for (const { offer, receiptOnly: isReceiptOnly, hydrated } of hydratedInputs) {
-    throwIfSearchAborted(signal);
-    const bodyText = String(hydrated?.bodyText || "").trim();
-    recoveredSources.push({
-      url: offer.url,
-      status:
-        hydrated?.bodyFetchStatus === "unavailable"
-          ? "failed"
-          : hydrated?.bodyPartial === true
-            ? "deferred"
-            : "completed",
-      ...(hydrated?.url && hydrated.url !== offer.url ? { canonicalUrl: hydrated.url } : {}),
-      ...(hydrated?.bodyFetchReason ? { error: hydrated.bodyFetchReason } : {}),
-    });
-    if (isReceiptOnly) continue;
-    if (!bodyText || hydrated?.bodyFetchStatus === "unavailable") {
-      captureFailures.push({
-        company: offer.company,
-        title: offer.title,
-        url: offer.url,
-        reason: hydrated?.bodyFetchReason || "The job description could not be read.",
-      });
-      continue;
+  let duplicates = 0;
+  let invalid = 0;
+
+  async function collectPromptOutcomes(
+    outcomes,
+    { recovery = false, rejectedPostingKeys = new Set() } = {}
+  ) {
+    const preliminary = [];
+    const receiptOnly = [];
+    for (const outcome of outcomes) {
+      for (const role of outcome.roles || []) {
+        roles.push(role);
+        if (!role?.company || !role?.title || !role?.url || !isPostingEvidenceUrl(role.url)) {
+          invalid += 1;
+          continue;
+        }
+        const key = normalizeCompanyRoleKey(role.company, role.title);
+        const req = extractReqId(role.url);
+        const offer = toScanOffer(role, { key, reqId: req.id });
+        if (recovery && postingIdentityIsSeen(offer, rejectedPostingKeys)) {
+          duplicates += 1;
+          continue;
+        }
+        const entry = { offer, promptId: outcome.promptId };
+        const isDuplicate = postingIdentityIsSeen(offer, preliminaryPostingKeys);
+        if (isDuplicate) {
+          duplicates += 1;
+          receiptOnly.push(entry);
+          continue;
+        }
+        addPostingIdentity(preliminaryPostingKeys, offer);
+        preliminary.push(entry);
+      }
     }
 
-    const canonicalKey = normalizeCompanyRoleKey(hydrated.company, hydrated.title);
-    const canonicalReq = extractReqId(hydrated.url);
-    const canonicalOffer = { ...hydrated, key: canonicalKey, reqId: canonicalReq.id };
-    const canonicalDuplicate = postingIdentityIsSeen(canonicalOffer, seenPostingKeys);
-    if (canonicalDuplicate) {
-      duplicates += 1;
-      continue;
+    const hydrationInputs = [
+      ...preliminary.map((entry) => ({ ...entry, receiptOnly: false })),
+      ...receiptOnly.map((entry) => ({ ...entry, receiptOnly: true })),
+    ];
+    let hydratedCount = 0;
+    if (hydrationInputs.length) {
+      onProgress?.({
+        type: "activity",
+        message: recovery
+          ? `Checking details for ${hydrationInputs.length} replacement job${hydrationInputs.length === 1 ? "" : "s"}…`
+          : `Checking details for ${hydrationInputs.length} discovered job${hydrationInputs.length === 1 ? "" : "s"}…`,
+      });
     }
-    addPostingIdentity(seenPostingKeys, canonicalOffer);
-    canonicalCandidates.push(canonicalOffer);
+    const hydratedInputs = await mapBounded(
+      hydrationInputs,
+      HYDRATION_CONCURRENCY,
+      async ({ offer, promptId, receiptOnly: isReceiptOnly }) => {
+        throwIfSearchAborted(signal);
+        const hydrated = await hydrateJobOffer(offer, {
+          fetchImpl,
+          resolveHost,
+          resolveJobUrlImpl,
+          force: true,
+          rejectExpired: true,
+          signal,
+          resolutionCache,
+        });
+        throwIfSearchAborted(signal);
+        hydratedCount += 1;
+        onProgress?.({
+          type: "activity",
+          message: recovery
+            ? `Checked details for ${hydratedCount} of ${hydrationInputs.length} replacement jobs…`
+            : `Checked details for ${hydratedCount} of ${hydrationInputs.length} discovered jobs…`,
+        });
+        return { offer, promptId, receiptOnly: isReceiptOnly, hydrated };
+      }
+    );
+
+    const canonicalPromptIds = new Set();
+    const receiptPromptIds = new Set();
+    const rejectionsByPrompt = new Map();
+    for (const { offer, promptId, receiptOnly: isReceiptOnly, hydrated } of hydratedInputs) {
+      throwIfSearchAborted(signal);
+      const bodyText = String(hydrated?.bodyText || "").trim();
+      recoveredSources.push({
+        url: offer.url,
+        status:
+          hydrated?.bodyFetchStatus === "unavailable"
+            ? "failed"
+            : hydrated?.bodyPartial === true
+              ? "deferred"
+              : "completed",
+        ...(hydrated?.url && hydrated.url !== offer.url ? { canonicalUrl: hydrated.url } : {}),
+        ...(hydrated?.bodyFetchReason ? { error: hydrated.bodyFetchReason } : {}),
+      });
+      if (isReceiptOnly) {
+        receiptPromptIds.add(promptId);
+        continue;
+      }
+      if (!bodyText || hydrated?.bodyFetchStatus === "unavailable") {
+        const reason = hydrated?.bodyFetchReason || "The job description could not be read.";
+        captureFailures.push({
+          company: offer.company,
+          title: offer.title,
+          url: offer.url,
+          reason,
+        });
+        if (!rejectionsByPrompt.has(promptId)) rejectionsByPrompt.set(promptId, []);
+        rejectionsByPrompt.get(promptId).push({ offer, reason });
+        continue;
+      }
+
+      canonicalPromptIds.add(promptId);
+      const canonicalKey = normalizeCompanyRoleKey(hydrated.company, hydrated.title);
+      const canonicalReq = extractReqId(hydrated.url);
+      const canonicalOffer = { ...hydrated, key: canonicalKey, reqId: canonicalReq.id };
+      const canonicalDuplicate = postingIdentityIsSeen(canonicalOffer, seenPostingKeys);
+      if (canonicalDuplicate) {
+        duplicates += 1;
+        continue;
+      }
+      addPostingIdentity(seenPostingKeys, canonicalOffer);
+      canonicalCandidates.push(canonicalOffer);
+    }
+
+    return { canonicalPromptIds, receiptPromptIds, rejectionsByPrompt };
   }
+
+  const initialCollection = await collectPromptOutcomes(promptOutcomes);
+  const recoverySpecs = selected
+    .map((prompt, promptIndex) => ({
+      prompt,
+      promptIndex,
+      rejectedCandidates: initialCollection.rejectionsByPrompt.get(prompt.id) || [],
+    }))
+    .filter(
+      ({ prompt, rejectedCandidates }) =>
+        rejectedCandidates.length > 0 &&
+        !initialCollection.canonicalPromptIds.has(prompt.id) &&
+        !initialCollection.receiptPromptIds.has(prompt.id)
+    );
+
+  if (recoverySpecs.length) {
+    const rejectedPostingKeys = new Set();
+    for (const { rejectedCandidates } of recoverySpecs) {
+      for (const { offer } of rejectedCandidates) addPostingIdentity(rejectedPostingKeys, offer);
+    }
+    const recoveryOutcomes = await mapBounded(
+      recoverySpecs,
+      AI_WEB_SEARCH_PROMPT_CONCURRENCY,
+      ({ prompt, promptIndex, rejectedCandidates }) =>
+        runSavedPrompt(prompt, promptIndex, { rejectedCandidates })
+    );
+    allPromptOutcomes.push(...recoveryOutcomes);
+    await collectPromptOutcomes(recoveryOutcomes, { recovery: true, rejectedPostingKeys });
+  }
+
+  const toolTrace = allPromptOutcomes.flatMap((result) => result.toolTrace);
+  const promptErrors = [...new Set(allPromptOutcomes.flatMap((result) => result.errors))];
+  const coverage = mergePromptCoverage({ selected, outcomes: allPromptOutcomes });
 
   const canonicalQualification = requalifyCanonicalOffers(canonicalCandidates, {
     config,
   });
-  survivors = canonicalQualification.kept.map((offer) => ({
+  const survivors = canonicalQualification.kept.map((offer) => ({
     ...offer,
     gate: deriveGate(offer.ruleFlags),
   }));
