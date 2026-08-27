@@ -138,6 +138,7 @@ export function createDevServer({
   chatRuntime = createChatRuntime({ repoRoot, env }),
   applyJobImpl = createConfiguredApplyExecutor({ repoRoot, env }),
   browserSessionManager = createBrowserSessionManager({ defaults: { repoRoot, env } }),
+  optimizeLinkedinInAppImpl = optimizeLinkedinInApp,
   workspaceAgentRuntime = createWorkspaceAgentRuntime({
     repoRoot,
     env,
@@ -205,11 +206,12 @@ export function createDevServer({
         role,
         createSessionImpl: (options) => browserSessionManager.get(options),
       }),
-    runLinkedinOptimizeImpl: ({ profileUrl }) =>
-      optimizeLinkedinInApp({
+    runLinkedinOptimizeImpl: ({ profileUrl, executionPlan }) =>
+      optimizeLinkedinInAppImpl({
         repoRoot,
         env,
         profileUrl,
+        executionPlan,
         createSessionImpl: (options) => browserSessionManager.get(options),
       }),
     runStatusSyncImpl: ({ applications }) =>

@@ -10982,6 +10982,22 @@ function seedLinkedinBatch(repoRoot, overrides = {}) {
 
 test("linkedin.optimize-request: profile_optimize granted returns handoff capabilities (optimize allowed, apply not) and batch null with no pending batch", async () => {
   const repoRoot = tempRepo();
+  const executionPlan = {
+    policyVersion: 1,
+    operation: "research.web",
+    runtimeId: "anthropic-api",
+    adapterVersion: 1,
+    requested: { quality: "balanced", reasoning: "medium" },
+    resolved: {
+      quality: "balanced",
+      reasoning: "medium",
+      model: "sonnet",
+      modelSource: "alias",
+      effort: "medium",
+      speedTier: null,
+    },
+    fallback: null,
+  };
   grantLinkedinOptimize(repoRoot, {
     profile_optimize: { enabled: true, platforms: { linkedin: true } },
   });
@@ -10999,6 +11015,7 @@ test("linkedin.optimize-request: profile_optimize granted returns handoff capabi
         summary: "2 profile suggestions ready for review. No profile edits were applied.",
       };
     },
+    executionPlan,
     intent: {
       type: "linkedin.optimize-request",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
@@ -11012,7 +11029,7 @@ test("linkedin.optimize-request: profile_optimize granted returns handoff capabi
   assert.equal(byKey.profile_optimize.allowed, true);
   assert.equal(byKey.profile_apply.allowed, false);
   assert.equal(artifact.batch, null);
-  assert.deepEqual(executions, [{ profileUrl: null }]);
+  assert.deepEqual(executions, [{ profileUrl: null, executionPlan }]);
   assert.equal(result.messages.at(-1).artifacts[1].kind, "browser_workflow_result");
 });
 

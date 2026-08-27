@@ -6722,9 +6722,13 @@ export async function executeWorkspaceIntent({
           now,
         });
       }
+      const linkedinExecutionPlan = operationExecutionPlan(selectedExecutionPlan, "research.web");
       const execution =
         typeof runLinkedinOptimizeImpl === "function"
-          ? await runLinkedinOptimizeImpl({ profileUrl: null })
+          ? await runLinkedinOptimizeImpl({
+              profileUrl: null,
+              executionPlan: linkedinExecutionPlan,
+            })
           : null;
 
       return appendActionResult({

@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { createDevServer } from "../src/cli/tracker-dev.mjs";
 import { openDb } from "../src/core/db/connection.mjs";
+import { candidateConfigPatch } from "../src/core/db/verbs/candidate.mjs";
 import {
   appOperationGet,
   appOperationStart,
@@ -187,6 +188,83 @@ test("the listening workspace owner recovers durable career-coach handoffs", asy
     await dev.listen({ port: 0, host: "127.0.0.1" });
     assert.deepEqual(calls, ["searches", "career-coach"]);
   } finally {
+    dev.chatRuntime.shutdown();
+    if (dev.server.listening) await new Promise((resolve) => dev.server.close(resolve));
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("tracker-dev preserves LinkedIn optimization's frozen plan across provider change and retry", async () => {
+  const repoRoot = tempRepo();
+  writeTracker(repoRoot);
+  openDb({ repoRoot });
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "automation",
+    patch: {
+      setup_mode: "advanced",
+      capabilities: {
+        profile_optimize: { enabled: true, platforms: { linkedin: true } },
+      },
+      consent: { linkedin: true },
+    },
+  });
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
+  const plans = [];
+  const dev = createDevServer({
+    repoRoot,
+    env,
+    optimizeLinkedinInAppImpl: async ({ executionPlan }) => {
+      plans.push(executionPlan);
+      if (plans.length === 1) {
+        delete env.ANTHROPIC_API_KEY;
+        env.CAREERRAT_AI_PROXY_URL = "http://127.0.0.1:7788";
+        const error = new Error("temporary provider failure");
+        error.code = "AI_PROVIDER_FAILED";
+        throw error;
+      }
+      return {
+        kind: "browser_workflow_result",
+        skill: "optimize-linkedin",
+        state: "completed",
+        summary: "LinkedIn suggestions ready.",
+      };
+    },
+  });
+
+  try {
+    await dev.listen({ port: 0, host: "127.0.0.1" });
+    const response = await fetch(`${baseUrl(dev)}/api/workspace/intent`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        requestId: "linkedin-plan-retry",
+        intent: {
+          type: "linkedin.optimize-request",
+          entity: { type: "workspace", id: "workspace-main" },
+          input: {},
+        },
+      }),
+    });
+    const started = await response.json();
+    assert.equal(response.status, 202, JSON.stringify(started));
+    let failed = started.operation;
+    for (let attempt = 0; attempt < 100 && failed.status !== "failed"; attempt += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+      failed = appOperationGet({ repoRoot, id: failed.id }).operation;
+    }
+    assert.equal(failed.status, "failed", JSON.stringify(failed.error));
+
+    const retried = await dev.appOperations.retry({ id: failed.id });
+    const completed = await dev.appOperations.wait(retried.operation.id);
+    assert.equal(completed.status, "completed", JSON.stringify(completed.error));
+    assert.equal(plans.length, 2);
+    assert.equal(plans[0].runtimeId, "anthropic-api");
+    assert.deepEqual(plans[1], plans[0]);
+  } finally {
+    await dev.shutdownAppOperations();
+    await dev.shutdownSourcingWorkers?.();
     dev.chatRuntime.shutdown();
     if (dev.server.listening) await new Promise((resolve) => dev.server.close(resolve));
     rmSync(repoRoot, { recursive: true, force: true });

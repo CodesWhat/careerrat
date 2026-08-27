@@ -302,6 +302,82 @@ test("Playwright fixture: LinkedIn profile read creates proposals without editin
   assert.ok(batch.surfaces.every((surface) => surface.decision === null));
 });
 
+test("LinkedIn proposal schema retry keeps the frozen provider plan after provider settings change", async () => {
+  const repoRoot = workspace(
+    { profile_optimize: { enabled: true, platforms: { linkedin: true } } },
+    { linkedin: true }
+  );
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
+  const executionPlan = {
+    policyVersion: 1,
+    operation: "research.web",
+    runtimeId: "anthropic-api",
+    adapterVersion: 1,
+    requested: { quality: "balanced", reasoning: "medium" },
+    resolved: {
+      quality: "balanced",
+      reasoning: "medium",
+      model: "sonnet",
+      modelSource: "alias",
+      effort: "medium",
+      speedTier: null,
+    },
+    fallback: null,
+  };
+  const calls = [];
+  const result = await optimizeLinkedinInApp({
+    repoRoot,
+    env,
+    executionPlan,
+    createSessionImpl: () => ({ async close() {} }),
+    readProfileImpl: async () => ({
+      ok: true,
+      records: [{ surfaceId: "headline", surface: "Headline", current: "Software Engineer" }],
+    }),
+    callAIImpl: async (options) => {
+      calls.push(options);
+      if (calls.length === 1) {
+        delete env.ANTHROPIC_API_KEY;
+        env.CAREERRAT_AI_PROXY_URL = "http://127.0.0.1:7788";
+        return { content: [{ type: "text", text: "not json" }] };
+      }
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              surfaces: [
+                {
+                  surfaceId: "headline",
+                  surface: "Headline",
+                  current: "Software Engineer",
+                  proposed: "Applied AI Engineer",
+                  rationale: "Matches the saved target role.",
+                  evidenceRef: "candidate evidence",
+                },
+              ],
+            }),
+          },
+        ],
+      };
+    },
+    now: () => new Date("2026-08-27T16:00:00.000Z"),
+  });
+
+  assert.equal(result.state, "completed");
+  assert.equal(calls.length, 2);
+  assert.deepEqual(
+    calls.map(({ executionPlan: received, useExecutionPlanRoute }) => ({
+      executionPlan: received,
+      useExecutionPlanRoute,
+    })),
+    [
+      { executionPlan, useExecutionPlanRoute: true },
+      { executionPlan, useExecutionPlanRoute: true },
+    ]
+  );
+});
+
 test("Playwright fixture: ATS sync reads status and atomically clears portal CTAs", async () => {
   const repoRoot = workspace(
     { status_polling: { enabled: true, platforms: { greenhouse: true } } },
