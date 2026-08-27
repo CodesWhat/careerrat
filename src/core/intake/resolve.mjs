@@ -188,6 +188,8 @@ export async function hydrateJobOffer(
     return {
       ...offer,
       url: resolved.url || offer.url,
+      company: resolved.company || offer.company,
+      title: resolved.title || offer.title,
       location: preferredResolvedLocation(resolved.location, offer.location),
       comp: resolved.comp || offer.comp,
       bodyText: canonicalBody,

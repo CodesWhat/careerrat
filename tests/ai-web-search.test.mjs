@@ -1202,6 +1202,139 @@ test("runAiWebSearch rejects a soft-404 page even when the model supplied a summ
   );
 });
 
+test("runAiWebSearch rejects a model title that resolves to a different canonical requisition", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        {
+          name: "Event and venue operations",
+          titles: ["Event Operations Manager", "Event Coordinator", "Venue Operations Manager"],
+        },
+      ],
+      fit_bands: { fit_floor: 65 },
+    },
+  });
+  const garnerUrl = "https://job-boards.greenhouse.io/garnerhealth/jobs/5982721004";
+  let calls = 0;
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      calls += 1;
+      emitAssistantJson(onEvent, {
+        roles:
+          typeof input === "string"
+            ? []
+            : [
+                role({
+                  company: "Garner Health",
+                  title: "Event Operations Senior Associate",
+                  url: garnerUrl,
+                  location: "New York City, New York",
+                }),
+              ],
+        queries_run: [{ prompt_id: "p1", query: `query ${calls}`, status: "completed" }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: async (url) => ({
+      bodyFetchStatus: "resolved",
+      url,
+      provider: "greenhouse",
+      company: "Garnerhealth",
+      title: "Senior IT Systems Engineer",
+      location: "New York City, New York",
+      comp: "$189,000 - $220,000 base salary",
+      bodyText: fullJd("Canonical Senior IT Systems Engineer posting"),
+      liveness: { result: "active", reason: "visible apply control" },
+    }),
+  });
+
+  assert.equal(calls, 3, "canonical identity rejection keeps the existing bounded recovery cap");
+  assert.equal(result.new, 0, JSON.stringify(result));
+  assert.equal(result.presented, 0, JSON.stringify(result));
+  assert.deepEqual(result.reasonCounts, { seniority: 1 });
+  assert.equal(
+    readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search").length,
+    0
+  );
+});
+
+test("runAiWebSearch persists a legitimate provider-normalized target title", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Hospitality", titles: ["Assistant General Manager"] }],
+      fit_bands: { fit_floor: 65 },
+    },
+  });
+  const url = "https://job-boards.greenhouse.io/hospitality/jobs/123456";
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: assistantJson({
+      roles: [
+        role({
+          company: "Hospitality Group",
+          title: "Asst. General Manager",
+          url,
+          location: "New York, NY",
+        }),
+      ],
+      queries_run: [{ prompt_id: "p1", query: "NYC assistant general manager" }],
+    }),
+    resolveJobUrlImpl: async () => ({
+      bodyFetchStatus: "resolved",
+      url,
+      provider: "greenhouse",
+      company: "Hospitality Group",
+      title: "Assistant General Manager",
+      location: "New York, NY",
+      bodyText: fullJd("Canonical Assistant General Manager posting"),
+      liveness: { result: "active", reason: "visible apply control" },
+    }),
+  });
+
+  assert.equal(result.new, 1, JSON.stringify(result));
+  assert.equal(result.presented, 1, JSON.stringify(result));
+  const [saved] = readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search");
+  assert.equal(saved.company, "Hospitality Group");
+  assert.equal(saved.role, "Assistant General Manager");
+});
+
 test("runAiWebSearch replaces a prompt batch erased by canonical liveness once", async () => {
   const repoRoot = repo({ prompts: 1 });
   candidateConfigPatch({

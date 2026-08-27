@@ -357,6 +357,36 @@ test("hydrateJobOffer rejects an exact ATS requisition missing from its successf
   assert.match(hydrated.bodyFetchReason, /current .*board|no longer lists/i);
 });
 
+test("hydrateJobOffer adopts canonical provider identity instead of model-supplied identity", async () => {
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Garner Health",
+      title: "Event Operations Senior Associate",
+      url: "https://job-boards.greenhouse.io/garnerhealth/jobs/5982721004",
+      bodyText: "Unverified open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      rejectExpired: true,
+      resolveJobUrlImpl: async (url) => ({
+        bodyFetchStatus: "resolved",
+        url,
+        provider: "greenhouse",
+        company: "Garnerhealth",
+        title: "Senior IT Systems Engineer",
+        location: "New York City, New York",
+        bodyText: LONG_ACTIVE_JD,
+      }),
+    }
+  );
+
+  assert.equal(hydrated.company, "Garnerhealth");
+  assert.equal(hydrated.title, "Senior IT Systems Engineer");
+  assert.equal(hydrated.provider, "greenhouse");
+  assert.equal(hydrated.bodyPartial, false);
+});
+
 test("non-ATS SPA-listed host (Wellfound) -> deferred without ever calling fetchImpl", async () => {
   let called = false;
   const result = await resolveJobUrl("https://wellfound.com/jobs/12345", {

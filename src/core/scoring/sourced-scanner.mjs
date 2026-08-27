@@ -888,6 +888,13 @@ export function requalifyCanonicalOffers(
       ? { ...offer, location: qualification.displayLocation }
       : offer;
     const rating = scoreSourcedOffer(qualifiedOffer, config);
+    if (rating.ruleFlags?.includes("title-target-mismatch")) {
+      result.filteredSeniority.push({
+        ...qualifiedOffer,
+        qualificationReason: "title-target-mismatch",
+      });
+      continue;
+    }
     result.kept.push({
       ...qualifiedOffer,
       qualificationUnknowns: qualification.qualificationUnknowns,
