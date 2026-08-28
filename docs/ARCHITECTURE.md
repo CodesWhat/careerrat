@@ -106,14 +106,16 @@ silently start chat or the full skill runtime.
 Confirmed company writes remain confirm-first source config or DB-owner work,
 not React state, generated tracker files, or model output.
 
-### CareerRat-owned browser workflows
+### CareerRat-owned private-account browser workflows
 
-The in-app browser workflows read permitted Apple Mail, Gmail, Outlook,
-LinkedIn, Wellfound, Greenhouse, Workday, Ashby, and Lever surfaces without
-delegating the product action to the selected agent CLI. Contextual permissions
-remain off by default and are checked per capability and platform. Login walls,
-captchas, 2FA, and other challenges return visible retry state without advancing
-the workflow watermark.
+The in-app private-account browser workflows read permitted Apple Mail, Gmail,
+Outlook, LinkedIn, Wellfound, Greenhouse, Workday, Ashby, and Lever surfaces
+without delegating the product action to the selected agent CLI. Their contextual
+permissions remain off by default and are checked per capability and platform.
+Saved job-source login is separate: when a source is added or first used and login
+is needed, CareerRat asks one site-specific Yes/No question instead of using the
+permission matrix. Login walls, captchas, 2FA, and other challenges return visible
+retry state without advancing the workflow watermark.
 
 Mail and message reads capture relevant communications locally. Relationship
 sourcing writes review-only leads. LinkedIn optimization writes proposal batches;

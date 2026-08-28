@@ -162,8 +162,46 @@ test("public copy explains job-site login as one point-of-use choice", async () 
       /Yes[\s\S]{0,160}opens[\s\S]{0,160}No[\s\S]{0,160}skip/i,
       `${paths[name]} should explain both answers`
     );
+    assert.match(
+      copy[name],
+      /added or first used/i,
+      `${paths[name]} should describe the actual point-of-use timing`
+    );
     assert.doesNotMatch(copy[name], /authenticated_search|authenticated search permission/i);
   }
+});
+
+test("architecture copy separates saved job-source login from private-account permissions", async () => {
+  const paths = {
+    rootArchitecture: "docs/ARCHITECTURE.md",
+    docsArchitecture: "apps/docs/content/docs/advanced/architecture.mdx",
+    whatIsCareerRat: "apps/docs/content/docs/getting-started/what-is-careerrat.mdx",
+    runtimeRouting: "docs/architecture/runtime-routing-policy.md",
+    skillDecomposition: "docs/architecture/skill-decomposition.yml",
+    companyDiscovery: "docs/architecture/discover-companies-target-contract.md",
+  };
+  const copy = Object.fromEntries(
+    await Promise.all(
+      Object.entries(paths).map(async ([name, path]) => [name, await readFile(path, "utf8")])
+    )
+  );
+
+  assert.match(copy.rootArchitecture, /private-account browser workflows/i);
+  assert.match(copy.docsArchitecture, /private-account browser workflows/i);
+  assert.match(copy.whatIsCareerRat, /private-account browser automation/i);
+  for (const name of Object.keys(paths)) {
+    assert.match(
+      copy[name],
+      /job-source|saved job-site|saved search/i,
+      `${paths[name]} should name the saved job-source exception`
+    );
+  }
+  assert.doesNotMatch(copy.runtimeRouting, /Do not use for \|[^\n]*browser-authenticated tasks/i);
+  assert.doesNotMatch(copy.skillDecomposition, /authenticated browser automation remains v2/i);
+  assert.doesNotMatch(
+    copy.companyDiscovery,
+    /Logged-in LinkedIn,[\s\S]{0,120}session-browser work remain v2/i
+  );
 });
 
 test("public docs explain durable background work without claiming interrupted work completed", async () => {

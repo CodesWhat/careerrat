@@ -31,9 +31,12 @@ This contract also preserves the Phase 1 sourcing decisions:
   concepts so public/custom career pages can be cached for later extraction
   without weakening today's supported-ATS scanner path.
 
-Authenticated browser automation is outside Phase 1. Logged-in LinkedIn,
-Wellfound, webmail, authenticated ATS portals, captchas, 2FA, and session-browser
-work remain v2 or full-skill/manual fallback territory.
+Authenticated people/company discovery is outside Phase 1. Logged-in LinkedIn or
+Wellfound people search, webmail, authenticated ATS portals, captchas, 2FA, and
+open-ended private-account browser work remain full-skill/manual fallback
+territory. This does not govern saved job-source login, which uses the shipped
+site-specific Yes/No handoff when a source is added or first used and login is
+needed.
 
 ## Inputs
 
@@ -186,8 +189,9 @@ JD capture posture:
 - When full text is unavailable, future implementation must mark the capture as
   partial instead of saving only a URL.
 
-Authenticated browser automation remains outside Phase 1 and must not be pulled
-into this scanner cascade.
+Authenticated people/company discovery and open-ended private-account browser
+work remain outside Phase 1 and must not be pulled into this scanner cascade.
+Saved job-source login stays in its existing source-specific scan path.
 
 ## Proposal Gate
 
@@ -359,7 +363,8 @@ Links without preserved JD text do not satisfy the JD capture requirement.
 - Do not create package-manager installs or introduce new vendor SDKs in Phase 1.
 - Do not make model output a trusted write path.
 - Do not auto-submit applications or promote sourced rows to applications.
-- Do not migrate browser-authenticated sources into Phase 1.
+- Do not migrate authenticated people/company discovery into Phase 1. Saved
+  job-source login remains in its existing source-specific scan path.
 - Do not write candidate-specific discovered sources into shipped docs such as
   `docs/SOURCES.md`.
 - Do not collapse supported ATS promotion and unsupported public-page cache into

@@ -14,12 +14,12 @@ owns the body-read gate.
 - Aggregators: collect broad matches, preserve their source labels, and dedupe
   against canonical job URLs.
 - Login-backed sources: use saved browser sessions and participate in normal
-  searches once enabled. At a login wall CareerRat asks “Do you want to log into
-  LinkedIn so I can use it?” (or names the actual site). Yes opens that exact
-  saved search in the visible app browser. No skips it and keeps searching the
-  other sources. Each result's full description is read in that same session so
-  a login-only posting is captured locally instead of being fetched again over
-  public HTTP.
+  searches once enabled. When a source is added or first used and login is
+  needed, CareerRat asks “Do you want to log into LinkedIn so I can use it?” (or
+  names the actual site). Yes opens that exact saved search in the visible app
+  browser. No skips it and keeps searching the other sources. Each result's full
+  description is read in that same session so a login-only posting is captured
+  locally instead of being fetched again over public HTTP.
 
 ## AI Open-Web Discovery
 

@@ -102,9 +102,9 @@ consent. Query it with `mayRun()` in `src/core/automation/consent.mjs`; never ha
 the policy in skill prose.
 
 Job sources use a simpler point-of-use flow instead of this switchboard. When a
-configured source needs login, CareerRat asks one site-specific Yes/No question.
-Yes opens the exact source URL in the visible CareerRat browser. No skips that
-source and continues with the rest.
+source is added or first used and login is needed, CareerRat asks one
+site-specific Yes/No question. Yes opens the exact source URL in the visible
+CareerRat browser. No skips that source and continues with the rest.
 
 Toggle it through the CLI (dry-run by default, `--write` to commit;
 comment-preserving and schema-validated):

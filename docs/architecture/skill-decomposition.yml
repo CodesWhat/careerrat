@@ -22,7 +22,7 @@ source_decisions:
   D-04: "Company board resolution should be cached once and reused by later sweeps."
   D-05: "Resolution cache records need company, domain, careers URL, board URL, provider, API URL, confidence, provenance, timestamps, scan result, and failure counters."
   D-06: "Re-resolution should be TTL or event driven by failures, redirects, stale windows, zero-job scans, or explicit refresh."
-  D-07: "Public non-job-board pages can use Node fetch first and Playwright for public JS rendering; authenticated browser automation remains v2."
+  D-07: "Public non-job-board pages can use Node fetch first and Playwright for public JS rendering; authenticated people/company discovery remains deferred. Saved job-source login uses the shipped point-of-use Yes/No handoff."
   D-08: "The practical source-design blockers are freshness, disappearing postings, cost, reliability, cacheability, and immediate JD capture."
   D-09: "Every discovered job should preserve the first reachable full JD body locally when found."
   D-10: "Phase 1 specifies a bakeoff across direct scanner/local scraper, low or free job APIs, Firecrawl, AI-search extraction, and optional benchmarks."
