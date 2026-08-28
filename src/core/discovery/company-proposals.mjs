@@ -80,7 +80,7 @@ function canAutoAddProposal(proposal) {
   );
 }
 
-function autoAddDecision({ proposal, sourceConfig, decidedAt }) {
+function autoAddDecision({ sourceConfig, decidedAt }) {
   return {
     action: "approve-supported-ats",
     status: "approved",
@@ -340,7 +340,7 @@ export async function createCompanyProposalBatch({
           provider: proposal.atsProvider,
         },
       });
-      const decision = autoAddDecision({ proposal, sourceConfig, decidedAt: createdAt });
+      const decision = autoAddDecision({ sourceConfig, decidedAt: createdAt });
       autoAdded.push({
         ...proposal,
         version: Number(proposal.version || 0) + 1,
