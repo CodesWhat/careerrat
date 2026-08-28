@@ -15,11 +15,11 @@ function checked(run, command, args, label) {
 
 function decodeXml(value) {
   return value
-    .replaceAll("&amp;", "&")
     .replaceAll("&lt;", "<")
     .replaceAll("&gt;", ">")
     .replaceAll("&quot;", '"')
-    .replaceAll("&apos;", "'");
+    .replaceAll("&apos;", "'")
+    .replaceAll("&amp;", "&");
 }
 
 export function parseDmgMountPoints(plist) {

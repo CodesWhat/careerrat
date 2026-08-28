@@ -11,7 +11,8 @@ export function selectMacReleaseArtifacts({ names, version } = {}) {
   if (dmgs.length !== 1 || dmgs[0] !== canonicalDmg) {
     throw new Error(`Release output must contain exactly ${canonicalDmg} and no other DMG.`);
   }
-  const zipPattern = new RegExp(`^CareerRat-${String(version).replace(/\./g, "\\.")}-.*\\.zip$`);
+  const escapedVersion = String(version).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const zipPattern = new RegExp(`^CareerRat-${escapedVersion}-.*\\.zip$`);
   const zips = entries.filter((name) => zipPattern.test(name));
   if (zips.length !== 1) {
     throw new Error(`Release output must contain exactly one updater ZIP for ${version}.`);
