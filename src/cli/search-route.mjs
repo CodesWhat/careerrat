@@ -167,6 +167,7 @@ export function mountSearchRoutes({
           env,
           fetchImpl,
           promptIds,
+          deterministic: run.metadata?.deterministic,
           executionPlan: run.metadata?.aiExecutionPlan,
           onProgress: (event) => {
             context?.emit?.(event);
@@ -502,7 +503,12 @@ export function mountSearchRoutes({
     return error;
   }
 
-  async function startAiWebSearchWorker({ promptIds, searchExecutionId, emit } = {}) {
+  async function startAiWebSearchWorker({
+    promptIds,
+    searchExecutionId,
+    deterministic,
+    emit,
+  } = {}) {
     const active = sourcingRunLatest({ repoRoot, env, purpose: "ai-web-search" }).run;
     if (active?.status === "running") {
       throw aiSearchStartError(409, "an AI web search is already running", { run: active });
@@ -569,6 +575,7 @@ export function mountSearchRoutes({
         prompts: requested.map((prompt) => ({ id: prompt.id, text: prompt.text })),
         aiExecutionPlan,
         ...(searchExecutionId ? { searchExecutionId } : {}),
+        ...(deterministic ? { deterministic } : {}),
       },
       trigger: promptIds?.length ? "retry-failed" : "jobs-search",
     });
@@ -619,10 +626,11 @@ export function mountSearchRoutes({
 
   workspaceAgentRuntime?.registerAiWebSearchStarter?.({
     isAvailable: () => resolveAIRoute(env, { repoRoot }).type !== "none",
-    start: async ({ searchExecutionId, signal, onProgress, onStarted } = {}) => {
+    start: async ({ searchExecutionId, deterministic, signal, onProgress, onStarted } = {}) => {
       signal?.throwIfAborted?.();
       const started = await startAiWebSearchWorker({
         searchExecutionId,
+        deterministic,
         emit: onProgress,
       });
       onStarted?.(started.run);

@@ -157,6 +157,7 @@ test("mounting the AI route registers a durable unified-search starter", async (
   const repoRoot = tempRepo();
   let workerDefinition;
   let starterDefinition;
+  let searchInput;
   const events = [];
   const workspaceAgentRuntime = {
     registerSourcingWorker(definition) {
@@ -184,22 +185,30 @@ test("mounting the AI route registers a durable unified-search starter", async (
   mountedRoutesFor({
     repoRoot,
     workspaceAgentRuntime,
-    runAiWebSearch: async ({ onProgress }) => {
+    runAiWebSearch: async (input) => {
+      searchInput = input;
+      const { onProgress } = input;
       onProgress({ type: "activity", message: "Searching the open web" });
       return { searched: 1, found: 1, new: 1, errors: [] };
     },
   });
 
   assert.equal(starterDefinition.isAvailable(), true);
+  const deterministic = {
+    status: "succeeded",
+    result: { offers: [{ company: "Existing Company", title: "Existing Role" }] },
+  };
   const result = await starterDefinition.start({
     searchExecutionId: "search-unified-route",
-    deterministic: { status: "succeeded" },
+    deterministic,
     onProgress: (event) => events.push(event),
   });
   const stored = sourcingRunLatest({ repoRoot, env: {}, purpose: "ai-web-search" }).run;
 
   assert.equal(result.ok, true);
   assert.equal(stored.metadata.searchExecutionId, "search-unified-route");
+  assert.deepEqual(stored.metadata.deterministic, deterministic);
+  assert.deepEqual(searchInput.deterministic, deterministic);
   assert.deepEqual(events, [{ type: "activity", message: "Searching the open web" }]);
 });
 
