@@ -89,6 +89,9 @@ function role(overrides = {}) {
     url: "https://jobs.lever.co/acme/req-1",
     body_text: "Build customer-facing agent workflows.",
     body_partial: false,
+    comp_text: null,
+    base_comp_text: null,
+    annual_earnings_text: null,
     fit_score: 88,
     fit_bucket: "high",
     fit_basis: "Strong role and tool match.",
@@ -120,6 +123,19 @@ function specificResolution(url, overrides = {}) {
 function canonicalResolver(overrides = {}) {
   return async (url) => specificResolution(url, overrides);
 }
+
+test("AI web search requires nullable basis-specific compensation fields", () => {
+  const schema = JSON.parse(
+    readFileSync(new URL("../config/ai-web-search.schema.json", import.meta.url), "utf8")
+  );
+  const roleSchema = schema.properties.roles.items;
+
+  assert.ok(roleSchema.required.includes("comp_text"));
+  assert.ok(roleSchema.required.includes("base_comp_text"));
+  assert.ok(roleSchema.required.includes("annual_earnings_text"));
+  assert.deepEqual(roleSchema.properties.base_comp_text.type, ["string", "null"]);
+  assert.deepEqual(roleSchema.properties.annual_earnings_text.type, ["string", "null"]);
+});
 
 after(() => {
   closeAll();
@@ -1593,6 +1609,7 @@ test("runAiWebSearch persists base pay and annual earnings in separate fields", 
   const row = readDbScannerRows({ repoRoot }).find((item) => item.company === "Tipped Bar");
   assert.equal(row.base, "$11.35 per hour");
   assert.equal(row.tc, "$95,000 - $120,000 including tips");
+  assert.equal(row.compBasis, "annual-earnings");
 });
 
 test("runAiWebSearch never copies annual earnings into base pay", async () => {
@@ -1620,6 +1637,34 @@ test("runAiWebSearch never copies annual earnings into base pay", async () => {
   const row = readDbScannerRows({ repoRoot }).find((item) => item.company === "Tips Only Bar");
   assert.equal(row.base, "verify");
   assert.equal(row.tc, "$85,000 - $110,000 including tips");
+  assert.equal(row.compBasis, "annual-earnings");
+});
+
+test("runAiWebSearch classifies legacy generic compensation before persistence", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: assistantJson({
+      roles: [
+        role({
+          company: "Legacy Tips Bar",
+          title: "Bartender",
+          url: "https://jobs.example.test/legacy-tips-bar",
+          comp_text: "$90,000 - $110,000 including tips",
+          body_text: "This is a tipped hospitality role.",
+        }),
+      ],
+      queries_run: [{ prompt_id: "p1", query: "NYC bartender jobs" }],
+    }),
+    resolveJobUrlImpl: canonicalResolver(),
+  });
+
+  assert.equal(result.new, 1, JSON.stringify(result));
+  const row = readDbScannerRows({ repoRoot }).find((item) => item.company === "Legacy Tips Bar");
+  assert.equal(row.base, "verify");
+  assert.equal(row.tc, "$90,000 - $110,000 including tips");
+  assert.equal(row.compBasis, "annual-earnings");
 });
 
 test("runAiWebSearch reports the count visible at the candidate's saved fit floor", async () => {

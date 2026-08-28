@@ -11,7 +11,11 @@ import { atomicWriteFile } from "../profile/gate-writer.mjs";
 import { stringifyYaml } from "../profile/yaml.mjs";
 import { trimEdgeCharacter } from "../text/slug.mjs";
 import { addPostingIdentity, postingIdentityIsSeen } from "./sourced-identity.mjs";
-import { requalifyCanonicalOffers } from "./sourced-scanner.mjs";
+import {
+  extractCompBand,
+  requalifyCanonicalOffers,
+  resolveCompensationEvidence,
+} from "./sourced-scanner.mjs";
 
 const ACTIVE_SOURCED_STATUSES = new Set(["sourced", "prospect", "saved", "gated"]);
 const POLICY_FAILURE_BUCKETS = Object.freeze([
@@ -199,6 +203,7 @@ function explicitBaseCompensationRange(bodyText) {
     const adjacentLabel = ADJACENT_BASE_COMPENSATION_LABEL_RE.test(clauses[index - 1] || "");
     if (!EXPLICIT_BASE_COMPENSATION_RE.test(clause) && !adjacentLabel) continue;
     if (NON_BASE_COMPENSATION_RE.test(clause)) continue;
+    if (!extractCompBand(clause, { baseOnly: true })) continue;
     for (const match of clause.matchAll(COMPENSATION_RANGE_RE)) {
       const min = normalizedCompensationAmount(match[1], match[2]);
       const max = normalizedCompensationAmount(match[3], match[4]);
@@ -241,13 +246,14 @@ function jobCaptureRelPath(offer) {
 
 function renderCapturedJob({ offer, savedAt }) {
   const body = offerBodyText(offer);
+  const compensation = resolveCompensationEvidence(offer);
   const dateSaved = savedAt.toISOString().slice(0, 10);
   const frontmatter = {
     company: offer.company || "",
     role: offer.title || "",
     reqId: offer.reqId || null,
-    comp: offer.baseComp || offer.comp || null,
-    tc: offer.annualEarningsComp || null,
+    comp: compensation.baseComp || null,
+    tc: compensation.annualEarningsComp || null,
     location: offer.location || null,
     source: offer.url || "",
     sourceName: offer.source || "capture",
@@ -276,8 +282,9 @@ function renderCapturedJob({ offer, savedAt }) {
     `# ${offer.title || "Open role"} - ${offer.company || "Unknown company"}`,
     "",
     offer.location ? `- Location: ${offer.location}` : "",
-    offer.baseComp || offer.comp ? `- Base pay: ${offer.baseComp || offer.comp}` : "",
-    offer.annualEarningsComp ? `- Annual earnings: ${offer.annualEarningsComp}` : "",
+    compensation.baseComp ? `- Base pay: ${compensation.baseComp}` : "",
+    compensation.annualEarningsComp ? `- Annual earnings: ${compensation.annualEarningsComp}` : "",
+    compensation.unclassifiedComp ? `- Compensation shown: ${compensation.unclassifiedComp}` : "",
     offer.url ? `- Source: ${offer.url}` : "",
     "",
     "## Capture triage",
@@ -327,6 +334,7 @@ function offerWithCapturedJob({ repoRoot, env, offer, savedAt }) {
 export function sourcedRowsFromScanOffers(offers, nowIso = new Date().toISOString()) {
   if (!Array.isArray(offers)) return [];
   return offers.filter(hasRequiredSourcedFields).map((offer) => {
+    const compensation = resolveCompensationEvidence(offer);
     const fitScore = Number(offer.score);
     const sourceMeta = sourceMetaFromOffer(offer);
     return {
@@ -339,11 +347,11 @@ export function sourcedRowsFromScanOffers(offers, nowIso = new Date().toISOStrin
       link: offer.url,
       loc: offer.location || "",
       base:
-        offer.baseComp ||
-        offer.comp ||
+        compensation.baseComp ||
         (offer.bodyPartial === true ? null : explicitBaseCompensationRange(offerBodyText(offer))) ||
         "verify",
-      tc: offer.annualEarningsComp || null,
+      tc: compensation.annualEarningsComp || null,
+      ...(compensation.annualEarningsComp ? { compBasis: "annual-earnings" } : {}),
       fitScore: Number.isFinite(fitScore) ? fitScore : 0,
       fitBucket: offer.fit || "",
       fitBasis: "triage",

@@ -53,6 +53,36 @@ test("annual cash earnings parsing ignores adjacent non-cash benefits", () => {
   assert.deepEqual(bands.annualEarnings, { min: 95_000, max: 120_000 });
 });
 
+test("hourly base annualization honors the posting's explicit weekly hours", () => {
+  const bands = sourcedScanner.extractCompensationBands(
+    "Base pay: $40 per hour, 30 hours per week."
+  );
+
+  assert.deepEqual(bands.base, { min: 62_400, max: 62_400 });
+  assert.deepEqual(
+    sourcedScanner.extractCompensationBands("Base pay: $40 per hour, full-time.").base,
+    { min: 83_200, max: 83_200 }
+  );
+});
+
+test("unquantified tips never turn hourly base pay into annual cash earnings", () => {
+  const bands = sourcedScanner.extractCompensationBands(
+    "Base pay: $11.35 per hour including tips."
+  );
+
+  assert.deepEqual(bands.base, { min: 23_608, max: 23_608 });
+  assert.equal(bands.annualEarnings, null);
+});
+
+test("compensation parsing rejects calendar years and unitless shorthand", () => {
+  assert.equal(extractCompBand("Salary review cycle: 2025-2026."), null);
+  assert.equal(extractCompBand("Salary range: 90-110."), null);
+  assert.deepEqual(extractCompBand("Salary range: 90k-110k."), {
+    min: 90_000,
+    max: 110_000,
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Filter + infrastructure tests (unchanged)
 // ---------------------------------------------------------------------------
@@ -2025,6 +2055,63 @@ test("annual earnings floor compares explicit tipped earnings without treating t
   assert.equal(result.filteredSalary[0]?.qualificationReason, "annual-earnings-below-floor");
   assert.deepEqual(result.filteredSalary[0]?.annualEarningsBand, { min: 60000, max: 75000 });
   assert.equal(result.kept.find((offer) => offer.company === "Overlap Bar")?.gate, "review");
+});
+
+test("basis-specific offer fields participate in scanner hard gates", () => {
+  const baseResult = filterAndDedupeOffers(
+    [
+      {
+        company: "Structured Base Corp",
+        title: "Bar Manager",
+        url: "https://jobs.example.test/structured-base",
+        location: "New York, NY",
+        baseComp: "$40 per hour",
+        bodyText: "Manage the venue team and daily service operations.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_base: 85_000 },
+          location: { home: "New York, NY", onsite: true },
+        },
+      },
+    }
+  );
+  const annualResult = filterAndDedupeOffers(
+    [
+      {
+        company: "Structured Tips Corp",
+        title: "Lead Bartender",
+        url: "https://jobs.example.test/structured-tips",
+        location: "New York, NY",
+        annualEarningsComp: "$60,000 - $75,000",
+        bodyText: "Lead a polished cocktail service team.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Lead Bartender"] }] },
+        profile: {
+          compensation: { minimum_annual_earnings: 85_000 },
+          location: { home: "New York, NY", onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(baseResult.filteredSalary[0]?.qualificationReason, "comp-below-floor");
+  assert.deepEqual(baseResult.filteredSalary[0]?.compBand, { min: 83_200, max: 83_200 });
+  assert.equal(annualResult.filteredSalary[0]?.qualificationReason, "annual-earnings-below-floor");
+  assert.deepEqual(annualResult.filteredSalary[0]?.annualEarningsBand, {
+    min: 60_000,
+    max: 75_000,
+  });
 });
 
 test("guaranteed base pay can clear an annual earnings floor", () => {

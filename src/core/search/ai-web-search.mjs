@@ -60,7 +60,11 @@ import {
   captureAndPersistOffersIfDb,
   revalidatePersistedSourcedRows,
 } from "../scoring/sourced-persistence.mjs";
-import { normalizeCompanyRoleKey, requalifyCanonicalOffers } from "../scoring/sourced-scanner.mjs";
+import {
+  normalizeCompanyRoleKey,
+  requalifyCanonicalOffers,
+  resolveCompensationEvidence,
+} from "../scoring/sourced-scanner.mjs";
 import { buildSearchPromptContext, getSearchPrompts } from "./search-prompts.mjs";
 
 const AI_WEB_SEARCH_SCHEMA_PATH = "config/ai-web-search.schema.json";
@@ -200,14 +204,19 @@ function toScanOffer(role, { key, reqId }) {
   const ruleFlags = Array.isArray(role.rule_flags) ? role.rule_flags.filter(Boolean) : [];
   const score = Number(role.fit_score);
   const bodyText = String(role.body_text || "").trim();
+  const compensation = resolveCompensationEvidence({
+    comp: role.comp_text,
+    baseComp: role.base_comp_text,
+    annualEarningsComp: role.annual_earnings_text,
+  });
   return {
     company: role.company,
     title: role.title,
     url: role.url,
     location: role.location || "",
     comp: role.comp_text || "",
-    baseComp: role.base_comp_text || "",
-    annualEarningsComp: role.annual_earnings_text || "",
+    baseComp: compensation.baseComp,
+    annualEarningsComp: compensation.annualEarningsComp,
     postedAt: role.posted_at || null,
     bodyText: bodyText || openWebEvidenceBody(role),
     bodyPartial: !bodyText || role.body_partial === true,

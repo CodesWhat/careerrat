@@ -71,6 +71,35 @@ test("existing offer compensation takes precedence over canonical-body extractio
   assert.equal(row.base, "$230,000 - $270,000 base");
 });
 
+test("generic compensation is classified instead of assumed to be base pay", () => {
+  const rows = sourcedRowsFromScanOffers([
+    offer({ comp: "$180,000 - $220,000 base salary" }),
+    offer({
+      title: "Lead Bartender",
+      url: "https://jobs.example.test/acme/lead-bartender",
+      comp: "$90,000 - $110,000 including tips",
+    }),
+    offer({
+      title: "Account Executive",
+      url: "https://jobs.example.test/acme/account-executive",
+      comp: "$180,000 - $240,000 total compensation including equity",
+    }),
+  ]);
+
+  assert.deepEqual(
+    rows.map(({ base, tc, compBasis }) => ({ base, tc, compBasis })),
+    [
+      { base: "$180,000 - $220,000 base salary", tc: null, compBasis: undefined },
+      {
+        base: "verify",
+        tc: "$90,000 - $110,000 including tips",
+        compBasis: "annual-earnings",
+      },
+      { base: "verify", tc: null, compBasis: undefined },
+    ]
+  );
+});
+
 test("sourced rows persist base pay and annual earnings separately", () => {
   const [row] = sourcedRowsFromScanOffers([
     offer({
@@ -83,6 +112,7 @@ test("sourced rows persist base pay and annual earnings separately", () => {
 
   assert.equal(row.base, "$11.35 per hour");
   assert.equal(row.tc, "$95,000 - $120,000 including tips");
+  assert.equal(row.compBasis, "annual-earnings");
 });
 
 test("partial bodies do not infer compensation but existing offer compensation still wins", () => {

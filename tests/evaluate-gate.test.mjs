@@ -261,6 +261,44 @@ describe("evaluateCompensation", () => {
     assert.deepEqual(result.annualEarningsBand, { min: 95_000, max: 120_000 });
   });
 
+  it("reads persisted annual cash evidence from frontmatter.tc", () => {
+    const result = evaluateCompensation({
+      body: "Join our bar team.",
+      frontmatter: { comp: "$11.35 per hour", tc: "$95,000 - $120,000" },
+      profile: { compensation: { minimum_annual_earnings: 85_000 } },
+    });
+
+    assert.equal(result.verdict, "clear");
+    assert.equal(result.basis, "annual-earnings");
+    assert.deepEqual(result.annualEarningsBand, { min: 95_000, max: 120_000 });
+  });
+
+  it("lets a hard base miss win over unknown annual earnings", () => {
+    const result = evaluateCompensation({
+      body: "Base pay: $11.35 per hour including tips.",
+      frontmatter: {},
+      profile: {
+        compensation: { minimum_base: 25_000, minimum_annual_earnings: 85_000 },
+      },
+    });
+
+    assert.equal(result.verdict, "below-floor");
+    assert.equal(result.basis, "base");
+  });
+
+  it("lets a hard annual-earnings miss win over an overlapping base range", () => {
+    const result = evaluateCompensation({
+      body: "Base salary: $80,000 - $100,000. Estimated annual earnings: $82,000 - $84,000.",
+      frontmatter: {},
+      profile: {
+        compensation: { minimum_base: 90_000, minimum_annual_earnings: 85_000 },
+      },
+    });
+
+    assert.equal(result.verdict, "below-floor");
+    assert.equal(result.basis, "annual-earnings");
+  });
+
   it("returns 'below-floor' when comp band max < minimum_base", () => {
     const result = evaluateCompensation({
       body: "Salary: $100,000 - $140,000 per year.",

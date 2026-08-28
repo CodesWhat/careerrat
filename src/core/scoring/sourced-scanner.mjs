@@ -788,9 +788,7 @@ function postingAgeEligibility(offer, config, now) {
 
 function salaryEligibility(offer, config) {
   const compensation = config?.profile?.compensation || {};
-  const bands = extractCompensationBands(
-    [offer?.comp, offer?.bodyText, offer?.description].filter(Boolean).join("\n")
-  );
+  const bands = extractCompensationBands(compensationEvidenceText(offer));
   const standing = assessCompensationFloors({
     baseBand: bands.base,
     annualEarningsBand: bands.annualEarnings,
@@ -947,7 +945,7 @@ function scoreSourcedOfferFromConfig(
   const title = String(offer.title || "").toLowerCase();
   const company = String(offer.company || "").toLowerCase();
   const location = String(offer.location || "").toLowerCase();
-  const compText = String(offer.comp || "");
+  const compText = compensationEvidenceText(offer, { includeBody: false });
   const body = String(offer.bodyText || offer.description || "");
   const text = `${title}\n${body}`.toLowerCase();
   const hasBody = body.trim().length > 300;
@@ -1268,6 +1266,45 @@ const ANNUAL_EARNINGS_LABEL_RE =
   /\b(?:annual\s+(?:cash\s+)?earnings|estimated\s+annual\s+earnings|on-target\s+earnings|ote|total\s+cash\s+comp(?:ensation)?|including\s+(?:tips|commissions?))\b/i;
 const EQUITY_COMP_LABEL_RE = /\b(?:equity|stock|options?)\b/i;
 const HOURLY_COMP_RE = /\b(?:hourly|per\s+(?:hour|hr))\b|\/\s*(?:hour|hr)\b/i;
+const WEEKLY_HOURS_RE = /\b(\d{1,2}(?:\.\d+)?)\s*(?:hours?|hrs?)\s*(?:\/|per|a|each)\s*week\b/i;
+const ANNUAL_PAY_UNIT_RE =
+  /\b(?:annually|annualized|per\s+(?:year|annum)|a\s+year)\b|\/\s*(?:year|yr)\b/i;
+
+function annualWorkHours(line) {
+  const explicit = String(line || "").match(WEEKLY_HOURS_RE);
+  if (!explicit) return ANNUAL_WORK_HOURS;
+  const hours = Number(explicit[1]);
+  return Number.isFinite(hours) && hours > 0 && hours <= 80
+    ? Math.round(hours * 52)
+    : ANNUAL_WORK_HOURS;
+}
+
+function isCalendarYear(value) {
+  const numeric = Number(value);
+  return Number.isInteger(numeric) && numeric >= 1900 && numeric <= 2100;
+}
+
+function plausibleCompensationMatch(line, match, values, suffixes, { hourly = false } = {}) {
+  const matchedText = String(match?.[0] || "");
+  const monetaryMarker = /[$£€]|\b(?:USD|CAD|MXN|EUR|GBP)\b/i.test(matchedText);
+  const abbreviated = suffixes.some(
+    (suffix) =>
+      String(suffix || "")
+        .trim()
+        .toLowerCase() === "k"
+  );
+  if (values.some(isCalendarYear) && !monetaryMarker && !abbreviated) return false;
+  if (
+    values.some((value) => Number(value) < 1000) &&
+    !monetaryMarker &&
+    !abbreviated &&
+    !hourly &&
+    !ANNUAL_PAY_UNIT_RE.test(line)
+  ) {
+    return false;
+  }
+  return true;
+}
 
 function lastLabelIndex(value, pattern) {
   let index = -1;
@@ -1290,6 +1327,7 @@ export function extractCompBand(text = "", { baseOnly = false } = {}) {
     const variableComp = VARIABLE_COMP_LABEL_RE.test(line);
     const annualEarnings = ANNUAL_EARNINGS_LABEL_RE.test(line);
     const hourly = HOURLY_COMP_RE.test(line);
+    const workHours = annualWorkHours(line);
     if (baseOnly && annualEarnings && !explicitBase) continue;
     const re =
       /(?:usd\s*)?\$?\s*(\d{2,6}(?:\.\d+)?)(\s*k)?\s*(?:-|–|—|to)\s*(?:usd\s*)?\$?\s*(\d{2,6}(?:\.\d+)?)(\s*k)?/gi;
@@ -1301,12 +1339,15 @@ export function extractCompBand(text = "", { baseOnly = false } = {}) {
       const rangeIsBase = baseLabelIndex >= 0 && baseLabelIndex > variableLabelIndex;
       const rangeIsVariable = variableLabelIndex >= 0 && variableLabelIndex > baseLabelIndex;
       const rangeIsHourly = rangeIsBase && hourly;
-      const min = rangeIsHourly
-        ? Number(match[1]) * ANNUAL_WORK_HOURS
-        : normalizeMoney(match[1], match[2]);
-      const max = rangeIsHourly
-        ? Number(match[3]) * ANNUAL_WORK_HOURS
-        : normalizeMoney(match[3], match[4]);
+      if (
+        !plausibleCompensationMatch(line, match, [match[1], match[3]], [match[2], match[4]], {
+          hourly: rangeIsHourly,
+        })
+      ) {
+        continue;
+      }
+      const min = rangeIsHourly ? Number(match[1]) * workHours : normalizeMoney(match[1], match[2]);
+      const max = rangeIsHourly ? Number(match[3]) * workHours : normalizeMoney(match[3], match[4]);
       const minimum = rangeIsBase ? 1_000 : 50_000;
       if (min >= minimum && max >= min && max <= 1200000) {
         const candidate = { min, max };
@@ -1323,12 +1364,17 @@ export function extractCompBand(text = "", { baseOnly = false } = {}) {
     if (variableComp && !explicitBase) {
       continue;
     }
-    const single = normalized.match(/(?:USD\s*)?\$\s*(\d{2,7}(?:\.\d+)?)(\s*k)?\b/i);
+    const single = normalized.match(/(?:USD\s*)?\$?\s*(\d{2,7}(?:\.\d+)?)(\s*k)?\b/i);
     if (!single) continue;
+    if (
+      !plausibleCompensationMatch(line, single, [single[1]], [single[2]], {
+        hourly: explicitBase && hourly,
+      })
+    ) {
+      continue;
+    }
     const amount =
-      explicitBase && hourly
-        ? Number(single[1]) * ANNUAL_WORK_HOURS
-        : normalizeMoney(single[1], single[2]);
+      explicitBase && hourly ? Number(single[1]) * workHours : normalizeMoney(single[1], single[2]);
     const minimum = explicitBase ? 1_000 : 50_000;
     if (amount >= minimum && amount <= 1200000) {
       const candidate = { min: amount, max: amount };
@@ -1349,23 +1395,24 @@ function extractAnnualEarningsBand(text = "") {
   for (const line of lines) {
     const normalized = line.replace(/,/g, "");
     const hourly = HOURLY_COMP_RE.test(line);
+    // An hourly base rate with "including tips" does not quantify the tips.
+    // Keep annual cash unknown until the posting supplies an annual amount.
+    if (hourly) continue;
     const range = normalized.match(
       /(?:usd\s*)?\$?\s*(\d{2,6}(?:\.\d+)?)(\s*k)?\s*(?:-|–|—|to)\s*(?:usd\s*)?\$?\s*(\d{2,6}(?:\.\d+)?)(\s*k)?/i
     );
     if (range) {
-      const min = hourly
-        ? Number(range[1]) * ANNUAL_WORK_HOURS
-        : normalizeMoney(range[1], range[2]);
-      const max = hourly
-        ? Number(range[3]) * ANNUAL_WORK_HOURS
-        : normalizeMoney(range[3], range[4]);
+      if (!plausibleCompensationMatch(line, range, [range[1], range[3]], [range[2], range[4]])) {
+        continue;
+      }
+      const min = normalizeMoney(range[1], range[2]);
+      const max = normalizeMoney(range[3], range[4]);
       if (min >= 1_000 && max >= min && max <= 1_200_000) return { min, max };
     }
-    const single = normalized.match(/(?:USD\s*)?\$\s*(\d{2,7}(?:\.\d+)?)(\s*k)?\b/i);
+    const single = normalized.match(/(?:USD\s*)?\$?\s*(\d{2,7}(?:\.\d+)?)(\s*k)?\b/i);
     if (!single) continue;
-    const amount = hourly
-      ? Number(single[1]) * ANNUAL_WORK_HOURS
-      : normalizeMoney(single[1], single[2]);
+    if (!plausibleCompensationMatch(line, single, [single[1]], [single[2]])) continue;
+    const amount = normalizeMoney(single[1], single[2]);
     if (amount >= 1_000 && amount <= 1_200_000) return { min: amount, max: amount };
   }
   return null;
@@ -1376,6 +1423,43 @@ export function extractCompensationBands(text = "") {
     base: extractCompBand(text, { baseOnly: true }),
     annualEarnings: extractAnnualEarningsBand(text),
   };
+}
+
+export function classifyCompensationText(text = "") {
+  const value = String(text || "").trim();
+  if (!value) return "unknown";
+  const bands = extractCompensationBands(value);
+  if (bands.base && !bands.annualEarnings) return "base";
+  if (bands.annualEarnings && !bands.base) return "annual-earnings";
+  return bands.base && bands.annualEarnings ? "mixed" : "unknown";
+}
+
+export function resolveCompensationEvidence(offer = {}) {
+  const generic = String(offer.comp || "").trim();
+  const genericBasis = classifyCompensationText(generic);
+  const baseComp = String(offer.baseComp || "").trim() || (genericBasis === "base" ? generic : "");
+  const annualEarningsComp =
+    String(offer.annualEarningsComp || "").trim() ||
+    (genericBasis === "annual-earnings" ? generic : "");
+  return {
+    baseComp,
+    annualEarningsComp,
+    unclassifiedComp:
+      generic && generic !== baseComp && generic !== annualEarningsComp ? generic : "",
+  };
+}
+
+export function compensationEvidenceText(offer = {}, { includeBody = true } = {}) {
+  const evidence = resolveCompensationEvidence(offer);
+  return [
+    evidence.baseComp ? `Base pay: ${evidence.baseComp}` : "",
+    evidence.annualEarningsComp ? `Annual earnings: ${evidence.annualEarningsComp}` : "",
+    evidence.unclassifiedComp ? `Compensation: ${evidence.unclassifiedComp}` : "",
+    includeBody ? offer?.bodyText : "",
+    includeBody ? offer?.description : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function normalizeMoney(value, suffix = "") {

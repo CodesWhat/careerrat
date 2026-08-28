@@ -234,9 +234,11 @@ export function evaluateCompensation({ body, frontmatter, profile, bucket, track
     };
   }
 
-  const compSource = [frontmatter?.comp ? String(frontmatter.comp) : "", String(body || "")].join(
-    "\n"
-  );
+  const compSource = [
+    frontmatter?.comp ? `Base pay: ${String(frontmatter.comp)}` : "",
+    frontmatter?.tc ? `Annual earnings: ${String(frontmatter.tc)}` : "",
+    String(body || ""),
+  ].join("\n");
 
   const bands = extractCompensationBands(compSource);
   const { floor, relo, label } = resolveCompFloor({ profile, frontmatter });
@@ -255,41 +257,6 @@ export function evaluateCompensation({ body, frontmatter, profile, bucket, track
     annualEarningsBand: bands.annualEarnings,
   };
 
-  if (hasAnnualEarningsFloor) {
-    if (standing.annualEarnings === "below") {
-      return {
-        verdict: "below-floor",
-        reason: `annual earnings top out at $${bands.annualEarnings.max.toLocaleString()}, below your $${minimumAnnualEarnings.toLocaleString()} floor`,
-        band: bands.annualEarnings,
-        basis: "annual-earnings",
-        floor: minimumAnnualEarnings,
-        relo: false,
-        ...bandFields,
-      };
-    }
-    if (standing.annualEarnings === "overlap") {
-      return {
-        verdict: "review",
-        reason: `annual earnings range overlaps your $${minimumAnnualEarnings.toLocaleString()} floor`,
-        band: bands.annualEarnings || bands.base,
-        basis: "annual-earnings",
-        floor: minimumAnnualEarnings,
-        ...bandFields,
-      };
-    }
-    if (standing.annualEarnings === "unknown") {
-      return {
-        verdict: "review",
-        reason:
-          "annual earnings are unverified; posted base pay does not include unknown tips or variable cash",
-        band: bands.base,
-        basis: "annual-earnings",
-        floor: minimumAnnualEarnings,
-        ...bandFields,
-      };
-    }
-  }
-
   if (standing.base === "below") {
     const reloWhere = label && label !== "relocation" ? ` to ${label}` : "";
     return {
@@ -301,6 +268,18 @@ export function evaluateCompensation({ body, frontmatter, profile, bucket, track
       basis: "base",
       relo,
       floor,
+      ...bandFields,
+    };
+  }
+
+  if (hasAnnualEarningsFloor && standing.annualEarnings === "below") {
+    return {
+      verdict: "below-floor",
+      reason: `annual earnings top out at $${bands.annualEarnings.max.toLocaleString()}, below your $${minimumAnnualEarnings.toLocaleString()} floor`,
+      band: bands.annualEarnings,
+      basis: "annual-earnings",
+      floor: minimumAnnualEarnings,
+      relo: false,
       ...bandFields,
     };
   }
@@ -317,6 +296,17 @@ export function evaluateCompensation({ body, frontmatter, profile, bucket, track
     };
   }
 
+  if (hasAnnualEarningsFloor && standing.annualEarnings === "overlap") {
+    return {
+      verdict: "review",
+      reason: `annual earnings range overlaps your $${minimumAnnualEarnings.toLocaleString()} floor`,
+      band: bands.annualEarnings || bands.base,
+      basis: "annual-earnings",
+      floor: minimumAnnualEarnings,
+      ...bandFields,
+    };
+  }
+
   if (standing.base === "unknown" && bands.annualEarnings) {
     return {
       verdict: "review",
@@ -325,6 +315,18 @@ export function evaluateCompensation({ body, frontmatter, profile, bucket, track
       basis: "base",
       floor,
       relo,
+      ...bandFields,
+    };
+  }
+
+  if (hasAnnualEarningsFloor && standing.annualEarnings === "unknown") {
+    return {
+      verdict: "review",
+      reason:
+        "annual earnings are unverified; posted base pay does not include unknown tips or variable cash",
+      band: bands.base,
+      basis: "annual-earnings",
+      floor: minimumAnnualEarnings,
       ...bandFields,
     };
   }
