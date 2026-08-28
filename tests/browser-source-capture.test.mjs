@@ -273,6 +273,31 @@ test("captureBrowserSearchSource returns one contextual login handoff instead of
   });
 });
 
+test("captureBrowserSearchSource rejects a known platform on another hostname before opening it", async () => {
+  let opened = false;
+  const result = await captureBrowserSearchSource({
+    source: source({
+      provider: "jobs.example.com",
+      platform: "linkedin",
+      label: "LinkedIn saved search",
+      url: "https://jobs.example.com/search",
+    }),
+    session: {
+      available: true,
+      async open() {
+        opened = true;
+        return { url: "https://jobs.example.com/search", text: "Jobs" };
+      },
+    },
+    resolvePublicTargetImpl: resolvePublic,
+  });
+
+  assert.equal(opened, false);
+  assert.deepEqual(result.offers, []);
+  assert.equal(result.needsLogin, null);
+  assert.match(result.errors[0].error, /does not match.*hostname/i);
+});
+
 test("captureBrowserSearchSource captures posting-shaped rows from an arbitrary enabled source", async () => {
   const jobBody =
     "Run venue operations, staff events, coordinate vendors, and deliver a safe guest experience in New York City. ".repeat(
@@ -558,7 +583,12 @@ test("captureBrowserSearchSource reports unavailable app browser without consent
 test("captureBrowserSearchSource rejects a source whose hostname resolves to a private address", async () => {
   let opened = false;
   const result = await captureBrowserSearchSource({
-    source: source({ url: "https://jobs.example.test/search" }),
+    source: source({
+      provider: "jobs.example.test",
+      platform: "jobs.example.test",
+      label: "Example Jobs",
+      url: "https://jobs.example.test/search",
+    }),
     session: {
       available: true,
       async open() {
@@ -580,7 +610,12 @@ test("captureBrowserSearchSource rejects a source whose hostname resolves to a p
 test("captureBrowserSearchSource rejects a redirect that lands on a private address before extraction", async () => {
   let extracted = false;
   const result = await captureBrowserSearchSource({
-    source: source({ url: "https://jobs.example.test/search" }),
+    source: source({
+      provider: "jobs.example.test",
+      platform: "jobs.example.test",
+      label: "Example Jobs",
+      url: "https://jobs.example.test/search",
+    }),
     session: {
       available: true,
       async open() {

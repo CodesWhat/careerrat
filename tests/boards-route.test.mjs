@@ -212,6 +212,53 @@ test("POST /api/boards/add: a LinkedIn URL persists an auth:true, enabled:false 
   }
 });
 
+test("browser source add and edit reject known-platform hostname mismatches", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const linkedinUrl = "https://www.linkedin.com/jobs/search/?keywords=platform";
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "linkedin.com",
+          platform: "linkedin",
+          source_type: "browser",
+          auth: true,
+          label: "LinkedIn platform",
+          url: linkedinUrl,
+          enabled: false,
+        },
+      ],
+    },
+  });
+  const server = await bootServer(repoRoot);
+  try {
+    const added = await postJson(server, "/api/boards/add", {
+      url: "https://jobs.example.com/search",
+      label: "LinkedIn saved search",
+    });
+    assert.equal(added.status, 400);
+    assert.match(added.body.error, /does not match.*hostname/i);
+
+    const edited = await postJson(server, "/api/boards/search/update", {
+      index: 0,
+      label: "LinkedIn platform",
+      target: "https://jobs.example.com/search",
+      enabled: false,
+    });
+    assert.equal(edited.status, 400);
+    assert.match(edited.body.error, /does not match.*hostname/i);
+    assert.equal(
+      sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches[0].url,
+      linkedinUrl
+    );
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/boards/add: an ATS hostname label resolves to the company slug", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });

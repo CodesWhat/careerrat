@@ -39,6 +39,68 @@ export function platformForHost(hostname) {
   return null;
 }
 
+const BROWSER_PLATFORM_LABELS = Object.freeze({
+  glassdoor: "Glassdoor",
+  indeed: "Indeed",
+  linkedin: "LinkedIn",
+  wellfound: "Wellfound",
+});
+
+const BROWSER_PLATFORM_PATTERNS = Object.freeze({
+  glassdoor: /\bglassdoor(?:\.com)?\b/i,
+  indeed: /\bindeed(?:\.com)?\b/i,
+  linkedin: /\blinked[\s-]?in(?:\.com)?\b/i,
+  wellfound: /\bwellfound(?:\.com)?\b/i,
+});
+
+function browserPlatformClaims(source = {}) {
+  const claims = new Set();
+  for (const value of [source.platform, source.provider, source.label]) {
+    const text = String(value || "").trim();
+    if (!text) continue;
+    for (const [platform, pattern] of Object.entries(BROWSER_PLATFORM_PATTERNS)) {
+      if (pattern.test(text)) claims.add(platform);
+    }
+  }
+  return claims;
+}
+
+export function resolveBrowserSourceIdentity(source = {}, value = source.url || source.target) {
+  const canonicalUrl = canonicalSearchSourceUrl(value);
+  if (!canonicalUrl) return { ok: false, reason: "Browser source URL is invalid." };
+  const parsed = new URL(String(value).trim());
+  if (!new Set(["http:", "https:"]).has(parsed.protocol)) {
+    return { ok: false, reason: "Browser source URL must use HTTP or HTTPS." };
+  }
+  const hostname = parsed.hostname.replace(/^www\./, "").toLowerCase();
+  if (!hostname) return { ok: false, reason: "Browser source URL has no hostname." };
+  const knownPlatform = platformForHost(hostname);
+  const claims = browserPlatformClaims(source);
+  if ([...claims].some((claim) => claim !== knownPlatform)) {
+    return {
+      ok: false,
+      reason: "Browser source identity does not match its URL hostname.",
+    };
+  }
+  return {
+    ok: true,
+    url: parsed.toString(),
+    canonicalUrl,
+    hostname,
+    platform: knownPlatform || hostname,
+    label: BROWSER_PLATFORM_LABELS[knownPlatform] || hostname,
+    knownPlatform,
+  };
+}
+
+export function requireBrowserSourceIdentity(source = {}, value = source.url || source.target) {
+  const identity = resolveBrowserSourceIdentity(source, value);
+  if (identity.ok) return identity;
+  const error = new Error(identity.reason);
+  error.code = "BAD_REQUEST";
+  throw error;
+}
+
 function resolveSelector(searches, selector) {
   if (typeof selector === "number") {
     if (selector < 0 || selector >= searches.length) {
@@ -193,9 +255,11 @@ export function addSearchFromUrl(
 
   // www. is already stripped by the line above, so host is never 'www.wellfound.com' here.
   if (host === "wellfound.com") {
+    const identity = requireBrowserSourceIdentity({ provider: "Wellfound", label }, pastedUrl);
     const entry = {
       provider: "Wellfound",
       source_type: "browser",
+      platform: identity.platform,
       label: label || "Wellfound import",
       url: pastedUrl,
       enabled,
@@ -252,11 +316,12 @@ export function addSearchFromUrl(
   // site-specific Yes/No question instead of hiding the choice in Settings.
   const authPlatform = platformForHost(host);
   if (authPlatform) {
+    const identity = requireBrowserSourceIdentity({ provider: host, label }, pastedUrl);
     const entry = {
       provider: host,
       source_type: "browser",
       auth: true,
-      platform: authPlatform,
+      platform: identity.platform,
       label: label || `${host} (authenticated)`,
       url: pastedUrl,
       enabled: false,
@@ -265,9 +330,14 @@ export function addSearchFromUrl(
   }
 
   if (sourceType === "url-query" || sourceType === "browser") {
+    const identity =
+      sourceType === "browser"
+        ? requireBrowserSourceIdentity({ provider: host, label }, pastedUrl)
+        : null;
     const entry = {
       provider: host,
       source_type: sourceType,
+      ...(identity ? { platform: identity.platform } : {}),
       label: label || host,
       url: pastedUrl,
       enabled,
@@ -291,9 +361,11 @@ export function addSearchFromUrl(
   }
 
   // Generic URL-based source
+  const identity = requireBrowserSourceIdentity({ provider: host, label }, pastedUrl);
   const entry = {
     provider: host,
     source_type: "browser",
+    platform: identity.platform,
     label: label || host,
     url: pastedUrl,
     enabled,

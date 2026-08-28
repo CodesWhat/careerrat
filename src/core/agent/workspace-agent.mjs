@@ -95,7 +95,11 @@ import { findCompLeak, findCurrentBaseToken } from "../profile/comp-guard.mjs";
 import { computeEvidenceWrite, loadEvidence } from "../profile/evidence-writer.mjs";
 import { applyGateWrite, GATE_APPLY_SUMMARIES } from "../profile/gate-apply.mjs";
 import { GATE_ROUTES } from "../profile/gate-writer.mjs";
-import { canonicalSearchSourceUrl, platformForHost } from "../providers/search-sources.mjs";
+import {
+  canonicalSearchSourceUrl,
+  platformForHost,
+  resolveBrowserSourceIdentity,
+} from "../providers/search-sources.mjs";
 import {
   isStale,
   listResearch,
@@ -2541,22 +2545,11 @@ async function startExpandedSourceSearch({
 }
 
 function authSourceSiteLabel(platform, source = {}) {
-  const known = {
-    linkedin: "LinkedIn",
-    indeed: "Indeed",
-    wellfound: "Wellfound",
-    glassdoor: "Glassdoor",
-  };
-  const key = String(platform || "").toLowerCase();
-  if (known[key]) return known[key];
-  try {
-    const host = new URL(source.target || source.url).hostname.replace(/^www\./, "");
-    const site = host.split(".")[0];
-    if (site) return `${site[0].toUpperCase()}${site.slice(1)}`;
-  } catch {
-    // A validated authenticated source normally has a URL; the platform is the safe fallback.
-  }
-  return key ? `${key[0].toUpperCase()}${key.slice(1)}` : "this site";
+  const identity = resolveBrowserSourceIdentity(
+    { ...source, platform },
+    source.target || source.url
+  );
+  return identity.ok ? identity.label : "this site";
 }
 
 function sourceAuthDecisionAction({ label, selector, sourceUrl, decision, primary }) {
@@ -2587,18 +2580,17 @@ function sourceLoginQuestionMetadata({ selector, platform, url, searchRunId } = 
 function sourceLoginRequest(summary, runId) {
   const requests = Array.isArray(summary?.loginRequests) ? summary.loginRequests : [];
   for (const request of requests) {
-    const platform = String(request?.platform || "").trim();
-    const selector = String(request?.sourceLabel || request?.label || platform).trim();
+    const selector = String(request?.sourceLabel || request?.label || request?.platform).trim();
     const url = String(request?.url || "").trim();
     if (!selector || !url) continue;
-    const site = authSourceSiteLabel(platform, { url });
+    const identity = resolveBrowserSourceIdentity(request, url);
+    if (!identity.ok) continue;
     return {
       selector,
-      platform,
-      url,
+      platform: identity.platform,
+      url: identity.url,
       searchRunId: runId,
-      question:
-        String(request?.prompt || "").trim() || `Do you want to log into ${site} so I can use it?`,
+      question: `Do you want to log into ${identity.label} so I can use it?`,
     };
   }
   return null;
@@ -3712,13 +3704,11 @@ async function executeSourceAuthDecision({
     enabled: allow,
   });
   const source = operation?.source || {};
-  const platform = String(source.platform || source.provider || "")
-    .trim()
-    .toLowerCase();
-  const url = String(source.target || source.url || "").trim();
+  const sourceTarget = String(source.target || source.url || "").trim();
+  const identity = resolveBrowserSourceIdentity(source, sourceTarget);
   if (
-    !url ||
-    canonicalSearchSourceUrl(url) !== sourceUrl ||
+    !identity.ok ||
+    identity.canonicalUrl !== sourceUrl ||
     String(source.sourceType || source.source_type || "").trim() !== "browser"
   ) {
     if (allow) {
@@ -3733,7 +3723,9 @@ async function executeSourceAuthDecision({
       "SOURCE_AUTH_UNAVAILABLE"
     );
   }
-  const site = authSourceSiteLabel(platform, source);
+  const platform = identity.platform;
+  const url = identity.url;
+  const site = identity.label;
   if (!allow) {
     const expandedSearch = await startExpandedSourceSearch({
       repoRoot,
@@ -4724,10 +4716,14 @@ export async function executeWorkspaceIntent({
       const added = operation?.added !== false;
       const enabled = source.enabled !== false;
       const authPending = source.auth === true && !enabled;
-      const authPlatform = String(source.platform || "")
-        .trim()
-        .toLowerCase();
-      const authSite = authSourceSiteLabel(authPlatform, source);
+      const authIdentity = authPending
+        ? resolveBrowserSourceIdentity(source, source.target || source.url || url)
+        : null;
+      if (authIdentity && !authIdentity.ok) {
+        throw actionError(authIdentity.reason, "SOURCE_AUTH_UNAVAILABLE");
+      }
+      const authPlatform = authIdentity?.platform || "";
+      const authSite = authIdentity?.label || "this site";
       const sourceSelector = label;
       const expandedSearch =
         added && enabled && source.auth !== true
@@ -4871,10 +4867,12 @@ export async function executeWorkspaceIntent({
           selector,
           enabled: false,
         });
-        const platform = String(source.platform || "")
-          .trim()
-          .toLowerCase();
-        const site = authSourceSiteLabel(platform, source);
+        const authIdentity = resolveBrowserSourceIdentity(source, source.target || source.url);
+        if (!authIdentity.ok) {
+          throw actionError(authIdentity.reason, "SOURCE_AUTH_UNAVAILABLE");
+        }
+        const platform = authIdentity.platform;
+        const site = authIdentity.label;
         return appendActionResult({
           repoRoot,
           env,

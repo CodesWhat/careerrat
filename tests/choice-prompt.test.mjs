@@ -217,3 +217,27 @@ test("explicit replies cannot resolve an older prompt after a newer choice is pe
     ["yes"]
   );
 });
+
+test("typed and button replies cannot resolve a pending prompt after later assistant content", async () => {
+  const { createBinaryChoicePrompt, resolvePendingMessageChoice } = await import(
+    "../src/core/agent/choice-prompt.mjs"
+  );
+  const prompt = createBinaryChoicePrompt({
+    threadId: "workspace-main",
+    messageId: "assistant-choice",
+    question: "Do you want to log into LinkedIn so I can use it?",
+  });
+  const messages = [
+    { id: "assistant-choice", role: "assistant", metadata: { choicePrompt: prompt } },
+    { id: "assistant-later", role: "assistant", text: "The job search finished." },
+  ];
+
+  assert.equal(resolvePendingMessageChoice(messages, { text: "Yes" }), null);
+  assert.throws(
+    () =>
+      resolvePendingMessageChoice(messages, {
+        choice: { promptId: prompt.id, version: prompt.version, optionIds: ["yes"] },
+      }),
+    (error) => error.code === "STALE_CHOICE_PROMPT"
+  );
+});

@@ -2699,13 +2699,53 @@ test("Yes opens any configured login source without a hardcoded job-site allowli
   });
 
   assert.equal(opened.length, 1);
-  assert.equal(opened[0].platform, "example-jobs");
+  assert.equal(opened[0].platform, "jobs.example.com");
   assert.equal(opened[0].url, sourceUrl);
   assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, {});
   assert.equal(
     result.messages.at(-1).text,
     "Example Jobs is open and ready. I’m continuing the search now."
   );
+});
+
+test("source login handoff rejects a known platform on another hostname", async () => {
+  const repoRoot = tempRepo();
+  const sourceUrl = "https://jobs.example.com/search";
+  const enabled = [];
+  let opened = false;
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "source.auth-decision",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { selector: "LinkedIn saved search", sourceUrl, decision: "yes" },
+      },
+      setSearchSourceEnabledImpl: (input) => {
+        enabled.push(input.enabled);
+        return {
+          changed: true,
+          source: {
+            label: "LinkedIn saved search",
+            target: sourceUrl,
+            sourceType: "browser",
+            enabled: input.enabled,
+            auth: true,
+            platform: "linkedin",
+          },
+        };
+      },
+      openAuthenticatedSourceImpl: async () => {
+        opened = true;
+      },
+    }),
+    (error) => error.code === "SOURCE_AUTH_UNAVAILABLE"
+  );
+
+  assert.deepEqual(enabled, [true, false]);
+  assert.equal(opened, false);
 });
 
 test("Yes opens a login-detected browser source without legacy auth metadata", async () => {

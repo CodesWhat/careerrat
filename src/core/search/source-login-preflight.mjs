@@ -1,12 +1,8 @@
-import { canonicalSearchSourceUrl, platformForHost } from "../providers/search-sources.mjs";
+import {
+  canonicalSearchSourceUrl,
+  resolveBrowserSourceIdentity,
+} from "../providers/search-sources.mjs";
 import { buildSourceUrl } from "../providers/source-url.mjs";
-
-const SITE_LABELS = Object.freeze({
-  glassdoor: "Glassdoor",
-  indeed: "Indeed",
-  linkedin: "LinkedIn",
-  wellfound: "Wellfound",
-});
 
 function searchList(config) {
   if (Array.isArray(config?.searches)) return config.searches;
@@ -26,18 +22,10 @@ function sourceUrl(source) {
 }
 
 function sourceIdentity(source, url) {
-  try {
-    const hostPlatform = platformForHost(new URL(url).hostname);
-    const platform = String(source?.platform || hostPlatform || "")
-      .trim()
-      .toLowerCase();
-    if (source?.auth !== true && !hostPlatform) return null;
-    const label =
-      SITE_LABELS[platform] || String(source?.provider || source?.label || "this site").trim();
-    return { platform: platform || new URL(url).hostname.replace(/^www\./, ""), label };
-  } catch {
-    return null;
-  }
+  const identity = resolveBrowserSourceIdentity(source, url);
+  if (!identity.ok) return null;
+  if (source?.auth !== true && !identity.knownPlatform) return null;
+  return identity;
 }
 
 export function pendingSourceLoginRequests(config) {

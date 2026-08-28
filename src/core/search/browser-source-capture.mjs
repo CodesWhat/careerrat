@@ -1,5 +1,6 @@
 import { classifyBrowserAuthState } from "../automation/browser-session.mjs";
 import { resolvePublicHttpTarget, validatePublicHttpUrl } from "../net/public-http-fetch.mjs";
+import { resolveBrowserSourceIdentity } from "../providers/search-sources.mjs";
 import { extractReqId } from "../scoring/sourced-identity.mjs";
 
 const SOURCE_SPECS = Object.freeze({
@@ -164,27 +165,14 @@ const SOURCE_SPECS = Object.freeze({
   },
 });
 
-function normalizedProvider(source = {}) {
-  const explicit = String(source.platform || source.provider || "").toLowerCase();
+function normalizedProvider(identity = {}) {
+  const explicit = String(identity.platform || identity.hostname || "").toLowerCase();
   if (explicit.includes("indeed")) return "indeed";
   if (explicit.includes("glassdoor")) return "glassdoor";
   if (explicit.includes("linkedin")) return "linkedin";
   if (explicit.includes("wellfound")) return "wellfound";
   if (explicit.includes("hiringcafe") || explicit.includes("hiring.cafe")) return "hiringcafe";
   return "generic";
-}
-
-function displayPlatform(source = {}) {
-  const platform = String(source.platform || source.provider || "this site")
-    .trim()
-    .toLowerCase();
-  const labels = {
-    glassdoor: "Glassdoor",
-    indeed: "Indeed",
-    linkedin: "LinkedIn",
-    wellfound: "Wellfound",
-  };
-  return labels[platform] || String(source.label || source.provider || "this site").trim();
 }
 
 function sourceUrl(source = {}) {
@@ -208,14 +196,13 @@ function normalizedBodyText(value) {
     .trim();
 }
 
-function loginRequest(source, url) {
-  const platformLabel = displayPlatform(source);
+function loginRequest(source, url, identity) {
   return {
-    platform: String(source.platform || normalizedProvider(source)).toLowerCase(),
-    label: platformLabel,
+    platform: identity.platform,
+    label: identity.label,
     sourceLabel: String(source.label || source.provider || "Browser source"),
     url,
-    prompt: `Do you want to log into ${platformLabel} so I can use it?`,
+    prompt: `Do you want to log into ${identity.label} so I can use it?`,
   };
 }
 
@@ -227,7 +214,14 @@ function partialBodyResult(offer, error) {
   };
 }
 
-async function capturePostingBody({ offer, session, source, spec, resolvePublicTargetImpl }) {
+async function capturePostingBody({
+  offer,
+  session,
+  source,
+  sourceIdentity,
+  spec,
+  resolvePublicTargetImpl,
+}) {
   const initialTarget = await resolvePublicTargetImpl(offer.url);
   if (!initialTarget?.ok) {
     return {
@@ -254,7 +248,11 @@ async function capturePostingBody({ offer, session, source, spec, resolvePublicT
     };
   }
   if (classifyBrowserAuthState(page)) {
-    return { offer: null, error: null, needsLogin: loginRequest(source, initialTarget.url) };
+    return {
+      offer: null,
+      error: null,
+      needsLogin: loginRequest(source, initialTarget.url, sourceIdentity),
+    };
   }
   let extracted;
   try {
@@ -320,19 +318,22 @@ export async function captureBrowserSearchSource({
   resolvePublicTargetImpl = resolvePublicHttpTarget,
 } = {}) {
   const label = String(source?.label || source?.provider || "Browser source");
+  let url;
+  let identity;
+  try {
+    url = sourceUrl(source);
+    identity = resolveBrowserSourceIdentity(source, url);
+    if (!identity.ok) throw new Error(identity.reason);
+  } catch (error) {
+    return { offers: [], errors: [{ company: label, error: error.message }], needsLogin: null };
+  }
+
   if (!session?.available) {
     return {
       offers: [],
       errors: [{ company: label, error: session?.reason || "The app browser is unavailable." }],
       needsLogin: null,
     };
-  }
-
-  let url;
-  try {
-    url = sourceUrl(source);
-  } catch (error) {
-    return { offers: [], errors: [{ company: label, error: error.message }], needsLogin: null };
   }
 
   try {
@@ -353,11 +354,11 @@ export async function captureBrowserSearchSource({
       return {
         offers: [],
         errors: [],
-        needsLogin: loginRequest(source, url),
+        needsLogin: loginRequest(source, url, identity),
       };
     }
 
-    const provider = normalizedProvider(source);
+    const provider = normalizedProvider(identity);
     const spec = SOURCE_SPECS[provider] || SOURCE_SPECS.generic;
     const extracted = await session.extractRows({
       rowSelectors: spec.rowSelectors,
@@ -380,6 +381,7 @@ export async function captureBrowserSearchSource({
         offer,
         session,
         source,
+        sourceIdentity: identity,
         spec,
         resolvePublicTargetImpl,
       });

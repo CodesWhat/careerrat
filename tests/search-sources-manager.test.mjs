@@ -16,6 +16,7 @@ import {
   toCaptureSource,
   validateConfig,
 } from "../src/core/providers/search-sources.mjs";
+import { pendingSourceLoginRequests } from "../src/core/search/source-login-preflight.mjs";
 
 // Load the real schema from disk
 const schemaPath = new URL("../config/search-sources.schema.json", import.meta.url).pathname;
@@ -225,6 +226,34 @@ test("addSearchFromUrl turns a supported Career Ops URL into a deterministic ATS
 
 test("addSearchFromUrl throws on unparseable URL", () => {
   assert.throws(() => addSearchFromUrl(emptyConfig(), "not-a-url"), /unparseable/i);
+});
+
+test("browser source add and login preflight reject a known site label on another hostname", () => {
+  assert.throws(
+    () =>
+      addSearchFromUrl(emptyConfig(), "https://jobs.example.com/search", {
+        label: "LinkedIn saved search",
+        sourceType: "browser",
+      }),
+    /does not match.*hostname/i
+  );
+
+  assert.deepEqual(
+    pendingSourceLoginRequests({
+      searches: [
+        {
+          provider: "jobs.example.com",
+          platform: "linkedin",
+          source_type: "browser",
+          auth: true,
+          label: "LinkedIn saved search",
+          url: "https://jobs.example.com/search",
+          enabled: false,
+        },
+      ],
+    }),
+    []
+  );
 });
 
 // ---------------------------------------------------------------------------

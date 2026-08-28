@@ -391,19 +391,16 @@ export function choiceMetadataForMessage({ metadata, role, threadId, messageId, 
 export function resolvePendingMessageChoice(messages, { text, choice, now } = {}) {
   const rows = Array.isArray(messages) ? messages : [];
   const explicit = choice && typeof choice === "object" && !Array.isArray(choice) ? choice : null;
-  const latestPending = [...rows]
-    .reverse()
-    .find(
-      (message) =>
-        message?.role === "assistant" && message?.metadata?.choicePrompt?.state === "pending"
-    );
+  const latestAssistant = [...rows].reverse().find((message) => message?.role === "assistant");
+  const latestPending =
+    latestAssistant?.metadata?.choicePrompt?.state === "pending" ? latestAssistant : null;
   let target = null;
   if (explicit?.promptId) {
     target =
       rows.find((message) => message?.metadata?.choicePrompt?.id === explicit.promptId) || null;
     if (!target) throw choiceError("choice prompt is no longer available", "STALE_CHOICE_PROMPT");
     if (
-      latestPending &&
+      !latestPending ||
       latestPending.metadata.choicePrompt.id !== target.metadata.choicePrompt.id
     ) {
       throw choiceError("choice prompt is no longer current", "STALE_CHOICE_PROMPT");

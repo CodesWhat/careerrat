@@ -43,6 +43,7 @@ import {
   addSearchFromUrl,
   canonicalSearchSourceUrl,
   listSearches,
+  requireBrowserSourceIdentity,
   validateConfig,
 } from "../core/providers/search-sources.mjs";
 import {
@@ -329,8 +330,16 @@ export function setSearchSourceEnabled({
   const searches = Array.isArray(current.searches) ? current.searches.slice() : [];
   const existing = searches[match.index];
   const { enabled_reason: _generatedEnabledReason, ...userOwned } = existing;
-  const changed = existing.enabled !== enabled || existing.enabled_reason != null;
-  searches[match.index] = { ...userOwned, enabled };
+  const identity =
+    existing.source_type === "browser"
+      ? requireBrowserSourceIdentity(existing, existing.url)
+      : null;
+  const normalized = identity ? { ...userOwned, platform: identity.platform } : userOwned;
+  const changed =
+    existing.enabled !== enabled ||
+    existing.enabled_reason != null ||
+    (identity && existing.platform !== identity.platform);
+  searches[match.index] = { ...normalized, enabled };
   const nextModel = changed
     ? validateAndWriteSearchConfig(pathCtx, { ...current, searches })
     : model;
@@ -485,6 +494,11 @@ export function mountBoardsRoutes({ addRoute, repoRoot, env = process.env }) {
       if (existing.rssUrl != null) updated.rssUrl = target;
       else if (existing.query != null) updated.query = target;
       else updated.url = target;
+      if (updated.source_type === "browser") {
+        const identity = requireBrowserSourceIdentity(updated, updated.url);
+        updated.url = identity.url;
+        updated.platform = identity.platform;
+      }
       searches[index] = updated;
       sendJson(res, 200, {
         ok: true,
