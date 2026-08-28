@@ -66,8 +66,9 @@ export async function launchPublicPlaywrightContext({
   channel,
   createProxyImpl = createPublicBrowserProxy,
   loadPlaywrightImpl = () => import("playwright"),
+  resolvePublicTargetImpl = resolvePublicHttpTarget,
 } = {}) {
-  const proxy = await createProxyImpl();
+  const proxy = await createProxyImpl({ resolvePublicTargetImpl });
   try {
     const { chromium } = await loadPlaywrightImpl();
     const context = await chromium.launchPersistentContext(profileDir, {
@@ -719,7 +720,12 @@ export function createPlaywrightOps({
       // openTab retries the launch instead of replaying a stale failure (a
       // transient profile lock or crash would otherwise permanently disable
       // this provider until process restart).
-      contextPromise = launchImpl({ profileDir, headless, ...(channel ? { channel } : {}) })
+      contextPromise = launchImpl({
+        profileDir,
+        headless,
+        ...(channel ? { channel } : {}),
+        resolvePublicTargetImpl,
+      })
         .then(async (context) => {
           if (typeof context?.route === "function") {
             await context.route("**/*", async (route) => {

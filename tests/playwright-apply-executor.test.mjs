@@ -608,7 +608,35 @@ test("playwright-ops forwards an explicit Chromium channel to the lazy launcher"
   await ops.openTab({ url: "about:blank" });
   await ops.close();
 
-  assert.deepEqual(launches, [{ profileDir: "/tmp/profile", headless: true, channel: "chromium" }]);
+  assert.equal(launches.length, 1);
+  assert.equal(launches[0].profileDir, "/tmp/profile");
+  assert.equal(launches[0].headless, true);
+  assert.equal(launches[0].channel, "chromium");
+  assert.equal(typeof launches[0].resolvePublicTargetImpl, "function");
+});
+
+test("playwright-ops forwards an explicit target resolver to the lazy launcher", async () => {
+  const fixtureResolver = async (rawUrl) => ({ ok: true, url: new URL(rawUrl).toString() });
+  let launchOptions = null;
+  const ops = createPlaywrightOps({
+    profileDir: "/tmp/profile",
+    headless: true,
+    resolvePublicTargetImpl: fixtureResolver,
+    launchImpl: async (options) => {
+      launchOptions = options;
+      return {
+        async newPage() {
+          return minimalFakePage("about:blank");
+        },
+        async close() {},
+      };
+    },
+  });
+
+  await ops.openTab({ url: "about:blank" });
+  await ops.close();
+
+  assert.equal(launchOptions.resolvePublicTargetImpl, fixtureResolver);
 });
 
 test("default Playwright launch blocks service workers and sends every request through the pinned proxy", async () => {
@@ -650,6 +678,38 @@ test("default Playwright launch blocks service workers and sends every request t
   await launched.close();
   assert.equal(contextClosed, 1);
   assert.equal(proxyClosed, 1);
+});
+
+test("default Playwright launch gives its explicit target resolver to the pinned proxy", async () => {
+  const fixtureResolver = async (rawUrl) => ({
+    ok: true,
+    url: new URL(rawUrl).toString(),
+    addresses: [{ address: "127.0.0.1", family: 4 }],
+  });
+  let proxyOptions = null;
+  const context = {
+    async close() {},
+  };
+
+  const launched = await launchPublicPlaywrightContext({
+    profileDir: "/tmp/profile",
+    headless: true,
+    resolvePublicTargetImpl: fixtureResolver,
+    createProxyImpl: async (options) => {
+      proxyOptions = options;
+      return { url: "http://127.0.0.1:43123", async close() {} };
+    },
+    loadPlaywrightImpl: async () => ({
+      chromium: {
+        async launchPersistentContext() {
+          return context;
+        },
+      },
+    }),
+  });
+
+  assert.equal(proxyOptions.resolvePublicTargetImpl, fixtureResolver);
+  await launched.close();
 });
 
 test("Playwright aborts a private subresource before it leaves the browser", async () => {

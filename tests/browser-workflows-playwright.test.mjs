@@ -23,6 +23,7 @@ import { candidateConfigPatch } from "../src/core/db/verbs/candidate.mjs";
 import { commUpsert } from "../src/core/db/verbs/comm.mjs";
 import { linkedinProposalBatchLatest } from "../src/core/db/verbs/linkedin-proposals.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
+import { resolveLocalFixtureTarget } from "./helpers/fixture-server.mjs";
 
 let server;
 let origin;
@@ -141,10 +142,7 @@ function headlessSession(options) {
   return createConfiguredBrowserSession({
     ...options,
     headless: true,
-    resolvePublicTargetImpl: async (rawUrl) => ({
-      ok: true,
-      url: new URL(rawUrl).toString(),
-    }),
+    resolvePublicTargetImpl: resolveLocalFixtureTarget,
     // GitHub's Linux runner already ships Google Chrome. Use that installed
     // browser for these live fixtures so the full unit suite does not depend
     // on an untracked Playwright browser download. Packaged desktop smoke tests
