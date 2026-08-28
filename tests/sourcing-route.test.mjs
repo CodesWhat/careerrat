@@ -340,14 +340,13 @@ test("POST /api/sourcing/first-run/start honors an explicit search before onboar
 test("first run with every deterministic source disabled records an actionable setup error", async () => {
   const repoRoot = tempRepo();
   markSearchReady(repoRoot);
-  // Use non-tech titles so only the domain-neutral baseline is generated.
-  // seedNoDeterministicSources stores that source as explicitly disabled,
-  // preserving the test's no-runnable-source premise.
+  // Remove target titles so no role query can be generated. The stored broad
+  // source is explicitly disabled, preserving the no-runnable-source premise.
   candidateConfigPatch({
     repoRoot,
     name: "targeting",
     patch: {
-      role_buckets: [{ name: "Care", titles: ["Registered Nurse", "Nurse Practitioner"] }],
+      role_buckets: [],
     },
   });
   seedNoDeterministicSources(repoRoot);
