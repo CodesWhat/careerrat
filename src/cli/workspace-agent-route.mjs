@@ -259,7 +259,12 @@ function selectedExecutionPlans({ repoRoot, env, operations }) {
   const plans = Object.fromEntries(
     operations.map((operation) => [
       operation,
-      resolveAIExecutionPlan({ operation, runtimeId, preferences }),
+      resolveAIExecutionPlan({
+        operation,
+        runtimeId,
+        preferences,
+        ...(route.type === "installed" ? { installedRuntime: route.runtime } : {}),
+      }),
     ])
   );
   return operations.length === 1

@@ -93,7 +93,13 @@ function deepFreeze(value) {
   return Object.freeze(value);
 }
 
-const INSTALLED_RUNTIME_EVIDENCE_KEYS = Object.freeze(["path", "capabilities"]);
+const INSTALLED_RUNTIME_EVIDENCE_KEYS = Object.freeze([
+  "path",
+  "realPath",
+  "version",
+  "binaryFingerprint",
+  "capabilities",
+]);
 
 function normalizeInstalledRuntimeEvidence(runtimeId, value, { persisted = false } = {}) {
   if (value == null) return null;
@@ -116,6 +122,19 @@ function normalizeInstalledRuntimeEvidence(runtimeId, value, { persisted = false
   if (!path || path.length > 4096 || path.includes("\0")) {
     throw policyError("installed-runtime evidence has an invalid executable path");
   }
+  const realPath = typeof value.realPath === "string" ? value.realPath.trim() : "";
+  if (!realPath || realPath.length > 4096 || realPath.includes("\0")) {
+    throw policyError("installed-runtime evidence has an invalid canonical executable path");
+  }
+  const version = typeof value.version === "string" ? value.version.trim() : "";
+  if (!version || version.length > 256 || version.includes("\0")) {
+    throw policyError("installed-runtime evidence has an invalid executable version");
+  }
+  const binaryFingerprint =
+    typeof value.binaryFingerprint === "string" ? value.binaryFingerprint.trim().toLowerCase() : "";
+  if (!/^[a-f0-9]{64}$/.test(binaryFingerprint)) {
+    throw policyError("installed-runtime evidence has an invalid executable fingerprint");
+  }
   if (!value.capabilities || typeof value.capabilities !== "object") {
     throw policyError("installed-runtime evidence has invalid capabilities");
   }
@@ -135,10 +154,13 @@ function normalizeInstalledRuntimeEvidence(runtimeId, value, { persisted = false
   if (capabilities.completion !== true) {
     throw policyError("installed-runtime evidence has no verified completion capability");
   }
-  return { path, capabilities };
+  return { path, realPath, version, binaryFingerprint, capabilities };
 }
 
 export function assertInstalledRuntimeExecutionEvidence(plan) {
+  if (plan?.installedRuntime == null) {
+    throw policyError("installed-runtime evidence is required");
+  }
   return normalizeInstalledRuntimeEvidence(plan?.runtimeId, plan?.installedRuntime, {
     persisted: true,
   });
@@ -184,6 +206,9 @@ export function resolveAIExecutionPlan({
   let modelSource = modelOverride ? "operator-override" : runtimeMap ? "alias" : "provider-default";
   const normalizedCapabilities = normalizeCapabilities(capabilities);
   const fallbackReasons = [];
+  if (isSupportedInstalledRuntime(selectedRuntime) && installedRuntime == null) {
+    throw policyError("installed-runtime evidence is required");
+  }
   const runtimeEvidence = normalizeInstalledRuntimeEvidence(selectedRuntime, installedRuntime);
 
   if (
@@ -257,7 +282,7 @@ export function assertAIExecutionPlanForRuntime(plan, runtimeId) {
   if (!AI_OPERATION_DEFAULTS[plan.operation]) {
     throw policyError(`unknown AI operation in execution plan: ${plan.operation || "(empty)"}`);
   }
-  if (plan.installedRuntime != null) assertInstalledRuntimeExecutionEvidence(plan);
+  if (isSupportedInstalledRuntime(plan.runtimeId)) assertInstalledRuntimeExecutionEvidence(plan);
   return deepFreeze(plan);
 }
 

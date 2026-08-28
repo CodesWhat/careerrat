@@ -597,6 +597,7 @@ export async function runSkillStream({
           reasoning,
           preferences: loadAIPreferences({ repoRoot, env }),
           capabilities: aiCapabilities,
+          ...(route.type === "installed" ? { installedRuntime: route.runtime } : {}),
           modelOverride: model,
           effortOverride: effort,
         })

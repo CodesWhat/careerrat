@@ -12,10 +12,23 @@ const INSTALLED_RUNTIME_SELECTION_RELPATH = ".internal/ai-runtime.json";
 function sanitizeVerification(value, runtimeId) {
   if (!runtimeId || !value || typeof value !== "object") return null;
   const path = typeof value.path === "string" ? value.path.trim() : "";
+  const realPath = typeof value.realPath === "string" ? value.realPath.trim() : "";
+  const version = typeof value.version === "string" ? value.version.trim() : "";
+  const binaryFingerprint =
+    typeof value.binaryFingerprint === "string" ? value.binaryFingerprint.trim().toLowerCase() : "";
   const checkedAt = typeof value.checkedAt === "string" ? value.checkedAt.trim() : "";
-  if (!path || !checkedAt || Number.isNaN(Date.parse(checkedAt))) return null;
+  if (
+    !path ||
+    !realPath ||
+    !version ||
+    !/^[a-f0-9]{64}$/.test(binaryFingerprint) ||
+    !checkedAt ||
+    Number.isNaN(Date.parse(checkedAt))
+  ) {
+    return null;
+  }
   const capabilities = sanitizeInstalledRuntimeCapabilityEvidence(runtimeId, value.capabilities);
-  return { path, capabilities, checkedAt };
+  return { path, realPath, version, binaryFingerprint, capabilities, checkedAt };
 }
 
 export function loadInstalledRuntimeSelection({ repoRoot, env = process.env } = {}) {

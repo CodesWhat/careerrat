@@ -39,8 +39,36 @@ const VERIFIED_CAPABILITIES = Object.freeze({
   resumable: true,
 });
 
-function verifiedInstalled(id, name, path) {
-  return { id, name, path, available: true, capabilities: VERIFIED_CAPABILITIES };
+function verifiedInstalled(id, name, path, overrides = {}) {
+  return {
+    id,
+    name,
+    path,
+    realPath: path,
+    version: "0.149.1",
+    binaryFingerprint: "a".repeat(64),
+    available: true,
+    capabilities: VERIFIED_CAPABILITIES,
+    capabilitiesVerified: true,
+    ...overrides,
+  };
+}
+
+function runtimeVerification(path, capabilities = VERIFIED_CAPABILITIES, overrides = {}) {
+  return {
+    path,
+    realPath: path,
+    version: "0.149.1",
+    binaryFingerprint: "a".repeat(64),
+    capabilities,
+    checkedAt: "2026-08-25T12:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function frozenRuntimeEvidence(path, capabilities = VERIFIED_CAPABILITIES) {
+  const { checkedAt: _checkedAt, ...evidence } = runtimeVerification(path, capabilities);
+  return evidence;
 }
 
 const NON_STREAM_BODY = {
@@ -299,18 +327,19 @@ test("resolveAIRoute: carries the selected runtime's verified capability evidenc
       repoRoot: root,
       env: {},
       runtimeId: "codex",
-      verification: {
-        path: "/safe/codex",
-        capabilities,
-        checkedAt: "2026-08-25T12:00:00.000Z",
-      },
+      verification: runtimeVerification("/safe/codex", capabilities),
     });
 
     const route = resolveAIRoute(
       { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_DESKTOP_CLI_ONLY: "1" },
       {
         repoRoot: root,
-        runtimeInventory: [{ id: "codex", name: "Codex", path: "/safe/codex", available: true }],
+        runtimeInventory: [
+          verifiedInstalled("codex", "Codex", "/safe/codex", {
+            capabilitiesVerified: false,
+            capabilities: undefined,
+          }),
+        ],
       }
     );
 
@@ -336,21 +365,22 @@ test("resolveAIRoute: dispatches a completion-ready runtime with unrelated capab
         repoRoot: root,
         env: {},
         runtimeId: "codex",
-        verification: {
-          path,
-          capabilities: {
-            ...VERIFIED_CAPABILITIES,
-            [missingCapability]: false,
-          },
-          checkedAt: "2026-08-25T12:00:00.000Z",
-        },
+        verification: runtimeVerification(path, {
+          ...VERIFIED_CAPABILITIES,
+          [missingCapability]: false,
+        }),
       });
 
       const route = resolveAIRoute(
         { CAREERRAT_DESKTOP_SHELL: "1", ANTHROPIC_API_KEY: "sk-ant-test" },
         {
           repoRoot: root,
-          runtimeInventory: [{ id: "codex", name: "Codex", path, available: true }],
+          runtimeInventory: [
+            verifiedInstalled("codex", "Codex", path, {
+              capabilitiesVerified: false,
+              capabilities: undefined,
+            }),
+          ],
         }
       );
 
@@ -370,18 +400,22 @@ test("resolveAIRoute: rejects a selected runtime without verified completion", (
       repoRoot: root,
       env: {},
       runtimeId: "codex",
-      verification: {
-        path,
-        capabilities: { ...VERIFIED_CAPABILITIES, completion: false },
-        checkedAt: "2026-08-25T12:00:00.000Z",
-      },
+      verification: runtimeVerification(path, {
+        ...VERIFIED_CAPABILITIES,
+        completion: false,
+      }),
     });
 
     const route = resolveAIRoute(
       { CAREERRAT_DESKTOP_SHELL: "1", ANTHROPIC_API_KEY: "sk-ant-test" },
       {
         repoRoot: root,
-        runtimeInventory: [{ id: "codex", name: "Codex", path, available: true }],
+        runtimeInventory: [
+          verifiedInstalled("codex", "Codex", path, {
+            capabilitiesVerified: false,
+            capabilities: undefined,
+          }),
+        ],
       }
     );
 
@@ -423,18 +457,17 @@ test("resolveAIRoute: rejects persisted evidence when the selected executable pa
       repoRoot: root,
       env: {},
       runtimeId: "codex",
-      verification: {
-        path: "/safe/codex-old",
-        capabilities: VERIFIED_CAPABILITIES,
-        checkedAt: "2026-08-25T12:00:00.000Z",
-      },
+      verification: runtimeVerification("/safe/codex-old"),
     });
     const route = resolveAIRoute(
       { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_DESKTOP_CLI_ONLY: "1" },
       {
         repoRoot: root,
         runtimeInventory: [
-          { id: "codex", name: "Codex", path: "/safe/codex-new", available: true },
+          verifiedInstalled("codex", "Codex", "/safe/codex-new", {
+            capabilitiesVerified: false,
+            capabilities: undefined,
+          }),
         ],
       }
     );
@@ -734,6 +767,7 @@ test("callAI can execute a server-owned frozen plan after the selected runtime c
       executionPlan: {
         operation: "research.web",
         runtimeId: "codex",
+        installedRuntime: frozenRuntimeEvidence("/safe/codex"),
         resolved: { model: "gpt-5.6-terra", effort: "medium" },
       },
       useExecutionPlanRoute: true,
@@ -765,12 +799,43 @@ test("a durable installed-runtime plan rejects a different detected executable",
       runtimeId: "codex",
       installedRuntime: {
         path: "/safe/original-codex",
+        realPath: "/safe/original-codex",
+        version: "0.149.1",
+        binaryFingerprint: "a".repeat(64),
         capabilities: VERIFIED_CAPABILITIES,
       },
     },
     {},
     {
       runtimeInventory: [verifiedInstalled("codex", "Codex", "/safe/replacement-codex")],
+    }
+  );
+
+  assert.equal(route.type, "none");
+  assert.match(route.error, /executable.*changed/i);
+});
+
+test("a durable installed-runtime plan rejects a replacement binary at the same path", () => {
+  const route = resolveAIRouteForExecutionPlan(
+    {
+      operation: "research.web",
+      runtimeId: "codex",
+      installedRuntime: {
+        path: "/safe/codex",
+        realPath: "/safe/codex",
+        version: "0.149.1",
+        binaryFingerprint: "a".repeat(64),
+        capabilities: VERIFIED_CAPABILITIES,
+      },
+    },
+    {},
+    {
+      runtimeInventory: [
+        verifiedInstalled("codex", "Codex", "/safe/codex", {
+          version: "0.150.0",
+          binaryFingerprint: "b".repeat(64),
+        }),
+      ],
     }
   );
 

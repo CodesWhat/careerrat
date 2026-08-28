@@ -28,6 +28,7 @@ import {
   detectInstalledRuntimes,
   hasInstalledRuntimeCompletion,
   installedRuntimeCapabilities,
+  installedRuntimeExecutionIdentity,
   runInstalledRuntime,
 } from "./installed-runtimes.mjs";
 import {
@@ -54,7 +55,11 @@ function hostOf(url) {
 
 export function resolveAIRoute(
   env = process.env,
-  { repoRoot = null, runtimeInventory = null } = {}
+  {
+    repoRoot = null,
+    runtimeInventory = null,
+    runtimeIdentityImpl = installedRuntimeExecutionIdentity,
+  } = {}
 ) {
   const desktopCliOnly = env.CAREERRAT_DESKTOP_CLI_ONLY === "1";
   if (repoRoot) {
@@ -77,14 +82,23 @@ export function resolveAIRoute(
         ? inventory.find(({ id, available }) => id === selection.runtimeId && available)
         : inventory.find(({ available }) => available);
       if (runtime) {
-        const persistedEvidence =
-          selection.verification?.path === runtime.path
-            ? selection.verification.capabilities
-            : null;
+        const currentIdentity = runtimeIdentityImpl(runtime, { env });
+        if (!currentIdentity) {
+          return {
+            type: "none",
+            error:
+              `selected installed AI runtime "${runtime.id}" could not be verified; ` +
+              "re-check it in Settings",
+          };
+        }
+        const verificationMatches =
+          selection.verification?.path === currentIdentity.path &&
+          selection.verification?.realPath === currentIdentity.realPath &&
+          selection.verification?.version === currentIdentity.version &&
+          selection.verification?.binaryFingerprint === currentIdentity.binaryFingerprint;
+        const persistedEvidence = verificationMatches ? selection.verification.capabilities : null;
         const capabilityEvidence =
-          runtime.capabilitiesVerified === false
-            ? persistedEvidence
-            : runtime.capabilities || persistedEvidence;
+          runtime.capabilitiesVerified === true ? runtime.capabilities : persistedEvidence;
         const capabilityState = installedRuntimeCapabilities(runtime.id, {
           available: runtime.available === true,
           capabilityEvidence,
@@ -94,6 +108,7 @@ export function resolveAIRoute(
             type: "installed",
             runtime: {
               ...runtime,
+              ...currentIdentity,
               capabilities: capabilityState.capabilities,
               capabilitiesVerified: true,
               capabilityTier: capabilityState.capabilityTier,
@@ -158,7 +173,7 @@ export function resolveAIRoute(
 export function resolveAIRouteForExecutionPlan(
   executionPlan,
   env = process.env,
-  { runtimeInventory = null } = {}
+  { runtimeInventory = null, runtimeIdentityImpl = installedRuntimeExecutionIdentity } = {}
 ) {
   const runtimeId = String(executionPlan?.runtimeId || "").trim();
   if (runtimeId === "claude" || runtimeId === "codex") {
@@ -173,8 +188,14 @@ export function resolveAIRouteForExecutionPlan(
         error: `the ${runtimeId} runtime selected for this work is no longer available`,
       };
     }
-    if (!installedRuntime) return { type: "installed", runtime };
-    if (runtime.path !== installedRuntime.path) {
+    const currentIdentity = runtimeIdentityImpl(runtime, { env });
+    if (
+      !currentIdentity ||
+      currentIdentity.path !== installedRuntime.path ||
+      currentIdentity.realPath !== installedRuntime.realPath ||
+      currentIdentity.version !== installedRuntime.version ||
+      currentIdentity.binaryFingerprint !== installedRuntime.binaryFingerprint
+    ) {
       return {
         type: "none",
         error: `the ${runtimeId} executable selected for this work has changed; start the work again`,
@@ -188,6 +209,7 @@ export function resolveAIRouteForExecutionPlan(
       type: "installed",
       runtime: {
         ...runtime,
+        ...currentIdentity,
         capabilities: capabilityState.capabilities,
         capabilitiesVerified: true,
         capabilityTier: capabilityState.capabilityTier,
@@ -649,6 +671,7 @@ export async function callAI({
           reasoning,
           preferences: loadAIPreferences({ repoRoot: root, env }),
           capabilities: aiCapabilities,
+          ...(route.type === "installed" ? { installedRuntime: route.runtime } : {}),
           modelOverride: model,
           effortOverride: effort,
         })

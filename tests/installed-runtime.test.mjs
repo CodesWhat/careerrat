@@ -350,7 +350,9 @@ test("auth probe exposes only bounded readiness state, never CLI account output"
     {
       spawnSyncImpl(executablePath, args, options) {
         calls.push({ executablePath, args, options });
-        return { status: 0, stdout: "Logged in as morgan@example.com", stderr: "" };
+        return args[0] === "--version"
+          ? { status: 0, stdout: "codex-cli 0.149.1", stderr: "" }
+          : { status: 0, stdout: "Logged in as morgan@example.com", stderr: "" };
       },
     }
   );
@@ -358,6 +360,7 @@ test("auth probe exposes only bounded readiness state, never CLI account output"
     status: "ready",
     ready: true,
     action: null,
+    version: "0.149.1",
     capabilities: {
       completion: true,
       structuredOutput: true,
@@ -921,6 +924,7 @@ test("Claude readiness keeps completion available below the tool boundary versio
     status: "ready",
     ready: true,
     action: null,
+    version: "2.1.200",
     capabilities: {
       completion: true,
       structuredOutput: true,
@@ -944,7 +948,9 @@ test("Codex readiness depends on authentication rather than a complete-workflow 
     {
       spawnSyncImpl(_path, args) {
         calls.push(args);
-        return { status: 0, stdout: "logged in", stderr: "" };
+        return args[0] === "--version"
+          ? { status: 0, stdout: "codex-cli 0.149.1", stderr: "" }
+          : { status: 0, stdout: "logged in", stderr: "" };
       },
     }
   );
@@ -952,6 +958,7 @@ test("Codex readiness depends on authentication rather than a complete-workflow 
     status: "ready",
     ready: true,
     action: null,
+    version: "0.149.1",
     capabilities: {
       completion: true,
       structuredOutput: true,

@@ -1321,6 +1321,7 @@ export function createChatRuntime({
           operation: chatOperationForSkill(trimmedSkill),
           runtimeId: routeRuntimeId,
           preferences: loadAIPreferences({ repoRoot, env }),
+          ...(route.type === "installed" ? { installedRuntime: route.runtime } : {}),
           modelOverride:
             route.type === "installed"
               ? installedRuntimeModel(route.runtime.id, { env })

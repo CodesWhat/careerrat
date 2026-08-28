@@ -3,6 +3,7 @@
 // spawn the resolved executable directly with fixed argv and shell:false.
 
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   accessSync,
   chmodSync,
@@ -377,6 +378,8 @@ export function findInstalledExecutable(
 export function detectInstalledRuntimes(options = {}) {
   return INSTALLED_RUNTIME_DEFINITIONS.map((definition) => {
     const path = findInstalledExecutable(definition.binaries, options);
+    const realPath = path ? existingCanonicalPath(path) : null;
+    const binaryFingerprint = realPath ? runtimeBinaryFingerprint(realPath) : null;
     const runtimeCapabilities = installedRuntimeCapabilities(definition.id, {
       available: Boolean(path),
     });
@@ -386,6 +389,8 @@ export function detectInstalledRuntimes(options = {}) {
       supported: definition.supported === true,
       commandShape: definition.commandShape,
       path,
+      realPath,
+      binaryFingerprint,
       available: Boolean(path),
       warning: definition.warning || null,
       installUrl: definition.installUrl || null,
@@ -577,11 +582,50 @@ const COMPLETION_SMOKE_SCHEMA = Object.freeze({
 
 function runtimeBinaryFingerprint(path) {
   try {
-    const stats = statSync(path);
-    return `${stats.size}:${Math.trunc(stats.mtimeMs)}`;
+    return createHash("sha256").update(readFileSync(path)).digest("hex");
   } catch {
     return null;
   }
+}
+
+export function installedRuntimeExecutionIdentity(
+  runtime,
+  { env = process.env, platform = process.platform, spawnSyncImpl = spawnSync } = {}
+) {
+  const path = String(runtime?.path || "").trim();
+  if (!path) return null;
+  const realPath = existingCanonicalPath(path) || String(runtime?.realPath || "").trim();
+  const binaryFingerprint =
+    (realPath ? runtimeBinaryFingerprint(realPath) : null) ||
+    String(runtime?.binaryFingerprint || "")
+      .trim()
+      .toLowerCase();
+  let version = String(runtime?.version || "").trim();
+  if (!version) {
+    const childEnv = buildInstalledRuntimeChildEnv({ env });
+    const invocation = runtimeProcessInvocation(path, ["--version"], {
+      env: childEnv,
+      platform,
+    });
+    try {
+      const result = spawnSyncImpl(invocation.command, invocation.args, {
+        ...invocation.options,
+        env: childEnv,
+        encoding: "utf8",
+        maxBuffer: MAX_RUNTIME_PROBE_BYTES,
+        timeout: 5_000,
+        shell: false,
+        windowsHide: true,
+      });
+      if (!result?.error && result?.status === 0) {
+        version = parseVersion(`${result.stdout || ""}\n${result.stderr || ""}`)?.join(".") || "";
+      }
+    } catch {
+      version = "";
+    }
+  }
+  if (!realPath || !/^[a-f0-9]{64}$/.test(binaryFingerprint) || !version) return null;
+  return { path, realPath, version, binaryFingerprint };
 }
 
 function completionSmokeCachePath({ cwd, env }) {
@@ -1021,6 +1065,7 @@ export async function probeInstalledRuntime(
         status: "ready",
         ready: true,
         action: null,
+        version: runtimeVersion,
         capabilities: runtimeCapabilities,
         capabilityReason:
           capabilityReason || (runtimeCapabilities.taskTools ? null : UNVERIFIED_COMPLETION_REASON),
@@ -1084,6 +1129,7 @@ export async function probeInstalledRuntime(
       status: definition.authProbe.launchOnly ? "ready_unverified" : "ready",
       ready: true,
       action: null,
+      version: runtimeVersion,
       capabilities: runtimeCapabilities,
       capabilityReason:
         capabilityReason ||

@@ -135,6 +135,7 @@ function resolveCompanyDiscoveryExecutionPlan({ repoRoot, env = process.env } = 
     operation: "research.web",
     runtimeId,
     preferences: loadAIPreferences({ repoRoot, env }),
+    ...(route.type === "installed" ? { installedRuntime: route.runtime } : {}),
   });
 }
 

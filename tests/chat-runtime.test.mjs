@@ -9,7 +9,16 @@
 // write-back, abort/close/interrupt) without spawning a CLI subprocess.
 
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -51,6 +60,9 @@ const VERIFIED_CAPABILITIES = Object.freeze({
 function runtimeVerification(path) {
   return {
     path,
+    realPath: realpathSync(path),
+    version: "0.149.1",
+    binaryFingerprint: createHash("sha256").update(readFileSync(path)).digest("hex"),
     capabilities: VERIFIED_CAPABILITIES,
     checkedAt: "2026-08-25T12:00:00.000Z",
   };
@@ -71,7 +83,7 @@ function runtimeVerification(path) {
 function selectFakeCodexRuntime({ repoRoot, env }) {
   const binDir = mkdtempSync(join(tmpdir(), "careerrat-fake-codex-bin-"));
   const codexPath = join(binDir, "codex");
-  writeFileSync(codexPath, "#!/bin/sh\nexit 0\n", "utf8");
+  writeFileSync(codexPath, "#!/bin/sh\nprintf '0.149.1\\n'\nexit 0\n", "utf8");
   chmodSync(codexPath, 0o755);
   env.PATH = "";
   env.CAREERRAT_RUNTIME_EXTRA_PATHS = binDir;
@@ -88,7 +100,7 @@ function selectInstalledRuntime({ repoRoot, env }) {
   const binDir = join(repoRoot, ".internal", "fake-runtime-bin");
   mkdirSync(binDir, { recursive: true });
   const codexPath = join(binDir, "codex");
-  writeFileSync(codexPath, "#!/bin/sh\nexit 0\n", "utf8");
+  writeFileSync(codexPath, "#!/bin/sh\nprintf '0.149.1\\n'\nexit 0\n", "utf8");
   chmodSync(codexPath, 0o755);
   env.PATH = "";
   env.CAREERRAT_RUNTIME_EXTRA_PATHS = binDir;
@@ -108,7 +120,7 @@ function selectInstalledRuntime({ repoRoot, env }) {
 function selectFakeClaudeRuntime({ repoRoot, env }) {
   const binDir = mkdtempSync(join(tmpdir(), "careerrat-fake-claude-bin-"));
   const claudePath = join(binDir, "claude");
-  writeFileSync(claudePath, "#!/bin/sh\nexit 0\n", "utf8");
+  writeFileSync(claudePath, "#!/bin/sh\nprintf '0.149.1\\n'\nexit 0\n", "utf8");
   chmodSync(claudePath, 0o755);
   env.PATH = "";
   env.CAREERRAT_RUNTIME_EXTRA_PATHS = binDir;

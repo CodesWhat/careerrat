@@ -1092,6 +1092,7 @@ function resolveOnboardingSearchPromptExecutionPlan({ repoRoot, env }) {
     operation: "research.web",
     runtimeId,
     preferences: loadAIPreferences({ repoRoot, env }),
+    ...(route.type === "installed" ? { installedRuntime: route.runtime } : {}),
   });
 }
 
@@ -2045,6 +2046,7 @@ export function mountOnboardRoutes({
       operation: "structured.extraction",
       runtimeId,
       preferences: loadAIPreferences({ repoRoot, env }),
+      ...(route.type === "installed" ? { installedRuntime: route.runtime } : {}),
     });
   }
 

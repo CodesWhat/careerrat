@@ -40,6 +40,7 @@ function selectedMissionExecutionPlan({ repoRoot, env, operation }) {
     operation,
     runtimeId,
     preferences: loadAIPreferences({ repoRoot, env }),
+    ...(route.type === "installed" ? { installedRuntime: route.runtime } : {}),
   });
 }
 

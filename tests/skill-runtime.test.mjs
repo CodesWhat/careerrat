@@ -8,7 +8,16 @@
 // abort handling) without spawning a CLI subprocess.
 
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mock, test } from "node:test";
@@ -29,6 +38,41 @@ import {
   runSkillStream,
 } from "../src/core/ai/skill-runtime.mjs";
 import { computeCost, readUsageEvents } from "../src/core/ai/usage-log.mjs";
+
+const VERIFIED_INSTALLED_CAPABILITIES = Object.freeze({
+  completion: true,
+  structuredOutput: true,
+  appWorkflows: true,
+  exactRead: true,
+  publicWeb: true,
+  liveActivity: true,
+  resumable: true,
+});
+
+function verifiedRuntime(id, path) {
+  return {
+    id,
+    name: id === "claude" ? "Claude Code" : "Codex",
+    path,
+    realPath: path,
+    version: "0.149.1",
+    binaryFingerprint: "a".repeat(64),
+    available: true,
+    capabilities: VERIFIED_INSTALLED_CAPABILITIES,
+    capabilitiesVerified: true,
+  };
+}
+
+function frozenRuntimeEvidence(path, overrides = {}) {
+  return {
+    path,
+    realPath: path,
+    version: "0.149.1",
+    binaryFingerprint: "a".repeat(64),
+    capabilities: VERIFIED_INSTALLED_CAPABILITIES,
+    ...overrides,
+  };
+}
 
 // `skillNames` accepts a single name (most tests only need one) or an array
 // — the default-allowlist tests need every default runtime skill fixture
@@ -1074,23 +1118,7 @@ test("runSkillStream: a selected installed CLI bypasses the Agent SDK and stream
       timeoutMs: 480_000,
       model: "opus",
       effort: "high",
-      runtimeInventory: [
-        {
-          id: "claude",
-          name: "Claude Code",
-          path: "/safe/claude",
-          available: true,
-          capabilities: {
-            completion: true,
-            structuredOutput: true,
-            appWorkflows: true,
-            exactRead: true,
-            publicWeb: true,
-            liveActivity: true,
-            resumable: true,
-          },
-        },
-      ],
+      runtimeInventory: [verifiedRuntime("claude", "/safe/claude")],
       runInstalledRuntimeImpl: async (input) => {
         calls.push(input);
         return { text: '{"full_text":"Morgan Hale"}', runtimeId: "claude", usage: null };
@@ -1142,23 +1170,7 @@ test("runSkillStream resolves a named operation once for the selected installed 
       repoRoot,
       env,
       aiOperation: "research.web",
-      runtimeInventory: [
-        {
-          id: "codex",
-          name: "Codex",
-          path: "/safe/codex",
-          available: true,
-          capabilities: {
-            completion: true,
-            structuredOutput: true,
-            appWorkflows: true,
-            exactRead: true,
-            publicWeb: true,
-            liveActivity: true,
-            resumable: true,
-          },
-        },
-      ],
+      runtimeInventory: [verifiedRuntime("codex", "/safe/codex")],
       runInstalledRuntimeImpl: async (input) => {
         calls.push(input);
         return { text: "{}", runtimeId: "codex", usage: null };
@@ -1189,40 +1201,13 @@ test("runSkillStream can execute a server-owned frozen plan after the selected r
       executionPlan: {
         operation: "research.web",
         runtimeId: "codex",
+        installedRuntime: frozenRuntimeEvidence("/safe/codex"),
         resolved: { model: "gpt-5.6-terra", effort: "medium" },
       },
       useExecutionPlanRoute: true,
       runtimeInventory: [
-        {
-          id: "claude",
-          name: "Claude Code",
-          path: "/safe/claude",
-          available: true,
-          capabilities: {
-            completion: true,
-            structuredOutput: true,
-            appWorkflows: true,
-            exactRead: true,
-            publicWeb: true,
-            liveActivity: true,
-            resumable: true,
-          },
-        },
-        {
-          id: "codex",
-          name: "Codex",
-          path: "/safe/codex",
-          available: true,
-          capabilities: {
-            completion: true,
-            structuredOutput: true,
-            appWorkflows: true,
-            exactRead: true,
-            publicWeb: true,
-            liveActivity: true,
-            resumable: true,
-          },
-        },
+        verifiedRuntime("claude", "/safe/claude"),
+        verifiedRuntime("codex", "/safe/codex"),
       ],
       runInstalledRuntimeImpl: async (input) => {
         calls.push(input);
@@ -1254,7 +1239,7 @@ test("durable AI web search hydrates verified Claude and Codex capabilities with
     const binDir = join(repoRoot, "bin");
     const executablePath = join(binDir, runtimeId);
     mkdirSync(binDir, { recursive: true });
-    writeFileSync(executablePath, "#!/bin/sh\nexit 0\n", "utf8");
+    writeFileSync(executablePath, "#!/bin/sh\nprintf '0.149.1\\n'\nexit 0\n", "utf8");
     chmodSync(executablePath, 0o755);
     const env = {
       PATH: binDir,
@@ -1266,6 +1251,9 @@ test("durable AI web search hydrates verified Claude and Codex capabilities with
       installedRuntime: {
         id: runtimeId,
         path: executablePath,
+        realPath: realpathSync(executablePath),
+        version: "0.149.1",
+        binaryFingerprint: createHash("sha256").update(readFileSync(executablePath)).digest("hex"),
         available: true,
         capabilities,
       },
@@ -1311,23 +1299,7 @@ test("runSkillStream applies saved provider-neutral preferences to a new operati
       repoRoot,
       env,
       aiOperation: "research.web",
-      runtimeInventory: [
-        {
-          id: "codex",
-          name: "Codex",
-          path: "/safe/codex",
-          available: true,
-          capabilities: {
-            completion: true,
-            structuredOutput: true,
-            appWorkflows: true,
-            exactRead: true,
-            publicWeb: true,
-            liveActivity: true,
-            resumable: true,
-          },
-        },
-      ],
+      runtimeInventory: [verifiedRuntime("codex", "/safe/codex")],
       runInstalledRuntimeImpl: async (input) => {
         calls.push(input);
         return { text: "{}", runtimeId: "codex", usage: null };

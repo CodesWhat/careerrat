@@ -24,6 +24,21 @@ function plan(runtimeId) {
     runtimeId,
     quality: "balanced",
     reasoning: "medium",
+    installedRuntime: {
+      path: `/safe/${runtimeId}`,
+      realPath: `/safe/${runtimeId}`,
+      version: "0.149.1",
+      binaryFingerprint: "a".repeat(64),
+      capabilities: {
+        completion: true,
+        structuredOutput: true,
+        appWorkflows: true,
+        exactRead: true,
+        publicWeb: true,
+        liveActivity: true,
+        resumable: true,
+      },
+    },
   });
 }
 

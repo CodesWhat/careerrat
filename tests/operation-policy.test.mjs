@@ -4,7 +4,7 @@ import { test } from "node:test";
 import {
   AI_OPERATION_DEFAULTS,
   assertAIExecutionPlanForRuntime,
-  resolveAIExecutionPlan,
+  resolveAIExecutionPlan as resolveAIExecutionPlanImpl,
 } from "../src/core/ai/operation-policy.mjs";
 
 const VERIFIED_INSTALLED_CAPABILITIES = Object.freeze({
@@ -16,6 +16,29 @@ const VERIFIED_INSTALLED_CAPABILITIES = Object.freeze({
   liveActivity: true,
   resumable: true,
 });
+
+const VERIFIED_INSTALLED_IDENTITY = Object.freeze({
+  path: "/safe/codex",
+  realPath: "/opt/careerrat/codex",
+  version: "0.149.1",
+  binaryFingerprint: "a".repeat(64),
+});
+
+function resolveAIExecutionPlan(input = {}) {
+  const runtimeId = String(input.runtimeId || "");
+  if (["claude", "codex"].includes(runtimeId) && input.installedRuntime == null) {
+    return resolveAIExecutionPlanImpl({
+      ...input,
+      installedRuntime: {
+        ...VERIFIED_INSTALLED_IDENTITY,
+        path: `/safe/${runtimeId}`,
+        realPath: `/safe/${runtimeId}`,
+        capabilities: VERIFIED_INSTALLED_CAPABILITIES,
+      },
+    });
+  }
+  return resolveAIExecutionPlanImpl(input);
+}
 
 test("automatic policy keeps Paul strong and routes web research to the balanced model", () => {
   const paul = resolveAIExecutionPlan({
@@ -189,7 +212,7 @@ test("installed-runtime plans persist only bounded executable and capability evi
     installedRuntime: {
       id: "codex",
       name: "Codex",
-      path: "/safe/codex",
+      ...VERIFIED_INSTALLED_IDENTITY,
       available: true,
       warning: "not durable",
       capabilities: {
@@ -202,7 +225,7 @@ test("installed-runtime plans persist only bounded executable and capability evi
   });
 
   assert.deepEqual(plan.installedRuntime, {
-    path: "/safe/codex",
+    ...VERIFIED_INSTALLED_IDENTITY,
     capabilities: VERIFIED_INSTALLED_CAPABILITIES,
   });
   assert.equal(Object.isFrozen(plan.installedRuntime), true);
@@ -217,7 +240,7 @@ test("installed-runtime evidence is rejected when its executable or runtime prov
         runtimeId: "codex",
         installedRuntime: {
           id: "claude",
-          path: "/safe/codex",
+          ...VERIFIED_INSTALLED_IDENTITY,
           capabilities: VERIFIED_INSTALLED_CAPABILITIES,
         },
       }),
@@ -230,7 +253,7 @@ test("installed-runtime evidence is rejected when its executable or runtime prov
           operation: "research.web",
           runtimeId: "codex",
           installedRuntime: {
-            path: "/safe/codex",
+            ...VERIFIED_INSTALLED_IDENTITY,
             capabilities: VERIFIED_INSTALLED_CAPABILITIES,
             injected: true,
           },
@@ -238,6 +261,29 @@ test("installed-runtime evidence is rejected when its executable or runtime prov
         "codex"
       ),
     { code: "AI_POLICY_INVALID" }
+  );
+});
+
+test("installed-runtime execution plans fail closed when frozen executable evidence is missing", () => {
+  assert.throws(
+    () =>
+      assertAIExecutionPlanForRuntime(
+        {
+          operation: "research.web",
+          runtimeId: "codex",
+          resolved: { model: "gpt-5.6-terra", effort: "medium" },
+        },
+        "codex"
+      ),
+    (error) =>
+      error?.code === "AI_POLICY_INVALID" &&
+      /installed-runtime evidence is required/i.test(error.message)
+  );
+  assert.throws(
+    () => resolveAIExecutionPlanImpl({ operation: "research.web", runtimeId: "codex" }),
+    (error) =>
+      error?.code === "AI_POLICY_INVALID" &&
+      /installed-runtime evidence is required/i.test(error.message)
   );
 });
 

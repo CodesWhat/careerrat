@@ -82,9 +82,20 @@ function withProbeReadiness(runtime, probe) {
 }
 
 function runtimeVerification(runtime) {
-  if (!runtime?.path || runtime.capabilities?.completion !== true) return null;
+  if (
+    !runtime?.path ||
+    !runtime.realPath ||
+    !runtime.version ||
+    !/^[a-f0-9]{64}$/i.test(String(runtime.binaryFingerprint || "")) ||
+    runtime.capabilities?.completion !== true
+  ) {
+    return null;
+  }
   return {
     path: runtime.path,
+    realPath: runtime.realPath,
+    version: runtime.version,
+    binaryFingerprint: String(runtime.binaryFingerprint).toLowerCase(),
     capabilities: runtime.capabilities,
     checkedAt: new Date().toISOString(),
   };

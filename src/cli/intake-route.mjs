@@ -664,6 +664,7 @@ function createLaneBManager({ repoRoot, env, runSkillStream, heartbeatMs = 30_00
         operation: "application.judgment",
         runtimeId: aiRuntimeIdForRoute(route),
         preferences: loadAIPreferences({ repoRoot, env }),
+        ...(route.type === "installed" ? { installedRuntime: route.runtime } : {}),
       });
     }
     executionPlan = assertAIExecutionPlanForOperation(executionPlan, "application.judgment");

@@ -31,6 +31,7 @@ function readyProbe() {
     status: "ready",
     ready: true,
     action: null,
+    version: "0.149.1",
     capabilities: VERIFIED_CAPABILITIES,
   };
 }
@@ -142,6 +143,8 @@ const INVENTORY = [
     name: "Claude Code",
     commandShape: "claude -p --output-format json",
     path: "/Users/morgan/.local/bin/claude",
+    realPath: "/Users/morgan/.local/bin/claude",
+    binaryFingerprint: "a".repeat(64),
     available: true,
     warning: null,
   },
@@ -150,6 +153,8 @@ const INVENTORY = [
     name: "Codex",
     commandShape: "codex exec --json -",
     path: "/opt/homebrew/bin/codex",
+    realPath: "/opt/homebrew/bin/codex",
+    binaryFingerprint: "b".repeat(64),
     available: true,
     warning: null,
   },
@@ -195,6 +200,9 @@ test("inventory auto-selects the sole verified full-workflow CLI", async () => {
   assert.equal(selected.providerFallback, false);
   assert.deepEqual(selected.verification?.capabilities, VERIFIED_CAPABILITIES);
   assert.equal(selected.verification?.path, "/opt/homebrew/bin/codex");
+  assert.equal(selected.verification?.realPath, "/opt/homebrew/bin/codex");
+  assert.equal(selected.verification?.version, "0.149.1");
+  assert.equal(selected.verification?.binaryFingerprint, "b".repeat(64));
   assert.equal(JSON.stringify(response.body).includes("morgan@example.com"), false);
   // The registry's installUrl passes through the route untouched — the
   // onboarding not-found row's "INSTALL GUIDE" link depends on this.
