@@ -1039,6 +1039,39 @@ test("background search runs browser sources and preserves point-of-use login re
   ]);
 });
 
+test("a manual search with only a disabled login source starts so the login preflight can settle", async () => {
+  const repoRoot = tempRepo();
+  sourceConfigPut({
+    repoRoot,
+    name: "sourced-scan",
+    data: { title_filter: { positive: [], negative: [] }, tracked_companies: [] },
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      title_filter: { positive: [], negative: [] },
+      searches: [
+        {
+          provider: "linkedin.com",
+          source_type: "browser",
+          auth: true,
+          platform: "linkedin",
+          label: "LinkedIn NYC operations",
+          url: "https://www.linkedin.com/jobs/search/?keywords=operations",
+          enabled: false,
+        },
+      ],
+    },
+  });
+
+  const operation = await startManualSearchRun({ repoRoot, env: {} });
+
+  assert.equal(operation.run.status, "running");
+  assert.equal(operation.sources.deterministicSources.attempted, 0);
+  assert.equal(operation.sources.deterministicSources.pendingLogins, 1);
+});
+
 test("completed search runs preserve bounded rejection evidence", async () => {
   const repoRoot = tempRepo();
   sourceConfigPut({

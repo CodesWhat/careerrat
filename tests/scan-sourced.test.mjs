@@ -2286,6 +2286,61 @@ test("runSourcedScan returns a contextual login request without failing the rest
   }
 });
 
+test("runSourcedScan preflights the exact disabled authenticated source instead of returning a false empty search", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({
+      repoRoot,
+      name: "sourced-scan",
+      data: { title_filter: { positive: [], negative: [] }, tracked_companies: [] },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "linkedin.com",
+            source_type: "browser",
+            auth: true,
+            platform: "linkedin",
+            label: "LinkedIn NYC operations",
+            url: "https://www.linkedin.com/jobs/search/?keywords=operations&location=New%20York",
+            enabled: false,
+          },
+        ],
+      },
+    });
+    let captures = 0;
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: true,
+      captureBrowserSourceImpl: async () => {
+        captures += 1;
+        throw new Error("a disabled source must not open before Yes");
+      },
+    });
+
+    assert.equal(captures, 0);
+    assert.equal(summary.scanned, 0);
+    assert.deepEqual(summary.errors, []);
+    assert.deepEqual(summary.loginRequests, [
+      {
+        platform: "linkedin",
+        label: "LinkedIn",
+        sourceLabel: "LinkedIn NYC operations",
+        url: "https://www.linkedin.com/jobs/search/?keywords=operations&location=New%20York",
+        prompt: "Do you want to log into LinkedIn so I can use it?",
+      },
+    ]);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("explicit config mode in a DB workspace captures output without mutating DB product state", async () => {
   const repoRoot = tempRepo();
   try {

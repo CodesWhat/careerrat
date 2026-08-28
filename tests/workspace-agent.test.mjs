@@ -2896,6 +2896,53 @@ test("No keeps the authenticated source disabled and continues the rest of the s
   assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, {});
 });
 
+test("No settles honestly when the login source was the only source available", async () => {
+  const repoRoot = tempRepo();
+  const sourceUrl = "https://www.linkedin.com/jobs/search/?keywords=operations";
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.auth-decision",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        selector: "LinkedIn operations",
+        sourceUrl,
+        decision: "no",
+      },
+    },
+    setSearchSourceEnabledImpl: () => ({
+      changed: false,
+      source: {
+        index: 0,
+        provider: "linkedin.com",
+        label: "LinkedIn operations",
+        target: sourceUrl,
+        sourceType: "browser",
+        enabled: false,
+        auth: true,
+        platform: "linkedin",
+      },
+    }),
+    startManualSearchImpl: async () => ({
+      run: {
+        id: "manual-search-after-only-source-skip",
+        purpose: "manual-search",
+        status: "failed",
+        error: {
+          code: "NO_DETERMINISTIC_SOURCES",
+          message: "No enabled job sources are ready yet.",
+        },
+      },
+    }),
+  });
+
+  const message = result.messages.at(-1);
+  assert.equal(message.text, "Skipped LinkedIn. There aren’t any other enabled sources to search.");
+  assert.equal(message.metadata.state, "skipped");
+  assert.equal(message.artifacts.at(-1).status, "failed");
+});
+
 test("enabling an authenticated source asks at point of use and leaves it disabled", async () => {
   const repoRoot = tempRepo();
   const calls = [];
@@ -5518,9 +5565,9 @@ test("a completed scan turns its first login request into a durable Yes or No qu
       purpose: "manual-search",
       status: "completed",
       summary: {
-        scanned: 8,
-        qualified: 2,
-        presented: 2,
+        scanned: 0,
+        qualified: 0,
+        presented: 0,
         loginRequests: [
           {
             platform: "linkedin",
@@ -5535,6 +5582,10 @@ test("a completed scan turns its first login request into a durable Yes or No qu
   });
 
   const prompt = result.messages.at(-1);
+  assert.equal(
+    result.messages.at(-2).text,
+    "This search is waiting for your answer before it can use LinkedIn."
+  );
   assert.equal(prompt.text, "Do you want to log into LinkedIn so I can use it?");
   assert.equal(prompt.kind, "text");
   assert.equal(prompt.metadata.state, "login-needed");
@@ -5555,9 +5606,9 @@ test("a completed scan turns its first login request into a durable Yes or No qu
       purpose: "manual-search",
       status: "completed",
       summary: {
-        scanned: 8,
-        qualified: 2,
-        presented: 2,
+        scanned: 0,
+        qualified: 0,
+        presented: 0,
         loginRequests: [
           {
             platform: "linkedin",

@@ -21,6 +21,7 @@ import {
   isBoardProviderSupported,
   isCompanyProviderSupported,
 } from "../scoring/sourced-scanner.mjs";
+import { pendingSourceLoginRequests } from "../search/source-login-preflight.mjs";
 
 // Bounded backfill for automatic company-board resolution ahead of the first
 // search: on a fresh install, targeting.tracked_companies is just a list of
@@ -671,7 +672,11 @@ async function startSearchRun({
   });
 
   let run = start.run;
-  if (start.reused !== true && deterministicSources.attempted < 1) {
+  if (
+    start.reused !== true &&
+    deterministicSources.attempted < 1 &&
+    Number(deterministicSources.pendingLogins || 0) < 1
+  ) {
     run = sourcingRunFail({
       ...pathCtx,
       id: start.run.id,
@@ -706,12 +711,14 @@ export function countDeterministicSources({ searchSources, sourcedScan } = {}) {
   const browser = enabledSearches.filter(isBrowserSearchSource).length;
   const supportedAts = supportedAtsCompanies(sourcedScan).length;
   const skipped = enabledSearches.length - rss - boards - browser;
+  const pendingLogins = pendingSourceLoginRequests(searchSources).length;
   return {
     attempted: rss + boards + browser + supportedAts,
     rss,
     boards,
     browser,
     supportedAtsCompanies: supportedAts,
+    ...(pendingLogins > 0 ? { pendingLogins } : {}),
     skipped,
   };
 }
@@ -898,7 +905,7 @@ export async function runFirstSearchInBackground({
       searchSources,
       sourcedScan,
     });
-    if (deterministicSources.attempted < 1) {
+    if (deterministicSources.attempted < 1 && Number(deterministicSources.pendingLogins || 0) < 1) {
       if (!settle) {
         return {
           settlement: { status: "failed", error: sourceSetupError() },

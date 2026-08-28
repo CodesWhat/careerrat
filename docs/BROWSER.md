@@ -51,8 +51,8 @@ tracked path. See the **Browser Automation Contract** (Local-only + safety) in `
 
 **Write skill prose tool-agnostically** — say "use the session browser," not a
 specific vendor tool or MCP namespace. `auto` is the default: it uses Orca's visible,
-supervised browser inside an Orca workspace, bundled Playwright in the packaged desktop
-app, and the compatible extension session otherwise. If the selected provider cannot
+supervised browser inside an Orca workspace and CareerRat's app-owned Playwright browser
+otherwise. If the selected provider cannot
 execute the concrete workflow, CareerRat exposes a supervised/manual handoff instead of
 claiming the browser ran.
 
@@ -141,8 +141,8 @@ mail login wall, mail 2FA prompt, captcha, or unexpected interstitial.
 Which provider drives the live session is itself a setting. `auto` is the
 **recommended default** and selects a browser CareerRat can detect without asking the
 candidate to understand their CLI or extension setup. It selects Orca inside an Orca
-workspace, bundled Playwright in the packaged desktop app, and the compatible extension
-otherwise. Explicit overrides are `extension`, `orca` (a supervised embedded browser
+workspace and CareerRat's app-owned Playwright browser otherwise. Explicit overrides are
+`extension`, `orca` (a supervised embedded browser
 available inside Orca workspaces), or `playwright` (a supervised browser with persistent
 local storage created on demand). Public application forms need no setup. If a particular
 site requires an account, the candidate signs in when that site asks and CareerRat reuses

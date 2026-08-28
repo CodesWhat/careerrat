@@ -2635,6 +2635,11 @@ function searchResultText(run) {
   if (run?.status === "completed") {
     const summary = compactSearchSummary(run.summary) || {};
     const presented = summary.presented ?? summary.new ?? 0;
+    const loginRequest = sourceLoginRequest(run.summary, run.id);
+    if (presented === 0 && loginRequest) {
+      const site = authSourceSiteLabel(loginRequest.platform, { url: loginRequest.url });
+      return `This search is waiting for your answer before it can use ${site}.`;
+    }
     const filtered = summary.filtered ?? Math.max(0, (summary.scanned || 0) - presented);
     return `Job search complete: ${presented} qualified role${presented === 1 ? "" : "s"} presented, ${filtered} filtered out, ${summary.reconciled ?? summary.scanned ?? 0} reconciled.`;
   }
@@ -3742,7 +3747,9 @@ async function executeSourceAuthDecision({
       env,
       normalized,
       intentMessage,
-      text: `Skipped ${site}. I’m continuing with your other sources.`,
+      text: expandedSearch?.started
+        ? `Skipped ${site}. I’m continuing with your other sources.`
+        : `Skipped ${site}. There aren’t any other enabled sources to search.`,
       artifacts: [
         {
           kind: "search_source",
@@ -3760,7 +3767,11 @@ async function executeSourceAuthDecision({
       ].filter(Boolean),
       metadata: {
         state: expandedSearch?.started ? "running" : "skipped",
-        nextActions: [navigationAction("Search jobs", { surface: "search" })],
+        nextActions: [
+          expandedSearch?.started
+            ? navigationAction("Search jobs", { surface: "search" })
+            : navigationAction("Manage sources", { surface: "settings", section: "sources" }),
+        ],
       },
       operationResult: { source: operation, search: expandedSearch?.operation || null },
       now,

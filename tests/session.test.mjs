@@ -94,10 +94,12 @@ test("automatic session setup uses Orca when CareerRat is running inside Orca", 
   assert.equal(session.descriptor.storesCreds, false);
 });
 
-test("automatic session setup falls back to the browser extension outside Orca", () => {
+test("automatic session setup uses the app-owned Playwright browser outside Orca", () => {
   const session = resolveSession({ data: { session: { provider: "auto" } }, env: {} });
   assert.equal(session.configuredProvider, "auto");
-  assert.equal(session.provider, "extension");
+  assert.equal(session.provider, "playwright");
+  assert.equal(session.descriptor.automatedApply, true);
+  assert.match(session.profileRoot, /board-profiles$/);
 });
 
 test("automatic session setup uses bundled Playwright in a packaged desktop workspace", () => {
@@ -188,15 +190,10 @@ test("Orca remains the automatic packaged-desktop provider inside an Orca worksp
   assert.equal(session.provider, "orca");
 });
 
-// Regression: describeProviders() used to report the "auto" descriptor's own
-// literal automatedApply (always true), not what "auto" actually resolves to.
-// Outside Orca, "auto" resolves to the extension provider, which cannot drive
-// apply-job's scripted apply path — the option list (and the JSON
-// `careerrat automation status --json` / Settings both read) must say so.
-test("describeProviders reports automatedApply:false for the auto option outside an Orca workspace", () => {
+test("describeProviders reports automatedApply:true for app-owned automatic browsing", () => {
   const providers = describeProviders({ env: {} });
   const auto = providers.find((p) => p.id === "auto");
-  assert.equal(auto.automatedApply, false);
+  assert.equal(auto.automatedApply, true);
 });
 
 test("describeProviders reports automatedApply:true for the auto option inside an Orca workspace", () => {
