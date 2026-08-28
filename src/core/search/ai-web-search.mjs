@@ -724,20 +724,30 @@ function configuredSourceHosts(
   return hosts;
 }
 
-function rotateSourceHosts(hosts, offset = 0) {
-  if (hosts.length < 2) return hosts;
-  const normalizedOffset = Number.isInteger(offset)
-    ? ((offset % hosts.length) + hosts.length) % hosts.length
-    : 0;
-  if (!normalizedOffset) return hosts;
-  return [...hosts.slice(normalizedOffset), ...hosts.slice(0, normalizedOffset)];
-}
-
 function normalizedSearchQuery(value) {
   return String(value || "")
     .trim()
     .replace(/\s+/g, " ")
     .toLowerCase();
+}
+
+function prioritizeUnusedSourceHosts(hosts, usedQueries = []) {
+  const normalizedQueries = usedQueries.map(normalizedSearchQuery).filter(Boolean);
+  const usedHosts = new Set(
+    hosts.filter((host) => {
+      const siteClause = `site:${String(host || "").toLowerCase()}`;
+      return normalizedQueries.some((query) =>
+        query
+          .split(/\s+/)
+          .map((term) => term.replace(/^[('"]+|[)'",]+$/g, ""))
+          .includes(siteClause)
+      );
+    })
+  );
+  return [
+    ...hosts.filter((host) => !usedHosts.has(host)),
+    ...hosts.filter((host) => usedHosts.has(host)),
+  ];
 }
 
 function normalizedTitleTokens(value) {
@@ -1124,7 +1134,6 @@ function buildPromptSearchPlan(
     excludedHosts = [],
     preferDirectSources = false,
     configuredSourceFirst = false,
-    sourceHintOffset = 0,
     usedQueries = [],
   } = {}
 ) {
@@ -1138,11 +1147,11 @@ function buildPromptSearchPlan(
       ...excludedHosts,
     ]),
   ];
-  const sourceHints = rotateSourceHosts(
+  const sourceHints = prioritizeUnusedSourceHosts(
     configuredSourceHosts(sourceConfig, titles, {
       excludedHosts: rejectedHosts,
     }),
-    sourceHintOffset
+    usedQueries
   );
   const usedQuerySet = new Set(usedQueries.map(normalizedSearchQuery).filter(Boolean));
   const plannedQueryHints = buildSearchQueryHints(
@@ -1346,7 +1355,6 @@ export async function runAiWebSearch({
             excludedHosts: topUpRejectedHosts,
             preferDirectSources: topUpRejectedHosts.length > 0,
             configuredSourceFirst: topUp,
-            sourceHintOffset: topUp ? topUpState.sourceHintOffset || 0 : 0,
             usedQueries: topUp ? topUpState.usedQueries || [] : [],
           })
         : searchPlansByPrompt.get(prompt.id);
@@ -2057,7 +2065,6 @@ export async function runAiWebSearch({
           (bucket) => bucket.name || JSON.stringify(bucket.titles)
         ),
         rejectedSourceHosts: [...topUpRejectedHosts],
-        sourceHintOffset: topUpSpec.topUpCount,
         usedQueries,
       },
     });

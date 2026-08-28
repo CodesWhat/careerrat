@@ -5446,7 +5446,7 @@ test("runAiWebSearch tops up a useful set made only of deferred posting leads", 
   );
 });
 
-test("runAiWebSearch rotates configured hosts and prior queries across underfilled top-ups", async () => {
+test("runAiWebSearch prioritizes unused configured hosts across underfilled top-ups", async () => {
   const repoRoot = repo({ prompts: 1 });
   const targetTitles = [
     "Bar Manager",
@@ -5500,14 +5500,14 @@ test("runAiWebSearch rotates configured hosts and prior queries across underfill
         {
           provider: "indeed",
           source_type: "url-query",
-          label: "Bar Manager jobs",
+          label: "General job aggregator",
           url: "https://www.indeed.com/jobs?q=bar+manager",
           enabled: true,
         },
         ...configuredHosts.map((host, index) => ({
           provider: host,
           source_type: "browser",
-          label: `${targetTitles[index]} board`,
+          label: `${targetTitles.join(" / ")} board ${index + 1}`,
           url: `https://${host}/jobs`,
           enabled: true,
         })),
@@ -5516,7 +5516,7 @@ test("runAiWebSearch rotates configured hosts and prior queries across underfill
   });
 
   const inputs = [];
-  const actualQueries = [];
+  const actualQueriesByTurn = [];
   const blockedUrl = "https://www.indeed.com/viewjob?jk=blocked-head-bartender";
   const readableUrl = "https://direct-bar.example/jobs/bar-manager";
   const result = await runAiWebSearch({
@@ -5525,10 +5525,12 @@ test("runAiWebSearch rotates configured hosts and prior queries across underfill
     runSkillStream: async ({ input, onEvent }) => {
       inputs.push(input);
       const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
-      const query = kickoff.search_plan.query_hints[0].query;
-      const reportedQuery =
-        inputs.length === 1 ? `  ${query.toUpperCase().replace(/\s+/g, "  ")}  ` : query;
-      actualQueries.push(reportedQuery);
+      const plannedQueries = kickoff.search_plan.query_hints.map(({ query }) => query);
+      const reportedQueries =
+        inputs.length === 1
+          ? plannedQueries.map((query) => `  ${query.toUpperCase().replace(/\s+/g, "  ")}  `)
+          : [plannedQueries[0]];
+      actualQueriesByTurn.push(reportedQueries);
       emitAssistantJson(onEvent, {
         roles:
           inputs.length === 1
@@ -5549,7 +5551,11 @@ test("runAiWebSearch rotates configured hosts and prior queries across underfill
                 }),
               ]
             : [],
-        queries_run: [{ prompt_id: "p1", query: reportedQuery, status: "completed" }],
+        queries_run: reportedQueries.map((query) => ({
+          prompt_id: "p1",
+          query,
+          status: "completed",
+        })),
       });
       return { ok: true };
     },
@@ -5567,6 +5573,12 @@ test("runAiWebSearch rotates configured hosts and prior queries across underfill
           }),
   });
 
+  assert.ok(
+    actualQueriesByTurn[0].some((query) =>
+      query.toLowerCase().includes(`site:${configuredHosts[0]}`)
+    ),
+    JSON.stringify(actualQueriesByTurn[0])
+  );
   assert.equal(inputs.length, 4, JSON.stringify(result));
   const topUpPlans = inputs
     .slice(1)
@@ -5577,7 +5589,7 @@ test("runAiWebSearch rotates configured hosts and prior queries across underfill
     expectedTopUpHosts
   );
   const normalizedQuery = (query) => query.trim().replace(/\s+/g, " ").toLowerCase();
-  const previouslyUsed = new Set([normalizedQuery(actualQueries[0])]);
+  const previouslyUsed = new Set(actualQueriesByTurn[0].map(normalizedQuery));
   for (let index = 0; index < topUpPlans.length; index += 1) {
     const plan = topUpPlans[index];
     assert.deepEqual(plan.limits, {
@@ -5608,7 +5620,9 @@ test("runAiWebSearch rotates configured hosts and prior queries across underfill
       plan.query_hints.every(({ query }) => !previouslyUsed.has(normalizedQuery(query))),
       JSON.stringify(plan)
     );
-    previouslyUsed.add(normalizedQuery(actualQueries[index + 1]));
+    for (const query of actualQueriesByTurn[index + 1]) {
+      previouslyUsed.add(normalizedQuery(query));
+    }
   }
   assert.equal(result.presented, 1, JSON.stringify(result));
 });
