@@ -313,6 +313,25 @@ function safePromptFailure({ outcome, runtimeFailure }) {
   return "AI search couldn't finish. Try it again.";
 }
 
+const TRANSIENT_AUTHORIZED_RUNTIME_RESPONSE =
+  /^(?:Search response was unavailable in the authorized runtime|No usable assistant response)\.?$/i;
+
+function isTransientAuthorizedRuntimeResponse({ runtimeResult, rawText }) {
+  if (runtimeResult?.aborted === true) return false;
+  if (runtimeResult?.ok === false) {
+    const code = String(runtimeResult.code || "").trim();
+    if (
+      code === "RUNTIME_USAGE_LIMIT" ||
+      code === "RUNTIME_AUTH_REQUIRED" ||
+      code === "RUNTIME_CANCELLED"
+    ) {
+      return false;
+    }
+    return TRANSIENT_AUTHORIZED_RUNTIME_RESPONSE.test(String(runtimeResult.error || "").trim());
+  }
+  return !String(rawText || "").trim();
+}
+
 function safeToolError(content) {
   let text = "";
   if (typeof content === "string") text = content;
@@ -1309,6 +1328,7 @@ export async function runAiWebSearch({
     const toolTrace = [];
     let runtimeFailure = null;
     let previousRawText = "";
+    let transientRetryUsed = false;
     const heartbeat = setInterval(() => {
       onProgress?.({
         type: "activity",
@@ -1403,6 +1423,25 @@ export async function runAiWebSearch({
           },
         });
       } catch (error) {
+        runtimeFailure = error;
+        throw error;
+      }
+      if (!correction && isTransientAuthorizedRuntimeResponse({ runtimeResult, rawText })) {
+        if (!transientRetryUsed) {
+          transientRetryUsed = true;
+          toolCalls.clear();
+          toolTrace.length = 0;
+          onProgress?.({
+            type: "activity",
+            message: `The search response was unavailable. Trying saved prompt ${promptNumber} of ${promptTotal} once more…`,
+            ...lifecycle,
+            promptStatus: "running",
+            retry: true,
+          });
+          return invokeAiWebSearch({ correction: null });
+        }
+        const error = new Error("Search response was unavailable in the authorized runtime.");
+        error.code = "AI_WEB_SEARCH_TRANSIENT_UNAVAILABLE";
         runtimeFailure = error;
         throw error;
       }

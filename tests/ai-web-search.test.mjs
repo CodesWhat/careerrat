@@ -2132,12 +2132,18 @@ test("a successful zero-result AI search revalidates active rows against the cur
     ],
   });
 
+  let calls = 0;
+  const zeroResult = assistantJson({ roles: [], queries_run: [] });
   const result = await runAiWebSearch({
     repoRoot,
     env: {},
-    runSkillStream: assistantJson({ roles: [], queries_run: [] }),
+    runSkillStream: async (options) => {
+      calls += 1;
+      return zeroResult(options);
+    },
   });
 
+  assert.equal(calls, 1, "a canonical zero-result response is complete, not transient");
   assert.equal(result.new, 0);
   assert.deepEqual(result.revalidatedExisting.hiddenIds, ["stale-ai-result"]);
   assert.equal(
@@ -2198,26 +2204,239 @@ test("runAiWebSearch gives installed web research enough time and preserves runt
   assert.deepEqual(result.failedPromptIds, ["p1"]);
 });
 
-test("runAiWebSearch explains a selected-provider usage cap without exposing runtime text", async () => {
+for (const transient of [
+  {
+    label: "candidate-safe unavailable result",
+    respond: async () => ({
+      ok: false,
+      error: "Search response was unavailable in the authorized runtime.",
+    }),
+  },
+  {
+    label: "successful runtime turn with no assistant response",
+    respond: async () => ({ ok: true }),
+  },
+]) {
+  test(`runAiWebSearch retries one transient ${transient.label} on the frozen execution plan`, async () => {
+    const repoRoot = repo({ prompts: 1 });
+    candidateConfigPatch({
+      repoRoot,
+      name: "targeting",
+      patch: {
+        role_buckets: [{ name: "Applied AI", titles: ["Applied AI Engineer"] }],
+        fit_bands: { fit_floor: 0 },
+      },
+    });
+    saveSearchPrompts({
+      repoRoot,
+      prompts: [{ id: "p1", text: "Find Applied AI Engineer jobs" }],
+    });
+    const executionPlan = Object.freeze({
+      operation: "research.web",
+      runtimeId: "codex",
+      resolved: Object.freeze({ model: "gpt-5.6-terra", effort: "medium" }),
+    });
+    const invocations = [];
+    const result = await runAiWebSearch({
+      repoRoot,
+      env: {},
+      executionPlan,
+      runSkillStream: async (options) => {
+        invocations.push(options);
+        if (invocations.length === 1) return transient.respond(options);
+        emitAssistantJson(options.onEvent, {
+          roles: [
+            role(),
+            role({ company: "Beta AI", url: "https://jobs.lever.co/beta/req-2" }),
+            role({ company: "Gamma AI", url: "https://jobs.lever.co/gamma/req-3" }),
+          ],
+          queries_run: [{ prompt_id: "p1", query: "applied AI jobs", status: "completed" }],
+        });
+        return { ok: true };
+      },
+      resolveJobUrlImpl: canonicalResolver(),
+    });
+
+    assert.equal(invocations.length, 2);
+    assert.deepEqual(
+      invocations.map((invocation) => invocation.executionPlan),
+      [executionPlan, executionPlan]
+    );
+    assert.deepEqual(
+      invocations.map((invocation) => invocation.input),
+      [invocations[0].input, invocations[0].input]
+    );
+    assert.deepEqual(
+      invocations.map((invocation) => invocation.useExecutionPlanRoute),
+      [true, true]
+    );
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.new, 3, JSON.stringify(result));
+  });
+}
+
+test("runAiWebSearch stops after one retry when the authorized runtime stays transiently unavailable", async () => {
   const repoRoot = repo({ prompts: 1 });
+  let calls = 0;
   const result = await runAiWebSearch({
     repoRoot,
     env: {},
-    runSkillStream: async () => ({
-      ok: false,
-      code: "RUNTIME_USAGE_LIMIT",
-      error:
-        "Claude Code has reached its usage limit. It resets at 4pm (America/New_York). " +
-        "raw CLI schema secret",
-    }),
+    runSkillStream: async () => {
+      calls += 1;
+      return {
+        ok: false,
+        error: "Search response was unavailable in the authorized runtime.",
+      };
+    },
   });
 
+  assert.equal(calls, 2);
+  assert.deepEqual(result.failedPromptIds, ["p1"]);
+  assert.deepEqual(result.errors, ["AI search couldn't finish. Try it again."]);
+});
+
+test("runAiWebSearch discards a response-less attempt's tool trace before its one retry", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Applied AI", titles: ["Applied AI Engineer"] }],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [{ id: "p1", text: "Find Applied AI Engineer jobs" }],
+  });
+  const abandonedUrl = "https://jobs.example.test/abandoned-attempt";
+  const acceptedUrl = "https://jobs.example.test/accepted-attempt";
+  let calls = 0;
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ onEvent }) => {
+      calls += 1;
+      assert.ok(calls <= 2, "the transient replay must not fall through to a schema correction");
+      if (calls === 1) {
+        onEvent({
+          type: "tool_use",
+          data: { id: "old-search", name: "WebSearch", input: { query: "abandoned query" } },
+        });
+        onEvent({
+          type: "tool_result",
+          data: { toolUseId: "old-search", content: "Search failed", isError: true },
+        });
+        onEvent({
+          type: "tool_use",
+          data: { id: "old-fetch", name: "WebFetch", input: { url: abandonedUrl } },
+        });
+        onEvent({
+          type: "tool_result",
+          data: { toolUseId: "old-fetch", content: "Fetched", isError: false },
+        });
+        return {
+          ok: false,
+          error: "Search response was unavailable in the authorized runtime.",
+        };
+      }
+      onEvent({
+        type: "tool_use",
+        data: { id: "new-search", name: "WebSearch", input: { query: "applied AI jobs" } },
+      });
+      onEvent({
+        type: "tool_result",
+        data: { toolUseId: "new-search", content: "Search completed", isError: false },
+      });
+      onEvent({
+        type: "tool_use",
+        data: { id: "new-fetch", name: "WebFetch", input: { url: acceptedUrl } },
+      });
+      onEvent({
+        type: "tool_result",
+        data: { toolUseId: "new-fetch", content: "Fetched", isError: false },
+      });
+      emitAssistantJson(onEvent, {
+        roles: [
+          role({ url: acceptedUrl }),
+          role({ company: "Beta AI", url: "https://jobs.example.test/beta" }),
+          role({ company: "Gamma AI", url: "https://jobs.example.test/gamma" }),
+        ],
+        queries_run: [{ prompt_id: "p1", query: "applied AI jobs", status: "completed" }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver(),
+  });
+
+  assert.equal(calls, 2);
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.queryResults[0].queries, [
+    { query: "applied AI jobs", status: "completed", error: null },
+  ]);
+  assert.equal(
+    result.sources.some((source) => source.url === abandonedUrl),
+    false
+  );
+  assert.equal(
+    result.sources.some((source) => source.url === acceptedUrl),
+    true
+  );
+  assert.deepEqual(result.fetchedPostingDecisions, []);
+});
+
+test("runAiWebSearch explains a selected-provider usage cap without exposing runtime text", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  let calls = 0;
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async () => {
+      calls += 1;
+      return {
+        ok: false,
+        code: "RUNTIME_USAGE_LIMIT",
+        error:
+          "Claude Code has reached its usage limit. It resets at 4pm (America/New_York). " +
+          "raw CLI schema secret",
+      };
+    },
+  });
+
+  assert.equal(calls, 1);
   assert.deepEqual(result.errors, [
     "The selected AI provider has reached its usage limit. It resets at 4pm (America/New_York). Try again after the reset.",
   ]);
   assert.deepEqual(result.failedPromptIds, ["p1"]);
   assert.doesNotMatch(result.errors[0], /Claude|CLI|schema|secret|RUNTIME_/i);
 });
+
+for (const failure of [
+  {
+    label: "authentication error",
+    result: { ok: false, code: "RUNTIME_AUTH_REQUIRED", error: "Sign in first." },
+  },
+  {
+    label: "runtime cancellation",
+    result: { ok: false, aborted: true, code: "RUNTIME_CANCELLED", error: "Cancelled." },
+  },
+]) {
+  test(`runAiWebSearch does not replay a ${failure.label}`, async () => {
+    const repoRoot = repo({ prompts: 1 });
+    let calls = 0;
+    const result = await runAiWebSearch({
+      repoRoot,
+      env: {},
+      runSkillStream: async () => {
+        calls += 1;
+        return failure.result;
+      },
+    });
+
+    assert.equal(calls, 1);
+    assert.deepEqual(result.failedPromptIds, ["p1"]);
+  });
+}
 
 test("runAiWebSearch isolates a failed prompt and preserves successful siblings in saved order", async () => {
   const repoRoot = repo({ prompts: 3 });
@@ -6159,16 +6378,19 @@ test("runAiWebSearch retries schema-invalid output once and returns the safe err
   assert.equal(calls, 2);
   assert.deepEqual(recovered.errors, []);
 
+  let failedCalls = 0;
   const failed = await runAiWebSearch({
     repoRoot,
     env: {},
     runSkillStream: async ({ onEvent }) => {
+      failedCalls += 1;
       onEvent({
         type: "assistant",
         data: { message: { content: [{ type: "text", text: "still invalid" }] } },
       });
     },
   });
+  assert.equal(failedCalls, 2, "schema exhaustion gets its correction only, not a prompt replay");
   assert.deepEqual(
     {
       searched: failed.searched,
