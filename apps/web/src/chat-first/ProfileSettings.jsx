@@ -168,7 +168,6 @@ function SettingsView({
   onAddSource,
   onExportData,
 }) {
-  const blockedCount = Number(sources?.blockedCount) || 0;
   return (
     <section className="cf-settings" aria-label="App settings">
       <article className="cf-settings__card">
@@ -241,26 +240,16 @@ function SettingsView({
       <article className="cf-settings__card">
         <SectionHeading
           label="JOB SOURCES"
-          actionLabel="Add a niche board"
+          actionLabel="Add a job source"
           onAction={() => onAddSource?.()}
         />
         <div className="cf-settings__source-copy">
-          <strong>
-            Every board {agentName} can read stays on. You never curate, so you never miss a job.
-          </strong>
+          <strong>Saved sources run when you search.</strong>
           <span>
-            {Number(sources?.scannedCount) || 0} scanned automatically ·{" "}
+            {Number(sources?.scannedCount) || 0} searched recently ·{" "}
             {Number(sources?.pinnedCount) || 0} pinned for your targets
             {sources?.lastSweep ? ` · last sweep ${sources.lastSweep}` : ""}
           </span>
-          {blockedCount > 0 ? (
-            <span>
-              ⚠ {blockedCount} {blockedCount === 1 ? "board" : "boards"} blocked by a bot wall.
-              Retrying, {agentName} will tell you if it stays dead.
-            </span>
-          ) : (
-            <span>All readable boards are healthy.</span>
-          )}
         </div>
       </article>
       <article className="cf-settings__card cf-settings__public-sync">
@@ -582,7 +571,7 @@ function EnginePicker({
 
 function SourceDialog({ value, busy, onChange, onSubmit, onClose }) {
   return (
-    <SettingsDialog title="Add a niche board" onClose={onClose}>
+    <SettingsDialog title="Add a job source" onClose={onClose}>
       <form
         className="cf-settings-dialog__form"
         onSubmit={(event) => {
@@ -590,9 +579,9 @@ function SourceDialog({ value, busy, onChange, onSubmit, onClose }) {
           onSubmit?.();
         }}
       >
-        <label htmlFor="cf-niche-board-url">Board URL</label>
+        <label htmlFor="cf-job-source-url">Board or saved-search URL</label>
         <input
-          id="cf-niche-board-url"
+          id="cf-job-source-url"
           type="url"
           required
           value={value}
@@ -604,7 +593,7 @@ function SourceDialog({ value, busy, onChange, onSubmit, onClose }) {
             Cancel
           </button>
           <button type="submit" disabled={busy || !String(value || "").trim()}>
-            Add board
+            Add source
           </button>
         </div>
       </form>

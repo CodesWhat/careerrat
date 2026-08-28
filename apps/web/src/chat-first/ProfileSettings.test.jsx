@@ -322,7 +322,9 @@ describe("ProfileSettings", () => {
     expect(html).toContain("Connected");
     expect(html).toContain("WHAT PAUL MAY DO ON HIS OWN");
     expect(html).toContain("Submitting an application always gates back to you");
-    expect(html).toContain("1 board blocked by a bot wall");
+    expect(html).toContain("Saved sources run when you search");
+    expect(html).not.toContain("blocked by a bot wall");
+    expect(html).not.toContain("permission to use LinkedIn");
     expect(html).toContain('role="switch"');
     expect(html).toContain('aria-checked="false"');
     expect(html).toContain("Always on");
@@ -528,7 +530,11 @@ describe("ProfileSettings", () => {
     expect(html).toContain(">Sign in</button>");
     expect(html).not.toMatch(/open terminal/i);
     expect(html).toContain("Retry detection");
-    expect(html).toContain("Add a niche board");
+    expect(html).toContain("Add a job source");
+    expect(html).toContain("Board or saved-search URL");
+    expect(html).toContain("Add source");
+    expect(html).not.toContain("Permission to use LinkedIn");
+    expect(html).not.toContain("Set up LinkedIn");
     expect(html).toContain('value="https://jobs.example.com"');
     expect(html).toContain("Technical details");
     expect(html).toContain("Browser connection");

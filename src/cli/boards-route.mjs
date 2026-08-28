@@ -501,7 +501,12 @@ export function mountBoardsRoutes({ addRoute, repoRoot, env = process.env }) {
       // the user's toggle. Transfer ownership to the user on every explicit
       // save by removing the generator marker before persisting.
       const { enabled_reason: _generatedEnabledReason, ...userOwnedExisting } = existing;
-      const updated = { ...userOwnedExisting, label, enabled: body?.enabled !== false };
+      const requestedEnabled = body?.enabled !== false;
+      const enabled =
+        existing.source_type === "browser" && existing.auth === true && existing.enabled !== true
+          ? false
+          : requestedEnabled;
+      const updated = { ...userOwnedExisting, label, enabled };
       if (existing.source_type === "ats") updated.name = label;
       if (existing.rssUrl != null) updated.rssUrl = target;
       else if (existing.query != null) updated.query = target;

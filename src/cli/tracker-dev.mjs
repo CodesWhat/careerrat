@@ -162,7 +162,7 @@ export async function openAuthenticatedSource(
       summary: `CareerRat couldn't open that ${site} link. Add a public job-site URL and try again.`,
     };
   }
-  const session = browserSessionManager.get({ platform });
+  const session = browserSessionManager.get({ platform, provider: "playwright" });
   if (!session?.available) {
     return {
       state: "needs-user",
@@ -306,6 +306,7 @@ export function createDevServer({
         source,
         session: browserSessionManager.get({
           platform: source?.platform || source?.provider || "search",
+          provider: "playwright",
         }),
       }),
   }),
@@ -465,6 +466,7 @@ export function createDevServer({
         source,
         session: browserSessionManager.get({
           platform: source?.platform || source?.provider || "search",
+          provider: "playwright",
         }),
       }),
   });

@@ -20,7 +20,7 @@ test("authenticated source handoff opens the exact URL and stops for visible ver
   };
   const browserSessionManager = {
     get(options) {
-      assert.deepEqual(options, { platform: "linkedin" });
+      assert.deepEqual(options, { platform: "linkedin", provider: "playwright" });
       return session;
     },
   };
@@ -128,7 +128,7 @@ test("authenticated source handoff refuses Orca before opening a login URL witho
   assert.equal(opened, false);
   assert.equal(result.state, "needs-user");
   assert.match(result.summary, /can't safely use the Orca browser/i);
-  assert.doesNotMatch(result.summary, /permission|consent/i);
+  assert.doesNotMatch(result.summary, /permission|consent|settings/i);
 });
 
 test("authenticated source handoff refuses a private DNS target before creating a browser session", async () => {

@@ -294,14 +294,10 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
     setSourceDialogBusy(true);
     setError(null);
     try {
-      await api.runWorkspaceIntent(
-        "source.add",
-        { type: "workspace", id: "workspace-main" },
-        { url: url.href }
-      );
+      await api.addBoardSource(url.href);
+      await load();
       setSourceDraft("");
       setSourceDialogOpen(false);
-      navigate("/");
     } catch (cause) {
       setError(
         profileSettingsErrorMessage(

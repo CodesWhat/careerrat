@@ -637,6 +637,13 @@ export function getSourceMaintenance() {
   return apiFetch("/api/boards/sources");
 }
 
+export function addBoardSource(url, label) {
+  return apiFetch("/api/boards/add", {
+    method: "POST",
+    body: JSON.stringify({ url, ...(label ? { label } : {}) }),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // First-run chat runtime (src/cli/chat-route.mjs). GET /api/chat/events is a
 // plain GET SSE stream consumed directly via useEventSource (../lib/sse.js).

@@ -67,6 +67,7 @@ vi.mock("./ProfileSettings.jsx", () => ({ ProfileSettings: () => null }));
 function createApi() {
   let enabled = true;
   return {
+    addBoardSource: vi.fn().mockResolvedValue({ ok: true }),
     runWorkspaceIntent: vi.fn().mockResolvedValue({ status: "completed" }),
     getAiPreferences: vi.fn().mockResolvedValue({
       quality: "automatic",
@@ -316,7 +317,7 @@ describe("ProfileSettingsController browser automation provider", () => {
 });
 
 describe("ProfileSettingsController source setup", () => {
-  it("adds a board through the durable workspace chat so login questions appear there", async () => {
+  it("saves a source in Settings without starting a login or conversation gate", async () => {
     const module = await import("./ProfileSettingsController.jsx");
     const api = createApi();
 
@@ -329,12 +330,12 @@ describe("ProfileSettingsController source setup", () => {
     view = renderController(module, api);
     await settingsProps(view).onSubmitSource();
 
-    expect(api.runWorkspaceIntent).toHaveBeenCalledWith(
-      "source.add",
-      { type: "workspace", id: "workspace-main" },
-      { url: "https://www.linkedin.com/jobs/search/?keywords=ops" }
+    expect(api.addBoardSource).toHaveBeenCalledWith(
+      "https://www.linkedin.com/jobs/search/?keywords=ops"
     );
-    expect(navigate).toHaveBeenCalledWith("/");
+    expect(api.runWorkspaceIntent).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+    expect(api.getSourceMaintenance).toHaveBeenCalledTimes(2);
   });
 });
 

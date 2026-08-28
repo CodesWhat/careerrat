@@ -707,6 +707,89 @@ test("source login No persists a skip and a later enable makes the source askabl
   assert.equal(enabled.login_skipped, undefined);
 });
 
+test("source maintenance cannot turn a skipped browser source into a hidden login grant", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const sourceUrl = "https://www.indeed.com/jobs?q=operations";
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "indeed.com",
+          source_type: "browser",
+          auth: true,
+          platform: "indeed",
+          label: "Indeed operations",
+          url: sourceUrl,
+          enabled: false,
+          login_skipped: true,
+        },
+      ],
+    },
+  });
+  const server = await bootServer(repoRoot);
+  try {
+    const { status, body } = await postJson(server, "/api/boards/search/update", {
+      index: 0,
+      label: "Indeed operations",
+      target: sourceUrl,
+      enabled: true,
+    });
+
+    assert.equal(status, 200);
+    assert.equal(body.searches[0].enabled, false);
+    assert.equal(body.searches[0].loginSkipped, true);
+    const saved = sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches[0];
+    assert.equal(saved.enabled, false);
+    assert.equal(saved.login_skipped, true);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("source maintenance can enable a browser source that does not require login", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const sourceUrl = "https://www.linkedin.com/jobs/search/?keywords=operations";
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "linkedin.com",
+          source_type: "browser",
+          auth: false,
+          platform: "linkedin",
+          label: "Public LinkedIn operations",
+          url: sourceUrl,
+          enabled: false,
+        },
+      ],
+    },
+  });
+  const server = await bootServer(repoRoot);
+  try {
+    const { status, body } = await postJson(server, "/api/boards/search/update", {
+      index: 0,
+      label: "Public LinkedIn operations",
+      target: sourceUrl,
+      enabled: true,
+    });
+
+    assert.equal(status, 200);
+    assert.equal(body.searches[0].enabled, true);
+    assert.equal(
+      sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches[0].enabled,
+      true
+    );
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("source login toggles reject a stale URL instead of mutating by label", () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });

@@ -66,6 +66,27 @@ test("browser session manager reuses one platform session until it closes", asyn
   assert.equal(closes, 2);
 });
 
+test("browser session manager keeps a server-selected provider separate from the configured session", async () => {
+  const created = [];
+  const manager = createBrowserSessionManager({
+    createSessionImpl: (options) => {
+      created.push(options);
+      return { available: true, async close() {} };
+    },
+  });
+
+  const configured = manager.get({ platform: "linkedin" });
+  const careerRatBrowser = manager.get({ platform: "linkedin", provider: "playwright" });
+
+  assert.notEqual(careerRatBrowser, configured);
+  assert.equal(manager.get({ platform: "linkedin", provider: "playwright" }), careerRatBrowser);
+  assert.deepEqual(created, [
+    { platform: "linkedin" },
+    { platform: "linkedin", provider: "playwright" },
+  ]);
+  await manager.shutdown();
+});
+
 test("configured sessions expose whether every network request has a pinned public boundary", () => {
   const playwright = createConfiguredBrowserSession({
     repoRoot: "/repo",
