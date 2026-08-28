@@ -895,12 +895,36 @@ export function ProfileSettings({
   profileEditor = null,
   editorValues = {},
   editorBusy = false,
+  discardEditorOpen = false,
   onEditorChange,
   onSaveEditor,
   onAskAgent,
   onCloseEditor,
+  onKeepEditing,
+  onDiscardEditor,
 }) {
   const settingsActive = activeTab === "settings" || activeTab === "app";
+  const selectedTab = settingsActive ? "settings" : "profile";
+
+  function handleTabKeyDown(event) {
+    const tabs = ["profile", "settings"];
+    const currentIndex = tabs.indexOf(selectedTab);
+    let nextTab = null;
+    if (["ArrowLeft", "ArrowUp"].includes(event.key)) {
+      nextTab = tabs[(currentIndex - 1 + tabs.length) % tabs.length];
+    }
+    if (["ArrowRight", "ArrowDown"].includes(event.key)) {
+      nextTab = tabs[(currentIndex + 1) % tabs.length];
+    }
+    if (event.key === "Home") nextTab = tabs[0];
+    if (event.key === "End") nextTab = tabs.at(-1);
+    if (!nextTab) return;
+    event.preventDefault();
+    if (nextTab === selectedTab) return;
+    onTabChange?.(nextTab);
+    globalThis.document?.getElementById?.(`profile-settings-tab-${nextTab}`)?.focus?.();
+  }
+
   return (
     <div className="cf-profile">
       <header className="cf-profile__header">
@@ -908,47 +932,68 @@ export function ProfileSettings({
           <ArrowLeftIcon /> Back
         </button>
         <strong className="cf-profile__brand">CareerRat</strong>
-        <nav className="cf-profile__tabs" aria-label="Profile and settings">
+        <div
+          className="cf-profile__tabs"
+          aria-label="Profile and settings"
+          role="tablist"
+          aria-orientation="horizontal"
+        >
           <button
+            id="profile-settings-tab-profile"
             type="button"
-            aria-current={!settingsActive ? "page" : undefined}
+            role="tab"
+            aria-selected={!settingsActive}
+            aria-controls="profile-settings-panel-profile"
+            tabIndex={!settingsActive ? 0 : -1}
             onClick={() => onTabChange?.("profile")}
+            onKeyDown={handleTabKeyDown}
           >
             What {agentName} knows
           </button>
           <button
+            id="profile-settings-tab-settings"
             type="button"
-            aria-current={settingsActive ? "page" : undefined}
+            role="tab"
+            aria-selected={settingsActive}
+            aria-controls="profile-settings-panel-settings"
+            tabIndex={settingsActive ? 0 : -1}
             onClick={() => onTabChange?.("settings")}
+            onKeyDown={handleTabKeyDown}
           >
             App settings
           </button>
-        </nav>
+        </div>
         <span className="cf-profile__hint">
           edit anything here. Or just tell {agentName} what changed
         </span>
       </header>
-      {settingsActive
-        ? SettingsView({
-            agentName,
-            desktopUpdate,
-            engine,
-            aiPreferences,
-            aiPreferencesBusy,
-            aiPreferencesStatus,
-            permissions,
-            sources,
-            publicSyncPreference,
-            publicSyncBusy,
-            onPermissionChange,
-            onAiPreferenceChange,
-            onPublicSyncChange,
-            onChangeEngine,
-            onShowTechnicalDetails,
-            onAddSource,
-            onExportData,
-          })
-        : ProfileGrid({ agentName, profile, onEditSection, onOpenFiles })}
+      <div
+        id={`profile-settings-panel-${selectedTab}`}
+        role="tabpanel"
+        aria-labelledby={`profile-settings-tab-${selectedTab}`}
+      >
+        {settingsActive
+          ? SettingsView({
+              agentName,
+              desktopUpdate,
+              engine,
+              aiPreferences,
+              aiPreferencesBusy,
+              aiPreferencesStatus,
+              permissions,
+              sources,
+              publicSyncPreference,
+              publicSyncBusy,
+              onPermissionChange,
+              onAiPreferenceChange,
+              onPublicSyncChange,
+              onChangeEngine,
+              onShowTechnicalDetails,
+              onAddSource,
+              onExportData,
+            })
+          : ProfileGrid({ agentName, profile, onEditSection, onOpenFiles })}
+      </div>
       {enginePickerOpen ? (
         <EnginePicker
           engine={engine}
@@ -980,7 +1025,7 @@ export function ProfileSettings({
           onClose={onCloseTechnicalDetails}
         />
       ) : null}
-      {profileEditor ? (
+      {profileEditor && !discardEditorOpen ? (
         <ProfileSectionEditor
           agentName={agentName}
           editor={profileEditor}
@@ -991,6 +1036,21 @@ export function ProfileSettings({
           onAskAgent={onAskAgent}
           onClose={onCloseEditor}
         />
+      ) : null}
+      {discardEditorOpen ? (
+        <SettingsDialog title="Discard unsaved changes?" onClose={onKeepEditing}>
+          <p className="cf-settings-dialog__intro">
+            Your edits haven't been saved yet. Keep editing, or discard them and continue.
+          </p>
+          <div className="cf-settings-dialog__actions">
+            <button type="button" onClick={onKeepEditing}>
+              Keep editing
+            </button>
+            <button type="button" onClick={onDiscardEditor}>
+              Discard changes
+            </button>
+          </div>
+        </SettingsDialog>
       ) : null}
     </div>
   );

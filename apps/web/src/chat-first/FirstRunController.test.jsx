@@ -1924,9 +1924,7 @@ describe("FirstRunController chat event reconciliation", () => {
     const view = await bootController(module, api);
 
     view.props.onEditKnowledgeSection({ id: "engine", label: "ENGINE" });
-    expect(navigate).toHaveBeenCalledWith("/settings", {
-      state: { activeTab: "settings", openEnginePicker: true },
-    });
+    expect(navigate).toHaveBeenCalledWith("/settings?tab=settings&panel=engine");
   });
 
   it("writes whole-section modal edits through canonical candidate APIs", async () => {

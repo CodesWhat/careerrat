@@ -6,6 +6,19 @@ import {
 } from "./profile-settings-controller.js";
 
 describe("profile settings controller mapping", () => {
+  it("builds stable settings URLs for tabs, dialogs, and section editors", async () => {
+    const module = await import("./profile-settings-controller.js");
+
+    expect(module.profileSettingsRoute).toBeTypeOf("function");
+    expect(module.profileSettingsRoute({ tab: "settings" })).toBe("/settings?tab=settings");
+    expect(module.profileSettingsRoute({ tab: "settings", panel: "engine" })).toBe(
+      "/settings?tab=settings&panel=engine"
+    );
+    expect(module.profileSettingsRoute({ panel: "editor", section: "location-policy" })).toBe(
+      "/settings?panel=editor&section=location-policy"
+    );
+  });
+
   it("treats an older completed quick-facts location as confirmed when the explicit flag is absent", () => {
     const model = buildProfileSettingsModel({
       onboard: {

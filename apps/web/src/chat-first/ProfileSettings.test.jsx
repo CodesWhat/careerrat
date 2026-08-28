@@ -102,6 +102,54 @@ describe("ProfileSettings", () => {
     expect(html).toContain("edit anything here");
   });
 
+  it("uses a keyboard-safe tab pattern for profile and app settings", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const onTabChange = vi.fn();
+    const tree = ProfileSettings({
+      agentName: "Paul",
+      activeTab: "settings",
+      permissions: PERMISSIONS,
+      onTabChange,
+    });
+    const html = renderToStaticMarkup(tree);
+    const appSettings = findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "App settings"
+    );
+
+    expect(html).toContain('role="tablist"');
+    expect(html).toContain('id="profile-settings-tab-settings"');
+    expect(appSettings.props).toMatchObject({
+      role: "tab",
+      "aria-selected": true,
+      "aria-controls": "profile-settings-panel-settings",
+      tabIndex: 0,
+    });
+
+    const preventDefault = vi.fn();
+    appSettings.props.onKeyDown({ key: "ArrowLeft", preventDefault });
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(onTabChange).toHaveBeenCalledWith("profile");
+  });
+
+  it("wraps arrow-key selection across both settings tabs", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const onTabChange = vi.fn();
+    const tree = ProfileSettings({
+      activeTab: "settings",
+      permissions: PERMISSIONS,
+      onTabChange,
+    });
+    const appSettings = findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "App settings"
+    );
+
+    appSettings.props.onKeyDown({ key: "ArrowRight", preventDefault: vi.fn() });
+
+    expect(onTabChange).toHaveBeenCalledWith("profile");
+  });
+
   it("renders keyboard-operable provider-neutral quality and thinking choices", async () => {
     const { ProfileSettings } = await loadProfile();
     const onAiPreferenceChange = vi.fn();
@@ -295,6 +343,42 @@ describe("ProfileSettings", () => {
     expect(onEditorChange).toHaveBeenCalledWith("home", "Brooklyn, NY");
     expect(onAskAgent).toHaveBeenCalledWith("location-policy");
     expect(onSaveEditor).toHaveBeenCalledOnce();
+  });
+
+  it("renders a clear unsaved-change choice with keep and discard actions", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const onKeepEditing = vi.fn();
+    const onDiscardEditor = vi.fn();
+    const tree = ProfileSettings({
+      agentName: "Paul",
+      activeTab: "profile",
+      profile: PROFILE,
+      profileEditor: {
+        id: "targets",
+        title: "Edit targets",
+        fields: [{ id: "titles", label: "Target roles", type: "textarea" }],
+      },
+      editorValues: { titles: "Principal Engineer" },
+      discardEditorOpen: true,
+      onKeepEditing,
+      onDiscardEditor,
+    });
+    const html = renderToStaticMarkup(tree);
+    const keep = findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "Keep editing"
+    );
+    const discard = findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "Discard changes"
+    );
+
+    expect(html).toContain("Discard unsaved changes?");
+    expect(html).toContain("Your edits haven&#x27;t been saved yet.");
+    keep.props.onClick();
+    discard.props.onClick();
+    expect(onKeepEditing).toHaveBeenCalledOnce();
+    expect(onDiscardEditor).toHaveBeenCalledOnce();
   });
 
   it("renders settings in plain language and keeps every submit gated", async () => {

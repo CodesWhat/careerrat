@@ -2,6 +2,19 @@ import { UserFacingError } from "../lib/errorCopy.js";
 import { runtimePresentation } from "./first-run-controller.js";
 import { buildLocationPolicy } from "./location-policy.js";
 
+const SETTINGS_PANELS = new Set(["engine", "source", "technical", "editor"]);
+
+export function profileSettingsRoute({ tab = "profile", panel = null, section = null } = {}) {
+  const params = new URLSearchParams();
+  if (tab === "settings") params.set("tab", "settings");
+  if (SETTINGS_PANELS.has(panel)) params.set("panel", panel);
+  if (panel === "editor" && String(section || "").trim()) {
+    params.set("section", String(section).trim());
+  }
+  const search = params.toString();
+  return `/settings${search ? `?${search}` : ""}`;
+}
+
 function list(value) {
   return Array.isArray(value) ? value : [];
 }

@@ -34,6 +34,7 @@ import {
   firstRunRuntimeChoices,
   runtimeSelectionReady,
 } from "./first-run-controller.js";
+import { profileSettingsRoute } from "./profile-settings-controller.js";
 
 const INTERVIEW_SKILL = "ingest-profile";
 const PROFILE_BLOCK_KINDS = new Set(["authorization", "candidate_patch", "evidence_claim"]);
@@ -1563,10 +1564,7 @@ export function FirstRunController({
   const knowledge = buildFirstRunKnowledge(onboardState, runtime);
   const configuredAgentName = firstRunAgentName(onboardState, agentName);
   const voluntaryDefaultsRequired = setupNeedsVoluntaryDefaults(onboardState);
-  const openSettings = () =>
-    navigate("/settings", {
-      state: { activeTab: "settings", openEnginePicker: true },
-    });
+  const openSettings = () => navigate(profileSettingsRoute({ tab: "settings", panel: "engine" }));
 
   const companyReview =
     companyReviewOpen && companyProposalBatch ? (

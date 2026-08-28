@@ -126,6 +126,7 @@ import {
   markGithubStarPromptHandled,
   shouldOfferGithubStarPrompt,
 } from "./GithubStarPrompt.jsx";
+import { profileSettingsRoute } from "./profile-settings-controller.js";
 import {
   commitSkillChatCompletion,
   commitSkillChatDecision,
@@ -3147,10 +3148,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         return result;
       },
       openSourced: (id) => revealSourcedTarget(id, { dispatch, setQuery, setBrowserFilters }),
-      openSettings: (section) =>
-        navigate("/settings", {
-          state: { activeTab: "settings", ...(section ? { section } : {}) },
-        }),
+      openSettings: () => navigate(profileSettingsRoute({ tab: "settings" })),
       runWorkspaceIntent: (typedIntent) => {
         if (
           typedIntent?.type === "job.prepare-submit" &&
@@ -3361,7 +3359,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     runSweep,
     setQuery,
     clearSearchFilters: () => resetBrowserSearchFilters({ setQuery, setBrowserFilters }),
-    openSourceHealth: () => navigate("/settings", { state: { activeTab: "settings" } }),
+    openSourceHealth: () => navigate(profileSettingsRoute({ tab: "settings" })),
     filterBrowser: (filter, value) => {
       if (ui.browse === "files") {
         setBrowserFilters((current) => ({ ...current, files: filter }));
@@ -3622,7 +3620,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       setEngineDown(runtimeState ? engineUnavailable(runtimeState) : false);
       setTechnicalOpen(false);
     },
-    openSettings: () => navigate("/settings"),
+    openSettings: () => navigate(profileSettingsRoute({ tab: "settings" })),
     showTechnical: () => setTechnicalOpen((current) => !current),
   };
 

@@ -74,7 +74,7 @@
   cursor: pointer;
 }
 
-.cf-profile__tabs button[aria-current="page"] {
+.cf-profile__tabs button[aria-selected="true"] {
   border: var(--cf-selection-border);
   color: var(--cf-selection-foreground);
   outline: var(--cf-selection-outline);

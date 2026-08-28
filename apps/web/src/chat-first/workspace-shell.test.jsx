@@ -530,7 +530,7 @@ describe("ChatFirstWorkspace", () => {
     const browserTab =
       browser.match(/\.cf-browser__tab\[aria-selected="true"\]\s*\{([^}]*)\}/)?.[1] || "";
     const profileTab =
-      profile.match(/\.cf-profile__tabs button\[aria-current="page"\]\s*\{([^}]*)\}/)?.[1] || "";
+      profile.match(/\.cf-profile__tabs button\[aria-selected="true"\]\s*\{([^}]*)\}/)?.[1] || "";
 
     expect(foundation).toMatch(/--gray-selected:\s*#474a4f/);
     expect(foundation).toMatch(/--cf-selection-fill:\s*var\(--gray-selected\)/);
