@@ -21,8 +21,6 @@ import {
   mockStartContext,
   openApplicationHandoff,
   packetExportReceipt,
-  resolveMissionTextCommand,
-  resolveMockInterviewTextCommand,
   resolveNeedDecision,
   resolvePersonAction,
   resumePacketPreparation,
@@ -100,46 +98,6 @@ describe("chat-first app controller", () => {
     expect(workspaceOperationIsActive({ status: "running" })).toBe(true);
     expect(workspaceOperationIsActive({ status: "completed" })).toBe(false);
     expect(workspaceOperationIsActive({ status: "failed" })).toBe(false);
-  });
-
-  it("recognizes only explicit mission commands valid for the durable mission state", () => {
-    expect(resolveMissionTextCommand("pause mission", { id: "mission-1", status: "running" })).toBe(
-      "pause"
-    );
-    expect(
-      resolveMissionTextCommand("please resume this mission", {
-        id: "mission-1",
-        status: "paused",
-      })
-    ).toBe("resume");
-    expect(
-      resolveMissionTextCommand("pause mission", { id: "mission-1", status: "paused" })
-    ).toBeNull();
-    expect(
-      resolveMissionTextCommand("I need to pause and think about my search", {
-        id: "mission-1",
-        status: "running",
-      })
-    ).toBeNull();
-  });
-
-  it("ends mock interviews only for an explicit control command", () => {
-    for (const command of [
-      "end mock interview",
-      "end this mock interview",
-      "please end the mock interview",
-      "stop mock interview",
-    ]) {
-      expect(resolveMockInterviewTextCommand(command)).toBe("end");
-    }
-    for (const answer of [
-      "I ended the project by shipping the migration.",
-      "At the end, I reviewed the results.",
-      "I would stop and ask the customer what changed.",
-      "end",
-    ]) {
-      expect(resolveMockInterviewTextCommand(answer)).toBeNull();
-    }
   });
 
   it("returns a newly-created mission before its execution reaches the submit gates", async () => {

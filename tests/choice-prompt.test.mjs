@@ -128,6 +128,61 @@ test("resolves typed and clicked choices to the same normalized selection", asyn
   assert.equal(typed.prompt.resolvedAt, "2026-08-27T16:00:00.000Z");
 });
 
+test("resolves mission and mock control text and clicks to the same allowlisted server action", async () => {
+  const { createChoicePrompt, resolveChoicePrompt } = await import(
+    "../src/core/agent/choice-prompt.mjs"
+  );
+  const cases = [
+    {
+      actionType: "mission.pause",
+      entity: { type: "mission", id: "mission-1" },
+      label: "Pause",
+      alias: "pause mission",
+    },
+    {
+      actionType: "mission.resume",
+      entity: { type: "mission", id: "mission-1" },
+      label: "Resume",
+      alias: "resume mission",
+    },
+    {
+      actionType: "mock-interview.end",
+      entity: { type: "mock-interview", id: "mock-1" },
+      label: "End interview",
+      alias: "end mock interview",
+    },
+  ];
+
+  for (const item of cases) {
+    let prompt;
+    assert.doesNotThrow(() => {
+      prompt = createChoicePrompt(
+        {
+          threadId: `${item.entity.type}:${item.entity.id}`,
+          messageId: `control:${item.actionType}`,
+          question: `${item.label}?`,
+          mode: "single",
+          options: [{ id: "confirm", label: item.label, aliases: [item.alias] }],
+        },
+        {
+          actionRefs: {
+            confirm: { type: item.actionType, entity: item.entity },
+          },
+        }
+      );
+    }, `${item.actionType} must be in the server choice allowlist`);
+    const clicked = resolveChoicePrompt(prompt, {
+      promptId: prompt.id,
+      version: prompt.version,
+      optionIds: ["confirm"],
+    });
+    const typed = resolveChoicePrompt(prompt, { text: item.alias });
+
+    assert.deepEqual(clicked.resolution.actions, typed.resolution.actions);
+    assert.deepEqual(clicked.resolution.actions, [{ type: item.actionType, entity: item.entity }]);
+  }
+});
+
 test("typed multi-select keeps and inside an option label", async () => {
   const { createChoicePrompt, resolveChoicePrompt } = await import(
     "../src/core/agent/choice-prompt.mjs"

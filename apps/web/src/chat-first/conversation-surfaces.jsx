@@ -748,21 +748,12 @@ export function TodayConversation({
             <div className="chat-first-mission__header">
               <span className="chat-first-eyebrow">MISSION</span>
               <strong>{mission.title}</strong>
-              {mission.onPause ? (
-                <>
-                  <button type="button" onClick={mission.onPause}>
-                    pause
-                  </button>
-                  <small>or type “pause mission”</small>
-                </>
-              ) : null}
-              {mission.onResume ? (
-                <>
-                  <button type="button" onClick={mission.onResume}>
-                    resume
-                  </button>
-                  <small>or type “resume mission”</small>
-                </>
+              {mission.choicePrompt && typeof onAnswer === "function" ? (
+                <ChoicePromptActions
+                  prompt={mission.choicePrompt}
+                  onAnswer={onAnswer}
+                  busy={answerBusy}
+                />
               ) : null}
             </div>
             <div className="chat-first-mission__steps">
@@ -1221,7 +1212,16 @@ export function MockInterviewConversation({
   );
 }
 
-export function MockInterviewContext({ title, detail, loadedContext, status = "active", onEnd }) {
+export function MockInterviewContext({
+  title,
+  detail,
+  loadedContext,
+  status = "active",
+  choicePrompt,
+  onAnswer,
+  answerBusy = false,
+  onEnd,
+}) {
   const ended = status === "ended";
   return (
     <aside
@@ -1240,14 +1240,17 @@ export function MockInterviewContext({ title, detail, loadedContext, status = "a
         <strong>Context loaded</strong>
         <span>{loadedContext}</span>
       </section>
-      <button
-        className="chat-first-context-action chat-first-context-action--outline"
-        type="button"
-        onClick={onEnd}
-      >
-        {ended ? "Back to thread" : "End session → back to thread"}
-      </button>
-      {!ended ? <small>or type “end mock interview” in chat</small> : null}
+      {!ended && choicePrompt && typeof onAnswer === "function" ? (
+        <ChoicePromptActions prompt={choicePrompt} onAnswer={onAnswer} busy={answerBusy} />
+      ) : ended ? (
+        <button
+          className="chat-first-context-action chat-first-context-action--outline"
+          type="button"
+          onClick={onEnd}
+        >
+          Back to thread
+        </button>
+      ) : null}
     </aside>
   );
 }

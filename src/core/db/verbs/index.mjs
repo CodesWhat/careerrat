@@ -48,6 +48,7 @@ export {
   candidateSetupInitialize,
 } from "./candidate.mjs";
 export {
+  chatFirstChoiceResolve,
   chatFirstStateFromDb,
   chatFirstStateGet,
   deepIngestPromptDismiss,

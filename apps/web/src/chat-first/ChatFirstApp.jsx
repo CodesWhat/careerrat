@@ -36,8 +36,6 @@ import {
   openApplicationHandoff,
   packetExportReceipt,
   projectWorkspaceResultToJobThread,
-  resolveMissionTextCommand,
-  resolveMockInterviewTextCommand,
   resolveNeedDecision,
   resolvePersonAction,
   resumeHydratedMission,
@@ -676,7 +674,7 @@ function missionForView(view) {
   );
 }
 
-function missionPresentation(mission, { onPause, onResume } = {}) {
+function missionPresentation(mission) {
   if (!mission) return null;
   const marks = { completed: "✓", running: "◐", blocked: "•", failed: "!", pending: "○" };
   const hasRemainingWork = list(mission.steps).some((step) =>
@@ -689,8 +687,7 @@ function missionPresentation(mission, { onPause, onResume } = {}) {
         `${marks[step?.status] || "○"} ${step?.label || titleCase(step?.action, "Mission step")}`
     ),
     footnote: "Packets are built from the full posting. Every submit gates back here.",
-    onPause: mission.status === "running" ? onPause : null,
-    onResume: mission.status === "paused" && hasRemainingWork ? onResume : null,
+    choicePrompt: hasRemainingWork ? mission.choicePrompt || null : null,
   };
 }
 
@@ -1453,7 +1450,10 @@ export function ChatFirstAppView({
         }
         loadedContext={mapped.loadedContext || "Job description and confirmed story bank"}
         status={mapped.status}
-        onEnd={actions.endMock}
+        choicePrompt={mapped.choicePrompt}
+        onAnswer={actions.submitComposer}
+        answerBusy={busy}
+        onEnd={mapped.status === "ended" ? actions.endMock : undefined}
       />
     );
   } else if (activeJob) {
@@ -1499,10 +1499,7 @@ export function ChatFirstAppView({
           intentBusy={busy}
           onAnswer={actions.submitComposer}
           answerBusy={busy}
-          mission={missionPresentation(activeMission, {
-            onPause: () => actions.pauseMission?.(activeMission.id),
-            onResume: () => actions.resumeMission?.(activeMission.id),
-          })}
+          mission={missionPresentation(activeMission)}
         />
       </ConversationPanel>
     );
@@ -2580,22 +2577,31 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     if (!clean || busy) return;
     if (persistedSkillChat && skillChatSubmitBlocked(activeSkillChat)) return;
     const activeMission = missionForView(view);
-    const missionCommand =
-      ui.activeThread === "today" ? resolveMissionTextCommand(clean, activeMission) : null;
-    if (missionCommand) {
-      const result = await controlMission(activeMission.id, missionCommand);
-      if (result) setComposerValue("");
-      return;
-    }
-    if (
-      ui.activeThread === "mock" &&
-      rawMock?.id &&
-      rawMock.status !== "ended" &&
-      resolveMockInterviewTextCommand(clean) === "end"
-    ) {
-      const ended = await endMock();
-      if (ended) setComposerValue("");
-      return;
+    const controlEntity =
+      ui.activeThread === "today" &&
+      activeMission?.choicePrompt?.state === "pending" &&
+      (!choice || choice.promptId === activeMission.choicePrompt.id)
+        ? { type: "mission", id: activeMission.id }
+        : ui.activeThread === "mock" &&
+            rawMock?.choicePrompt?.state === "pending" &&
+            (!choice || choice.promptId === rawMock.choicePrompt.id)
+          ? { type: "mock-interview", id: rawMock.id }
+          : null;
+    if (controlEntity && typeof api.resolveChatFirstChoice === "function") {
+      const response = await run(() =>
+        api.resolveChatFirstChoice({
+          entityType: controlEntity.type,
+          entityId: controlEntity.id,
+          text: clean,
+          choice,
+        })
+      );
+      const handled = response?.data?.handled === true || response?.handled === true;
+      if (handled) {
+        setComposerValue("");
+        return;
+      }
+      if (!response || choice) return;
     }
     if (activeJob?.applicationId && packetAnswerGap) {
       await persistPacketGapAnswer(packetAnswerGap, clean, { clearComposer: true });
@@ -2799,21 +2805,9 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     if (result) dispatch({ type: "mock.open", applicationId });
   }
 
-  async function endMock() {
-    if (rawMock?.id && rawMock.status !== "ended") {
-      const ended = await run(() => api.endMockInterview({ sessionId: rawMock.id }));
-      if (!ended) return false;
-    }
+  function closeMock() {
     dispatch({ type: "mock.close" });
     return true;
-  }
-
-  function controlMission(id, command) {
-    return run(() =>
-      command === "pause"
-        ? api.setChatFirstMissionStatus({ id, status: "paused" })
-        : api.resumeChatFirstMission(id)
-    );
   }
 
   async function ingestFiles(fileList) {
@@ -3553,9 +3547,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         browse: false,
       });
     },
-    endMock,
-    pauseMission: (id) => controlMission(id, "pause"),
-    resumeMission: (id) => controlMission(id, "resume"),
+    endMock: closeMock,
     decideNeed,
     closeGate: () => {
       dispatch({ type: "gate.close" });

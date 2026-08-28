@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 
 const CHOICE_MODES = new Set(["binary", "single", "multi", "confirm"]);
 const CHOICE_STATES = new Set(["pending", "resolved", "stale"]);
-const DEFAULT_ACTION_TYPES = new Set(["chat.reply"]);
+const DEFAULT_ACTION_TYPES = new Set([
+  "chat.reply",
+  "mission.pause",
+  "mission.resume",
+  "mock-interview.end",
+]);
 const MAX_OPTIONS = 8;
 const MAX_ALIASES = 8;
 

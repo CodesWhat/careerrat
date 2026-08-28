@@ -1196,7 +1196,6 @@ describe("TodayConversation", () => {
           title: "Apply to 3 roles",
           steps: ["✓ 3 queued · gates cleared", "◐ Drafting packet 1 of 3 · Aperture Science"],
           footnote: "applies start as each packet lands · submits gate back here",
-          onPause: () => {},
         }}
       />
     );
@@ -1205,8 +1204,113 @@ describe("TodayConversation", () => {
     expect(html).toContain("Apply to 3 roles");
     expect(html).toContain("Drafting packet 1 of 3 · Aperture Science");
     expect(html).toContain("submits gate back here");
-    expect(html).toContain("pause");
-    expect(html).toContain("or type “pause mission”");
+    expect(html).not.toContain("pause");
+  });
+
+  it("submits the mission control button as its versioned server choice", () => {
+    const pausePrompt = {
+      id: "choice-mission-pause",
+      version: 4,
+      threadId: "mission:mission-1",
+      messageId: "control:mission.pause",
+      question: "Pause this mission?",
+      mode: "single",
+      minSelections: 1,
+      maxSelections: 1,
+      allowText: true,
+      options: [
+        {
+          id: "pause",
+          label: "Pause",
+          aliases: ["pause mission"],
+          actionRef: {
+            type: "mission.pause",
+            entity: { type: "mission", id: "mission-1" },
+          },
+        },
+      ],
+      state: "pending",
+    };
+    const missionAnswer = vi.fn();
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(visit);
+      if (typeof node.type === "function") return visit(node.type(node.props));
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+
+    visit(
+      TodayConversation({
+        mission: {
+          title: "Prepare one application",
+          steps: ["○ Draft the packet"],
+          choicePrompt: pausePrompt,
+        },
+        onAnswer: missionAnswer,
+      })
+    );
+    const pause = buttons.find((button) => button.props.children === "Pause");
+    expect(pause).toBeTruthy();
+    pause.props.onClick();
+    expect(missionAnswer).toHaveBeenCalledWith("Pause", {
+      promptId: pausePrompt.id,
+      version: pausePrompt.version,
+      optionIds: ["pause"],
+    });
+  });
+
+  it("submits the mock End button as its versioned server choice", () => {
+    const endPrompt = {
+      id: "choice-mock-end",
+      version: 2,
+      threadId: "mock-interview:mock-1",
+      messageId: "control:mock-interview.end",
+      question: "End this mock interview?",
+      mode: "single",
+      minSelections: 1,
+      maxSelections: 1,
+      allowText: true,
+      options: [
+        {
+          id: "end",
+          label: "End interview",
+          aliases: ["end mock interview"],
+          actionRef: {
+            type: "mock-interview.end",
+            entity: { type: "mock-interview", id: "mock-1" },
+          },
+        },
+      ],
+      state: "pending",
+    };
+    const mockAnswer = vi.fn();
+    const tree = MockInterviewContext({
+      title: "Platform practice",
+      detail: "Question 1 of 2",
+      loadedContext: "Saved role context",
+      choicePrompt: endPrompt,
+      onAnswer: mockAnswer,
+    });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(visit);
+      if (typeof node.type === "function") return visit(node.type(node.props));
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+
+    const end = buttons.find((button) => button.props.children === "End interview");
+    expect(end).toBeTruthy();
+    end.props.onClick();
+    expect(mockAnswer).toHaveBeenCalledWith("End interview", {
+      promptId: endPrompt.id,
+      version: endPrompt.version,
+      optionIds: ["end"],
+    });
   });
 });
 
@@ -1841,20 +1945,19 @@ describe("focused conversation modes", () => {
     expect(html).toContain("Again, tighter this time");
   });
 
-  it("renders job-loaded mock session context with an exit action", () => {
+  it("does not invent a direct exit action without a durable mock choice", () => {
     const html = markup(
       <MockInterviewContext
         title="Systems design · Cyberdyne panel"
         detail="question 2 of 6 · calibrated to Thursday's interviewers"
         loadedContext="their ML org rebuild · your Nexus story · the dossier's likely questions"
-        onEnd={() => {}}
       />
     );
 
     expect(html).toContain("LIVE SESSION");
     expect(html).toContain("Context loaded");
-    expect(html).toContain("End session → back to thread");
-    expect(html).toContain("or type “end mock interview” in chat");
+    expect(html).not.toContain("End session → back to thread");
+    expect(html).not.toContain("end mock interview");
   });
 
   it("renders deep ingest as a resumable conversation with accessible intake actions", () => {

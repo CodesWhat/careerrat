@@ -114,6 +114,7 @@ test("chat-first route module mounts the complete durable write surface", async 
     "POST /api/chat-first/missions/status",
     "POST /api/chat-first/missions/run",
     "POST /api/chat-first/missions/resume",
+    "POST /api/chat-first/choice/resolve",
     "POST /api/chat-first/mock/start",
     "POST /api/chat-first/mock/message",
     "POST /api/chat-first/mock/turn",
@@ -127,6 +128,248 @@ test("chat-first route module mounts the complete durable write surface", async 
     assert.equal(routes.has(key), true, key);
   }
   assert.equal(routes.has("POST /api/chat-first/missions/step"), false);
+});
+
+test("mission control choices persist one action, replay idempotently, and restore the next prompt", async () => {
+  const repoRoot = tempRepo();
+  const api = await import("../src/core/db/verbs.mjs");
+  appUpsert({
+    repoRoot,
+    row: {
+      id: "app-choice-control",
+      company: "Choice Control Corp",
+      role: "Platform Engineer",
+      status: "applied",
+      evaluation: { gate: "keep" },
+    },
+  });
+  const created = api.missionCreateForJobs({
+    repoRoot,
+    id: "mission-choice-control",
+    title: "Prepare one application",
+    jobs: [{ type: "application", id: "app-choice-control" }],
+    mode: "draft",
+  });
+  const pausePrompt = created.mission.choicePrompt;
+  assert.ok(pausePrompt, "running mission must expose its durable Pause choice");
+  assert.equal(pausePrompt.state, "pending");
+  assert.deepEqual(
+    pausePrompt.options.map((option) => option.actionRef),
+    [
+      {
+        type: "mission.pause",
+        entity: { type: "mission", id: "mission-choice-control" },
+      },
+    ]
+  );
+
+  const calls = [];
+  const routes = await boot(repoRoot, {
+    workspaceAgentRuntime: {
+      executeIntent: async ({ intent }) => {
+        calls.push(intent.type);
+        return { operationResult: { ok: true } };
+      },
+    },
+  });
+  let db = openDb({ repoRoot });
+  const beforeVersion = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+  const beforeEvents = db.prepare("SELECT count(*) AS count FROM activity_events").get().count;
+  const clickedPayload = {
+    entityType: "mission",
+    entityId: "mission-choice-control",
+    choice: {
+      promptId: pausePrompt.id,
+      version: pausePrompt.version,
+      optionIds: [pausePrompt.options[0].id],
+    },
+  };
+  const clicked = await invoke(routes, "POST", "/api/chat-first/choice/resolve", clickedPayload);
+
+  assert.equal(clicked.status, 200);
+  assert.equal(clicked.body.data.handled, true);
+  assert.equal(clicked.body.data.result.mission.status, "paused");
+  assert.equal(
+    db.prepare("SELECT version FROM meta WHERE id = 1").get().version,
+    beforeVersion + 1
+  );
+  assert.equal(
+    db.prepare("SELECT count(*) AS count FROM activity_events").get().count,
+    beforeEvents + 1
+  );
+
+  const replay = await invoke(routes, "POST", "/api/chat-first/choice/resolve", clickedPayload);
+  assert.equal(replay.status, 200);
+  assert.equal(replay.body.data.result.mission.status, "paused");
+  assert.equal(
+    db.prepare("SELECT version FROM meta WHERE id = 1").get().version,
+    beforeVersion + 1
+  );
+  assert.equal(
+    db.prepare("SELECT count(*) AS count FROM activity_events").get().count,
+    beforeEvents + 1
+  );
+
+  closeAll();
+  const paused = api
+    .chatFirstStateGet({ repoRoot })
+    .missions.find((mission) => mission.id === "mission-choice-control");
+  db = openDb({ repoRoot });
+  assert.equal(paused.choicePrompt.state, "pending");
+  assert.equal(paused.choicePrompt.options[0].actionRef.type, "mission.resume");
+
+  const resumed = await invoke(routes, "POST", "/api/chat-first/choice/resolve", {
+    entityType: "mission",
+    entityId: "mission-choice-control",
+    text: "resume mission",
+  });
+  assert.equal(resumed.status, 200);
+  assert.equal(resumed.body.data.result.mission.status, "completed");
+  assert.deepEqual(calls, ["job.generate-documents"]);
+  const afterResumeVersion = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+  const afterResumeEvents = db.prepare("SELECT count(*) AS count FROM activity_events").get().count;
+
+  const resumeReplay = await invoke(routes, "POST", "/api/chat-first/choice/resolve", {
+    entityType: "mission",
+    entityId: "mission-choice-control",
+    text: "resume mission",
+  });
+  assert.equal(resumeReplay.status, 200);
+  assert.equal(resumeReplay.body.data.reused, true);
+  assert.equal(resumeReplay.body.data.result.mission.status, "completed");
+  assert.deepEqual(calls, ["job.generate-documents"]);
+  assert.equal(
+    db.prepare("SELECT version FROM meta WHERE id = 1").get().version,
+    afterResumeVersion
+  );
+  assert.equal(
+    db.prepare("SELECT count(*) AS count FROM activity_events").get().count,
+    afterResumeEvents
+  );
+
+  closeAll();
+  const completed = api
+    .chatFirstStateGet({ repoRoot })
+    .missions.find((mission) => mission.id === "mission-choice-control");
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.choicePrompt, undefined);
+});
+
+test("mock End is durable and idempotent while ordinary free text remains an answer", async () => {
+  const repoRoot = tempRepo();
+  const api = await import("../src/core/db/verbs.mjs");
+  appUpsert({
+    repoRoot,
+    row: {
+      id: "app-mock-choice-control",
+      company: "Choice Interview Corp",
+      role: "Platform Engineer",
+      status: "interview",
+    },
+  });
+  const started = api.mockInterviewStart({
+    repoRoot,
+    id: "mock-choice-control",
+    applicationId: "app-mock-choice-control",
+    title: "Platform mock interview",
+    questionTotal: 2,
+  });
+  api.mockInterviewMessageAppend({
+    repoRoot,
+    sessionId: started.session.id,
+    role: "assistant",
+    kind: "question",
+    questionNumber: 1,
+    text: "Tell me about an incident you led.",
+  });
+  const prompt = api
+    .chatFirstStateGet({ repoRoot })
+    .mockSessions.find((session) => session.id === started.session.id).choicePrompt;
+  assert.ok(prompt, "active mock interview must expose its durable End choice");
+  assert.equal(prompt.state, "pending");
+  assert.equal(prompt.options[0].actionRef.type, "mock-interview.end");
+
+  const routes = await boot(repoRoot);
+  const db = openDb({ repoRoot });
+  const beforeAnswerVersion = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+  const ordinary = await invoke(routes, "POST", "/api/chat-first/choice/resolve", {
+    entityType: "mock-interview",
+    entityId: started.session.id,
+    text: "I ended the incident by rolling back and writing the follow-up.",
+  });
+  assert.equal(ordinary.status, 200);
+  assert.equal(ordinary.body.data.handled, false);
+  assert.equal(
+    db.prepare("SELECT version FROM meta WHERE id = 1").get().version,
+    beforeAnswerVersion
+  );
+
+  const answerText = "I ended the incident by rolling back and writing the follow-up.";
+  const turn = await api.mockInterviewTurn({
+    repoRoot,
+    sessionId: started.session.id,
+    text: answerText,
+    runAI: async () => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          worked: "Clear ownership.",
+          tighten: "Add the measurable result.",
+          nextQuestion: "How did you prevent recurrence?",
+        },
+        ai: { used: true },
+      },
+    }),
+  });
+  assert.equal(turn.answer.text, answerText);
+  assert.equal(turn.session.status, "active");
+
+  const current = api
+    .chatFirstStateGet({ repoRoot })
+    .mockSessions.find((session) => session.id === started.session.id);
+  const endPrompt = current.choicePrompt;
+  const beforeEndVersion = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+  const beforeEndEvents = db.prepare("SELECT count(*) AS count FROM activity_events").get().count;
+  const endPayload = {
+    entityType: "mock-interview",
+    entityId: started.session.id,
+    choice: {
+      promptId: endPrompt.id,
+      version: endPrompt.version,
+      optionIds: [endPrompt.options[0].id],
+    },
+  };
+  const ended = await invoke(routes, "POST", "/api/chat-first/choice/resolve", endPayload);
+  assert.equal(ended.status, 200);
+  assert.equal(ended.body.data.result.session.status, "ended");
+  assert.equal(
+    db.prepare("SELECT version FROM meta WHERE id = 1").get().version,
+    beforeEndVersion + 1
+  );
+  assert.equal(
+    db.prepare("SELECT count(*) AS count FROM activity_events").get().count,
+    beforeEndEvents + 1
+  );
+
+  const replay = await invoke(routes, "POST", "/api/chat-first/choice/resolve", endPayload);
+  assert.equal(replay.status, 200);
+  assert.equal(replay.body.data.result.session.status, "ended");
+  assert.equal(
+    db.prepare("SELECT version FROM meta WHERE id = 1").get().version,
+    beforeEndVersion + 1
+  );
+  assert.equal(
+    db.prepare("SELECT count(*) AS count FROM activity_events").get().count,
+    beforeEndEvents + 1
+  );
+
+  closeAll();
+  const reloaded = api
+    .chatFirstStateGet({ repoRoot })
+    .mockSessions.find((session) => session.id === started.session.id);
+  assert.equal(reloaded.choicePrompt.state, "resolved");
+  assert.deepEqual(reloaded.choicePrompt.selectedOptionIds, [endPrompt.options[0].id]);
 });
 
 test("deep ingest prompt dismiss route returns the durable updated aggregate", async () => {

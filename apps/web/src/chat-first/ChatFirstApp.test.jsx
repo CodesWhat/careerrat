@@ -2631,11 +2631,35 @@ describe("ChatFirstAppView", () => {
 
   it("offers an explicit resume action for a durable paused mission", async () => {
     const html = await renderView({
+      actions: { submitComposer: () => {} },
       view: {
         ...VIEW,
         missions: [
           {
             ...VIEW.missions[0],
+            choicePrompt: {
+              id: "choice-resume-mission",
+              version: 2,
+              threadId: "mission:mission-1",
+              messageId: "control:mission.resume",
+              question: "Resume this mission?",
+              mode: "single",
+              minSelections: 1,
+              maxSelections: 1,
+              allowText: true,
+              options: [
+                {
+                  id: "resume",
+                  label: "Resume",
+                  aliases: ["resume mission"],
+                  actionRef: {
+                    type: "mission.resume",
+                    entity: { type: "mission", id: "mission-1" },
+                  },
+                },
+              ],
+              state: "pending",
+            },
             steps: [
               { id: "packet", label: "Draft E Corp packet", status: "completed" },
               { id: "prepare", label: "Prepare E Corp form", status: "pending" },
@@ -2645,8 +2669,8 @@ describe("ChatFirstAppView", () => {
       },
     });
 
-    expect(html).toContain(">resume</button>");
-    expect(html).not.toContain(">pause</button>");
+    expect(html).toContain(">Resume</button>");
+    expect(html).not.toContain(">Pause</button>");
   });
 
   it("mounts the submit gate, artifact viewer, and engine-down cover as real overlays", async () => {

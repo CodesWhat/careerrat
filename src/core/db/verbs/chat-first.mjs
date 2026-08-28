@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import {
   choiceMetadataForMessage,
+  createChoicePrompt,
+  resolveChoicePrompt,
   resolvePendingMessageChoice,
 } from "../../agent/choice-prompt.mjs";
 import { workspaceMessagesForDisplay } from "../../agent/workspace-thread.mjs";
@@ -76,6 +78,48 @@ const MOCK_FEEDBACK_SCHEMA = Object.freeze({
     worked: { type: "string", minLength: 1, maxLength: 2_000 },
     tighten: { type: "string", minLength: 1, maxLength: 2_000 },
     nextQuestion: { type: ["string", "null"], maxLength: 4_000 },
+  },
+});
+
+const CONTROL_CHOICE_SPECS = Object.freeze({
+  "mission.pause": {
+    optionId: "pause",
+    label: "Pause",
+    question: "Pause this mission?",
+    aliases: [
+      "pause mission",
+      "pause this mission",
+      "pause the mission",
+      "pause run",
+      "pause work",
+      "please pause mission",
+    ],
+  },
+  "mission.resume": {
+    optionId: "resume",
+    label: "Resume",
+    question: "Resume this mission?",
+    aliases: [
+      "resume mission",
+      "resume this mission",
+      "continue mission",
+      "continue this mission",
+      "resume run",
+      "resume work",
+    ],
+  },
+  "mock-interview.end": {
+    optionId: "end",
+    label: "End interview",
+    question: "End this mock interview?",
+    aliases: [
+      "end mock interview",
+      "end this mock interview",
+      "stop mock interview",
+      "finish mock interview",
+      "end interview practice",
+      "end session",
+    ],
   },
 });
 
@@ -1177,6 +1221,90 @@ export async function jobThreadTurn({
   }
 }
 
+function controlChoicePrompt({ entityType, entityId, actionType, version = 1 }) {
+  const spec = CONTROL_CHOICE_SPECS[actionType];
+  if (!spec) throw makeError(`unsupported control choice action: ${actionType}`);
+  return createChoicePrompt(
+    {
+      threadId: `${entityType}:${entityId}`,
+      messageId: `control:${actionType}`,
+      question: spec.question,
+      mode: "single",
+      version,
+      allowText: true,
+      options: [
+        {
+          id: spec.optionId,
+          label: spec.label,
+          aliases: spec.aliases,
+        },
+      ],
+    },
+    {
+      actionRefs: {
+        [spec.optionId]: {
+          type: actionType,
+          entity: { type: entityType, id: entityId },
+        },
+      },
+    }
+  );
+}
+
+function promptActionType(prompt) {
+  return prompt?.options?.length === 1 ? prompt.options[0]?.actionRef?.type : null;
+}
+
+function controlChoiceVersion(entity) {
+  const value = Number(entity?.choicePromptVersion ?? entity?.choicePrompt?.version);
+  return Number.isSafeInteger(value) && value > 0 ? value : 1;
+}
+
+function missionControlAction(status) {
+  if (status === "running") return "mission.pause";
+  if (status === "paused") return "mission.resume";
+  return null;
+}
+
+function missionWithControlChoice(mission, { advance = false } = {}) {
+  const actionType = missionControlAction(mission?.status);
+  if (!actionType) {
+    if (!mission?.choicePrompt) return mission;
+    const { choicePrompt: _choicePrompt, ...withoutChoice } = mission;
+    return withoutChoice;
+  }
+  if (
+    !advance &&
+    mission.choicePrompt?.state === "pending" &&
+    promptActionType(mission.choicePrompt) === actionType
+  ) {
+    return mission;
+  }
+  const version = controlChoiceVersion(mission) + (advance ? 1 : 0);
+  return {
+    ...mission,
+    choicePromptVersion: version,
+    choicePrompt: controlChoicePrompt({
+      entityType: "mission",
+      entityId: mission.id,
+      actionType,
+      version,
+    }),
+  };
+}
+
+function mockSessionWithControlChoice(session) {
+  if (session?.status !== "active" || session.choicePrompt) return session;
+  return {
+    ...session,
+    choicePrompt: controlChoicePrompt({
+      entityType: "mock-interview",
+      entityId: session.id,
+      actionType: "mock-interview.end",
+    }),
+  };
+}
+
 function missionRequired(db, id) {
   const missionId = cleanId(id, "mission id");
   const mission = parseRow(db.prepare("SELECT data FROM missions WHERE id = ?").get(missionId));
@@ -1193,7 +1321,7 @@ function missionSteps(db, missionId) {
 }
 
 function hydrateMission(db, mission) {
-  return { ...mission, steps: missionSteps(db, mission.id) };
+  return { ...missionWithControlChoice(mission), steps: missionSteps(db, mission.id) };
 }
 
 function writeMission(db, mission) {
@@ -1324,7 +1452,7 @@ export function missionCreate({ repoRoot, env, id, title, steps, metadata, mode,
     if (db.prepare("SELECT 1 FROM missions WHERE id = ?").get(missionId)) {
       throw makeError(`mission id already exists: ${missionId}`, "CONFLICT");
     }
-    const mission = {
+    const mission = missionWithControlChoice({
       id: missionId,
       title: cleanTitle,
       status: "running",
@@ -1332,7 +1460,7 @@ export function missionCreate({ repoRoot, env, id, title, steps, metadata, mode,
       updatedAt: at,
       ...(cleanMode ? { mode: cleanMode } : {}),
       ...(safeMetadata === undefined ? {} : { metadata: safeMetadata }),
-    };
+    });
     writeMission(db, mission);
     for (const step of normalizedSteps) writeMissionStep(db, step);
     const meta = bumpMeta(db, at);
@@ -1481,7 +1609,15 @@ const MISSION_TRANSITIONS = Object.freeze({
   cancelled: new Set(),
 });
 
-export function missionSetStatus({ repoRoot, env, id, status, error, now } = {}) {
+export function missionSetStatus({
+  repoRoot,
+  env,
+  id,
+  status,
+  error,
+  now,
+  preserveChoiceReplay = false,
+} = {}) {
   const missionId = cleanId(id, "mission id");
   const nextStatus = String(status || "").trim();
   if (!MISSION_STATUSES.has(nextStatus))
@@ -1502,15 +1638,20 @@ export function missionSetStatus({ repoRoot, env, id, status, error, now } = {})
       throw makeError("mission cannot complete while run steps are unfinished", "CONFLICT");
     }
     const at = nextIso(mission.updatedAt, now);
-    const updated = {
-      ...mission,
-      status: nextStatus,
-      updatedAt: at,
-      ...(nextStatus === "paused" ? { pausedAt: at } : {}),
-      ...(nextStatus === "running" ? { resumedAt: at } : {}),
-      ...(TERMINAL_MISSION_STATUSES.has(nextStatus) ? { completedAt: at } : {}),
-      ...(safeError === undefined ? {} : { error: safeError }),
-    };
+    const missionWithoutReplay = { ...mission };
+    if (!preserveChoiceReplay) delete missionWithoutReplay.lastResolvedChoicePrompt;
+    const updated = missionWithControlChoice(
+      {
+        ...missionWithoutReplay,
+        status: nextStatus,
+        updatedAt: at,
+        ...(nextStatus === "paused" ? { pausedAt: at } : {}),
+        ...(nextStatus === "running" ? { resumedAt: at } : {}),
+        ...(TERMINAL_MISSION_STATUSES.has(nextStatus) ? { completedAt: at } : {}),
+        ...(safeError === undefined ? {} : { error: safeError }),
+      },
+      { advance: true }
+    );
     writeMission(db, updated);
     const meta = bumpMeta(db, at);
     const event = logActivityEvent(db, {
@@ -2218,6 +2359,7 @@ export async function missionRun({
                 id: missionId,
                 status: "paused",
                 now,
+                preserveChoiceReplay: true,
               })
             ).mission,
           };
@@ -2291,7 +2433,14 @@ export async function missionRun({
   mission = chatFirstStateGet({ repoRoot, env }).missions.find((row) => row.id === missionId);
   if (mission.status === "running" && mission.steps.some((step) => step.status === "blocked")) {
     mission = committedWrite(() =>
-      missionSetStatus({ repoRoot, env, id: missionId, status: "paused", now })
+      missionSetStatus({
+        repoRoot,
+        env,
+        id: missionId,
+        status: "paused",
+        now,
+        preserveChoiceReplay: true,
+      })
     ).mission;
   }
   return { ok: true, mission };
@@ -2376,7 +2525,7 @@ function hydrateMockSession(db, session) {
     "SELECT data FROM mock_interview_feedback WHERE session_id = ? ORDER BY question_number ASC, created_at ASC",
     session.id
   );
-  return { ...session, messages, feedback };
+  return { ...mockSessionWithControlChoice(session), messages, feedback };
 }
 
 export function mockInterviewStart({
@@ -2411,7 +2560,7 @@ export function mockInterviewStart({
       .get(applicationKey);
     if (active)
       throw makeError(`an active mock interview already exists: ${active.id}`, "CONFLICT");
-    const session = {
+    const session = mockSessionWithControlChoice({
       id: sessionId,
       applicationId: applicationKey,
       title: cleanTitle,
@@ -2422,7 +2571,7 @@ export function mockInterviewStart({
       updatedAt: at,
       ...(safeContext === undefined ? {} : { context: safeContext }),
       ...(safeExecutionPlan === undefined ? {} : { executionPlan: safeExecutionPlan }),
-    };
+    });
     writeMockSession(db, session);
     const meta = bumpMeta(db, at);
     const event = logActivityEvent(db, {
@@ -3065,7 +3214,7 @@ export function mockInterviewEnd({ repoRoot, env, sessionId, summary, now } = {}
     required: false,
   });
   return runVerb({ repoRoot, env }, (db) => {
-    const session = mockSessionRequired(db, cleanSessionId);
+    const session = mockSessionWithControlChoice(mockSessionRequired(db, cleanSessionId));
     if (session.status === "ended") {
       return {
         session: hydrateMockSession(db, session),
@@ -3075,11 +3224,21 @@ export function mockInterviewEnd({ repoRoot, env, sessionId, summary, now } = {}
       };
     }
     const at = nextIso(session.updatedAt, now);
+    const resolvedChoice = resolveChoicePrompt(
+      session.choicePrompt,
+      {
+        promptId: session.choicePrompt.id,
+        version: session.choicePrompt.version,
+        optionIds: [session.choicePrompt.options[0].id],
+      },
+      { now: at }
+    );
     const updated = {
       ...session,
       status: "ended",
       endedAt: at,
       updatedAt: at,
+      choicePrompt: resolvedChoice.prompt,
       ...(cleanSummary ? { summary: cleanSummary } : {}),
     };
     writeMockSession(db, updated);
@@ -3101,6 +3260,188 @@ export function mockInterviewEnd({ repoRoot, env, sessionId, summary, now } = {}
     return {
       session: hydrateMockSession(db, updated),
       reused: false,
+      meta,
+      event,
+    };
+  });
+}
+
+function replayMatchesResolvedPrompt(prompt, reply) {
+  if (prompt?.state !== "resolved") return false;
+  const pending = { ...prompt, state: "pending" };
+  delete pending.selectedOptionIds;
+  delete pending.resolvedAt;
+  try {
+    const replay = resolveChoicePrompt(
+      pending,
+      reply.choice ? { ...reply.choice, text: reply.text } : { text: reply.text }
+    );
+    return (
+      replay.resolution.optionIds.length === prompt.selectedOptionIds?.length &&
+      replay.resolution.optionIds.every((id, index) => id === prompt.selectedOptionIds[index])
+    );
+  } catch {
+    return false;
+  }
+}
+
+function resolvedControlChoice(prompt, reply, now) {
+  return resolveChoicePrompt(
+    prompt,
+    reply.choice ? { ...reply.choice, text: reply.text } : { text: reply.text },
+    { now }
+  );
+}
+
+function assertControlAction(action, { entityType, entityId, expectedType }) {
+  if (
+    action?.type !== expectedType ||
+    action?.entity?.type !== entityType ||
+    action?.entity?.id !== entityId
+  ) {
+    throw makeError("choice action does not match its control", "STALE_CHOICE_PROMPT");
+  }
+}
+
+export function chatFirstChoiceResolve({
+  repoRoot,
+  env,
+  entityType,
+  entityId,
+  text,
+  choice,
+  now,
+} = {}) {
+  const cleanEntityType = String(entityType || "").trim();
+  if (!new Set(["mission", "mock-interview"]).has(cleanEntityType)) {
+    throw makeError(`unsupported choice entity: ${cleanEntityType || "unknown"}`);
+  }
+  const cleanEntityId = cleanId(entityId, "entityId");
+  const cleanReply = {
+    text: cleanText(text, "text", { max: 2_000, required: false }),
+    ...(choice === undefined ? {} : { choice: jsonClone(choice, "choice") }),
+  };
+
+  return runVerb({ repoRoot, env }, (db) => {
+    if (cleanEntityType === "mission") {
+      const storedMission = missionRequired(db, cleanEntityId);
+      const mission = missionWithControlChoice(storedMission);
+      const currentPrompt = mission.choicePrompt;
+      const replayPrompt = mission.lastResolvedChoicePrompt;
+      let resolved;
+      try {
+        resolved = resolvedControlChoice(currentPrompt, cleanReply, now);
+      } catch (error) {
+        if (replayMatchesResolvedPrompt(replayPrompt, cleanReply)) {
+          return {
+            handled: true,
+            reused: true,
+            result: { mission: hydrateMission(db, mission) },
+            meta: null,
+            event: null,
+          };
+        }
+        if (!cleanReply.choice && error?.code === "BAD_CHOICE_OPTION") {
+          return { handled: false, reused: false, meta: null, event: null };
+        }
+        throw error;
+      }
+
+      const action = resolved.resolution.actions[0];
+      const expectedType = missionControlAction(mission.status);
+      assertControlAction(action, {
+        entityType: cleanEntityType,
+        entityId: cleanEntityId,
+        expectedType,
+      });
+      const nextStatus = action.type === "mission.pause" ? "paused" : "running";
+      const at = nextIso(mission.updatedAt, now);
+      const updated = missionWithControlChoice(
+        {
+          ...mission,
+          status: nextStatus,
+          updatedAt: at,
+          choicePrompt: resolved.prompt,
+          lastResolvedChoicePrompt: resolved.prompt,
+          ...(nextStatus === "paused" ? { pausedAt: at } : { resumedAt: at }),
+        },
+        { advance: true }
+      );
+      writeMission(db, updated);
+      const meta = bumpMeta(db, at);
+      const event = logActivityEvent(db, {
+        at,
+        type: "system",
+        title: `Mission ${nextStatus}: ${mission.title}`,
+        skill: "chat-first",
+        operation: `mission:${nextStatus}`,
+      });
+      return {
+        handled: true,
+        reused: false,
+        result: { mission: hydrateMission(db, updated) },
+        meta,
+        event,
+      };
+    }
+
+    const storedSession = mockSessionRequired(db, cleanEntityId);
+    const session = mockSessionWithControlChoice(storedSession);
+    if (session.status === "ended") {
+      if (replayMatchesResolvedPrompt(session.choicePrompt, cleanReply)) {
+        return {
+          handled: true,
+          reused: true,
+          result: { session: hydrateMockSession(db, session) },
+          meta: null,
+          event: null,
+        };
+      }
+      return { handled: false, reused: false, meta: null, event: null };
+    }
+
+    let resolved;
+    try {
+      resolved = resolvedControlChoice(session.choicePrompt, cleanReply, now);
+    } catch (error) {
+      if (!cleanReply.choice && error?.code === "BAD_CHOICE_OPTION") {
+        return { handled: false, reused: false, meta: null, event: null };
+      }
+      throw error;
+    }
+    const action = resolved.resolution.actions[0];
+    assertControlAction(action, {
+      entityType: cleanEntityType,
+      entityId: cleanEntityId,
+      expectedType: "mock-interview.end",
+    });
+    const at = nextIso(session.updatedAt, now);
+    const updated = {
+      ...session,
+      status: "ended",
+      endedAt: at,
+      updatedAt: at,
+      choicePrompt: { ...resolved.prompt, resolvedAt: at },
+    };
+    writeMockSession(db, updated);
+    const application = applicationRequired(db, session.applicationId);
+    const meta = bumpMeta(db, at);
+    const event = logActivityEvent(db, {
+      at,
+      type: "interview",
+      title: `${application.company || session.applicationId}: mock interview ended`,
+      refs: {
+        applicationId: session.applicationId,
+        company: application.company,
+        role: application.role,
+      },
+      skill: "chat-first",
+      operation: "mock-interview:end",
+    });
+    return {
+      handled: true,
+      reused: false,
+      result: { session: hydrateMockSession(db, updated) },
       meta,
       event,
     };
@@ -3810,7 +4151,10 @@ export function chatFirstStateFromDb(db, { now = new Date() } = {}) {
   );
   const stepsByMission = missionStepsByMission(db);
   const missions = readJsonRows(db, "SELECT data FROM missions ORDER BY updated_at DESC").map(
-    (mission) => ({ ...mission, steps: stepsByMission.get(mission.id) || [] })
+    (mission) => ({
+      ...missionWithControlChoice(mission),
+      steps: stepsByMission.get(mission.id) || [],
+    })
   );
   const sourced = readJsonRows(db, "SELECT data FROM sourced ORDER BY rowid ASC");
   const mockMessagesBySession = recentMockMessagesBySession(db);
@@ -3819,7 +4163,7 @@ export function chatFirstStateFromDb(db, { now = new Date() } = {}) {
     db,
     "SELECT data FROM mock_interview_sessions ORDER BY updated_at DESC"
   ).map((session) => ({
-    ...session,
+    ...mockSessionWithControlChoice(session),
     messages: mockMessagesBySession.get(session.id) || [],
     feedback: mockFeedbackBySession.get(session.id) || [],
   }));

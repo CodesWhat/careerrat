@@ -4,6 +4,7 @@ import { loadAIPreferences } from "../core/ai/ai-preferences.mjs";
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
 import { aiRuntimeIdForRoute, resolveAIExecutionPlan } from "../core/ai/operation-policy.mjs";
 import {
+  chatFirstChoiceResolve,
   deepIngestPromptDismiss,
   deepIngestThreadOpen,
   jobThreadMessageAppend,
@@ -248,6 +249,20 @@ export function mountChatFirstRoutes({
     }
   }
 
+  async function resolveControlChoice(body) {
+    const resolved = chatFirstChoiceResolve({ ...pathCtx, ...body });
+    const mission = resolved?.result?.mission;
+    if (!resolved.reused && resolved.handled && mission?.status === "running") {
+      const { mission: executedMission, ...execution } = await executeMission(mission.id);
+      return {
+        ...resolved,
+        ...execution,
+        result: { ...resolved.result, mission: executedMission },
+      };
+    }
+    return resolved;
+  }
+
   addRoute("POST", "/api/chat-first/job-thread/pin", (req, res) =>
     withBody(req, res, (body) =>
       jobThreadSetPinned({
@@ -368,6 +383,10 @@ export function mountChatFirstRoutes({
         focusApplicationId: body.focusApplicationId,
       })
     )
+  );
+
+  addRoute("POST", "/api/chat-first/choice/resolve", (req, res) =>
+    withBody(req, res, resolveControlChoice)
   );
 
   addRoute("POST", "/api/chat-first/mock/start", (req, res) =>

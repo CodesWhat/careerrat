@@ -999,6 +999,18 @@ export function setChatFirstMissionStatus({ id, status } = {}) {
   });
 }
 
+export function resolveChatFirstChoice({ entityType, entityId, text, choice } = {}) {
+  return apiFetch("/api/chat-first/choice/resolve", {
+    method: "POST",
+    body: JSON.stringify({
+      entityType,
+      entityId,
+      text,
+      ...(choice ? { choice } : {}),
+    }),
+  });
+}
+
 export function startMockInterview({ applicationId, questionTotal, title, context } = {}) {
   return apiFetch("/api/chat-first/mock/start", {
     method: "POST",
