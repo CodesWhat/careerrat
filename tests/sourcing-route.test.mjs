@@ -112,7 +112,7 @@ function seedNoDeterministicSources(repoRoot) {
           label: "Browser-only board",
           source_type: "browser",
           url: "https://example.test/search?q=ai",
-          enabled: true,
+          enabled: false,
         },
         {
           provider: "arbeitnow",
@@ -319,17 +319,19 @@ test("POST /api/sourcing/first-run/start reuses running and completed first-sear
   }
 });
 
-test("POST /api/sourcing/first-run/start returns 409 when candidate setup is not search_ready", async () => {
+test("POST /api/sourcing/first-run/start honors an explicit search before onboarding is complete", async () => {
   const repoRoot = tempRepo();
   seedDeterministicSources(repoRoot);
   const server = await bootServer(repoRoot, { fetchImpl: publicFetchStub() });
   try {
     const { status, body } = await postJson(server, "/api/sourcing/first-run/start", {});
-    assert.equal(status, 409);
-    assert.equal(body.ok, false);
-    assert.match(body.error, /search-ready/i);
-    assert.deepEqual(body.readiness?.search_ready, false);
+    assert.equal(status, 202);
+    assert.equal(body.ok, true);
+    assert.equal(body.run.status, "running");
+    assert.equal(body.readiness?.search_ready, false);
     assertNoRuntimeHandoff(body);
+    const latest = await waitForLatestStatus(server, "completed");
+    assert.equal(latest.body.run.status, "completed");
   } finally {
     await closeServer(server);
   }
@@ -359,7 +361,7 @@ test("first run with every deterministic source disabled records an actionable s
     assert.equal(latest.status, 200);
     assert.equal(latest.body.run.status, "failed");
     assert.equal(latest.body.run.error.code, "NO_DETERMINISTIC_SOURCES");
-    assert.match(latest.body.run.error.message, /RSS source|supported public ATS/i);
+    assert.match(latest.body.run.error.message, /enabled job sources/i);
     assertNoRuntimeHandoff(latest.body);
   } finally {
     await closeServer(server);

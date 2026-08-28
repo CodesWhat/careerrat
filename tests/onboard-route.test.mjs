@@ -812,6 +812,7 @@ describe("GET /api/onboard/state", () => {
         attempted: 1,
         rss: 1,
         boards: 0,
+        browser: 0,
         supportedAtsCompanies: 0,
         skipped: 0,
       });
@@ -820,7 +821,7 @@ describe("GET /api/onboard/state", () => {
     }
   });
 
-  it("does not report browser or URL-query sources as runnable first-search setup", async () => {
+  it("reports browser and URL-query sources as runnable first-search setup", async () => {
     const repoRoot = buildTempRoot();
     const { server } = await bootServer(repoRoot);
     try {
@@ -855,13 +856,14 @@ describe("GET /api/onboard/state", () => {
       const res = await fetch(`${baseUrl(server)}/api/onboard/state`);
       const body = await res.json();
       assert.equal(res.status, 200);
-      assert.equal(body.searchSourcesPresent, false);
+      assert.equal(body.searchSourcesPresent, true);
       assert.deepEqual(body.deterministicSources, {
-        attempted: 0,
+        attempted: 2,
         rss: 0,
         boards: 0,
+        browser: 2,
         supportedAtsCompanies: 0,
-        skipped: 2,
+        skipped: 0,
       });
       assert.deepEqual(
         body.data.sourcing.sourceSetup.deterministicSources,
@@ -895,6 +897,7 @@ describe("GET /api/onboard/state", () => {
         attempted: 1,
         rss: 0,
         boards: 0,
+        browser: 0,
         supportedAtsCompanies: 1,
         skipped: 0,
       });

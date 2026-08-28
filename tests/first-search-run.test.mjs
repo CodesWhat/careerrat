@@ -155,7 +155,7 @@ function seedNoDeterministicSources(repoRoot) {
           label: "Browser-only board",
           source_type: "browser",
           url: "https://example.test/search?q=ai",
-          enabled: true,
+          enabled: false,
         },
         {
           provider: "arbeitnow",

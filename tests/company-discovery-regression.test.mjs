@@ -312,6 +312,7 @@ test("manual proposal create, latest pending read, and approval add only the com
   });
 
   const created = await postJson(server, "/api/discovery/company-proposals", {
+    trigger: { kind: "search-run", id: "search-regression" },
     manualSeeds: [
       {
         name: "Local Deterministic AI",
@@ -466,11 +467,18 @@ test("proposal contract and comp plausibility gates stay aligned end to end", as
   const byName = new Map(
     response.body.data.proposals.map((proposal) => [proposal.company.name, proposal])
   );
+  const autoAdded = new Map(
+    response.body.data.autoAdded.map((proposal) => [proposal.company.name, proposal])
+  );
   const rejected = new Map(
     response.body.data.rejected.map((proposal) => [proposal.company.name, proposal])
   );
-  assertProposalContract(byName.get("Clear Comp Co"));
-  assert.equal(byName.get("Clear Comp Co").confidenceTier, "high-confidence");
+  const { decision: clearDecision, ...clearProposal } = autoAdded.get("Clear Comp Co");
+  assertProposalContract(clearProposal);
+  assert.equal(clearProposal.confidenceTier, "high-confidence");
+  assert.equal(clearDecision.action, "approve-supported-ats");
+  assert.equal(clearDecision.status, "approved");
+  assertProposalContract(byName.get("Unposted Co"));
   assert.equal(byName.get("Unposted Co").confidenceTier, "borderline");
   assert.ok(byName.get("Unposted Co").reviewReasons.includes("comp-unposted"));
   assert.equal(byName.get("Top Band Co").confidenceTier, "borderline");

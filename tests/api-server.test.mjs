@@ -621,6 +621,7 @@ test("the production workspace runtime imports an explicitly confirmed board URL
   dev.startWatching();
   await new Promise((resolve) => dev.server.listen(0, resolve));
   const sourceUrl = "https://remoteok.com/remote-dev-jobs?order_by=date";
+  let importedLabel;
   try {
     let body = await runWorkspaceIntentOverHttp(
       dev,
@@ -636,6 +637,7 @@ test("the production workspace runtime imports an explicitly confirmed board URL
     assert.equal(result.artifacts[0].kind, "search_source");
     assert.equal(result.artifacts[0].target, sourceUrl);
     assert.equal(result.artifacts[0].added, true);
+    importedLabel = result.artifacts[0].label;
     body = await runWorkspaceIntentOverHttp(
       dev,
       repoRoot,
@@ -653,7 +655,7 @@ test("the production workspace runtime imports an explicitly confirmed board URL
       {
         type: "source.set-enabled",
         entity: { type: "workspace", id: "workspace-main" },
-        input: { selector: "RemoteOK", enabled: false },
+        input: { selector: importedLabel, enabled: false },
       },
       "api-server-source-toggle"
     );
@@ -669,11 +671,13 @@ test("the production workspace runtime imports an explicitly confirmed board URL
       "api-server-source-query-add"
     );
     const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches;
-    assert.equal(stored.length, 2);
-    assert.equal(stored[0].url, sourceUrl);
-    assert.equal(stored[0].enabled, false);
-    assert.equal(stored[1].query, "staff AI engineer");
+    const imported = stored.filter((source) => source.url === sourceUrl);
+    const queried = stored.filter((source) => source.query === "staff AI engineer");
+    assert.equal(imported.length, 1);
+    assert.equal(imported[0].enabled, false);
+    assert.equal(queried.length, 1);
   } finally {
+    await dev.shutdownSourcingWorkers?.();
     teardown(dev, repoRoot);
   }
 });
