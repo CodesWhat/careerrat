@@ -252,6 +252,7 @@ function compactCandidateSnapshot({ repoRoot, env }) {
       currency: compensation.currency || "USD",
       target_base: compensation.target_base ?? null,
       minimum_base: compensation.minimum_base ?? null,
+      minimum_annual_earnings: compensation.minimum_annual_earnings ?? null,
       target_total_comp: compensation.target_total_comp ?? null,
     },
     authorization: profile.authorization || {},
@@ -5828,6 +5829,7 @@ export async function executeWorkspaceIntent({
         domain === "all" || domain === "gates"
           ? {
               comp_floor: compensation.minimum_base ?? null,
+              minimum_annual_earnings: compensation.minimum_annual_earnings ?? null,
               comp_target: compensation.target_base ?? null,
               comp_expected: compensation.expected_base ?? null,
               excluded_companies: Array.isArray(targeting.excluded_companies)
@@ -9261,23 +9263,25 @@ function parseSettingsCompAmount(text) {
   return match[2] ? n * 1000 : n;
 }
 
-// "set/change/raise/lower my comp floor|minimum|comp target|target comp|
+// "set/change/raise/lower my comp floor|minimum|annual earnings floor|comp target|target comp|
 // expected comp|expected base to <amount>" → one GATE_ROUTES comp type, with
 // the raw (unparsed) value text so the caller can still detect a comp-leak
 // phrase ("to match my current salary") before treating it as a number.
 function settingsCompGateFromText(text) {
   const value = String(text || "").trim();
   const match = value.match(
-    /^(?:please\s+)?(?:set|change|raise|lower)\s+my\s+(comp\s+floor|minimum|comp\s+target|target\s+comp|expected\s+comp|expected\s+base)\s+to\s+(.+?)\s*[.?!]*$/i
+    /^(?:please\s+)?(?:set|change|raise|lower)\s+my\s+(comp\s+floor|minimum|minimum\s+annual(?:\s+cash)?\s+earnings|annual(?:\s+cash)?\s+earnings\s+floor|total\s+earnings\s+floor|comp\s+target|target\s+comp|expected\s+comp|expected\s+base)\s+to\s+(.+?)\s*[.?!]*$/i
   );
   if (!match) return null;
   const noun = match[1].toLowerCase();
   const rawValue = match[2].trim();
-  const type = /floor|minimum/.test(noun)
-    ? "comp-floor"
-    : /target/.test(noun)
-      ? "comp-target"
-      : "comp-expected";
+  const type = /annual|total\s+earnings/.test(noun)
+    ? "comp-annual-floor"
+    : /floor|minimum/.test(noun)
+      ? "comp-floor"
+      : /target/.test(noun)
+        ? "comp-target"
+        : "comp-expected";
   return { type, rawValue };
 }
 
@@ -9542,6 +9546,8 @@ function settingsApplyPreviewLabel(change) {
   if (change.kind === "gate") {
     if (change.compReference) return "Update this comp setting";
     if (change.type === "comp-floor") return `Set comp floor to ${formatSettingsUsd(change.value)}`;
+    if (change.type === "comp-annual-floor")
+      return `Set minimum annual cash earnings to ${formatSettingsUsd(change.value)}`;
     if (change.type === "comp-target")
       return `Set comp target to ${formatSettingsUsd(change.value)}`;
     if (change.type === "comp-expected")

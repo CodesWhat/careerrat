@@ -1169,7 +1169,11 @@ export function FirstRunController({
           cut_signals: cleanLines(values.signals),
         });
       } else if (sectionId === "quickFacts") {
-        const minimumBase = moneyAmount(values.minimumBase);
+        const compensationFloor = moneyAmount(values.compensationFloor ?? values.minimumBase);
+        const compensation =
+          values.compensationFloorType === "annual-cash"
+            ? { minimum_base: null, minimum_annual_earnings: compensationFloor }
+            : { minimum_base: compensationFloor, minimum_annual_earnings: null };
         const remoteScope = values.remoteScope === "worldwide" ? "worldwide" : "home-country";
         await api.saveCandidateFile("profile", {
           candidate: {
@@ -1186,7 +1190,7 @@ export function FirstRunController({
             onsite: values.onsite === true,
             mode_preferences_confirmed: true,
           },
-          compensation: { minimum_base: minimumBase },
+          compensation,
         });
       } else if (sectionId === "authorization") {
         const authorization = {

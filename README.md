@@ -24,10 +24,15 @@
 
 ## Rate. Apply. Track
 
-CareerRat reads the full job posting against your location, compensation floor,
+CareerRat reads the full job posting against your location and compensation floor,
 fit, and dealbreakers before it recommends anything. It builds resumes, cover
 letters, and screening answers from your real experience, then fills supported
 application forms for your review. It never presses the final Submit button.
+
+Pay rules work for salaried, hourly, tipped, and commissioned jobs. You can set a
+guaranteed base floor, a minimum for annual cash earnings that includes wages,
+tips, commission, and cash bonuses, or both. Equity and benefits never count as
+cash earnings.
 
 The search stays together in one local workspace: conversations, jobs, recruiter
 threads, missions, files, follow-ups, interviews, and outcomes. You can leave a

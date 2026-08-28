@@ -310,7 +310,10 @@ Treat this section as private by default. Capture and write each field separatel
    ```
 
    **NEVER surface current_base in any outbound artifact** (résumé, cover letter, form field, message, packet, tracker note, or any other candidate-facing or employer-facing output). This is a private gate input only; all outbound comp comes from the fields below.
-2. **(b) minimum_base** — Ask: **"What's the lowest base salary you'd accept for any job? I'll skip anything clearly below it."** This is the absolute walk-away floor regardless of arrangement. Write it with `careerrat gate comp-floor <N> --write --confirm`.
+2. **(b) Compensation floor choice** — Ask one plain question first: **"Should I screen jobs by guaranteed pay, or by what you need to make in a full year including tips, commission, or cash bonuses?"** Offer **Guaranteed pay** and **Total annual earnings** as clickable choices when the surface supports them; typed answers mean the same thing.
+   - **Guaranteed pay** → ask: **"What's the lowest guaranteed base pay you'd accept?"** Save `minimum_base` with `careerrat gate comp-floor <N> --write --confirm`.
+   - **Total annual earnings** → ask: **"What's the least you need to make in a full year, including wages, tips, commission, or cash bonuses? Don't count equity or benefits."** Save `minimum_annual_earnings` with `careerrat gate comp-annual-floor <N> --write --confirm`.
+   These are separate facts. Never turn tips, commission, or cash bonuses into guaranteed base pay, and never count equity or benefits toward annual cash earnings. A candidate may later save both floors.
 3. **(b2) Arrangement floors (the comp gate)** — Comp tolerance usually changes with the work arrangement, so collect floors only for arrangements the candidate would accept. If saved targeting or cut signals already exclude full-time onsite work or relocation, do not ask for an onsite or relocation floor and do not invent one; preserve that arrangement as unavailable. Ask about each accepted arrangement one at a time. For example: *"What's the lowest base salary you'd accept for a fully remote job?"* On the next turn, ask the same plain question for hybrid, on-site, or relocation only if that arrangement is still in scope. Write the supplied numbers under their matching `comp_floors` keys (`remote`, `hybrid`, `onsite`, `relocation`) plus the home-metro match terms as `comp_floors.home_metro`, omitting disallowed arrangements, in one `careerrat data candidate patch profile --data ...` call in DB mode or one confirm block (`doc: "profile"`) in chat mode. These are a **hard gate**: `evaluate-job` cuts any posting whose band tops out below the floor for its allowed arrangement, while the saved cut signal rejects unavailable arrangements. If the user gives one number for every arrangement they accept, set each allowed arrangement equal to it. Confirm: "I'll automatically skip jobs whose listed pay is below the minimum you set for that kind of work."
 4. **(c) target_base** — Ask: **"What base salary would you aim for when negotiating?"** This is the default negotiation anchor. Write it with `careerrat gate comp-target <N> --write --confirm`.
 5. **(d) expected_base** — Ask: **"What base salary should I enter when an application form requires one? This is never your current salary."** This number may differ from the negotiation anchor. In a one-shot CLI context, write it with `careerrat gate comp-expected <N> --write` and also patch `form-defaults.expected_base` so apply-job has a direct lookup. In conversational chat, emit one form-defaults confirmation block for `expected_base`, not separate profile and form-defaults proposals; the web surface mirrors that confirmed value into profile compensation from the same click.
@@ -340,7 +343,7 @@ Treat this section as private by default. Capture and write each field separatel
 
    This field informs comp negotiation framing and `email-comms` counter-offer drafts. If the user says "I don't care about benefits" or skips this, omit the field.
 
-After writing all comp fields: read candidate profile config and confirm `current_comp_shareable: false`. If absent or true, write/correct it before continuing. Report: "current_base stored private; expected_base and minimum_base available for outbound use."
+After writing all comp fields: read candidate profile config and confirm `current_comp_shareable: false`. If absent or true, write/correct it before continuing. Report which saved floor CareerRat will use: guaranteed `minimum_base`, `minimum_annual_earnings` from wages/tips/commission/cash bonuses, or both. Equity and benefits never clear either cash floor.
 
 ---
 
@@ -578,7 +581,7 @@ Any time the user states a new gate during this interview — an exclusion, cut 
 
 - Exclusion → `careerrat gate exclude-company "<Company>" --write --confirm`
 - Cut or keep signal → `careerrat gate cut-signal "<signal>" --write` / `careerrat gate keep-signal "<signal>" --write`
-- Comp floor or anchor → `careerrat gate comp-floor <N> --write --confirm`, `careerrat gate comp-target <N> --write --confirm`, or `careerrat gate comp-expected <N> --write` (not current_base)
+- Comp floor or anchor → `careerrat gate comp-floor <N> --write --confirm` for guaranteed base, `careerrat gate comp-annual-floor <N> --write --confirm` for annual cash earnings, `careerrat gate comp-target <N> --write --confirm`, or `careerrat gate comp-expected <N> --write` (not current_base)
 - Honesty boundary → `careerrat gate do-not-claim "<tool>" --write` or `careerrat gate do-not-fabricate "<claim>" --write`
 - Per-company cap / cooldown → `careerrat data candidate limits upsert --data '<json row>'` in DB mode; legacy mode writes `candidate/application-limits.yml`
 
@@ -596,7 +599,7 @@ A stated gate must never live only in chat. It must never be hardcoded into a sk
 - **Persistence cadence.** After completing each major step, append its step key to `completed[]` in `workspace/setup-state.json` and refresh `updatedAt` (read-modify-write; keep the JSON minimal). Step keys: `domain`, `identity`, `projects-scan`, `work-history`, `targets`, `keep-cut`, `comp`, `location`, `authorization`, `education`, `exclusions`, `form-defaults`, `proof-points`, `toolchain`, `writing-samples`, `capabilities`, `materialize`, `discovery-handoff`. The `setup-state.json` shape also carries `question_style`, `optional_areas`, and `agent_voice` (set in STEP 0a), plus `resume_source` (`"none"` when STEP 2a ran, so a resumed session doesn't re-ask for a file that doesn't exist). On a deliberate pause, do the same and tell the user: "Progress saved — re-run `ingest-profile` (or `careerrat ingest`) to resume."
 - Never invent facts. Ask or omit — do not guess.
 - A missing résumé is never a blocker. If the candidate has none, run STEP 2a, record the decline so the checklist can complete, and never ask for the file again in the same setup.
-- Keep `current_base` private. Store it with `current_comp_shareable: false`. It must never appear in any résumé, cover letter, form field, ATS entry, recruiter message, interview packet, or shareable tracker note. This is enforced by field path: always read outbound comp from `expected_base`, `target_base`, or `minimum_base`.
+- Keep `current_base` private. Store it with `current_comp_shareable: false`. It must never appear in any résumé, cover letter, form field, ATS entry, recruiter message, interview packet, or shareable tracker note. This is enforced by field path: always read outbound comp from `expected_base`, `target_base`, `minimum_base`, or `minimum_annual_earnings`.
 - Keep `current_base` separate from `expected_base`. They are different fields and must never be conflated. `expected_base` is what goes on forms; `current_base` is a private gate input only.
 - Translate stated preferences into explicit keep/cut signal lists in candidate targeting config. Vague preferences are not signals.
 - Translate company preferences into the structured `company_preferences` thesis. Focus examples guide discovery; only explicit exclusions constrain the company universe.
@@ -626,7 +629,7 @@ A stated gate must never live only in chat. It must never be hardcoded into a sk
 ## Config notes
 
 - **Comp fields are schema-backed (shipped).** `compensation.expected_base`,
-  `oe_min_base`, `oe_max_base`, and `relo_package_needs` all exist in
+  `minimum_annual_earnings`, `oe_min_base`, `oe_max_base`, and `relo_package_needs` all exist in
   `profile.schema.json` (Foundation B) — write them as their native types
   (numbers for the comp values, string for `relo_package_needs`), not as freeform
   notes.

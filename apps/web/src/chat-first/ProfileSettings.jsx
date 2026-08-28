@@ -57,7 +57,14 @@ function ProfileGrid({ agentName, profile = {}, onEditSection, onOpenFiles }) {
         <div className="cf-profile__comp">
           <div>
             <strong>{valueOrFallback(compensation?.floor, "Not set")}</strong>
-            <span>floor · roles under this never reach you</span>
+            <span>guaranteed base floor</span>
+          </div>
+          <div>
+            <strong>{valueOrFallback(compensation?.annualEarningsFloor, "Not set")}</strong>
+            <span>
+              yearly cash earnings · includes tips, commission, and cash bonuses; excludes equity
+              and benefits
+            </span>
           </div>
           <div>
             <strong>{valueOrFallback(compensation?.target, "Not set")}</strong>
@@ -820,6 +827,7 @@ function ProfileSectionEditor({
                   onChange={(event) => onChange?.(field.id, event.target.value)}
                 />
               )}
+              {field.help ? <small>{field.help}</small> : null}
             </label>
           );
         })}

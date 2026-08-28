@@ -60,6 +60,24 @@ test("applyGateWrite comp-floor: writes profile compensation.minimum_base, then 
   assert.equal(second.value, 150000);
 });
 
+test("applyGateWrite comp-annual-floor writes annual cash earnings without replacing base", () => {
+  const repoRoot = tempRepo();
+  applyGateWrite({ repoRoot, env: {}, type: "comp-floor", value: 60000 });
+
+  const result = applyGateWrite({
+    repoRoot,
+    env: {},
+    type: "comp-annual-floor",
+    value: 90000,
+  });
+  const stored = candidateConfigGet({ repoRoot, env: {} }).profile.compensation;
+
+  assert.equal(result.field, "compensation.minimum_annual_earnings");
+  assert.equal(result.summary, "Minimum annual cash earnings are now 90000.");
+  assert.equal(stored.minimum_annual_earnings, 90000);
+  assert.equal(stored.minimum_base, 60000);
+});
+
 test("applyGateWrite append gate (cut-signal) appends to targeting.cut_signals and is idempotent", () => {
   const repoRoot = tempRepo();
 

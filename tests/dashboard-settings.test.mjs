@@ -13,6 +13,7 @@ test("Dashboard settings snapshot exposes onboarding config without private curr
       compensation: {
         current_base: 123456,
         minimum_base: 200000,
+        minimum_annual_earnings: 240000,
         target_base: 165000,
         expected_base: 165000,
       },
@@ -41,6 +42,7 @@ test("Dashboard settings snapshot exposes onboarding config without private curr
 
   assert.equal(snapshot.profile.candidate, "Demo Candidate");
   assert.equal(snapshot.profile.minimumBase, "$200K");
+  assert.equal(snapshot.profile.minimumAnnualEarnings, "$240K");
   assert.equal(snapshot.profile.targetBase, "$165K");
   assert.equal(snapshot.profile.expectedBase, "$165K");
   assert.equal(snapshot.profile.location, "Remote worldwide / hybrid - Example City, ST");

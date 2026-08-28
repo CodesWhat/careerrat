@@ -116,9 +116,11 @@ export function buildSettingsSnapshot({
             : "home-country"
           : null,
       minimumBase: formatBase(compensation.minimum_base),
+      minimumAnnualEarnings: formatBase(compensation.minimum_annual_earnings),
       targetBase: formatBase(compensation.target_base),
       expectedBase: formatBase(compensation.expected_base),
       minimumBaseK: baseK(compensation.minimum_base),
+      minimumAnnualEarningsK: baseK(compensation.minimum_annual_earnings),
       targetBaseK: baseK(compensation.target_base),
       expectedBaseK: baseK(compensation.expected_base),
       workAuthorization: workAuthorization(authorization),

@@ -256,6 +256,12 @@ function buildKnowledgeEditor(key, state) {
   if (key === "quickFacts") {
     const location = profile.location || {};
     const minimumBase = Number(profile.compensation?.minimum_base);
+    const minimumAnnualEarnings = Number(profile.compensation?.minimum_annual_earnings);
+    const useAnnualCash =
+      Number.isFinite(minimumAnnualEarnings) &&
+      minimumAnnualEarnings > 0 &&
+      !(Number.isFinite(minimumBase) && minimumBase > 0);
+    const compensationFloor = useAnnualCash ? minimumAnnualEarnings : minimumBase;
     return {
       fields: [
         editorField("name", "Name", "text", candidate.full_name || ""),
@@ -263,10 +269,27 @@ function buildKnowledgeEditor(key, state) {
         editorField("phone", "Phone", "text", candidate.phone || ""),
         editorField("home", "Home market", "text", location.home || candidate.location || ""),
         editorField(
-          "minimumBase",
-          "Minimum base salary",
+          "compensationFloorType",
+          "How should CareerRat screen pay?",
+          "select",
+          useAnnualCash ? "annual-cash" : "guaranteed-base",
+          {
+            options: [
+              { value: "guaranteed-base", label: "Guaranteed base pay" },
+              {
+                value: "annual-cash",
+                label: "Total yearly cash earnings (tips, commission, or cash bonuses included)",
+              },
+            ],
+          }
+        ),
+        editorField(
+          "compensationFloor",
+          "Minimum yearly amount",
           "number",
-          Number.isFinite(minimumBase) && minimumBase > 0 ? String(minimumBase) : "",
+          Number.isFinite(compensationFloor) && compensationFloor > 0
+            ? String(compensationFloor)
+            : "",
           { min: "0", step: "1000" }
         ),
         editorField(

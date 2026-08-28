@@ -66,7 +66,11 @@ describe("profile settings controller mapping", () => {
         data: {
           profile: {
             candidate: { name: "Scott" },
-            compensation: { oe_min_base: 210000, expected_base: 230000 },
+            compensation: {
+              oe_min_base: 210000,
+              minimum_annual_earnings: 226000,
+              expected_base: 230000,
+            },
             location: {
               home: "NYC",
               remote: true,
@@ -180,7 +184,7 @@ describe("profile settings controller mapping", () => {
 
     expect(model.profile).toMatchObject({
       targets: ["Staff Software Engineer", "Engineering Lead"],
-      compensation: { floor: "$210k", target: "$230k" },
+      compensation: { floor: "$210k", annualEarningsFloor: "$226k", target: "$230k" },
       dealbreakers: ["Fully onsite"],
       locationPolicy: {
         home: "NYC",
@@ -203,6 +207,7 @@ describe("profile settings controller mapping", () => {
       compensation: {
         fields: [
           { id: "minimumBase", value: "210000" },
+          { id: "minimumAnnualEarnings", value: "226000" },
           { id: "targetBase", value: "230000" },
         ],
       },
@@ -554,13 +559,20 @@ describe("profile settings controller mapping", () => {
     expect(
       profileSectionSavePlan("compensation", {
         minimumBase: "210000",
+        minimumAnnualEarnings: "226000",
         targetBase: "235000",
       })
     ).toEqual([
       {
         kind: "candidate",
         name: "profile",
-        patch: { compensation: { minimum_base: 210000, target_base: 235000 } },
+        patch: {
+          compensation: {
+            minimum_base: 210000,
+            minimum_annual_earnings: 226000,
+            target_base: 235000,
+          },
+        },
       },
     ]);
     expect(

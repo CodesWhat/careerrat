@@ -568,6 +568,41 @@ describe("chat-first onboarding controller", () => {
     });
   });
 
+  it("builds a plain quick-facts compensation branch for total annual cash earnings", () => {
+    const knowledge = buildFirstRunKnowledge(
+      {
+        setupProgress: {
+          completedCount: 0,
+          total: 8,
+          items: [{ key: "quickFacts", done: false }],
+        },
+        data: {
+          profile: {
+            compensation: { minimum_annual_earnings: 90000 },
+          },
+        },
+      },
+      { name: "Claude Code" }
+    );
+    const fields = knowledge.items.find((item) => item.id === "quickFacts").editor.fields;
+
+    expect(fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "compensationFloorType",
+          type: "select",
+          value: "annual-cash",
+          label: "How should CareerRat screen pay?",
+        }),
+        expect.objectContaining({
+          id: "compensationFloor",
+          value: "90000",
+          label: "Minimum yearly amount",
+        }),
+      ])
+    );
+  });
+
   it("adds the deterministic first-question suggestion without replacing typed answers", () => {
     const message = firstRunAssistantMessage(
       "One question at a time. First: what kind of role are you actually after?",

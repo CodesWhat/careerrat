@@ -236,6 +236,7 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
       targets,
       compensation: {
         floor: money(compensation.minimum_base ?? compensation.oe_min_base),
+        annualEarningsFloor: money(compensation.minimum_annual_earnings),
         target: money(compensation.target_base ?? compensation.expected_base),
       },
       locationPolicy: locationPolicyForProfile(location, onboard),
@@ -290,10 +291,25 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
           fields: [
             field(
               "minimumBase",
-              "Minimum base salary",
+              "Guaranteed base floor",
               "number",
               numberValue(compensation.minimum_base ?? compensation.oe_min_base),
-              { min: "0", step: "1000" }
+              {
+                min: "0",
+                step: "1000",
+                help: "Use this when guaranteed wages or salary must clear a minimum.",
+              }
+            ),
+            field(
+              "minimumAnnualEarnings",
+              "Minimum annual cash earnings",
+              "number",
+              numberValue(compensation.minimum_annual_earnings),
+              {
+                min: "0",
+                step: "1000",
+                help: "Includes wages, tips, commission, and cash bonuses. Excludes equity and benefits.",
+              }
             ),
             field(
               "targetBase",
@@ -505,6 +521,10 @@ export function profileSectionSavePlan(
   }
   if (section === "compensation") {
     const minimumBase = amountOrNull(values.minimumBase, "Minimum base");
+    const minimumAnnualEarnings = amountOrNull(
+      values.minimumAnnualEarnings,
+      "Minimum annual cash earnings"
+    );
     const targetBase = amountOrNull(values.targetBase, "Target base");
     if (minimumBase !== null && targetBase !== null && targetBase < minimumBase) {
       throw new UserFacingError("Target base must be at least the floor.");
@@ -514,7 +534,11 @@ export function profileSectionSavePlan(
         kind: "candidate",
         name: "profile",
         patch: {
-          compensation: { minimum_base: minimumBase, target_base: targetBase },
+          compensation: {
+            minimum_base: minimumBase,
+            minimum_annual_earnings: minimumAnnualEarnings,
+            target_base: targetBase,
+          },
         },
       },
     ];

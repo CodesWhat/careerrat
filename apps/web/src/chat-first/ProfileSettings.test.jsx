@@ -41,7 +41,7 @@ const PROFILE = {
     summary: "NYC local + worldwide remote",
     boundary: "On-site limited to NYC",
   },
-  compensation: { floor: "$210k", target: "$230k+" },
+  compensation: { floor: "$210k", annualEarningsFloor: "$225k", target: "$230k+" },
   dealbreakers: ["Fully onsite", "Crypto / web3", "Less than 4 weeks PTO"],
   evidence: { roles: 6, promotions: 3, stories: 14 },
   writingStyle: { sampleCount: 2, description: "plain, direct, no buzzwords" },
@@ -91,6 +91,8 @@ describe("ProfileSettings", () => {
     expect(html).toContain("On-site · NYC only");
     expect(html).toContain("Confirmed search boundary");
     expect(html).toContain("$210k");
+    expect(html).toContain("$225k");
+    expect(html).toContain("yearly cash earnings");
     expect(html).toContain("14 stories captured");
     expect(html).toContain("plain, direct, no buzzwords");
     expect(html).toContain("APPLICATION DEFAULTS");

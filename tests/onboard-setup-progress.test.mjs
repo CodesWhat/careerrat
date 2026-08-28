@@ -185,6 +185,22 @@ describe("computeSetupProgress", () => {
       true,
       "confirmed remote-only candidates do not need a home, hybrid, on-site, or relocation market"
     );
+    assert.equal(
+      computeSetupProgress({
+        data: {
+          profile: {
+            location: {
+              home: "New York, NY",
+              hybrid: true,
+              mode_preferences_confirmed: true,
+            },
+            compensation: { minimum_annual_earnings: 90000 },
+          },
+        },
+      }).items.find((i) => i.key === "quickFacts").done,
+      true,
+      "a total annual cash earnings floor completes compensation setup for tipped work"
+    );
   });
 
   it("does not treat a resume location and the ambient remote fallback as a confirmed work-mode posture", () => {

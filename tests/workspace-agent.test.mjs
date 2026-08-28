@@ -9067,6 +9067,7 @@ test("settings.explain never leaks current_base and surfaces the other comp fiel
       compensation: {
         current_base: 987654,
         minimum_base: 150000,
+        minimum_annual_earnings: 180000,
         target_base: 170000,
         expected_base: 160000,
       },
@@ -9086,6 +9087,7 @@ test("settings.explain never leaks current_base and surfaces the other comp fiel
   assert.ok(!serialized.includes("987654"), "artifact must never carry the private comp value");
   assert.ok(serialized.includes("150000"), "artifact should still surface minimum_base");
   assert.equal(artifact.gates.comp_floor, 150000);
+  assert.equal(artifact.gates.minimum_annual_earnings, 180000);
   assert.equal(artifact.gates.comp_target, 170000);
   assert.equal(artifact.gates.comp_expected, 160000);
 });
@@ -9304,6 +9306,30 @@ test("settings.apply gate happy path: comp-floor writes minimum_base, repeats no
   assert.equal(settingsArtifact(appended).field, "cut_signals");
   const targeting = candidateConfigGet({ repoRoot, env: {} }).targeting;
   assert.ok(targeting.cut_signals.includes("on-call rotation"));
+});
+
+test("settings.apply writes a minimum annual cash earnings gate without replacing base", async () => {
+  const repoRoot = tempRepo();
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "profile",
+    patch: { compensation: { minimum_base: 60000 } },
+  });
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { change: { kind: "gate", type: "comp-annual-floor", value: 90000 } },
+    },
+  });
+  const compensation = candidateConfigGet({ repoRoot, env: {} }).profile.compensation;
+
+  assert.equal(settingsArtifact(result).field, "compensation.minimum_annual_earnings");
+  assert.equal(compensation.minimum_annual_earnings, 90000);
+  assert.equal(compensation.minimum_base, 60000);
 });
 
 test("settings.apply mode happy path persists usage_mode and surfaces VALIDATION_FAILED for an invalid value", async () => {
