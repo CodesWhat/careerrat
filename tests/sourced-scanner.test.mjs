@@ -99,6 +99,18 @@ test("unlabeled compensation stays unclassified instead of becoming guaranteed b
   });
 });
 
+test("compensation parsing does not treat customer base as a base-pay label", () => {
+  assert.deepEqual(
+    sourcedScanner.extractCompensationBands(
+      "Compensation is $95k-$120k depending on experience while helping expand our customer base"
+    ),
+    {
+      base: null,
+      annualEarnings: null,
+    }
+  );
+});
+
 // ---------------------------------------------------------------------------
 // Filter + infrastructure tests (unchanged)
 // ---------------------------------------------------------------------------

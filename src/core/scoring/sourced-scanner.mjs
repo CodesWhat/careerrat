@@ -1263,7 +1263,10 @@ function gateFromScoreAndFlags(score, flags, modes = {}) {
 }
 
 const ANNUAL_WORK_HOURS = 2_080;
-const BASE_COMP_LABEL_RE = /\b(?:base(?:\s+(?:salary|pay))?|salary(?:\s+(?:range|band))?)\b/i;
+const BASE_COMP_LABEL_RE = /\b(?:base\s+(?:salary|pay)|salary(?:\s+(?:range|band))?)\b/i;
+const ADJACENT_BARE_BASE_PREFIX_RE = /\bbase\s*:?\s*$/i;
+const ADJACENT_BARE_BASE_SUFFIX_RE =
+  /^[\s,]*(?:(?:USD|CAD|MXN|EUR|GBP)\b[\s,]*)?(?:(?:per\s+(?:year|annum)|a\s+year|annually|annualized)\b[\s,]*)?base\b/i;
 const VARIABLE_COMP_LABEL_RE =
   /\b(?:on-target\s+earnings|ote|bonus|equity|commission|total\s+comp(?:ensation)?|variable\s+(?:pay|compensation)|incentive\s+(?:pay|compensation))\b/i;
 const ANNUAL_EARNINGS_LABEL_RE =
@@ -1339,9 +1342,24 @@ export function extractCompBand(text = "", { baseOnly = false } = {}) {
     for (const match of normalized.matchAll(re)) {
       const prefix = normalized.slice(0, match.index);
       const suffix = normalized.slice(match.index + match[0].length);
-      const baseLabelIndex = lastLabelIndex(prefix, BASE_COMP_LABEL_RE);
+      const prefixBareBaseMatch = prefix.match(ADJACENT_BARE_BASE_PREFIX_RE);
+      const prefixBareBaseIndex = prefixBareBaseMatch?.index ?? -1;
+      const baseLabelIndex = Math.max(
+        lastLabelIndex(prefix, BASE_COMP_LABEL_RE),
+        prefixBareBaseIndex
+      );
       const variableLabelIndex = lastLabelIndex(prefix, VARIABLE_COMP_LABEL_RE);
-      const suffixBaseLabelIndex = suffix.search(BASE_COMP_LABEL_RE);
+      const suffixBareBaseMatch = suffix.match(ADJACENT_BARE_BASE_SUFFIX_RE);
+      const suffixBareBaseIndex = suffixBareBaseMatch
+        ? suffixBareBaseMatch[0].toLowerCase().lastIndexOf("base")
+        : -1;
+      const suffixStrongBaseLabelIndex = suffix.search(BASE_COMP_LABEL_RE);
+      const suffixBaseLabelIndex =
+        suffixBareBaseIndex < 0
+          ? suffixStrongBaseLabelIndex
+          : suffixStrongBaseLabelIndex < 0
+            ? suffixBareBaseIndex
+            : Math.min(suffixBareBaseIndex, suffixStrongBaseLabelIndex);
       const suffixVariableLabelIndex = suffix.search(VARIABLE_COMP_LABEL_RE);
       const prefixIsBase = baseLabelIndex >= 0 && baseLabelIndex > variableLabelIndex;
       const prefixIsVariable = variableLabelIndex >= 0 && variableLabelIndex > baseLabelIndex;
