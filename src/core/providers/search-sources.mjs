@@ -14,6 +14,18 @@ function slug(s) {
     .replace(/^-|-$/g, "");
 }
 
+function canonicalSourceUrl(value) {
+  try {
+    const parsed = new URL(value);
+    parsed.hash = "";
+    if (parsed.pathname !== "/") parsed.pathname = parsed.pathname.replace(/\/+$/, "");
+    parsed.searchParams.sort();
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
 // Map a hostname to the saved browser session used when that source needs login.
 // Returns null for hosts that do not have a site-specific session.
 export function platformForHost(hostname) {
@@ -147,7 +159,11 @@ export function addProviderSource(
 // addSearchFromUrl
 // ---------------------------------------------------------------------------
 
-export function addSearchFromUrl(config, pastedUrl, { label, enabled = true } = {}) {
+export function addSearchFromUrl(
+  config,
+  pastedUrl,
+  { label, enabled = true, sourceType = null } = {}
+) {
   let parsed;
   try {
     parsed = new URL(pastedUrl);
@@ -156,6 +172,24 @@ export function addSearchFromUrl(config, pastedUrl, { label, enabled = true } = 
   }
 
   const host = parsed.hostname.replace(/^www\./, "");
+  const canonicalTarget = canonicalSourceUrl(pastedUrl);
+  const duplicate = (config.searches ?? []).some((source) => {
+    const existingTarget = source.url || source.rssUrl;
+    return existingTarget && canonicalSourceUrl(existingTarget) === canonicalTarget;
+  });
+  if (duplicate) return config;
+
+  if (sourceType === "rss") {
+    const entry = {
+      provider: host,
+      source_type: "rss",
+      label: label || host,
+      rssUrl: pastedUrl,
+      enabled,
+      recency: { mode: "since-last-run", safetyMinutes: 30 },
+    };
+    return { ...config, searches: [...(config.searches ?? []), entry] };
+  }
 
   // www. is already stripped by the line above, so host is never 'www.wellfound.com' here.
   if (host === "wellfound.com") {
@@ -213,6 +247,18 @@ export function addSearchFromUrl(config, pastedUrl, { label, enabled = true } = 
       label: label || `${host} (authenticated)`,
       url: pastedUrl,
       enabled: false,
+    };
+    return { ...config, searches: [...(config.searches ?? []), entry] };
+  }
+
+  if (sourceType === "url-query" || sourceType === "browser") {
+    const entry = {
+      provider: host,
+      source_type: sourceType,
+      label: label || host,
+      url: pastedUrl,
+      enabled,
+      recency: { mode: "since-last-run", safetyMinutes: 30 },
     };
     return { ...config, searches: [...(config.searches ?? []), entry] };
   }

@@ -2132,7 +2132,7 @@ test("DB mode merges board offers, filters their titles, and stamps board waterm
   }
 });
 
-test("runSourcedScan includes enabled browser sources in the normal durable search", async () => {
+test("runSourcedScan materializes generated query-only HiringCafe sources", async () => {
   const repoRoot = tempRepo();
   try {
     candidateSetupInitialize({ repoRoot });
@@ -2173,14 +2173,13 @@ test("runSourcedScan includes enabled browser sources in the normal durable sear
       data: {
         searches: [
           {
-            provider: "linkedin",
-            platform: "linkedin",
-            source_type: "browser",
-            auth: true,
-            label: "LinkedIn NYC",
-            url: "https://www.linkedin.com/jobs/search/?keywords=bar%20manager",
+            provider: "HiringCafe",
+            source_type: "url-query",
+            label: "Bar Manager",
+            query: "Bar Manager",
             enabled: true,
-            recency: { mode: "since-last-run" },
+            recency: { mode: "since-last-run", safetyMinutes: 30 },
+            searchState: { sortBy: "date" },
           },
         ],
       },
@@ -2201,8 +2200,8 @@ test("runSourcedScan includes enabled browser sources in the normal durable sear
               location: "New York, NY",
               bodyText: "Unverified browser result for a Bar Manager role in New York City.",
               bodyPartial: true,
-              source: "linkedin-browser",
-              sourceProvider: "linkedin",
+              source: "hiringcafe-browser",
+              sourceProvider: "hiringcafe",
             },
           ],
           errors: [],
@@ -2213,6 +2212,8 @@ test("runSourcedScan includes enabled browser sources in the normal durable sear
     });
 
     assert.equal(captured.length, 1);
+    assert.match(captured[0].url, /^https:\/\/hiring\.cafe\/\?searchState=/);
+    assert.equal(new URL(captured[0].url).searchParams.has("searchState"), true);
     assert.equal(summary.scanned, 1);
     assert.equal(summary.new, 1);
     assert.deepEqual(summary.loginRequests, []);

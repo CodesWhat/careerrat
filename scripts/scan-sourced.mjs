@@ -37,6 +37,7 @@ import {
   loadLegacyCandidateConfig,
   loadCandidateConfig as loadStoredCandidateConfig,
 } from "../src/core/profile/config-store.mjs";
+import { buildSourceUrl } from "../src/core/providers/source-url.mjs";
 import {
   captureAndPersistOffersIfDb,
   offersWithCapturedJobs,
@@ -135,13 +136,29 @@ function searchListKey(config) {
   return null;
 }
 
+function materializeBrowserSearchSource(source) {
+  if (!source || source.enabled === false) return null;
+  if (source.url) return source;
+  if (!["url-query", "browser", "aggregator"].includes(source.source_type)) return null;
+  try {
+    const built = buildSourceUrl(source);
+    return {
+      ...source,
+      url: built.url,
+      searchState: built.searchState || source.searchState || {},
+    };
+  } catch {
+    return null;
+  }
+}
+
 function isFetchableSearchSource(source) {
   if (!source || source.enabled === false) return false;
   if (source.source_type === "rss" || source.rssUrl) return true;
   if (["ats", "board"].includes(source.source_type)) {
     return isBoardProviderSupported(source.provider) || Boolean(source.url);
   }
-  return Boolean(source.url);
+  return Boolean(materializeBrowserSearchSource(source));
 }
 
 function normalizedIdentityValue(value) {
@@ -240,8 +257,11 @@ function searchSourceTasks(searchSources) {
     }
     const supportedBoard =
       ["ats", "board"].includes(source.source_type) && isBoardProviderSupported(source.provider);
-    if (!source.rssUrl && !supportedBoard && source.url) {
-      browsers.push({ kind: "browser", source, sourceIndex });
+    if (!source.rssUrl && !supportedBoard) {
+      const browserSource = materializeBrowserSearchSource(source);
+      if (browserSource?.url) {
+        browsers.push({ kind: "browser", source, captureSource: browserSource, sourceIndex });
+      }
     }
   });
   // The whole-scan path concatenated RSS results before board results. Keeping
@@ -513,7 +533,7 @@ export async function runSourcedScan({
           : task.kind === "board"
             ? await scanBoards(singleton, { fetchImpl: fetchForRun, resolveHost })
             : typeof captureBrowserSourceImpl === "function"
-              ? await captureBrowserSourceImpl(task.source)
+              ? await captureBrowserSourceImpl(task.captureSource || task.source)
               : {
                   offers: [],
                   errors: [

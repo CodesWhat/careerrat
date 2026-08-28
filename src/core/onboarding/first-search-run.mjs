@@ -15,6 +15,7 @@ import {
 import { normalizeCompanyKey, resolveCompanyBoard } from "../discovery/company-board-resolver.mjs";
 import { fillManualDomainHints } from "../discovery/company-seeds.mjs";
 import { buildSearchSources } from "../profile/generate-search-sources.mjs";
+import { buildSourceUrl } from "../providers/source-url.mjs";
 import {
   inferProvider,
   isBoardProviderSupported,
@@ -346,10 +347,16 @@ function isFetchableBoard(entry = {}) {
 }
 
 function isBrowserSearchSource(entry = {}) {
-  if (!isEnabled(entry) || !entry.url || isFetchableRss(entry) || isFetchableBoard(entry)) {
+  if (!isEnabled(entry) || isFetchableRss(entry) || isFetchableBoard(entry)) {
     return false;
   }
-  return true;
+  if (entry.url) return true;
+  if (!["url-query", "browser", "aggregator"].includes(entry.source_type)) return false;
+  try {
+    return Boolean(buildSourceUrl(entry).url);
+  } catch {
+    return false;
+  }
 }
 
 function supportedAtsCompanies(sourcedScan = {}) {

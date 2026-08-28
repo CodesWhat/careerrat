@@ -50,7 +50,10 @@ export function persistValidatedBoardSources({
   for (const candidate of review.candidates) {
     if (candidate.status !== "proposed" || candidate.confidence !== "high") continue;
     const before = listSearches(next);
-    const updated = addSearchFromUrl(next, candidate.url, { label: candidate.label });
+    const updated = addSearchFromUrl(next, candidate.url, {
+      label: candidate.label,
+      sourceType: candidate.sourceType,
+    });
     const after = listSearches(updated);
     const source = after.find((entry) => !before.some((prior) => prior.target === entry.target));
     next = updated;

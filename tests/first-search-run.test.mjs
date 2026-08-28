@@ -690,9 +690,41 @@ test("countDeterministicSources accepts sources as the search list key", () => {
   });
 });
 
+test("countDeterministicSources counts generated query-only HiringCafe searches", () => {
+  const counts = countDeterministicSources({
+    searchSources: {
+      searches: [
+        {
+          provider: "HiringCafe",
+          source_type: "url-query",
+          label: "Bar Manager",
+          query: "Bar Manager",
+          enabled: true,
+          recency: { mode: "since-last-run", safetyMinutes: 30 },
+          searchState: { sortBy: "date" },
+        },
+      ],
+    },
+  });
+
+  assert.deepEqual(counts, {
+    attempted: 1,
+    rss: 0,
+    boards: 0,
+    browser: 1,
+    supportedAtsCompanies: 0,
+    skipped: 0,
+  });
+});
+
 test("failed first-search can retry as fresh work after deterministic source setup is fixed", async () => {
   const repoRoot = tempRepo();
   markSearchReady(repoRoot, { domain: "operations" });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: { role_buckets: [] },
+  });
   seedNoDeterministicSources(repoRoot);
 
   const failed = await startFirstSearchRun({ repoRoot, env: {} });
@@ -905,7 +937,7 @@ test("zero-result scans with attempted deterministic sources complete with zero-
   assert.equal(latest.run.status, "completed");
   assert.equal(latest.run.summary.new, 0);
   assert.equal(latest.run.summary.zeroResults, true);
-  assert.equal(latest.run.summary.deterministicSources.attempted, 2);
+  assert.equal(latest.run.summary.deterministicSources.attempted, 3);
 });
 
 test("the shared worker can own deterministic terminal settlement", async () => {
