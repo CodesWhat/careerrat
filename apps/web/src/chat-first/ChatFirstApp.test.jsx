@@ -125,6 +125,42 @@ describe("ChatFirstAppView", () => {
     });
   });
 
+  it("reloads a manual search through its exact durable execution, never latest AI state", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const deterministic = {
+      purpose: "manual-search",
+      run: {
+        id: "manual-1",
+        purpose: "manual-search",
+        status: "running",
+        metadata: { searchExecutionId: "search-execution-1" },
+      },
+    };
+    const execution = {
+      id: "search-execution-1",
+      status: "running",
+      lanes: {
+        deterministic: { status: "running", runId: "manual-1" },
+        aiWeb: { status: "queued", runId: null },
+      },
+    };
+    const getSourcingRun = vi.fn(async ({ purpose }) =>
+      purpose === "manual-search" ? deterministic : { purpose, run: null }
+    );
+    const getSearchExecution = vi.fn(async () => ({ ok: true, execution }));
+
+    await expect(
+      module.loadVisibleSearchState({ getSourcingRun, getSearchExecution })
+    ).resolves.toEqual({ deterministic, execution });
+    expect(getSourcingRun.mock.calls).toEqual([
+      [{ purpose: "manual-search" }],
+      [{ purpose: "first-search" }],
+    ]);
+    expect(getSearchExecution).toHaveBeenCalledWith({
+      searchExecutionId: "search-execution-1",
+    });
+  });
+
   it("keeps the Search launcher in a loading state while saved runs hydrate", async () => {
     const html = await renderView({
       view: {
@@ -338,56 +374,41 @@ describe("ChatFirstAppView", () => {
       },
     });
 
-    const runDeterministicLane = vi.fn(async () => ({ ok: true }));
-    const runAiLane = vi.fn(async () => ({ ok: true }));
+    const runUnifiedSearch = vi.fn(async () => ({ ok: true }));
     await module.runChatFirstJobSearch({
       api: {
-        getSearchSourceStatus: vi.fn(async () => ({
-          searches: { enabled: 1 },
-          deterministicSources: { attempted: 1 },
-        })),
-        getRuntimeConfig: vi.fn(async () => ({
-          ai: { available: true },
-          aiWebSearch: { available: true },
-        })),
+        startSearchRun: vi.fn(),
+        getSearchExecution: vi.fn(),
       },
       retry: hydrated.retry,
-      runDeterministicLane,
-      runAiLane,
+      runUnifiedSearch,
+      createSearchExecutionId: () => "search-fresh-after-failure",
     });
 
-    expect(runDeterministicLane).toHaveBeenCalledOnce();
-    expect(runAiLane).toHaveBeenCalledOnce();
-    expect(runAiLane.mock.calls[0][0]).not.toHaveProperty("promptIds");
+    expect(runUnifiedSearch).toHaveBeenCalledWith(
+      expect.objectContaining({ searchExecutionId: "search-fresh-after-failure" })
+    );
+    expect(runUnifiedSearch.mock.calls[0][0]).not.toHaveProperty("retry");
   });
 
   it("lets the server heal sources while AI searches when no boards are pinned", async () => {
     const module = await import("./ChatFirstApp.jsx");
-    const runDeterministicLane = vi.fn(async () => ({ ok: true }));
-    const runAiLane = vi.fn(async () => ({ ok: true, data: { new: 3 } }));
+    const runUnifiedSearch = vi.fn(async () => ({ ok: true }));
+    const getSearchSourceStatus = vi.fn();
 
     const result = await module.runChatFirstJobSearch({
       api: {
-        getSearchSourceStatus: vi.fn(async () => ({
-          searches: { enabled: 0 },
-          enabledTrackedCompanies: 0,
-          deterministicSources: { attempted: 0 },
-        })),
-        getRuntimeConfig: vi.fn(async () => ({
-          ai: { available: true },
-          aiWebSearch: { available: true },
-        })),
+        getSearchSourceStatus,
+        startSearchRun: vi.fn(),
+        getSearchExecution: vi.fn(),
       },
-      runDeterministicLane,
-      runAiLane,
+      runUnifiedSearch,
       createSearchExecutionId: () => "search-tester-fixture",
     });
 
     expect(result).toMatchObject({ ok: true });
-    expect(runDeterministicLane).toHaveBeenCalledWith(
-      expect.objectContaining({ searchExecutionId: "search-tester-fixture" })
-    );
-    expect(runAiLane).toHaveBeenCalledWith(
+    expect(getSearchSourceStatus).not.toHaveBeenCalled();
+    expect(runUnifiedSearch).toHaveBeenCalledWith(
       expect.objectContaining({ searchExecutionId: "search-tester-fixture" })
     );
   });
@@ -808,7 +829,7 @@ describe("ChatFirstAppView", () => {
     });
   });
 
-  it("starts deterministic search without a source-permission preflight", async () => {
+  it("starts unified search without a source-permission preflight", async () => {
     const module = await import("./ChatFirstApp.jsx");
     expect(module.runChatFirstJobSearch).toBeTypeOf("function");
     const controller = new AbortController();
@@ -817,133 +838,151 @@ describe("ChatFirstAppView", () => {
       enabledTrackedCompanies: 1,
       deterministicSources: { attempted: 3 },
     };
-    const runtimeStatus = {
-      ai: { available: true, route: "installed" },
-      aiWebSearch: { available: true },
-    };
     const api = {
       getSearchSourceStatus: vi.fn(async () => sourceStatus),
-      getRuntimeConfig: vi.fn(async () => runtimeStatus),
+      getRuntimeConfig: vi.fn(),
       getInstalledAiRuntimes: vi.fn(() => {
         throw new Error("a search must not re-probe installed runtimes");
       }),
       startSearchRun: vi.fn(),
-      getSourcingRun: vi.fn(),
+      getSearchExecution: vi.fn(),
     };
-    const runDeterministicLane = vi.fn(async () => ({ ok: true }));
-    const runAiLane = vi.fn(async () => ({ ok: true }));
-    const runCoordinator = vi.fn(async (options) => {
-      expect(options.capabilities).toEqual({
-        deterministic: { configured: true, executable: true },
-        aiWeb: { configured: true, executable: true },
-      });
-      await options.runDeterministic({ signal: controller.signal, onLaneState: vi.fn() });
-      await options.runAiWeb({ signal: controller.signal, onLaneState: vi.fn() });
-      return { ok: true };
-    });
+    const runUnifiedSearch = vi.fn(async () => ({ ok: true }));
 
     await module.runChatFirstJobSearch({
       api,
       refetch: vi.fn(),
       setSearchState: vi.fn(),
       signal: controller.signal,
-      runCoordinator,
-      runDeterministicLane,
-      runAiLane,
+      runUnifiedSearch,
       createSearchExecutionId: () => "search-execution-shared",
     });
 
     expect(api.getSearchSourceStatus).not.toHaveBeenCalled();
-    expect(api.getRuntimeConfig).toHaveBeenCalledOnce();
+    expect(api.getRuntimeConfig).not.toHaveBeenCalled();
     expect(api.getInstalledAiRuntimes).not.toHaveBeenCalled();
-    expect(runDeterministicLane).toHaveBeenCalledWith(
+    expect(runUnifiedSearch).toHaveBeenCalledWith(
       expect.objectContaining({
         startSearchRun: api.startSearchRun,
-        getSourcingRun: api.getSourcingRun,
-        searchExecutionId: "search-execution-shared",
-        signal: controller.signal,
-      })
-    );
-    expect(runAiLane).toHaveBeenCalledWith(
-      expect.objectContaining({
+        getSearchExecution: api.getSearchExecution,
         searchExecutionId: "search-execution-shared",
         signal: controller.signal,
       })
     );
   });
 
-  it("still starts deterministic search when optional AI availability cannot be read", async () => {
+  it("starts one server-owned unified execution and observes its exact durable id", async () => {
     const module = await import("./ChatFirstApp.jsx");
-    const runDeterministicLane = vi.fn(async () => ({ ok: true }));
-    const runAiLane = vi.fn(async () => ({ ok: true }));
+    const api = {
+      getRuntimeConfig: vi.fn(),
+      startSearchRun: vi.fn(async () => ({
+        ok: true,
+        searchExecutionId: "search-adopted",
+        execution: { id: "search-adopted", status: "running" },
+      })),
+      getSearchExecution: vi.fn(),
+      getSourcingRun: vi.fn(),
+    };
+    const runUnifiedSearch = vi.fn(async (options) => ({
+      ok: true,
+      searchExecutionId: "search-adopted",
+      options,
+    }));
+    const refetch = vi.fn();
+    const setSearchState = vi.fn();
+    const controller = new AbortController();
+
+    await module.runChatFirstJobSearch({
+      api,
+      retry: { aiPromptIds: ["old-prompt"] },
+      refetch,
+      setSearchState,
+      signal: controller.signal,
+      runUnifiedSearch,
+      createSearchExecutionId: () => "search-fresh",
+    });
+
+    expect(runUnifiedSearch).toHaveBeenCalledOnce();
+    expect(runUnifiedSearch).toHaveBeenCalledWith({
+      startSearchRun: api.startSearchRun,
+      getSearchExecution: api.getSearchExecution,
+      searchExecutionId: "search-fresh",
+      refetch,
+      setSearchState,
+      signal: controller.signal,
+    });
+    expect(api.getRuntimeConfig).not.toHaveBeenCalled();
+    expect(api.getSourcingRun).not.toHaveBeenCalled();
+  });
+
+  it("does not block unified search on optional runtime availability preflight", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const getRuntimeConfig = vi.fn(async () => {
+      throw new Error("runtime status unavailable");
+    });
+    const runUnifiedSearch = vi.fn(async () => ({ ok: true }));
 
     const result = await module.runChatFirstJobSearch({
       api: {
-        getRuntimeConfig: vi.fn(async () => {
-          throw new Error("runtime status unavailable");
-        }),
+        getRuntimeConfig,
+        startSearchRun: vi.fn(),
+        getSearchExecution: vi.fn(),
       },
-      runDeterministicLane,
-      runAiLane,
+      runUnifiedSearch,
       createSearchExecutionId: () => "search-without-ai-status",
     });
 
     expect(result).toMatchObject({ ok: true });
-    expect(runDeterministicLane).toHaveBeenCalledWith(
+    expect(getRuntimeConfig).not.toHaveBeenCalled();
+    expect(runUnifiedSearch).toHaveBeenCalledWith(
       expect.objectContaining({ searchExecutionId: "search-without-ai-status" })
     );
-    expect(runAiLane).not.toHaveBeenCalled();
   });
 
-  it("uses the dedicated AI search capability instead of the generic AI route status", async () => {
+  it("leaves AI lane availability to the server-owned coordinator", async () => {
     const module = await import("./ChatFirstApp.jsx");
-    const runDeterministicLane = vi.fn(async () => ({ ok: true }));
-    const runAiLane = vi.fn(async () => ({ ok: true }));
+    const getRuntimeConfig = vi.fn();
+    const runUnifiedSearch = vi.fn(async () => ({ ok: true }));
 
     await module.runChatFirstJobSearch({
       api: {
-        getRuntimeConfig: vi.fn(async () => ({
-          ai: { available: true, route: "installed" },
-          aiWebSearch: { available: false },
-        })),
+        getRuntimeConfig,
+        startSearchRun: vi.fn(),
+        getSearchExecution: vi.fn(),
       },
-      runDeterministicLane,
-      runAiLane,
+      runUnifiedSearch,
     });
 
-    expect(runDeterministicLane).toHaveBeenCalledOnce();
-    expect(runAiLane).not.toHaveBeenCalled();
+    expect(getRuntimeConfig).not.toHaveBeenCalled();
+    expect(runUnifiedSearch).toHaveBeenCalledOnce();
   });
 
   it("retries through a fresh unified search instead of replaying a stale AI lane", async () => {
     const module = await import("./ChatFirstApp.jsx");
     const api = {
-      getSearchSourceStatus: vi.fn(async () => ({
-        searches: { enabled: 2 },
-        deterministicSources: { attempted: 2 },
-      })),
-      getRuntimeConfig: vi.fn(async () => ({
-        ai: { available: true, route: "installed" },
-        aiWebSearch: { available: true },
-      })),
       startSearchRun: vi.fn(),
-      getSourcingRun: vi.fn(),
+      getSearchExecution: vi.fn(),
     };
-    const runDeterministicLane = vi.fn(async () => ({ ok: true }));
-    const runAiLane = vi.fn(async () => ({ ok: true, data: { new: 1 } }));
+    const ids = ["search-first", "search-retry"];
+    const runUnifiedSearch = vi.fn(async () => ({ ok: true, partial: false }));
 
+    await module.runChatFirstJobSearch({
+      api,
+      runUnifiedSearch,
+      createSearchExecutionId: () => ids.shift(),
+    });
     const result = await module.runChatFirstJobSearch({
       api,
-      retry: { aiPromptIds: ["p2"] },
-      refetch: vi.fn(),
-      setSearchState: vi.fn(),
-      runDeterministicLane,
-      runAiLane,
+      retry: { aiPromptIds: ["p2"], searchExecutionId: "search-first" },
+      runUnifiedSearch,
+      createSearchExecutionId: () => ids.shift(),
     });
 
-    expect(runDeterministicLane).toHaveBeenCalledOnce();
-    expect(runAiLane).toHaveBeenCalledOnce();
-    expect(runAiLane.mock.calls[0][0]).not.toHaveProperty("promptIds");
+    expect(runUnifiedSearch.mock.calls.map(([options]) => options.searchExecutionId)).toEqual([
+      "search-first",
+      "search-retry",
+    ]);
+    expect(runUnifiedSearch.mock.calls[1][0]).not.toHaveProperty("retry");
     expect(result).toMatchObject({ ok: true, partial: false });
   });
 

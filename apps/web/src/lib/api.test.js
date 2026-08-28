@@ -7,6 +7,7 @@ import {
   finishOnboarding,
   getResumeExtraction,
   getRuntimeConfig,
+  getSearchExecution,
   getSourcingRun,
   markCommSent,
   openDeepIngestThread,
@@ -17,7 +18,6 @@ import {
   replaceEvidenceClaims,
   requestHostedInterest,
   retryDeepIngestSource,
-  runAiWebSearchStream,
   runWorkspaceIntent,
   scheduleInterview,
   sendChatMessage,
@@ -510,49 +510,7 @@ describe("completeDiscovery", () => {
   });
 });
 
-describe("runAiWebSearchStream", () => {
-  it("uses the shared split-frame/comment parser for AI lane events", async () => {
-    const encoder = new TextEncoder();
-    const body = new ReadableStream({
-      start(controller) {
-        controller.enqueue(encoder.encode(": ping\n\nda"));
-        controller.enqueue(
-          encoder.encode(
-            'ta: {"type":"activity","message":"Searching"}\n\n' +
-              'data: {"type":"done","data":{"searched":1,"found":1,"new":1,"duplicates":0,"errors":[]}}'
-          )
-        );
-        controller.close();
-      },
-    });
-    const fetchMock = vi.fn(async () => new Response(body, { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
-    const events = [];
-
-    await runAiWebSearchStream({
-      onEvent: (event) => events.push(event),
-      promptIds: ["p2"],
-      searchExecutionId: "search-execution-shared",
-    });
-
-    expect(fetchMock).toHaveBeenCalledWith("/api/search/ai-web-search/run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        promptIds: ["p2"],
-        searchExecutionId: "search-execution-shared",
-      }),
-      signal: undefined,
-    });
-    expect(events).toEqual([
-      { type: "activity", message: "Searching" },
-      {
-        type: "done",
-        data: { searched: 1, found: 1, new: 1, duplicates: 0, errors: [] },
-      },
-    ]);
-  });
-
+describe("durable sourcing reads", () => {
   it("requests an exact durable run when an id is supplied", async () => {
     const fetchMock = vi.fn(
       async () =>
@@ -567,6 +525,25 @@ describe("runAiWebSearchStream", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/sourcing/runs/latest?purpose=manual-search&id=manual-running",
+      expect.any(Object)
+    );
+  });
+
+  it("requests one durable unified search execution by exact id", async () => {
+    const execution = { id: "search-execution-1", status: "running" };
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true, execution }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getSearchExecution({ searchExecutionId: execution.id });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sourcing/execution?id=search-execution-1",
       expect.any(Object)
     );
   });

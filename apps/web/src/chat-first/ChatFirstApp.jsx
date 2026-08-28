@@ -3,10 +3,9 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { ArtifactViewerModal } from "../jobs/ArtifactViewerModal.jsx";
 import {
   classifyDurableSearchRun,
-  followUnifiedAiWebSearch,
-  jobSearchCapabilities,
-  runCoordinatedJobSearch,
-  runJobsPageSearch,
+  followSearchExecution,
+  runUnifiedJobSearch,
+  searchExecutionPresentation,
 } from "../jobs/jobsSearch.js";
 import { resolveErrorCopy } from "../lib/errorCopy.js";
 import { safeDisplayDetail } from "../lib/safe-display-details.js";
@@ -284,6 +283,54 @@ export async function loadVisibleSearchRuns({ getSourcingRun, signal } = {}) {
   };
 }
 
+function newestVisibleDeterministicRun(values) {
+  const deterministicRuns = values.filter(
+    (value) => value?.run && value.run.status !== "not_started"
+  );
+  const running = deterministicRuns.filter((value) => value.run.status === "running");
+  const candidates = running.length ? running : deterministicRuns;
+  const timestamp = (value) => {
+    const run = value?.run || {};
+    for (const candidate of [
+      run.updatedAt,
+      run.updated_at,
+      run.startedAt,
+      run.started_at,
+      run.completedAt,
+      run.completed_at,
+    ]) {
+      const parsed = Date.parse(candidate || "");
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return 0;
+  };
+  return candidates.sort((left, right) => timestamp(right) - timestamp(left))[0] || values[0];
+}
+
+export async function loadVisibleSearchState({ getSourcingRun, getSearchExecution, signal } = {}) {
+  const request = (purpose) => getSourcingRun({ purpose, ...(signal ? { signal } : {}) });
+  const [manualSearch, firstSearch] = await Promise.all([
+    request("manual-search"),
+    request("first-search"),
+  ]);
+  const deterministic = newestVisibleDeterministicRun([manualSearch, firstSearch]);
+  const searchExecutionId = durableSearchExecutionId(deterministic);
+  let execution = null;
+  if (searchExecutionId && typeof getSearchExecution === "function") {
+    try {
+      const response = await getSearchExecution({
+        searchExecutionId,
+        ...(signal ? { signal } : {}),
+      });
+      if (response?.execution?.id === searchExecutionId) execution = response.execution;
+    } catch {
+      // Older workspaces can have child-run correlation metadata without the
+      // unified execution row. Keep their deterministic result visible.
+    }
+  }
+  return { deterministic, execution };
+}
+
 function durableSearchExecutionId(value) {
   const id = value?.run?.metadata?.searchExecutionId ?? value?.metadata?.searchExecutionId;
   return typeof id === "string" && id.trim() ? id.trim() : null;
@@ -501,71 +548,18 @@ export async function runChatFirstJobSearch({
   refetch,
   setSearchState,
   signal,
-  runCoordinator = runCoordinatedJobSearch,
-  runDeterministicLane = runJobsPageSearch,
-  runAiLane = followUnifiedAiWebSearch,
+  runUnifiedSearch = runUnifiedJobSearch,
   createSearchExecutionId: createSearchExecutionIdFn = createSearchExecutionId,
 } = {}) {
-  let runtimeConfig = null;
-  try {
-    runtimeConfig = await api?.getRuntimeConfig?.();
-  } catch {
-    // The deterministic server route owns source healing and still runs when
-    // optional AI availability cannot be read.
-  }
-  const aiSearchAvailable = runtimeConfig?.aiWebSearch?.available === true;
-  const capabilities = jobSearchCapabilities({
-    ai: {
-      configured: aiSearchAvailable,
-      executable: aiSearchAvailable,
-    },
-  });
-
   const searchExecutionId = createSearchExecutionIdFn();
-  const result = await runCoordinator({
-    capabilities,
+  return runUnifiedSearch({
+    startSearchRun: api.startSearchRun,
+    getSearchExecution: api.getSearchExecution,
+    searchExecutionId,
     refetch,
     setSearchState,
     signal,
-    runDeterministic: ({ signal: laneSignal, onLaneState }) =>
-      runDeterministicLane({
-        startSearchRun: api.startSearchRun,
-        getSourcingRun: api.getSourcingRun,
-        searchExecutionId,
-        setSearchRun: (run) => {
-          const presentation = sourceSweepPresentation(run);
-          onLaneState?.({
-            ...(presentation.detail || presentation.summary
-              ? { detail: presentation.detail || presentation.summary }
-              : {}),
-            ...(presentation.providers ? { providers: presentation.providers } : {}),
-          });
-        },
-        setSearchError: (error) => {
-          if (error) onLaneState?.({ error });
-        },
-        signal: laneSignal,
-      }),
-    runAiWeb: ({ signal: laneSignal, onLaneState }) =>
-      runAiLane({
-        getSourcingRun: api.getSourcingRun,
-        searchExecutionId,
-        refetch,
-        signal: laneSignal,
-        setStatus: () => undefined,
-        setActivity: (detail) => {
-          if (detail) onLaneState?.({ detail });
-        },
-        setCounts: (counts) => {
-          if (counts) onLaneState?.({ counts });
-        },
-        setError: (error) => {
-          if (error) onLaneState?.({ error });
-        },
-      }),
   });
-  if (!result?.retry) return result;
-  return { ...result, retry: { ...result.retry, searchExecutionId } };
 }
 const SKILL_CHAT_EVENT_TYPES = [
   "assistant",
@@ -1610,7 +1604,6 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   const [sweepComparison, setSweepComparison] = useState(0);
   const sweepBaselineRef = useRef(null);
   const sweepAbortRef = useRef(null);
-  const sweepRetryRef = useRef(null);
   const missionExecutionRef = useRef(new Set());
   const workspaceSubmissionRef = useRef(null);
   const companyOperationBatchRef = useRef(null);
@@ -2113,35 +2106,51 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     const controller = new AbortController();
     void (async () => {
       try {
-        const loaded = await loadVisibleSearchRuns({
+        const loaded = await loadVisibleSearchState({
           getSourcingRun: api.getSourcingRun,
+          getSearchExecution: api.getSearchExecution,
           signal: controller.signal,
         });
         if (controller.signal.aborted) return;
-        const hydrated = hydrateVisibleSearchRuns(loaded);
-        setSourceSweep({ ...hydrated.sourceSweep, retry: hydrated.retry });
-        sweepRetryRef.current = hydrated.retry;
-        const hasRunning = [loaded.deterministic, loaded.aiWeb].some(
-          (value) => value?.run?.status === "running"
-        );
-        if (!hasRunning) return;
-        const followed = await followVisibleSearchRuns({
-          loaded,
+        if (loaded.execution) {
+          setSourceSweep(searchExecutionPresentation(loaded.execution));
+          if (["completed", "failed", "cancelled"].includes(loaded.execution.status)) return;
+          const followed = await followSearchExecution({
+            getSearchExecution: api.getSearchExecution,
+            searchExecutionId: loaded.execution.id,
+            initialExecution: loaded.execution,
+            refetch: dashboard.refetch,
+            setSearchState: setSourceSweep,
+            signal: controller.signal,
+          });
+          if (!controller.signal.aborted && followed.timedOut) {
+            setSourceSweep((current) => ({
+              ...current,
+              status: "running",
+              detail: "Search is still running in the background. Reload later to see results.",
+            }));
+          }
+          return;
+        }
+        const hydrated = hydrateVisibleSearchRuns({ deterministic: loaded.deterministic });
+        setSourceSweep(hydrated.sourceSweep);
+        const run = loaded.deterministic?.run;
+        if (run?.status !== "running" || !run.id || !run.purpose) return;
+        const followed = await followExactSearchRun({
           getSourcingRun: api.getSourcingRun,
+          id: run.id,
+          purpose: run.purpose,
           signal: controller.signal,
+          pollIntervalMs: 2500,
+          pollTimeoutMs: 10 * 60 * 1000,
         });
         if (controller.signal.aborted || followed.aborted) return;
-        const completed = hydrateVisibleSearchRuns(followed.runs);
-        if (followed.timedOut) {
-          completed.sourceSweep = {
-            ...completed.sourceSweep,
-            status: "running",
-            detail: "Search is still running in the background. Reload later to see results.",
-          };
+        if (followed.run) {
+          setSourceSweep(
+            hydrateVisibleSearchRuns({ deterministic: { run: followed.run } }).sourceSweep
+          );
+          await dashboard.refetch?.();
         }
-        setSourceSweep({ ...completed.sourceSweep, retry: completed.retry });
-        sweepRetryRef.current = completed.retry;
-        await dashboard.refetch?.();
       } catch (cause) {
         if (!controller.signal.aborted) {
           setSourceSweep({ status: "error", summary: errorCopy(cause) });
@@ -2746,16 +2755,10 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     try {
       const result = await runChatFirstJobSearch({
         api,
-        retry: sweepRetryRef.current,
         refetch: dashboard.refetch,
         setSearchState: setSourceSweep,
         signal: controller.signal,
       });
-      if (!result?.aborted) {
-        const retry = result?.retry || null;
-        sweepRetryRef.current = retry;
-        setSourceSweep((current) => ({ ...current, retry }));
-      }
       if (result?.ok) setSweepComparison((current) => current + 1);
       else if (!result?.timedOut) sweepBaselineRef.current = null;
     } finally {

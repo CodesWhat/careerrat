@@ -446,43 +446,6 @@ export async function streamResumeAi(file, { onEvent, signal } = {}) {
   await parseSseStream(res.body, { onEvent });
 }
 
-// POST /api/search/ai-web-search/run — the Jobs > Search tab's AI web-search
-// lane. Same `data: <json>\n\n` frame / `: ping` heartbeat contract as
-// resume-ai-stream above (parsed by the same parseSseStream), but this
-// route's own payload shapes: {type:"activity", message} progress lines,
-// {type:"done", data:{searched, found, new, duplicates, errors}}, and
-// {type:"error", message}. No request body — the server reads the saved
-// search prompts itself (see getSearchPrompts/saveSearchPrompts above).
-// Pre-stream failures are ordinary ApiError throws: 409 while a run is
-// already in flight, other 4xx/5xx for no-AI/no-prompts/lean-downshift with
-// the API's standard error shape. Static preview has no run route at all —
-// same immediate-throw contract as streamResumeAi above.
-export async function runAiWebSearchStream({ onEvent, promptIds, searchExecutionId, signal } = {}) {
-  const res = await fetch("/api/search/ai-web-search/run", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      ...(Array.isArray(promptIds) ? { promptIds } : {}),
-      ...(searchExecutionId ? { searchExecutionId } : {}),
-    }),
-    signal,
-  });
-  if (!res.ok || !res.body) {
-    const text = await res.text().catch(() => "");
-    let body = {};
-    if (text) {
-      try {
-        body = JSON.parse(text);
-      } catch {
-        body = { raw: text };
-      }
-    }
-    throw new ApiError(res.status, body);
-  }
-
-  await parseSseStream(res.body, { onEvent });
-}
-
 export async function extractResumeDocx(file) {
   const res = await fetch(`/api/onboard/resume-docx?name=${encodeURIComponent(file.name)}`, {
     method: "POST",
@@ -537,27 +500,17 @@ export function getSourcingRun({ purpose, id, signal } = {}) {
   });
 }
 
+export function getSearchExecution({ searchExecutionId, signal } = {}) {
+  const params = new URLSearchParams();
+  if (searchExecutionId) params.set("id", searchExecutionId);
+  const query = params.toString();
+  return apiFetch(`/api/sourcing/execution${query ? `?${query}` : ""}`, {
+    ...(signal ? { signal } : {}),
+  });
+}
+
 export function getSearchSourceStatus() {
   return apiFetch("/api/search/sources");
-}
-
-// AI search-assistant prompts (src/cli/search-route.mjs) — generate-first:
-// CareerRat generates the prompts, the user edits/adds/removes afterward.
-// GET/PUT both unwrap to the stored { id, text, source, updatedAt } list;
-// generate additionally persists server-side before returning it.
-export function getSearchPrompts() {
-  return apiFetch("/api/search/prompts", { method: "GET" });
-}
-
-export function generateSearchPrompts() {
-  return apiFetch("/api/search/prompts/generate", { method: "POST" });
-}
-
-export function saveSearchPrompts(prompts) {
-  return apiFetch("/api/search/prompts", {
-    method: "PUT",
-    body: JSON.stringify({ prompts }),
-  });
 }
 
 export function startFirstSearchRun(payload = {}) {
