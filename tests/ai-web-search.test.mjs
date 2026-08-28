@@ -730,6 +730,71 @@ test("runAiWebSearch keeps the exact event fixture hints atomic and scopes remot
   }
 });
 
+test("runAiWebSearch keeps US-remote scope separate from the following NYC hybrid clause", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: false,
+        max_commute_days_per_week: 2,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        {
+          name: "Developer infrastructure",
+          titles: ["Developer Infrastructure Engineer", "Developer Experience Engineer"],
+        },
+      ],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      {
+        id: "p1",
+        text: "Find currently active Developer Infrastructure and Developer Experience Engineer roles that are either US-remote or hybrid in New York City with at most two office days.",
+      },
+    ],
+  });
+  let plan = null;
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      plan =
+        typeof input === "string"
+          ? JSON.parse(input.split("\n\n", 1)[0]).search_plan
+          : input.search_plan;
+      emitAssistantJson(onEvent, {
+        roles: [],
+        queries_run: [{ prompt_id: "p1", query: "developer infrastructure", status: "completed" }],
+      });
+      return { ok: true };
+    },
+  });
+
+  assert.ok(plan.query_hints.length > 0);
+  for (const { query } of plan.query_hints) {
+    assert.match(query, /"New York, NY"/);
+    assert.match(query, /remote "United States"/i);
+    assert.doesNotMatch(query, /office days/i);
+  }
+});
+
 test("runAiWebSearch recognizes a comma-qualified configured title in prompt word order", async () => {
   const repoRoot = repo({ prompts: 1 });
   candidateConfigPatch({

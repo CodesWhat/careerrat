@@ -464,6 +464,14 @@ test("US-only remote scope rejects foreign, global, and region-unknown remote ro
       offer("remote-us-strict", "Remote US Strict", "Remote - United States"),
       offer("remote-de", "Remote DE Corp", "Remote DE; Aachen; Munich"),
       offer("remote-germany", "Remote Germany Corp", "Remote - Germany"),
+      {
+        ...offer(
+          "remote-germany-postal-country",
+          "Remote Germany Postal Corp",
+          "Offenbach am Main, HESSE, 63071, DE"
+        ),
+        title: "Platform Engineer - Full Remote",
+      },
       offer("remote-emea-strict", "Remote EMEA Strict", "Remote - EMEA"),
       offer("remote-global", "Remote Global Corp", "Remote - Worldwide"),
       offer("remote-anywhere", "Remote Anywhere Corp", "Remote - Anywhere"),
@@ -481,6 +489,7 @@ test("US-only remote scope rejects foreign, global, and region-unknown remote ro
     [
       ["Remote DE Corp", "remote-region-mismatch"],
       ["Remote Germany Corp", "remote-region-mismatch"],
+      ["Remote Germany Postal Corp", "remote-region-mismatch"],
       ["Remote EMEA Strict", "remote-region-mismatch"],
       ["Remote Global Corp", "remote-region-unverified"],
       ["Remote Anywhere Corp", "remote-region-unverified"],

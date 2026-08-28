@@ -1078,14 +1078,18 @@ function parseSearchPlanRemoteIntent(prompt) {
           after
         );
       const occurrenceOutsideScope = scopedOutsideExclusion(clause);
+      const prefixScope = /\b(?:u\.?s\.?a?\.?|united states)[ -]*$/i.test(before)
+        ? "United States"
+        : "";
       const isNegated = prefixIsNegated || suffixIsNegated;
 
       if (!isNegated || occurrenceOutsideScope) explicit = true;
       scope ||=
         occurrenceOutsideScope ||
+        (!isNegated && prefixScope) ||
         (!isNegated &&
           after.match(
-            /\b(?:in|within)\s+(?:the\s+)?(.+?)(?=\s+(?:and|but)\s+(?:available|eligible|open|accessible)\b|$)/i
+            /^\s*(?:anywhere\s+)?(?:in|within)\s+(?:the\s+)?(.+?)(?=\s+(?:and|but)\s+(?:available|eligible|open|accessible)\b|$)/i
           )?.[1]) ||
         "";
     }

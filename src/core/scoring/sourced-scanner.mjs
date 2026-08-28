@@ -361,6 +361,8 @@ const NO_SPONSORSHIP_RE =
   /\b(?:no|not|cannot|can't|unable to|do not|does not|won't|will not)\b[^.\n]{0,50}\b(?:visa )?sponsor(?:ship)?\b|\b(?:visa )?sponsorship\b[^.\n]{0,50}\b(?:not available|is unavailable)\b/i;
 const US_STATE_RE =
   /(?:^|[,\s])(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC)(?:$|[,\s])/i;
+const FOREIGN_POSTAL_COUNTRY_SUFFIX_RE =
+  /\b(?:[A-Z]\d[A-Z]\s?\d[A-Z]\d|\d{4,6})\s*,\s*[A-Z]{2}(?:\s*,\s*remote)?$/i;
 const US_STATE_NAMES = Object.freeze([
   ["AL", "Alabama"],
   ["AK", "Alaska"],
@@ -748,7 +750,9 @@ function locationEligibility(offer, config) {
     if (homeLooksUs(profileLocation.home)) {
       const local = commuteEligibility(location, profileLocation);
       if (local.eligible) return { eligible: true };
-      const usRemoteLocation = US_REMOTE_RE.test(location) || US_STATE_RE.test(location);
+      const foreignPostalCountry = FOREIGN_POSTAL_COUNTRY_SUFFIX_RE.test(location);
+      const usRemoteLocation =
+        US_REMOTE_RE.test(location) || (US_STATE_RE.test(location) && !foreignPostalCountry);
       if (FOREIGN_REMOTE_RE.test(location) && !usRemoteLocation) {
         return { eligible: false, reason: "remote-region-mismatch" };
       }
