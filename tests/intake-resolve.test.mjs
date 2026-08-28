@@ -381,6 +381,9 @@ test("Workday resolves a short posting URL to the current board row by requisiti
       ) {
         detailFetchCalled = true;
         return jsonResponse({
+          hiringOrganization: {
+            name: "Shake Shack",
+          },
           jobPostingInfo: {
             title: "Assistant General Manager",
             location: "New York, NY",
@@ -399,6 +402,7 @@ test("Workday resolves a short posting URL to the current board row by requisiti
   assert.equal(result.provider, "workday");
   assert.equal(result.providerExactMatch, true);
   assert.equal(result.title, "Assistant General Manager");
+  assert.equal(result.company, "Shake Shack");
   assert.equal(result.location, "New York, NY");
   assert.equal(result.url, canonicalUrl);
   assert.match(result.bodyText, /Lead a busy restaurant team/);

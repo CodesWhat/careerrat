@@ -219,6 +219,7 @@ export default {
     return {
       ...job,
       title: String(detail.title || job.title || '').trim(),
+      company: String(json?.hiringOrganization?.name || job.company || '').trim(),
       location: String(detail.location || job.location || '').trim(),
       ...(Number.isFinite(startDate) ? { postedAt: startDate } : {}),
       ...(description ? { description } : {}),
