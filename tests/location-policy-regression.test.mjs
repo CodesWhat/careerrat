@@ -554,6 +554,54 @@ test("incidental hybrid-workplace wording does not classify a remote role as hyb
   assert.equal(result.filteredLocation.length, 0);
 });
 
+test("declarative hybrid wording classifies the role itself as hybrid", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Brooklyn, NY",
+      remote: true,
+      hybrid: false,
+      onsite: false,
+      relocation: [],
+    },
+  };
+  const hybridRole = offer("country-hybrid-role", "Hybrid Role Corp", "United States");
+  hybridRole.bodyText = "This is a hybrid role.";
+  const hybridModel = offer("country-hybrid-model", "Hybrid Model Corp", "United States");
+  hybridModel.bodyText = "We offer a hybrid work model.";
+
+  const result = qualifyByLocation(profile, [hybridRole, hybridModel], {
+    generatedFilter: false,
+  });
+
+  assert.equal(result.kept.length, 0);
+  assert.deepEqual(
+    result.filteredLocation.map((row) => row.qualificationReason),
+    ["hybrid-not-allowed", "hybrid-not-allowed"]
+  );
+});
+
+test("a required two-day on-site schedule is hybrid when hybrid work is allowed", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Brooklyn, NY",
+      remote: true,
+      hybrid: true,
+      onsite: false,
+      max_commute_days_per_week: 2,
+      relocation: [],
+    },
+  };
+  const hybrid = offer("required-two-day-onsite", "Two Day Corp", "New York, NY");
+  hybrid.bodyText = "This position requires working on-site two days per week.";
+
+  const result = qualifyByLocation(profile, [hybrid], { generatedFilter: false });
+
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.filteredLocation.length, 0);
+});
+
 test("US-only remote scope rejects foreign, global, and region-unknown remote roles", () => {
   const profile = {
     candidate: { domain: "software engineering" },

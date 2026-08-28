@@ -425,7 +425,7 @@ const EXPLICIT_ONSITE_BODY_RE =
 const REQUIRED_ONSITE_WORK_BODY_RE =
   /\b(?:this|the)\s+(?:role|position|job)\s+(?:requires?|will require)\s+(?:(?:employees?|you)\s+to\s+)?(?:work(?:ing)?\s+)?(?:fully\s+)?(?:on[ -]?site|in[ -]?office|office[ -]?based|in[ -]?person)\b/i;
 const EXPLICIT_HYBRID_BODY_RE =
-  /\b(?:this|the)\s+(?:role|position|job)\s+(?:is|will be)\s+(?:a\s+)?hybrid\b|\b(?:this|the)\s+(?:role|position|job)\s+(?:follows?|uses?)\s+(?:a\s+)?hybrid\s+(?:work model|schedule)\b|\b(?:work model|workplace|location)\s*:\s*hybrid\b/i;
+  /\b(?:this|the)\s+(?:role|position|job)\s+(?:is|will be)\s+(?:a\s+)?hybrid\b|\b(?:this|the)\s+(?:role|position|job)\s+(?:follows?|uses?)\s+(?:a\s+)?hybrid\s+(?:work model|schedule)\b|\bthis\s+is\s+(?:a\s+)?hybrid\s+(?:role|position|job)\b|\bwe\s+(?:offer|use|follow|have)\s+(?:a\s+)?hybrid\s+(?:work model|schedule)\b|\b(?:work model|workplace|location)\s*:\s*hybrid\b/i;
 const OFFICE_CONTEXT_RE = /\b(?:office|on[ -]?site|in[ -]?office|in[ -]?person)\b/i;
 const REQUIRED_OFFICE_DAYS_RE = /\b(?:must|require(?:d|s)?|expect(?:ed|s)?|mandatory)\b/i;
 const DECLARATIVE_OFFICE_POSTURE_RE =
@@ -701,10 +701,11 @@ function locationEligibility(offer, config) {
 
   const officeDays = requiredOfficeDaysPerWeek(body);
   const conditional = conditionalLocationPosture(body);
+  const requiredOnsiteWork = REQUIRED_ONSITE_WORK_BODY_RE.test(body);
   const bodyOnsite =
     EXPLICIT_ONSITE_BODY_RE.test(body) ||
-    REQUIRED_ONSITE_WORK_BODY_RE.test(body) ||
-    (officeDays != null && officeDays >= 4);
+    (officeDays != null && officeDays >= 4) ||
+    (requiredOnsiteWork && officeDays == null);
   const bodyHybrid =
     !bodyOnsite && (EXPLICIT_HYBRID_BODY_RE.test(body) || (officeDays != null && officeDays > 0));
   if (!location && !conditional && !bodyOnsite && !bodyHybrid) {
