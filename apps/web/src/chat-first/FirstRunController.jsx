@@ -1169,11 +1169,17 @@ export function FirstRunController({
           cut_signals: cleanLines(values.signals),
         });
       } else if (sectionId === "quickFacts") {
-        const compensationFloor = moneyAmount(values.compensationFloor ?? values.minimumBase);
-        const compensation =
-          values.compensationFloorType === "annual-cash"
-            ? { minimum_base: null, minimum_annual_earnings: compensationFloor }
-            : { minimum_base: compensationFloor, minimum_annual_earnings: null };
+        const hasSeparateAnnualFloor = Object.hasOwn(values, "minimumAnnualEarnings");
+        const compensation = hasSeparateAnnualFloor
+          ? {
+              minimum_base: moneyAmount(values.minimumBase),
+              minimum_annual_earnings: moneyAmount(values.minimumAnnualEarnings),
+            }
+          : values.compensationFloorType === "annual-cash"
+            ? { minimum_annual_earnings: moneyAmount(values.compensationFloor) }
+            : {
+                minimum_base: moneyAmount(values.compensationFloor ?? values.minimumBase),
+              };
         const remoteScope = values.remoteScope === "worldwide" ? "worldwide" : "home-country";
         await api.saveCandidateFile("profile", {
           candidate: {

@@ -603,6 +603,46 @@ describe("chat-first onboarding controller", () => {
     );
   });
 
+  it("shows both compensation floors when both are already saved", () => {
+    const knowledge = buildFirstRunKnowledge(
+      {
+        setupProgress: {
+          completedCount: 0,
+          total: 8,
+          items: [{ key: "quickFacts", done: false }],
+        },
+        data: {
+          profile: {
+            compensation: {
+              minimum_base: 50000,
+              minimum_annual_earnings: 85000,
+            },
+          },
+        },
+      },
+      { name: "Claude Code" }
+    );
+    const fields = knowledge.items.find((item) => item.id === "quickFacts").editor.fields;
+
+    expect(fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "minimumBase",
+          value: "50000",
+          label: "Minimum guaranteed base pay",
+        }),
+        expect.objectContaining({
+          id: "minimumAnnualEarnings",
+          value: "85000",
+          label: "Minimum annual cash earnings",
+        }),
+      ])
+    );
+    expect(fields).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "compensationFloorType" })])
+    );
+  });
+
   it("adds the deterministic first-question suggestion without replacing typed answers", () => {
     const message = firstRunAssistantMessage(
       "One question at a time. First: what kind of role are you actually after?",

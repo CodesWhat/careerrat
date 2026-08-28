@@ -257,41 +257,63 @@ function buildKnowledgeEditor(key, state) {
     const location = profile.location || {};
     const minimumBase = Number(profile.compensation?.minimum_base);
     const minimumAnnualEarnings = Number(profile.compensation?.minimum_annual_earnings);
-    const useAnnualCash =
-      Number.isFinite(minimumAnnualEarnings) &&
-      minimumAnnualEarnings > 0 &&
-      !(Number.isFinite(minimumBase) && minimumBase > 0);
+    const hasMinimumBase = Number.isFinite(minimumBase) && minimumBase > 0;
+    const hasMinimumAnnualEarnings =
+      Number.isFinite(minimumAnnualEarnings) && minimumAnnualEarnings > 0;
+    const useAnnualCash = hasMinimumAnnualEarnings && !hasMinimumBase;
     const compensationFloor = useAnnualCash ? minimumAnnualEarnings : minimumBase;
+    const compensationFields =
+      hasMinimumBase && hasMinimumAnnualEarnings
+        ? [
+            editorField(
+              "minimumBase",
+              "Minimum guaranteed base pay",
+              "number",
+              String(minimumBase),
+              { min: "0", step: "1000" }
+            ),
+            editorField(
+              "minimumAnnualEarnings",
+              "Minimum annual cash earnings",
+              "number",
+              String(minimumAnnualEarnings),
+              { min: "0", step: "1000" }
+            ),
+          ]
+        : [
+            editorField(
+              "compensationFloorType",
+              "How should CareerRat screen pay?",
+              "select",
+              useAnnualCash ? "annual-cash" : "guaranteed-base",
+              {
+                options: [
+                  { value: "guaranteed-base", label: "Guaranteed base pay" },
+                  {
+                    value: "annual-cash",
+                    label:
+                      "Total yearly cash earnings (tips, commission, or cash bonuses included)",
+                  },
+                ],
+              }
+            ),
+            editorField(
+              "compensationFloor",
+              "Minimum yearly amount",
+              "number",
+              Number.isFinite(compensationFloor) && compensationFloor > 0
+                ? String(compensationFloor)
+                : "",
+              { min: "0", step: "1000" }
+            ),
+          ];
     return {
       fields: [
         editorField("name", "Name", "text", candidate.full_name || ""),
         editorField("email", "Email", "email", candidate.email || ""),
         editorField("phone", "Phone", "text", candidate.phone || ""),
         editorField("home", "Home market", "text", location.home || candidate.location || ""),
-        editorField(
-          "compensationFloorType",
-          "How should CareerRat screen pay?",
-          "select",
-          useAnnualCash ? "annual-cash" : "guaranteed-base",
-          {
-            options: [
-              { value: "guaranteed-base", label: "Guaranteed base pay" },
-              {
-                value: "annual-cash",
-                label: "Total yearly cash earnings (tips, commission, or cash bonuses included)",
-              },
-            ],
-          }
-        ),
-        editorField(
-          "compensationFloor",
-          "Minimum yearly amount",
-          "number",
-          Number.isFinite(compensationFloor) && compensationFloor > 0
-            ? String(compensationFloor)
-            : "",
-          { min: "0", step: "1000" }
-        ),
+        ...compensationFields,
         editorField(
           "remoteScope",
           "Remote job eligibility",

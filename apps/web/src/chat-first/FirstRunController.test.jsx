@@ -1976,7 +1976,7 @@ describe("FirstRunController chat event reconciliation", () => {
         onsite: false,
         mode_preferences_confirmed: true,
       },
-      compensation: { minimum_base: 190000, minimum_annual_earnings: null },
+      compensation: { minimum_base: 190000 },
     });
 
     await view.props.onSaveKnowledgeSection(
@@ -1996,7 +1996,28 @@ describe("FirstRunController chat event reconciliation", () => {
     expect(api.saveCandidateFile).toHaveBeenCalledWith(
       "profile",
       expect.objectContaining({
-        compensation: { minimum_base: null, minimum_annual_earnings: 90000 },
+        compensation: { minimum_annual_earnings: 90000 },
+      })
+    );
+
+    await view.props.onSaveKnowledgeSection(
+      { id: "quickFacts" },
+      {
+        name: "Jordan Rivera",
+        email: "jordan@example.test",
+        phone: "+1 212 555 0199",
+        home: "New York, NY",
+        minimumBase: "$50,000",
+        minimumAnnualEarnings: "$85,000",
+        remoteScope: "home-country",
+        hybrid: true,
+        onsite: false,
+      }
+    );
+    expect(api.saveCandidateFile).toHaveBeenCalledWith(
+      "profile",
+      expect.objectContaining({
+        compensation: { minimum_base: 50000, minimum_annual_earnings: 85000 },
       })
     );
 

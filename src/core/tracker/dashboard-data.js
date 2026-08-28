@@ -3694,16 +3694,32 @@ function fitLabel(row) {
   return `${isTriageFit(row) ? "~" : ""}${row.fit}`;
 }
 
-function compactComp(base, tc) {
+function secondaryCompBasis(row = {}) {
+  if (row.compBasis === "annual-earnings" || row.comp?.basis === "annual-earnings") {
+    return "annual-earnings";
+  }
+  const evaluated = row.evaluation?.compensation;
+  if (evaluated?.minAnnualEarnings !== null && evaluated?.minAnnualEarnings !== undefined) {
+    return "annual-earnings";
+  }
+  if (evaluated?.maxAnnualEarnings !== null && evaluated?.maxAnnualEarnings !== undefined) {
+    return "annual-earnings";
+  }
+  return null;
+}
+
+function compactComp(base, tc, basis = null) {
   const baseDisplay = base || "TBD";
   const tcDisplay = tc || "";
   const midpoint = medianMoneyK(baseDisplay) || medianMoneyK(tcDisplay);
+  const secondaryLabel = basis === "annual-earnings" ? "Annual cash" : "TC";
   return {
     base: baseDisplay,
     tc: tcDisplay,
+    basis,
     midpoint,
     compact: formatMoneyK(midpoint),
-    summary: tcDisplay ? `${baseDisplay} base · ${tcDisplay} TC` : baseDisplay,
+    summary: tcDisplay ? `${baseDisplay} base · ${tcDisplay} ${secondaryLabel}` : baseDisplay,
   };
 }
 
@@ -4587,7 +4603,11 @@ function applicationJobRow(app, index, communications = [], now = new Date(), pr
   const location = app.loc || app.location || app.mode || "";
   const mode = modeInfo(app.mode || "", location);
   const source = sourceInfo("application", app.channel || "");
-  const comp = compactComp(app.base || app.comp?.base || "", app.tc || app.comp?.tc || "");
+  const comp = compactComp(
+    app.base || app.comp?.base || "",
+    app.tc || app.comp?.tc || "",
+    secondaryCompBasis(app)
+  );
   const displayStageLabel = advancedByHistory
     ? stageGroupLabel(stage)
     : stage === "reviewed-hold"
@@ -4611,6 +4631,7 @@ function applicationJobRow(app, index, communications = [], now = new Date(), pr
     stageGroupLabel: stageGroupLabel(stage),
     comp: comp.base,
     tc: comp.tc,
+    compBasis: comp.basis,
     compCompact: comp.compact,
     compMidpointK: comp.midpoint,
     compSummary: comp.summary,
@@ -4690,7 +4711,11 @@ function sourcedJobRow(role, index, now = new Date(), profileComp = {}) {
   const mode = modeInfo(role.mode || "", location);
   const source = sourceInfo("sourced", role.fitBasis || "sourced");
   const aiDiscovered = role.source === "ai-web-search";
-  const comp = compactComp(role.base || role.comp?.base || "", role.tc || role.comp?.tc || "");
+  const comp = compactComp(
+    role.base || role.comp?.base || "",
+    role.tc || role.comp?.tc || "",
+    secondaryCompBasis(role)
+  );
   const row = {
     id: role.id || `sourced-${index + 1}`,
     drawerId: role.id || `sourced-${index + 1}`,
@@ -4706,6 +4731,7 @@ function sourcedJobRow(role, index, now = new Date(), profileComp = {}) {
     stageGroupLabel: stageGroupLabel(stage),
     comp: comp.base,
     tc: comp.tc,
+    compBasis: comp.basis,
     compCompact: comp.compact,
     compMidpointK: comp.midpoint,
     compSummary: comp.summary,

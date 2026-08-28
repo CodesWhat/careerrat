@@ -25,6 +25,66 @@ test("Dashboard adapterbuilds live UI state from tracker JSON", async () => {
   assert.ok(vm.jobs.sankey.nodes.length > 0);
 });
 
+test("Dashboard labels annual cash separately while legacy total compensation stays TC", () => {
+  const vm = buildDashboardViewModel(
+    {
+      applications: [
+        {
+          id: "evaluated-annual-cash",
+          company: "Annual Cash Co",
+          role: "Bartender",
+          status: "reviewed-hold",
+          base: "$23,608 - $23,608",
+          tc: "$95,000 - $120,000",
+          evaluation: {
+            compensation: {
+              basis: "annual-earnings",
+              minAnnualEarnings: 95000,
+              maxAnnualEarnings: 120000,
+            },
+          },
+        },
+      ],
+      sourced: [
+        {
+          id: "sourced-annual-cash",
+          company: "Tips Co",
+          role: "Bartender",
+          status: "sourced",
+          base: "$11.35 per hour",
+          tc: "$85,000 - $110,000",
+          compBasis: "annual-earnings",
+        },
+        {
+          id: "legacy-total-comp",
+          company: "Legacy Co",
+          role: "Engineer",
+          status: "sourced",
+          base: "$180,000 - $220,000",
+          tc: "$240,000 - $300,000",
+        },
+      ],
+      sources: [],
+      communications: [],
+    },
+    { now: new Date("2026-08-28T12:00:00.000Z") }
+  );
+  const rows = new Map(vm.jobs.rows.map((row) => [row.id, row]));
+
+  assert.equal(
+    rows.get("evaluated-annual-cash")?.compSummary,
+    "$23,608 - $23,608 base · $95,000 - $120,000 Annual cash"
+  );
+  assert.equal(
+    rows.get("sourced-annual-cash")?.compSummary,
+    "$11.35 per hour base · $85,000 - $110,000 Annual cash"
+  );
+  assert.equal(
+    rows.get("legacy-total-comp")?.compSummary,
+    "$180,000 - $220,000 base · $240,000 - $300,000 TC"
+  );
+});
+
 test("Dashboard adapter limits Activity to the 12 most recent events without pruning history", () => {
   const activityEvents = Array.from({ length: 15 }, (_, index) => ({
     id: `event-${index + 1}`,
