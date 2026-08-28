@@ -90,6 +90,19 @@ const MAX_FRESHNESS_RECOVERY_TURNS = 2;
 const MAX_USEFUL_SET_TOP_UP_TURNS = 3;
 const MIN_USEFUL_SET_ROLES = 3;
 const MIN_USEFUL_SET_BUCKETS = 2;
+const AI_WEB_SEARCH_TURN_LIMITS = Object.freeze({
+  scope: "prompt-turn",
+  web_search_calls: 2,
+  web_fetch_calls: 4,
+  hard_stop: true,
+});
+const COMMON_ATS_SEARCH_HOSTS = Object.freeze([
+  "job-boards.greenhouse.io",
+  "jobs.lever.co",
+  "jobs.ashbyhq.com",
+  "jobs.smartrecruiters.com",
+  "myworkdayjobs.com",
+]);
 const RESULT_URL_POLICY = Object.freeze([
   "Prefer employer-owned career pages and direct ATS postings.",
   "Use third-party boards to discover employer-and-title pairs, and attempt to resolve a direct posting URL before returning the third-party URL.",
@@ -591,6 +604,79 @@ function promptMatchesBucket(prompt, bucket) {
   );
 }
 
+function quoteSearchTerm(value) {
+  const text = String(value || "")
+    .replace(/["\r\n]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text ? `"${text}"` : "";
+}
+
+function searchPlanTitles(prompt, candidateContext) {
+  const titles = [];
+  const seen = new Set();
+  for (const bucket of Array.isArray(candidateContext?.role_buckets)
+    ? candidateContext.role_buckets
+    : []) {
+    const namedTitles = configuredTitlesNamedByPrompt(prompt, bucket);
+    const selectedTitles = namedTitles.length
+      ? namedTitles
+      : promptMatchesBucketName(prompt, bucket)
+        ? bucket.titles
+        : [];
+    for (const title of selectedTitles) {
+      const key = String(title || "")
+        .trim()
+        .toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      titles.push(String(title).trim());
+    }
+  }
+  return titles.slice(0, 4);
+}
+
+function searchPlanLocationClause(location = {}) {
+  const alternatives = [];
+  const home = quoteSearchTerm(location.home);
+  if (home) alternatives.push(home);
+  if (location.remote === true) alternatives.push("remote");
+  if (!home && location.hybrid === true) alternatives.push("hybrid");
+  if (!home && location.onsite === true) alternatives.push("onsite");
+  if (!alternatives.length) return "";
+  return alternatives.length === 1 ? alternatives[0] : `(${alternatives.join(" OR ")})`;
+}
+
+function buildPromptSearchPlan(prompt, candidateContext) {
+  const titles = searchPlanTitles(prompt, candidateContext);
+  const titleClause = titles.length
+    ? titles.length === 1
+      ? quoteSearchTerm(titles[0])
+      : `(${titles.map(quoteSearchTerm).join(" OR ")})`
+    : quoteSearchTerm(prompt.text);
+  const locationClause = searchPlanLocationClause(candidateContext?.location);
+  const directHostClause = [
+    "careers",
+    ...COMMON_ATS_SEARCH_HOSTS.map((host) => `site:${host}`),
+  ].join(" OR ");
+  const directQuery = [titleClause, locationClause, `(${directHostClause})`]
+    .filter(Boolean)
+    .join(" ");
+
+  // Native agent CLIs dispatch their own WebSearch/WebFetch calls before the
+  // server sees a tool event, so CareerRat cannot preempt an over-budget call
+  // provider-neutrally. A frozen per-turn plan plus the skill's hard-stop
+  // instruction is the strongest deterministic input contract available
+  // without provider-specific hooks.
+  return Object.freeze({
+    limits: AI_WEB_SEARCH_TURN_LIMITS,
+    query_hints: Object.freeze([
+      Object.freeze({ kind: "broad-saved-prompt", query: prompt.text }),
+      Object.freeze({ kind: "direct-employer-or-ats", query: directQuery }),
+    ]),
+  });
+}
+
 // search-jobs is deliberately excluded from the embedded runtime's default
 // allowlist (see skill-runtime.mjs's own DEFAULT_RUNTIME_SKILLS comment) — a
 // blanket CAREERRAT_RUNTIME_SKILLS opt-in shouldn't also hand every other
@@ -693,6 +779,9 @@ export async function runAiWebSearch({
     config,
     includeSearchLimits: true,
   });
+  const searchPlansByPrompt = new Map(
+    selected.map((prompt) => [prompt.id, buildPromptSearchPlan(prompt, candidateContext)])
+  );
   // Scoped once for the whole run, not per-attempt — see buildAiWebSearchEnv's
   // own comment on why search-jobs needs a per-call override here rather
   // than living in the embedded runtime's own default allowlist.
@@ -740,6 +829,7 @@ export async function runAiWebSearch({
       mode: "ai-web-search",
       prompts: [{ id: prompt.id, text: prompt.text }],
       candidate: candidateContext,
+      search_plan: searchPlansByPrompt.get(prompt.id),
       result_url_policy: RESULT_URL_POLICY,
     };
     const toolCalls = new Map();

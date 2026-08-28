@@ -234,6 +234,92 @@ test("runAiWebSearch gives every initial prompt the strict result URL routing po
   ]);
 });
 
+test("runAiWebSearch gives each prompt a server-owned hard budget and two generic query hints", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: false,
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        {
+          name: "Developer infrastructure",
+          titles: ["Platform Engineer", "Site Reliability Engineer"],
+        },
+      ],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  const savedPrompt =
+    "Find Platform Engineer and Site Reliability Engineer roles in New York or remote in the US";
+  saveSearchPrompts({ repoRoot, prompts: [{ id: "p1", text: savedPrompt }] });
+  const inputs = [];
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      emitAssistantJson(onEvent, {
+        roles: [
+          role({
+            company: "Infra One",
+            title: "Platform Engineer",
+            url: "https://jobs.example.test/infra-one",
+          }),
+          role({
+            company: "Infra Two",
+            title: "Site Reliability Engineer",
+            url: "https://jobs.example.test/infra-two",
+          }),
+          role({
+            company: "Infra Three",
+            title: "Platform Engineer",
+            url: "https://jobs.example.test/infra-three",
+          }),
+        ],
+        queries_run: [{ prompt_id: "p1", query: savedPrompt, status: "completed" }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver(),
+  });
+
+  assert.equal(typeof inputs[0], "object");
+  assert.deepEqual(inputs[0].search_plan.limits, {
+    scope: "prompt-turn",
+    web_search_calls: 2,
+    web_fetch_calls: 4,
+    hard_stop: true,
+  });
+  assert.equal(inputs[0].search_plan.query_hints.length, 2);
+  assert.deepEqual(inputs[0].search_plan.query_hints[0], {
+    kind: "broad-saved-prompt",
+    query: savedPrompt,
+  });
+  assert.equal(inputs[0].search_plan.query_hints[1].kind, "direct-employer-or-ats");
+  assert.match(inputs[0].search_plan.query_hints[1].query, /"Platform Engineer"/);
+  assert.match(inputs[0].search_plan.query_hints[1].query, /"Site Reliability Engineer"/);
+  assert.match(inputs[0].search_plan.query_hints[1].query, /"New York, NY"/);
+  assert.match(inputs[0].search_plan.query_hints[1].query, /\bremote\b/i);
+  assert.match(inputs[0].search_plan.query_hints[1].query, /\bcareers\b/i);
+  assert.match(inputs[0].search_plan.query_hints[1].query, /site:job-boards\.greenhouse\.io/);
+  assert.match(inputs[0].search_plan.query_hints[1].query, /site:jobs\.lever\.co/);
+  assert.doesNotMatch(inputs[0].search_plan.query_hints[1].query, /claude|codex|hospitality/i);
+});
+
 test("runAiWebSearch rejects aggregator result pages and expired redirects before hydration", async () => {
   const repoRoot = repo({ prompts: 1 });
   const directUrl = "https://www.linkedin.com/jobs/view/assistant-general-manager-5186736008";
@@ -666,6 +752,10 @@ test("AI web-search skill gives each saved prompt a small exploration budget", (
   );
   assert.match(skill, /at most 2 `WebSearch` calls per saved prompt/i);
   assert.match(skill, /at most 4 job-posting `WebFetch` calls per saved prompt/i);
+  assert.match(skill, /`search_plan`.*authoritative/i);
+  assert.match(skill, /failed.*(?:search|fetch).*(?:counts|consumes).*(?:budget|limit)/i);
+  assert.match(skill, /stop immediately.*(?:budget|limit).*return/i);
+  assert.match(skill, /query_hints.*(?:in order|exactly)/i);
   assert.match(skill, /never emit an aggregator search\/results page/i);
   assert.match(skill, /employer-owned career|employer career/i);
   assert.match(skill, /at least two (?:different )?(?:source )?hosts/i);
@@ -1754,6 +1844,8 @@ test("runAiWebSearch replaces a prompt batch erased by canonical liveness once",
   assert.equal(inputs.length, 5);
   assert.equal(typeof inputs[0], "object");
   assert.ok(inputs.slice(1).every((input) => typeof input === "string"));
+  const recoveryKickoff = JSON.parse(inputs[1].split("\n\n", 1)[0]);
+  assert.deepEqual(recoveryKickoff.search_plan, inputs[0].search_plan);
   assert.deepEqual(plans, Array(5).fill(executionPlan));
   assert.match(inputs[1], /replacement|recover|fresh/i);
   assert.match(inputs[1], /expired-role/);
