@@ -280,6 +280,7 @@ export function appSetStatus({
 }
 
 const RECORDED_OUTCOME_STATUSES = new Set([
+  "applied",
   "manual-apply",
   "awaiting",
   "interview",
@@ -290,7 +291,7 @@ const RECORDED_OUTCOME_STATUSES = new Set([
 
 function outcomeCommunicationStatus(status) {
   if (status === "rejected" || status === "withdrawn") return "closed";
-  if (status === "interview" || status === "offer") return "waiting";
+  if (status === "applied" || status === "interview" || status === "offer") return "waiting";
   return null;
 }
 
@@ -312,7 +313,13 @@ export function appRecordOutcome({ repoRoot, env, id, to, note, round, at } = {}
 
   return runVerb({ repoRoot, env }, (db) => {
     const app = requireApp(db, id);
-    const { from, updated } = applyStatusUpdate(app, { to, note, round, at: timestamp });
+    const { from, updated } = applyStatusUpdate(app, {
+      to,
+      note,
+      round,
+      at: timestamp,
+      ...(to === "applied" ? { appliedAt: timestamp } : {}),
+    });
     const communicationStatus = outcomeCommunicationStatus(to);
     if (communicationStatus && updated.followUp?.draft != null) {
       updated.followUp = { ...updated.followUp, draft: null };

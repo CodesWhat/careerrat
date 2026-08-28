@@ -4435,7 +4435,7 @@ function jobDetailFromRow(
   // A stale follow-up draft left after a send must never show a ghost "Ready to send" panel.
   // If a linked comm exists, reuse its status gate ({waiting, closed} = inactive).
   // If no linked comm, block when the application itself is in a terminal/done stage.
-  const FOLLOWUP_DONE_STAGES = new Set(["rejected", "withdrawn", "offer", "accepted"]);
+  const FOLLOWUP_DONE_STAGES = new Set(["applied", "rejected", "withdrawn", "offer", "accepted"]);
   const linkedComm = communications.find((c) => c.applicationId === sourceRecord.id);
   const followUpDraftActive = linkedComm
     ? !["waiting", "closed"].includes(linkedComm.status)

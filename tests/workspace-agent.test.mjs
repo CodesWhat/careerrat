@@ -6271,7 +6271,17 @@ test("confirmed interview intake is captured on the matched application through 
 
 test("I applied elsewhere records only the user-reported outcome in the same thread", async () => {
   const repoRoot = tempRepo();
-  seedApplication(repoRoot);
+  seedApplication(repoRoot, {
+    nextAction: "Submit the application",
+    nextActionDue: "2026-08-10",
+    followUp: { draft: { body: "I submitted the application." } },
+  });
+  seedCommunication(repoRoot, {
+    status: "drafted",
+    nextAction: "Confirm submission",
+    nextActionDue: "2026-08-10",
+    draft: { body: "I submitted the application." },
+  });
 
   const result = await executeWorkspaceIntent({
     repoRoot,
@@ -6288,6 +6298,12 @@ test("I applied elsewhere records only the user-reported outcome in the same thr
   assert.equal(app.status, "applied");
   assert.equal(app.appliedAt, "2026-08-08T19:30:00.000Z");
   assert.match(app.statusNote, /outside CareerRat/i);
+  assert.equal(app.followUp.draft, null);
+  const communication = readCommunication(repoRoot, "comm-temporal-recruiter");
+  assert.equal(communication.status, "waiting");
+  assert.equal(communication.nextAction, null);
+  assert.equal(communication.nextActionDue, null);
+  assert.equal(communication.draft, null);
   assert.deepEqual(
     result.messages.map(({ role, kind }) => ({ role, kind })),
     [
@@ -8531,9 +8547,8 @@ test("job.apply resumeSession accepts a persisted REVIEW only with explicit appr
 
 test("job.apply's resumeSession proceeds straight to the executor once the persisted gate and packet both corroborate", async () => {
   const repoRoot = tempRepo();
-  seedApplication(
-    repoRoot,
-    preparedPacketOverrides(repoRoot, {
+  seedApplication(repoRoot, {
+    ...preparedPacketOverrides(repoRoot, {
       evaluation: { gate: "keep", fitScore: 92 },
       packetManifest: {
         applicationId: "app-temporal",
@@ -8542,8 +8557,17 @@ test("job.apply's resumeSession proceeds straight to the executor once the persi
         gaps: [],
         artifacts: {},
       },
-    })
-  );
+    }),
+    nextAction: "Submit the application",
+    nextActionDue: "2026-08-10",
+    followUp: { draft: { body: "I submitted the application." } },
+  });
+  seedCommunication(repoRoot, {
+    status: "drafted",
+    nextAction: "Confirm submission",
+    nextActionDue: "2026-08-10",
+    draft: { body: "I submitted the application." },
+  });
   let applyCalls = 0;
 
   const result = await executeWorkspaceIntent({
@@ -8566,6 +8590,13 @@ test("job.apply's resumeSession proceeds straight to the executor once the persi
   assert.equal(result.messages.at(-1).metadata.submissionVerified, true);
   assert.equal(result.messages.at(-1).metadata.state, "applied");
   assert.equal(result.messages.at(-1).metadata.nextActions, undefined);
+  const application = readApplication(repoRoot, "app-temporal");
+  const communication = readCommunication(repoRoot, "comm-temporal-recruiter");
+  assert.equal(application.followUp.draft, null);
+  assert.equal(communication.status, "waiting");
+  assert.equal(communication.nextAction, null);
+  assert.equal(communication.nextActionDue, null);
+  assert.equal(communication.draft, null);
 });
 
 test("Draft reply uses the same agent context and persists a reviewable communication draft", async () => {

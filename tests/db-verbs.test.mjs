@@ -359,6 +359,49 @@ test("appRecordOutcome: rejection atomically clears every linked CTA and leaves 
   );
 });
 
+test("appRecordOutcome: applied atomically clears submission CTAs, drafts, and linked communication state", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+  commUpsert({
+    repoRoot,
+    row: {
+      ...JSON.parse(
+        db.prepare("SELECT data FROM communications WHERE id = ?").get("comm-with-draft").data
+      ),
+      nextAction: "Confirm the application was submitted",
+      nextActionDue: "2026-08-10",
+      messages: [],
+    },
+  });
+
+  const result = appRecordOutcome({
+    repoRoot,
+    id: "app-with-draft",
+    to: "applied",
+    note: "Submission verified in the supervised browser.",
+    at: "2026-08-09T14:03:00.000Z",
+  });
+
+  const app = JSON.parse(
+    db.prepare("SELECT data FROM applications WHERE id = ?").get("app-with-draft").data
+  );
+  const comm = JSON.parse(
+    db.prepare("SELECT data FROM communications WHERE id = ?").get("comm-with-draft").data
+  );
+  assert.equal(app.status, "applied");
+  assert.equal(app.appliedAt, "2026-08-09T14:03:00.000Z");
+  assert.equal(app.nextAction, null);
+  assert.equal(app.nextActionDue, null);
+  assert.equal(app.followUp.draft, null);
+  assert.deepEqual(result.clearedCommunicationIds, ["comm-with-draft"]);
+  assert.equal(comm.status, "waiting");
+  assert.equal(comm.nextAction, null);
+  assert.equal(comm.nextActionDue, null);
+  assert.equal(comm.draft, null);
+  assert.match(comm.messages.at(-1).summary, /applied/i);
+});
+
 for (const to of ["interview", "offer"]) {
   test(`appRecordOutcome: ${to} advances linked communications to waiting and preserves round clearing`, () => {
     const repoRoot = tempRepo();

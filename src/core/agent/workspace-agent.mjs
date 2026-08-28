@@ -7822,13 +7822,13 @@ export async function executeWorkspaceIntent({
     }
     if (normalized.type === "application.record-external") {
       const appliedAt = resolvedDate(input.appliedAt, now);
-      appSetStatus({
+      appRecordOutcome({
         repoRoot,
         env,
         id: normalized.entity.id,
         to: "applied",
         note: "Applied outside CareerRat. Reported by user.",
-        appliedAt,
+        at: appliedAt,
       });
       return appendActionResult({
         repoRoot,
@@ -8617,13 +8617,13 @@ export async function executeWorkspaceIntent({
     }
     if (execution?.verified === true) {
       const appliedAt = resolvedDate(execution.submittedAt, now);
-      appSetStatus({
+      appRecordOutcome({
         repoRoot,
         env,
         id: normalized.entity.id,
         to: "applied",
         note: "Submission verified in the supervised browser.",
-        appliedAt,
+        at: appliedAt,
       });
       return appendActionResult({
         repoRoot,

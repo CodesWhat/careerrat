@@ -1047,6 +1047,26 @@ test("Dashboard adapter builds actionable Jobs row and drawer payloads", () => {
   assert.equal(missing.drawer.nextAction.label, "Comp");
 });
 
+test("Applied jobs never surface a stale follow-up draft as ready to send", () => {
+  const vm = buildDashboardViewModel({
+    applications: [
+      {
+        id: "applied-with-stale-draft",
+        company: "Example Co",
+        role: "Operations Manager",
+        status: "applied",
+        appliedAt: "2026-08-27T14:00:00.000Z",
+        followUp: { draft: { body: "I submitted the application." } },
+      },
+    ],
+    sourced: [],
+    sources: [],
+    communications: [],
+  });
+
+  assert.deepEqual(vm.jobs.rows[0].drawer.drafts, []);
+});
+
 test("Jobs never attaches a communication with another application id to a same-company role", () => {
   const tracker = {
     applications: [
