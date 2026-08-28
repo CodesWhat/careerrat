@@ -852,6 +852,97 @@ test("runAiWebSearch partitions all five explicit bar titles across two bounded 
   }
 });
 
+test("runAiWebSearch keeps exact prompt titles authoritative over incidental bucket words", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: false,
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  const explicitTitles = [
+    "Bar Manager",
+    "Assistant Bar Manager",
+    "Bar Operations Lead",
+    "Lead Bartender",
+    "Head Bartender",
+  ];
+  const unrelatedTitles = [
+    "Operations Manager, Food & Beverage",
+    "Assistant General Manager",
+    "General Manager",
+  ];
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        { name: "Bar leadership", titles: explicitTitles },
+        { name: "Hospitality operations", titles: unrelatedTitles },
+      ],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      {
+        id: "nyc-bar-leadership",
+        text: "Find currently active Bar Manager, Assistant Bar Manager, Bar Operations Lead, Lead Bartender, and Head Bartender openings in New York City. Search the open web broadly, including specialist hospitality boards, employer career pages, and useful aggregators.",
+      },
+    ],
+  });
+  const inputs = [];
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      emitAssistantJson(onEvent, {
+        roles: [],
+        queries_run: [
+          { prompt_id: "nyc-bar-leadership", query: "bar leadership", status: "completed" },
+        ],
+      });
+      return { ok: true };
+    },
+  });
+
+  const parsedInputs = inputs.map((input) =>
+    typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input
+  );
+  const queries = parsedInputs.flatMap(({ search_plan: plan }) =>
+    plan.query_hints.map(({ query }) => query)
+  );
+  const topUpInstructions = inputs
+    .filter((input) => typeof input === "string")
+    .map((input) => input.split("\n\n").slice(1).join("\n\n"));
+  for (const title of explicitTitles) {
+    assert.ok(
+      queries.some((query) => query.includes(`"${title}"`)),
+      `${title}: ${JSON.stringify(queries)}`
+    );
+  }
+  for (const title of unrelatedTitles) {
+    assert.ok(
+      queries.every((query) => !query.includes(`"${title}"`)),
+      `${title}: ${JSON.stringify(queries)}`
+    );
+    assert.ok(
+      topUpInstructions.every((instruction) => !instruction.includes(title)),
+      `${title}: ${JSON.stringify(topUpInstructions)}`
+    );
+  }
+});
+
 test("runAiWebSearch keeps oversized multi-title hints atomic and location-scoped", async () => {
   const repoRoot = repo({ prompts: 1 });
   candidateConfigPatch({

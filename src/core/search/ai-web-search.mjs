@@ -793,11 +793,17 @@ function promptMatchesBucketName(prompt, bucket) {
   return bucketWords.size >= 2 && [...bucketWords].every((word) => promptWords.has(word));
 }
 
-function promptMatchesBucket(prompt, bucket) {
-  return (
-    configuredTitlesNamedByPrompt(prompt, bucket).length > 0 ||
-    promptMatchesBucketName(prompt, bucket)
+function promptTargetTitles(prompt, bucket, buckets) {
+  const namedTitles = configuredTitlesNamedByPrompt(prompt, bucket);
+  if (namedTitles.length) return namedTitles;
+  const hasAnyNamedTitle = buckets.some(
+    (candidate) => configuredTitlesNamedByPrompt(prompt, candidate).length > 0
   );
+  return !hasAnyNamedTitle && promptMatchesBucketName(prompt, bucket) ? bucket.titles : [];
+}
+
+function promptMatchesBucket(prompt, bucket, buckets) {
+  return promptTargetTitles(prompt, bucket, buckets).length > 0;
 }
 
 function quoteSearchTerm(value) {
@@ -811,15 +817,11 @@ function quoteSearchTerm(value) {
 function searchPlanTitles(prompt, candidateContext) {
   const titles = [];
   const seen = new Set();
-  for (const bucket of Array.isArray(candidateContext?.role_buckets)
+  const buckets = Array.isArray(candidateContext?.role_buckets)
     ? candidateContext.role_buckets
-    : []) {
-    const namedTitles = configuredTitlesNamedByPrompt(prompt, bucket);
-    const selectedTitles = namedTitles.length
-      ? namedTitles
-      : promptMatchesBucketName(prompt, bucket)
-        ? bucket.titles
-        : [];
+    : [];
+  for (const bucket of buckets) {
+    const selectedTitles = promptTargetTitles(prompt, bucket, buckets);
     for (const title of selectedTitles) {
       const key = String(title || "")
         .trim()
@@ -1797,19 +1799,14 @@ export async function runAiWebSearch({
       )
     : [];
   const targetBuckets = configuredTargetBuckets.filter((bucket) =>
-    selected.some((prompt) => promptMatchesBucket(prompt, bucket))
+    selected.some((prompt) => promptMatchesBucket(prompt, bucket, configuredTargetBuckets))
   );
   const requiredBucketCount = Math.min(MIN_USEFUL_SET_BUCKETS, targetBuckets.length);
   const selectedTargetTitles = new Map();
   for (const bucket of targetBuckets) {
     const scopedTitleKeys = new Set();
     for (const prompt of selected) {
-      const namedTitles = configuredTitlesNamedByPrompt(prompt, bucket);
-      const promptTitles = namedTitles.length
-        ? namedTitles
-        : promptMatchesBucketName(prompt, bucket)
-          ? bucket.titles
-          : [];
+      const promptTitles = promptTargetTitles(prompt, bucket, configuredTargetBuckets);
       for (const title of promptTitles) scopedTitleKeys.add(String(title).trim().toLowerCase());
     }
     for (const title of bucket.titles) {
@@ -1902,10 +1899,12 @@ export async function runAiWebSearch({
         promptIndex,
         topUpCount: topUpCounts.get(prompt.id) || 0,
         missingTargetTitles: state.missingTargetTitles.filter((target) =>
-          target.buckets.some((bucket) => promptMatchesBucket(prompt, bucket))
+          target.buckets.some((bucket) =>
+            promptMatchesBucket(prompt, bucket, configuredTargetBuckets)
+          )
         ),
         targetsMissingBucket: state.missingBuckets.some((bucket) =>
-          promptMatchesBucket(prompt, bucket)
+          promptMatchesBucket(prompt, bucket, configuredTargetBuckets)
         ),
       }))
       .filter(({ prompt }) => usefulSetPromptIds.has(prompt.id))
