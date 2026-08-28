@@ -164,6 +164,7 @@ test("typed role choices ask for a separate confirmation before one idempotent e
         purpose: "manual-search",
         status: "running",
         label: "Searching",
+        metadata: { searchExecutionId: input.searchExecutionId },
       },
       sources: { deterministicSources: { attempted: 4 } },
     };
@@ -217,6 +218,14 @@ test("typed role choices ask for a separate confirmation before one idempotent e
     startManualSearchImpl,
     runSearchInBackgroundImpl,
   });
+  const unifiedEvents = [];
+  restarted.registerAiWebSearchStarter({
+    available: true,
+    start: async ({ searchExecutionId, deterministic }) => {
+      unifiedEvents.push(`ai:${searchExecutionId}:${deterministic.status}`);
+      return { ok: true, run: { status: "completed" } };
+    },
+  });
   const afterReload = workspaceThreadRead({ repoRoot, env: {} });
   const durableConfirmation = afterReload.messages.at(-1).metadata.choicePrompt;
   assert.equal(durableConfirmation.id, confirmation.id);
@@ -225,8 +234,12 @@ test("typed role choices ask for a separate confirmation before one idempotent e
     text: "Yes",
     choice: { promptId: confirmation.id, version: 1, optionIds: ["yes"] },
   });
+  const expectedExecutionId = `career-coach-${confirmation.id}`;
+  await restarted.waitForUnifiedSearch(expectedExecutionId);
   assert.match(confirmed.messages.at(-1).text, /added .* as stretch targets/i);
   assert.equal(starts.length, 1);
+  assert.equal(starts[0].searchExecutionId, expectedExecutionId);
+  assert.deepEqual(unifiedEvents, [`ai:${expectedExecutionId}:succeeded`]);
   const config = candidateConfigGet({ repoRoot, env: {} });
   const exploration = config.targeting.role_buckets.find(
     (bucket) => bucket.name === "Career exploration"

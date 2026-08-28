@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../lib/api.js";
 import {
   classifyDurableSearchRun,
+  followUnifiedAiWebSearch,
   jobSearchCapabilities,
   runAiWebSearchLane,
   runCoordinatedJobSearch,
@@ -371,6 +372,47 @@ describe("runJobsPageSearch", () => {
   });
 });
 
+describe("followUnifiedAiWebSearch", () => {
+  it("ignores stale latest AI state and follows only the exact execution id", async () => {
+    const matching = {
+      id: "ai-matching",
+      purpose: "ai-web-search",
+      status: "running",
+      metadata: { searchExecutionId: "search-current" },
+      progress: { lastActivity: "Checking company career pages" },
+    };
+    const completed = { ...matching, status: "completed", summary: { new: 2 } };
+    const getSourcingRun = vi
+      .fn()
+      .mockResolvedValueOnce({
+        run: {
+          id: "ai-stale",
+          purpose: "ai-web-search",
+          status: "failed",
+          metadata: { searchExecutionId: "search-old" },
+        },
+      })
+      .mockResolvedValueOnce({ run: matching })
+      .mockResolvedValueOnce({ run: completed });
+
+    const setActivity = vi.fn();
+    const result = await followUnifiedAiWebSearch({
+      getSourcingRun,
+      searchExecutionId: "search-current",
+      pollIntervalMs: 0,
+      setActivity,
+    });
+
+    expect(result).toEqual({ ok: true, data: completed.summary, run: completed });
+    expect(getSourcingRun.mock.calls).toEqual([
+      [{ purpose: "ai-web-search" }],
+      [{ purpose: "ai-web-search" }],
+      [{ purpose: "ai-web-search", id: "ai-matching", signal: undefined }],
+    ]);
+    expect(setActivity).toHaveBeenCalledWith("Checking company career pages");
+  });
+});
+
 function stateSpies() {
   return {
     setStatus: vi.fn(),
@@ -714,7 +756,7 @@ describe("runCoordinatedJobSearch", () => {
     aiWeb: { configured: true, executable: true },
   };
 
-  it("starts every executable lane from one action and refetches once after both finish", async () => {
+  it("finishes deterministic search before starting the AI top-up", async () => {
     const setSearchState = vi.fn();
     const refetch = vi.fn();
     let finishDeterministic;
@@ -736,8 +778,8 @@ describe("runCoordinatedJobSearch", () => {
 
     await vi.waitFor(() => {
       expect(runDeterministic).toHaveBeenCalledOnce();
-      expect(runAiWeb).toHaveBeenCalledOnce();
     });
+    expect(runAiWeb).not.toHaveBeenCalled();
     expect(setSearchState).toHaveBeenLastCalledWith(
       expect.objectContaining({
         status: "running",
@@ -755,8 +797,9 @@ describe("runCoordinatedJobSearch", () => {
         },
       })
     );
-    finishAiWeb();
     finishDeterministic();
+    await vi.waitFor(() => expect(runAiWeb).toHaveBeenCalledOnce());
+    finishAiWeb();
 
     await expect(search).resolves.toMatchObject({ ok: true, partial: false });
     expect(refetch).toHaveBeenCalledOnce();

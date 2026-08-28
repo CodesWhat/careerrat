@@ -5,6 +5,19 @@ async function loadSubject() {
   return import("../src/core/search/unified-job-search.mjs").catch(() => ({}));
 }
 
+test("creates validated execution ids for production call sites", async () => {
+  const { createSearchExecutionId } = await loadSubject();
+  assert.equal(typeof createSearchExecutionId, "function");
+  assert.equal(
+    createSearchExecutionId({ createExecutionId: () => "search-call-site" }),
+    "search-call-site"
+  );
+  assert.throws(
+    () => createSearchExecutionId({ searchExecutionId: "not a valid id" }),
+    (error) => error.code === "BAD_REQUEST"
+  );
+});
+
 test("runs deterministic search before AI top-up with one generated execution id", async () => {
   const { runUnifiedJobSearch } = await loadSubject();
   assert.equal(typeof runUnifiedJobSearch, "function");

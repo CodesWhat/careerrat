@@ -16,6 +16,13 @@ function resolveExecutionId(searchExecutionId, createExecutionId) {
   return value;
 }
 
+export function createSearchExecutionId({
+  searchExecutionId,
+  createExecutionId = defaultExecutionId,
+} = {}) {
+  return resolveExecutionId(searchExecutionId, createExecutionId);
+}
+
 function errorDetails(value, fallback) {
   if (typeof value === "string" && value.trim()) return { message: value.trim() };
   if (value && typeof value === "object") {
@@ -83,7 +90,7 @@ export async function runUnifiedJobSearch({
   if (typeof runDeterministic !== "function") {
     throw new TypeError("runUnifiedJobSearch requires a deterministic search runner");
   }
-  const executionId = resolveExecutionId(searchExecutionId, createExecutionId);
+  const executionId = createSearchExecutionId({ searchExecutionId, createExecutionId });
   const deterministic = await runLane({
     id: "deterministic",
     run: runDeterministic,

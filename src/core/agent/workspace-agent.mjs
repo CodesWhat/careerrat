@@ -125,6 +125,7 @@ import {
   mergeAdjacentRoleTargets,
 } from "../search/adjacent-role-coach.mjs";
 import { createSourcingWorkerManager } from "../search/sourcing-worker-manager.mjs";
+import { createSearchExecutionId, runUnifiedJobSearch } from "../search/unified-job-search.mjs";
 import {
   applyStrategyRecommendation,
   draftStrategyReview,
@@ -3859,6 +3860,7 @@ export async function executeWorkspaceIntent({
   packetExportArtifact,
   startFirstSearchImpl = startFirstSearchRun,
   startManualSearchImpl = startManualSearchRun,
+  createSearchExecutionIdImpl,
   createCompanyProposalsImpl = createCompanyProposalBatch,
   startCompanyDiscoveryOperationImpl,
   decideCompanyProposalImpl = applyCompanyProposalDecision,
@@ -6540,6 +6542,15 @@ export async function executeWorkspaceIntent({
 
     if (normalized.type === "search.run") {
       const purpose = input.purpose === "first-search" ? "first-search" : "manual-search";
+      const searchExecutionId =
+        purpose === "manual-search"
+          ? createSearchExecutionId({
+              searchExecutionId: input.searchExecutionId,
+              ...(createSearchExecutionIdImpl
+                ? { createExecutionId: createSearchExecutionIdImpl }
+                : {}),
+            })
+          : null;
       const operation =
         purpose === "first-search"
           ? await startFirstSearchImpl({
@@ -6552,9 +6563,7 @@ export async function executeWorkspaceIntent({
               repoRoot,
               env,
               fetchImpl: searchFetchImpl,
-              ...(input.searchExecutionId
-                ? { searchExecutionId: String(input.searchExecutionId) }
-                : {}),
+              searchExecutionId,
             });
       const run = operation?.run || {
         purpose,
@@ -10500,7 +10509,9 @@ function correlatedAiSearch(deterministic, ai) {
     deterministic.run.metadata?.searchExecutionId || ""
   ).trim();
   const aiExecutionId = String(ai.run.metadata?.searchExecutionId || "").trim();
-  return deterministicExecutionId && deterministicExecutionId !== aiExecutionId ? null : ai;
+  return deterministicExecutionId && aiExecutionId && deterministicExecutionId === aiExecutionId
+    ? ai
+    : null;
 }
 
 function countLabel(count, singular) {
@@ -10767,6 +10778,8 @@ export function createWorkspaceAgentRuntime({
   packetExportArtifact,
   startFirstSearchImpl = startFirstSearchRun,
   startManualSearchImpl = startManualSearchRun,
+  createSearchExecutionIdImpl,
+  runUnifiedSearchImpl = runUnifiedJobSearch,
   createCompanyProposalsImpl = createCompanyProposalBatch,
   startCompanyDiscoveryOperationImpl,
   decideCompanyProposalImpl = applyCompanyProposalDecision,
@@ -10801,6 +10814,8 @@ export function createWorkspaceAgentRuntime({
 } = {}) {
   let tail = Promise.resolve();
   let runtime;
+  let aiWebSearchStarter = null;
+  const unifiedSearches = new Map();
   const sourcingWorkers = createSourcingWorkerManager({
     repoRoot,
     env,
@@ -10831,13 +10846,47 @@ export function createWorkspaceAgentRuntime({
     return current;
   }
 
+  function workerLaneResult(outcome) {
+    if (outcome?.resumable) return { ok: false, aborted: true };
+    if (outcome?.run?.status === "failed") {
+      return {
+        ok: false,
+        run: outcome.run,
+        error: outcome.run.error || { message: "The search failed before it finished." },
+      };
+    }
+    return { ok: true, run: outcome?.run || null, value: outcome?.value ?? null };
+  }
+
+  function coordinateManualSearch(run, worker) {
+    const searchExecutionId = String(run.metadata?.searchExecutionId || "").trim();
+    if (run.purpose !== "manual-search" || !searchExecutionId || !worker) return worker;
+    if (unifiedSearches.has(searchExecutionId)) return worker;
+
+    const coordination = runUnifiedSearchImpl({
+      searchExecutionId,
+      runDeterministic: async () => workerLaneResult(await worker.promise),
+      runAiWeb: aiWebSearchStarter?.start
+        ? ({ deterministic, signal }) =>
+            aiWebSearchStarter.start({ searchExecutionId, deterministic, signal })
+        : undefined,
+      aiAvailable: aiWebSearchStarter?.available === true,
+    });
+    unifiedSearches.set(searchExecutionId, coordination);
+    return worker;
+  }
+
   function startSearchInBackground({ operation, run }) {
     if (operation?.reused === true || run?.status !== "running" || !run?.id) return;
-    sourcingWorkers.start({ run });
+    return coordinateManualSearch(run, sourcingWorkers.start({ run }));
   }
 
   function reconcileOrphanedSourcingRuns() {
-    sourcingWorkers.recover();
+    const recovered = sourcingWorkers.recover();
+    for (const run of recovered) {
+      coordinateManualSearch(run, sourcingWorkers.worker(run.id));
+    }
+    return recovered;
   }
 
   runtime = {
@@ -10847,6 +10896,18 @@ export function createWorkspaceAgentRuntime({
     },
     registerSourcingWorker(definition) {
       sourcingWorkers.register(definition);
+    },
+    registerAiWebSearchStarter(definition) {
+      if (!definition || typeof definition.start !== "function") {
+        throw new TypeError("AI web-search starter requires a start function");
+      }
+      aiWebSearchStarter = {
+        available: definition.available === true,
+        start: definition.start,
+      };
+    },
+    waitForUnifiedSearch(searchExecutionId) {
+      return unifiedSearches.get(String(searchExecutionId || "").trim()) || Promise.resolve(null);
     },
     startSourcingWorker(input) {
       return sourcingWorkers.start(input);
@@ -10898,6 +10959,7 @@ export function createWorkspaceAgentRuntime({
           packetExportArtifact,
           startFirstSearchImpl,
           startManualSearchImpl,
+          createSearchExecutionIdImpl,
           createCompanyProposalsImpl,
           startCompanyDiscoveryOperationImpl,
           decideCompanyProposalImpl,

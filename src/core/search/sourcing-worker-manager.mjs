@@ -178,5 +178,8 @@ export function createSourcingWorkerManager({
     owns(runId) {
       return workers.has(runId);
     },
+    worker(runId) {
+      return workers.get(runId) || null;
+    },
   };
 }

@@ -270,6 +270,33 @@ describe("ChatFirstAppView", () => {
     });
   });
 
+  it("never attaches a current AI run to a legacy deterministic run without an execution id", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const hydrated = module.hydrateVisibleSearchRuns({
+      deterministic: {
+        run: {
+          id: "manual-legacy",
+          purpose: "manual-search",
+          status: "completed",
+          metadata: {},
+          summary: { new: 1 },
+        },
+      },
+      aiWeb: {
+        run: {
+          id: "ai-current",
+          purpose: "ai-web-search",
+          status: "failed",
+          metadata: { searchExecutionId: "search-current" },
+          error: { message: "Current AI run failed" },
+        },
+      },
+    });
+
+    expect(hydrated.sourceSweep.lanes).not.toHaveProperty("aiWeb");
+    expect(hydrated.retry).toBeNull();
+  });
+
   it("hydrates a durable AI failure into a visible exact-prompt retry", async () => {
     const module = await import("./ChatFirstApp.jsx");
     const deterministic = {
@@ -329,8 +356,9 @@ describe("ChatFirstAppView", () => {
       runAiLane,
     });
 
-    expect(runDeterministicLane).not.toHaveBeenCalled();
-    expect(runAiLane).toHaveBeenCalledWith(expect.objectContaining({ promptIds: ["p2"] }));
+    expect(runDeterministicLane).toHaveBeenCalledOnce();
+    expect(runAiLane).toHaveBeenCalledOnce();
+    expect(runAiLane.mock.calls[0][0]).not.toHaveProperty("promptIds");
   });
 
   it("lets the server heal sources while AI searches when no boards are pinned", async () => {
@@ -419,7 +447,7 @@ describe("ChatFirstAppView", () => {
     expect(hydrated.sourceSweep.summary).not.toContain("retry");
   });
 
-  it("keeps a current AI-only lane visible when the deterministic run has no execution id", async () => {
+  it("does not attach a current AI lane to a legacy first search without an execution id", async () => {
     const module = await import("./ChatFirstApp.jsx");
     const hydrated = module.hydrateVisibleSearchRuns({
       deterministic: {
@@ -443,18 +471,9 @@ describe("ChatFirstAppView", () => {
       },
     });
 
-    expect(hydrated).toMatchObject({
-      retry: {
-        aiPromptIds: ["current-prompt"],
-        searchExecutionId: "search-execution-current",
-      },
-      sourceSweep: {
-        status: "complete",
-        lanes: {
-          deterministic: { status: "succeeded" },
-          aiWeb: { status: "failed", error: "current AI lane failed" },
-        },
-      },
+    expect(hydrated.retry).toBeNull();
+    expect(hydrated.sourceSweep.lanes).toEqual({
+      deterministic: expect.objectContaining({ status: "succeeded" }),
     });
   });
 
@@ -896,7 +915,7 @@ describe("ChatFirstAppView", () => {
     expect(runAiLane).not.toHaveBeenCalled();
   });
 
-  it("retries only the exact failed AI prompts through the chat-first search wrapper", async () => {
+  it("retries through a fresh unified search instead of replaying a stale AI lane", async () => {
     const module = await import("./ChatFirstApp.jsx");
     const api = {
       getSearchSourceStatus: vi.fn(async () => ({
@@ -922,8 +941,9 @@ describe("ChatFirstAppView", () => {
       runAiLane,
     });
 
-    expect(runDeterministicLane).not.toHaveBeenCalled();
-    expect(runAiLane).toHaveBeenCalledWith(expect.objectContaining({ promptIds: ["p2"] }));
+    expect(runDeterministicLane).toHaveBeenCalledOnce();
+    expect(runAiLane).toHaveBeenCalledOnce();
+    expect(runAiLane.mock.calls[0][0]).not.toHaveProperty("promptIds");
     expect(result).toMatchObject({ ok: true, partial: false });
   });
 

@@ -22,6 +22,7 @@ import {
   isCompanyProviderSupported,
 } from "../scoring/sourced-scanner.mjs";
 import { pendingSourceLoginRequests } from "../search/source-login-preflight.mjs";
+import { createSearchExecutionId } from "../search/unified-job-search.mjs";
 
 // Bounded backfill for automatic company-board resolution ahead of the first
 // search: on a fresh install, targeting.tracked_companies is just a list of
@@ -859,7 +860,7 @@ export async function startManualSearchRun({
     mode: "manual",
     retryFailed: false,
     trigger: "manual-search",
-    searchExecutionId,
+    searchExecutionId: createSearchExecutionId({ searchExecutionId }),
   });
 }
 

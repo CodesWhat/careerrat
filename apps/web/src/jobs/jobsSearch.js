@@ -335,35 +335,40 @@ export async function runCoordinatedJobSearch({
     detail: `${runnable.map((id) => SEARCH_LANES[id].label).join(" and ")} running`,
   });
 
-  const outcomes = await Promise.all(
-    runnable.map(async (id) => {
-      try {
-        const result = await runners[id]({
-          signal,
-          onLaneState: (patch) => updateLane(id, patch),
-          ...(id === "aiWeb" && requestedRetry.aiPromptIds.length
-            ? { retryPromptIds: requestedRetry.aiPromptIds }
-            : {}),
-        });
-        if (signal?.aborted || result?.aborted) return { id, result, aborted: true };
-        if (result?.ok === false) {
-          return {
-            id,
-            result,
-            error: laneError(result, `${SEARCH_LANES[id].label} failed.`),
-            failedPromptIds: failedPromptIds(result),
-          };
-        }
+  const outcomes = [];
+  for (const id of runnable) {
+    let outcome;
+    try {
+      const result = await runners[id]({
+        signal,
+        onLaneState: (patch) => updateLane(id, patch),
+        ...(id === "aiWeb" && requestedRetry.aiPromptIds.length
+          ? { retryPromptIds: requestedRetry.aiPromptIds }
+          : {}),
+      });
+      if (signal?.aborted || result?.aborted) outcome = { id, result, aborted: true };
+      else if (result?.ok === false) {
+        outcome = {
+          id,
+          result,
+          error: laneError(result, `${SEARCH_LANES[id].label} failed.`),
+          failedPromptIds: failedPromptIds(result),
+        };
+      } else {
         const partial = inferredPartialLane(id, result);
-        return partial
+        outcome = partial
           ? { id, result, ok: true, partial: true, ...partial }
           : { id, result, ok: true };
-      } catch (error) {
-        if (signal?.aborted || error?.name === "AbortError") return { id, aborted: true };
-        return { id, error: error?.message || `${SEARCH_LANES[id].label} failed.` };
       }
-    })
-  );
+    } catch (error) {
+      outcome =
+        signal?.aborted || error?.name === "AbortError"
+          ? { id, aborted: true }
+          : { id, error: error?.message || `${SEARCH_LANES[id].label} failed.` };
+    }
+    outcomes.push(outcome);
+    if (id === "deterministic" && outcome.aborted) break;
+  }
 
   if (signal?.aborted || outcomes.every((outcome) => outcome.aborted)) {
     for (const id of runnable) {
@@ -631,6 +636,7 @@ async function followDroppedAiWebSearch({
   signal,
   pollIntervalMs,
   pollTimeoutMs,
+  onRun,
 }) {
   const deadline = Date.now() + pollTimeoutMs;
   let current = run;
@@ -652,6 +658,7 @@ async function followDroppedAiWebSearch({
     }
     if (next?.id === run.id) {
       current = next;
+      onRun?.(next);
       misses = 0;
       if (next.status !== "running") return { run: next };
     } else {
@@ -663,6 +670,87 @@ async function followDroppedAiWebSearch({
     if (Date.now() >= deadline) return { timedOut: true, run: current };
     await sleep(pollIntervalMs, signal);
   }
+}
+
+function runSearchExecutionId(run) {
+  const value = run?.metadata?.searchExecutionId;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+export async function followUnifiedAiWebSearch({
+  getSourcingRun: getSourcingRunFn = getSourcingRun,
+  searchExecutionId,
+  refetch,
+  signal,
+  setStatus,
+  setActivity,
+  setCounts,
+  setError,
+  pollIntervalMs = 2500,
+  pollTimeoutMs = 60 * 1000,
+} = {}) {
+  const executionId = String(searchExecutionId || "").trim();
+  if (!executionId) return { ok: false, error: "Search execution id is required." };
+  const deadline = Date.now() + pollTimeoutMs;
+  setStatus?.("running");
+  setActivity?.("Starting AI web search…");
+
+  let matching = null;
+  while (!signal?.aborted && Date.now() <= deadline) {
+    let latest = null;
+    try {
+      latest = unwrapRun(
+        await getSourcingRunFn({ purpose: "ai-web-search", ...(signal ? { signal } : {}) })
+      );
+    } catch (error) {
+      if (error?.name === "AbortError" || signal?.aborted) return { ok: false, aborted: true };
+    }
+    if (latest && runSearchExecutionId(latest) === executionId) {
+      matching = latest;
+      break;
+    }
+    await sleep(pollIntervalMs, signal);
+  }
+  if (signal?.aborted) return { ok: false, aborted: true };
+  if (!matching) {
+    const error = "The AI search did not start. Your saved job-site results are still available.";
+    setStatus?.("error");
+    setError?.(error);
+    return { ok: false, error };
+  }
+
+  if (matching.status === "running") {
+    if (matching.progress?.lastActivity) setActivity?.(matching.progress.lastActivity);
+    const followed = await followDroppedAiWebSearch({
+      getSourcingRunFn,
+      run: matching,
+      signal,
+      pollIntervalMs,
+      pollTimeoutMs: Math.max(0, deadline - Date.now()),
+      onRun: (run) => {
+        if (run?.progress?.lastActivity) setActivity?.(run.progress.lastActivity);
+      },
+    });
+    if (followed.aborted || signal?.aborted) return { ok: false, aborted: true };
+    if (followed.timedOut || followed.run?.status === "running") {
+      setActivity?.("AI search is still running in the background.");
+      return { ok: true, running: true, run: followed.run || matching };
+    }
+    matching = followed.run;
+  }
+
+  if (matching?.status === "failed") {
+    const error = matching.error?.message || "AI web search failed. Run the search again.";
+    setStatus?.("error");
+    setError?.(error);
+    return { ok: false, error, run: matching, failedPromptIds: failedPromptIds({ run: matching }) };
+  }
+  const data = matching?.summary || {};
+  setStatus?.("results");
+  setActivity?.(null);
+  setCounts?.(data);
+  await refetch?.();
+  return { ok: true, data, run: matching };
 }
 
 // There is no per-prompt/Regenerate UI anymore (Scott, 2026-07-20: the old

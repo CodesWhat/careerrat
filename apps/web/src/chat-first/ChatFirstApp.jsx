@@ -3,8 +3,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { ArtifactViewerModal } from "../jobs/ArtifactViewerModal.jsx";
 import {
   classifyDurableSearchRun,
+  followUnifiedAiWebSearch,
   jobSearchCapabilities,
-  runAiWebSearchLane,
   runCoordinatedJobSearch,
   runJobsPageSearch,
 } from "../jobs/jobsSearch.js";
@@ -293,7 +293,7 @@ function correlatedAiRun(deterministic, aiWeb) {
   if (!aiWeb?.run || !deterministic?.run) return aiWeb;
   const deterministicExecutionId = durableSearchExecutionId(deterministic);
   const aiExecutionId = durableSearchExecutionId(aiWeb);
-  if (deterministicExecutionId && deterministicExecutionId !== aiExecutionId) {
+  if (!deterministicExecutionId || !aiExecutionId || deterministicExecutionId !== aiExecutionId) {
     return { ...aiWeb, status: "not_started", run: null };
   }
   return aiWeb;
@@ -498,13 +498,12 @@ function createSearchExecutionId() {
 
 export async function runChatFirstJobSearch({
   api,
-  retry,
   refetch,
   setSearchState,
   signal,
   runCoordinator = runCoordinatedJobSearch,
   runDeterministicLane = runJobsPageSearch,
-  runAiLane = runAiWebSearchLane,
+  runAiLane = followUnifiedAiWebSearch,
   createSearchExecutionId: createSearchExecutionIdFn = createSearchExecutionId,
 } = {}) {
   let runtimeConfig = null;
@@ -522,10 +521,9 @@ export async function runChatFirstJobSearch({
     },
   });
 
-  const searchExecutionId = retry?.searchExecutionId || createSearchExecutionIdFn();
+  const searchExecutionId = createSearchExecutionIdFn();
   const result = await runCoordinator({
     capabilities,
-    retry,
     refetch,
     setSearchState,
     signal,
@@ -548,10 +546,11 @@ export async function runChatFirstJobSearch({
         },
         signal: laneSignal,
       }),
-    runAiWeb: ({ signal: laneSignal, onLaneState, retryPromptIds }) =>
+    runAiWeb: ({ signal: laneSignal, onLaneState }) =>
       runAiLane({
-        ...(retryPromptIds?.length ? { promptIds: retryPromptIds } : {}),
+        getSourcingRun: api.getSourcingRun,
         searchExecutionId,
+        refetch,
         signal: laneSignal,
         setStatus: () => undefined,
         setActivity: (detail) => {

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { mountSourcingRoutes } from "../src/cli/sourcing-route.mjs";
+import { createWorkspaceAgentRuntime } from "../src/core/agent/workspace-agent.mjs";
 import { closeAll } from "../src/core/db/connection.mjs";
 import {
   sourcingRunComplete,
@@ -417,6 +418,50 @@ test("POST /api/sourcing/search/start creates a manual-search run without using 
     assert.equal(body.run.metadata.searchExecutionId, "search-execution-direct");
     assertNoRuntimeHandoff(body);
   } finally {
+    await closeServer(server);
+  }
+});
+
+test("the Jobs button route starts the same deterministic-first unified search with one id", async () => {
+  const repoRoot = tempRepo();
+  const events = [];
+  const runtime = createWorkspaceAgentRuntime({
+    repoRoot,
+    env: {},
+    createSearchExecutionIdImpl: () => "search-jobs-button",
+    startManualSearchImpl: async ({ searchExecutionId }) => {
+      const started = sourcingRunStart({
+        repoRoot,
+        env: {},
+        purpose: "manual-search",
+        inputFingerprint: "jobs-button",
+        metadata: { searchExecutionId },
+      });
+      return { ok: true, reused: false, run: started.run };
+    },
+    runSearchInBackgroundImpl: async ({ runId }) => {
+      events.push(`deterministic:${runId}`);
+      return { id: runId, purpose: "manual-search", status: "completed", summary: {} };
+    },
+    companyDiscoveryCadenceImpl: () => ({ status: "current", due: false }),
+  });
+  runtime.registerAiWebSearchStarter({
+    available: true,
+    start: async ({ searchExecutionId, deterministic }) => {
+      events.push(`ai:${searchExecutionId}:${deterministic.status}`);
+      return { ok: true, run: { status: "completed" } };
+    },
+  });
+  const server = await bootServer(repoRoot, { workspaceAgentRuntime: runtime });
+  try {
+    const { status, body } = await postJson(server, "/api/sourcing/search/start", {});
+    await runtime.waitForUnifiedSearch("search-jobs-button");
+
+    assert.equal(status, 202);
+    assert.equal(body.run.metadata.searchExecutionId, "search-jobs-button");
+    assert.deepEqual(events, [`deterministic:${body.run.id}`, "ai:search-jobs-button:succeeded"]);
+  } finally {
+    await runtime.shutdownSourcingWorkers();
     await closeServer(server);
   }
 });

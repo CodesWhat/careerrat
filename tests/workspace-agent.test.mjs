@@ -6110,6 +6110,46 @@ test("search status questions ignore an AI run from a different search execution
   assert.doesNotMatch(result.messages.at(-1).text, /AI|failed|retry|running/i);
 });
 
+test("search status never attaches a current AI run to a legacy deterministic run", async () => {
+  const repoRoot = tempRepo();
+  seedSourcingRun(repoRoot, {
+    id: "manual-search-legacy",
+    purpose: "manual-search",
+    status: "completed",
+    started_at: "2026-08-27T13:30:00.000Z",
+    completed_at: "2026-08-27T13:30:04.000Z",
+    updated_at: "2026-08-27T13:30:04.000Z",
+    metadata: {},
+    summary: { scanned: 12, qualified: 1, presented: 1, filtered: 11 },
+    error: null,
+  });
+  seedSourcingRun(repoRoot, {
+    id: "ai-web-search-current-id",
+    purpose: "ai-web-search",
+    status: "failed",
+    started_at: "2026-08-27T13:30:05.000Z",
+    completed_at: "2026-08-27T13:30:09.000Z",
+    updated_at: "2026-08-27T13:30:09.000Z",
+    metadata: { searchExecutionId: "search-current-id" },
+    summary: null,
+    error: { code: "AI_WEB_SEARCH_FAILED", message: "Current search failed." },
+  });
+
+  const result = await runWorkspaceAgentTurn({
+    repoRoot,
+    env: {},
+    text: "How's the job search going?",
+    callAIImpl: async () => {
+      throw new Error("search status must not call the model");
+    },
+  });
+
+  assert.equal(
+    result.messages.at(-1).text,
+    "Your saved job sites finished. They scanned 12 jobs and found 1 match."
+  );
+});
+
 test("free-form turns persist and resolve a durable binary choice across reload", async () => {
   const repoRoot = tempRepo();
   const result = await runWorkspaceAgentTurn({
