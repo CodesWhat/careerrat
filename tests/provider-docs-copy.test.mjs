@@ -46,7 +46,7 @@ test("public setup docs expose the neutral direct Claude Code and Codex contract
   );
 });
 
-test("v0.16.6 docs describe the current release and preserve v0.16.5 history", async () => {
+test("v0.16.6 docs describe candidate behavior without rewriting v0.16.5 history", async () => {
   const [changelog, readme, install] = await Promise.all([
     readFile("CHANGELOG.md", "utf8"),
     readFile("README.md", "utf8"),
@@ -83,20 +83,26 @@ test("v0.16.6 docs describe the current release and preserve v0.16.5 history", a
     changelog,
     /PR review, publication, production deployment[^.]*remain pending/i
   );
-  assert.match(changelog, /^## \[0\.16\.6\] - 2026-08-27/m);
-  assert.match(changelog, /repository suite passes 4,222 tests/i);
-  assert.match(changelog, /web suite passes all 905 tests/i);
+  assert.match(changelog, /^## \[0\.16\.6\] - 2026-08-28/m);
+  assert.match(changelog, /Promotion requires one clean source revision/i);
+  assert.match(
+    changelog,
+    /exact Claude Code\/Codex hospitality and engineering native-search matrix/i
+  );
+  assert.match(changelog, /tagged release workflow must then build and verify/i);
+  assert.doesNotMatch(changelog, /repository suite passes 4,222 tests/i);
+  assert.doesNotMatch(changelog, /web suite passes all 905 tests/i);
   assert.match(changelog, /finite job, recruiter-thread, and company ambiguities/i);
   assert.match(changelog, /First, manual, and AI searches now share one durable worker owner/i);
 
   for (const publicCopy of [readme, install]) {
-    assert.match(publicCopy, /v0\.16\.6 is the current release/i);
+    assert.doesNotMatch(publicCopy, /v0\.16\.6 is the current release/i);
     assert.match(publicCopy, /Claude Code and Codex (?:run|the same complete)/i);
     assert.match(publicCopy, /no fallback|never falls back/i);
     assert.match(publicCopy, /(?:durable across|survive)\s+navigation and\s+restart/i);
     assert.match(
       publicCopy,
-      /(?:keeps?\s+AI leads|AI leads\s+(?:clearly )?(?:stay|remain))\s+(?:clearly )?unverified/i
+      /(?:keeps?\s+AI\s+leads|AI\s+leads\s+(?:clearly )?(?:stay|remain))\s+(?:clearly )?unverified/i
     );
     assert.match(publicCopy, /Evaluate reads the posting|full\s+postings/i);
     assert.match(publicCopy, /final Submit control always stay/i);
