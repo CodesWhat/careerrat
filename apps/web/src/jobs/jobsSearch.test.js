@@ -1144,7 +1144,7 @@ describe("runCoordinatedJobSearch", () => {
 });
 
 describe("jobSearchCapabilities", () => {
-  it("distinguishes configured sources from executable deterministic work", () => {
+  it("does not gate the server-owned deterministic lane on stale source inventory", () => {
     expect(
       jobSearchCapabilities({
         sourceStatus: {
@@ -1155,14 +1155,14 @@ describe("jobSearchCapabilities", () => {
         ai: { configured: true, executable: true },
       })
     ).toEqual({
-      deterministic: { configured: true, executable: false },
+      deterministic: { configured: true, executable: true },
       aiWeb: { configured: true, executable: true },
     });
   });
 
-  it("fails closed when source or AI capability state is unavailable", () => {
+  it("still asks the server to heal sources or surface a login when preflight is unavailable", () => {
     expect(jobSearchCapabilities()).toEqual({
-      deterministic: { configured: false, executable: false },
+      deterministic: { configured: true, executable: true },
       aiWeb: { configured: false, executable: false },
     });
   });

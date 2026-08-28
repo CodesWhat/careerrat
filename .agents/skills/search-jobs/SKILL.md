@@ -59,8 +59,11 @@ If `doctor` says the next discovery step is `setup-searches`, `research-boards`,
 `discover-companies`, run that owning skill first during an automatic pipeline handoff.
 When the user explicitly asked to search and at least one enabled source exists, their
 request already authorizes a partial sweep of the configured sources. Run it without a
-second override question. If source config is missing or has no enabled entries, stop and
-run `setup-searches` first because there is nothing runnable yet:
+second override question. If source config is missing or has no enabled entries, run
+`setup-searches` as part of the same request, then continue the sweep without another
+handoff. A disabled login-backed source is still actionable: start the sweep so its
+contextual Yes/No login question appears. If setup still produces no runnable source,
+settle honestly with the setup recovery instead of inventing a permission gate:
 
 > **Available portals:** the baseline auto-seeds domain-appropriate sources, and
 > `careerrat searches --providers` lists all 77 public deterministic adapters.

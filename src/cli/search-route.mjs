@@ -12,8 +12,9 @@
 //                              and returns the summary JSON. 409 while a scan
 //                              is already running (a single in-module flag —
 //                              this is one local dev-server process, not a
-//                              job queue). 400 if neither
-//                              DB source config is not configured yet.
+//                              job queue). The route heals source config
+//                              before scanning and settles an empty valid
+//                              workspace as an honest zero-result run.
 //   GET  /api/search/results   DB sourced rows in stable database row order.
 //   GET  /api/search/sources   {searches:{enabled,total}, trackedCompanies}
 //                              — source health for the React search surface.
@@ -90,15 +91,6 @@ function searchExecutionIdFromBody(body) {
 function queryParam(req, name) {
   const url = new URL(req.url, "http://127.0.0.1");
   return url.searchParams.get(name);
-}
-
-function hasConfiguredDbSourcesOnly(pathCtx) {
-  const sourcedScan = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
-  const searchSources = sourceConfigGet({ ...pathCtx, name: "search-sources" }).data;
-  return Boolean(
-    (Array.isArray(sourcedScan.tracked_companies) && sourcedScan.tracked_companies.length > 0) ||
-      (Array.isArray(searchSources.searches) && searchSources.searches.length > 0)
-  );
 }
 
 function sendDbError(res, error) {
@@ -268,29 +260,11 @@ export function mountSearchRoutes({
       return;
     }
 
-    let hasConfig = false;
     try {
-      hasConfig = hasConfiguredDbSourcesOnly(pathCtx);
+      healSearchSourceConfig({ repoRoot, env });
     } catch (err) {
       if (sendDbError(res, err)) return;
       sendJson(res, 500, { ok: false, error: err?.message || String(err) });
-      return;
-    }
-
-    if (!hasConfig) {
-      sendJson(res, 409, {
-        ok: false,
-        code: "SOURCE_SETUP_REQUIRED",
-        error: "No enabled search sources are configured yet.",
-        action: {
-          label: "Set up sources",
-          intent: {
-            type: "ui.navigate",
-            entity: { type: "workspace", id: "workspace-main" },
-            input: { surface: "settings", section: "sources" },
-          },
-        },
-      });
       return;
     }
 

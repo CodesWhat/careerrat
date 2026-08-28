@@ -573,18 +573,14 @@ function promptMatchesBucket(prompt, bucket) {
 // search-jobs is deliberately excluded from the embedded runtime's default
 // allowlist (see skill-runtime.mjs's own DEFAULT_RUNTIME_SKILLS comment) — a
 // blanket CAREERRAT_RUNTIME_SKILLS opt-in shouldn't also hand every other
-// one-shot skill run WebSearch access. This lane is the one place search-jobs
-// may run, so it builds its own scoped env override for just this
-// runSkillStream call: whatever the operator already allows, plus
-// search-jobs — UNLESS the operator explicitly locked the runtime down
-// (CAREERRAT_RUNTIME_SKILLS === "", resolveSkillAllowlist's own "empty means
-// nothing is allowed" contract), in which case this lane respects that and
-// lets runSkillStream reject with the standard SKILL_NOT_ALLOWED error rather
-// than silently punching a hole in an explicit lockdown.
+// one-shot skill run WebSearch access. This dedicated route is the authority
+// to run search-jobs, so it always grants that one skill for this call.
 function buildAiWebSearchEnv({ repoRoot, env }) {
-  if (env.CAREERRAT_RUNTIME_SKILLS === "") return env;
   const allowed = resolveAllowedSkills({ repoRoot, env });
-  return { ...env, CAREERRAT_RUNTIME_SKILLS: [...allowed, "search-jobs"].join(",") };
+  return {
+    ...env,
+    CAREERRAT_RUNTIME_SKILLS: [...new Set([...allowed, "search-jobs"])].join(","),
+  };
 }
 
 // ---------------------------------------------------------------------------

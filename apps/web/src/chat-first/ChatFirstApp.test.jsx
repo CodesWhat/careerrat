@@ -330,7 +330,7 @@ describe("ChatFirstAppView", () => {
     expect(runAiLane).toHaveBeenCalledWith(expect.objectContaining({ promptIds: ["p2"] }));
   });
 
-  it("runs AI search when the candidate has not pinned any job boards", async () => {
+  it("lets the server heal sources while AI searches when no boards are pinned", async () => {
     const module = await import("./ChatFirstApp.jsx");
     const runDeterministicLane = vi.fn(async () => ({ ok: true }));
     const runAiLane = vi.fn(async () => ({ ok: true, data: { new: 3 } }));
@@ -350,7 +350,9 @@ describe("ChatFirstAppView", () => {
     });
 
     expect(result).toMatchObject({ ok: true });
-    expect(runDeterministicLane).not.toHaveBeenCalled();
+    expect(runDeterministicLane).toHaveBeenCalledWith(
+      expect.objectContaining({ searchExecutionId: "search-tester-fixture" })
+    );
     expect(runAiLane).toHaveBeenCalledWith(
       expect.objectContaining({ searchExecutionId: "search-tester-fixture" })
     );
@@ -781,7 +783,7 @@ describe("ChatFirstAppView", () => {
     });
   });
 
-  it("preflights source and AI capability before coordinating one user search", async () => {
+  it("starts deterministic search without a source-permission preflight", async () => {
     const module = await import("./ChatFirstApp.jsx");
     expect(module.runChatFirstJobSearch).toBeTypeOf("function");
     const controller = new AbortController();
@@ -823,7 +825,7 @@ describe("ChatFirstAppView", () => {
       createSearchExecutionId: () => "search-execution-shared",
     });
 
-    expect(api.getSearchSourceStatus).toHaveBeenCalledOnce();
+    expect(api.getSearchSourceStatus).not.toHaveBeenCalled();
     expect(api.getRuntimeConfig).toHaveBeenCalledOnce();
     expect(api.getInstalledAiRuntimes).not.toHaveBeenCalled();
     expect(runDeterministicLane).toHaveBeenCalledWith(
@@ -840,6 +842,29 @@ describe("ChatFirstAppView", () => {
         signal: controller.signal,
       })
     );
+  });
+
+  it("still starts deterministic search when optional AI availability cannot be read", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const runDeterministicLane = vi.fn(async () => ({ ok: true }));
+    const runAiLane = vi.fn(async () => ({ ok: true }));
+
+    const result = await module.runChatFirstJobSearch({
+      api: {
+        getRuntimeConfig: vi.fn(async () => {
+          throw new Error("runtime status unavailable");
+        }),
+      },
+      runDeterministicLane,
+      runAiLane,
+      createSearchExecutionId: () => "search-without-ai-status",
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(runDeterministicLane).toHaveBeenCalledWith(
+      expect.objectContaining({ searchExecutionId: "search-without-ai-status" })
+    );
+    expect(runAiLane).not.toHaveBeenCalled();
   });
 
   it("retries only the exact failed AI prompts through the chat-first search wrapper", async () => {

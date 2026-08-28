@@ -139,12 +139,6 @@ const RULES = [
     action: { label: "Finish setup", to: "/onboarding" },
   },
   {
-    match: ({ raw, code }) =>
-      code === "SOURCE_SETUP_REQUIRED" || startsWith(raw, "No search config found"),
-    message: "No search sources are set up yet.",
-    action: { label: "Open Settings", to: "/settings" },
-  },
-  {
     match: ({ code }) => code === "BOARD_DISCOVERY_UNAVAILABLE",
     message:
       "CareerRat can't look for new job boards automatically right now. Add one yourself in Settings.",

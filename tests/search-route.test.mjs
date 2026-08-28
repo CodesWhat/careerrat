@@ -301,7 +301,7 @@ test("POST /api/search/scan: browser source login is requested at the point of u
   }
 });
 
-test("POST /api/search/scan: DB mode ignores legacy source files when DB source config is empty", async () => {
+test("POST /api/search/scan: empty DB config settles honestly without reading legacy sources", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
   writeSourcedScanConfig(repoRoot, [{ name: "Acme", careers_url: "https://jobs.lever.co/acme" }]);
@@ -309,18 +309,11 @@ test("POST /api/search/scan: DB mode ignores legacy source files when DB source 
   const server = await bootServer(repoRoot, { fetchImpl: leverFetchStub() });
   try {
     const { status, body } = await postJson(server, "/api/search/scan", {});
-    assert.equal(status, 409);
-    assert.equal(body.code, "SOURCE_SETUP_REQUIRED");
-    assert.equal(body.error, "No enabled search sources are configured yet.");
-    assert.deepEqual(body.action, {
-      label: "Set up sources",
-      intent: {
-        type: "ui.navigate",
-        entity: { type: "workspace", id: "workspace-main" },
-        input: { surface: "settings", section: "sources" },
-      },
-    });
-    assert.doesNotMatch(JSON.stringify(body), /\/onboard|write-config|\/jobs/);
+    assert.equal(status, 200);
+    assert.equal(body.scanned, 0);
+    assert.deepEqual(body.offers, []);
+    assert.deepEqual(body.errors, []);
+    assert.doesNotMatch(JSON.stringify(body), /Acme|permission|Open Settings|Set up sources/i);
   } finally {
     await closeServer(server);
   }

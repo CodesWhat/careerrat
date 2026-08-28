@@ -507,20 +507,15 @@ export async function runChatFirstJobSearch({
   runAiLane = runAiWebSearchLane,
   createSearchExecutionId: createSearchExecutionIdFn = createSearchExecutionId,
 } = {}) {
-  const [sourceStatusResult, runtimeConfigResult] = await Promise.allSettled([
-    typeof api?.getSearchSourceStatus === "function"
-      ? api.getSearchSourceStatus()
-      : Promise.reject(new Error("Search source status is unavailable")),
-    typeof api?.getRuntimeConfig === "function"
-      ? api.getRuntimeConfig()
-      : Promise.reject(new Error("AI runtime configuration is unavailable")),
-  ]);
-  const sourceStatus = sourceStatusResult.status === "fulfilled" ? sourceStatusResult.value : null;
-  const runtimeConfig =
-    runtimeConfigResult.status === "fulfilled" ? runtimeConfigResult.value : null;
+  let runtimeConfig = null;
+  try {
+    runtimeConfig = await api?.getRuntimeConfig?.();
+  } catch {
+    // The deterministic server route owns source healing and still runs when
+    // optional AI availability cannot be read.
+  }
   const aiConfigured = runtimeConfig?.ai?.available === true;
   const capabilities = jobSearchCapabilities({
-    sourceStatus,
     ai: {
       configured: aiConfigured,
       executable: aiConfigured,

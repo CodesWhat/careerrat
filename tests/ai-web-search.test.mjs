@@ -174,6 +174,23 @@ test("AI web search uses the provider-neutral web research policy without changi
   assert.equal(calls[0].useExecutionPlanRoute, true);
 });
 
+test("the dedicated AI search route grants its owning skill despite an empty generic allowlist", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  let receivedEnv = null;
+  const respond = assistantJson({ roles: [], queries_run: [] });
+
+  await runAiWebSearch({
+    repoRoot,
+    env: { CAREERRAT_RUNTIME_SKILLS: "" },
+    runSkillStream: async (options) => {
+      receivedEnv = options.env;
+      return respond(options);
+    },
+  });
+
+  assert.equal(receivedEnv.CAREERRAT_RUNTIME_SKILLS, "search-jobs");
+});
+
 test("runAiWebSearch gives every initial prompt the strict result URL routing policy", async () => {
   const repoRoot = repo({ prompts: 1 });
   const inputs = [];
@@ -668,6 +685,17 @@ test("AI web-search skill preserves only posting-specific blocked leads as unver
   assert.match(skill, /expired.*redirect.*(?:drop|reject)/i);
   assert.match(skill, /unsafe|private URL/i);
   assert.match(skill, /mismatched|different (?:job|requisition|posting)/i);
+});
+
+test("search-jobs prepares missing sources in the same request and keeps disabled login sources actionable", () => {
+  const skill = readFileSync(
+    new URL("../.agents/skills/search-jobs/SKILL.md", import.meta.url),
+    "utf8"
+  );
+  const prose = skill.replace(/\s+/g, " ");
+  assert.doesNotMatch(prose, /no enabled entries, stop and run `setup-searches` first/i);
+  assert.match(prose, /run `setup-searches` as part of the same request/i);
+  assert.match(prose, /disabled login-backed source.*contextual.*Yes\/No/i);
 });
 
 test("runAiWebSearch preserves posting-specific blocked third-party URLs as unverified partials", async () => {

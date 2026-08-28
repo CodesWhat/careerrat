@@ -87,12 +87,6 @@ const RULE_CASES = [
     action: { label: "Finish setup", to: "/onboarding" },
   },
   {
-    name: "No search config found",
-    err: new ApiError(400, { error: "No search config found for this workspace" }),
-    message: "No search sources are set up yet.",
-    action: { label: "Open Settings", to: "/settings" },
-  },
-  {
     name: "board discovery unavailable",
     err: new ApiError(501, {
       code: "BOARD_DISCOVERY_UNAVAILABLE",

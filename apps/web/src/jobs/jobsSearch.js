@@ -21,14 +21,11 @@ const SEARCH_LANES = Object.freeze({
   aiWeb: { label: "AI web search" },
 });
 
-export function jobSearchCapabilities({ sourceStatus, ai } = {}) {
-  const enabledSearches = Number(sourceStatus?.searches?.enabled || 0);
-  const enabledCompanies = Number(sourceStatus?.enabledTrackedCompanies || 0);
-  const deterministicAttempts = Number(sourceStatus?.deterministicSources?.attempted || 0);
+export function jobSearchCapabilities({ ai } = {}) {
   return {
     deterministic: {
-      configured: enabledSearches > 0 || enabledCompanies > 0,
-      executable: deterministicAttempts > 0,
+      configured: true,
+      executable: true,
     },
     aiWeb: {
       configured: ai?.configured === true,
