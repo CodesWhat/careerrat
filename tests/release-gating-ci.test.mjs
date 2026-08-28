@@ -53,7 +53,7 @@ test("all deterministic product builds are declared as protected contexts", asyn
   assert.doesNotMatch(workflow, /Non-gating for now/i);
 });
 
-test("pre-tag and packaged release verification both require the four live-search receipts", async () => {
+test("pre-tag and packaged release verification both require the four native AI search receipts", async () => {
   const [rootPackage, desktopVerify, desktopWorkflow] = await Promise.all([
     source("package.json"),
     source("apps/desktop/scripts/verify-release.mjs"),
@@ -66,12 +66,12 @@ test("pre-tag and packaged release verification both require the four live-searc
   );
   const checkoutBeforeReceiptGate = macReleaseJob.slice(
     macReleaseJob.indexOf("actions/checkout@"),
-    macReleaseJob.indexOf("Verify current live-search receipts")
+    macReleaseJob.indexOf("Verify current native AI search receipts")
   );
 
   assert.equal(pkg.scripts?.["release:pretag"], "node scripts/verify-live-search-receipts.mjs");
   assert.match(desktopVerify, /verifyLiveSearchReceiptDirectory/);
-  assert.match(desktopWorkflow, /Verify current live-search receipts/);
+  assert.match(desktopWorkflow, /Verify current native AI search receipts/);
   assert.match(desktopWorkflow, /npm run release:pretag/);
   assert.match(checkoutBeforeReceiptGate, /fetch-depth:\s*0/);
 });
