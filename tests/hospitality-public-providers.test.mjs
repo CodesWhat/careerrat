@@ -194,3 +194,58 @@ test("hospitality public providers drop expired detail pages", async () => {
   const offers = await fetchOysterLink({ url: listUrlByProvider.oysterlink }, options);
   assert.deepEqual(offers, []);
 });
+
+test("hcareers emits its single safe apply destination without losing board provenance", async () => {
+  const applyUrl =
+    "https://careers.hireology.com/arlo-williamsburg/2838889/description?source=hcareers&utm_source=hcareers";
+  const { options } = requestOptions("hcareers");
+  options.fetchImpl = async (url) =>
+    new Response(
+      url === listUrlByProvider.hcareers
+        ? listHtmlByProvider.hcareers
+        : detailHtmlByProvider.hcareers.replace(
+            "</body>",
+            `<a data-track="apply-click" href="${applyUrl.replaceAll("&", "&amp;")}">Apply</a></body>`
+          ),
+      { status: 200, headers: { "content-type": "text/html" } }
+    );
+
+  const offers = await fetchHcareers({ url: listUrlByProvider.hcareers }, options);
+
+  assert.equal(offers.length, 1);
+  assert.equal(offers[0].url, applyUrl);
+  assert.equal(offers[0].capturedUrl, detailUrlByProvider.hcareers);
+  assert.equal(offers[0].provider, "hcareers");
+  assert.equal(offers[0].bodyPartial, false);
+  assert.match(offers[0].bodyText, /Serve guests in a high-volume New York bar/);
+});
+
+test("hcareers falls back to its detail page for unsafe or ambiguous apply destinations", async () => {
+  const cases = [
+    '<a data-track="apply-click" href="http://careers.hireology.com/acme/123/description">Apply</a>',
+    '<a data-track="apply-click" href="https://user:pass@careers.hireology.com/acme/123/description">Apply</a>',
+    '<a data-track="apply-click" href="https://127.0.0.1/acme/123/description">Apply</a>',
+    '<a data-track="apply-click" href="javascript:alert(1)">Apply</a>',
+    [
+      '<a data-track="apply-click" href="https://careers.hireology.com/acme/123/description">Apply</a>',
+      '<a data-track="apply-click" href="https://jobs.example.com/acme/456">Apply</a>',
+    ].join(""),
+  ];
+
+  for (const applyMarkup of cases) {
+    const { options } = requestOptions("hcareers");
+    options.fetchImpl = async (url) =>
+      new Response(
+        url === listUrlByProvider.hcareers
+          ? listHtmlByProvider.hcareers
+          : detailHtmlByProvider.hcareers.replace("</body>", `${applyMarkup}</body>`),
+        { status: 200, headers: { "content-type": "text/html" } }
+      );
+
+    const offers = await fetchHcareers({ url: listUrlByProvider.hcareers }, options);
+
+    assert.equal(offers.length, 1);
+    assert.equal(offers[0].url, detailUrlByProvider.hcareers);
+    assert.equal(offers[0].capturedUrl, undefined);
+  }
+});

@@ -574,6 +574,86 @@ test("same-run canonical dedupe selects the richer copy independent of source or
   }
 });
 
+test("same Hireology requisition dedupes to the richer Hcareers capture independent of source order", () => {
+  const weak = {
+    company: "Arlo Williamsburg",
+    title: "Bar Manager & Floor Manager",
+    url: "https://careers.hireology.com/arlo-williamsburg/2838889/description?source=hcareers",
+    capturedUrl: "https://www.hcareers.com/jobs/4360243-bar-manager-floor-manager",
+    location: "Brooklyn, NY",
+    bodyText: "Short preview.",
+    bodyPartial: true,
+    provider: "hcareers",
+  };
+  const rich = {
+    ...weak,
+    url: "https://careers.hireology.com/arlo-williamsburg/2838889/description?source=hcareers&utm_source=hcareers",
+    capturedUrl: "https://www.hcareers.com/jobs/4360403-bar-manager-floor-manager",
+    bodyText: "Lead the bar program and dining room operations. ".repeat(20),
+    bodyPartial: false,
+    comp: "$75,000 to $85,000 per year",
+  };
+  const run = (offers) =>
+    filterAndDedupeOffers(offers, {
+      seenUrls: new Set(),
+      seenReqIds: new Set(),
+      seenCompanyRoles: new Set(),
+      titleFilter: () => true,
+      locationFilter: () => true,
+    });
+
+  for (const offers of [
+    [weak, rich],
+    [rich, weak],
+  ]) {
+    const result = run(offers);
+    assert.equal(result.kept.length, 1);
+    assert.equal(result.kept[0].url, rich.url);
+    assert.equal(result.kept[0].capturedUrl, rich.capturedUrl);
+    assert.equal(result.kept[0].bodyText, rich.bodyText);
+    assert.equal(result.kept[0].provider, "hcareers");
+    assert.equal(result.duplicates.length, 1);
+    assert.equal(result.duplicates[0].duplicateReason, "req_id_batch");
+  }
+});
+
+test("distinct Hireology requisitions survive even when their job facts match", () => {
+  const shared = {
+    company: "Arlo Williamsburg",
+    title: "Bar Manager & Floor Manager",
+    location: "Brooklyn, NY",
+    bodyText: "Lead the bar program and dining room operations. ".repeat(20),
+    bodyPartial: false,
+    provider: "hcareers",
+  };
+  const offers = [
+    {
+      ...shared,
+      url: "https://careers.hireology.com/arlo-williamsburg/2838889/description",
+      capturedUrl: "https://www.hcareers.com/jobs/4360403-bar-manager-floor-manager",
+    },
+    {
+      ...shared,
+      url: "https://careers.hireology.com/arlo-williamsburg/2850254/description",
+      capturedUrl: "https://www.hcareers.com/jobs/4363300-events-outlets-operations-manager",
+    },
+  ];
+
+  const result = filterAndDedupeOffers(offers, {
+    seenUrls: new Set(),
+    seenReqIds: new Set(),
+    seenCompanyRoles: new Set(),
+    titleFilter: () => true,
+    locationFilter: () => true,
+  });
+
+  assert.deepEqual(
+    result.kept.map((offer) => offer.url),
+    offers.map((offer) => offer.url)
+  );
+  assert.equal(result.duplicates.length, 0);
+});
+
 test("adjacent engineering titles need strong candidate evidence while blockers stay blocked", () => {
   const titleFilter = buildTitleFilter({
     positive: ["Staff Frontend Engineer"],
@@ -1114,6 +1194,16 @@ test("extracts canonical req ids from common ATS URLs", () => {
   assert.equal(
     extractReqId("https://www.linkedin.com/jobs/view/444555666/").id,
     "linkedin:444555666"
+  );
+  assert.deepEqual(
+    extractReqId(
+      "https://careers.hireology.com/arlo-williamsburg/2838889/description?source=hcareers"
+    ),
+    { provider: "hireology", value: "2838889", id: "hireology:2838889" }
+  );
+  assert.equal(
+    extractReqId("https://careers.hireology.com/arlo-williamsburg/not-numeric/description").id,
+    null
   );
   for (const requisition of ["JR12269", "JR13123-1", "R100123149", "HB344468-3"]) {
     assert.deepEqual(

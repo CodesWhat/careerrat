@@ -1,6 +1,6 @@
 import { Parser } from "htmlparser2";
 
-import { fetchPublicHttpText } from "../net/public-http-fetch.mjs";
+import { fetchPublicHttpText, validatePublicHttpUrl } from "../net/public-http-fetch.mjs";
 import { htmlToPlainText } from "../text/html-text.mjs";
 
 const MAX_DETAIL_LINKS = 50;
@@ -140,6 +140,42 @@ function structuredPostings(html) {
   return postings;
 }
 
+function extractHcareersApplyDestination(html, detailUrl) {
+  const destinations = new Map();
+  const parser = new Parser(
+    {
+      onopentag(name, attributes) {
+        if (
+          name !== "a" ||
+          String(attributes["data-track"] || "").toLowerCase() !== "apply-click" ||
+          !attributes.href
+        ) {
+          return;
+        }
+        try {
+          const candidate = new URL(String(attributes.href), detailUrl);
+          if (
+            candidate.protocol !== "https:" ||
+            candidate.username ||
+            candidate.password ||
+            !validatePublicHttpUrl(candidate).ok
+          ) {
+            return;
+          }
+          candidate.hash = "";
+          if (candidate.toString() === detailUrl) return;
+          destinations.set(candidate.toString(), candidate.toString());
+        } catch {
+          // Ignore malformed page-owned destinations and keep the board URL.
+        }
+      },
+    },
+    { decodeEntities: true }
+  );
+  parser.end(String(html || ""));
+  return destinations.size === 1 ? [...destinations.values()][0] : null;
+}
+
 function cleanText(value) {
   return htmlToPlainText(String(value || ""), { blockSeparator: "\n" })
     .replace(/\u00a0/g, " ")
@@ -221,11 +257,14 @@ function normalizePosting(posting, { url, provider, now, html }) {
   const company = String(posting?.hiringOrganization?.name || "").trim();
   const bodyText = cleanText(posting?.description);
   if (!title || !company || bodyText.length < MIN_BODY_CHARS) return { status: "invalid" };
+  const applyDestination =
+    provider === "hcareers" ? extractHcareersApplyDestination(html, url) : null;
   return {
     status: "live",
     offer: {
       title,
-      url,
+      url: applyDestination || url,
+      ...(applyDestination ? { capturedUrl: url } : {}),
       company,
       location: locationText(posting.jobLocation),
       comp:

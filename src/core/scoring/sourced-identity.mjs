@@ -50,6 +50,13 @@ export function extractReqId(rawUrl = "") {
     const linkedIn = path.match(/\/jobs\/view\/(\d+)/);
     if ((url.hostname === "linkedin.com" || url.hostname.endsWith(".linkedin.com")) && linkedIn)
       return { provider: "linkedin", value: linkedIn[1], id: `linkedin:${linkedIn[1]}` };
+    const hireology = path.match(/^\/[^/]+\/(\d+)\/description\/?$/i);
+    if (url.hostname === "careers.hireology.com" && hireology)
+      return {
+        provider: "hireology",
+        value: hireology[1],
+        id: `hireology:${hireology[1]}`,
+      };
     const workday = path.match(/_([a-z]{1,8}\d{4,}(?:-\d+)?)(?:\/|$)/i);
     if (/^[\w-]+\.wd[\w-]*\.myworkdayjobs\.com$/i.test(url.hostname) && workday)
       return {
