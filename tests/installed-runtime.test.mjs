@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import {
   chmodSync,
@@ -26,6 +27,7 @@ import {
   hasCompleteCareerRatCapabilities,
   INSTALLED_RUNTIME_DEFINITIONS,
   installedRuntimeCapabilities,
+  installedRuntimeExecutionIdentity,
   installedRuntimeSignInCommand,
   materializeIsolatedSkillCwd,
   ONE_SHOT_RUNTIME_TIMEOUT_MS,
@@ -43,6 +45,7 @@ import {
   supportsInstalledRuntimeStreaming,
 } from "../src/core/ai/installed-runtimes.mjs";
 import {
+  runtimeProcessIdentityFiles,
   runtimeProcessInvocation,
   scheduleRuntimeProcessKill,
 } from "../src/core/ai/runtime-process.mjs";
@@ -814,6 +817,166 @@ test("Windows batch invocation distinguishes npm shims, plain batch files, and l
     () => runtimeProcessInvocation("C:\\tools\\agent\nowned.bat", [], { platform: "win32" }),
     /line breaks/i
   );
+});
+
+test("Windows npm shim identity resolves the cmd launcher, Node interpreter, and payload", () => {
+  const wrapper = "C:\\Users\\Taylor\\AppData\\Roaming\\npm\\codex.cmd";
+  const command = "C:\\Windows\\System32\\cmd.exe";
+  const interpreter = "C:\\Program Files\\nodejs\\node.exe";
+  const payload =
+    "C:\\Users\\Taylor\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js";
+  const canonical = new Map([
+    [wrapper.toLowerCase(), wrapper],
+    [command.toLowerCase(), command],
+    [interpreter.toLowerCase(), interpreter],
+    [payload.toLowerCase(), payload],
+  ]);
+  const shim = [
+    "@ECHO off",
+    "GOTO start",
+    ":find_dp0",
+    "SET dp0=%~dp0",
+    "EXIT /b",
+    ":start",
+    "SETLOCAL",
+    "CALL :find_dp0",
+    'IF EXIST "%dp0%\\node.exe" (',
+    '  SET "_prog=%dp0%\\node.exe"',
+    ") ELSE (",
+    '  SET "_prog=node"',
+    ")",
+    'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & set PATHEXT=%PATHEXT:;.JS;=;% & "%_prog%" "%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*',
+  ].join("\r\n");
+
+  const files = runtimeProcessIdentityFiles(wrapper, {
+    platform: "win32",
+    env: { ComSpec: command, Path: "C:\\Program Files\\nodejs" },
+    readFileImpl(path) {
+      assert.equal(path, wrapper);
+      return shim;
+    },
+    realpathImpl(path) {
+      const resolved = canonical.get(String(path).toLowerCase());
+      if (!resolved) throw new Error(`missing ${path}`);
+      return resolved;
+    },
+  });
+
+  assert.deepEqual(files, [
+    { role: "launcher", path: command },
+    { role: "wrapper", path: wrapper },
+    { role: "interpreter", path: interpreter },
+    { role: "payload", path: payload },
+  ]);
+
+  const decoy = `${shim}\r\n"%dp0%\\untracked.exe" %*`;
+  assert.equal(
+    runtimeProcessIdentityFiles(wrapper, {
+      platform: "win32",
+      env: { ComSpec: command, Path: "C:\\Program Files\\nodejs" },
+      readFileImpl: () => decoy,
+      realpathImpl(path) {
+        const resolved = canonical.get(String(path).toLowerCase());
+        if (!resolved) throw new Error(`missing ${path}`);
+        return resolved;
+      },
+    }),
+    null
+  );
+});
+
+test("Windows verified runtime identity changes when an unchanged shim payload or interpreter changes", () => {
+  const root = tempRoot();
+  const wrapper = join(root, "codex.cmd");
+  const launcher = join(root, "cmd.exe");
+  const interpreter = join(root, "node.exe");
+  const payload = join(root, "codex.js");
+  writeFileSync(wrapper, "unchanged wrapper");
+  writeFileSync(launcher, "cmd implementation");
+  writeFileSync(interpreter, "node implementation v1");
+  writeFileSync(payload, "codex implementation v1");
+  const runtimeIdentityFilesImpl = () => [
+    { role: "launcher", path: launcher },
+    { role: "wrapper", path: wrapper },
+    { role: "interpreter", path: interpreter },
+    { role: "payload", path: payload },
+  ];
+
+  try {
+    const runtime = { path: wrapper, version: "codex-cli 0.149.1" };
+    const original = installedRuntimeExecutionIdentity(runtime, {
+      platform: "win32",
+      runtimeIdentityFilesImpl,
+    });
+    assert.ok(original);
+
+    writeFileSync(payload, "codex implementation v2");
+    const changedPayload = installedRuntimeExecutionIdentity(runtime, {
+      platform: "win32",
+      runtimeIdentityFilesImpl,
+    });
+    assert.notEqual(changedPayload.binaryFingerprint, original.binaryFingerprint);
+
+    writeFileSync(payload, "codex implementation v1");
+    writeFileSync(interpreter, "node implementation v2");
+    const changedInterpreter = installedRuntimeExecutionIdentity(runtime, {
+      platform: "win32",
+      runtimeIdentityFilesImpl,
+    });
+    assert.notEqual(changedInterpreter.binaryFingerprint, original.binaryFingerprint);
+
+    writeFileSync(interpreter, "node implementation v1");
+    writeFileSync(launcher, "cmd implementation v2");
+    const changedLauncher = installedRuntimeExecutionIdentity(runtime, {
+      platform: "win32",
+      runtimeIdentityFilesImpl,
+    });
+    assert.notEqual(changedLauncher.binaryFingerprint, original.binaryFingerprint);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Windows verified runtime identity fails closed for an unresolved batch implementation", () => {
+  const root = tempRoot();
+  const wrapper = join(root, "codex.cmd");
+  writeFileSync(wrapper, "@echo off\r\ncodex-real.exe %*");
+  try {
+    assert.equal(
+      installedRuntimeExecutionIdentity(
+        {
+          path: wrapper,
+          version: "codex-cli 0.149.1",
+          binaryFingerprint: "a".repeat(64),
+        },
+        {
+          platform: "win32",
+          runtimeIdentityFilesImpl: () => null,
+        }
+      ),
+      null
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Unix direct executable identity keeps the existing raw-byte fingerprint", () => {
+  const root = tempRoot();
+  const executable = join(root, "codex");
+  const bytes = Buffer.from("direct executable bytes");
+  writeFileSync(executable, bytes);
+  try {
+    const identity = installedRuntimeExecutionIdentity(
+      { path: executable, version: "0.149.1" },
+      {
+        platform: "darwin",
+      }
+    );
+    assert.equal(identity.binaryFingerprint, createHash("sha256").update(bytes).digest("hex"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("Windows forced cleanup uses fixed taskkill argv for the entire runtime process tree", async () => {

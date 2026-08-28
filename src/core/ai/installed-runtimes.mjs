@@ -38,7 +38,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { fetchPublicHttpText, validatePublicHttpUrl } from "../net/public-http-fetch.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { probeAcpRuntime, runAcpRuntime } from "./acp-runtime.mjs";
-import { runtimeProcessInvocation, scheduleRuntimeProcessKill } from "./runtime-process.mjs";
+import {
+  runtimeProcessIdentityFiles,
+  runtimeProcessInvocation,
+  scheduleRuntimeProcessKill,
+} from "./runtime-process.mjs";
 
 const CLAUDE_BOUNDARY_MINIMUM_VERSION = "2.1.241";
 const UNVERIFIED_COMPLETION_REASON =
@@ -379,7 +383,7 @@ export function detectInstalledRuntimes(options = {}) {
   return INSTALLED_RUNTIME_DEFINITIONS.map((definition) => {
     const path = findInstalledExecutable(definition.binaries, options);
     const realPath = path ? existingCanonicalPath(path) : null;
-    const binaryFingerprint = realPath ? runtimeBinaryFingerprint(realPath) : null;
+    const binaryFingerprint = realPath ? runtimeBinaryFingerprint(realPath, options) : null;
     const runtimeCapabilities = installedRuntimeCapabilities(definition.id, {
       available: Boolean(path),
     });
@@ -580,8 +584,43 @@ const COMPLETION_SMOKE_SCHEMA = Object.freeze({
   required: ["receipt"],
 });
 
-function runtimeBinaryFingerprint(path) {
+function runtimeBinaryFingerprint(
+  path,
+  {
+    env = process.env,
+    platform = process.platform,
+    runtimeIdentityFilesImpl = runtimeProcessIdentityFiles,
+  } = {}
+) {
   try {
+    if (platform === "win32" && /\.(?:bat|cmd)$/i.test(String(path || ""))) {
+      const resolvedBytes = new Map();
+      const readIdentityFile = (filePath) => {
+        const bytes = readFileSync(filePath);
+        resolvedBytes.set(String(filePath).toLowerCase(), bytes);
+        return bytes;
+      };
+      const files = runtimeIdentityFilesImpl(path, {
+        env,
+        platform,
+        readFileImpl: readIdentityFile,
+      });
+      if (!Array.isArray(files) || files.length < 3) return null;
+      const hash = createHash("sha256").update("careerrat-runtime-chain-v1\0");
+      const seenRoles = new Set();
+      for (const file of files) {
+        const role = String(file?.role || "").trim();
+        const filePath = String(file?.path || "").trim();
+        if (!role || !filePath || seenRoles.has(role)) return null;
+        seenRoles.add(role);
+        const bytes = resolvedBytes.get(filePath.toLowerCase()) || readIdentityFile(filePath);
+        hash.update(`${role}\0${filePath.toLowerCase()}\0${bytes.length}\0`).update(bytes);
+      }
+      if (!seenRoles.has("launcher") || !seenRoles.has("wrapper") || !seenRoles.has("payload")) {
+        return null;
+      }
+      return hash.digest("hex");
+    }
     return createHash("sha256").update(readFileSync(path)).digest("hex");
   } catch {
     return null;
@@ -590,16 +629,28 @@ function runtimeBinaryFingerprint(path) {
 
 export function installedRuntimeExecutionIdentity(
   runtime,
-  { env = process.env, platform = process.platform, spawnSyncImpl = spawnSync } = {}
+  {
+    env = process.env,
+    platform = process.platform,
+    spawnSyncImpl = spawnSync,
+    runtimeIdentityFilesImpl = runtimeProcessIdentityFiles,
+  } = {}
 ) {
   const path = String(runtime?.path || "").trim();
   if (!path) return null;
   const realPath = existingCanonicalPath(path) || String(runtime?.realPath || "").trim();
+  const resolvedFingerprint = realPath
+    ? runtimeBinaryFingerprint(realPath, { env, platform, runtimeIdentityFilesImpl })
+    : null;
+  const requiresResolvedChain =
+    platform === "win32" && /\.(?:bat|cmd)$/i.test(String(realPath || path));
   const binaryFingerprint =
-    (realPath ? runtimeBinaryFingerprint(realPath) : null) ||
-    String(runtime?.binaryFingerprint || "")
-      .trim()
-      .toLowerCase();
+    resolvedFingerprint ||
+    (requiresResolvedChain
+      ? null
+      : String(runtime?.binaryFingerprint || "")
+          .trim()
+          .toLowerCase());
   let version = String(runtime?.version || "").trim();
   if (!version) {
     const childEnv = buildInstalledRuntimeChildEnv({ env });
@@ -731,6 +782,7 @@ export async function probeInstalledRuntimeCompletion({
   version,
   cwd = process.cwd(),
   env = process.env,
+  platform = process.platform,
   force = false,
   timeoutMs = COMPLETION_SMOKE_TIMEOUT_MS,
   nowImpl = Date.now,
@@ -747,7 +799,7 @@ export async function probeInstalledRuntimeCompletion({
       entry: { ok: false, checkedAt: new Date(nowImpl()).toISOString() },
     });
   }
-  const binaryFingerprint = runtimeFingerprintImpl(runtime.path);
+  const binaryFingerprint = runtimeFingerprintImpl(runtime.path, { env, platform });
   const nowMs = nowImpl();
   if (!binaryFingerprint) {
     return completionSmokeResult({
