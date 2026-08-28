@@ -5670,8 +5670,9 @@ test("runAiWebSearch tops up a useful set made only of deferred posting leads", 
       });
       return { ok: true };
     },
-    resolveJobUrlImpl: async (url) =>
-      url.includes("indeed.com")
+    resolveJobUrlImpl: async (url) => {
+      const host = new URL(url).hostname;
+      return host === "indeed.com" || host.endsWith(".indeed.com")
         ? {
             bodyFetchStatus: "deferred",
             url,
@@ -5680,7 +5681,8 @@ test("runAiWebSearch tops up a useful set made only of deferred posting leads", 
         : specificResolution(url, {
             location: "New York, NY",
             liveness: { result: "active", reason: "visible apply control" },
-          }),
+          });
+    },
   });
 
   assert.equal(inputs.length, 3);
@@ -7819,10 +7821,16 @@ test("runAiWebSearch uses deterministic coverage to plan unresolved sources and 
       },
     ],
   });
-  assert.equal(hydrationUrls.includes(knownUrl), false);
-  assert.equal(hydrationUrls.includes(alternateKnownReqUrl), false);
   assert.equal(
-    hydrationUrls.includes("https://covered.example/jobs/another-field-requisition"),
+    hydrationUrls.some((u) => u === knownUrl),
+    false
+  );
+  assert.equal(
+    hydrationUrls.some((u) => u === alternateKnownReqUrl),
+    false
+  );
+  assert.equal(
+    hydrationUrls.some((u) => u === "https://covered.example/jobs/another-field-requisition"),
     true
   );
   assert.equal(result.new, 4, JSON.stringify(result));
