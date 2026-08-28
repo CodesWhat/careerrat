@@ -624,7 +624,10 @@ test("runAiWebSearch does not treat negated remote wording as a remote search re
       { id: "no", text: "Find Platform Engineer jobs in NYC; no remote roles" },
       { id: "not", text: "Find Platform Engineer jobs in NYC, not remote" },
       { id: "excluded", text: "Find Platform Engineer jobs in NYC; remote roles excluded" },
-      { id: "positive", text: "Find Platform Engineer jobs in NYC or remote in the US" },
+      {
+        id: "relative-negation",
+        text: "Find Platform Engineer jobs in NYC; exclude all jobs that are remote",
+      },
     ],
   });
   const plans = new Map();
@@ -641,7 +644,7 @@ test("runAiWebSearch does not treat negated remote wording as a remote search re
           role({
             company: `${promptId} Platform ${index}`,
             title: "Platform Engineer",
-            location: promptId === "positive" ? "Remote, US" : "New York, NY",
+            location: "New York, NY",
             url: `https://${promptId}-${index}.example/jobs/platform-engineer`,
           })
         ),
@@ -652,17 +655,146 @@ test("runAiWebSearch does not treat negated remote wording as a remote search re
     resolveJobUrlImpl: canonicalResolver(),
   });
 
-  for (const promptId of ["exclude", "no", "not", "excluded"]) {
+  for (const promptId of ["exclude", "no", "not", "excluded", "relative-negation"]) {
     assert.ok(
       plans.get(promptId).query_hints.every(({ query }) => !/\bremote\b/i.test(query)),
       JSON.stringify(plans.get(promptId))
     );
   }
+});
+
+test("runAiWebSearch treats relational do-not-include remote wording as local-only", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Platform engineering", titles: ["Platform Engineer"] }],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  const prompt = "Find Platform Engineer jobs in NYC; do not include jobs that are remote";
+  saveSearchPrompts({ repoRoot, prompts: [{ id: "p1", text: prompt }] });
+  let plan = null;
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      plan ??= kickoff.search_plan;
+      emitAssistantJson(onEvent, {
+        roles: [1, 2, 3].map((index) =>
+          role({
+            company: `Local Platform ${index}`,
+            title: "Platform Engineer",
+            location: "New York, NY",
+            url: `https://local-${index}.example/jobs/platform-engineer`,
+          })
+        ),
+        queries_run: [{ prompt_id: "p1", query: prompt, status: "completed" }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver(),
+  });
+
   assert.ok(
-    plans.get("positive").query_hints.some(({ query }) => /\bremote\b/i.test(query)),
-    JSON.stringify(plans.get("positive"))
+    plan.query_hints.every(({ query }) => !/\bremote\b/i.test(query)),
+    JSON.stringify(plan)
   );
 });
+
+for (const { label, prompt } of [
+  {
+    label: "exclude remote roles outside the US",
+    prompt: "Find remote Platform Engineer roles in the US; exclude remote roles outside the US",
+  },
+  {
+    label: "do not include remote roles outside the US",
+    prompt:
+      "Find remote Platform Engineer roles in the US; do not include remote roles outside the US",
+  },
+  {
+    label: "exclude roles outside the US in one clause",
+    prompt: "Find remote Platform Engineer roles in the US, exclude roles outside the US",
+  },
+]) {
+  test(`runAiWebSearch preserves US remote intent when told to ${label}`, async () => {
+    const repoRoot = repo({ prompts: 1 });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: {
+        location: {
+          home: "New York, NY",
+          remote: true,
+          remote_scope: "home-country",
+          hybrid: true,
+          onsite: true,
+          relocation: [],
+        },
+      },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "targeting",
+      patch: {
+        role_buckets: [{ name: "Platform engineering", titles: ["Platform Engineer"] }],
+        fit_bands: { fit_floor: 0 },
+      },
+    });
+    saveSearchPrompts({ repoRoot, prompts: [{ id: "p1", text: prompt }] });
+    let initialSearchPlan = null;
+
+    await runAiWebSearch({
+      repoRoot,
+      env: {},
+      runSkillStream: async ({ input, onEvent }) => {
+        const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+        initialSearchPlan ??= kickoff.search_plan;
+        emitAssistantJson(onEvent, {
+          roles: [1, 2, 3].map((index) =>
+            role({
+              company: `${label} Platform ${index}`,
+              title: "Platform Engineer",
+              location: "Remote, United States",
+              url: `https://mixed-remote-${index}.example/jobs/platform-engineer`,
+            })
+          ),
+          queries_run: [{ prompt_id: "p1", query: prompt, status: "completed" }],
+        });
+        return { ok: true };
+      },
+      resolveJobUrlImpl: canonicalResolver({
+        title: "Platform Engineer",
+        location: "Remote, United States",
+        liveness: { result: "active", reason: "visible apply control" },
+      }),
+    });
+
+    assert.equal(initialSearchPlan.query_hints.length, 2);
+    for (const { query } of initialSearchPlan.query_hints) {
+      assert.match(query, /"Platform Engineer"/);
+      assert.match(query, /\bremote\b/i);
+      assert.match(query, /\b(?:US|United States)\b/i);
+    }
+  });
+}
 
 test("runAiWebSearch retains remote when an event prompt explicitly requests it", async () => {
   const repoRoot = repo({ prompts: 1 });

@@ -693,18 +693,62 @@ function searchPlanTitles(prompt, candidateContext) {
   return titles.slice(0, 4);
 }
 
+function parseSearchPlanRemoteIntent(prompt) {
+  let explicit = false;
+  let scope = "";
+  const clauses = String(prompt?.text || "").split(/[,;.!?]+/);
+  const scopedOutsideExclusion = (clause) => {
+    const outside = clause.match(/\boutside\s+(?:the\s+)?(.+?)\s*$/i);
+    if (!outside) return "";
+    const beforeOutside = clause.slice(0, outside.index);
+    const excludesOutside =
+      /\b(?:exclude|excluding)\b/i.test(beforeOutside) ||
+      /\b(?:do\s+not|don't)\s+(?:include|show|find|search(?:\s+for)?)\b/i.test(beforeOutside);
+    const excludesAnotherMode =
+      /\b(?:local|hybrid|on-?site)\b/i.test(beforeOutside) && !/\bremote\b/i.test(beforeOutside);
+    return excludesOutside && !excludesAnotherMode ? outside[1] : "";
+  };
+  const outsideScope = clauses.map(scopedOutsideExclusion).find(Boolean) || "";
+
+  for (const clause of clauses) {
+    for (const match of clause.matchAll(/\bremote\b/gi)) {
+      const before = clause.slice(0, match.index);
+      const after = clause.slice(match.index + match[0].length);
+      const exclusionPrefix = /\b(?:exclude|excluding)\b[^,;.!?]*$/i.test(before);
+      const prefixIsNegated =
+        (exclusionPrefix && !/\b(?:do\s+not|don't)\s+exclude\b/i.test(before)) ||
+        /\bno(?:\s+(?:roles?|jobs?|work|positions?))?(?:\s+that\s+(?:are|is))?\s*$/i.test(before) ||
+        /\bnot\s*$/i.test(before) ||
+        /\bwithout(?:\s+(?:any|all))?(?:\s+(?:roles?|jobs?|work|positions?)(?:\s+that\s+(?:are|is))?)?\s+(?:fully\s+)?$/i.test(
+          before
+        ) ||
+        /\b(?:do\s+not|don't)\s+(?:include|show|find|search(?:\s+for)?)\b[^,;.!?]*$/i.test(before);
+      const suffixIsNegated =
+        /^(?:\s+(?:roles?|jobs?|work|positions?))?\s+(?:are\s+)?(?:excluded|not\s+allowed|off\s+limits)\b/i.test(
+          after
+        );
+      const occurrenceOutsideScope = scopedOutsideExclusion(clause);
+      const isNegated = prefixIsNegated || suffixIsNegated;
+
+      if (!isNegated || occurrenceOutsideScope) explicit = true;
+      scope ||=
+        occurrenceOutsideScope ||
+        (!isNegated && after.match(/\b(?:in|within)\s+(?:the\s+)?([^,]+?)\s*$/i)?.[1]) ||
+        "";
+    }
+  }
+  if (explicit && !scope) scope = outsideScope;
+  return { explicit, scope };
+}
+
 function searchPlanLocationClause(prompt, location = {}) {
   const alternatives = [];
   const home = quoteSearchTerm(location.home);
-  const promptText = String(prompt?.text || "");
-  const remoteIsNegated = [
-    /\b(?:exclude|excluding|no|not|without)\s+(?:any\s+)?(?:fully\s+)?remote\b/i,
-    /\b(?:do\s+not|don't)\s+(?:include|show|find|search(?:\s+for)?)\s+(?:fully\s+)?remote\b/i,
-    /\bremote(?:\s+(?:roles?|jobs?|work|positions?))?\s+(?:are\s+)?(?:excluded|not\s+allowed|off\s+limits)\b/i,
-  ].some((pattern) => pattern.test(promptText));
-  const remoteIsExplicit = /\bremote\b/i.test(promptText) && !remoteIsNegated;
+  const remoteIntent = parseSearchPlanRemoteIntent(prompt);
   if (home) alternatives.push(home);
-  if (location.remote === true && remoteIsExplicit) alternatives.push("remote");
+  if (location.remote === true && remoteIntent.explicit) {
+    alternatives.push(["remote", quoteSearchTerm(remoteIntent.scope)].filter(Boolean).join(" "));
+  }
   if (!home && location.hybrid === true) alternatives.push("hybrid");
   if (!home && location.onsite === true) alternatives.push("onsite");
   if (!alternatives.length) return "";
