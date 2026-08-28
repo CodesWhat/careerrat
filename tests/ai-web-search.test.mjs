@@ -5446,6 +5446,238 @@ test("runAiWebSearch tops up a useful set made only of deferred posting leads", 
   );
 });
 
+test("runAiWebSearch rotates configured hosts and prior queries across underfilled top-ups", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  const targetTitles = [
+    "Bar Manager",
+    "Assistant Bar Manager",
+    "Bar Operations Lead",
+    "Lead Bartender",
+    "Head Bartender",
+  ];
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Bar leadership", titles: targetTitles }],
+      fit_bands: { fit_floor: 65 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      {
+        id: "p1",
+        text: `Find active ${targetTitles.join(", ")} jobs in New York City`,
+      },
+    ],
+  });
+  const configuredHosts = [
+    "bar-source-one.example",
+    "bar-source-two.example",
+    "bar-source-three.example",
+    "bar-source-four.example",
+  ];
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "indeed",
+          source_type: "url-query",
+          label: "Bar Manager jobs",
+          url: "https://www.indeed.com/jobs?q=bar+manager",
+          enabled: true,
+        },
+        ...configuredHosts.map((host, index) => ({
+          provider: host,
+          source_type: "browser",
+          label: `${targetTitles[index]} board`,
+          url: `https://${host}/jobs`,
+          enabled: true,
+        })),
+      ],
+    },
+  });
+
+  const inputs = [];
+  const actualQueries = [];
+  const blockedUrl = "https://www.indeed.com/viewjob?jk=blocked-head-bartender";
+  const readableUrl = "https://direct-bar.example/jobs/bar-manager";
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      const query = kickoff.search_plan.query_hints[0].query;
+      const reportedQuery =
+        inputs.length === 1 ? `  ${query.toUpperCase().replace(/\s+/g, "  ")}  ` : query;
+      actualQueries.push(reportedQuery);
+      emitAssistantJson(onEvent, {
+        roles:
+          inputs.length === 1
+            ? [
+                role({
+                  company: "Direct Bar",
+                  title: "Bar Manager",
+                  location: "New York, NY",
+                  url: readableUrl,
+                }),
+                role({
+                  company: "Blocked Bar",
+                  title: "Head Bartender",
+                  location: "New York, NY",
+                  url: blockedUrl,
+                  body_text: null,
+                  body_partial: true,
+                }),
+              ]
+            : [],
+        queries_run: [{ prompt_id: "p1", query: reportedQuery, status: "completed" }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: async (url) =>
+      url === blockedUrl
+        ? {
+            bodyFetchStatus: "deferred",
+            url,
+            reason: "The exact posting requires a browser session.",
+          }
+        : specificResolution(url, {
+            title: "Bar Manager",
+            location: "New York, NY",
+            liveness: { result: "active", reason: "visible apply control" },
+          }),
+  });
+
+  assert.equal(inputs.length, 4, JSON.stringify(result));
+  const topUpPlans = inputs
+    .slice(1)
+    .map((input) => JSON.parse(input.split("\n\n", 1)[0]).search_plan);
+  const expectedTopUpHosts = configuredHosts.slice(1);
+  assert.deepEqual(
+    topUpPlans.map((plan) => plan.source_hints[0]),
+    expectedTopUpHosts
+  );
+  const normalizedQuery = (query) => query.trim().replace(/\s+/g, " ").toLowerCase();
+  const previouslyUsed = new Set([normalizedQuery(actualQueries[0])]);
+  for (let index = 0; index < topUpPlans.length; index += 1) {
+    const plan = topUpPlans[index];
+    assert.deepEqual(plan.limits, {
+      scope: "prompt-turn",
+      web_search_calls: 4,
+      web_fetch_calls: 8,
+      hard_stop: true,
+    });
+    assert.deepEqual(plan.focus.missing_target_titles, targetTitles.slice(1));
+    assert.deepEqual(plan.rejected_sources.hosts, ["www.indeed.com"]);
+    assert.doesNotMatch(JSON.stringify([plan.source_hints, plan.query_hints]), /indeed\.com/);
+    assert.equal(plan.query_hints[0].kind, "configured-source-or-direct", JSON.stringify(plan));
+    assert.ok(
+      plan.query_hints[0].query.includes(`site:${expectedTopUpHosts[index]}`),
+      JSON.stringify(plan)
+    );
+    assert.ok(
+      plan.query_hints.every(({ query }) => query.includes('"New York, NY"')),
+      JSON.stringify(plan)
+    );
+    for (const title of targetTitles.slice(1)) {
+      assert.ok(
+        plan.query_hints.some(({ query }) => query.includes(`"${title}"`)),
+        JSON.stringify(plan)
+      );
+    }
+    assert.ok(
+      plan.query_hints.every(({ query }) => !previouslyUsed.has(normalizedQuery(query))),
+      JSON.stringify(plan)
+    );
+    previouslyUsed.add(normalizedQuery(actualQueries[index + 1]));
+  }
+  assert.equal(result.presented, 1, JSON.stringify(result));
+});
+
+test("runAiWebSearch stops before invoking an empty used-query top-up plan", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: false,
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Bar leadership", titles: ["Bar Manager"] }],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [{ id: "p1", text: "Find active Bar Manager jobs in New York City" }],
+  });
+
+  const inputs = [];
+  const roleUrl = "https://direct-bar.example/jobs/bar-manager";
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      assert.ok(kickoff.search_plan.query_hints.length > 0, JSON.stringify(kickoff.search_plan));
+      const query = kickoff.search_plan.query_hints[0].query;
+      emitAssistantJson(onEvent, {
+        roles:
+          inputs.length === 1
+            ? [
+                role({
+                  company: "Direct Bar",
+                  title: "Bar Manager",
+                  location: "New York, NY",
+                  url: roleUrl,
+                }),
+              ]
+            : [],
+        queries_run: [{ prompt_id: "p1", query, status: "completed" }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver({
+      title: "Bar Manager",
+      location: "New York, NY",
+      liveness: { result: "active", reason: "visible apply control" },
+    }),
+  });
+
+  assert.equal(inputs.length, 2, JSON.stringify(result));
+  assert.equal(result.presented, 1, JSON.stringify(result));
+});
+
 test("runAiWebSearch replaces a canonical row that cannot form a complete presented result", async () => {
   const repoRoot = repo({ prompts: 3 });
   candidateConfigPatch({
@@ -6811,7 +7043,7 @@ test("runAiWebSearch top-up prioritizes the configured source for the missing ti
 
   const topUpPlan = JSON.parse(inputs[1].split("\n\n", 1)[0]).search_plan;
   assert.equal(topUpPlan.source_hints[0], "venue.example");
-  assert.match(topUpPlan.query_hints[1].query, /site:venue\.example/);
+  assert.match(topUpPlan.query_hints[0].query, /site:venue\.example/);
   assert.equal(topUpPlan.query_hints.length, 2);
   assert.ok(topUpPlan.query_hints.every(({ query }) => query.length <= 100));
 });

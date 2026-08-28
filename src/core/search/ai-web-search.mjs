@@ -724,6 +724,22 @@ function configuredSourceHosts(
   return hosts;
 }
 
+function rotateSourceHosts(hosts, offset = 0) {
+  if (hosts.length < 2) return hosts;
+  const normalizedOffset = Number.isInteger(offset)
+    ? ((offset % hosts.length) + hosts.length) % hosts.length
+    : 0;
+  if (!normalizedOffset) return hosts;
+  return [...hosts.slice(normalizedOffset), ...hosts.slice(0, normalizedOffset)];
+}
+
+function normalizedSearchQuery(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
 function normalizedTitleTokens(value) {
   return String(value || "")
     .toLowerCase()
@@ -1030,7 +1046,8 @@ function buildSearchQueryHints(
   initialKind,
   sourceHosts = [],
   excludedHosts = [],
-  preferDirectSources = false
+  preferDirectSources = false,
+  configuredSourceFirst = false
 ) {
   if (!titles.length) {
     const sourceClause = directSourceClause(
@@ -1038,7 +1055,7 @@ function buildSearchQueryHints(
       locationClause,
       sourceHosts,
       excludedHosts,
-      preferDirectSources
+      preferDirectSources && !configuredSourceFirst
     );
     const directQuery = boundedFallbackQuery(fallback, locationClause, sourceClause || "careers");
     return [
@@ -1058,7 +1075,7 @@ function buildSearchQueryHints(
       locationClause,
       sourceHosts,
       excludedHosts,
-      preferDirectSources || directFirst
+      directFirst
     );
     const query = boundedSearchQuery(hintTitles, locationClause, sourceClause);
     return {
@@ -1070,7 +1087,12 @@ function buildSearchQueryHints(
   };
   if (titles.length >= 3) {
     if (titleGroups.length > 2) {
-      const hints = titleGroups.slice(0, 4).map((hintTitles) => sourceHint(hintTitles, true));
+      const sourceGroups = titleGroups.slice(0, 4);
+      const configuredSourceIndex =
+        configuredSourceFirst && sourceHosts.length ? sourceGroups.length - 1 : -1;
+      const hints = sourceGroups.map((hintTitles, index) =>
+        sourceHint(hintTitles, index !== configuredSourceIndex)
+      );
       for (const hintTitles of titleGroups) {
         if (hints.length >= 4) break;
         hints.push({ kind: initialKind, query: boundedSearchQuery(hintTitles, locationClause) });
@@ -1101,6 +1123,9 @@ function buildPromptSearchPlan(
     missingTargetTitles = [],
     excludedHosts = [],
     preferDirectSources = false,
+    configuredSourceFirst = false,
+    sourceHintOffset = 0,
+    usedQueries = [],
   } = {}
 ) {
   const titles = missingTargetTitles.length
@@ -1113,17 +1138,31 @@ function buildPromptSearchPlan(
       ...excludedHosts,
     ]),
   ];
-  const sourceHints = configuredSourceHosts(sourceConfig, titles, {
-    excludedHosts: rejectedHosts,
-  });
-  const queryHints = buildSearchQueryHints(
+  const sourceHints = rotateSourceHosts(
+    configuredSourceHosts(sourceConfig, titles, {
+      excludedHosts: rejectedHosts,
+    }),
+    sourceHintOffset
+  );
+  const usedQuerySet = new Set(usedQueries.map(normalizedSearchQuery).filter(Boolean));
+  const plannedQueryHints = buildSearchQueryHints(
     titles,
     locationClause,
     prompt.text,
     missingTargetTitles.length ? "missing-target-title" : "target-title-and-location",
     sourceHints,
     rejectedHosts,
-    preferDirectSources
+    preferDirectSources,
+    configuredSourceFirst
+  );
+  const orderedQueryHints = configuredSourceFirst
+    ? [
+        ...plannedQueryHints.filter((hint) => hint.kind === "configured-source-or-direct"),
+        ...plannedQueryHints.filter((hint) => hint.kind !== "configured-source-or-direct"),
+      ]
+    : plannedQueryHints;
+  const queryHints = orderedQueryHints.filter(
+    (hint) => !usedQuerySet.has(normalizedSearchQuery(hint.query))
   );
 
   // Native agent CLIs dispatch their own WebSearch/WebFetch calls before the
@@ -1298,6 +1337,39 @@ export async function runAiWebSearch({
       ...(searchInstruction ? { recovery: true } : {}),
       ...(topUp ? { topUp: true } : {}),
     };
+    const searchPlan =
+      rejectedCandidates.length || topUp
+        ? buildPromptSearchPlan(prompt, candidateContext, {
+            sourceConfig,
+            rejectedCandidates,
+            missingTargetTitles,
+            excludedHosts: topUpRejectedHosts,
+            preferDirectSources: topUpRejectedHosts.length > 0,
+            configuredSourceFirst: topUp,
+            sourceHintOffset: topUp ? topUpState.sourceHintOffset || 0 : 0,
+            usedQueries: topUp ? topUpState.usedQueries || [] : [],
+          })
+        : searchPlansByPrompt.get(prompt.id);
+    if (topUp && searchPlan.query_hints.length === 0) {
+      onProgress?.({
+        type: "activity",
+        message: `No unused search queries remain for saved prompt ${promptNumber} of ${promptTotal}.`,
+        ...lifecycle,
+        promptStatus: "completed",
+      });
+      return {
+        promptId: prompt.id,
+        roles: [],
+        rejectedPostings: [],
+        validationFailures: [],
+        toolTrace: [],
+        errors: [],
+        topUp: true,
+        planExhausted: true,
+        queryResults: [],
+        failedPromptIds: [],
+      };
+    }
     onProgress?.({
       type: "activity",
       message: topUp
@@ -1313,16 +1385,7 @@ export async function runAiWebSearch({
       mode: "ai-web-search",
       prompts: [{ id: prompt.id, text: prompt.text }],
       candidate: candidateContext,
-      search_plan:
-        rejectedCandidates.length || topUp
-          ? buildPromptSearchPlan(prompt, candidateContext, {
-              sourceConfig,
-              rejectedCandidates,
-              missingTargetTitles,
-              excludedHosts: topUpRejectedHosts,
-              preferDirectSources: topUpRejectedHosts.length > 0,
-            })
-          : searchPlansByPrompt.get(prompt.id),
+      search_plan: searchPlan,
       result_url_policy: RESULT_URL_POLICY,
     };
     const toolCalls = new Map();
@@ -1975,6 +2038,12 @@ export async function runAiWebSearch({
     const consideredCandidates = [...consideredByUrl.values()];
     const consideredPostingKeys = new Set();
     for (const { offer } of consideredCandidates) addPostingIdentity(consideredPostingKeys, offer);
+    const usedQueries = allPromptOutcomes
+      .filter((outcome) => outcome.promptId === topUpSpec.prompt.id)
+      .flatMap((outcome) => outcome.queryResults || [])
+      .flatMap((entry) => entry.queries || [])
+      .map((query) => String(query?.query || "").trim())
+      .filter(Boolean);
     topUpCounts.set(topUpSpec.prompt.id, topUpSpec.topUpCount + 1);
     const topUpOutcome = await runSavedPrompt(topUpSpec.prompt, topUpSpec.promptIndex, {
       topUpCandidates: consideredCandidates,
@@ -1988,9 +2057,12 @@ export async function runAiWebSearch({
           (bucket) => bucket.name || JSON.stringify(bucket.titles)
         ),
         rejectedSourceHosts: [...topUpRejectedHosts],
+        sourceHintOffset: topUpSpec.topUpCount,
+        usedQueries,
       },
     });
     allPromptOutcomes.push(topUpOutcome);
+    if (topUpOutcome.planExhausted === true) break;
     const topUpCollection = await collectPromptOutcomes([topUpOutcome], {
       recovery: true,
       rejectedPostingKeys: consideredPostingKeys,
