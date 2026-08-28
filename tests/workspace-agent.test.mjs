@@ -2422,6 +2422,261 @@ test("a confirmed Ask action adds one board URL and keeps the receipt in workspa
   ]);
 });
 
+test("adding an authenticated source asks a durable site-specific Yes or No question", async () => {
+  const repoRoot = tempRepo();
+  const sourceUrl = "https://www.linkedin.com/jobs/search/?keywords=platform";
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.add",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { url: sourceUrl },
+    },
+    addBoardSourceImpl: () => ({
+      added: true,
+      source: {
+        index: 3,
+        provider: "linkedin.com",
+        label: "LinkedIn search",
+        target: sourceUrl,
+        sourceType: "browser",
+        enabled: false,
+        auth: true,
+        platform: "linkedin",
+      },
+    }),
+  });
+
+  const message = result.messages.at(-1);
+  assert.equal(message.text, "Do you want to log into LinkedIn so I can use it?");
+  assert.equal(message.metadata.state, "permission-needed");
+  assert.deepEqual(
+    message.metadata.nextActions.map((action) => ({
+      label: action.label,
+      primary: action.primary,
+      type: action.intent.type,
+      input: action.intent.input,
+    })),
+    [
+      {
+        label: "Yes",
+        primary: undefined,
+        type: "source.auth-decision",
+        input: { selector: "LinkedIn search", decision: "yes" },
+      },
+      {
+        label: "No",
+        primary: false,
+        type: "source.auth-decision",
+        input: { selector: "LinkedIn search", decision: "no" },
+      },
+    ]
+  );
+  assert.deepEqual(
+    workspaceThreadRead({ repoRoot, env: {} }).messages.at(-1).metadata.nextActions,
+    message.metadata.nextActions
+  );
+});
+
+test("Yes grants only the resolved authenticated platform and opens its exact saved URL", async () => {
+  const repoRoot = tempRepo();
+  const sourceUrl = "https://www.linkedin.com/jobs/search/?keywords=platform&location=New%20York";
+  const enabled = [];
+  const opened = [];
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.auth-decision",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { selector: "LinkedIn search", decision: "yes" },
+    },
+    setSearchSourceEnabledImpl: (input) => {
+      enabled.push(input);
+      return {
+        changed: true,
+        source: {
+          index: 1,
+          provider: "linkedin.com",
+          label: "LinkedIn search",
+          target: sourceUrl,
+          sourceType: "browser",
+          enabled: true,
+          auth: true,
+          platform: "linkedin",
+        },
+      };
+    },
+    openAuthenticatedSourceImpl: async (input) => {
+      opened.push(input);
+      return { state: "needs-user", summary: "LinkedIn is open for sign-in." };
+    },
+  });
+
+  assert.deepEqual(enabled, [{ repoRoot, env: {}, selector: "LinkedIn search", enabled: true }]);
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0].platform, "linkedin");
+  assert.equal(opened[0].url, sourceUrl);
+  assert.equal(opened[0].source.label, "LinkedIn search");
+  const automation = candidateConfigGet({ repoRoot, env: {} }).automation;
+  assert.equal(automation.capabilities.authenticated_search.enabled, true);
+  assert.equal(automation.capabilities.authenticated_search.platforms.linkedin, true);
+  assert.equal(automation.capabilities.authenticated_search.scoped_grants.linkedin, true);
+  assert.equal(automation.consent.linkedin, true);
+  assert.notEqual(automation.capabilities.authenticated_search.platforms.indeed, true);
+  assert.notEqual(automation.consent.indeed, true);
+  assert.equal(result.messages.at(-1).text, "LinkedIn is open for sign-in.");
+  assert.equal(result.messages.at(-1).metadata.state, "needs-user");
+});
+
+test("Yes fails closed when the browser-session handoff is unavailable", async () => {
+  const repoRoot = tempRepo();
+  const sourceUrl = "https://www.linkedin.com/jobs/search/?keywords=platform";
+  const enabled = [];
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "source.auth-decision",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { selector: "LinkedIn search", decision: "yes" },
+      },
+      setSearchSourceEnabledImpl: (input) => {
+        enabled.push(input.enabled);
+        return {
+          changed: true,
+          source: {
+            label: "LinkedIn search",
+            target: sourceUrl,
+            enabled: input.enabled,
+            auth: true,
+            platform: "linkedin",
+          },
+        };
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "SOURCE_SETUP_UNAVAILABLE");
+      return true;
+    }
+  );
+
+  assert.deepEqual(enabled, [true, false]);
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, {});
+});
+
+test("No keeps the authenticated source disabled and continues the rest of the search", async () => {
+  const repoRoot = tempRepo();
+  const enabled = [];
+  const searchCalls = [];
+  let browserCalls = 0;
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.auth-decision",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { selector: "Indeed search", decision: "no" },
+    },
+    setSearchSourceEnabledImpl: (input) => {
+      enabled.push(input);
+      return {
+        changed: false,
+        source: {
+          index: 2,
+          provider: "indeed.com",
+          label: "Indeed search",
+          target: "https://www.indeed.com/jobs?q=operations",
+          sourceType: "browser",
+          enabled: false,
+          auth: true,
+          platform: "indeed",
+        },
+      };
+    },
+    openAuthenticatedSourceImpl: async () => {
+      browserCalls += 1;
+    },
+    startManualSearchImpl: async (input) => {
+      searchCalls.push(input);
+      return { run: { id: "search-after-skip", purpose: "manual-search", status: "running" } };
+    },
+  });
+
+  assert.deepEqual(enabled, [{ repoRoot, env: {}, selector: "Indeed search", enabled: false }]);
+  assert.equal(browserCalls, 0);
+  assert.deepEqual(searchCalls, [{ repoRoot, env: {}, fetchImpl: undefined }]);
+  assert.equal(
+    result.messages.at(-1).text,
+    "Skipped Indeed. I’m continuing with your other sources."
+  );
+  assert.equal(result.messages.at(-1).metadata.state, "running");
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, {});
+});
+
+test("enabling an authenticated source asks at point of use and leaves it disabled", async () => {
+  const repoRoot = tempRepo();
+  const calls = [];
+  const sourceUrl = "https://www.linkedin.com/jobs/search/?keywords=platform";
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.set-enabled",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { selector: "LinkedIn search", enabled: true },
+    },
+    setSearchSourceEnabledImpl: (input) => {
+      calls.push(input);
+      return {
+        changed: true,
+        source: {
+          index: 1,
+          provider: "linkedin.com",
+          label: "LinkedIn search",
+          target: sourceUrl,
+          sourceType: "browser",
+          enabled: input.enabled,
+          auth: true,
+          platform: "linkedin",
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(calls, [
+    { repoRoot, env: {}, selector: "LinkedIn search", enabled: true },
+    { repoRoot, env: {}, selector: "LinkedIn search", enabled: false },
+  ]);
+  const message = result.messages.at(-1);
+  assert.equal(message.text, "Do you want to log into LinkedIn so I can use it?");
+  assert.equal(message.metadata.state, "permission-needed");
+  assert.deepEqual(
+    message.metadata.nextActions.map(({ label, intent }) => ({ label, intent })),
+    [
+      {
+        label: "Yes",
+        intent: {
+          type: "source.auth-decision",
+          entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+          input: { selector: "LinkedIn search", decision: "yes" },
+        },
+      },
+      {
+        label: "No",
+        intent: {
+          type: "source.auth-decision",
+          entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+          input: { selector: "LinkedIn search", decision: "no" },
+        },
+      },
+    ]
+  );
+});
+
 test("a confirmed Ask action adds one keyword search through source setup", async () => {
   const repoRoot = tempRepo();
   const calls = [];
@@ -8808,6 +9063,39 @@ test("settings.apply automation: a narrow platform patch preserves every other c
   assert.equal(automation.capabilities.status_polling.enabled, true);
   assert.equal(automation.capabilities.status_polling.platforms.greenhouse, true);
   assert.equal(automation.capabilities.status_polling.platforms.workday, true);
+});
+
+test("settings.apply cannot grant authenticated search outside a source login question", async () => {
+  const repoRoot = tempRepo();
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "settings.apply",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {
+          change: {
+            kind: "automation",
+            op: "platform",
+            capability: "authenticated_search",
+            platform: "linkedin",
+            enabled: true,
+          },
+        },
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "SETTINGS_CHANGE_UNSUPPORTED");
+      assert.equal(
+        error.message,
+        "CareerRat asks about a job-site login only when that source needs it."
+      );
+      return true;
+    }
+  );
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, {});
 });
 
 test("settings.apply automation: capability disable is allowed even for a high-tier capability", async () => {

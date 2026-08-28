@@ -67,7 +67,7 @@ vi.mock("./ProfileSettings.jsx", () => ({ ProfileSettings: () => null }));
 function createApi() {
   let enabled = true;
   return {
-    addBoard: vi.fn(),
+    runWorkspaceIntent: vi.fn().mockResolvedValue({ status: "completed" }),
     getAiPreferences: vi.fn().mockResolvedValue({
       quality: "automatic",
       reasoning: "automatic",
@@ -315,8 +315,31 @@ describe("ProfileSettingsController browser automation provider", () => {
   });
 });
 
+describe("ProfileSettingsController source setup", () => {
+  it("adds a board through the durable workspace chat so login questions appear there", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+
+    renderController(module, api);
+    await flushEffects();
+    let view = renderController(module, api);
+    settingsProps(view).onAddSource();
+    view = renderController(module, api);
+    settingsProps(view).onSourceDraftChange("https://www.linkedin.com/jobs/search/?keywords=ops");
+    view = renderController(module, api);
+    await settingsProps(view).onSubmitSource();
+
+    expect(api.runWorkspaceIntent).toHaveBeenCalledWith(
+      "source.add",
+      { type: "workspace", id: "workspace-main" },
+      { url: "https://www.linkedin.com/jobs/search/?keywords=ops" }
+    );
+    expect(navigate).toHaveBeenCalledWith("/");
+  });
+});
+
 describe("ProfileSettingsController permission consent", () => {
-  it("does not revoke LinkedIn consent while another enabled permission still uses it", async () => {
+  it("does not expose the removed authenticated-search Settings write path", async () => {
     const module = await import("./ProfileSettingsController.jsx");
     const api = createApi();
     api.getAutomationSettings.mockResolvedValue({
@@ -332,16 +355,27 @@ describe("ProfileSettingsController permission consent", () => {
     const view = renderController(module, api);
     await settingsProps(view).onPermissionChange("authenticated_search", false);
 
+    expect(api.saveCandidateFile).not.toHaveBeenCalled();
+  });
+
+  it("preserves a source-scoped LinkedIn grant when a visible permission is turned off", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getAutomationSettings.mockResolvedValue({
+      capabilities: [
+        { capability: "authenticated_search", enabled: true },
+        { capability: "authenticated_apply_preparation", enabled: true },
+      ],
+    });
+
+    renderController(module, api);
+    await flushEffects();
+    const view = renderController(module, api);
+    await settingsProps(view).onPermissionChange("authenticated_apply_preparation", false);
+
     expect(api.saveCandidateFile).toHaveBeenCalledWith(
       "automation",
-      expect.objectContaining({
-        consent: {
-          linkedin: true,
-          indeed: false,
-          wellfound: false,
-          glassdoor: false,
-        },
-      })
+      expect.objectContaining({ consent: expect.objectContaining({ linkedin: true }) })
     );
   });
 });

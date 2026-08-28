@@ -155,7 +155,7 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   }
 
   async function changePermission(id, enabled) {
-    const patch = permissionPatch(id, enabled, model.permissions);
+    const patch = permissionPatch(id, enabled, model.permissionState || model.permissions);
     if (!patch) return;
     try {
       await api.saveCandidateFile("automation", patch);
@@ -294,10 +294,14 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
     setSourceDialogBusy(true);
     setError(null);
     try {
-      await api.addBoard({ url: url.href, label: url.hostname });
-      await load();
+      await api.runWorkspaceIntent(
+        "source.add",
+        { type: "workspace", id: "workspace-main" },
+        { url: url.href }
+      );
       setSourceDraft("");
       setSourceDialogOpen(false);
+      navigate("/");
     } catch (cause) {
       setError(
         profileSettingsErrorMessage(

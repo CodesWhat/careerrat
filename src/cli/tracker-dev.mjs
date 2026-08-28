@@ -36,7 +36,10 @@ import { stopInstalledRuntimeSignIns } from "../core/ai/installed-runtimes.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
 import { createConfiguredApplyExecutor } from "../core/apply/apply-executor-factory.mjs";
 import { ingestAppleMail } from "../core/automation/apple-mail-ingest.mjs";
-import { createBrowserSessionManager } from "../core/automation/browser-session.mjs";
+import {
+  classifyBrowserAuthState,
+  createBrowserSessionManager,
+} from "../core/automation/browser-session.mjs";
 import {
   ingestPlatformMessagesInApp,
   ingestWebmailInApp,
@@ -125,6 +128,45 @@ function log(msg) {
   process.stdout.write(`[tracker:dev] ${msg}\n`);
 }
 
+function authenticatedSourceSite(platform) {
+  return (
+    {
+      linkedin: "LinkedIn",
+      indeed: "Indeed",
+      wellfound: "Wellfound",
+      glassdoor: "Glassdoor",
+    }[String(platform || "").toLowerCase()] || "The job site"
+  );
+}
+
+export async function openAuthenticatedSource(browserSessionManager, { platform, url } = {}) {
+  const site = authenticatedSourceSite(platform);
+  const session = browserSessionManager.get({ platform });
+  if (!session?.available) {
+    return {
+      state: "needs-user",
+      summary: `${site} couldn’t open in the CareerRat browser. ${session?.reason || "Try again."}`,
+    };
+  }
+  try {
+    const page = await session.open(url);
+    const auth = classifyBrowserAuthState(page);
+    if (auth) {
+      return {
+        state: "needs-user",
+        summary: `${site} is open. Finish the visible sign-in or verification step there, then come back here.`,
+        blocker: auth,
+      };
+    }
+    return { state: "ready", summary: `${site} is open and ready.` };
+  } catch (error) {
+    return {
+      state: "needs-user",
+      summary: `${site} couldn’t open in the CareerRat browser. ${error?.message || "Try again."}`,
+    };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Server creation
 
@@ -151,6 +193,7 @@ export function createDevServer({
     addBoardSourceImpl: addBoardSource,
     addSearchSourceQueryImpl: addSearchSourceQuery,
     setSearchSourceEnabledImpl: setSearchSourceEnabled,
+    openAuthenticatedSourceImpl: (input) => openAuthenticatedSource(browserSessionManager, input),
     applyJobImpl,
     startBoardDiscoveryImpl: ({ request }) =>
       startExplicitDiscoveryChat({

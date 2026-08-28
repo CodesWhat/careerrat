@@ -82,8 +82,6 @@ const PERMISSION_PLATFORMS = Object.freeze({
 });
 
 const PERMISSION_PROVIDER_SCOPES = Object.freeze({
-  authenticated_search:
-    "Turning this on records consent for LinkedIn, Indeed, Wellfound, and Glassdoor.",
   authenticated_apply_preparation:
     "Turning this on records consent for Greenhouse, Lever, Ashby, Workable, SmartRecruiters, LinkedIn, and external ATS sites.",
   mail_access: "Turning this on records consent for Gmail, Outlook, and webmail.",
@@ -433,6 +431,9 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
       source: publicSyncPreference.source || "default",
       updatedAt: publicSyncPreference.updatedAt || null,
     },
+    permissionState: ["authenticated_search", "authenticated_apply_preparation", "mail_access"].map(
+      (id) => ({ id, enabled: capabilityEnabled(automation, id) })
+    ),
     permissions: [
       {
         id: "draft_documents",
@@ -441,14 +442,6 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
         enabled: true,
         mutable: false,
         statusLabel: "Always on",
-      },
-      {
-        id: "authenticated_search",
-        name: "Browse job portals",
-        description: "use connected browser sessions when needed",
-        providerScope: PERMISSION_PROVIDER_SCOPES.authenticated_search,
-        enabled: capabilityEnabled(automation, "authenticated_search"),
-        mutable: true,
       },
       {
         id: "authenticated_apply_preparation",
@@ -621,7 +614,7 @@ export function profileSectionSavePlan(
 }
 
 export function permissionPatch(id, enabled, currentPermissions = []) {
-  if (id === "draft_documents") return null;
+  if (id === "draft_documents" || id === "authenticated_search") return null;
   const value = Boolean(enabled);
   const platforms = PERMISSION_PLATFORMS[id] || [];
   const providerState = Object.fromEntries(platforms.map((platform) => [platform, value]));

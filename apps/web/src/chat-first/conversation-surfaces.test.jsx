@@ -951,6 +951,45 @@ describe("TodayConversation", () => {
     );
   });
 
+  it("restores a site login question with working Yes and No actions", () => {
+    const onIntentAction = vi.fn();
+    const action = (label, decision) => ({
+      label,
+      ...(decision === "no" ? { primary: false } : {}),
+      intent: {
+        type: "source.auth-decision",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: { selector: "LinkedIn search", decision },
+      },
+    });
+    const actions = [action("Yes", "yes"), action("No", "no")];
+    const message = {
+      id: "source-login-after-reload",
+      role: "assistant",
+      kind: "action_result",
+      text: "Do you want to log into LinkedIn so I can use it?",
+      metadata: { state: "permission-needed", nextActions: actions },
+    };
+    const tree = MessageTranscript({ onIntentAction, messages: [message] });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(visit);
+      if (typeof node.type === "function") return visit(node.type(node.props));
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+
+    expect(buttons.map((button) => button.props.children)).toEqual(["Yes", "No"]);
+    buttons[1].props.onClick();
+    expect(onIntentAction).toHaveBeenCalledWith(
+      actions[1].intent,
+      expect.objectContaining({ id: "source-login-after-reload" }),
+      expect.objectContaining({ label: "No", primary: false })
+    );
+  });
+
   it("renders ambiguity choices as equal neutral actions after reload", () => {
     const onIntentAction = vi.fn();
     const actions = ["app-acme-ai", "app-acme-platform"].map((id, index) => ({

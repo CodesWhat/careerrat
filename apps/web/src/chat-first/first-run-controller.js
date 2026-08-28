@@ -339,7 +339,21 @@ export function buildFirstRunKnowledge(state, runtime) {
 
 export function firstRunAssistantMessage(raw, id) {
   const parsedAnswer = parseChatAnswerMode(raw);
-  const { text, blocks } = parseConfirmBlocks(parsedAnswer.text);
+  const parsed = parseConfirmBlocks(parsedAnswer.text);
+  const removedSearchConsent = parsed.blocks.some(
+    (block) =>
+      block?.kind === "consent_capability" && block?.payload?.capability === "authenticated_search"
+  );
+  const text = removedSearchConsent
+    ? "I’ll ask about a job-site login only when a source needs it."
+    : parsed.text;
+  const blocks = parsed.blocks.filter(
+    (block) =>
+      !(
+        block?.kind === "consent_capability" &&
+        block?.payload?.capability === "authenticated_search"
+      )
+  );
   const suggested =
     blocks.length === 0 && /what kind of role are you actually after/i.test(text)
       ? [FIRST_ROLE_SUGGESTION]
@@ -415,6 +429,9 @@ export async function applyFirstRunConfirmation(block, { api, state, onCompanyOp
   }
   if (block?.kind === "consent_capability") {
     const { capability, platform } = block.payload;
+    if (capability === "authenticated_search") {
+      throw new Error("Each job source asks about login only when it needs it.");
+    }
     await api.saveCandidateFile("automation", {
       setup_mode: "advanced",
       capabilities: {

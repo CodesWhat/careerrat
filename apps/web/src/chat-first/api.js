@@ -1,5 +1,4 @@
 import {
-  addBoard,
   appendJobThreadMessage,
   buildDeepIngestProposals,
   completeDiscovery,
@@ -105,7 +104,6 @@ export const firstRunApi = Object.freeze({
 });
 
 export const profileSettingsApi = Object.freeze({
-  addBoard,
   getAiPreferences,
   getAutomationSettings,
   getInstalledAiRuntimes,
@@ -113,6 +111,7 @@ export const profileSettingsApi = Object.freeze({
   getSourceMaintenance,
   startInstalledAiRuntimeSignIn,
   probeInstalledAiRuntime,
+  runWorkspaceIntent,
   saveCandidateFile,
   saveAiPreferences,
   selectInstalledAiRuntime,

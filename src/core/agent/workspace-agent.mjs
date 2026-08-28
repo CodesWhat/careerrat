@@ -164,6 +164,7 @@ export const EXECUTABLE_INTENTS = new Set([
   "application.record-external",
   "application.record-external-request",
   "source.add",
+  "source.auth-decision",
   "source.query-add",
   "source.set-enabled",
   "source.discover",
@@ -2539,6 +2540,37 @@ async function startExpandedSourceSearch({
   }
 }
 
+function authSourceSiteLabel(platform, source = {}) {
+  const known = {
+    linkedin: "LinkedIn",
+    indeed: "Indeed",
+    wellfound: "Wellfound",
+    glassdoor: "Glassdoor",
+  };
+  const key = String(platform || "").toLowerCase();
+  if (known[key]) return known[key];
+  try {
+    const host = new URL(source.target || source.url).hostname.replace(/^www\./, "");
+    const site = host.split(".")[0];
+    if (site) return `${site[0].toUpperCase()}${site.slice(1)}`;
+  } catch {
+    // A validated authenticated source normally has a URL; the platform is the safe fallback.
+  }
+  return key ? `${key[0].toUpperCase()}${key.slice(1)}` : "this site";
+}
+
+function sourceAuthDecisionAction({ label, selector, decision, primary }) {
+  return {
+    label,
+    ...(primary === false ? { primary: false } : {}),
+    intent: {
+      type: "source.auth-decision",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { selector, decision },
+    },
+  };
+}
+
 function searchResultText(run) {
   if (run?.status === "failed") {
     return run?.purpose === "ai-web-search"
@@ -3543,6 +3575,7 @@ export async function executeWorkspaceIntent({
   addBoardSourceImpl,
   addSearchSourceQueryImpl,
   setSearchSourceEnabledImpl,
+  openAuthenticatedSourceImpl,
   startBoardDiscoveryImpl,
   startCompanyResearchImpl,
   startCompResearchImpl,
@@ -4361,6 +4394,155 @@ export async function executeWorkspaceIntent({
       });
     }
 
+    if (normalized.type === "source.auth-decision") {
+      if (typeof setSearchSourceEnabledImpl !== "function") {
+        const error = actionError(
+          "Search-source controls are not connected in this runtime.",
+          "SOURCE_SETUP_UNAVAILABLE"
+        );
+        error.status = 501;
+        throw error;
+      }
+      const selector = String(input.selector || "").trim();
+      if (!selector) throw actionError("Name the search source to change.", "SOURCE_REQUIRED");
+      const decision = String(input.decision || "")
+        .trim()
+        .toLowerCase();
+      if (!new Set(["yes", "no"]).has(decision)) {
+        throw actionError("Choose Yes or No.", "SOURCE_AUTH_DECISION_REQUIRED");
+      }
+      const allow = decision === "yes";
+      const operation = await setSearchSourceEnabledImpl({
+        repoRoot,
+        env,
+        selector,
+        enabled: allow,
+      });
+      const source = operation?.source || {};
+      const platform = String(source.platform || "")
+        .trim()
+        .toLowerCase();
+      const validPlatform = CAPABILITIES.authenticated_search.platforms.includes(platform);
+      const url = String(source.target || source.url || "").trim();
+      if (source.auth !== true || !validPlatform || !url) {
+        if (allow) {
+          try {
+            await setSearchSourceEnabledImpl({ repoRoot, env, selector, enabled: false });
+          } catch {
+            // The original decision still fails closed because no grant or browser handoff follows.
+          }
+        }
+        throw actionError(
+          "That saved source no longer needs a CareerRat login.",
+          "SOURCE_AUTH_UNAVAILABLE"
+        );
+      }
+      const site = authSourceSiteLabel(platform, source);
+      if (!allow) {
+        const expandedSearch = await startExpandedSourceSearch({
+          repoRoot,
+          env,
+          searchFetchImpl,
+          startManualSearchImpl,
+          onSearchStarted,
+        });
+        return appendActionResult({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          text: `Skipped ${site}. I’m continuing with your other sources.`,
+          artifacts: [
+            {
+              kind: "search_source",
+              title: `${source.label || site}: Skipped`,
+              index: source.index ?? null,
+              provider: source.provider || null,
+              label: source.label || site,
+              target: url,
+              sourceType: source.sourceType || source.source_type || null,
+              enabled: false,
+              auth: true,
+              platform,
+            },
+            expandedSearch?.artifact,
+          ].filter(Boolean),
+          metadata: {
+            state: expandedSearch?.started ? "running" : "skipped",
+            nextActions: [navigationAction("Search jobs", { surface: "search" })],
+          },
+          operationResult: { source: operation, search: expandedSearch?.operation || null },
+          now,
+        });
+      }
+
+      if (typeof openAuthenticatedSourceImpl !== "function") {
+        await setSearchSourceEnabledImpl({ repoRoot, env, selector, enabled: false });
+        const error = actionError(
+          `CareerRat couldn't open ${site} for sign-in. Try again.`,
+          "SOURCE_SETUP_UNAVAILABLE"
+        );
+        error.status = 501;
+        throw error;
+      }
+      candidateConfigPatch({
+        repoRoot,
+        env,
+        name: "automation",
+        patch: {
+          consent: { [platform]: true },
+          capabilities: {
+            authenticated_search: {
+              enabled: true,
+              platforms: { [platform]: true },
+              scoped_grants: { [platform]: true },
+            },
+          },
+        },
+      });
+      const handoff = await openAuthenticatedSourceImpl({ platform, url, source });
+      const handoffState = String(handoff?.state || "needs-user");
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text:
+          String(handoff?.summary || "").trim() ||
+          `${site} is open. Finish signing in there, then come back here.`,
+        artifacts: [
+          {
+            kind: "search_source",
+            title: `${source.label || site}: Login`,
+            index: source.index ?? null,
+            provider: source.provider || null,
+            label: source.label || site,
+            target: url,
+            sourceType: source.sourceType || source.source_type || null,
+            enabled: true,
+            auth: true,
+            platform,
+          },
+        ],
+        metadata: {
+          state: handoffState,
+          ...(handoffState === "needs-user"
+            ? {
+                nextActions: [
+                  sourceAuthDecisionAction({
+                    label: "Check again",
+                    selector: source.label || selector,
+                    decision: "yes",
+                  }),
+                ],
+              }
+            : {}),
+        },
+        operationResult: { source: operation, handoff },
+        now,
+      });
+    }
+
     if (normalized.type === "source.add") {
       if (typeof addBoardSourceImpl !== "function") {
         const error = actionError(
@@ -4378,6 +4560,11 @@ export async function executeWorkspaceIntent({
       const added = operation?.added !== false;
       const enabled = source.enabled !== false;
       const authPending = source.auth === true && !enabled;
+      const authPlatform = String(source.platform || "")
+        .trim()
+        .toLowerCase();
+      const authSite = authSourceSiteLabel(authPlatform, source);
+      const sourceSelector = label;
       const expandedSearch =
         added && enabled && source.auth !== true
           ? await startExpandedSourceSearch({
@@ -4393,15 +4580,15 @@ export async function executeWorkspaceIntent({
         env,
         normalized,
         intentMessage,
-        text: added
-          ? `Added ${label} to your search sources.${
-              authPending
-                ? " It stays off until you enable browser access for this provider."
-                : expandedSearch?.started
+        text: authPending
+          ? `Do you want to log into ${authSite} so I can use it?`
+          : added
+            ? `Added ${label} to your search sources.${
+                expandedSearch?.started
                   ? " It is enabled, and CareerRat is searching it now."
                   : " It is enabled for future searches."
-            }`
-          : `${label} is already in your search sources. Nothing changed.`,
+              }`
+            : `${label} is already in your search sources. Nothing changed.`,
         artifacts: [
           {
             kind: "search_source",
@@ -4414,15 +4601,36 @@ export async function executeWorkspaceIntent({
             sourceType: source.sourceType || source.source_type || null,
             enabled,
             auth: source.auth === true,
+            ...(source.auth === true ? { platform: authPlatform || null } : {}),
           },
           expandedSearch?.artifact,
         ].filter(Boolean),
         metadata: {
-          state: expandedSearch?.started ? "running" : added ? "added" : "existing",
-          nextActions: [
-            navigationAction("Search jobs", { surface: "search" }),
-            navigationAction("Manage sources", { surface: "settings", section: "sources" }),
-          ],
+          state: authPending
+            ? "permission-needed"
+            : expandedSearch?.started
+              ? "running"
+              : added
+                ? "added"
+                : "existing",
+          nextActions: authPending
+            ? [
+                sourceAuthDecisionAction({
+                  label: "Yes",
+                  selector: sourceSelector,
+                  decision: "yes",
+                }),
+                sourceAuthDecisionAction({
+                  label: "No",
+                  selector: sourceSelector,
+                  decision: "no",
+                  primary: false,
+                }),
+              ]
+            : [
+                navigationAction("Search jobs", { surface: "search" }),
+                navigationAction("Manage sources", { surface: "settings", section: "sources" }),
+              ],
         },
         operationResult: operation,
         now,
@@ -4506,17 +4714,61 @@ export async function executeWorkspaceIntent({
       const label = String(source.label || source.provider || selector);
       const changed = operation?.changed !== false;
       const stateLabel = input.enabled ? "Enabled" : "Disabled";
+      if (input.enabled && source.auth === true) {
+        const rollback = await setSearchSourceEnabledImpl({
+          repoRoot,
+          env,
+          selector,
+          enabled: false,
+        });
+        const platform = String(source.platform || "")
+          .trim()
+          .toLowerCase();
+        const site = authSourceSiteLabel(platform, source);
+        return appendActionResult({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          text: `Do you want to log into ${site} so I can use it?`,
+          artifacts: [
+            {
+              kind: "search_source",
+              title: `${label}: Login needed`,
+              changed,
+              index: source.index ?? null,
+              provider: source.provider || null,
+              label,
+              target: source.target || null,
+              sourceType: source.sourceType || source.source_type || null,
+              enabled: false,
+              auth: true,
+              ...(platform ? { platform } : {}),
+            },
+          ],
+          metadata: {
+            state: "permission-needed",
+            nextActions: [
+              sourceAuthDecisionAction({ label: "Yes", selector: label, decision: "yes" }),
+              sourceAuthDecisionAction({
+                label: "No",
+                selector: label,
+                decision: "no",
+                primary: false,
+              }),
+            ],
+          },
+          operationResult: { requested: operation, rollback },
+          now,
+        });
+      }
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
         text: changed
-          ? `${stateLabel} ${label} for future searches.${
-              input.enabled && source.auth === true
-                ? " Browser access still needs separate consent before CareerRat can use it."
-                : ""
-            }`
+          ? `${stateLabel} ${label} for future searches.`
           : `${label} is already ${input.enabled ? "enabled" : "disabled"}. Nothing changed.`,
         artifacts: [
           {
@@ -5566,7 +5818,15 @@ export async function executeWorkspaceIntent({
             error.details = { options: CAPABILITY_KEYS };
             throw error;
           }
-          if (!new Set(["status_polling", "authenticated_search"]).has(capability)) {
+          if (capability === "authenticated_search") {
+            const error = actionError(
+              "CareerRat asks about a job-site login only when that source needs it.",
+              "SETTINGS_CHANGE_UNSUPPORTED"
+            );
+            error.details = { reason: "source-login", capability };
+            throw error;
+          }
+          if (capability !== "status_polling") {
             const error = actionError(
               `Turning on ${CAPABILITIES[capability].label} happens in Settings, where the permissions are explained.`,
               "SETTINGS_CHANGE_UNSUPPORTED"
@@ -9067,8 +9327,7 @@ function settingsAutomationFromText(text) {
   match = value.match(/^(?:please\s+)?turn\s+on\s+(.+?)(?:\s+on\s+(.+?))?\s*[.?!]*$/i);
   if (match) {
     const capability = matchAutomationCapabilityPhrase(match[1]);
-    if (!capability || !new Set(["status_polling", "authenticated_search"]).has(capability))
-      return null;
+    if (!capability || capability !== "status_polling") return null;
     return automationToggleChange(capability, match[2], true);
   }
 
@@ -10355,6 +10614,7 @@ export function createWorkspaceAgentRuntime({
   addBoardSourceImpl,
   addSearchSourceQueryImpl,
   setSearchSourceEnabledImpl,
+  openAuthenticatedSourceImpl,
   startBoardDiscoveryImpl,
   startCompanyResearchImpl,
   startCompResearchImpl,
@@ -10481,6 +10741,7 @@ export function createWorkspaceAgentRuntime({
           addBoardSourceImpl,
           addSearchSourceQueryImpl,
           setSearchSourceEnabledImpl,
+          openAuthenticatedSourceImpl,
           startBoardDiscoveryImpl,
           startCompanyResearchImpl,
           startCompResearchImpl,
