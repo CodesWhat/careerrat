@@ -1392,7 +1392,7 @@ export function extractCompBand(text = "", { baseOnly = false } = {}) {
     const workHours = annualWorkHours(line);
     if (baseOnly && annualEarnings && !explicitBase) continue;
     const re =
-      /(?:usd\s*)?\$?\s*(\d{2,6}(?:\.\d+)?)(\s*k)?\s*(?:-|–|—|to)\s*(?:usd\s*)?\$?\s*(\d{2,6}(?:\.\d+)?)(\s*k)?/gi;
+      /(?:usd\s{0,4})?\$?\s{0,4}(\d{2,6}(?:\.\d+)?)(\s{0,4}k)?\s{0,4}(?:-|–|—|to)\s{0,4}(?:usd\s{0,4})?\$?\s{0,4}(\d{2,6}(?:\.\d+)?)(\s{0,4}k)?/gi;
     let foundRange = false;
     for (const match of normalized.matchAll(re)) {
       const prefix = normalized.slice(0, match.index);
@@ -1454,7 +1454,7 @@ export function extractCompBand(text = "", { baseOnly = false } = {}) {
     if (variableComp && !explicitBase) {
       continue;
     }
-    const single = normalized.match(/(?:USD\s*)?\$?\s*(\d{2,7}(?:\.\d+)?)(\s*k)?\b/i);
+    const single = normalized.match(/(?:USD\s{0,4})?\$?\s{0,4}(\d{2,7}(?:\.\d+)?)(\s{0,4}k)?\b/i);
     if (!single) continue;
     if (
       !plausibleCompensationMatch(line, single, [single[1]], [single[2]], {
@@ -1493,7 +1493,7 @@ function extractAnnualEarningsBand(text = "") {
     // Keep annual cash unknown until the posting supplies an annual amount.
     if (hourly) continue;
     const range = normalized.match(
-      /(?:usd\s*)?\$?\s*(\d{2,6}(?:\.\d+)?)(\s*k)?\s*(?:-|–|—|to)\s*(?:usd\s*)?\$?\s*(\d{2,6}(?:\.\d+)?)(\s*k)?/i
+      /(?:usd\s{0,4})?\$?\s{0,4}(\d{2,6}(?:\.\d+)?)(\s{0,4}k)?\s{0,4}(?:-|–|—|to)\s{0,4}(?:usd\s{0,4})?\$?\s{0,4}(\d{2,6}(?:\.\d+)?)(\s{0,4}k)?/i
     );
     if (range) {
       if (!plausibleCompensationMatch(line, range, [range[1], range[3]], [range[2], range[4]])) {
@@ -1503,7 +1503,7 @@ function extractAnnualEarningsBand(text = "") {
       const max = normalizeMoney(range[3], range[4]);
       if (min >= 1_000 && max >= min && max <= 1_200_000) return { min, max };
     }
-    const single = normalized.match(/(?:USD\s*)?\$?\s*(\d{2,7}(?:\.\d+)?)(\s*k)?\b/i);
+    const single = normalized.match(/(?:USD\s{0,4})?\$?\s{0,4}(\d{2,7}(?:\.\d+)?)(\s{0,4}k)?\b/i);
     if (!single) continue;
     if (!plausibleCompensationMatch(line, single, [single[1]], [single[2]])) continue;
     const amount = normalizeMoney(single[1], single[2]);
