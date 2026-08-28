@@ -27,6 +27,23 @@ describe("profile settings controller mapping", () => {
     );
   });
 
+  it("canonicalizes contradictory sources and rejects unknown profile editor sections", async () => {
+    const { profileSettingsLocation } = await import("./profile-settings-controller.js");
+
+    expect(profileSettingsLocation("?tab=settings&panel=editor&section=sources")).toMatchObject({
+      route: "/settings?tab=settings&panel=source",
+      activeTab: "settings",
+      panel: "source",
+      section: null,
+    });
+    expect(profileSettingsLocation("?panel=editor&section=not-a-section")).toMatchObject({
+      route: "/settings",
+      activeTab: "profile",
+      panel: null,
+      section: null,
+    });
+  });
+
   it("treats an older completed quick-facts location as confirmed when the explicit flag is absent", () => {
     const model = buildProfileSettingsModel({
       onboard: {

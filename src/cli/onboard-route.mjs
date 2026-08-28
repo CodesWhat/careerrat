@@ -239,6 +239,7 @@ const SETTINGS_DATA_FILES = [
   // the DB-backed response shape.
   "automation",
 ];
+const SETTINGS_DRAFT_REVISION_KEYS = [...SETTINGS_DATA_FILES, "deepIngest"];
 const DEFAULT_PUBLIC_SYNC_PREFERENCE = Object.freeze({
   enabled: true,
   source: "default",
@@ -263,10 +264,10 @@ function draftDigest(label, value) {
     .digest("hex");
 }
 
-function onboardDraftContext(pathCtx, data) {
+export function onboardDraftContext(pathCtx, data) {
   const workspaceId = draftDigest("workspace", privateDataRoot(pathCtx));
   const candidateData = Object.fromEntries(
-    SETTINGS_DATA_FILES.map((name) => [name, data?.[name] ?? null])
+    SETTINGS_DRAFT_REVISION_KEYS.map((name) => [name, data?.[name] ?? null])
   );
   return {
     owner: {
@@ -277,6 +278,68 @@ function onboardDraftContext(pathCtx, data) {
       revision: draftDigest("candidate-content", candidateData),
     },
   };
+}
+
+function currentSettingsDraftData(pathCtx) {
+  if (dbExists(pathCtx)) {
+    const config = candidateConfigGet(pathCtx);
+    const automation = config.automation || {};
+    return {
+      profile: config.profile,
+      targeting: config.targeting,
+      evidence: config.evidence,
+      "form-defaults": config["form-defaults"],
+      automation: {
+        setup_mode: automation.setup_mode,
+        capabilities: automation.capabilities,
+        consent: automation.consent,
+      },
+      modes: config.modes,
+      honesty: config.honesty,
+      setup: config.setup,
+      deepIngest: buildDeepIngestViewModel(pathCtx),
+    };
+  }
+
+  const data = {};
+  for (const name of SETTINGS_DATA_FILES) {
+    const entry = CANDIDATE_ROUTE_ENTRIES.find((candidate) => candidate.name === name);
+    if (!entry) continue;
+    try {
+      data[name] = readBaseDoc(entry, userPath(pathCtx, entry.candidatePath));
+    } catch {
+      data[name] = {};
+    }
+  }
+  if (data.automation) {
+    data.automation = {
+      setup_mode: data.automation.setup_mode,
+      capabilities: data.automation.capabilities,
+      consent: data.automation.consent,
+    };
+  }
+  return data;
+}
+
+export function currentOnboardDraftContext({ repoRoot, env = process.env } = {}) {
+  const pathCtx = { repoRoot, env };
+  return onboardDraftContext(pathCtx, currentSettingsDraftData(pathCtx));
+}
+
+export function assertSettingsBaseRevision({
+  repoRoot,
+  env = process.env,
+  expectedBaseRevision,
+} = {}) {
+  if (expectedBaseRevision === undefined) return null;
+  const expected = String(expectedBaseRevision || "").trim();
+  const current = currentOnboardDraftContext({ repoRoot, env });
+  if (expected && expected === current.base.revision) return current;
+  const error = new Error("Settings changed since this editor opened.");
+  error.code = "SETTINGS_BASE_CHANGED";
+  error.status = 409;
+  error.draftContext = current;
+  throw error;
 }
 
 // ---------------------------------------------------------------------------
@@ -1046,10 +1109,12 @@ function prepareDbSearchSources(pathCtx, config) {
 }
 
 function sendCandidateError(res, err) {
-  sendJson(res, err?.code === "NO_DATABASE" ? 409 : 400, {
+  sendJson(res, err?.status || (err?.code === "NO_DATABASE" ? 409 : 400), {
     ok: false,
+    code: err?.code || undefined,
     error: err?.message || String(err),
     errors: err?.errors || undefined,
+    draftContext: err?.draftContext || undefined,
   });
 }
 
@@ -2811,6 +2876,16 @@ export function mountOnboardRoutes({
           ok: false,
           errors: [{ path: "", message: "body.data must be an object" }],
         });
+        return;
+      }
+
+      try {
+        assertSettingsBaseRevision({
+          ...pathCtx,
+          expectedBaseRevision: body?.expectedBaseRevision,
+        });
+      } catch (err) {
+        sendCandidateError(res, err);
         return;
       }
 

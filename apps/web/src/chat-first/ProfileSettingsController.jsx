@@ -7,6 +7,7 @@ import { firstRunRuntimeChoices } from "./first-run-controller.js";
 import { ProfileSettings } from "./ProfileSettings.jsx";
 import {
   buildProfileSettingsModel,
+  PROFILE_SETTINGS_EDITOR_SECTIONS,
   permissionPatch,
   profileSectionSavePlan,
   profileSettingsLocation,
@@ -34,10 +35,13 @@ function buildSettingsModel(input = {}) {
 const PROFILE_EDITOR_DRAFT_PREFIX = "careerrat:profile-editor-draft:";
 const SOURCE_DRAFT_PREFIX = "careerrat:source-draft:";
 const SETTINGS_DRAFT_LIMIT = 16_000;
-const FALLBACK_DRAFT_CONTEXT = Object.freeze({
-  owner: { workspaceId: "current-workspace", candidateId: "current-candidate" },
-  base: { revision: "current-candidate-content" },
-});
+const LEGACY_UNOWNED_DRAFT_OWNER = "current-workspace:current-candidate";
+const DRAFT_TOO_LARGE =
+  "That draft is too large to save for recovery. Shorten it before leaving this page.";
+const DRAFT_STORAGE_UNAVAILABLE =
+  "CareerRat couldn't save that draft for recovery. Keep this page open, then try again.";
+const SETTINGS_BASE_CHANGED =
+  "Your profile changed while you were editing. CareerRat reloaded the latest version and kept your draft open. Review it, then save again.";
 const useDataRouterBlocker =
   "useBlocker" in ReactRouter && typeof ReactRouter.useBlocker === "function"
     ? ReactRouter.useBlocker
@@ -66,23 +70,27 @@ function normalizeDraftContext(context) {
         .filter((value) => value != null)
         .join(":")
   ).trim();
-  if (!workspaceId || !candidateId || !revision) return FALLBACK_DRAFT_CONTEXT;
+  if (!workspaceId || !candidateId || !revision) return null;
   return { owner: { workspaceId, candidateId }, base: { revision } };
 }
 
 function draftContextId(context) {
+  if (!context) return null;
   return `${context.owner.workspaceId}:${context.owner.candidateId}:${context.base.revision}`;
 }
 
 function draftOwnerId(context) {
+  if (!context) return null;
   return `${context.owner.workspaceId}:${context.owner.candidateId}`;
 }
 
 function storedDraftKey(prefix, context, scope = "") {
+  if (!context) return null;
   return `${prefix}${draftOwnerId(context)}${scope ? `:${scope}` : ""}`;
 }
 
 function sameDraftContext(left, right) {
+  if (!left || !right) return false;
   return draftContextId(left) === draftContextId(right);
 }
 
@@ -97,7 +105,7 @@ function removeStoredDraft(key) {
 }
 
 function readStoredDraft(key, context) {
-  if (!key) return null;
+  if (!key || !context) return null;
   try {
     const raw = globalThis.localStorage?.getItem(key);
     if (!raw) return null;
@@ -118,24 +126,29 @@ function readStoredDraft(key, context) {
 }
 
 function writeStoredDraft(key, context, value) {
-  if (!key) return false;
+  if (!key || !context) return "unowned";
   let raw;
   try {
     raw = JSON.stringify({ ...context, savedAt: new Date().toISOString(), value });
   } catch {
-    removeStoredDraft(key);
-    return false;
+    return "unavailable";
   }
   if (raw.length > SETTINGS_DRAFT_LIMIT) {
-    removeStoredDraft(key);
-    return false;
+    return "too-large";
   }
   try {
-    globalThis.localStorage?.setItem(key, raw);
-    return true;
+    if (!globalThis.localStorage?.setItem) return "unavailable";
+    globalThis.localStorage.setItem(key, raw);
+    return "saved";
   } catch {
-    removeStoredDraft(key);
-    return false;
+    return "unavailable";
+  }
+}
+
+function clearLegacyUnownedDrafts() {
+  removeStoredDraft(`${SOURCE_DRAFT_PREFIX}${LEGACY_UNOWNED_DRAFT_OWNER}`);
+  for (const section of PROFILE_SETTINGS_EDITOR_SECTIONS) {
+    removeStoredDraft(`${PROFILE_EDITOR_DRAFT_PREFIX}${LEGACY_UNOWNED_DRAFT_OWNER}:${section}`);
   }
 }
 
@@ -173,6 +186,7 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   const [acceptedLocationUrl, setAcceptedLocationUrl] = useState(currentLocationUrl);
   const [model, setModel] = useState(EMPTY_MODEL);
   const [error, setError] = useState(null);
+  const [draftStorageWarning, setDraftStorageWarning] = useState(null);
   const [enginePickerBusy, setEnginePickerBusy] = useState(false);
   const [engineSignInId, setEngineSignInId] = useState(null);
   const [sourceDialogBusy, setSourceDialogBusy] = useState(false);
@@ -186,7 +200,7 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   const [pendingNavigation, setPendingNavigation] = useState(null);
   const permittedNavigationRef = useRef(null);
   const desktopUpdate = useDesktopUpdate();
-  const draftContext = normalizeDraftContext(model.draftContext);
+  const draftContext = model.draftContext;
   const contextId = draftContextId(draftContext);
   const acceptedRoute = profileSettingsLocation(
     new URL(acceptedLocationUrl, "http://careerrat.local").search
@@ -199,7 +213,9 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   const editorDrafts = editorDraftState.contextId === contextId ? editorDraftState.values : {};
   const acceptedEditorValues = acceptedEditingSection
     ? (editorDrafts[acceptedEditingSection] ??
-      readStoredDraft(profileEditorDraftKey(acceptedEditingSection, draftContext), draftContext))
+      (draftContext
+        ? readStoredDraft(profileEditorDraftKey(acceptedEditingSection, draftContext), draftContext)
+        : null))
     : null;
   const acceptedVisibleEditorValues = acceptedEditorValues ?? acceptedDefaultValues;
   const editorDirty = Boolean(
@@ -209,7 +225,9 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   const sourceDraft =
     sourceDraftState.contextId === contextId
       ? sourceDraftState.value
-      : (readStoredDraft(sourceDraftKey(draftContext), draftContext) ?? "");
+      : sourceDraftState.contextId === null && sourceDraftState.value
+        ? sourceDraftState.value
+        : (readStoredDraft(sourceDraftKey(draftContext), draftContext) ?? "");
   const sourceDirty = acceptedRoute.panel === "source" && sourceDraft !== "";
   const dirtyKind = editorDirty ? "profile" : sourceDirty ? "source" : null;
   const shouldBlockDestination = (destination) => {
@@ -245,7 +263,7 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
         }
       : null;
   const activeNavigation =
-    pendingNavigation || blockedHistoryNavigation || fallbackHistoryNavigation;
+    blockedHistoryNavigation || fallbackHistoryNavigation || pendingNavigation;
   const displayedRoute = fallbackHistoryNavigation ? acceptedRoute : currentRoute;
   const activeTab = displayedRoute.activeTab;
   const activePanel = displayedRoute.panel;
@@ -254,7 +272,9 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   const defaultEditorValues = profileEditorValues(profileEditor);
   const editorValues = editingSection
     ? (editorDrafts[editingSection] ??
-      readStoredDraft(profileEditorDraftKey(editingSection, draftContext), draftContext))
+      (draftContext
+        ? readStoredDraft(profileEditorDraftKey(editingSection, draftContext), draftContext)
+        : null))
     : null;
   const visibleEditorValues = editorValues ?? defaultEditorValues;
   const draftDirty = Boolean(dirtyKind);
@@ -271,6 +291,21 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
     globalThis.addEventListener("beforeunload", protectDraft);
     return () => globalThis.removeEventListener?.("beforeunload", protectDraft);
   }, [draftDirty]);
+
+  useEffect(() => {
+    if (!draftContext) return;
+    clearLegacyUnownedDrafts();
+    if (sourceDraftState.contextId !== null || !sourceDraftState.value) return;
+    const result = writeStoredDraft(
+      sourceDraftKey(draftContext),
+      draftContext,
+      sourceDraftState.value
+    );
+    setSourceDraftState({ contextId, value: sourceDraftState.value });
+    if (result === "saved") setDraftStorageWarning(null);
+    if (result === "too-large") setDraftStorageWarning(DRAFT_TOO_LARGE);
+    if (result === "unavailable") setDraftStorageWarning(DRAFT_STORAGE_UNAVAILABLE);
+  }, [contextId, draftContext, sourceDraftState.contextId, sourceDraftState.value]);
 
   useEffect(() => {
     if (draftDirty || actualLocationUrl === currentLocationUrl) return;
@@ -391,6 +426,12 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
     setSourceDraftState({ contextId, value: "" });
   }
 
+  function recordDraftPersistence(result) {
+    if (result === "saved") setDraftStorageWarning(null);
+    if (result === "too-large") setDraftStorageWarning(DRAFT_TOO_LARGE);
+    if (result === "unavailable") setDraftStorageWarning(DRAFT_STORAGE_UNAVAILABLE);
+  }
+
   function closeEditor() {
     if (editorBusy) return;
     if (!navigateForeground({ tab: "profile" }, { replace: true })) return;
@@ -400,7 +441,7 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   function keepEditing() {
     const navigation = activeNavigation;
     setPendingNavigation(null);
-    if (navigation?.kind === "blocker") blocker.reset();
+    if (blocker?.state === "blocked") blocker.reset();
     if (navigation?.kind === "committed") {
       navigate(navigation.origin, { replace: true });
     }
@@ -426,14 +467,25 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   async function saveEditor() {
     const editor = model.profile?.editors?.[editingSection];
     if (!editor) return;
+    if (!draftContext?.base?.revision) {
+      setError("CareerRat couldn't confirm the latest profile. Reload Settings, then try again.");
+      return;
+    }
+    const savedDraft = { ...visibleEditorValues };
+    const savedContext = draftContext;
     setEditorBusy(true);
     setError(null);
     try {
       for (const write of profileSectionSavePlan(editingSection, visibleEditorValues, editor)) {
         if (write.kind === "deep-ingest") {
-          await api.upsertDeepIngestConfirmedItem(write);
+          await api.upsertDeepIngestConfirmedItem({
+            ...write,
+            expectedBaseRevision: draftContext.base.revision,
+          });
         } else {
-          await api.saveCandidateFile(write.name, write.patch);
+          await api.saveCandidateFile(write.name, write.patch, {
+            expectedBaseRevision: draftContext.base.revision,
+          });
         }
       }
       await load();
@@ -441,12 +493,41 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
       setPendingNavigation(null);
       navigateForeground({ tab: "profile" }, { replace: true }, true);
     } catch (cause) {
-      setError(
-        profileSettingsErrorMessage(
-          cause,
-          "CareerRat couldn't save that profile section. Check it and try again."
-        )
-      );
+      if (cause?.status === 409 && cause?.body?.code === "SETTINGS_BASE_CHANGED") {
+        try {
+          const next = await load();
+          const nextContext = normalizeDraftContext(next.onboard?.draftContext);
+          const nextContextId = draftContextId(nextContext);
+          if (nextContext) {
+            const previousKey = profileEditorDraftKey(editingSection, savedContext);
+            const nextKey = profileEditorDraftKey(editingSection, nextContext);
+            const result = writeStoredDraft(nextKey, nextContext, savedDraft);
+            recordDraftPersistence(result);
+            setEditorDraftState({
+              contextId: nextContextId,
+              values: { [editingSection]: savedDraft },
+            });
+            if (result === "saved" && previousKey !== nextKey) {
+              removeStoredDraft(previousKey);
+            }
+          }
+          setError(SETTINGS_BASE_CHANGED);
+        } catch (reloadCause) {
+          setError(
+            profileSettingsErrorMessage(
+              reloadCause,
+              "Your profile changed while you were editing, but CareerRat couldn't reload it. Keep this page open and try again."
+            )
+          );
+        }
+      } else {
+        setError(
+          profileSettingsErrorMessage(
+            cause,
+            "CareerRat couldn't save that profile section. Check it and try again."
+          )
+        );
+      }
     } finally {
       setEditorBusy(false);
     }
@@ -620,9 +701,9 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
 
   return (
     <>
-      {error ? (
+      {error || draftStorageWarning ? (
         <div className="chat-first-controller-alert" role="alert">
-          {error}
+          {error || draftStorageWarning}
         </div>
       ) : null}
       <ProfileSettings
@@ -671,7 +752,9 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
         sourceDraft={sourceDraft}
         onCloseSourceDialog={() => setSourceDialogOpen(false)}
         onSourceDraftChange={(value) => {
-          writeStoredDraft(sourceDraftKey(draftContext), draftContext, value);
+          recordDraftPersistence(
+            writeStoredDraft(sourceDraftKey(draftContext), draftContext, value)
+          );
           setSourceDraftState({ contextId, value });
         }}
         onSubmitSource={submitSource}
@@ -684,26 +767,23 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
         editorBusy={editorBusy}
         discardEditorOpen={Boolean(activeNavigation)}
         onEditorChange={(id, value) => {
-          setEditorDraftState((current) => {
-            const currentValues = current.contextId === contextId ? current.values : {};
-            const values = {
-              ...(currentValues[editingSection] ||
-                readStoredDraft(
-                  profileEditorDraftKey(editingSection, draftContext),
-                  draftContext
-                ) ||
-                defaultEditorValues),
-              [id]: value,
-            };
+          const currentValues = editorDraftState.contextId === contextId ? editorDrafts : {};
+          const values = {
+            ...(currentValues[editingSection] ||
+              readStoredDraft(profileEditorDraftKey(editingSection, draftContext), draftContext) ||
+              defaultEditorValues),
+            [id]: value,
+          };
+          recordDraftPersistence(
             writeStoredDraft(
               profileEditorDraftKey(editingSection, draftContext),
               draftContext,
               values
-            );
-            return {
-              contextId,
-              values: { ...currentValues, [editingSection]: values },
-            };
+            )
+          );
+          setEditorDraftState({
+            contextId,
+            values: { ...currentValues, [editingSection]: values },
           });
         }}
         onSaveEditor={saveEditor}

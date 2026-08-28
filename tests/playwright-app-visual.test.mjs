@@ -187,3 +187,44 @@ test("real Chromium renders the built chat-first workspace without selection glo
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test("real Chromium restores the original Settings editor control after Keep editing", {
+  skip: !LIVE && "set CAREERRAT_LIVE_BROWSER=1 to run the built app visual contract",
+  timeout: 30_000,
+}, async () => {
+  assert.equal(
+    existsSync(join(PRODUCT_ROOT, "apps", "web", "dist", "index.html")),
+    true,
+    "build apps/web before running the visual contract"
+  );
+
+  const home = mkdtempSync(join(tmpdir(), "careerrat-settings-focus-"));
+  const pathCtx = await seedVisualWorkspace(home);
+  const dev = createDevServer(pathCtx);
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+
+  try {
+    await dev.listen({ port: 0, host: "127.0.0.1" });
+    const baseUrl = `http://127.0.0.1:${dev.server.address().port}`;
+    await page.goto(`${baseUrl}/app/settings?panel=editor&section=targets`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    const editor = page.locator("#cf-profile-editor-titles");
+    await editor.waitFor({ state: "visible" });
+    await editor.fill(`${await editor.inputValue()}\nPrincipal Platform Engineer`);
+    await editor.focus();
+    await page.keyboard.press("Escape");
+    await page.getByRole("dialog", { name: "Discard unsaved changes?" }).waitFor();
+    await page.getByRole("button", { name: "Keep editing" }).click();
+    await editor.waitFor({ state: "visible" });
+
+    assert.equal(await page.evaluate(() => document.activeElement?.id), "cf-profile-editor-titles");
+  } finally {
+    await browser.close();
+    await closeDevServer(dev);
+    closeAll();
+    rmSync(home, { recursive: true, force: true });
+  }
+});

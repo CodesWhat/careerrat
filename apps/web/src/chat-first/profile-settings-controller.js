@@ -4,16 +4,27 @@ import { buildLocationPolicy } from "./location-policy.js";
 
 const SETTINGS_PANELS = new Set(["engine", "source", "technical"]);
 const PROFILE_PANEL = "editor";
+export const PROFILE_SETTINGS_EDITOR_SECTIONS = Object.freeze([
+  "targets",
+  "compensation",
+  "dealbreakers",
+  "location-policy",
+  "writing-style",
+  "search-rules",
+  "application-defaults",
+]);
+const PROFILE_SECTIONS = new Set(PROFILE_SETTINGS_EDITOR_SECTIONS);
 
 export function profileSettingsRoute({ tab = "profile", panel = null, section = null } = {}) {
   const cleanSection = String(section || "").trim();
-  const cleanPanel = SETTINGS_PANELS.has(panel)
-    ? panel
-    : panel === PROFILE_PANEL && cleanSection
-      ? PROFILE_PANEL
-      : cleanSection === "sources"
-        ? "source"
-        : null;
+  const cleanPanel =
+    cleanSection === "sources"
+      ? "source"
+      : SETTINGS_PANELS.has(panel)
+        ? panel
+        : panel === PROFILE_PANEL && PROFILE_SECTIONS.has(cleanSection)
+          ? PROFILE_PANEL
+          : null;
   const owningTab = SETTINGS_PANELS.has(cleanPanel)
     ? "settings"
     : cleanPanel === PROFILE_PANEL

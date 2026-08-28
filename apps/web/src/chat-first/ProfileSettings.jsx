@@ -547,6 +547,7 @@ function SettingsDialog({ title, children, onClose }) {
               };
               globalThis.queueMicrotask?.(() => {
                 if (!node.isConnected) return;
+                if (node.contains(globalThis.document?.activeElement)) return;
                 const initial = node.querySelector?.(SETTINGS_DIALOG_FOCUSABLE);
                 (initial || node).focus?.();
               });

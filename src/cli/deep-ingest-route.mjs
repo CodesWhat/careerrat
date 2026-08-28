@@ -39,7 +39,7 @@ import {
 import { scanDeepIngestSource as defaultScanDeepIngestSource } from "../core/deep-ingest/source-scanner.mjs";
 import { buildDeepIngestViewModel } from "../core/deep-ingest/view-model.mjs";
 import { userPath } from "../core/paths/workspace.mjs";
-import { sanitizeUploadFilename } from "./onboard-route.mjs";
+import { assertSettingsBaseRevision, sanitizeUploadFilename } from "./onboard-route.mjs";
 import { readJsonBodyCapped, readRawBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 export { DEEP_INGEST_JSON_BODY_MAX_BYTES, DEEP_INGEST_UPLOAD_MAX_BYTES };
@@ -109,6 +109,7 @@ function queryParam(req, name) {
 }
 
 function statusForError(err) {
+  if (err?.code === "SETTINGS_BASE_CHANGED") return 409;
   if (err?.code === "NO_DATABASE") return 409;
   if (
     err?.code === "VERSION_CONFLICT" ||
@@ -123,9 +124,11 @@ function statusForError(err) {
 function respondError(res, err) {
   sendJson(res, statusForError(err), {
     ok: false,
+    code: err?.code === "SETTINGS_BASE_CHANGED" ? err.code : undefined,
     error: err?.message || String(err),
     reasons: err?.reasons || undefined,
     validation: err?.validation || undefined,
+    draftContext: err?.code === "SETTINGS_BASE_CHANGED" ? err.draftContext : undefined,
   });
 }
 
@@ -496,6 +499,11 @@ export function mountDeepIngestRoutes({
     }
 
     try {
+      assertSettingsBaseRevision({
+        repoRoot,
+        env,
+        expectedBaseRevision: body?.expectedBaseRevision,
+      });
       const result = deepIngestConfirmedItemUpsert({
         repoRoot,
         env,

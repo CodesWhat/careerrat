@@ -100,6 +100,7 @@ function createApi() {
     })),
     getSourceMaintenance: vi.fn().mockResolvedValue({ searches: [], companies: [] }),
     saveCandidateFile: vi.fn().mockResolvedValue({ ok: true }),
+    upsertDeepIngestConfirmedItem: vi.fn().mockResolvedValue({ ok: true }),
     saveAiPreferences: vi.fn(async ({ quality, reasoning }) => ({
       quality,
       reasoning,
@@ -119,12 +120,13 @@ function onboardState({
   candidateId = "candidate-a",
   version = 1,
   lastUpdatedAt = "2026-08-28T12:00:00.000Z",
+  revision,
   title = "Staff Engineer",
 } = {}) {
   return {
     draftContext: {
       owner: { workspaceId, candidateId },
-      base: { version, lastUpdatedAt },
+      base: revision ? { revision } : { version, lastUpdatedAt },
     },
     data: {
       targeting: {
@@ -206,7 +208,51 @@ afterEach(() => {
 });
 
 describe("ProfileSettingsController foreground", () => {
-  it("owns editor drafts by workspace and candidate, invalidates stale bases, and clears failed persistence", async () => {
+  it("keeps a source draft transient until its real owner loads, then migrates it", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    const entries = new Map();
+    let resolveOnboard;
+    api.getOnboardState.mockReturnValue(
+      new Promise((resolve) => {
+        resolveOnboard = resolve;
+      })
+    );
+    vi.stubGlobal("localStorage", {
+      getItem: vi.fn((key) => entries.get(key) ?? null),
+      setItem: vi.fn((key, value) => entries.set(key, value)),
+      removeItem: vi.fn((key) => entries.delete(key)),
+    });
+    router.location = {
+      pathname: "/settings",
+      search: "?tab=settings&panel=source",
+      state: null,
+    };
+    const sourceUrl = "https://jobs.example.test/search?q=platform";
+
+    renderController(module, api);
+    await flushEffects();
+    let props = settingsProps(renderController(module, api));
+    props.onSourceDraftChange(sourceUrl);
+    props = settingsProps(renderController(module, api));
+
+    expect.soft(props.sourceDraft).toBe(sourceUrl);
+    expect.soft(globalThis.localStorage.setItem).not.toHaveBeenCalled();
+    expect.soft(entries.size).toBe(0);
+
+    resolveOnboard(onboardState());
+    await flushEffects();
+    props = settingsProps(renderController(module, api));
+    expect.soft(props.sourceDraft).toBe(sourceUrl);
+    await flushEffects();
+    props = settingsProps(renderController(module, api));
+
+    expect.soft(props.sourceDraft).toBe(sourceUrl);
+    expect.soft([...entries.keys()]).toEqual(["careerrat:source-draft:workspace-a:candidate-a"]);
+    expect.soft(JSON.parse([...entries.values()][0]).value).toBe(sourceUrl);
+  });
+
+  it("owns editor drafts by workspace and candidate, invalidates stale bases, and preserves the last recoverable snapshot", async () => {
     const module = await import("./ProfileSettingsController.jsx");
     const api = createApi();
     const entries = new Map();
@@ -252,17 +298,122 @@ describe("ProfileSettingsController foreground", () => {
     expect.soft(props.editorValues.titles).toBe("Staff Platform Engineer");
 
     props.onEditorChange("titles", "Principal Engineer");
+    const lastBoundedSnapshot = [...entries.values()][0];
     props = settingsProps(renderController(module, api));
     props.onEditorChange("titles", "x".repeat(20_000));
-    expect.soft(entries.size).toBe(0);
+    let view = renderController(module, api);
+    expect.soft(entries.size).toBe(1);
+    expect.soft([...entries.values()][0]).toBe(lastBoundedSnapshot);
+    expect
+      .soft(controllerAlertText(view))
+      .toBe("That draft is too large to save for recovery. Shorten it before leaving this page.");
 
-    props = settingsProps(renderController(module, api));
+    props = settingsProps(view);
     props.onEditorChange("titles", "Principal Engineer");
     expect(entries.size).toBe(1);
+    const beforeStorageFailure = [...entries.values()][0];
     persistenceFails = true;
     props = settingsProps(renderController(module, api));
     props.onEditorChange("titles", "Distinguished Engineer");
-    expect.soft(entries.size).toBe(0);
+    view = renderController(module, api);
+    expect.soft(entries.size).toBe(1);
+    expect.soft([...entries.values()][0]).toBe(beforeStorageFailure);
+    expect
+      .soft(controllerAlertText(view))
+      .toBe(
+        "CareerRat couldn't save that draft for recovery. Keep this page open, then try again."
+      );
+  });
+
+  it("reconciles a pending client navigation and blocked browser POP with one Keep editing choice", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getOnboardState.mockResolvedValue(onboardState());
+    router.location = {
+      pathname: "/settings",
+      search: "?panel=editor&section=targets",
+      state: null,
+    };
+
+    renderController(module, api);
+    await flushEffects();
+    let props = settingsProps(renderController(module, api));
+    props.onEditorChange("titles", "Principal Engineer");
+    props = settingsProps(renderController(module, api));
+    props.onTabChange("settings");
+
+    router.blocker.state = "blocked";
+    router.blocker.location = {
+      pathname: "/",
+      search: "",
+      state: null,
+    };
+    props = settingsProps(renderController(module, api));
+    expect.soft(props.discardEditorOpen).toBe(true);
+    props.onKeepEditing();
+    props = settingsProps(renderController(module, api));
+
+    expect.soft(router.blocker.reset).toHaveBeenCalledOnce();
+    expect.soft(props.discardEditorOpen).toBe(false);
+    expect.soft(props.profileEditor?.id).toBe("targets");
+  });
+
+  it("sends the captured base revision and reloads a conflicting editor for review", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    const entries = new Map();
+    vi.stubGlobal("localStorage", {
+      getItem: vi.fn((key) => entries.get(key) ?? null),
+      setItem: vi.fn((key, value) => entries.set(key, value)),
+      removeItem: vi.fn((key) => entries.delete(key)),
+    });
+    let canonical = onboardState({ revision: "revision-a", title: "Staff Engineer" });
+    api.getOnboardState.mockImplementation(async () => canonical);
+    api.saveCandidateFile.mockRejectedValueOnce(
+      new ApiError(409, {
+        code: "SETTINGS_BASE_CHANGED",
+        error: "Settings changed since this editor opened.",
+      })
+    );
+    router.location = {
+      pathname: "/settings",
+      search: "?panel=editor&section=targets",
+      state: null,
+    };
+
+    renderController(module, api);
+    await flushEffects();
+    let view = renderController(module, api);
+    let props = settingsProps(view);
+    props.onEditorChange("titles", "Principal Engineer");
+    canonical = onboardState({ revision: "revision-b", title: "Platform Engineer" });
+    props = settingsProps(renderController(module, api));
+    await props.onSaveEditor();
+    view = renderController(module, api);
+    props = settingsProps(view);
+
+    expect.soft(api.saveCandidateFile).toHaveBeenNthCalledWith(1, "targeting", expect.any(Object), {
+      expectedBaseRevision: "revision-a",
+    });
+    expect
+      .soft(controllerAlertText(view))
+      .toBe(
+        "Your profile changed while you were editing. CareerRat reloaded the latest version and kept your draft open. Review it, then save again."
+      );
+    expect.soft(props.profileEditor?.id).toBe("targets");
+    expect.soft(props.editorValues.titles).toBe("Principal Engineer");
+
+    hooks.clear();
+    renderController(module, api);
+    await flushEffects();
+    props = settingsProps(renderController(module, api));
+    expect.soft(props.editorValues.titles).toBe("Principal Engineer");
+
+    api.saveCandidateFile.mockResolvedValue({ ok: true });
+    await props.onSaveEditor();
+    expect.soft(api.saveCandidateFile).toHaveBeenNthCalledWith(2, "targeting", expect.any(Object), {
+      expectedBaseRevision: "revision-b",
+    });
   });
 
   it("blocks browser history while an editor is dirty and reuses the Keep or Discard decision", async () => {
@@ -420,7 +571,7 @@ describe("ProfileSettingsController foreground", () => {
     props = settingsProps(renderController(module, api));
     expect.soft(props.sourceDraft).toBe(sourceUrl);
     props.onSourceDraftChange(`https://jobs.example.test/${"x".repeat(20_000)}`);
-    expect.soft(entries.size).toBe(0);
+    expect.soft(entries.size).toBe(1);
 
     props = settingsProps(renderController(module, api));
     props.onSourceDraftChange(sourceUrl);
@@ -613,6 +764,7 @@ describe("ProfileSettingsController foreground", () => {
       removeItem: vi.fn((key) => storageEntries.delete(key)),
     });
     api.getOnboardState.mockResolvedValue({
+      draftContext: onboardState().draftContext,
       data: {
         targeting: {
           role_buckets: [
@@ -710,6 +862,7 @@ describe("ProfileSettingsController error copy", () => {
     const api = createApi();
     const raw = "SQLITE_BUSY: database is locked at /Users/person/private/careerrat.db";
     api.getOnboardState.mockResolvedValue({
+      draftContext: onboardState().draftContext,
       data: {
         targeting: {
           role_buckets: [
@@ -932,6 +1085,7 @@ describe("ProfileSettingsController local application defaults", () => {
     const module = await import("./ProfileSettingsController.jsx");
     const api = createApi();
     api.getOnboardState.mockResolvedValue({
+      draftContext: onboardState().draftContext,
       data: {
         "form-defaults": {
           voluntary_self_identification: {
@@ -965,19 +1119,23 @@ describe("ProfileSettingsController local application defaults", () => {
     view = renderController(module, api);
     await settingsProps(view).onSaveEditor();
 
-    expect(api.saveCandidateFile).toHaveBeenCalledWith("form-defaults", {
-      voluntary_self_identification: {
-        enabled: true,
-        default_action: "decline_when_available",
-        confirmed_at: expect.any(String),
-        answers: {
-          disability: {
-            value: "Saved private answer",
-            confirmed_at: "2026-08-19T12:00:00.000Z",
+    expect(api.saveCandidateFile).toHaveBeenCalledWith(
+      "form-defaults",
+      {
+        voluntary_self_identification: {
+          enabled: true,
+          default_action: "decline_when_available",
+          confirmed_at: expect.any(String),
+          answers: {
+            disability: {
+              value: "Saved private answer",
+              confirmed_at: "2026-08-19T12:00:00.000Z",
+            },
           },
         },
       },
-    });
+      { expectedBaseRevision: "1:2026-08-28T12:00:00.000Z" }
+    );
     const saved = api.saveCandidateFile.mock.calls[0][1].voluntary_self_identification;
     expect(Number.isNaN(Date.parse(saved.confirmed_at))).toBe(false);
     expect(navigate).toHaveBeenLastCalledWith("/settings", { replace: true });

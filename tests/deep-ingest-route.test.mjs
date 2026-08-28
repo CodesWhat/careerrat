@@ -1525,6 +1525,23 @@ test("POST /api/deep-ingest/confirmed/upsert saves a manual writing style", asyn
   assert.equal(response.body.data.created, true);
 });
 
+test("POST /api/deep-ingest/confirmed/upsert rejects a stale Settings base revision", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+  const routes = await mountDirectRoutes(repoRoot);
+
+  const response = await postJsonDirect(routes, "/api/deep-ingest/confirmed/upsert", {
+    lane: "writing_voice",
+    id: null,
+    expectedBaseRevision: "stale-settings-revision",
+    fields: { summary: "This stale draft must not overwrite current state." },
+  });
+
+  assert.equal(response.status, 409);
+  assert.equal(response.body.code, "SETTINGS_BASE_CHANGED");
+});
+
 test("POST confirmed-item routes reject missing id/lane payloads", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });

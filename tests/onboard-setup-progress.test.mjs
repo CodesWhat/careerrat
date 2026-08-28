@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { quickFactsDetailLine } from "../apps/web/src/onboarding/onboardingSetup.js";
 import { computeSetupProgress, mountOnboardRoutes } from "../src/cli/onboard-route.mjs";
 import { closeAll } from "../src/core/db/connection.mjs";
+import { deepIngestConfirmedItemUpsert } from "../src/core/db/verbs/index.mjs";
 import {
   CANDIDATE_FILES,
   COPY_ONLY_CANDIDATE_FILES,
@@ -528,6 +529,42 @@ describe("GET /api/onboard/state — setupProgress", () => {
       assert.doesNotMatch(exposedIdentity, /ada|@|example\.test/i);
       assert.equal(exposedIdentity.includes(repoRoot), false);
       assert.equal(exposedIdentity.includes(tmpdir()), false);
+
+      deepIngestConfirmedItemUpsert({
+        repoRoot,
+        lane: "writing_voice",
+        fields: { summary: "Plain, direct, and newly updated." },
+      });
+      const voiceChanged = (await getDirect(routes, "/api/onboard/state")).body.draftContext;
+      assert.deepEqual(voiceChanged.owner, first.owner);
+      assert.notEqual(voiceChanged.base.revision, changed.base.revision);
+    } finally {
+      closeAll();
+    }
+  });
+
+  it("rejects a Settings editor write when its captured base revision is stale", async () => {
+    const repoRoot = buildTempRoot();
+    const routes = mountDirectRoutes(repoRoot);
+    try {
+      await postDirect(routes, "/api/onboard/init", {});
+      const before = (await getDirect(routes, "/api/onboard/state")).body.draftContext;
+      const external = await postDirect(routes, "/api/onboard/candidate/profile", {
+        data: { candidate: { full_name: "New canonical name" } },
+      });
+      assert.equal(external.status, 200);
+
+      const stale = await postDirect(routes, "/api/onboard/candidate/targeting", {
+        expectedBaseRevision: before.base.revision,
+        data: {
+          role_buckets: [
+            { name: "Primary targets", priority: "primary", titles: ["Principal Engineer"] },
+          ],
+        },
+      });
+
+      assert.equal(stale.status, 409);
+      assert.equal(stale.body.code, "SETTINGS_BASE_CHANGED");
     } finally {
       closeAll();
     }

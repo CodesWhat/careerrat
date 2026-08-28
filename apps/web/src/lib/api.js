@@ -299,10 +299,10 @@ export function selectInstalledAiRuntime({ runtimeId, providerFallback = false }
 // in full — never a subset — or the rest silently truncates on write. None
 // of M7's Settings fields are arrays; a future section that edits one
 // (e.g. targeting.role_families) must respect this.
-export function saveCandidateFile(name, patch) {
+export function saveCandidateFile(name, patch, { expectedBaseRevision } = {}) {
   return apiFetch(`/api/onboard/candidate/${name}`, {
     method: "POST",
-    body: JSON.stringify({ data: patch }),
+    body: JSON.stringify({ data: patch, expectedBaseRevision }),
   });
 }
 
