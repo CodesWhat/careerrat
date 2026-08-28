@@ -62,7 +62,10 @@ import {
   countDeterministicSources,
   healSearchSourceConfig,
 } from "../core/onboarding/first-search-run.mjs";
-import { runAiWebSearch as defaultRunAiWebSearch } from "../core/search/ai-web-search.mjs";
+import {
+  compactDeterministicCoverage,
+  runAiWebSearch as defaultRunAiWebSearch,
+} from "../core/search/ai-web-search.mjs";
 import {
   buildSearchPromptInputFingerprint,
   generateSearchPrompts,
@@ -509,6 +512,7 @@ export function mountSearchRoutes({
     deterministic,
     emit,
   } = {}) {
+    const deterministicCoverage = compactDeterministicCoverage(deterministic);
     const active = sourcingRunLatest({ repoRoot, env, purpose: "ai-web-search" }).run;
     if (active?.status === "running") {
       throw aiSearchStartError(409, "an AI web search is already running", { run: active });
@@ -559,9 +563,10 @@ export function mountSearchRoutes({
     const inputFingerprint = createHash("sha256")
       .update(
         JSON.stringify({
-          version: 1,
+          version: 2,
           candidateInputFingerprint,
           prompts: requested.map((prompt) => ({ id: prompt.id, text: prompt.text })),
+          deterministic: deterministicCoverage,
         })
       )
       .digest("hex");
@@ -575,7 +580,7 @@ export function mountSearchRoutes({
         prompts: requested.map((prompt) => ({ id: prompt.id, text: prompt.text })),
         aiExecutionPlan,
         ...(searchExecutionId ? { searchExecutionId } : {}),
-        ...(deterministic ? { deterministic } : {}),
+        ...(deterministicCoverage ? { deterministic: deterministicCoverage } : {}),
       },
       trigger: promptIds?.length ? "retry-failed" : "jobs-search",
     });

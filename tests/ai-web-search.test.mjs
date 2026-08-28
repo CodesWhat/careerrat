@@ -7318,6 +7318,242 @@ test("runAiWebSearch prioritizes prompt-matched enabled public source hints with
   }
 });
 
+test("runAiWebSearch uses deterministic coverage to plan unresolved sources and skip known postings", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: { home: "New York, NY", remote: false, hybrid: true, onsite: true },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        {
+          name: "Operations",
+          titles: [
+            "Field Operations Manager",
+            "Venue Services Manager",
+            "Customer Operations Manager",
+          ],
+        },
+      ],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      {
+        id: "p1",
+        text: "Find Field Operations Manager, Venue Services Manager, and Customer Operations Manager jobs in New York City",
+      },
+    ],
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          source_type: "browser",
+          label: "Operations source with results",
+          url: "https://covered.example/jobs",
+          enabled: true,
+        },
+        {
+          source_type: "browser",
+          label: "Operations source with no deterministic matches",
+          url: "https://zero.example/jobs",
+          enabled: true,
+        },
+        {
+          source_type: "browser",
+          label: "Operations source that could not be read",
+          url: "https://failed.example/jobs",
+          enabled: true,
+        },
+        {
+          source_type: "browser",
+          label: "Operations source that needs login",
+          url: "https://login.example/jobs",
+          enabled: true,
+        },
+        {
+          source_type: "browser",
+          label: "Company ATS source already scanned deterministically",
+          url: "https://jobs.ashbyhq.com/example-company",
+          enabled: true,
+        },
+      ],
+    },
+  });
+  const knownUrl = "https://covered.example/jobs/existing-field";
+  const hydrationUrls = [];
+  const inputs = [];
+
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    deterministic: {
+      status: "succeeded",
+      sources: [
+        {
+          kind: "configured",
+          label: "Operations source with results",
+          host: "covered.example",
+          status: "success",
+          found: 1,
+        },
+        {
+          kind: "configured",
+          label: "Operations source with no deterministic matches",
+          host: "zero.example",
+          status: "zero",
+          found: 0,
+        },
+        {
+          kind: "configured",
+          label: "Operations source that could not be read",
+          host: "failed.example",
+          status: "failed",
+          found: 0,
+        },
+        {
+          kind: "configured",
+          label: "Operations source that needs login",
+          host: "login.example",
+          status: "login-required",
+          found: 0,
+        },
+        {
+          kind: "company",
+          label: "Company ATS source already scanned deterministically",
+          host: "jobs.ashbyhq.com",
+          company: "Example Company",
+          status: "success",
+          found: 1,
+        },
+        {
+          kind: "company",
+          label: "Company source with no deterministic matches",
+          host: "zero-company.example",
+          company: "Zero Company",
+          status: "zero",
+          found: 0,
+        },
+      ],
+      offers: [
+        {
+          company: "Existing Operations Company",
+          title: "Field Operations Manager",
+          url: knownUrl,
+        },
+      ],
+    },
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      emitAssistantJson(onEvent, {
+        roles: [
+          role({
+            company: "Existing Operations Company",
+            title: "Field Operations Manager",
+            url: knownUrl,
+          }),
+          role({
+            company: "Existing Operations Company",
+            title: "Field Operations Manager",
+            url: "https://covered.example/jobs/another-field-requisition",
+          }),
+          role({
+            company: "Fresh Field Company",
+            title: "Field Operations Manager",
+            url: "https://fresh.example/jobs/field",
+          }),
+          role({
+            company: "Fresh Venue Company",
+            title: "Venue Services Manager",
+            url: "https://fresh.example/jobs/venue",
+          }),
+          role({
+            company: "Fresh Customer Company",
+            title: "Customer Operations Manager",
+            url: "https://fresh.example/jobs/customer",
+          }),
+        ],
+        queries_run: [
+          {
+            prompt_id: "p1",
+            query: "unresolved operations sources",
+            status: "completed",
+          },
+        ],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: async (url) => {
+      hydrationUrls.push(url);
+      return specificResolution(url, {
+        title: url.endsWith("/venue")
+          ? "Venue Services Manager"
+          : url.endsWith("/customer")
+            ? "Customer Operations Manager"
+            : "Field Operations Manager",
+        location: "New York, NY",
+        liveness: { result: "active", reason: "visible apply control" },
+      });
+    },
+  });
+
+  assert.equal(inputs.length, 1);
+  const plan = inputs[0].search_plan;
+  assert.deepEqual(plan.source_hints, [
+    "failed.example",
+    "zero.example",
+    "login.example",
+    "jobs.ashbyhq.com",
+  ]);
+  assert.doesNotMatch(JSON.stringify(plan.source_hints), /covered\.example/);
+  assert.deepEqual(plan.deterministic_coverage, {
+    covered_companies: ["Existing Operations Company", "Example Company"],
+    known_postings: [
+      {
+        company: "Existing Operations Company",
+        title: "Field Operations Manager",
+        url: knownUrl,
+      },
+    ],
+    sources: [
+      { host: "covered.example", status: "success", found: 1 },
+      { host: "zero.example", status: "zero", found: 0 },
+      { host: "failed.example", status: "failed", found: 0 },
+      { host: "login.example", status: "login-required", found: 0 },
+      {
+        host: "jobs.ashbyhq.com",
+        company: "Example Company",
+        status: "success",
+        found: 1,
+      },
+      {
+        host: "zero-company.example",
+        company: "Zero Company",
+        status: "zero",
+        found: 0,
+      },
+    ],
+  });
+  assert.equal(hydrationUrls.includes(knownUrl), false);
+  assert.equal(
+    hydrationUrls.includes("https://covered.example/jobs/another-field-requisition"),
+    true
+  );
+  assert.equal(result.new, 4, JSON.stringify(result));
+  assert.ok(result.duplicates >= 1, JSON.stringify(result));
+});
+
 test("runAiWebSearch recovery excludes a rejected common ATS host and keeps one source snapshot", async () => {
   const repoRoot = repo({ prompts: 1 });
   candidateConfigPatch({

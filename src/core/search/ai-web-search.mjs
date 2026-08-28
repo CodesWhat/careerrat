@@ -101,6 +101,8 @@ const MAX_CONFIGURED_SOURCE_HINTS = 4;
 const MAX_CANONICAL_DISQUALIFICATIONS = 20;
 const MAX_FETCHED_POSTING_DECISIONS = 20;
 const MAX_CORRECTION_CONTEXT_CHARS = 2 * 1024 * 1024;
+const MAX_DETERMINISTIC_SOURCES = 40;
+const MAX_DETERMINISTIC_OFFERS = 80;
 const AI_WEB_SEARCH_TURN_LIMITS = Object.freeze({
   scope: "prompt-turn",
   web_search_calls: 4,
@@ -358,6 +360,150 @@ function sourceHost(url) {
   } catch {
     return url;
   }
+}
+
+function normalizedCoverageHost(value) {
+  return sourceHost(value)
+    .replace(/^www\./, "")
+    .trim()
+    .toLowerCase();
+}
+
+function isCommonAtsSearchHost(value) {
+  const host = normalizedCoverageHost(value);
+  return COMMON_ATS_SEARCH_HOSTS.some(
+    (commonHost) => host === commonHost || host.endsWith(`.${commonHost}`)
+  );
+}
+
+function deterministicPayload(deterministic) {
+  if (!deterministic || typeof deterministic !== "object" || Array.isArray(deterministic))
+    return {};
+  if (Array.isArray(deterministic.sources) || Array.isArray(deterministic.offers)) {
+    return deterministic;
+  }
+  const result = deterministic.result;
+  if (!result || typeof result !== "object" || Array.isArray(result)) return {};
+  if (result.value && typeof result.value === "object" && !Array.isArray(result.value)) {
+    return result.value;
+  }
+  if (result.run?.summary && typeof result.run.summary === "object") return result.run.summary;
+  return result;
+}
+
+function normalizedCoverageStatus(value, found) {
+  const status = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (["failed", "error"].includes(status)) return "failed";
+  if (["login-required", "needs-login"].includes(status)) return "login-required";
+  if (["zero", "empty", "no-results"].includes(status)) return "zero";
+  if (["success", "succeeded", "completed"].includes(status)) {
+    return found > 0 ? "success" : "zero";
+  }
+  return found > 0 ? "success" : "zero";
+}
+
+function compactCoverageSources(payload) {
+  const input = Array.isArray(payload.sourceCoverage)
+    ? payload.sourceCoverage
+    : Array.isArray(payload.sources)
+      ? payload.sources
+      : [];
+  const sources = [];
+  const seen = new Set();
+  for (const source of input) {
+    if (!source || typeof source !== "object" || Array.isArray(source)) continue;
+    const found = Math.max(0, Math.trunc(Number(source.found) || 0));
+    const host = normalizedCoverageHost(source.host || source.url);
+    const kind = source.kind === "company" ? "company" : "configured";
+    const label = String(source.label || "")
+      .trim()
+      .slice(0, 160);
+    const company = String(source.company || "")
+      .trim()
+      .slice(0, 160);
+    const status = normalizedCoverageStatus(source.status, found);
+    if (!host && !company && !label) continue;
+    const key = `${kind}\n${host}\n${company}\n${label}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    sources.push({
+      kind,
+      ...(label ? { label } : {}),
+      ...(host ? { host } : {}),
+      ...(company ? { company } : {}),
+      status,
+      found,
+    });
+    if (sources.length >= MAX_DETERMINISTIC_SOURCES) break;
+  }
+  return sources;
+}
+
+function compactCoverageOffers(payload) {
+  const input = Array.isArray(payload.offers) ? payload.offers : [];
+  const offers = [];
+  const seen = new Set();
+  for (const offer of input) {
+    if (!offer || typeof offer !== "object" || Array.isArray(offer)) continue;
+    const company = String(offer.company || offer.co || "")
+      .trim()
+      .slice(0, 160);
+    const title = String(offer.title || offer.role || "")
+      .trim()
+      .slice(0, 240);
+    const url = normalizedSourceUrl(offer.url || offer.link);
+    if (!company || !title || !url || !isPostingEvidenceUrl(url)) continue;
+    const key = `${url}\n${normalizeCompanyRoleKey(company, title)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    offers.push({ company, title, url });
+    if (offers.length >= MAX_DETERMINISTIC_OFFERS) break;
+  }
+  return offers;
+}
+
+export function compactDeterministicCoverage(deterministic) {
+  if (!deterministic || typeof deterministic !== "object" || Array.isArray(deterministic)) {
+    return null;
+  }
+  const payload = deterministicPayload(deterministic);
+  return {
+    status: String(deterministic.status || payload.status || "unknown")
+      .trim()
+      .slice(0, 40),
+    sources: compactCoverageSources(payload),
+    offers: compactCoverageOffers(payload),
+  };
+}
+
+function buildDeterministicPlanCoverage(coverage) {
+  if (!coverage) return null;
+  const knownPostings = coverage.offers.map((offer) => ({ ...offer }));
+  const coveredCompanies = [
+    ...new Set([
+      ...knownPostings.map((offer) => offer.company),
+      ...coverage.sources
+        .filter((source) => source.status === "success")
+        .map((source) => source.company)
+        .filter(Boolean),
+    ]),
+  ];
+  return Object.freeze({
+    covered_companies: Object.freeze(coveredCompanies),
+    known_postings: Object.freeze(knownPostings.map((offer) => Object.freeze(offer))),
+    sources: Object.freeze(
+      coverage.sources.map((source) =>
+        Object.freeze({
+          ...(source.host ? { host: source.host } : {}),
+          ...(source.company ? { company: source.company } : {}),
+          status: source.status,
+          found: source.found,
+        })
+      )
+    ),
+  });
 }
 
 function normalizedSourceUrl(value) {
@@ -697,7 +843,7 @@ function sourceMatchesTitles(source, titles) {
 function configuredSourceHosts(
   sourceConfig,
   titles,
-  { excludedHosts = [], limit = MAX_CONFIGURED_SOURCE_HINTS } = {}
+  { excludedHosts = [], preferredHosts = [], limit = MAX_CONFIGURED_SOURCE_HINTS } = {}
 ) {
   const entries = Array.isArray(sourceConfig?.searches)
     ? sourceConfig.searches
@@ -720,10 +866,18 @@ function configuredSourceHosts(
       matched: sourceMatchesTitles(source, titles),
     }))
     .filter(({ host }) => host && !excluded.has(host));
+  const preferred = new Map(
+    preferredHosts.map((host, index) => [normalizedCoverageHost(host), index])
+  );
   const hosts = [];
   const seen = new Set();
   for (const candidate of candidates.sort(
-    (left, right) => Number(right.matched) - Number(left.matched) || left.index - right.index
+    (left, right) =>
+      Number(preferred.has(right.host)) - Number(preferred.has(left.host)) ||
+      (preferred.get(left.host) ?? Number.POSITIVE_INFINITY) -
+        (preferred.get(right.host) ?? Number.POSITIVE_INFINITY) ||
+      Number(right.matched) - Number(left.matched) ||
+      left.index - right.index
   )) {
     if (seen.has(candidate.host)) continue;
     seen.add(candidate.host);
@@ -1187,21 +1341,44 @@ function buildPromptSearchPlan(
     preferDirectSources = false,
     configuredSourceFirst = false,
     usedQueries = [],
+    deterministicCoverage = null,
   } = {}
 ) {
   const titles = missingTargetTitles.length
     ? missingTargetTitles
     : searchPlanTitles(prompt, candidateContext);
   const locationClause = searchPlanLocationClause(prompt, candidateContext?.location);
+  const completedCoverageHosts = (deterministicCoverage?.sources || [])
+    .filter(
+      (source) =>
+        source.status === "success" &&
+        source.kind !== "company" &&
+        !isCommonAtsSearchHost(source.host)
+    )
+    .map((source) => source.host)
+    .filter(Boolean);
+  const retryCoverageHosts = [
+    ...(deterministicCoverage?.sources || [])
+      .filter((source) => source.status === "failed")
+      .map((source) => source.host),
+    ...(deterministicCoverage?.sources || [])
+      .filter((source) => source.status === "zero")
+      .map((source) => source.host),
+    ...(deterministicCoverage?.sources || [])
+      .filter((source) => source.status === "login-required")
+      .map((source) => source.host),
+  ].filter(Boolean);
   const rejectedHosts = [
     ...new Set([
       ...rejectedCandidates.map(({ offer }) => sourceHost(offer?.url)).filter(Boolean),
       ...excludedHosts,
+      ...completedCoverageHosts,
     ]),
   ];
   const sourceHints = prioritizeUnusedSourceHosts(
     configuredSourceHosts(sourceConfig, titles, {
       excludedHosts: rejectedHosts,
+      preferredHosts: retryCoverageHosts,
       limit: Number.POSITIVE_INFINITY,
     }),
     usedQueries
@@ -1236,6 +1413,9 @@ function buildPromptSearchPlan(
     limits: AI_WEB_SEARCH_TURN_LIMITS,
     query_hints: Object.freeze(queryHints.map((hint) => Object.freeze(hint))),
     source_hints: Object.freeze(sourceHints),
+    ...(deterministicCoverage
+      ? { deterministic_coverage: buildDeterministicPlanCoverage(deterministicCoverage) }
+      : {}),
     ...(missingTargetTitles.length
       ? {
           focus: Object.freeze({
@@ -1308,6 +1488,7 @@ export async function runAiWebSearch({
   signal,
   writeGuard,
   executionPlan,
+  deterministic,
 } = {}) {
   if (!dbExists({ repoRoot, env })) {
     throwPreconditionError(
@@ -1360,10 +1541,11 @@ export async function runAiWebSearch({
     includeSearchLimits: true,
   });
   const sourceConfig = sourceConfigGet({ repoRoot, env, name: "search-sources" }).data;
+  const deterministicCoverage = compactDeterministicCoverage(deterministic);
   const searchPlansByPrompt = new Map(
     selected.map((prompt) => [
       prompt.id,
-      buildPromptSearchPlan(prompt, candidateContext, { sourceConfig }),
+      buildPromptSearchPlan(prompt, candidateContext, { sourceConfig, deterministicCoverage }),
     ])
   );
   // Scoped once for the whole run, not per-attempt — see buildAiWebSearchEnv's
@@ -1409,6 +1591,7 @@ export async function runAiWebSearch({
             preferDirectSources: topUpRejectedHosts.length > 0,
             configuredSourceFirst: topUp,
             usedQueries: topUp ? topUpState.usedQueries || [] : [],
+            deterministicCoverage,
           })
         : searchPlansByPrompt.get(prompt.id);
     if (topUp && searchPlan.query_hints.length === 0) {
@@ -1690,6 +1873,10 @@ export async function runAiWebSearch({
   const allPromptOutcomes = [...promptOutcomes];
   const roles = [];
   const { seenPostingKeys } = buildDbSeenSets({ repoRoot, env });
+  const deterministicPostingKeys = new Set();
+  for (const offer of deterministicCoverage?.offers || []) {
+    addPostingIdentity(deterministicPostingKeys, offer);
+  }
   const preliminaryPostingKeys = new Set(seenPostingKeys);
   const canonicalCandidates = [];
   const captureFailures = [];
@@ -1721,6 +1908,10 @@ export async function runAiWebSearch({
         const key = normalizeCompanyRoleKey(role.company, role.title);
         const req = extractReqId(role.url);
         const offer = toScanOffer(role, { key, reqId: req.id });
+        if (postingIdentityIsSeen(offer, deterministicPostingKeys)) {
+          duplicates += 1;
+          continue;
+        }
         const exactRejectedUrl = rejectedSourceUrls.has(normalizedSourceUrl(offer.url));
         if (
           recovery &&
@@ -1996,9 +2187,10 @@ export async function runAiWebSearch({
 
   function usefulSetState() {
     const qualification = requalifyCanonicalOffers(canonicalCandidates, { config });
-    const offers = qualification.kept.filter((offer) =>
+    const aiOffers = qualification.kept.filter((offer) =>
       offerCanBePresented(offer, fitFloor, presentationIdentityOptions)
     );
+    const offers = [...(deterministicCoverage?.offers || []), ...aiOffers];
     const representedBuckets = new Set(
       targetBuckets
         .filter((bucket) => offers.some((offer) => titleMatchesBucket(offer.title, bucket)))

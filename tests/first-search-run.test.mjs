@@ -876,9 +876,9 @@ test("zero-result scans with attempted deterministic sources complete with zero-
       location_filter: null,
       searches: [
         {
-          label: "Empty RSS",
-          source_type: "rss",
-          rssUrl: "https://example.test/empty.xml",
+          label: "Empty browser source",
+          source_type: "browser",
+          url: "https://example.test/jobs",
           enabled: true,
         },
       ],
@@ -940,12 +940,19 @@ test("the shared worker can own deterministic terminal settlement", async () => 
     env: {},
     runId: started.run.id,
     settle: false,
+    captureBrowserSourceImpl: async () => ({ offers: [], errors: [], needsLogin: null }),
     fetchImpl: async () =>
       new Response('<?xml version="1.0"?><rss><channel></channel></rss>', { status: 200 }),
   });
 
   assert.equal(result.settlement.status, "completed");
   assert.equal(result.settlement.summary.zeroResults, true);
+  assert.ok(
+    result.settlement.summary.sourceCoverage.some(
+      (source) => source.kind === "configured" && source.status === "zero" && source.found === 0
+    ),
+    JSON.stringify(result.settlement.summary.sourceCoverage)
+  );
   assert.equal(sourcingRunLatest({ repoRoot, purpose: "first-search" }).run.status, "running");
 });
 

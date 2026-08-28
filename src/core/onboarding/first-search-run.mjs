@@ -617,6 +617,7 @@ function normalizeRunSummary(summary = {}, deterministicSources) {
     errorCount: errors.length,
     errors: clone(errors),
     loginRequests: clone(loginRequests),
+    sourceCoverage: clone(Array.isArray(summary.sourceCoverage) ? summary.sourceCoverage : []),
     offerCount: Array.isArray(summary.offers) ? summary.offers.length : 0,
     zeroResults: Number(summary.new || 0) === 0,
     deterministicSources: clone(deterministicSources),

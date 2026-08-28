@@ -196,7 +196,30 @@ test("mounting the AI route registers a durable unified-search starter", async (
   assert.equal(starterDefinition.isAvailable(), true);
   const deterministic = {
     status: "succeeded",
-    result: { offers: [{ company: "Existing Company", title: "Existing Role" }] },
+    result: {
+      ok: true,
+      run: { summary: { scanned: 3, presented: 1 } },
+      value: {
+        scanned: 3,
+        presented: 1,
+        sourceCoverage: [
+          {
+            kind: "configured",
+            label: "Existing source",
+            host: "existing.example",
+            status: "success",
+            found: 1,
+          },
+        ],
+        offers: [
+          {
+            company: "Existing Company",
+            title: "Existing Role",
+            url: "https://existing.example/jobs/existing-role",
+          },
+        ],
+      },
+    },
   };
   const result = await starterDefinition.start({
     searchExecutionId: "search-unified-route",
@@ -204,11 +227,30 @@ test("mounting the AI route registers a durable unified-search starter", async (
     onProgress: (event) => events.push(event),
   });
   const stored = sourcingRunLatest({ repoRoot, env: {}, purpose: "ai-web-search" }).run;
+  const expectedCoverage = {
+    status: "succeeded",
+    sources: [
+      {
+        kind: "configured",
+        label: "Existing source",
+        host: "existing.example",
+        status: "success",
+        found: 1,
+      },
+    ],
+    offers: [
+      {
+        company: "Existing Company",
+        title: "Existing Role",
+        url: "https://existing.example/jobs/existing-role",
+      },
+    ],
+  };
 
   assert.equal(result.ok, true);
   assert.equal(stored.metadata.searchExecutionId, "search-unified-route");
-  assert.deepEqual(stored.metadata.deterministic, deterministic);
-  assert.deepEqual(searchInput.deterministic, deterministic);
+  assert.deepEqual(stored.metadata.deterministic, expectedCoverage);
+  assert.deepEqual(searchInput.deterministic, expectedCoverage);
   assert.deepEqual(events, [{ type: "activity", message: "Searching the open web" }]);
 });
 

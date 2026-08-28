@@ -275,6 +275,34 @@ function singleSearchSourceConfig(searchSources, source) {
   return { ...searchSources, [key]: [source] };
 }
 
+function sourceCoverageHost(value) {
+  try {
+    return new URL(String(value || "")).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function sourceCoverageStatus(result = {}) {
+  if (result.needsLogin) return "login-required";
+  if (Array.isArray(result.errors) && result.errors.length > 0) return "failed";
+  return Array.isArray(result.offers) && result.offers.length > 0 ? "success" : "zero";
+}
+
+function sourceCoverageReceipt({ kind, label, company, url, result }) {
+  const receipt = {
+    kind,
+    label: String(label || company || kind)
+      .trim()
+      .slice(0, 160),
+    host: sourceCoverageHost(url),
+    status: sourceCoverageStatus(result),
+    found: Array.isArray(result?.offers) ? result.offers.length : 0,
+  };
+  if (company) receipt.company = String(company).trim().slice(0, 160);
+  return receipt;
+}
+
 function captureOffersForOutput({ repoRoot, env, offers, savedAt, guard }) {
   if (dbExists({ repoRoot, env })) {
     return (
@@ -441,7 +469,7 @@ export async function runSourcedScan({
   const titleFilter = buildTitleFilter(config.title_filter);
   const locationFilter = buildLocationFilter(config.location_filter);
 
-  const scanned = { offers: [], errors: [], loginRequests: [] };
+  const scanned = { offers: [], errors: [], loginRequests: [], sourceCoverage: [] };
   const savedAt = new Date();
   const configuredCompanyCap = Number(
     candidateConfig?.targeting?.search_preferences?.presentation_cap_per_company
@@ -517,6 +545,15 @@ export async function runSourcedScan({
   );
   for (const { company, result } of companyResults) {
     acceptBatch(result);
+    scanned.sourceCoverage.push(
+      sourceCoverageReceipt({
+        kind: "company",
+        label: company.name,
+        company: company.name,
+        url: company.careers_url || company.careersUrl || company.url,
+        result,
+      })
+    );
     if (write && !standaloneConfigMode && result.errors.length === 0) {
       successfulCompanySources.push(company);
     }
@@ -557,6 +594,15 @@ export async function runSourcedScan({
   );
   for (const { task, result } of searchSourceResults) {
     acceptBatch(result);
+    scanned.sourceCoverage.push(
+      sourceCoverageReceipt({
+        kind: "configured",
+        label: task.source.label || task.source.provider || task.kind,
+        url:
+          task.captureSource?.url || task.source.url || task.source.rssUrl || task.source.searchUrl,
+        result,
+      })
+    );
 
     if ((result.errors || []).length > 0 || result.needsLogin) {
       failedSourceIndexes.add(task.sourceIndex);
@@ -758,6 +804,7 @@ export async function runSourcedScan({
       filtered.overflow.length,
     errors: scanned.errors,
     loginRequests: scanned.loginRequests,
+    sourceCoverage: scanned.sourceCoverage,
     coldFamilies,
     revalidatedExisting,
     offers: outputOffers,
