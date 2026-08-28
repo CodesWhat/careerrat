@@ -49,7 +49,7 @@
     },
     "rejected_postings": {
       "type": "array",
-      "maxItems": 4,
+      "maxItems": 8,
       "items": {
         "type": "object",
         "required": ["url", "reason"],

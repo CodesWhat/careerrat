@@ -103,8 +103,8 @@ const MAX_FETCHED_POSTING_DECISIONS = 20;
 const MAX_CORRECTION_CONTEXT_CHARS = 2 * 1024 * 1024;
 const AI_WEB_SEARCH_TURN_LIMITS = Object.freeze({
   scope: "prompt-turn",
-  web_search_calls: 2,
-  web_fetch_calls: 4,
+  web_search_calls: 4,
+  web_fetch_calls: 8,
   hard_stop: true,
 });
 const COMMON_ATS_SEARCH_HOSTS = Object.freeze([
@@ -977,8 +977,8 @@ function partitionSearchTitles(titles, locationClause) {
     const broadTitles = titles.slice(0, split);
     const directTitles = titles.slice(split);
     if (
-      searchQuery(broadTitles, locationClause).length <= MAX_SEARCH_QUERY_LENGTH &&
-      searchQuery(directTitles, locationClause).length <= MAX_SEARCH_QUERY_LENGTH
+      searchQuery(broadTitles, locationClause, "careers").length <= MAX_SEARCH_QUERY_LENGTH &&
+      searchQuery(directTitles, locationClause, "careers").length <= MAX_SEARCH_QUERY_LENGTH
     ) {
       return [broadTitles, directTitles];
     }
@@ -1015,22 +1015,33 @@ function buildSearchQueryHints(
     ];
   }
   const [broadTitles, directTitles] = partitionSearchTitles(titles, locationClause);
-  const sourceClause = directSourceClause(
-    directTitles,
-    locationClause,
-    sourceHosts,
-    excludedHosts,
-    preferDirectSources
-  );
-  const directQuery = boundedSearchQuery(directTitles, locationClause, sourceClause);
-  return [
-    { kind: initialKind, query: boundedSearchQuery(broadTitles, locationClause) },
-    {
-      kind: sourceHosts.some((host) => directQuery.includes(`site:${host}`))
+  const sourceHint = (hintTitles, directFirst) => {
+    const sourceClause = directSourceClause(
+      hintTitles,
+      locationClause,
+      sourceHosts,
+      excludedHosts,
+      preferDirectSources || directFirst
+    );
+    const query = boundedSearchQuery(hintTitles, locationClause, sourceClause);
+    return {
+      kind: sourceHosts.some((host) => query.includes(`site:${host}`))
         ? "configured-source-or-direct"
         : "direct-employer-or-ats",
-      query: directQuery,
-    },
+      query,
+    };
+  };
+  if (titles.length >= 3) {
+    return [
+      { kind: initialKind, query: boundedSearchQuery(broadTitles, locationClause) },
+      { kind: initialKind, query: boundedSearchQuery(directTitles, locationClause) },
+      sourceHint(broadTitles, true),
+      sourceHint(directTitles, false),
+    ];
+  }
+  return [
+    { kind: initialKind, query: boundedSearchQuery(broadTitles, locationClause) },
+    sourceHint(directTitles, false),
   ];
 }
 

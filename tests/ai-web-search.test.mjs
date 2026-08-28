@@ -145,7 +145,7 @@ test("AI web search schema bounds explicit fetched-posting rejections", () => {
   const rejectionSchema = schema.properties.rejected_postings;
 
   assert.equal(rejectionSchema.type, "array");
-  assert.equal(rejectionSchema.maxItems, 4);
+  assert.equal(rejectionSchema.maxItems, 8);
   assert.deepEqual(rejectionSchema.items.required, ["url", "reason"]);
   assert.equal(rejectionSchema.items.additionalProperties, false);
   assert.equal(rejectionSchema.items.properties.reason.maxLength, 240);
@@ -644,8 +644,8 @@ test("runAiWebSearch gives each prompt compact target-title and location query h
   assert.equal(typeof inputs[0], "object");
   assert.deepEqual(inputs[0].search_plan.limits, {
     scope: "prompt-turn",
-    web_search_calls: 2,
-    web_fetch_calls: 4,
+    web_search_calls: 4,
+    web_fetch_calls: 8,
     hard_stop: true,
   });
   assert.equal(inputs[0].search_plan.query_hints.length, 2);
@@ -720,7 +720,7 @@ test("runAiWebSearch keeps the exact event fixture hints atomic and scopes remot
   });
 
   const hints = inputs[0].search_plan.query_hints;
-  assert.equal(hints.length, 2);
+  assert.equal(hints.length, 4);
   for (const { query } of hints) {
     assert.ok(query.length <= 100, query);
     assert.equal((query.match(/"/g) || []).length % 2, 0, query);
@@ -836,7 +836,7 @@ test("runAiWebSearch partitions all five explicit bar titles across two bounded 
   });
 
   const hints = inputs[0].search_plan.query_hints;
-  assert.equal(hints.length, 2);
+  assert.equal(hints.length, 4);
   for (const { query } of hints) {
     assert.ok(query.length <= 100, query);
     assert.equal((query.match(/"/g) || []).length % 2, 0, query);
@@ -846,7 +846,7 @@ test("runAiWebSearch partitions all five explicit bar titles across two bounded 
   for (const title of titles) {
     assert.equal(
       hints.filter(({ query }) => query.includes(`"${title}"`)).length,
-      1,
+      2,
       `${title}: ${JSON.stringify(hints)}`
     );
   }
@@ -2153,8 +2153,8 @@ test("AI web-search skill gives each saved prompt a small exploration budget", (
     new URL("../.agents/skills/search-jobs/SKILL.md", import.meta.url),
     "utf8"
   );
-  assert.match(skill, /at most 2 `WebSearch` calls per saved prompt/i);
-  assert.match(skill, /at most 4 job-posting `WebFetch` calls per saved prompt/i);
+  assert.match(skill, /at most 4 `WebSearch` calls per saved prompt/i);
+  assert.match(skill, /at most 8 job-posting `WebFetch` calls per saved prompt/i);
   assert.match(skill, /`search_plan`.*authoritative/i);
   assert.match(skill, /failed.*(?:search|fetch).*(?:counts|consumes).*(?:budget|limit)/i);
   assert.match(skill, /stop immediately.*(?:budget|limit).*return/i);
@@ -2168,7 +2168,7 @@ test("AI web-search skill gives each saved prompt a small exploration budget", (
   assert.match(skill, /every successfully fetched posting-specific URL.*accounted/i);
   assert.match(skill, /roles\[\].*rejected_postings\[\]/i);
   assert.match(skill, /never silently drop a fetched exact posting/i);
-  assert.match(skill, /rejected_postings\[\].*four-fetch turn limit/i);
+  assert.match(skill, /rejected_postings\[\].*eight-fetch turn limit/i);
   assert.match(skill, /correction.*do not run WebSearch, WebFetch, or any other tool/i);
 });
 
@@ -5034,7 +5034,7 @@ test("runAiWebSearch tops up a useful set made only of deferred posting leads", 
   const secondTopUpPlan = JSON.parse(inputs[2].split("\n\n", 1)[0]).search_plan;
   assert.equal(firstTopUpPlan.source_hints[0], "specialist.example");
   assert.deepEqual(firstTopUpPlan.rejected_sources.hosts, ["www.indeed.com"]);
-  assert.equal(firstTopUpPlan.query_hints[1].kind, "direct-employer-or-ats");
+  assert.ok(firstTopUpPlan.query_hints.some(({ kind }) => kind === "direct-employer-or-ats"));
   assert.doesNotMatch(JSON.stringify(firstTopUpPlan.query_hints), /indeed\.com/);
   assert.doesNotMatch(JSON.stringify(secondTopUpPlan.query_hints), /indeed\.com/);
   assert.equal(result.new, 6, JSON.stringify(result));
