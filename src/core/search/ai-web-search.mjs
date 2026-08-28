@@ -1201,7 +1201,8 @@ function directSourceClause(
   locationClause,
   sourceHosts = [],
   excludedHosts = [],
-  preferDirectSources = false
+  preferDirectSources = false,
+  directSourceIndex = 0
 ) {
   const excluded = new Set(
     excludedHosts.map((host) =>
@@ -1211,7 +1212,17 @@ function directSourceClause(
     )
   );
   const atsCandidates = COMMON_ATS_SEARCH_HOSTS.map((host) => `site:${host}`);
-  const directCandidates = ["careers", ...atsCandidates];
+  const viableAtsCandidates = atsCandidates.filter(
+    (candidate) => searchQuery(titles, locationClause, candidate).length <= MAX_SEARCH_QUERY_LENGTH
+  );
+  const atsOffset = viableAtsCandidates.length ? directSourceIndex % viableAtsCandidates.length : 0;
+  const rotatedAtsCandidates = [
+    ...viableAtsCandidates.slice(atsOffset),
+    ...viableAtsCandidates.slice(0, atsOffset),
+  ];
+  const directCandidates = preferDirectSources
+    ? [...rotatedAtsCandidates, "careers"]
+    : ["careers", ...atsCandidates];
   const configuredCandidates = sourceHosts.map((host) => `site:${host}`);
   const candidates = preferDirectSources
     ? [...directCandidates, ...configuredCandidates]
@@ -1284,13 +1295,14 @@ function buildSearchQueryHints(
     ];
   }
   const titleGroups = partitionSearchTitles(titles, locationClause);
-  const sourceHint = (hintTitles, directFirst) => {
+  const sourceHint = (hintTitles, directFirst, directSourceIndex = 0) => {
     const sourceClause = directSourceClause(
       hintTitles,
       locationClause,
       sourceHosts,
       excludedHosts,
-      directFirst
+      directFirst,
+      directSourceIndex
     );
     let query = boundedSearchQuery(hintTitles, locationClause, sourceClause);
     if (
@@ -1324,7 +1336,7 @@ function buildSearchQueryHints(
           query: boundedSearchQuery(hintTitles, locationClause),
         })),
         ...sourceIndexes.map((index) =>
-          sourceHint(sourceGroups[index], index !== configuredSourceIndex)
+          sourceHint(sourceGroups[index], index !== configuredSourceIndex, index)
         ),
       ];
       const seenQueries = new Set();
@@ -1342,17 +1354,17 @@ function buildSearchQueryHints(
     return [
       { kind: initialKind, query: boundedSearchQuery(broadTitles, locationClause) },
       { kind: initialKind, query: boundedSearchQuery(directTitles, locationClause) },
-      sourceHint(broadTitles, true),
-      sourceHint(directTitles, false),
+      sourceHint(broadTitles, true, 0),
+      sourceHint(directTitles, false, 1),
     ];
   }
   const [broadTitles, directTitles = broadTitles] = titleGroups;
   if (titleGroups.length > 1) {
     const hints = titleGroups
       .slice(0, 2)
-      .flatMap((hintTitles) => [
+      .flatMap((hintTitles, index) => [
         { kind: initialKind, query: boundedSearchQuery(hintTitles, locationClause) },
-        sourceHint(hintTitles, !configuredSourceFirst),
+        sourceHint(hintTitles, !configuredSourceFirst, index),
       ]);
     const seenQueries = new Set();
     return hints.filter(({ query }) => {

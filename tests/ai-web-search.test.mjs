@@ -808,21 +808,32 @@ test("runAiWebSearch keeps US-remote scope separate from the following NYC hybri
     assert.match(query, /remote "United States"/i);
     assert.doesNotMatch(query, /office days/i);
   }
+  const directAtsHosts = [];
   for (const title of ["Developer Infrastructure Engineer", "Developer Experience Engineer"]) {
     assert.ok(
       plan.query_hints.some(({ query }) => query.includes(`"${title}"`) && !/\bsite:/i.test(query)),
       `${title} needs one broad query: ${JSON.stringify(plan.query_hints)}`
     );
-    assert.ok(
-      plan.query_hints.some(
-        ({ query }) =>
-          query.includes(`"${title}"`) &&
-          /\bcareers\b|site:(?:jobs\.ashbyhq\.com|job-boards\.greenhouse\.io)/i.test(query) &&
-          !query.includes("site:hiring.cafe")
-      ),
-      `${title} needs one direct employer or ATS query: ${JSON.stringify(plan.query_hints)}`
+    const directQuery = plan.query_hints.find(
+      ({ query }) =>
+        query.includes(`"${title}"`) &&
+        /site:(?:job-boards\.greenhouse\.io|jobs\.lever\.co|jobs\.ashbyhq\.com|jobs\.smartrecruiters\.com|myworkdayjobs\.com)/i.test(
+          query
+        ) &&
+        !/\bcareers\b/i.test(query) &&
+        !query.includes("site:hiring.cafe")
     );
+    assert.ok(
+      directQuery,
+      `${title} needs one direct ATS query: ${JSON.stringify(plan.query_hints)}`
+    );
+    directAtsHosts.push(directQuery.query.match(/site:([^ )]+)/i)?.[1]);
   }
+  assert.equal(
+    new Set(directAtsHosts).size,
+    directAtsHosts.length,
+    `split titles should rotate ATS hosts: ${JSON.stringify(plan.query_hints)}`
+  );
 });
 
 test("runAiWebSearch recognizes a plain-English remote eligibility scope", async () => {
