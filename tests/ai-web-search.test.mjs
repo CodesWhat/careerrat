@@ -7933,6 +7933,114 @@ test("runAiWebSearch recovery excludes a rejected common ATS host and keeps one 
   assert.ok(recoveryPlan.query_hints.every(({ query }) => query.length <= 100));
 });
 
+test("runAiWebSearch rotates split recovery hints after excluding the first viable ATS", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  const titles = ["Developer Infrastructure Engineer", "Developer Experience Engineer"];
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: false,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Developer infrastructure", titles }],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      {
+        id: "p1",
+        text: `Find ${titles.join(" and ")} roles that are remote in the United States.`,
+      },
+    ],
+  });
+  const rejectedUrls = new Set([
+    "https://jobs.lever.co/example/developer-infrastructure",
+    "https://jobs.lever.co/example/developer-experience",
+  ]);
+  const inputs = [];
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      emitAssistantJson(onEvent, {
+        roles:
+          inputs.length === 1
+            ? titles.map((title, index) =>
+                role({
+                  company: `Expired Infrastructure ${index + 1}`,
+                  title,
+                  location: "Remote, United States",
+                  url: [...rejectedUrls][index],
+                })
+              )
+            : [
+                role({
+                  company: "Fresh Infrastructure One",
+                  title: titles[0],
+                  location: "Remote, United States",
+                  url: "https://fresh-one.example/jobs/developer-infrastructure",
+                }),
+                role({
+                  company: "Fresh Infrastructure Two",
+                  title: titles[1],
+                  location: "Remote, United States",
+                  url: "https://fresh-two.example/jobs/developer-experience",
+                }),
+                role({
+                  company: "Fresh Infrastructure Three",
+                  title: titles[0],
+                  location: "Remote, United States",
+                  url: "https://fresh-three.example/jobs/developer-infrastructure",
+                }),
+              ],
+        queries_run: [
+          {
+            prompt_id: kickoff.prompts[0].id,
+            query: `developer infrastructure ${inputs.length}`,
+            status: "completed",
+          },
+        ],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: async (url) =>
+      rejectedUrls.has(url)
+        ? specificResolution(url, {
+            location: "Remote, United States",
+            liveness: { result: "expired", reason: "The posting is no longer active." },
+          })
+        : specificResolution(url, {
+            location: "Remote, United States",
+            liveness: { result: "active", reason: "visible apply control" },
+          }),
+  });
+
+  const recoveryPlan = JSON.parse(inputs[1].split("\n\n", 1)[0]).search_plan;
+  const directAtsHosts = recoveryPlan.query_hints
+    .map(({ query }) => query.match(/site:([^ )]+)/i)?.[1])
+    .filter(Boolean);
+  assert.equal(directAtsHosts.includes("jobs.lever.co"), false);
+  assert.equal(new Set(directAtsHosts).size, 2, JSON.stringify(recoveryPlan.query_hints));
+  assert.ok(recoveryPlan.query_hints.every(({ query }) => query.length <= 100));
+});
+
 test("runAiWebSearch top-up prioritizes the configured source for the missing title", async () => {
   const repoRoot = repo({ prompts: 1 });
   candidateConfigPatch({

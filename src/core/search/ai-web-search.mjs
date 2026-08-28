@@ -1213,7 +1213,9 @@ function directSourceClause(
   );
   const atsCandidates = COMMON_ATS_SEARCH_HOSTS.map((host) => `site:${host}`);
   const viableAtsCandidates = atsCandidates.filter(
-    (candidate) => searchQuery(titles, locationClause, candidate).length <= MAX_SEARCH_QUERY_LENGTH
+    (candidate) =>
+      !excluded.has(candidate.slice("site:".length)) &&
+      searchQuery(titles, locationClause, candidate).length <= MAX_SEARCH_QUERY_LENGTH
   );
   const atsOffset = viableAtsCandidates.length ? directSourceIndex % viableAtsCandidates.length : 0;
   const rotatedAtsCandidates = [
