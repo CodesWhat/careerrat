@@ -243,7 +243,7 @@ test("typed role choices ask for a separate confirmation before one idempotent e
       text: "Yes",
       choice: { promptId: confirmation.id, version: 1, optionIds: ["yes"] },
     }),
-    (error) => error.code === "CHOICE_ALREADY_RESOLVED"
+    (error) => error.code === "STALE_CHOICE_PROMPT"
   );
   assert.equal(starts.length, 1);
   await restarted.shutdownSourcingWorkers();

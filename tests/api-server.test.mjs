@@ -381,6 +381,18 @@ async function runWorkspaceIntentOverHttp(dev, repoRoot, intent, requestId) {
   return (await threadResponse.json()).data;
 }
 
+function lastMatchingArtifact(messages, predicate) {
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const artifacts = Array.isArray(messages[messageIndex].artifacts)
+      ? messages[messageIndex].artifacts
+      : [];
+    for (let artifactIndex = artifacts.length - 1; artifactIndex >= 0; artifactIndex -= 1) {
+      if (predicate(artifacts[artifactIndex])) return artifacts[artifactIndex];
+    }
+  }
+  return null;
+}
+
 function rawRequest(dev, { path, method = "GET", headers = {}, body = "" }) {
   const { port } = dev.server.address();
   return new Promise((resolve, reject) => {
@@ -633,11 +645,13 @@ test("the production workspace runtime imports an explicitly confirmed board URL
       },
       "api-server-source-add"
     );
-    const result = body.messages.at(-1);
-    assert.equal(result.artifacts[0].kind, "search_source");
-    assert.equal(result.artifacts[0].target, sourceUrl);
-    assert.equal(result.artifacts[0].added, true);
-    importedLabel = result.artifacts[0].label;
+    const added = lastMatchingArtifact(
+      body.messages,
+      (artifact) => artifact.kind === "search_source" && artifact.target === sourceUrl
+    );
+    assert.ok(added);
+    assert.equal(added.added, true);
+    importedLabel = added.label;
     body = await runWorkspaceIntentOverHttp(
       dev,
       repoRoot,
@@ -648,7 +662,13 @@ test("the production workspace runtime imports an explicitly confirmed board URL
       },
       "api-server-source-add-duplicate"
     );
-    assert.equal(body.messages.at(-1).artifacts[0].added, false);
+    const duplicate = lastMatchingArtifact(
+      body.messages,
+      (artifact) =>
+        artifact.kind === "search_source" && artifact.target === sourceUrl && !artifact.added
+    );
+    assert.ok(duplicate);
+    assert.equal(duplicate.added, false);
     body = await runWorkspaceIntentOverHttp(
       dev,
       repoRoot,
@@ -659,7 +679,13 @@ test("the production workspace runtime imports an explicitly confirmed board URL
       },
       "api-server-source-toggle"
     );
-    assert.equal(body.messages.at(-1).artifacts[0].enabled, false);
+    const disabled = lastMatchingArtifact(
+      body.messages,
+      (artifact) =>
+        artifact.kind === "search_source" && artifact.label === importedLabel && !artifact.enabled
+    );
+    assert.ok(disabled);
+    assert.equal(disabled.enabled, false);
     await runWorkspaceIntentOverHttp(
       dev,
       repoRoot,

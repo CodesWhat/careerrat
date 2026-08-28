@@ -153,16 +153,21 @@ test("DB-backed search readiness comes from source config, not generated YAML", 
   assert.doesNotMatch(dbStateBranch, /config\/search-sources\.yml/);
 
   const searchRoute = stripJavaScriptComments(source("src/cli/search-route.mjs"));
-  const configuredSources = functionBlock(searchRoute, "function hasConfiguredDbSourcesOnly");
+  const scanRoute = sliceBetween(
+    searchRoute,
+    'addRoute("POST", "/api/search/scan"',
+    'addRoute("GET", "/api/search/results"',
+    "search scan route"
+  );
   const searchSourcesRoute = sliceBetween(
     searchRoute,
     'addRoute("GET", "/api/search/sources"',
     'addRoute("POST", "/api/search/prompts/generate"',
     "search sources route"
   );
-  assert.match(configuredSources, /name: "search-sources"/);
-  assert.match(configuredSources, /name: "sourced-scan"/);
-  assert.doesNotMatch(configuredSources, /config\/search-sources\.yml|existsSync/);
+  assert.match(scanRoute, /\bhealSearchSourceConfig\b/);
+  assert.match(scanRoute, /\brunSourcedScan\b/);
+  assert.doesNotMatch(scanRoute, /\bhasConfiguredDbSourcesOnly\b|configure a search source/);
   assert.match(
     searchSourcesRoute,
     /sourceConfigGet\(\{ \.\.\.pathCtx, name: "search-sources" \}\)/
