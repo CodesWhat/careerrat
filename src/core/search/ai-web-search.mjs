@@ -507,12 +507,7 @@ function normalizeQueryResults({ selected, queriesRun, toolTrace, fallbackError 
   const traceByQuery = new Map(
     toolTrace
       .filter((item) => item.kind === "query")
-      .map((item) => [
-        String(item.query || "")
-          .trim()
-          .toLowerCase(),
-        item,
-      ])
+      .map((item) => [normalizedSearchQuery(item.query), item])
   );
   const normalizedQueries = Array.isArray(queriesRun) ? queriesRun : [];
 
@@ -521,7 +516,7 @@ function normalizeQueryResults({ selected, queriesRun, toolTrace, fallbackError 
       .filter((item) => String(item?.prompt_id || "") === prompt.id)
       .map((item) => {
         const query = String(item?.query || "").trim();
-        const trace = traceByQuery.get(query.toLowerCase());
+        const trace = traceByQuery.get(normalizedSearchQuery(query));
         const failed = item?.status === "failed" || trace?.status === "failed";
         return {
           query,
@@ -530,6 +525,20 @@ function normalizeQueryResults({ selected, queriesRun, toolTrace, fallbackError 
         };
       })
       .filter((item) => item.query);
+
+    const reportedQueries = new Set(queries.map((item) => normalizedSearchQuery(item.query)));
+    for (const trace of toolTrace.filter((item) => item.kind === "query")) {
+      const query = String(trace.query || "").trim();
+      const key = normalizedSearchQuery(query);
+      if (!key || reportedQueries.has(key)) continue;
+      const failed = trace.status === "failed";
+      queries.push({
+        query,
+        status: failed ? "failed" : "completed",
+        error: failed ? String(trace.error || "The search query failed.") : null,
+      });
+      reportedQueries.add(key);
+    }
 
     if (fallbackError) {
       queries = [{ query: prompt.text, status: "failed", error: fallbackError }];
@@ -991,6 +1000,41 @@ function boundedSearchQuery(titles, locationClause, sourceClause = "") {
   return boundedFallbackQuery(titles.join(" OR "), "");
 }
 
+function compactSearchLocation(locationClause) {
+  const match = String(locationClause || "").match(/^"([^"]+)"(.*)$/);
+  if (!match) return locationClause;
+  const [, place, suffix] = match;
+  const [city, region = ""] = place.split(",").map((part) => part.trim());
+  const cityWords = city.split(/\s+/).filter(Boolean);
+  if (cityWords.length < 2) return locationClause;
+  let compactCity = cityWords
+    .map((word) => word[0])
+    .join("")
+    .toUpperCase();
+  const cityInitialsMatchRegion = Boolean(region && compactCity === region.toUpperCase());
+  if (cityInitialsMatchRegion) compactCity += "C";
+  return [compactCity, cityInitialsMatchRegion ? "" : region, suffix.trim()]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function boundedConfiguredSourceQuery(titles, locationClause, sourceHost) {
+  const sourceClause = `site:${sourceHost}`;
+  const titleGroups = [titles, ...titles.map((title) => [title])];
+  const locationClauses = [...new Set([locationClause, compactSearchLocation(locationClause)])];
+  for (const scopedLocation of locationClauses) {
+    const seen = new Set();
+    for (const titleGroup of titleGroups) {
+      const key = titleGroup.join("\n");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const query = searchQuery(titleGroup, scopedLocation, sourceClause);
+      if (query.length <= MAX_SEARCH_QUERY_LENGTH) return query;
+    }
+  }
+  return "";
+}
+
 function directSourceClause(
   titles,
   locationClause,
@@ -1087,7 +1131,15 @@ function buildSearchQueryHints(
       excludedHosts,
       directFirst
     );
-    const query = boundedSearchQuery(hintTitles, locationClause, sourceClause);
+    let query = boundedSearchQuery(hintTitles, locationClause, sourceClause);
+    if (
+      configuredSourceFirst &&
+      !directFirst &&
+      sourceHosts.length &&
+      !query.includes(`site:${sourceHosts[0]}`)
+    ) {
+      query = boundedConfiguredSourceQuery(hintTitles, locationClause, sourceHosts[0]) || query;
+    }
     return {
       kind: sourceHosts.some((host) => query.includes(`site:${host}`))
         ? "configured-source-or-direct"
@@ -1150,9 +1202,10 @@ function buildPromptSearchPlan(
   const sourceHints = prioritizeUnusedSourceHosts(
     configuredSourceHosts(sourceConfig, titles, {
       excludedHosts: rejectedHosts,
+      limit: Number.POSITIVE_INFINITY,
     }),
     usedQueries
-  );
+  ).slice(0, MAX_CONFIGURED_SOURCE_HINTS);
   const usedQuerySet = new Set(usedQueries.map(normalizedSearchQuery).filter(Boolean));
   const plannedQueryHints = buildSearchQueryHints(
     titles,
@@ -1997,6 +2050,7 @@ export async function runAiWebSearch({
   }
 
   const topUpCounts = new Map(selected.map((prompt) => [prompt.id, 0]));
+  const exhaustedTopUpPromptIds = new Set();
   for (
     let topUpTurn = 0;
     usefulSetPromptIds.size > 0 && topUpTurn < MAX_USEFUL_SET_TOP_UP_TURNS;
@@ -2017,8 +2071,14 @@ export async function runAiWebSearch({
         targetsMissingBucket: state.missingBuckets.some((bucket) =>
           promptMatchesBucket(prompt, bucket, configuredTargetBuckets)
         ),
+        needsMoreRoles: state.survivorRoles.length < MIN_USEFUL_SET_ROLES,
       }))
-      .filter(({ prompt }) => usefulSetPromptIds.has(prompt.id))
+      .filter(
+        ({ prompt, missingTargetTitles, targetsMissingBucket, needsMoreRoles }) =>
+          usefulSetPromptIds.has(prompt.id) &&
+          !exhaustedTopUpPromptIds.has(prompt.id) &&
+          (needsMoreRoles || missingTargetTitles.length > 0 || targetsMissingBucket)
+      )
       .sort(
         (left, right) =>
           Number(right.missingTargetTitles.length > 0) -
@@ -2027,6 +2087,7 @@ export async function runAiWebSearch({
           left.topUpCount - right.topUpCount ||
           left.promptIndex - right.promptIndex
       )[0];
+    if (!topUpSpec) break;
     const genericConsideredCandidates = roles
       .filter((role) => role?.company && role?.title && role?.url && isPostingEvidenceUrl(role.url))
       .map((role) => ({
@@ -2069,7 +2130,11 @@ export async function runAiWebSearch({
       },
     });
     allPromptOutcomes.push(topUpOutcome);
-    if (topUpOutcome.planExhausted === true) break;
+    if (topUpOutcome.planExhausted === true) {
+      exhaustedTopUpPromptIds.add(topUpSpec.prompt.id);
+      topUpTurn -= 1;
+      continue;
+    }
     const topUpCollection = await collectPromptOutcomes([topUpOutcome], {
       recovery: true,
       rejectedPostingKeys: consideredPostingKeys,
