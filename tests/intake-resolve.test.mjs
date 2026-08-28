@@ -95,6 +95,28 @@ test("known ATS (Greenhouse) board fetch succeeds and finds the matching posting
   assert.match(result.bodyText, /Full JD text here/);
 });
 
+test("Greenhouse uses the posting employer name instead of inventing one from the board slug", async () => {
+  const url = "https://job-boards.greenhouse.io/smartlyio/jobs/6030600004";
+  const result = await resolveJobUrl(url, {
+    resolveHost: publicResolver,
+    fetchImpl: async () =>
+      jsonResponse({
+        jobs: [
+          {
+            id: 6030600004,
+            title: "Event Operations Manager, (Contract)",
+            company_name: "Smartly",
+            absolute_url: url,
+            location: { name: "New York, New York, United States" },
+            content: "<p>Full canonical job description.</p>",
+          },
+        ],
+      }),
+  });
+
+  assert.equal(result.company, "Smartly");
+});
+
 test("hydrateJobOffer does not replace a usable location with a numeric ATS label", async () => {
   const url = "https://job-boards.greenhouse.io/550/jobs/5186736008";
   const hydrated = await hydrateJobOffer(

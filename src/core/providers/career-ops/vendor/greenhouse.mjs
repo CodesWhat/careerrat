@@ -203,7 +203,7 @@ export default {
       return {
         title: decodeEntities(String(j.title || '')).trim(),
         url: j.absolute_url,
-        company: entry.name,
+        company: String(j.company_name || '').trim() || entry.name,
         location,
         // Omitted entirely when the board ships no body — same shape as
         // cryptocurrencyjobs/remotli, so "no signal" stays distinguishable
