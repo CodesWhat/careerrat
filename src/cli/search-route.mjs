@@ -618,13 +618,14 @@ export function mountSearchRoutes({
   }
 
   workspaceAgentRuntime?.registerAiWebSearchStarter?.({
-    available: resolveAIRoute(env, { repoRoot }).type !== "none",
-    start: async ({ searchExecutionId, signal, onProgress } = {}) => {
+    isAvailable: () => resolveAIRoute(env, { repoRoot }).type !== "none",
+    start: async ({ searchExecutionId, signal, onProgress, onStarted } = {}) => {
       signal?.throwIfAborted?.();
       const started = await startAiWebSearchWorker({
         searchExecutionId,
         emit: onProgress,
       });
+      onStarted?.(started.run);
       const outcome = await started.start().promise;
       signal?.throwIfAborted?.();
       if (outcome?.run?.status === "failed") {

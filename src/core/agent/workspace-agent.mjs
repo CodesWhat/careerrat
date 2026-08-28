@@ -60,8 +60,14 @@ import {
   linkedinProposalDecide,
 } from "../db/verbs/linkedin-proposals.mjs";
 import { relationshipLeadUpsertBatch } from "../db/verbs/relationship.mjs";
+import {
+  searchExecutionEnsure,
+  searchExecutionGet,
+  searchExecutionListRecoverable,
+  searchExecutionSetLane,
+} from "../db/verbs/search-executions.mjs";
 import { sourcedPromote, sourcedSetStatus, sourcedUpsertBatch } from "../db/verbs/sourced.mjs";
-import { sourcingRunLatest } from "../db/verbs/sourcing-runs.mjs";
+import { sourcingRunGet, sourcingRunLatest } from "../db/verbs/sourcing-runs.mjs";
 import { companyDiscoveryCadenceState } from "../discovery/company-discovery-cadence.mjs";
 import { applyCompanyProposalDecision } from "../discovery/company-proposal-decisions.mjs";
 import { createCompanyProposalBatch } from "../discovery/company-proposals.mjs";
@@ -10858,21 +10864,166 @@ export function createWorkspaceAgentRuntime({
     return { ok: true, run: outcome?.run || null, value: outcome?.value ?? null };
   }
 
+  function readSearchExecution(id) {
+    try {
+      return searchExecutionGet({ repoRoot, env, id }).execution;
+    } catch (error) {
+      if (error?.code === "NOT_FOUND") return null;
+      throw error;
+    }
+  }
+
+  function laneStatus(result) {
+    if (result?.aborted === true) return "cancelled";
+    return result?.ok === false ? "failed" : "completed";
+  }
+
+  function persistLane(searchExecutionId, lane, result, fallbackRunId) {
+    const status = laneStatus(result);
+    return searchExecutionSetLane({
+      repoRoot,
+      env,
+      id: searchExecutionId,
+      lane,
+      status,
+      runId: result?.run?.id || fallbackRunId,
+      summary: result?.run?.summary ?? result?.value ?? null,
+      error: status === "failed" ? result?.error || result?.run?.error : null,
+    }).execution;
+  }
+
+  function persistUnifiedOutcome(searchExecutionId, lane, outcome) {
+    const status =
+      outcome?.status === "succeeded"
+        ? "completed"
+        : new Set(["failed", "cancelled", "skipped"]).has(outcome?.status)
+          ? outcome.status
+          : "failed";
+    const current = readSearchExecution(searchExecutionId);
+    if (
+      !current ||
+      new Set(["completed", "failed", "cancelled", "skipped"]).has(current.lanes[lane].status)
+    ) {
+      return current;
+    }
+    return searchExecutionSetLane({
+      repoRoot,
+      env,
+      id: searchExecutionId,
+      lane,
+      status,
+      runId: outcome?.result?.run?.id,
+      summary: outcome?.result?.run?.summary ?? outcome?.result?.value ?? null,
+      error: outcome?.error || outcome?.result?.error || outcome?.result?.run?.error,
+      reason: outcome?.reason,
+    }).execution;
+  }
+
+  async function startCoordinatedManualSearch(input = {}) {
+    const requestedId = String(input.searchExecutionId || "").trim();
+    if (requestedId) {
+      const existing = readSearchExecution(requestedId);
+      if (existing) {
+        const child = sourcingRunGet({
+          repoRoot,
+          env,
+          id: existing.lanes.deterministic.runId,
+          purpose: "manual-search",
+        }).run;
+        return {
+          ok: true,
+          reused: true,
+          run: child,
+          searchExecutionId: existing.id,
+          execution: existing,
+        };
+      }
+    }
+
+    const operation = await startManualSearchImpl(input);
+    const run = operation?.run;
+    if (!run?.id) return operation;
+    const actualId = createSearchExecutionId({
+      searchExecutionId: run.metadata?.searchExecutionId || requestedId,
+      ...(createSearchExecutionIdImpl ? { createExecutionId: createSearchExecutionIdImpl } : {}),
+    });
+    let execution = searchExecutionEnsure({
+      repoRoot,
+      env,
+      id: actualId,
+      deterministicRunId: run.id,
+    }).execution;
+    if (
+      ["completed", "failed"].includes(run.status) &&
+      execution.lanes.deterministic.status === "running"
+    ) {
+      execution = searchExecutionSetLane({
+        repoRoot,
+        env,
+        id: actualId,
+        lane: "deterministic",
+        status: run.status,
+        runId: run.id,
+        summary: run.summary,
+        error: run.error,
+      }).execution;
+    }
+    return { ...operation, searchExecutionId: actualId, execution };
+  }
+
   function coordinateManualSearch(run, worker) {
     const searchExecutionId = String(run.metadata?.searchExecutionId || "").trim();
     if (run.purpose !== "manual-search" || !searchExecutionId || !worker) return worker;
     if (unifiedSearches.has(searchExecutionId)) return worker;
+    searchExecutionEnsure({
+      repoRoot,
+      env,
+      id: searchExecutionId,
+      deterministicRunId: run.id,
+    });
 
     const coordination = runUnifiedSearchImpl({
       searchExecutionId,
-      runDeterministic: async () => workerLaneResult(await worker.promise),
+      runDeterministic: async () => {
+        const result = workerLaneResult(await worker.promise);
+        persistLane(searchExecutionId, "deterministic", result, run.id);
+        return result;
+      },
       runAiWeb: aiWebSearchStarter?.start
-        ? ({ deterministic, signal }) =>
-            aiWebSearchStarter.start({ searchExecutionId, deterministic, signal })
+        ? async ({ deterministic, signal }) => {
+            let aiRunId = null;
+            const result = await aiWebSearchStarter.start({
+              searchExecutionId,
+              deterministic,
+              signal,
+              onStarted(startedRun) {
+                aiRunId = startedRun?.id || null;
+                searchExecutionSetLane({
+                  repoRoot,
+                  env,
+                  id: searchExecutionId,
+                  lane: "aiWeb",
+                  status: "running",
+                  runId: aiRunId,
+                });
+              },
+            });
+            persistLane(searchExecutionId, "aiWeb", result, aiRunId);
+            return result;
+          }
         : undefined,
-      aiAvailable: aiWebSearchStarter?.available === true,
+      aiAvailable: async () => (await aiWebSearchStarter?.isAvailable?.()) === true,
+    }).then((result) => {
+      persistUnifiedOutcome(searchExecutionId, "deterministic", result.lanes.deterministic);
+      persistUnifiedOutcome(searchExecutionId, "aiWeb", result.lanes.aiWeb);
+      return searchExecutionGet({ repoRoot, env, id: searchExecutionId }).execution;
     });
-    unifiedSearches.set(searchExecutionId, coordination);
+    const tracked = coordination.finally(() => {
+      if (unifiedSearches.get(searchExecutionId) === tracked) {
+        unifiedSearches.delete(searchExecutionId);
+      }
+    });
+    unifiedSearches.set(searchExecutionId, tracked);
     return worker;
   }
 
@@ -10885,6 +11036,43 @@ export function createWorkspaceAgentRuntime({
     const recovered = sourcingWorkers.recover();
     for (const run of recovered) {
       coordinateManualSearch(run, sourcingWorkers.worker(run.id));
+    }
+    let recoverableExecutions = [];
+    try {
+      recoverableExecutions = searchExecutionListRecoverable({ repoRoot, env }).executions;
+    } catch (error) {
+      if (error?.code !== "NO_DATABASE") throw error;
+    }
+    for (const execution of recoverableExecutions) {
+      if (unifiedSearches.has(execution.id)) continue;
+      if (execution.lanes.deterministic.status === "cancelled") {
+        searchExecutionSetLane({
+          repoRoot,
+          env,
+          id: execution.id,
+          lane: "aiWeb",
+          status: "skipped",
+          reason: "cancelled",
+        });
+        continue;
+      }
+      try {
+        const run = sourcingRunGet({
+          repoRoot,
+          env,
+          id: execution.lanes.deterministic.runId,
+          purpose: "manual-search",
+        }).run;
+        if (run.status === "running") {
+          const worker = sourcingWorkers.worker(run.id);
+          if (worker) coordinateManualSearch(run, worker);
+          continue;
+        }
+        coordinateManualSearch(run, { promise: Promise.resolve({ run, value: run.summary }) });
+      } catch {
+        // A missing deterministic child remains queryable as incomplete instead
+        // of starting unrelated work under the execution id.
+      }
     }
     return recovered;
   }
@@ -10902,12 +11090,17 @@ export function createWorkspaceAgentRuntime({
         throw new TypeError("AI web-search starter requires a start function");
       }
       aiWebSearchStarter = {
-        available: definition.available === true,
+        isAvailable:
+          typeof definition.isAvailable === "function"
+            ? definition.isAvailable
+            : () => definition.available === true,
         start: definition.start,
       };
     },
     waitForUnifiedSearch(searchExecutionId) {
-      return unifiedSearches.get(String(searchExecutionId || "").trim()) || Promise.resolve(null);
+      const id = String(searchExecutionId || "").trim();
+      if (!id) return Promise.resolve(null);
+      return unifiedSearches.get(id) || Promise.resolve(readSearchExecution(id));
     },
     startSourcingWorker(input) {
       return sourcingWorkers.start(input);
@@ -10925,7 +11118,7 @@ export function createWorkspaceAgentRuntime({
           repoRoot,
           env,
           callAIImpl,
-          startManualSearchImpl,
+          startManualSearchImpl: startCoordinatedManualSearch,
           onSearchStarted: startSearchInBackground,
           searchFetchImpl,
         })
@@ -10937,7 +11130,7 @@ export function createWorkspaceAgentRuntime({
           repoRoot,
           env,
           callAIImpl,
-          startManualSearchImpl,
+          startManualSearchImpl: startCoordinatedManualSearch,
           setSearchSourceEnabledImpl,
           openAuthenticatedSourceImpl,
           onSearchStarted: startSearchInBackground,
@@ -10958,7 +11151,7 @@ export function createWorkspaceAgentRuntime({
           exportDocumentsImpl,
           packetExportArtifact,
           startFirstSearchImpl,
-          startManualSearchImpl,
+          startManualSearchImpl: startCoordinatedManualSearch,
           createSearchExecutionIdImpl,
           createCompanyProposalsImpl,
           startCompanyDiscoveryOperationImpl,

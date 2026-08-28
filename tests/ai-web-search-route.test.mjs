@@ -190,7 +190,7 @@ test("mounting the AI route registers a durable unified-search starter", async (
     },
   });
 
-  assert.equal(starterDefinition.available, true);
+  assert.equal(starterDefinition.isAvailable(), true);
   const result = await starterDefinition.start({
     searchExecutionId: "search-unified-route",
     deterministic: { status: "succeeded" },

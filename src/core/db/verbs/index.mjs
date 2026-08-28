@@ -145,6 +145,12 @@ export {
   resumeExtractionRecoverOrphans,
   resumeExtractionStart,
 } from "./resume-extractions.mjs";
+export {
+  searchExecutionEnsure,
+  searchExecutionGet,
+  searchExecutionListRecoverable,
+  searchExecutionSetLane,
+} from "./search-executions.mjs";
 export { ExportFailedError, kvGet, kvUpsert, NotFoundError } from "./shared.mjs";
 export {
   skillChatDecisionSet,

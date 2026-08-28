@@ -104,7 +104,11 @@ export async function runUnifiedJobSearch({
     return unifiedResult({ searchExecutionId: executionId, lanes });
   }
 
-  if (aiAvailable !== true || typeof runAiWeb !== "function") {
+  const canRunAi =
+    typeof aiAvailable === "function"
+      ? await aiAvailable({ searchExecutionId: executionId })
+      : aiAvailable;
+  if (canRunAi !== true || typeof runAiWeb !== "function") {
     lanes.aiWeb = { status: "skipped", reason: "unavailable" };
     return unifiedResult({ searchExecutionId: executionId, lanes });
   }

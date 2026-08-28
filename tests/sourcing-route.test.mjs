@@ -8,6 +8,10 @@ import { mountSourcingRoutes } from "../src/cli/sourcing-route.mjs";
 import { createWorkspaceAgentRuntime } from "../src/core/agent/workspace-agent.mjs";
 import { closeAll } from "../src/core/db/connection.mjs";
 import {
+  searchExecutionEnsure,
+  searchExecutionSetLane,
+} from "../src/core/db/verbs/search-executions.mjs";
+import {
   sourcingRunComplete,
   sourcingRunFail,
   sourcingRunStart,
@@ -131,6 +135,48 @@ function seedNoDeterministicSources(repoRoot) {
     },
   });
 }
+
+test("GET /api/sourcing/execution returns exact unified status after a later AI run exists", async () => {
+  const repoRoot = tempRepo();
+  searchExecutionEnsure({
+    repoRoot,
+    env: {},
+    id: "search-exact-status",
+    deterministicRunId: "manual-exact",
+  });
+  searchExecutionSetLane({
+    repoRoot,
+    env: {},
+    id: "search-exact-status",
+    lane: "deterministic",
+    status: "completed",
+    runId: "manual-exact",
+  });
+  searchExecutionSetLane({
+    repoRoot,
+    env: {},
+    id: "search-exact-status",
+    lane: "aiWeb",
+    status: "completed",
+    runId: "ai-exact",
+  });
+  sourcingRunStart({
+    repoRoot,
+    env: {},
+    purpose: "ai-web-search",
+    id: "ai-unrelated-latest",
+    inputFingerprint: "later-unrelated",
+  });
+  const server = await bootServer(repoRoot);
+  try {
+    const response = await getJson(server, "/api/sourcing/execution?id=search-exact-status");
+    assert.equal(response.status, 200);
+    assert.equal(response.body.execution.id, "search-exact-status");
+    assert.equal(response.body.execution.lanes.aiWeb.runId, "ai-exact");
+  } finally {
+    await closeServer(server);
+  }
+});
 
 function bootServer(repoRoot, opts = {}) {
   const routes = new Map();
@@ -458,6 +504,8 @@ test("the Jobs button route starts the same deterministic-first unified search w
     await runtime.waitForUnifiedSearch("search-jobs-button");
 
     assert.equal(status, 202);
+    assert.equal(body.searchExecutionId, "search-jobs-button");
+    assert.equal(body.execution.id, "search-jobs-button");
     assert.equal(body.run.metadata.searchExecutionId, "search-jobs-button");
     assert.deepEqual(events, [`deterministic:${body.run.id}`, "ai:search-jobs-button:succeeded"]);
   } finally {
