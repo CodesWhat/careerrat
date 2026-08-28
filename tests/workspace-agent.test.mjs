@@ -2451,32 +2451,150 @@ test("adding an authenticated source asks a durable site-specific Yes or No ques
   const message = result.messages.at(-1);
   assert.equal(message.text, "Do you want to log into LinkedIn so I can use it?");
   assert.equal(message.metadata.state, "login-needed");
+  assert.equal(message.metadata.nextActions, undefined);
+  assert.equal(message.metadata.choicePrompt.mode, "binary");
+  assert.equal(message.metadata.choicePrompt.state, "pending");
   assert.deepEqual(
-    message.metadata.nextActions.map((action) => ({
-      label: action.label,
-      primary: action.primary,
-      type: action.intent.type,
-      input: action.intent.input,
-    })),
+    message.metadata.choicePrompt.options.map(({ id, label }) => ({ id, label })),
     [
-      {
-        label: "Yes",
-        primary: undefined,
-        type: "source.auth-decision",
-        input: { selector: "LinkedIn search", decision: "yes" },
-      },
-      {
-        label: "No",
-        primary: false,
-        type: "source.auth-decision",
-        input: { selector: "LinkedIn search", decision: "no" },
-      },
+      { id: "yes", label: "Yes" },
+      { id: "no", label: "No" },
     ]
   );
+  assert.deepEqual(message.metadata.sourceLogin, {
+    selector: "LinkedIn search",
+    platform: "linkedin",
+    url: sourceUrl,
+  });
   assert.deepEqual(
-    workspaceThreadRead({ repoRoot, env: {} }).messages.at(-1).metadata.nextActions,
-    message.metadata.nextActions
+    workspaceThreadRead({ repoRoot, env: {} }).messages.at(-1).metadata.choicePrompt,
+    message.metadata.choicePrompt
   );
+});
+
+test("typing Yes answers a pending source-login question without calling the model", async () => {
+  const repoRoot = tempRepo();
+  const sourceUrl = "https://www.linkedin.com/jobs/search/?keywords=platform";
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.add",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { url: sourceUrl },
+    },
+    addBoardSourceImpl: () => ({
+      added: true,
+      source: {
+        label: "LinkedIn search",
+        target: sourceUrl,
+        sourceType: "browser",
+        enabled: false,
+        auth: true,
+        platform: "linkedin",
+      },
+    }),
+  });
+  closeAll();
+  const enabled = [];
+  const opened = [];
+
+  const result = await runWorkspaceAgentTurn({
+    repoRoot,
+    env: {},
+    text: "Yes",
+    setSearchSourceEnabledImpl: (input) => {
+      enabled.push(input);
+      return {
+        changed: true,
+        source: {
+          label: "LinkedIn search",
+          target: sourceUrl,
+          sourceType: "browser",
+          enabled: input.enabled,
+          auth: true,
+          platform: "linkedin",
+        },
+      };
+    },
+    openAuthenticatedSourceImpl: async (input) => {
+      opened.push(input);
+      return { state: "needs-user", summary: "LinkedIn is open for sign-in." };
+    },
+    callAIImpl: async () => {
+      throw new Error("a source-login answer must not call the model");
+    },
+  });
+
+  assert.deepEqual(enabled, [{ repoRoot, env: {}, selector: "LinkedIn search", enabled: true }]);
+  assert.equal(opened[0].url, sourceUrl);
+  assert.equal(result.messages.at(-1).text, "LinkedIn is open for sign-in.");
+  assert.equal(result.messages.at(-1).metadata.nextActions[0].label, "Check again");
+  const question = result.messages.find((message) => message.metadata?.sourceLogin);
+  assert.equal(question.metadata.choicePrompt.state, "resolved");
+  assert.deepEqual(question.metadata.choicePrompt.selectedOptionIds, ["yes"]);
+});
+
+test("typing No answers a pending source-login question and continues other sources", async () => {
+  const repoRoot = tempRepo();
+  const sourceUrl = "https://www.indeed.com/jobs?q=operations";
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.add",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { url: sourceUrl },
+    },
+    addBoardSourceImpl: () => ({
+      added: true,
+      source: {
+        label: "Indeed search",
+        target: sourceUrl,
+        sourceType: "browser",
+        enabled: false,
+        auth: true,
+        platform: "indeed",
+      },
+    }),
+  });
+  const searches = [];
+
+  const result = await runWorkspaceAgentTurn({
+    repoRoot,
+    env: {},
+    text: "No",
+    setSearchSourceEnabledImpl: ({ enabled }) => ({
+      changed: false,
+      source: {
+        label: "Indeed search",
+        target: sourceUrl,
+        sourceType: "browser",
+        enabled,
+        auth: true,
+        platform: "indeed",
+      },
+    }),
+    startManualSearchImpl: async (input) => {
+      searches.push(input);
+      return { run: { id: "search-after-typed-no", status: "running" } };
+    },
+    callAIImpl: async () => {
+      throw new Error("a source-login answer must not call the model");
+    },
+  });
+
+  assert.equal(searches.length, 1);
+  assert.equal(searches[0].repoRoot, repoRoot);
+  assert.deepEqual(searches[0].env, {});
+  assert.equal(typeof searches[0].fetchImpl, "function");
+  assert.equal(
+    result.messages.at(-1).text,
+    "Skipped Indeed. I’m continuing with your other sources."
+  );
+  const question = result.messages.find((message) => message.metadata?.sourceLogin);
+  assert.equal(question.metadata.choicePrompt.state, "resolved");
+  assert.deepEqual(question.metadata.choicePrompt.selectedOptionIds, ["no"]);
 });
 
 test("Yes enables the resolved login source and opens its exact saved URL without a global permission grant", async () => {
@@ -2551,13 +2669,62 @@ test("Yes opens any configured login source without a hardcoded job-site allowli
       opened.push(input);
       return { state: "ready", summary: "Example Jobs is open and ready." };
     },
+    startManualSearchImpl: async () => ({
+      run: { id: "search-after-example-login", status: "running" },
+    }),
   });
 
   assert.equal(opened.length, 1);
   assert.equal(opened[0].platform, "example-jobs");
   assert.equal(opened[0].url, sourceUrl);
   assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, {});
-  assert.equal(result.messages.at(-1).text, "Example Jobs is open and ready.");
+  assert.equal(
+    result.messages.at(-1).text,
+    "Example Jobs is open and ready. I’m continuing the search now."
+  );
+});
+
+test("a successful login check resumes the saved-source search", async () => {
+  const repoRoot = tempRepo();
+  const sourceUrl = "https://www.linkedin.com/jobs/search/?keywords=platform";
+  const searches = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.auth-decision",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { selector: "LinkedIn search", decision: "yes" },
+    },
+    setSearchSourceEnabledImpl: ({ enabled }) => ({
+      changed: true,
+      source: {
+        label: "LinkedIn search",
+        target: sourceUrl,
+        sourceType: "browser",
+        enabled,
+        auth: true,
+        platform: "linkedin",
+      },
+    }),
+    openAuthenticatedSourceImpl: async () => ({
+      state: "ready",
+      summary: "LinkedIn is open and ready.",
+    }),
+    startManualSearchImpl: async (input) => {
+      searches.push(input);
+      return { run: { id: "search-after-login", status: "running" } };
+    },
+  });
+
+  assert.deepEqual(searches, [{ repoRoot, env: {}, fetchImpl: undefined }]);
+  assert.equal(
+    result.messages.at(-1).text,
+    "LinkedIn is open and ready. I’m continuing the search now."
+  );
+  assert.equal(result.messages.at(-1).metadata.state, "running");
+  assert.equal(result.messages.at(-1).artifacts.at(-1).runId, "search-after-login");
 });
 
 test("Yes fails closed when the browser-session handoff is unavailable", async () => {
@@ -2684,27 +2851,13 @@ test("enabling an authenticated source asks at point of use and leaves it disabl
   const message = result.messages.at(-1);
   assert.equal(message.text, "Do you want to log into LinkedIn so I can use it?");
   assert.equal(message.metadata.state, "login-needed");
-  assert.deepEqual(
-    message.metadata.nextActions.map(({ label, intent }) => ({ label, intent })),
-    [
-      {
-        label: "Yes",
-        intent: {
-          type: "source.auth-decision",
-          entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-          input: { selector: "LinkedIn search", decision: "yes" },
-        },
-      },
-      {
-        label: "No",
-        intent: {
-          type: "source.auth-decision",
-          entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-          input: { selector: "LinkedIn search", decision: "no" },
-        },
-      },
-    ]
-  );
+  assert.equal(message.metadata.nextActions, undefined);
+  assert.equal(message.metadata.choicePrompt.mode, "binary");
+  assert.deepEqual(message.metadata.sourceLogin, {
+    selector: "LinkedIn search",
+    platform: "linkedin",
+    url: sourceUrl,
+  });
 });
 
 test("a confirmed Ask action adds one keyword search through source setup", async () => {
@@ -5270,6 +5423,71 @@ test("a confirmed company decision stays in the workspace thread and hands off t
   assert.equal(message.artifacts[0].proposals.length, 0);
   assert.equal(message.artifacts[1].kind, "search_run");
   assert.deepEqual(searches, [{ repoRoot, env: {}, fetchImpl: undefined }]);
+});
+
+test("a completed scan turns its first login request into a durable Yes or No question", () => {
+  const repoRoot = tempRepo();
+  const sourceUrl = "https://www.linkedin.com/jobs/search/?keywords=operations";
+  const result = recordWorkspaceSearchCompletion({
+    repoRoot,
+    env: {},
+    run: {
+      id: "manual-search-login-needed",
+      purpose: "manual-search",
+      status: "completed",
+      summary: {
+        scanned: 8,
+        qualified: 2,
+        presented: 2,
+        loginRequests: [
+          {
+            platform: "linkedin",
+            label: "LinkedIn",
+            sourceLabel: "LinkedIn NYC",
+            url: sourceUrl,
+            prompt: "Do you want to log into LinkedIn so I can use it?",
+          },
+        ],
+      },
+    },
+  });
+
+  const prompt = result.messages.at(-1);
+  assert.equal(prompt.text, "Do you want to log into LinkedIn so I can use it?");
+  assert.equal(prompt.kind, "text");
+  assert.equal(prompt.metadata.state, "login-needed");
+  assert.deepEqual(prompt.metadata.sourceLogin, {
+    selector: "LinkedIn NYC",
+    platform: "linkedin",
+    url: sourceUrl,
+    searchRunId: "manual-search-login-needed",
+  });
+  assert.equal(prompt.metadata.choicePrompt.mode, "binary");
+  assert.equal(prompt.metadata.choicePrompt.state, "pending");
+
+  const replay = recordWorkspaceSearchCompletion({
+    repoRoot,
+    env: {},
+    run: {
+      id: "manual-search-login-needed",
+      purpose: "manual-search",
+      status: "completed",
+      summary: {
+        scanned: 8,
+        qualified: 2,
+        presented: 2,
+        loginRequests: [
+          {
+            platform: "linkedin",
+            sourceLabel: "LinkedIn NYC",
+            url: sourceUrl,
+            prompt: "Do you want to log into LinkedIn so I can use it?",
+          },
+        ],
+      },
+    },
+  });
+  assert.equal(replay.messages.filter((message) => message.metadata?.sourceLogin).length, 1);
 });
 
 test("completed search results return to the same agent without replaying fetched job bodies", async () => {

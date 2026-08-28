@@ -952,25 +952,48 @@ describe("TodayConversation", () => {
   });
 
   it("restores a site login question with working Yes and No actions", () => {
-    const onIntentAction = vi.fn();
-    const action = (label, decision) => ({
-      label,
-      ...(decision === "no" ? { primary: false } : {}),
-      intent: {
-        type: "source.auth-decision",
-        entity: { type: "workspace", id: "workspace-main" },
-        input: { selector: "LinkedIn search", decision },
-      },
-    });
-    const actions = [action("Yes", "yes"), action("No", "no")];
+    const onAnswer = vi.fn();
     const message = {
       id: "source-login-after-reload",
       role: "assistant",
       kind: "action_result",
       text: "Do you want to log into LinkedIn so I can use it?",
-      metadata: { state: "login-needed", nextActions: actions },
+      metadata: {
+        state: "login-needed",
+        sourceLogin: {
+          selector: "LinkedIn search",
+          platform: "linkedin",
+          url: "https://www.linkedin.com/jobs/search/?keywords=platform",
+        },
+        choicePrompt: {
+          id: "choice-source-login",
+          version: 1,
+          threadId: "workspace-main",
+          messageId: "source-login-after-reload",
+          question: "Do you want to log into LinkedIn so I can use it?",
+          mode: "binary",
+          minSelections: 1,
+          maxSelections: 1,
+          allowText: true,
+          options: [
+            {
+              id: "yes",
+              label: "Yes",
+              aliases: [],
+              actionRef: { type: "chat.reply", input: { text: "Yes" } },
+            },
+            {
+              id: "no",
+              label: "No",
+              aliases: [],
+              actionRef: { type: "chat.reply", input: { text: "No" } },
+            },
+          ],
+          state: "pending",
+        },
+      },
     };
-    const tree = MessageTranscript({ onIntentAction, messages: [message] });
+    const tree = MessageTranscript({ onAnswer, messages: [message] });
     const buttons = [];
     function visit(node) {
       if (!node || typeof node !== "object") return;
@@ -983,11 +1006,11 @@ describe("TodayConversation", () => {
 
     expect(buttons.map((button) => button.props.children)).toEqual(["Yes", "No"]);
     buttons[1].props.onClick();
-    expect(onIntentAction).toHaveBeenCalledWith(
-      actions[1].intent,
-      expect.objectContaining({ id: "source-login-after-reload" }),
-      expect.objectContaining({ label: "No", primary: false })
-    );
+    expect(onAnswer).toHaveBeenCalledWith("No", {
+      promptId: "choice-source-login",
+      version: 1,
+      optionIds: ["no"],
+    });
   });
 
   it("renders ambiguity choices as equal neutral actions after reload", () => {

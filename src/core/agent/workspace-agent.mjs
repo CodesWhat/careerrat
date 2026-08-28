@@ -2571,6 +2571,61 @@ function sourceAuthDecisionAction({ label, selector, decision, primary }) {
   };
 }
 
+function sourceLoginQuestionMetadata({ selector, platform, url, searchRunId } = {}) {
+  return {
+    state: "login-needed",
+    answerMode: "yes-no",
+    sourceLogin: {
+      selector: String(selector || "").trim(),
+      platform: String(platform || "").trim(),
+      url: String(url || "").trim(),
+      ...(searchRunId ? { searchRunId: String(searchRunId) } : {}),
+    },
+  };
+}
+
+function sourceLoginRequest(summary, runId) {
+  const requests = Array.isArray(summary?.loginRequests) ? summary.loginRequests : [];
+  for (const request of requests) {
+    const platform = String(request?.platform || "").trim();
+    const selector = String(request?.sourceLabel || request?.label || platform).trim();
+    const url = String(request?.url || "").trim();
+    if (!selector || !url) continue;
+    const site = authSourceSiteLabel(platform, { url });
+    return {
+      selector,
+      platform,
+      url,
+      searchRunId: runId,
+      question:
+        String(request?.prompt || "").trim() || `Do you want to log into ${site} so I can use it?`,
+    };
+  }
+  return null;
+}
+
+function sourceLoginQuestionMessageId(request) {
+  return `source-login-${createHash("sha256")
+    .update(`${request.searchRunId}\0${request.selector}\0${request.url}`)
+    .digest("hex")
+    .slice(0, 24)}`;
+}
+
+function appendSourceLoginQuestion({ repoRoot, env, run, now } = {}) {
+  const request = sourceLoginRequest(run?.summary, run?.id);
+  if (!request) return null;
+  return workspaceMessageAppend({
+    repoRoot,
+    env,
+    id: sourceLoginQuestionMessageId(request),
+    role: "assistant",
+    kind: "text",
+    text: request.question,
+    metadata: sourceLoginQuestionMetadata(request),
+    now,
+  }).message;
+}
+
 function searchResultText(run) {
   if (run?.status === "failed") {
     return run?.purpose === "ai-web-search"
@@ -2849,25 +2904,26 @@ export function recordWorkspaceSearchCompletion({ repoRoot, env = process.env, r
       message.metadata?.searchTerminal === true &&
       message.metadata?.searchRunId === runId
   );
-  if (duplicate) return current;
-
-  const artifact = searchRunArtifact({ run });
-  workspaceMessageAppend({
-    repoRoot,
-    env,
-    role: "assistant",
-    kind: "action_result",
-    text: searchResultText(run),
-    entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-    artifacts: [artifact],
-    metadata: {
-      state: status,
-      purpose: artifact.purpose,
-      searchRunId: runId,
-      searchTerminal: true,
-    },
-    now,
-  });
+  if (!duplicate) {
+    const artifact = searchRunArtifact({ run });
+    workspaceMessageAppend({
+      repoRoot,
+      env,
+      role: "assistant",
+      kind: "action_result",
+      text: searchResultText(run),
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      artifacts: [artifact],
+      metadata: {
+        state: status,
+        purpose: artifact.purpose,
+        searchRunId: runId,
+        searchTerminal: true,
+      },
+      now,
+    });
+  }
+  appendSourceLoginQuestion({ repoRoot, env, run, now });
   return workspaceThreadRead({ repoRoot, env });
 }
 
@@ -2998,6 +3054,58 @@ function careerCoachPromptForResolution(messages, resolution) {
   return (Array.isArray(messages) ? messages : []).find(
     (message) => message?.metadata?.choicePrompt?.id === promptId
   );
+}
+
+function sourceLoginPromptForResolution(messages, resolution) {
+  const promptId = String(resolution?.promptId || "");
+  if (!promptId) return null;
+  return (Array.isArray(messages) ? messages : []).find(
+    (message) => message?.metadata?.sourceLogin && message?.metadata?.choicePrompt?.id === promptId
+  );
+}
+
+async function handleSourceLoginChoice({
+  repoRoot,
+  env,
+  userMessage,
+  choiceResolution,
+  setSearchSourceEnabledImpl,
+  openAuthenticatedSourceImpl,
+  startManualSearchImpl,
+  onSearchStarted,
+  searchFetchImpl,
+  resultMessageId,
+  operationAttempt,
+  now,
+} = {}) {
+  if (!choiceResolution?.promptId) return null;
+  const current = workspaceThreadRead({ repoRoot, env });
+  const promptMessage = sourceLoginPromptForResolution(current.messages, choiceResolution);
+  const sourceLogin = promptMessage?.metadata?.sourceLogin;
+  if (!sourceLogin) return null;
+  const decision = choiceResolution.optionIds?.find((value) => value === "yes" || value === "no");
+  if (!decision) return null;
+  const normalized = normalizeWorkspaceIntent({
+    type: "source.auth-decision",
+    entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+    input: { selector: sourceLogin.selector, decision },
+  });
+  return executeSourceAuthDecision({
+    repoRoot,
+    env,
+    normalized,
+    intentMessage: {
+      message: userMessage,
+      resultMessageId,
+      operationAttempt,
+    },
+    setSearchSourceEnabledImpl,
+    openAuthenticatedSourceImpl,
+    startManualSearchImpl,
+    onSearchStarted,
+    searchFetchImpl,
+    now,
+  });
 }
 
 function selectedProposalRoles(proposal, selectedRoleIds) {
@@ -3549,6 +3657,172 @@ function appendContextualPermissionRequest({
           },
         },
       ],
+    },
+    now,
+  });
+}
+
+async function executeSourceAuthDecision({
+  repoRoot,
+  env,
+  normalized,
+  intentMessage,
+  setSearchSourceEnabledImpl,
+  openAuthenticatedSourceImpl,
+  startManualSearchImpl,
+  onSearchStarted,
+  searchFetchImpl,
+  now,
+} = {}) {
+  if (typeof setSearchSourceEnabledImpl !== "function") {
+    const error = actionError(
+      "Search-source controls are not connected in this runtime.",
+      "SOURCE_SETUP_UNAVAILABLE"
+    );
+    error.status = 501;
+    throw error;
+  }
+  const input = normalized.input || {};
+  const selector = String(input.selector || "").trim();
+  if (!selector) throw actionError("Name the search source to change.", "SOURCE_REQUIRED");
+  const decision = String(input.decision || "")
+    .trim()
+    .toLowerCase();
+  if (!new Set(["yes", "no"]).has(decision)) {
+    throw actionError("Choose Yes or No.", "SOURCE_AUTH_DECISION_REQUIRED");
+  }
+  const allow = decision === "yes";
+  const operation = await setSearchSourceEnabledImpl({
+    repoRoot,
+    env,
+    selector,
+    enabled: allow,
+  });
+  const source = operation?.source || {};
+  const platform = String(source.platform || source.provider || "")
+    .trim()
+    .toLowerCase();
+  const url = String(source.target || source.url || "").trim();
+  if (source.auth !== true || !url) {
+    if (allow) {
+      try {
+        await setSearchSourceEnabledImpl({ repoRoot, env, selector, enabled: false });
+      } catch {
+        // The source remains unusable because no browser handoff follows.
+      }
+    }
+    throw actionError(
+      "That saved source no longer needs a CareerRat login.",
+      "SOURCE_AUTH_UNAVAILABLE"
+    );
+  }
+  const site = authSourceSiteLabel(platform, source);
+  if (!allow) {
+    const expandedSearch = await startExpandedSourceSearch({
+      repoRoot,
+      env,
+      searchFetchImpl,
+      startManualSearchImpl,
+      onSearchStarted,
+    });
+    return appendActionResult({
+      repoRoot,
+      env,
+      normalized,
+      intentMessage,
+      text: `Skipped ${site}. I’m continuing with your other sources.`,
+      artifacts: [
+        {
+          kind: "search_source",
+          title: `${source.label || site}: Skipped`,
+          index: source.index ?? null,
+          provider: source.provider || null,
+          label: source.label || site,
+          target: url,
+          sourceType: source.sourceType || source.source_type || null,
+          enabled: false,
+          auth: true,
+          platform,
+        },
+        expandedSearch?.artifact,
+      ].filter(Boolean),
+      metadata: {
+        state: expandedSearch?.started ? "running" : "skipped",
+        nextActions: [navigationAction("Search jobs", { surface: "search" })],
+      },
+      operationResult: { source: operation, search: expandedSearch?.operation || null },
+      now,
+    });
+  }
+
+  if (typeof openAuthenticatedSourceImpl !== "function") {
+    await setSearchSourceEnabledImpl({ repoRoot, env, selector, enabled: false });
+    const error = actionError(
+      `CareerRat couldn't open ${site} for sign-in. Try again.`,
+      "SOURCE_SETUP_UNAVAILABLE"
+    );
+    error.status = 501;
+    throw error;
+  }
+  const handoff = await openAuthenticatedSourceImpl({ platform, url, source });
+  const handoffState = String(handoff?.state || "needs-user");
+  const expandedSearch =
+    handoffState === "ready"
+      ? await startExpandedSourceSearch({
+          repoRoot,
+          env,
+          searchFetchImpl,
+          startManualSearchImpl,
+          onSearchStarted,
+        })
+      : null;
+  const handoffText =
+    String(handoff?.summary || "").trim() ||
+    `${site} is open. Finish signing in there, then come back here.`;
+  return appendActionResult({
+    repoRoot,
+    env,
+    normalized,
+    intentMessage,
+    text:
+      handoffState === "ready" && expandedSearch?.started
+        ? `${handoffText} I’m continuing the search now.`
+        : handoffState === "ready"
+          ? `${handoffText} The search could not restart. Open Search and try again.`
+          : handoffText,
+    artifacts: [
+      {
+        kind: "search_source",
+        title: `${source.label || site}: Login`,
+        index: source.index ?? null,
+        provider: source.provider || null,
+        label: source.label || site,
+        target: url,
+        sourceType: source.sourceType || source.source_type || null,
+        enabled: true,
+        auth: true,
+        platform,
+      },
+      expandedSearch?.artifact,
+    ].filter(Boolean),
+    metadata: {
+      state: expandedSearch?.started ? "running" : handoffState,
+      ...(handoffState === "needs-user"
+        ? {
+            nextActions: [
+              sourceAuthDecisionAction({
+                label: "Check again",
+                selector: source.label || selector,
+                decision: "yes",
+              }),
+            ],
+          }
+        : { nextActions: [navigationAction("Search jobs", { surface: "search" })] }),
+    },
+    operationResult: {
+      source: operation,
+      handoff,
+      search: expandedSearch?.operation || null,
     },
     now,
   });
@@ -4395,134 +4669,16 @@ export async function executeWorkspaceIntent({
     }
 
     if (normalized.type === "source.auth-decision") {
-      if (typeof setSearchSourceEnabledImpl !== "function") {
-        const error = actionError(
-          "Search-source controls are not connected in this runtime.",
-          "SOURCE_SETUP_UNAVAILABLE"
-        );
-        error.status = 501;
-        throw error;
-      }
-      const selector = String(input.selector || "").trim();
-      if (!selector) throw actionError("Name the search source to change.", "SOURCE_REQUIRED");
-      const decision = String(input.decision || "")
-        .trim()
-        .toLowerCase();
-      if (!new Set(["yes", "no"]).has(decision)) {
-        throw actionError("Choose Yes or No.", "SOURCE_AUTH_DECISION_REQUIRED");
-      }
-      const allow = decision === "yes";
-      const operation = await setSearchSourceEnabledImpl({
-        repoRoot,
-        env,
-        selector,
-        enabled: allow,
-      });
-      const source = operation?.source || {};
-      const platform = String(source.platform || source.provider || "")
-        .trim()
-        .toLowerCase();
-      const url = String(source.target || source.url || "").trim();
-      if (source.auth !== true || !url) {
-        if (allow) {
-          try {
-            await setSearchSourceEnabledImpl({ repoRoot, env, selector, enabled: false });
-          } catch {
-            // The original decision still fails closed because no grant or browser handoff follows.
-          }
-        }
-        throw actionError(
-          "That saved source no longer needs a CareerRat login.",
-          "SOURCE_AUTH_UNAVAILABLE"
-        );
-      }
-      const site = authSourceSiteLabel(platform, source);
-      if (!allow) {
-        const expandedSearch = await startExpandedSourceSearch({
-          repoRoot,
-          env,
-          searchFetchImpl,
-          startManualSearchImpl,
-          onSearchStarted,
-        });
-        return appendActionResult({
-          repoRoot,
-          env,
-          normalized,
-          intentMessage,
-          text: `Skipped ${site}. I’m continuing with your other sources.`,
-          artifacts: [
-            {
-              kind: "search_source",
-              title: `${source.label || site}: Skipped`,
-              index: source.index ?? null,
-              provider: source.provider || null,
-              label: source.label || site,
-              target: url,
-              sourceType: source.sourceType || source.source_type || null,
-              enabled: false,
-              auth: true,
-              platform,
-            },
-            expandedSearch?.artifact,
-          ].filter(Boolean),
-          metadata: {
-            state: expandedSearch?.started ? "running" : "skipped",
-            nextActions: [navigationAction("Search jobs", { surface: "search" })],
-          },
-          operationResult: { source: operation, search: expandedSearch?.operation || null },
-          now,
-        });
-      }
-
-      if (typeof openAuthenticatedSourceImpl !== "function") {
-        await setSearchSourceEnabledImpl({ repoRoot, env, selector, enabled: false });
-        const error = actionError(
-          `CareerRat couldn't open ${site} for sign-in. Try again.`,
-          "SOURCE_SETUP_UNAVAILABLE"
-        );
-        error.status = 501;
-        throw error;
-      }
-      const handoff = await openAuthenticatedSourceImpl({ platform, url, source });
-      const handoffState = String(handoff?.state || "needs-user");
-      return appendActionResult({
+      return executeSourceAuthDecision({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text:
-          String(handoff?.summary || "").trim() ||
-          `${site} is open. Finish signing in there, then come back here.`,
-        artifacts: [
-          {
-            kind: "search_source",
-            title: `${source.label || site}: Login`,
-            index: source.index ?? null,
-            provider: source.provider || null,
-            label: source.label || site,
-            target: url,
-            sourceType: source.sourceType || source.source_type || null,
-            enabled: true,
-            auth: true,
-            platform,
-          },
-        ],
-        metadata: {
-          state: handoffState,
-          ...(handoffState === "needs-user"
-            ? {
-                nextActions: [
-                  sourceAuthDecisionAction({
-                    label: "Check again",
-                    selector: source.label || selector,
-                    decision: "yes",
-                  }),
-                ],
-              }
-            : {}),
-        },
-        operationResult: { source: operation, handoff },
+        setSearchSourceEnabledImpl,
+        openAuthenticatedSourceImpl,
+        startManualSearchImpl,
+        onSearchStarted,
+        searchFetchImpl,
         now,
       });
     }
@@ -4589,33 +4745,19 @@ export async function executeWorkspaceIntent({
           },
           expandedSearch?.artifact,
         ].filter(Boolean),
-        metadata: {
-          state: authPending
-            ? "login-needed"
-            : expandedSearch?.started
-              ? "running"
-              : added
-                ? "added"
-                : "existing",
-          nextActions: authPending
-            ? [
-                sourceAuthDecisionAction({
-                  label: "Yes",
-                  selector: sourceSelector,
-                  decision: "yes",
-                }),
-                sourceAuthDecisionAction({
-                  label: "No",
-                  selector: sourceSelector,
-                  decision: "no",
-                  primary: false,
-                }),
-              ]
-            : [
+        metadata: authPending
+          ? sourceLoginQuestionMetadata({
+              selector: sourceSelector,
+              platform: authPlatform,
+              url: source.target || url,
+            })
+          : {
+              state: expandedSearch?.started ? "running" : added ? "added" : "existing",
+              nextActions: [
                 navigationAction("Search jobs", { surface: "search" }),
                 navigationAction("Manage sources", { surface: "settings", section: "sources" }),
               ],
-        },
+            },
         operationResult: operation,
         now,
       });
@@ -4730,18 +4872,11 @@ export async function executeWorkspaceIntent({
               ...(platform ? { platform } : {}),
             },
           ],
-          metadata: {
-            state: "login-needed",
-            nextActions: [
-              sourceAuthDecisionAction({ label: "Yes", selector: label, decision: "yes" }),
-              sourceAuthDecisionAction({
-                label: "No",
-                selector: label,
-                decision: "no",
-                primary: false,
-              }),
-            ],
-          },
+          metadata: sourceLoginQuestionMetadata({
+            selector: label,
+            platform,
+            url: source.target || source.url,
+          }),
           operationResult: { requested: operation, rollback },
           now,
         });
@@ -10434,6 +10569,8 @@ export async function runWorkspaceAgentTurn({
   choice,
   callAIImpl = callAI,
   startManualSearchImpl = startManualSearchRun,
+  setSearchSourceEnabledImpl,
+  openAuthenticatedSourceImpl,
   onSearchStarted,
   searchFetchImpl = fetch,
   executionPlan,
@@ -10459,6 +10596,24 @@ export async function runWorkspaceAgentTurn({
   if (workspaceResultExists({ repoRoot, env, resultMessageId })) {
     return workspaceThreadRead({ repoRoot, env });
   }
+  const sourceChoiceResolution = appended.message.metadata?.choiceResolution;
+  const handledSourceLogin = sourceChoiceResolution?.promptId
+    ? await handleSourceLoginChoice({
+        repoRoot,
+        env,
+        userMessage: appended.message,
+        choiceResolution: sourceChoiceResolution,
+        setSearchSourceEnabledImpl,
+        openAuthenticatedSourceImpl,
+        startManualSearchImpl,
+        onSearchStarted,
+        searchFetchImpl,
+        resultMessageId,
+        operationAttempt,
+        now,
+      })
+    : null;
+  if (handledSourceLogin) return handledSourceLogin;
   const handledChoice = await handleAdjacentRoleChoice({
     repoRoot,
     env,
@@ -10693,6 +10848,8 @@ export function createWorkspaceAgentRuntime({
           env,
           callAIImpl,
           startManualSearchImpl,
+          setSearchSourceEnabledImpl,
+          openAuthenticatedSourceImpl,
           onSearchStarted: startSearchInBackground,
           searchFetchImpl,
           ...input,

@@ -53,6 +53,7 @@ import {
   createCompanyDiscoveryOperationKind,
   startCompanyDiscoveryOperation,
 } from "../core/discovery/company-operation.mjs";
+import { validatePublicHttpUrl } from "../core/net/public-http-fetch.mjs";
 import { resolveUserPaths } from "../core/paths/workspace.mjs";
 import { acquireWorkspaceRuntimeOwnership } from "../core/runtime/workspace-runtime-ownership.mjs";
 import { captureBrowserSearchSource } from "../core/search/browser-source-capture.mjs";
@@ -142,15 +143,22 @@ function authenticatedSourceSite(platform) {
 
 export async function openAuthenticatedSource(browserSessionManager, { platform, url } = {}) {
   const site = authenticatedSourceSite(platform);
+  const checked = validatePublicHttpUrl(url);
+  if (!checked.ok) {
+    return {
+      state: "needs-user",
+      summary: `CareerRat couldn't open that ${site} link. Add a public job-site URL and try again.`,
+    };
+  }
   const session = browserSessionManager.get({ platform });
   if (!session?.available) {
     return {
       state: "needs-user",
-      summary: `${site} couldn’t open in the CareerRat browser. ${session?.reason || "Try again."}`,
+      summary: `${site} couldn't open in CareerRat. Close and reopen CareerRat, then try again.`,
     };
   }
   try {
-    const page = await session.open(url);
+    const page = await session.open(checked.url);
     const auth = classifyBrowserAuthState(page);
     if (auth) {
       return {
@@ -160,10 +168,10 @@ export async function openAuthenticatedSource(browserSessionManager, { platform,
       };
     }
     return { state: "ready", summary: `${site} is open and ready.` };
-  } catch (error) {
+  } catch {
     return {
       state: "needs-user",
-      summary: `${site} couldn’t open in the CareerRat browser. ${error?.message || "Try again."}`,
+      summary: `${site} couldn't open in CareerRat. Close and reopen CareerRat, then try again.`,
     };
   }
 }
