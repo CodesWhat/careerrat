@@ -101,8 +101,18 @@ function createPlaywrightBrowserSession({
   launchImpl,
   headless = false,
   channel,
+  resolvePublicTargetImpl,
 } = {}) {
-  return wrapOps(createPlaywrightOps({ profileDir, launchImpl, headless, channel }), "playwright");
+  return wrapOps(
+    createPlaywrightOps({
+      profileDir,
+      launchImpl,
+      headless,
+      channel,
+      ...(resolvePublicTargetImpl ? { resolvePublicTargetImpl } : {}),
+    }),
+    "playwright"
+  );
 }
 
 function createOrcaBrowserSession({ repoRoot, env = process.env, runOrcaImpl } = {}) {
@@ -119,6 +129,7 @@ export function createConfiguredBrowserSession({
   runOrcaImpl,
   headless = false,
   channel,
+  resolvePublicTargetImpl,
 } = {}) {
   let data;
   try {
@@ -137,6 +148,7 @@ export function createConfiguredBrowserSession({
       launchImpl,
       headless,
       channel,
+      resolvePublicTargetImpl,
     });
   }
   if (resolved.provider === "orca") {

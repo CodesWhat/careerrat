@@ -107,6 +107,64 @@ test("configured Playwright sessions forward an explicit browser channel", async
   await session.close();
 });
 
+test("configured Playwright sessions forward an explicit public-target resolver", async () => {
+  let routeHandler = null;
+  let resolverCalls = 0;
+  let continued = false;
+  let aborted = false;
+  const page = {
+    async goto() {},
+    url: () => "http://127.0.0.1/fixture",
+    title: async () => "Fixture",
+    locator: () => ({ innerText: async () => "Fixture" }),
+  };
+  const session = createConfiguredBrowserSession({
+    repoRoot: "/tmp/careerrat-browser-resolver-test",
+    env: {},
+    platform: "gmail",
+    headless: true,
+    loadAutomationImpl: () => ({
+      data: {
+        session: {
+          provider: "playwright",
+          profile_root: "/tmp/careerrat-browser-resolver-test/profiles",
+        },
+      },
+    }),
+    launchImpl: async () => ({
+      async route(_pattern, handler) {
+        routeHandler = handler;
+      },
+      newPage: async () => page,
+      close: async () => {},
+    }),
+    resolvePublicTargetImpl: async (rawUrl) => {
+      resolverCalls += 1;
+      return { ok: true, url: new URL(rawUrl).toString() };
+    },
+  });
+
+  await session.open("http://127.0.0.1/fixture");
+  await routeHandler({
+    request: () => ({
+      url: () => "http://127.0.0.1/fixture",
+      isNavigationRequest: () => true,
+      frame: () => ({}),
+    }),
+    continue: async () => {
+      continued = true;
+    },
+    abort: async () => {
+      aborted = true;
+    },
+  });
+
+  assert.equal(resolverCalls, 1);
+  assert.equal(continued, true);
+  assert.equal(aborted, false);
+  await session.close();
+});
+
 test("configured Playwright sessions isolate default profiles by CareerRat home", async () => {
   async function launchedProfileDir(dataRoot) {
     let launchOptions = null;

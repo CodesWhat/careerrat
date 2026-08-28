@@ -141,6 +141,10 @@ function headlessSession(options) {
   return createConfiguredBrowserSession({
     ...options,
     headless: true,
+    resolvePublicTargetImpl: async (rawUrl) => ({
+      ok: true,
+      url: new URL(rawUrl).toString(),
+    }),
     // GitHub's Linux runner already ships Google Chrome. Use that installed
     // browser for these live fixtures so the full unit suite does not depend
     // on an untracked Playwright browser download. Packaged desktop smoke tests
