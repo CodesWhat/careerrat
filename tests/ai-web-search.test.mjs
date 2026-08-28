@@ -3118,7 +3118,7 @@ test("runAiWebSearch reports the count visible at the candidate's saved fit floo
       ],
       queries_run: [{ prompt_id: "p1", query: "NYC hospitality jobs" }],
     }),
-    resolveJobUrlImpl: canonicalResolver(),
+    resolveJobUrlImpl: canonicalResolver({ location: "New York, NY" }),
   });
 
   assert.equal(result.new, 1, JSON.stringify(result));
@@ -4892,6 +4892,138 @@ test("runAiWebSearch tops up an underfilled three-prompt useful set once on the 
       .sort(),
     ["Assistant General Manager", "Bar Manager", "Head Bartender"]
   );
+});
+
+test("runAiWebSearch replaces a canonical row that cannot form a complete presented result", async () => {
+  const repoRoot = repo({ prompts: 3 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        { name: "Bar leadership", titles: ["Bar Manager", "Head Bartender"] },
+        {
+          name: "Hospitality operations",
+          titles: ["Assistant General Manager"],
+        },
+      ],
+      fit_bands: { fit_floor: 65 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      {
+        id: "p1",
+        text: "Find active Bar Manager and Head Bartender jobs in New York City",
+      },
+      {
+        id: "p2",
+        text: "Find active Assistant General Manager jobs in New York City",
+      },
+      { id: "p3", text: "Find active Event Operations jobs in New York City" },
+    ],
+  });
+
+  const calls = new Map();
+  const barManagerUrl = "https://bar-one.example/jobs/bar-manager";
+  const missingLocationUrl = "https://yacht-club.example/jobs/head-bartender";
+  const operationsUrl = "https://restaurant-two.example/jobs/assistant-general-manager";
+  const replacementUrl = "https://bar-three.example/jobs/head-bartender";
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      const promptId = kickoff.prompts[0].id;
+      const attempt = (calls.get(promptId) || 0) + 1;
+      calls.set(promptId, attempt);
+      const roles =
+        promptId === "p1" && attempt === 1
+          ? [
+              role({
+                company: "Bar One",
+                title: "Bar Manager",
+                location: "New York, NY",
+                url: barManagerUrl,
+              }),
+              role({
+                company: "The Yacht Club",
+                title: "Head Bartender",
+                location: "New York, NY",
+                url: missingLocationUrl,
+              }),
+            ]
+          : promptId === "p1"
+            ? [
+                role({
+                  company: "Bar Three",
+                  title: "Head Bartender",
+                  location: "New York, NY",
+                  url: replacementUrl,
+                }),
+              ]
+            : promptId === "p2"
+              ? [
+                  role({
+                    company: "Restaurant Two",
+                    title: "Assistant General Manager",
+                    location: "New York, NY",
+                    url: operationsUrl,
+                  }),
+                ]
+              : [];
+      emitAssistantJson(onEvent, {
+        roles,
+        queries_run: [
+          {
+            prompt_id: promptId,
+            query: `${promptId} query ${attempt}`,
+            status: "completed",
+          },
+        ],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: async (url) =>
+      specificResolution(url, {
+        location: url === missingLocationUrl ? "" : "New York, NY",
+        liveness: { result: "active", reason: "visible apply control" },
+      }),
+  });
+
+  assert.deepEqual(Object.fromEntries(calls), { p1: 2, p2: 1, p3: 1 });
+  assert.equal(result.new, 3, JSON.stringify(result));
+  assert.equal(result.presented, 3, JSON.stringify(result));
+  assert.equal(result.invalid, 1, JSON.stringify(result));
+  assert.deepEqual(result.reasonCounts, { identity: 1 });
+  assert.deepEqual(result.canonicalDisqualifications, [
+    {
+      company: "The Yacht Club",
+      title: "Head Bartender",
+      url: missingLocationUrl,
+      location: "",
+      reason: "incomplete-presentation-identity:location",
+    },
+  ]);
+  const rows = readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search");
+  assert.equal(rows.length, 3);
+  assert.ok(rows.every((row) => row.company && row.role && row.loc && row.link));
+  assert.doesNotMatch(JSON.stringify(rows), /The Yacht Club/);
 });
 
 test("runAiWebSearch continues prioritized useful-set recovery after an empty top-up", async () => {

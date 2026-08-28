@@ -134,6 +134,38 @@ function offerMeetsFitFloor(offer, fitFloor) {
   return Number.isFinite(score) && score >= fitFloor;
 }
 
+function searchRequiresCanonicalLocation(config) {
+  const location = config?.profile?.location || {};
+  return (
+    Boolean(String(location.home || "").trim()) ||
+    (Array.isArray(location.relocation) && location.relocation.some(Boolean))
+  );
+}
+
+function missingPresentationIdentityFields(offer, { requireLocation = false } = {}) {
+  return [
+    ["company", offer?.company],
+    ["title", offer?.title],
+    ...(requireLocation ? [["location", offer?.location]] : []),
+    ["source", isPostingEvidenceUrl(offer?.url) ? offer.url : ""],
+  ]
+    .filter(([, value]) => !String(value || "").trim())
+    .map(([field]) => field);
+}
+
+function offerHasCompletePresentationIdentity(offer, options) {
+  return missingPresentationIdentityFields(offer, options).length === 0;
+}
+
+function offerCanBePresented(offer, fitFloor, options) {
+  const score = Number(offer?.score);
+  return (
+    offerHasCompletePresentationIdentity(offer, options) &&
+    Number.isFinite(score) &&
+    score >= fitFloor
+  );
+}
+
 function canonicalRecoveryRejectionReason(offer, { config }) {
   const qualification = requalifyCanonicalOffers([offer], { config });
   if (qualification.filteredLocation.length) {
@@ -1107,6 +1139,9 @@ export async function runAiWebSearch({
 
   const config = candidateConfigGet({ repoRoot, env });
   const fitFloor = savedFitFloor(config);
+  const presentationIdentityOptions = {
+    requireLocation: searchRequiresCanonicalLocation(config),
+  };
   const modesGate = computeAllows("search:ai-web", config.modes);
   const promptCap = PROMPT_CAP_BY_MODE[modesGate.usage_mode] ?? PROMPT_CAP_BY_MODE.standard;
 
@@ -1734,7 +1769,9 @@ export async function runAiWebSearch({
 
   function usefulSetState() {
     const qualification = requalifyCanonicalOffers(canonicalCandidates, { config });
-    const offers = qualification.kept.filter((offer) => offerMeetsFitFloor(offer, fitFloor));
+    const offers = qualification.kept.filter((offer) =>
+      offerCanBePresented(offer, fitFloor, presentationIdentityOptions)
+    );
     const representedBuckets = new Set(
       targetBuckets
         .filter((bucket) => offers.some((offer) => titleMatchesBucket(offer.title, bucket)))
@@ -1903,16 +1940,23 @@ export async function runAiWebSearch({
   const canonicalQualification = requalifyCanonicalOffers(canonicalCandidates, {
     config,
   });
-  const survivors = canonicalQualification.kept.map((offer) => ({
-    ...offer,
-    gate: deriveGate(offer.ruleFlags),
-  }));
+  const incompletePresentedRows = canonicalQualification.kept.filter(
+    (offer) => !offerHasCompletePresentationIdentity(offer, presentationIdentityOptions)
+  );
+  invalid += incompletePresentedRows.length;
+  const survivors = canonicalQualification.kept
+    .filter((offer) => offerHasCompletePresentationIdentity(offer, presentationIdentityOptions))
+    .map((offer) => ({
+      ...offer,
+      gate: deriveGate(offer.ruleFlags),
+    }));
   const reasonCounts = {
     location: canonicalQualification.filteredLocation.length,
     salary: canonicalQualification.filteredSalary.length,
     seniority: canonicalQualification.filteredSeniority.length,
     age: canonicalQualification.filteredAge.length,
     eligibility: canonicalQualification.filteredEligibility.length,
+    identity: incompletePresentedRows.length,
   };
   for (const key of Object.keys(reasonCounts)) {
     if (reasonCounts[key] === 0) delete reasonCounts[key];
@@ -1924,6 +1968,13 @@ export async function runAiWebSearch({
     ...canonicalQualification.filteredAge,
     ...canonicalQualification.filteredSalary,
     ...canonicalQualification.filteredEligibility,
+    ...incompletePresentedRows.map((offer) => ({
+      ...offer,
+      qualificationReason: `incomplete-presentation-identity:${missingPresentationIdentityFields(
+        offer,
+        presentationIdentityOptions
+      ).join(",")}`,
+    })),
   ]
     .slice(0, MAX_CANONICAL_DISQUALIFICATIONS)
     .map((offer) => ({
