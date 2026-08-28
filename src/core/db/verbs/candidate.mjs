@@ -281,7 +281,7 @@ function hasAnyTitle(targeting) {
   );
 }
 
-export function hasSearchLocation(profile) {
+function hasSearchLocation(profile) {
   const location = profile.location || {};
   const candidate = profile.candidate || {};
   return !!(

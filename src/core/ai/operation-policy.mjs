@@ -3,8 +3,8 @@ import {
   sanitizeInstalledRuntimeCapabilityEvidence,
 } from "./installed-runtimes.mjs";
 
-export const AI_POLICY_VERSION = 1;
-export const AI_ADAPTER_VERSION = 1;
+const AI_POLICY_VERSION = 1;
+const AI_ADAPTER_VERSION = 1;
 
 export const AI_OPERATION_DEFAULTS = Object.freeze({
   "paul.conversation": Object.freeze({ quality: "best", reasoning: "medium" }),

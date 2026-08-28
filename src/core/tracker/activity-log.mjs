@@ -260,7 +260,7 @@ export function listActivity({ root = DEFAULT_ROOT, limit = null } = {}) {
 // events (drafted/tailored/sourced) have no tracker.json anchor so backfill can't
 // rebuild them. Default high (2000) and overridable so a normal job-search cycle
 // never silently loses history; lower it via CAREERRAT_ACTIVITY_MAX if needed.
-export const DEFAULT_ACTIVITY_MAX = 2000;
+const DEFAULT_ACTIVITY_MAX = 2000;
 
 export function activityRetentionLimit(env = process.env) {
   const configured = Number(env?.CAREERRAT_ACTIVITY_MAX);

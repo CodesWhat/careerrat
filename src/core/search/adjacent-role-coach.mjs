@@ -423,7 +423,7 @@ export function buildAdjacentRoleChoicePrompt({ proposal, threadId, messageId } 
   );
 }
 
-export function adjacentRoleConfirmationQuestion({ proposal, selectedRoleIds } = {}) {
+function adjacentRoleConfirmationQuestion({ proposal, selectedRoleIds } = {}) {
   const selected = new Set((Array.isArray(selectedRoleIds) ? selectedRoleIds : []).map(String));
   const roles = proposalRoles(proposal).filter((role) => selected.has(role.id));
   if (!roles.length) {

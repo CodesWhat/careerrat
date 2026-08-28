@@ -633,13 +633,6 @@ export async function suggestAssist(kind, input) {
   };
 }
 
-export function addBoard({ url, label }) {
-  return apiFetch("/api/boards/add", {
-    method: "POST",
-    body: JSON.stringify({ url, label }),
-  });
-}
-
 export function getSourceMaintenance() {
   return apiFetch("/api/boards/sources");
 }

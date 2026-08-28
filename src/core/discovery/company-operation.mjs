@@ -66,7 +66,7 @@ function contextDigest(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-export function encodeCompanyDiscoveryContext(context = {}) {
+function encodeCompanyDiscoveryContext(context = {}) {
   const serialized = JSON.stringify(stableValue(context));
   if (Buffer.byteLength(serialized, "utf8") > COMPANY_CONTEXT_MAX_BYTES) {
     throw makeError(
@@ -127,7 +127,7 @@ export function parseCompanyDiscoveryOperationRequest(input = {}) {
   };
 }
 
-export function resolveCompanyDiscoveryExecutionPlan({ repoRoot, env = process.env } = {}) {
+function resolveCompanyDiscoveryExecutionPlan({ repoRoot, env = process.env } = {}) {
   const route = resolveAIRoute(env, { repoRoot });
   const runtimeId = aiRuntimeIdForRoute(route);
   if (!runtimeId) return null;
@@ -138,7 +138,7 @@ export function resolveCompanyDiscoveryExecutionPlan({ repoRoot, env = process.e
   });
 }
 
-export function companyDiscoveryResultRef(batchId) {
+function companyDiscoveryResultRef(batchId) {
   const id = String(batchId || "").trim();
   if (!id) throw makeError("company discovery did not create a proposal batch");
   return { type: "company-proposal-batch", id };

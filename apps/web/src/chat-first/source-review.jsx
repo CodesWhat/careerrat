@@ -53,7 +53,7 @@ function normalizedOptionText(value) {
     .trim();
 }
 
-export function resolveVisibleOptionNames(text, options) {
+function resolveVisibleOptionNames(text, options) {
   const normalized = normalizedOptionText(text);
   if (!normalized) return null;
   const haystack = ` ${normalized} `;
@@ -323,7 +323,7 @@ function SourceReviewDialog({ artifact, busy, onDecision, onComplete, onClose, r
   );
 }
 
-export function SourceReviewContent({
+function SourceReviewContent({
   artifact,
   busy = false,
   onDecision,

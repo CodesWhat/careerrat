@@ -86,7 +86,7 @@ export function readDeepIngestOperation(storage) {
   }
 }
 
-export function rememberDeepIngestOperation(storage, operation, subject = {}) {
+function rememberDeepIngestOperation(storage, operation, subject = {}) {
   const resultRef = operation?.resultRef || {};
   const record = savedOperationRecord({
     ...subject,
