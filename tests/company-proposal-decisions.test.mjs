@@ -17,6 +17,7 @@ import {
 } from "../src/core/db/verbs.mjs";
 import { buildCompanyProposal } from "../src/core/discovery/company-proposal-gate.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
+import { captureBrowserSearchSource } from "../src/core/search/browser-source-capture.mjs";
 
 const cleanupRoots = [];
 const FIXED_NOW = new Date("2026-07-04T12:00:00.000Z");
@@ -828,20 +829,59 @@ test("VER-05 userConfirmed persists generic public proposals as browser sources 
   assert.equal(response.status, 200);
   assert.equal(response.body.data.decision.action, "approve-public-source");
   assert.equal(response.body.data.sourceConfig.status, "added");
+  const storedSources = sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches;
   assert.deepEqual(
-    sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches.map((source) => ({
+    storedSources.map((source) => ({
       source_type: source.source_type,
       url: source.url,
       enabled: source.enabled,
+      company: source.company,
     })),
     [
       {
         source_type: "browser",
         url: "https://plain.example/careers",
         enabled: true,
+        company: "Plain Co",
       },
     ]
   );
+  const captured = await captureBrowserSearchSource({
+    source: storedSources[0],
+    session: {
+      available: true,
+      async open(url) {
+        return { url, title: "Careers", text: "Operations Manager" };
+      },
+      async extractRows() {
+        return {
+          rows: [
+            {
+              title: "Operations Manager",
+              company: "",
+              location: "New York, NY",
+              url: "https://plain.example/careers/operations-manager",
+            },
+          ],
+        };
+      },
+      async extractText() {
+        return {
+          selector: "main",
+          text: "Lead venue operations, staffing, and guest experience in New York City. ".repeat(
+            8
+          ),
+        };
+      },
+    },
+    resolvePublicTargetImpl: async (rawUrl) => ({
+      ok: true,
+      url: new URL(rawUrl).toString(),
+    }),
+  });
+  assert.equal(captured.errors.length, 0);
+  assert.equal(captured.offers.length, 1);
+  assert.equal(captured.offers[0].company, "Plain Co");
 
   putBatch(
     repoRoot,

@@ -9,8 +9,13 @@ import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import {
   searchExecutionEnsure,
   searchExecutionGet,
+  searchExecutionSetLane,
 } from "../src/core/db/verbs/search-executions.mjs";
-import { sourcingRunComplete, sourcingRunStart } from "../src/core/db/verbs/sourcing-runs.mjs";
+import {
+  sourcingRunComplete,
+  sourcingRunGet,
+  sourcingRunStart,
+} from "../src/core/db/verbs/sourcing-runs.mjs";
 
 const cleanupRoots = [];
 
@@ -256,6 +261,215 @@ test("AI availability resolves at invocation after an in-process runtime install
   });
   await runtime.waitForUnifiedSearch("search-installed");
   assert.equal(aiCalls, 1);
+  await runtime.shutdownSourcingWorkers();
+});
+
+test("graceful shutdown leaves the unified AI lane running for restart recovery", async () => {
+  const repoRoot = tempRepo();
+  const runtime = createWorkspaceAgentRuntime({
+    repoRoot,
+    env: {},
+    startManualSearchImpl: async ({ searchExecutionId }) => ({
+      ok: true,
+      run: sourcingRunStart({
+        repoRoot,
+        env: {},
+        purpose: "manual-search",
+        inputFingerprint: searchExecutionId,
+        metadata: { searchExecutionId },
+      }).run,
+    }),
+    runSearchInBackgroundImpl: async ({ runId }) => ({
+      id: runId,
+      purpose: "manual-search",
+      status: "completed",
+      summary: { scanned: 1, presented: 1 },
+    }),
+    companyDiscoveryCadenceImpl: () => ({ status: "current", due: false }),
+  });
+  runtime.registerAiWebSearchStarter({
+    isAvailable: () => true,
+    start: async ({ onStarted }) => {
+      onStarted?.({ id: "ai-paused", purpose: "ai-web-search", status: "running" });
+      return {
+        ok: false,
+        resumable: true,
+        run: { id: "ai-paused", purpose: "ai-web-search", status: "running" },
+      };
+    },
+  });
+
+  await runtime.executeIntent({
+    intent: {
+      type: "search.run",
+      entity: { type: "workspace", id: "workspace-main" },
+      input: { purpose: "manual-search", searchExecutionId: "search-paused" },
+    },
+  });
+  const execution = await runtime.waitForUnifiedSearch("search-paused");
+
+  assert.equal(execution.status, "running");
+  assert.equal(execution.lanes.deterministic.status, "completed");
+  assert.equal(execution.lanes.aiWeb.status, "running");
+  assert.equal(execution.lanes.aiWeb.runId, "ai-paused");
+  await runtime.shutdownSourcingWorkers();
+});
+
+test("restart reattaches the exact running AI child and settles its parent execution", async () => {
+  const repoRoot = tempRepo();
+  const manual = sourcingRunStart({
+    repoRoot,
+    env: {},
+    purpose: "manual-search",
+    inputFingerprint: "restart-running-ai",
+    metadata: { searchExecutionId: "search-running-ai" },
+  }).run;
+  const completedManual = sourcingRunComplete({
+    repoRoot,
+    env: {},
+    id: manual.id,
+    summary: { scanned: 2, presented: 1 },
+  }).run;
+  searchExecutionEnsure({
+    repoRoot,
+    env: {},
+    id: "search-running-ai",
+    deterministicRunId: completedManual.id,
+  });
+  searchExecutionSetLane({
+    repoRoot,
+    env: {},
+    id: "search-running-ai",
+    lane: "deterministic",
+    status: "completed",
+    runId: completedManual.id,
+    summary: completedManual.summary,
+  });
+  const ai = sourcingRunStart({
+    repoRoot,
+    env: {},
+    purpose: "ai-web-search",
+    inputFingerprint: "restart-running-ai",
+    metadata: { searchExecutionId: "search-running-ai" },
+  }).run;
+  searchExecutionSetLane({
+    repoRoot,
+    env: {},
+    id: "search-running-ai",
+    lane: "aiWeb",
+    status: "running",
+    runId: ai.id,
+  });
+
+  const runtime = createWorkspaceAgentRuntime({ repoRoot, env: {} });
+  runtime.registerSourcingWorker({
+    purpose: "ai-web-search",
+    execute: async ({ run }) => ({
+      settlement: { status: "completed", summary: { searched: 3, new: 2 } },
+      value: { searched: 3, new: 2, resumedRunId: run.id },
+    }),
+  });
+
+  runtime.recoverOrphanedSourcingRuns();
+  const execution = await runtime.waitForUnifiedSearch("search-running-ai");
+  const child = sourcingRunGet({ repoRoot, env: {}, id: ai.id }).run;
+
+  assert.equal(child.id, ai.id);
+  assert.equal(child.status, "completed");
+  assert.equal(execution.status, "completed");
+  assert.equal(execution.lanes.aiWeb.status, "completed");
+  assert.equal(execution.lanes.aiWeb.runId, ai.id);
+  assert.equal(execution.lanes.aiWeb.summary.new, 2);
+  await runtime.shutdownSourcingWorkers();
+});
+
+test("unified execution persists a bounded receipt while the AI child keeps full detail", async () => {
+  const repoRoot = tempRepo();
+  const fullSummary = {
+    searched: 120,
+    found: 120,
+    new: 100,
+    offers: Array.from({ length: 120 }, (_, index) => ({
+      company: `Company ${index}`,
+      title: `Role ${index}`,
+      url: `https://example.com/jobs/${index}`,
+      bodyText: "Detailed job description. ".repeat(200),
+    })),
+    sources: Array.from({ length: 120 }, (_, index) => ({
+      url: `https://source.example/${index}`,
+      response: "Full source response. ".repeat(100),
+    })),
+    queryResults: Array.from({ length: 120 }, (_, index) => ({
+      promptId: `prompt-${index}`,
+      output: "Full provider response. ".repeat(100),
+    })),
+  };
+  const runtime = createWorkspaceAgentRuntime({
+    repoRoot,
+    env: {},
+    startManualSearchImpl: async ({ searchExecutionId }) => ({
+      ok: true,
+      run: sourcingRunStart({
+        repoRoot,
+        env: {},
+        purpose: "manual-search",
+        inputFingerprint: searchExecutionId,
+        metadata: { searchExecutionId },
+      }).run,
+    }),
+    runSearchInBackgroundImpl: async ({ runId }) => ({
+      id: runId,
+      purpose: "manual-search",
+      status: "completed",
+      summary: { scanned: 2, presented: 1 },
+    }),
+    companyDiscoveryCadenceImpl: () => ({ status: "current", due: false }),
+  });
+  let aiRunId;
+  runtime.registerAiWebSearchStarter({
+    isAvailable: () => true,
+    start: async ({ searchExecutionId, onStarted }) => {
+      const started = sourcingRunStart({
+        repoRoot,
+        env: {},
+        purpose: "ai-web-search",
+        inputFingerprint: searchExecutionId,
+        metadata: { searchExecutionId },
+      }).run;
+      aiRunId = started.id;
+      onStarted?.(started);
+      const completed = sourcingRunComplete({
+        repoRoot,
+        env: {},
+        id: started.id,
+        summary: fullSummary,
+      }).run;
+      return { ok: true, run: completed, value: fullSummary };
+    },
+  });
+
+  await runtime.executeIntent({
+    intent: {
+      type: "search.run",
+      entity: { type: "workspace", id: "workspace-main" },
+      input: { purpose: "manual-search", searchExecutionId: "search-max-shape" },
+    },
+  });
+  const execution = await runtime.waitForUnifiedSearch("search-max-shape");
+  const child = sourcingRunGet({ repoRoot, env: {}, id: aiRunId }).run;
+
+  assert.equal(execution.status, "completed");
+  assert.equal(execution.lanes.aiWeb.status, "completed");
+  assert.equal(execution.lanes.aiWeb.summary.offerCount, 120);
+  assert.equal(execution.lanes.aiWeb.summary.sourceCount, 120);
+  assert.equal(execution.lanes.aiWeb.summary.queryCount, 120);
+  assert.equal(Object.hasOwn(execution.lanes.aiWeb.summary, "offers"), false);
+  assert.equal(Object.hasOwn(execution.lanes.aiWeb.summary, "sources"), false);
+  assert.equal(Object.hasOwn(execution.lanes.aiWeb.summary, "queryResults"), false);
+  assert.ok(Buffer.byteLength(JSON.stringify(execution), "utf8") < 65_536);
+  assert.equal(child.summary.offers.length, 120);
+  assert.equal(child.summary.sources.length, 120);
+  assert.equal(child.summary.queryResults.length, 120);
   await runtime.shutdownSourcingWorkers();
 });
 

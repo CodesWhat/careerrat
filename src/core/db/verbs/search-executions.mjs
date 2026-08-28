@@ -180,7 +180,7 @@ export function searchExecutionListRecoverable({ repoRoot, env } = {}) {
     .prepare(
       `SELECT data FROM search_executions
        WHERE status = 'running'
-         AND ai_status = 'queued'
+         AND ai_status IN ('queued', 'running')
        ORDER BY updated_at ASC, id ASC`
     )
     .all();

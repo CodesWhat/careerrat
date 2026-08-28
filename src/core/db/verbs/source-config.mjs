@@ -176,6 +176,9 @@ export function companyAtsUpsert({ repoRoot, env, entry } = {}) {
 
 export function publicSearchSourceUpsert({ repoRoot, env, entry } = {}) {
   const name = String(entry?.name || entry?.label || "").trim();
+  const company = String(entry?.company || "")
+    .trim()
+    .slice(0, 200);
   const checked = validatePublicHttpUrl(entry?.url || entry?.careers_url);
   if (!name) {
     const error = new Error("public search source requires a name");
@@ -191,14 +194,30 @@ export function publicSearchSourceUpsert({ repoRoot, env, entry } = {}) {
   const db = requireDb({ repoRoot, env });
   return withTransaction(db, () => {
     const current = readSourceConfig(db, "search-sources").data;
-    const next = addSearchFromUrl(current, checked.url, {
+    let next = addSearchFromUrl(current, checked.url, {
       label: name,
       sourceType: "browser",
     });
-    const status = next === current ? "already-tracked" : "added";
-    if (status === "added") putSourceConfig(db, "search-sources", next);
-    const stored = readSourceConfig(db, "search-sources").data;
+    const added = next !== current;
     const canonicalTarget = canonicalSearchSourceUrl(checked.url);
+    const sourceIndex = next.searches.findIndex(
+      (candidate) => canonicalSearchSourceUrl(candidate.url) === canonicalTarget
+    );
+    const needsCompany =
+      company &&
+      sourceIndex !== -1 &&
+      String(next.searches[sourceIndex]?.company || "") !== company;
+    if (needsCompany) {
+      next = {
+        ...next,
+        searches: next.searches.map((source, index) =>
+          index === sourceIndex ? { ...source, company } : source
+        ),
+      };
+    }
+    const status = added ? "added" : needsCompany ? "updated" : "already-tracked";
+    if (next !== current) putSourceConfig(db, "search-sources", next);
+    const stored = readSourceConfig(db, "search-sources").data;
     const source = stored.searches.find(
       (candidate) => canonicalSearchSourceUrl(candidate.url) === canonicalTarget
     );

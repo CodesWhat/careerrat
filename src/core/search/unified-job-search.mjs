@@ -47,6 +47,7 @@ async function runLane({ id, run, searchExecutionId, signal, deterministic }) {
       signal,
       ...(id === "aiWeb" ? { deterministic } : {}),
     });
+    if (result?.resumable === true) return { status: "resumable", result };
     if (cancelled(signal, result)) return { status: "cancelled", ...(result ? { result } : {}) };
     if (result?.ok === false) {
       return {
@@ -98,6 +99,11 @@ export async function runUnifiedJobSearch({
     signal,
   });
   const lanes = { deterministic };
+
+  if (deterministic.status === "resumable") {
+    lanes.aiWeb = { status: "resumable", reason: "waiting-for-deterministic" };
+    return unifiedResult({ searchExecutionId: executionId, lanes });
+  }
 
   if (deterministic.status === "cancelled" || signal?.aborted) {
     lanes.aiWeb = { status: "skipped", reason: "cancelled" };

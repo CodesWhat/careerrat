@@ -2439,6 +2439,64 @@ function compactSearchSummary(summary) {
   return compact;
 }
 
+function compactSearchExecutionReceipt(summary) {
+  if (!summary || typeof summary !== "object" || Array.isArray(summary)) return null;
+  const numericKeys = [
+    "attemptedSources",
+    "searched",
+    "found",
+    "scanned",
+    "new",
+    "qualified",
+    "presented",
+    "filtered",
+    "reconciled",
+    "duplicates",
+    "invalid",
+    "partial",
+    "unreadable",
+    "disqualified",
+    "errorCount",
+    "offerCount",
+    "sourceCount",
+    "queryCount",
+    "failedPromptCount",
+    "warningCount",
+    "captureFailureCount",
+  ];
+  const receipt = {};
+  for (const key of numericKeys) {
+    const value = Number(summary[key]);
+    if (Number.isFinite(value)) receipt[key] = value;
+  }
+  const arrayCounts = {
+    offers: "offerCount",
+    sources: "sourceCount",
+    queryResults: "queryCount",
+    failedPromptIds: "failedPromptCount",
+    warnings: "warningCount",
+    errors: "errorCount",
+    captureFailures: "captureFailureCount",
+  };
+  for (const [key, countKey] of Object.entries(arrayCounts)) {
+    if (receipt[countKey] == null && Array.isArray(summary[key])) {
+      receipt[countKey] = summary[key].length;
+    }
+  }
+  if (summary.reasonCounts && typeof summary.reasonCounts === "object") {
+    receipt.reasonCounts = Object.fromEntries(
+      Object.entries(summary.reasonCounts)
+        .slice(0, 20)
+        .flatMap(([reason, count]) => {
+          const value = Number(count);
+          return Number.isFinite(value) ? [[String(reason).slice(0, 80), value]] : [];
+        })
+    );
+  }
+  if (typeof summary.zeroResults === "boolean") receipt.zeroResults = summary.zeroResults;
+  return receipt;
+}
+
 function searchStatusLabel(run) {
   if (run?.label) return String(run.label);
   if (run?.status === "completed") return "Complete";
@@ -10853,7 +10911,9 @@ export function createWorkspaceAgentRuntime({
   }
 
   function workerLaneResult(outcome) {
-    if (outcome?.resumable) return { ok: false, aborted: true };
+    if (outcome?.resumable) {
+      return { ok: false, resumable: true, run: outcome?.run || null };
+    }
     if (outcome?.run?.status === "failed") {
       return {
         ok: false,
@@ -10879,6 +10939,7 @@ export function createWorkspaceAgentRuntime({
   }
 
   function persistLane(searchExecutionId, lane, result, fallbackRunId) {
+    if (result?.resumable === true) return readSearchExecution(searchExecutionId);
     const status = laneStatus(result);
     return searchExecutionSetLane({
       repoRoot,
@@ -10887,12 +10948,13 @@ export function createWorkspaceAgentRuntime({
       lane,
       status,
       runId: result?.run?.id || fallbackRunId,
-      summary: result?.run?.summary ?? result?.value ?? null,
+      summary: compactSearchExecutionReceipt(result?.run?.summary ?? result?.value),
       error: status === "failed" ? result?.error || result?.run?.error : null,
     }).execution;
   }
 
   function persistUnifiedOutcome(searchExecutionId, lane, outcome) {
+    if (outcome?.status === "resumable") return readSearchExecution(searchExecutionId);
     const status =
       outcome?.status === "succeeded"
         ? "completed"
@@ -10913,7 +10975,9 @@ export function createWorkspaceAgentRuntime({
       lane,
       status,
       runId: outcome?.result?.run?.id,
-      summary: outcome?.result?.run?.summary ?? outcome?.result?.value ?? null,
+      summary: compactSearchExecutionReceipt(
+        outcome?.result?.run?.summary ?? outcome?.result?.value
+      ),
       error: outcome?.error || outcome?.result?.error || outcome?.result?.run?.error,
       reason: outcome?.reason,
     }).execution;
@@ -11027,6 +11091,35 @@ export function createWorkspaceAgentRuntime({
     return worker;
   }
 
+  function coordinateRecoveredAiSearch(execution, worker) {
+    const searchExecutionId = String(execution?.id || "").trim();
+    const aiRunId = String(execution?.lanes?.aiWeb?.runId || "").trim();
+    if (!searchExecutionId || !aiRunId || !worker) return worker;
+    if (unifiedSearches.has(searchExecutionId)) return worker;
+
+    const coordination = Promise.resolve(worker.promise)
+      .then((outcome) => {
+        persistLane(searchExecutionId, "aiWeb", workerLaneResult(outcome), aiRunId);
+        return readSearchExecution(searchExecutionId);
+      })
+      .catch((error) => {
+        persistLane(
+          searchExecutionId,
+          "aiWeb",
+          { ok: false, error: { code: error?.code, message: error?.message || String(error) } },
+          aiRunId
+        );
+        return readSearchExecution(searchExecutionId);
+      });
+    const tracked = coordination.finally(() => {
+      if (unifiedSearches.get(searchExecutionId) === tracked) {
+        unifiedSearches.delete(searchExecutionId);
+      }
+    });
+    unifiedSearches.set(searchExecutionId, tracked);
+    return worker;
+  }
+
   function startSearchInBackground({ operation, run }) {
     if (operation?.reused === true || run?.status !== "running" || !run?.id) return;
     return coordinateManualSearch(run, sourcingWorkers.start({ run }));
@@ -11045,6 +11138,25 @@ export function createWorkspaceAgentRuntime({
     }
     for (const execution of recoverableExecutions) {
       if (unifiedSearches.has(execution.id)) continue;
+      if (execution.lanes.aiWeb.status === "running") {
+        try {
+          const run = sourcingRunGet({
+            repoRoot,
+            env,
+            id: execution.lanes.aiWeb.runId,
+            purpose: "ai-web-search",
+          }).run;
+          const worker =
+            run.status === "running"
+              ? sourcingWorkers.worker(run.id)
+              : { promise: Promise.resolve({ run, value: run.summary }) };
+          if (worker) coordinateRecoveredAiSearch(execution, worker);
+        } catch {
+          // The exact child stays attached to the durable parent. A later
+          // recovery pass may restore it, but an unrelated AI run never can.
+        }
+        continue;
+      }
       if (execution.lanes.deterministic.status === "cancelled") {
         searchExecutionSetLane({
           repoRoot,

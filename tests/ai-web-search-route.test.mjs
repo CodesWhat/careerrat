@@ -203,6 +203,38 @@ test("mounting the AI route registers a durable unified-search starter", async (
   assert.deepEqual(events, [{ type: "activity", message: "Searching the open web" }]);
 });
 
+test("unified AI starter reports app shutdown as resumable instead of completed", async () => {
+  const repoRoot = tempRepo();
+  let starterDefinition;
+  const workspaceAgentRuntime = {
+    registerSourcingWorker() {},
+    registerAiWebSearchStarter(definition) {
+      starterDefinition = definition;
+    },
+    startSourcingWorker({ run }) {
+      return {
+        run,
+        promise: Promise.resolve({ run: null, value: null, resumable: true }),
+      };
+    },
+    async recordSearchStart() {},
+  };
+
+  mountedRoutesFor({
+    repoRoot,
+    workspaceAgentRuntime,
+    runAiWebSearch: async () => assert.fail("resumable fixture must not run the provider"),
+  });
+
+  const result = await starterDefinition.start({ searchExecutionId: "search-paused" });
+  const stored = sourcingRunLatest({ repoRoot, env: {}, purpose: "ai-web-search" }).run;
+
+  assert.equal(result.ok, false);
+  assert.equal(result.resumable, true);
+  assert.equal(result.run.id, stored.id);
+  assert.equal(stored.status, "running");
+});
+
 test("AI web-search generates candidate prompts automatically when none are saved", async () => {
   const repoRoot = tempRepo({ prompts: 0 });
   let searches = 0;

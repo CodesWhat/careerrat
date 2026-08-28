@@ -403,6 +403,7 @@ async function applyApproval({
           env,
           entry: {
             name: `${proposal.company?.name || "Company"} careers`,
+            company: proposal.company?.name,
             url: proposal.jobBoardUrl || proposal.careersUrl,
           },
         })

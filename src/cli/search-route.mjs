@@ -628,6 +628,9 @@ export function mountSearchRoutes({
       onStarted?.(started.run);
       const outcome = await started.start().promise;
       signal?.throwIfAborted?.();
+      if (outcome?.resumable === true) {
+        return { ok: false, resumable: true, run: started.run };
+      }
       if (outcome?.run?.status === "failed") {
         return { ok: false, run: outcome.run, error: outcome.run.error };
       }
