@@ -99,6 +99,7 @@ const MAX_SEARCH_QUERY_LENGTH = 100;
 const MAX_CONFIGURED_SOURCE_HINTS = 4;
 const MAX_CANONICAL_DISQUALIFICATIONS = 20;
 const MAX_FETCHED_POSTING_DECISIONS = 20;
+const MAX_CORRECTION_CONTEXT_CHARS = 2 * 1024 * 1024;
 const AI_WEB_SEARCH_TURN_LIMITS = Object.freeze({
   scope: "prompt-turn",
   web_search_calls: 2,
@@ -1211,6 +1212,7 @@ export async function runAiWebSearch({
     const toolCalls = new Map();
     const toolTrace = [];
     let runtimeFailure = null;
+    let previousRawText = "";
     const heartbeat = setInterval(() => {
       onProgress?.({
         type: "activity",
@@ -1229,6 +1231,10 @@ export async function runAiWebSearch({
       const baseInput = searchInstruction
         ? `${JSON.stringify(kickoffInput)}\n\n${searchInstruction}`
         : kickoffInput;
+      const correctionContext =
+        correction && previousRawText
+          ? `\n\nThe previous JSON response was:\n<careerrat-previous-json>\n${previousRawText.slice(0, MAX_CORRECTION_CONTEXT_CHARS)}\n</careerrat-previous-json>`
+          : "";
       try {
         runtimeResult = await runSkillStream({
           skill: AI_WEB_SEARCH_LABELS.skill,
@@ -1237,7 +1243,7 @@ export async function runAiWebSearch({
           ...(executionPlan ? { executionPlan } : { aiOperation: "research.web" }),
           useExecutionPlanRoute: Boolean(executionPlan),
           input: correction
-            ? `${typeof baseInput === "string" ? baseInput : JSON.stringify(baseInput)}\n\n${correction}\n\nDo not run WebSearch, WebFetch, or any other tools during this correction. Return the complete corrected JSON. Every successfully fetched exact posting named above must appear in roles[].url or rejected_postings[].url with a short factual reason.`
+            ? `${typeof baseInput === "string" ? baseInput : JSON.stringify(baseInput)}${correctionContext}\n\n${correction}\n\nDo not run WebSearch, WebFetch, or any other tools during this correction. Return the complete corrected JSON. Every successfully fetched exact posting named above must appear in roles[].url or rejected_postings[].url with a short factual reason.`
             : baseInput,
           repoRoot,
           env: skillEnv,
@@ -1310,6 +1316,7 @@ export async function runAiWebSearch({
         runtimeFailure = error;
         throw error;
       }
+      previousRawText = rawText;
       return rawText;
     }
 

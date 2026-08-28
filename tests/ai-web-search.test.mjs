@@ -218,6 +218,8 @@ test("runAiWebSearch corrects a schema-valid reply that silently drops a fetched
   assert.equal(typeof inputs[1], "string");
   assert.match(inputs[1], /successfully fetched exact posting/i);
   assert.match(inputs[1], /job-boards\.greenhouse\.io\/550\/jobs\/5186736008/);
+  assert.match(inputs[1], /https:\/\/jobs\.example\.test\/applied-ai/);
+  assert.match(inputs[1], /previous JSON response/i);
   assert.match(inputs[1], /do not run (?:WebSearch|web tools)/i);
   assert.deepEqual(invocations[1].tools, []);
   assert.deepEqual(result.errors, []);
