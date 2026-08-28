@@ -67,6 +67,7 @@ import {
   resolveCompensationEvidence,
 } from "../scoring/sourced-scanner.mjs";
 import { buildSearchPromptContext, getSearchPrompts } from "./search-prompts.mjs";
+import { normalizedTitleWords, titleMatchesBucket } from "./title-match.mjs";
 
 const AI_WEB_SEARCH_SCHEMA_PATH = "config/ai-web-search.schema.json";
 
@@ -636,18 +637,6 @@ function usefulSetTopUpInstruction(
   ].join("\n");
 }
 
-function normalizedTitleWords(value) {
-  return new Set(
-    String(value || "")
-      .toLowerCase()
-      .replace(/&/g, " and ")
-      .replace(/[^a-z0-9]+/g, " ")
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean)
-  );
-}
-
 function sourceTargetUrl(source) {
   const saved = String(source?.url || source?.rssUrl || "").trim();
   if (saved) return saved;
@@ -726,14 +715,6 @@ function normalizedTitleTokens(value) {
 }
 
 const GENERIC_TARGET_TITLE_SUFFIXES = new Set(["engineer", "engineering", "manager", "management"]);
-
-function titleMatchesBucket(title, bucket) {
-  const actual = normalizedTitleWords(title);
-  return (Array.isArray(bucket?.titles) ? bucket.titles : []).some((targetTitle) => {
-    const target = normalizedTitleWords(targetTitle);
-    return target.size > 0 && [...target].every((word) => actual.has(word));
-  });
-}
 
 function phraseRanges(words, phrase) {
   if (!phrase.length || phrase.length > words.length) return [];

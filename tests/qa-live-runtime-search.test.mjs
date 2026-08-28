@@ -131,7 +131,7 @@ test("failed native AI search acceptance preserves bounded row diagnostics befor
   );
   const safeResult = script.slice(
     script.indexOf("function safeResult"),
-    script.indexOf("function normalizedTitleWords")
+    script.indexOf("function presentedSetReceipt")
   );
   const diagnostic = script.indexOf('kind: "native-ai-search-diagnostic"');
   const verification = script.indexOf("verifyLiveSearchReceiptForReview(receipt)");

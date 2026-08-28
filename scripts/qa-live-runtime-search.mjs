@@ -19,6 +19,7 @@ import { candidateConfigPatch, candidateSetupInitialize } from "../src/core/db/v
 import { healSearchSourceConfig } from "../src/core/onboarding/first-search-run.mjs";
 import { runAiWebSearch } from "../src/core/search/ai-web-search.mjs";
 import { saveSearchPrompts } from "../src/core/search/search-prompts.mjs";
+import { titleMatchesBucket } from "../src/core/search/title-match.mjs";
 import {
   annotateCanonicalReadableRows,
   buildLiveSearchReceipt,
@@ -111,26 +112,6 @@ function safeResult(result) {
   };
 }
 
-function normalizedTitleWords(value) {
-  return new Set(
-    String(value || "")
-      .toLowerCase()
-      .replace(/&/g, " and ")
-      .replace(/[^a-z0-9]+/g, " ")
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean)
-  );
-}
-
-function roleMatchesBucket(role, bucket) {
-  const actual = normalizedTitleWords(role);
-  return (bucket.titles || []).some((title) => {
-    const target = normalizedTitleWords(title);
-    return target.size > 0 && [...target].every((word) => actual.has(word));
-  });
-}
-
 function presentedSetReceipt({ fixture, result, rows }) {
   const presentedRows = rows.filter(
     (row) =>
@@ -148,7 +129,7 @@ function presentedSetReceipt({ fixture, result, rows }) {
       .filter(Boolean)
   ).size;
   const presentedBuckets = (fixture.targeting.role_buckets || [])
-    .filter((bucket) => presentedRows.some((row) => roleMatchesBucket(row.role, bucket)))
+    .filter((bucket) => presentedRows.some((row) => titleMatchesBucket(row.role, bucket)))
     .map((bucket) => bucket.name);
   return { presentedRoleCount, presentedBucketCount: presentedBuckets.length, presentedBuckets };
 }
