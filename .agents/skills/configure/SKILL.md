@@ -77,6 +77,7 @@ Run the CLI confirm-first. The default is a **dry run** — it shows the exact l
 **Capabilities:** `status_polling`, `messaging`, `one_click_apply`, `profile_optimize`, `profile_apply`, `mail_access`.
 
 **Platforms per capability:**
+
 - `status_polling`: greenhouse, workday, ashby, lever
 - `messaging`: linkedin, wellfound
 - `one_click_apply`: linkedin

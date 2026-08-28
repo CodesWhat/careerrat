@@ -107,12 +107,14 @@ Review the generated filters and adjust as needed:
   - `manual` — no automatic date filter; the agent applies no recency constraint (use for sources with their own pagination).
   
   To tune: use the owning source-config command when available. Do not hand-edit exported source YAML in DB workspaces. If no DB-aware command exists for recency yet, stop and report the helper gap rather than editing `config/search-sources.yml`. In legacy workspaces only, edit the `recency` block directly in `config/search-sources.yml` for the relevant entry. Example for a 7-day lookback on a fixed-hours source:
+
   ```yaml
   recency:
     mode: fixed-hours
     windowHours: 168
     safetyMinutes: 60
   ```
+
   After tuning, run `careerrat doctor` to confirm the schema validates.
 
 Use `careerrat searches` to review the current state before finalizing.
@@ -125,6 +127,7 @@ Verify the auto-selected aggregator and board set is appropriate for the candida
 - If the user mentions a board or aggregator they always want included: add it now, and apply the gate write-back below.
 
 **Auto-seeded portals (review these):**
+
 - **Wellfound** (`wellfound.com`) — tech-domain candidates only; one entry per primary role title, `source_type: browser`. If the candidate is not in a tech-adjacent domain, disable these entries.
 - **Lever** (`jobs.lever.co`) — domain-neutral ATS; one entry per company in `targeting.tracked_companies`, `source_type: ats`. Verify each company slug matches the company's actual Lever subdomain — a wrong slug returns an empty result set (HTTP 200, no postings), not a 404.
 
