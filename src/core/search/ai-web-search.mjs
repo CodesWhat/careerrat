@@ -637,7 +637,9 @@ function searchPlanTitles(prompt, candidateContext) {
   for (const bucket of Array.isArray(candidateContext?.role_buckets)
     ? candidateContext.role_buckets
     : []) {
-    const namedTitles = configuredTitlesNamedByPrompt(prompt, bucket);
+    const namedTitles = (Array.isArray(bucket?.titles) ? bucket.titles : []).filter((title) =>
+      promptMatchesTitle(prompt, title)
+    );
     const selectedTitles = namedTitles.length
       ? namedTitles
       : promptMatchesBucketName(prompt, bucket)
@@ -655,25 +657,54 @@ function searchPlanTitles(prompt, candidateContext) {
   return titles.slice(0, 4);
 }
 
-function searchPlanLocationClause(location = {}) {
+function searchPlanLocationClause(prompt, location = {}) {
   const alternatives = [];
   const home = quoteSearchTerm(location.home);
+  const promptText = String(prompt?.text || "");
+  const remoteIsExplicit = /\bremote\b/i.test(promptText);
   if (home) alternatives.push(home);
-  if (location.remote === true) alternatives.push("remote");
+  if (location.remote === true && remoteIsExplicit) alternatives.push("remote");
   if (!home && location.hybrid === true) alternatives.push("hybrid");
   if (!home && location.onsite === true) alternatives.push("onsite");
   if (!alternatives.length) return "";
   return alternatives.length === 1 ? alternatives[0] : `(${alternatives.join(" OR ")})`;
 }
 
-function buildPromptSearchPlan(prompt, candidateContext) {
-  const titles = searchPlanTitles(prompt, candidateContext);
-  const titleClause = titles.length
-    ? titles.length === 1
-      ? quoteSearchTerm(titles[0])
-      : `(${titles.map(quoteSearchTerm).join(" OR ")})`
-    : quoteSearchTerm(prompt.text);
-  const locationClause = searchPlanLocationClause(candidateContext?.location);
+function searchTitleClause(titles, fallback = "") {
+  if (!titles.length) return quoteSearchTerm(fallback);
+  return titles.length === 1
+    ? quoteSearchTerm(titles[0])
+    : `(${titles.map(quoteSearchTerm).join(" OR ")})`;
+}
+
+function compactSearchQuery(titles, locationClause, fallback) {
+  if (!titles.length) {
+    return [quoteSearchTerm(String(fallback || "").slice(0, 80)), locationClause]
+      .filter(Boolean)
+      .join(" ")
+      .slice(0, 100);
+  }
+  const selected = [];
+  for (const title of titles) {
+    const query = [searchTitleClause([...selected, title]), locationClause]
+      .filter(Boolean)
+      .join(" ");
+    if (query.length > 100 && selected.length) break;
+    selected.push(title);
+  }
+  return [searchTitleClause(selected), locationClause].filter(Boolean).join(" ").slice(0, 100);
+}
+
+function buildPromptSearchPlan(
+  prompt,
+  candidateContext,
+  { rejectedCandidates = [], missingTargetTitles = [] } = {}
+) {
+  const titles = missingTargetTitles.length
+    ? missingTargetTitles
+    : searchPlanTitles(prompt, candidateContext);
+  const titleClause = titles.length ? searchTitleClause(titles) : quoteSearchTerm(prompt.text);
+  const locationClause = searchPlanLocationClause(prompt, candidateContext?.location);
   const directHostClause = [
     "careers",
     ...COMMON_ATS_SEARCH_HOSTS.map((host) => `site:${host}`),
@@ -690,9 +721,31 @@ function buildPromptSearchPlan(prompt, candidateContext) {
   return Object.freeze({
     limits: AI_WEB_SEARCH_TURN_LIMITS,
     query_hints: Object.freeze([
-      Object.freeze({ kind: "broad-saved-prompt", query: prompt.text }),
+      Object.freeze({
+        kind: missingTargetTitles.length ? "missing-target-title" : "target-title-and-location",
+        query: compactSearchQuery(titles, locationClause, prompt.text),
+      }),
       Object.freeze({ kind: "direct-employer-or-ats", query: directQuery }),
     ]),
+    ...(missingTargetTitles.length
+      ? {
+          focus: Object.freeze({
+            missing_target_titles: Object.freeze([...missingTargetTitles]),
+          }),
+        }
+      : {}),
+    ...(rejectedCandidates.length && titles.length
+      ? {
+          rejected_sources: Object.freeze({
+            urls: Object.freeze(rejectedCandidates.map(({ offer }) => offer?.url).filter(Boolean)),
+            hosts: Object.freeze([
+              ...new Set(
+                rejectedCandidates.map(({ offer }) => sourceHost(offer?.url)).filter(Boolean)
+              ),
+            ]),
+          }),
+        }
+      : {}),
   });
 }
 
@@ -848,7 +901,13 @@ export async function runAiWebSearch({
       mode: "ai-web-search",
       prompts: [{ id: prompt.id, text: prompt.text }],
       candidate: candidateContext,
-      search_plan: searchPlansByPrompt.get(prompt.id),
+      search_plan:
+        rejectedCandidates.length || topUp
+          ? buildPromptSearchPlan(prompt, candidateContext, {
+              rejectedCandidates,
+              missingTargetTitles,
+            })
+          : searchPlansByPrompt.get(prompt.id),
       result_url_policy: RESULT_URL_POLICY,
     };
     const toolCalls = new Map();

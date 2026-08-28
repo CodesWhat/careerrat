@@ -250,7 +250,7 @@ test("runAiWebSearch gives every initial prompt the strict result URL routing po
   ]);
 });
 
-test("runAiWebSearch gives each prompt a server-owned hard budget and two generic query hints", async () => {
+test("runAiWebSearch gives each prompt compact target-title and location query hints", async () => {
   const repoRoot = repo({ prompts: 1 });
   candidateConfigPatch({
     repoRoot,
@@ -279,7 +279,7 @@ test("runAiWebSearch gives each prompt a server-owned hard budget and two generi
     },
   });
   const savedPrompt =
-    "Find Platform Engineer and Site Reliability Engineer roles in New York or remote in the US";
+    "Find currently active Platform Engineer and Site Reliability Engineer roles in New York or remote in the US, prioritize direct employer postings, and avoid generic career pages or expired listings";
   saveSearchPrompts({ repoRoot, prompts: [{ id: "p1", text: savedPrompt }] });
   const inputs = [];
 
@@ -321,10 +321,16 @@ test("runAiWebSearch gives each prompt a server-owned hard budget and two generi
     hard_stop: true,
   });
   assert.equal(inputs[0].search_plan.query_hints.length, 2);
-  assert.deepEqual(inputs[0].search_plan.query_hints[0], {
-    kind: "broad-saved-prompt",
-    query: savedPrompt,
-  });
+  assert.notEqual(inputs[0].search_plan.query_hints[0].query, savedPrompt);
+  assert.ok(inputs[0].search_plan.query_hints[0].query.length <= 100);
+  assert.match(inputs[0].search_plan.query_hints[0].query, /"Platform Engineer"/);
+  assert.match(inputs[0].search_plan.query_hints[0].query, /"Site Reliability Engineer"/);
+  assert.match(inputs[0].search_plan.query_hints[0].query, /"New York, NY"/);
+  assert.match(inputs[0].search_plan.query_hints[0].query, /\bremote\b/i);
+  assert.doesNotMatch(
+    inputs[0].search_plan.query_hints[0].query,
+    /prioritize direct employer postings|generic career pages|expired listings/i
+  );
   assert.equal(inputs[0].search_plan.query_hints[1].kind, "direct-employer-or-ats");
   assert.match(inputs[0].search_plan.query_hints[1].query, /"Platform Engineer"/);
   assert.match(inputs[0].search_plan.query_hints[1].query, /"Site Reliability Engineer"/);
@@ -334,6 +340,392 @@ test("runAiWebSearch gives each prompt a server-owned hard budget and two generi
   assert.match(inputs[0].search_plan.query_hints[1].query, /site:job-boards\.greenhouse\.io/);
   assert.match(inputs[0].search_plan.query_hints[1].query, /site:jobs\.lever\.co/);
   assert.doesNotMatch(inputs[0].search_plan.query_hints[1].query, /claude|codex|hospitality/i);
+});
+
+test("runAiWebSearch keeps a configured core title in query hints beside longer siblings", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: false,
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        {
+          name: "Bar leadership",
+          titles: ["Bar Manager", "Assistant Bar Manager", "Senior Bar Manager"],
+        },
+      ],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      {
+        id: "p1",
+        text: "Find Bar Manager, Assistant Bar Manager, and Senior Bar Manager jobs in NYC",
+      },
+    ],
+  });
+  const inputs = [];
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      emitAssistantJson(onEvent, {
+        roles: [1, 2, 3].map((index) =>
+          role({
+            company: `Bar Group ${index}`,
+            title: "Bar Manager",
+            location: "New York, NY",
+            url: `https://bar-group-${index}.example/jobs/bar-manager`,
+          })
+        ),
+        queries_run: [{ prompt_id: "p1", query: "bar manager jobs", status: "completed" }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver({
+      title: "Bar Manager",
+      location: "New York, NY",
+      liveness: { result: "active", reason: "visible apply control" },
+    }),
+  });
+
+  const quotedTerms = inputs[0].search_plan.query_hints.flatMap(
+    ({ query }) => query.match(/"[^"]+"/g) || []
+  );
+  assert.ok(quotedTerms.includes('"Bar Manager"'), JSON.stringify(inputs[0].search_plan));
+});
+
+test("runAiWebSearch does not add remote when a hospitality prompt does not request it", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Bar leadership", titles: ["Bar Manager"] }],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      {
+        id: "p1",
+        text: "Find Bar Manager jobs in New York City. Exclude local roles outside New York City.",
+      },
+    ],
+  });
+  const inputs = [];
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      emitAssistantJson(onEvent, {
+        roles: [1, 2, 3].map((index) =>
+          role({
+            company: `NYC Bar Group ${index}`,
+            title: "Bar Manager",
+            location: "New York, NY",
+            url: `https://nyc-bar-${index}.example/jobs/bar-manager`,
+          })
+        ),
+        queries_run: [{ prompt_id: "p1", query: "NYC bar manager jobs", status: "completed" }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver({
+      title: "Bar Manager",
+      location: "New York, NY",
+      liveness: { result: "active", reason: "visible apply control" },
+    }),
+  });
+
+  assert.ok(
+    inputs[0].search_plan.query_hints.every(({ query }) => !/\bremote\b/i.test(query)),
+    JSON.stringify(inputs[0].search_plan)
+  );
+});
+
+test("runAiWebSearch retains remote when an event prompt explicitly requests it", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Event operations", titles: ["Event Operations Manager"] }],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      {
+        id: "p1",
+        text: "Find Event Operations Manager jobs in New York City or remote in the US",
+      },
+    ],
+  });
+  const inputs = [];
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      emitAssistantJson(onEvent, {
+        roles: [1, 2, 3].map((index) =>
+          role({
+            company: `Event Group ${index}`,
+            title: "Event Operations Manager",
+            location: "Remote, US",
+            url: `https://event-group-${index}.example/jobs/event-operations-manager`,
+          })
+        ),
+        queries_run: [{ prompt_id: "p1", query: "event operations jobs", status: "completed" }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver({
+      title: "Event Operations Manager",
+      location: "Remote, US",
+      liveness: { result: "active", reason: "visible apply control" },
+    }),
+  });
+
+  assert.ok(
+    inputs[0].search_plan.query_hints.some(({ query }) => /\bremote\b/i.test(query)),
+    JSON.stringify(inputs[0].search_plan)
+  );
+});
+
+test("runAiWebSearch does not add global remote to a hybrid engineering prompt", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Platform engineering", titles: ["Platform Engineer"] }],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [{ id: "p1", text: "Find hybrid Platform Engineer jobs in New York City" }],
+  });
+  const inputs = [];
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      emitAssistantJson(onEvent, {
+        roles: [1, 2, 3].map((index) =>
+          role({
+            company: `Platform Group ${index}`,
+            title: "Platform Engineer",
+            location: "New York, NY",
+            url: `https://platform-group-${index}.example/jobs/platform-engineer`,
+          })
+        ),
+        queries_run: [{ prompt_id: "p1", query: "hybrid platform jobs", status: "completed" }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver({
+      title: "Platform Engineer",
+      location: "New York, NY",
+      liveness: { result: "active", reason: "visible apply control" },
+    }),
+  });
+
+  assert.ok(
+    inputs[0].search_plan.query_hints.every(({ query }) => !/\bremote\b/i.test(query)),
+    JSON.stringify(inputs[0].search_plan)
+  );
+});
+
+test("runAiWebSearch gives freshness recovery a query plan informed by rejected sources", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Bar leadership", titles: ["Bar Manager"] }],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [{ id: "p1", text: "Find Bar Manager jobs in New York City" }],
+  });
+  const rejectedHost = "stale-board.example";
+  const rejectedUrl = `https://${rejectedHost}/jobs/bar-manager-expired`;
+  const inputs = [];
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      emitAssistantJson(onEvent, {
+        roles:
+          inputs.length === 1
+            ? [role({ company: "Stale Bar", title: "Bar Manager", url: rejectedUrl })]
+            : [1, 2, 3].map((index) =>
+                role({
+                  company: `Fresh Bar ${index}`,
+                  title: "Bar Manager",
+                  url: `https://fresh-bar-${index}.example/jobs/bar-manager`,
+                })
+              ),
+        queries_run: [
+          { prompt_id: kickoff.prompts[0].id, query: `bar manager query ${inputs.length}` },
+        ],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: async (url) =>
+      url === rejectedUrl
+        ? specificResolution(url, {
+            title: "Bar Manager",
+            bodyText: fullJd("Expired bar manager posting"),
+            liveness: { result: "expired", reason: "The posting is no longer available." },
+          })
+        : specificResolution(url, {
+            title: "Bar Manager",
+            bodyText: fullJd("Active bar manager posting"),
+            liveness: { result: "active", reason: "visible apply control" },
+          }),
+  });
+
+  const initialPlan = inputs[0].search_plan;
+  const recoveryPlan = JSON.parse(inputs[1].split("\n\n", 1)[0]).search_plan;
+  assert.notDeepEqual(recoveryPlan, initialPlan);
+  assert.match(JSON.stringify(recoveryPlan), /stale-board\.example/);
+  assert.match(JSON.stringify(recoveryPlan), /bar-manager-expired/);
+});
+
+test("runAiWebSearch gives useful-set top-up a query plan focused on missing titles", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Bar leadership", titles: ["Bar Manager", "Head Bartender"] }],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [{ id: "p1", text: "Find Bar Manager and Head Bartender jobs in New York City" }],
+  });
+  const inputs = [];
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      emitAssistantJson(onEvent, {
+        roles:
+          inputs.length === 1
+            ? [
+                role({
+                  company: "Initial Bar",
+                  title: "Bar Manager",
+                  url: "https://initial-bar.example/jobs/bar-manager",
+                }),
+              ]
+            : [
+                role({
+                  company: "Fresh Head One",
+                  title: "Head Bartender",
+                  url: "https://fresh-head-one.example/jobs/head-bartender",
+                }),
+                role({
+                  company: "Fresh Head Two",
+                  title: "Head Bartender",
+                  url: "https://fresh-head-two.example/jobs/head-bartender",
+                }),
+              ],
+        queries_run: [
+          { prompt_id: kickoff.prompts[0].id, query: `bar leadership query ${inputs.length}` },
+        ],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver({
+      liveness: { result: "active", reason: "visible apply control" },
+    }),
+  });
+
+  const initialPlan = inputs[0].search_plan;
+  const topUpPlan = JSON.parse(inputs[1].split("\n\n", 1)[0]).search_plan;
+  assert.notDeepEqual(topUpPlan, initialPlan);
+  assert.match(JSON.stringify(topUpPlan), /Head Bartender/);
 });
 
 test("runAiWebSearch rejects aggregator result pages and expired redirects before hydration", async () => {
