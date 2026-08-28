@@ -13,6 +13,7 @@ All notable changes to CareerRat are documented here. This project follows
 - Job threads now surface unresolved application answers in the right-side review panel. The candidate chooses **Answer**, writes the response in the normal composer, and CareerRat saves it against the exact application question before rebuilding the packet.
 - Once the packet is ready, the same review panel explains supervised form preparation, offers the existing opt-in permission in place, and resumes only the matching paused application mission. CareerRat may fill confirmed fields and advance safe form steps, but the candidate always reviews and presses the final Submit control.
 - Claude Code and OpenAI Codex remain the only supported product runtime choices. Both use the same CareerRat-owned workflows, skills, and durable state through direct installed-CLI adapters; v0.16.6 does not silently promote or fall back to another detected CLI.
+- First-run setup presents CareerRat AI as an icon-and-label row matching the other runtime choices, instead of a bare text label, so the options read as one consistent list.
 - Workspace, job, and research choices now share one durable click-or-type contract. Finite job, recruiter-thread, and company ambiguities render equal neutral choices that act on exact saved records without guessing or exposing internal IDs.
 - Activity shows the twelve most recent steps instead of growing without a bound. The complete audit history remains local and durable.
 
