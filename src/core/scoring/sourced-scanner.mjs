@@ -353,6 +353,8 @@ const HYBRID_RE = /\bhybrid\b/i;
 const ONSITE_RE = /\b(on[ -]?site|in[ -]?office|office[ -]?based|in[ -]?person)\b/i;
 const GLOBAL_REMOTE_RE = /\b(worldwide|anywhere|global)\b/i;
 const US_REMOTE_RE = /\b(united states|u\.?s\.?a?\.?|us[- ](?:only|based)|north america)\b/i;
+const US_COUNTRY_ONLY_LOCATION_RE =
+  /^\s*(?:u\.?\s*s\.?(?:\s*a\.?)?|united\s+states(?:\s+of\s+america)?)\s*$/i;
 const US_BASED_CANDIDATE_RE =
   /\b(?:all\s+)?candidates?\s+(?:must|required to)\s+be\s+(?:(?:based|located)\s+in\s+(?:the\s+)?(?:u\.?s\.?a?\.?|united states)|(?:u\.?s\.?a?\.?|united states)[ -]?based)\b/i;
 const FOREIGN_REMOTE_RE =
@@ -420,6 +422,8 @@ const REMOTE_REGION_EXCLUSION_RE =
   /\b(?:except|excluding|excluded|unavailable|not\s+available|cannot\s+hire|can't\s+hire|do\s+not\s+hire|does\s+not\s+hire|won't\s+hire|not\s+eligible|ineligible)\b/i;
 const EXPLICIT_ONSITE_BODY_RE =
   /\b(?:fully|entirely|100%|strictly)\s+(?:on[ -]?site|in[ -]?office|office[ -]?based|in[ -]?person)\b|\b(?:on[ -]?site|in[ -]?office)\s+only\b|\b(?:location|workplace)\s*:\s*[^.\n]{0,80}\b(?:on[ -]?site|in[ -]?office|office[ -]?based|in[ -]?person)\b|\b(?:role|position|work)\s+(?:is|will be)\s+(?:fully\s+)?(?:on[ -]?site|in[ -]?office|office[ -]?based|in[ -]?person)\b|\bin[ -]?person\s+(?:role|position|work)\b/i;
+const EXPLICIT_HYBRID_BODY_RE =
+  /\b(?:this|the)\s+(?:role|position|job)\s+(?:is|will be)\s+(?:a\s+)?hybrid\b|\b(?:this|the)\s+(?:role|position|job)\s+(?:follows?|uses?)\s+(?:a\s+)?hybrid\s+(?:work model|schedule)\b|\b(?:work model|workplace|location)\s*:\s*hybrid\b|\bhybrid\s+(?:role|position|job|work model|workplace|schedule)\b/i;
 const OFFICE_CONTEXT_RE = /\b(?:office|on[ -]?site|in[ -]?office|in[ -]?person)\b/i;
 const REQUIRED_OFFICE_DAYS_RE = /\b(?:must|require(?:d|s)?|expect(?:ed|s)?|mandatory)\b/i;
 const DECLARATIVE_OFFICE_POSTURE_RE =
@@ -696,7 +700,8 @@ function locationEligibility(offer, config) {
   const officeDays = requiredOfficeDaysPerWeek(body);
   const conditional = conditionalLocationPosture(body);
   const bodyOnsite = EXPLICIT_ONSITE_BODY_RE.test(body) || (officeDays != null && officeDays >= 4);
-  const bodyHybrid = !bodyOnsite && officeDays != null && officeDays > 0;
+  const bodyHybrid =
+    !bodyOnsite && (EXPLICIT_HYBRID_BODY_RE.test(body) || (officeDays != null && officeDays > 0));
   if (!location && !conditional && !bodyOnsite && !bodyHybrid) {
     return { eligible: true, unknown: "location" };
   }
@@ -725,7 +730,12 @@ function locationEligibility(offer, config) {
     return { eligible: true, displayLocation };
   }
 
-  const remote = REMOTE_RE.test(`${title}\n${location}`) && !bodyHybrid && !bodyOnsite;
+  const countryWideUsRemote =
+    profileLocation.remote === true &&
+    homeLooksUs(profileLocation.home) &&
+    US_COUNTRY_ONLY_LOCATION_RE.test(location);
+  const remote =
+    (REMOTE_RE.test(`${title}\n${location}`) || countryWideUsRemote) && !bodyHybrid && !bodyOnsite;
   const hybrid = HYBRID_RE.test(`${title}\n${location}`) || bodyHybrid;
   const onsite = ONSITE_RE.test(`${title}\n${location}`) || bodyOnsite;
   const hasExplicitModes = ["remote", "hybrid", "onsite"].some(

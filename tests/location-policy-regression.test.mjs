@@ -447,6 +447,73 @@ test("the scanner recognizes NYC as US even without a generated source filter", 
   );
 });
 
+test("US country-only locations qualify as remote for a US candidate who allows remote work", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Boston, MA",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: false,
+      onsite: false,
+      relocation: [],
+    },
+  };
+  const result = qualifyByLocation(profile, [
+    offer("country-us", "US Corp", "US"),
+    offer("country-usa", "USA Corp", "USA"),
+    offer("country-united-states", "United States Corp", "United States"),
+    offer("city-country", "New York Country Corp", "New York, USA"),
+    offer("foreign-country", "Canada Corp", "Canada"),
+  ]);
+
+  assert.deepEqual(result.kept.map((row) => row.company).sort(), [
+    "US Corp",
+    "USA Corp",
+    "United States Corp",
+  ]);
+  assert.deepEqual(result.filteredLocation.map((row) => row.company).sort(), [
+    "Canada Corp",
+    "New York Country Corp",
+  ]);
+});
+
+test("US country-only locations do not override remote permission or an explicit local work model", () => {
+  const remoteDisabled = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Brooklyn, NY",
+      remote: false,
+      hybrid: false,
+      onsite: false,
+      relocation: [],
+    },
+  };
+  const remoteAllowed = {
+    ...remoteDisabled,
+    location: { ...remoteDisabled.location, remote: true, hybrid: true },
+  };
+  const hybrid = offer("country-hybrid", "Hybrid Corp", "United States");
+  hybrid.bodyText = "This role follows a hybrid work model.";
+  const onsite = offer("country-onsite", "Onsite Corp", "USA");
+  onsite.bodyText = "This is a fully on-site role.";
+
+  const disabledResult = qualifyByLocation(remoteDisabled, [
+    offer("country-remote-disabled", "Remote Disabled Corp", "United States"),
+  ]);
+  const localWorkResult = qualifyByLocation(remoteAllowed, [hybrid, onsite], {
+    generatedFilter: false,
+  });
+
+  assert.equal(disabledResult.kept.length, 0);
+  assert.equal(disabledResult.filteredLocation[0]?.qualificationReason, "onsite-not-allowed");
+  assert.equal(localWorkResult.kept.length, 0);
+  assert.deepEqual(
+    localWorkResult.filteredLocation.map((row) => row.qualificationReason),
+    ["outside-commute-area", "onsite-not-allowed"]
+  );
+});
+
 test("US-only remote scope rejects foreign, global, and region-unknown remote roles", () => {
   const profile = {
     candidate: { domain: "software engineering" },
