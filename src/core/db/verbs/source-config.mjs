@@ -3,6 +3,13 @@
 // These are setup/config verbs, not tracker mutations: no tracker meta bump,
 // no activity event, and no tracker export. Legacy config files are compatibility
 // output only; DB-mode readers should load these rows first.
+
+import { validatePublicHttpUrl } from "../../net/public-http-fetch.mjs";
+import {
+  addSearchFromUrl,
+  canonicalSearchSourceUrl,
+  normalizeSearchSourceConfig,
+} from "../../providers/search-sources.mjs";
 import { inferProvider, isCompanyProviderSupported } from "../../scoring/sourced-scanner.mjs";
 import { requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
@@ -39,19 +46,21 @@ function assertConfigName(name) {
 function readSourceConfig(db, name) {
   assertConfigName(name);
   const row = db.prepare("SELECT data FROM candidate_source_configs WHERE name = ?").get(name);
+  const data = row ? JSON.parse(row.data) : clone(DEFAULTS[name]);
   return {
     name,
     stored: Boolean(row),
-    data: row ? JSON.parse(row.data) : clone(DEFAULTS[name]),
+    data: name === "search-sources" ? normalizeSearchSourceConfig(data) : data,
   };
 }
 
 function putSourceConfig(db, name, data) {
   assertConfigName(name);
+  const storedData = name === "search-sources" ? normalizeSearchSourceConfig(data) : data;
   db.prepare(
     `INSERT INTO candidate_source_configs (name, data, updated_at) VALUES (?, ?, ?)
      ON CONFLICT(name) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`
-  ).run(name, JSON.stringify(data || clone(DEFAULTS[name])), new Date().toISOString());
+  ).run(name, JSON.stringify(storedData || clone(DEFAULTS[name])), new Date().toISOString());
 }
 
 function normalizeCompanyEntry(entry = {}) {
@@ -163,6 +172,44 @@ export function companyAtsUpsertInDb(db, entry) {
 export function companyAtsUpsert({ repoRoot, env, entry } = {}) {
   const db = requireDb({ repoRoot, env });
   return withTransaction(db, () => companyAtsUpsertInDb(db, entry));
+}
+
+export function publicSearchSourceUpsert({ repoRoot, env, entry } = {}) {
+  const name = String(entry?.name || entry?.label || "").trim();
+  const checked = validatePublicHttpUrl(entry?.url || entry?.careers_url);
+  if (!name) {
+    const error = new Error("public search source requires a name");
+    error.code = "BAD_REQUEST";
+    throw error;
+  }
+  if (!checked.ok) {
+    const error = new Error(`public search source URL is unsafe: ${checked.reason}`);
+    error.code = "UNSAFE_COMPANY_BOARD_URL";
+    throw error;
+  }
+
+  const db = requireDb({ repoRoot, env });
+  return withTransaction(db, () => {
+    const current = readSourceConfig(db, "search-sources").data;
+    const next = addSearchFromUrl(current, checked.url, {
+      label: name,
+      sourceType: "browser",
+    });
+    const status = next === current ? "already-tracked" : "added";
+    if (status === "added") putSourceConfig(db, "search-sources", next);
+    const stored = readSourceConfig(db, "search-sources").data;
+    const canonicalTarget = canonicalSearchSourceUrl(checked.url);
+    const source = stored.searches.find(
+      (candidate) => canonicalSearchSourceUrl(candidate.url) === canonicalTarget
+    );
+    return {
+      ok: true,
+      status,
+      entry: source,
+      total: stored.searches.length,
+      data: stored,
+    };
+  });
 }
 
 export function companyAtsRemove({ repoRoot, env, name } = {}) {

@@ -160,6 +160,7 @@ export { sourceWatermarkUpsert } from "./source.mjs";
 export {
   companyAtsRemove,
   companyAtsUpsert,
+  publicSearchSourceUpsert,
   sourceConfigGet,
   sourceConfigPut,
 } from "./source-config.mjs";

@@ -35,6 +35,21 @@ test("emptyConfig() validates against the real schema", () => {
   );
 });
 
+test("parseConfig normalizes legacy manual-auth sources into the current browser shape", () => {
+  const config = parseConfig(`searches:
+  - provider: linkedin.com
+    source_type: manual-auth
+    label: LinkedIn saved search
+    url: https://www.linkedin.com/jobs/search/?keywords=operations
+    enabled: false
+`);
+
+  assert.equal(config.searches[0].source_type, "browser");
+  assert.equal(config.searches[0].auth, true);
+  assert.equal(validateConfig(config, SCHEMA).valid, true);
+  assert.equal(pendingSourceLoginRequests(config)[0].platform, "linkedin");
+});
+
 // ---------------------------------------------------------------------------
 // addSearchFromQuery
 // ---------------------------------------------------------------------------

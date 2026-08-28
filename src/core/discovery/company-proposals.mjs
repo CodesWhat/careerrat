@@ -195,7 +195,10 @@ async function proposalForSeed({
         },
       ],
     };
-    const rawScanResult = await scanCompaniesImpl(scanConfig, { fetchImpl, signal });
+    const canScanDeterministically = Boolean(resolution.atsProvider && resolution.jobBoardUrl);
+    const rawScanResult = canScanDeterministically
+      ? await scanCompaniesImpl(scanConfig, { fetchImpl, signal })
+      : { offers: [], errors: [] };
     signal?.throwIfAborted?.();
     const scanResult = prepareScanResult(rawScanResult, context);
     return { candidate: { seed, resolution, scanResult, proposalId } };

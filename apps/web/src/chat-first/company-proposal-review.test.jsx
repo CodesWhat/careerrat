@@ -147,6 +147,28 @@ describe("company proposal review", () => {
         expectedVersion: 3,
       },
     });
+    expect(
+      companyProposalDecisionIntent(
+        ARTIFACT,
+        {
+          ...proposal,
+          proposalId: "proposal-plain",
+          classification: "generic_public",
+          atsProvider: "",
+          jobBoardUrl: "https://plain.example/careers",
+          proposedAction: "approve-public-source",
+        },
+        "track"
+      )
+    ).toEqual({
+      type: "company.proposal-decide",
+      entity: { type: "company-proposal", id: "proposal-plain" },
+      input: {
+        batchId: "batch-growth",
+        action: "approve-public-source",
+        expectedVersion: 3,
+      },
+    });
   });
 
   it("reads the refreshed review artifact returned by a canonical decision", async () => {

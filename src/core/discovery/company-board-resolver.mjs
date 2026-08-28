@@ -282,23 +282,23 @@ function supportedResult({ seed, url, provider, provenance: proof }) {
   };
 }
 
-function unsupportedResult({ seed, url, observedAt, provenance: proof }) {
+function genericPublicResult({ seed, url, provenance: proof }) {
   const companyName = String(seed?.name || "").trim();
   const companyKey = normalizeCompanyKey(companyName);
   return {
     ok: true,
-    status: "unsupported_public",
+    status: "generic_public",
     companyKey,
     companyName,
     companyDomain: domainFromUrl(url),
     careersUrl: url.toString(),
-    jobBoardUrl: "",
+    jobBoardUrl: url.toString(),
     atsProvider: null,
     apiUrl: "",
-    confidence: "low",
-    provenance: [...proof, provenance("public-page-cache", url, observedAt)],
-    proposedAction: "cache-only",
-    promotable: false,
+    confidence: "medium",
+    provenance: proof,
+    proposedAction: "approve-public-source",
+    promotable: true,
   };
 }
 
@@ -316,7 +316,7 @@ function cacheRecordFromResult(result, { existing = null, observedAt }) {
     first_resolved_at: existing?.first_resolved_at || observedAt,
     last_verified_at: observedAt,
     last_scan_result: existing?.last_scan_result || {
-      status: result.status === "supported_ats" ? "resolved" : "unsupported-public",
+      status: result.status === "supported_ats" ? "resolved" : "generic-public",
     },
     failure_count: 0,
     zero_job_count: 0,
@@ -329,14 +329,17 @@ function cacheRecordFromResult(result, { existing = null, observedAt }) {
 
 function resultFromCache(record) {
   if (!record) return null;
+  const genericPublic =
+    record.status === "generic_public" || record.status === "unsupported_public";
+  const publicUrl = record.job_board_url || record.careers_url || "";
   return {
     ok: true,
-    status: record.status || "unresolved",
+    status: genericPublic ? "generic_public" : record.status || "unresolved",
     companyKey: record.company_key,
     companyName: record.company_name,
     companyDomain: record.company_domain || "",
     careersUrl: record.careers_url || "",
-    jobBoardUrl: record.job_board_url || "",
+    jobBoardUrl: genericPublic ? publicUrl : record.job_board_url || "",
     atsProvider: record.ats_provider || null,
     apiUrl: record.api_url || "",
     confidence: record.confidence || "low",
@@ -346,10 +349,11 @@ function resultFromCache(record) {
           ...record.provenance,
         ]
       : [{ source: "cache-hit", url: record.job_board_url || record.careers_url || "" }],
-    proposedAction:
-      record.proposed_action ||
-      (record.status === "supported_ats" ? "approve-supported-ats" : "cache-only"),
-    promotable: Boolean(record.promotable ?? record.status === "supported_ats"),
+    proposedAction: genericPublic
+      ? "approve-public-source"
+      : record.proposed_action ||
+        (record.status === "supported_ats" ? "approve-supported-ats" : "cache-only"),
+    promotable: genericPublic || Boolean(record.promotable ?? record.status === "supported_ats"),
   };
 }
 
@@ -427,11 +431,11 @@ async function resolveSupportedUrl({
   }
 
   if (depth >= RESOLVER_REDIRECT_CAP) {
-    return unsupportedResult({ seed, url, observedAt, provenance: proof });
+    return genericPublicResult({ seed, url, observedAt, provenance: proof });
   }
 
   if (visited.has(url.toString())) {
-    return unsupportedResult({ seed, url, observedAt, provenance: proof });
+    return genericPublicResult({ seed, url, observedAt, provenance: proof });
   }
   visited.add(url.toString());
 
@@ -498,7 +502,7 @@ async function resolveSupportedUrl({
     if (result.status === "supported_ats") return result;
   }
 
-  return unsupportedResult({ seed, url, observedAt, provenance: pageProof });
+  return genericPublicResult({ seed, url, observedAt, provenance: pageProof });
 }
 
 export async function resolveCompanyBoard({

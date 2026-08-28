@@ -354,6 +354,7 @@ export function mountDiscoveryRoutes({
   seedCall,
   now,
   companyAtsUpsertImpl,
+  publicSearchSourceUpsertImpl,
   sourcedUpsertBatchImpl,
   publicIntelStateGetImpl = publicIntelStateGet,
   publicIntelScanImpl = scanPublicIntelSeeds,
@@ -545,6 +546,7 @@ export function mountDiscoveryRoutes({
         gateProposal,
         now,
         companyAtsUpsertImpl,
+        publicSearchSourceUpsertImpl,
         sourcedUpsertBatchImpl,
       });
       sendJson(res, 200, { ok: true, data: result.data, meta: result.meta });

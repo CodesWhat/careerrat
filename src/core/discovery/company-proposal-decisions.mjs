@@ -2,7 +2,10 @@ import {
   companyProposalBatchGet,
   companyProposalBatchPatchState,
 } from "../db/verbs/company-discovery.mjs";
-import { companyAtsUpsert as defaultCompanyAtsUpsert } from "../db/verbs/source-config.mjs";
+import {
+  companyAtsUpsert as defaultCompanyAtsUpsert,
+  publicSearchSourceUpsert as defaultPublicSearchSourceUpsert,
+} from "../db/verbs/source-config.mjs";
 import { offersWithCapturedJobs as defaultOffersWithCapturedJobs } from "../scoring/sourced-persistence.mjs";
 import { scanCompanies as defaultScanCompanies } from "../scoring/sourced-scanner.mjs";
 import {
@@ -14,13 +17,20 @@ import { buildCompanyProposal as defaultGateProposal } from "./company-proposal-
 
 const DECISION_ACTIONS = new Set([
   "approve-supported-ats",
+  "approve-public-source",
   "reject",
   "suppress",
   "refresh",
   "escalate",
 ]);
 
-const FINAL_ACTIONS = new Set(["approve-supported-ats", "reject", "suppress", "escalate"]);
+const FINAL_ACTIONS = new Set([
+  "approve-supported-ats",
+  "approve-public-source",
+  "reject",
+  "suppress",
+  "escalate",
+]);
 
 function makeError(message, { code = "VALIDATION_FAILED", status = 422 } = {}) {
   const err = new Error(message);
@@ -153,7 +163,7 @@ function assertPendingProposal({ proposal, collection, expectedVersion, action }
     );
   }
   if (collection === "rejected") {
-    if (action === "approve-supported-ats") {
+    if (action === "approve-supported-ats" || action === "approve-public-source") {
       throw makeError("cannot approve a rejected company proposal", {
         code: "VALIDATION_FAILED",
         status: 422,
@@ -172,16 +182,28 @@ function assertPendingProposal({ proposal, collection, expectedVersion, action }
   }
 }
 
-function assertApprovalAllowed(proposal, { userConfirmed = false } = {}) {
-  const hasBoard =
+function assertApprovalAllowed(proposal, { action, userConfirmed = false } = {}) {
+  const hasAtsBoard =
     Boolean(String(proposal?.jobBoardUrl || "").trim()) &&
     Boolean(String(proposal?.atsProvider || "").trim());
+  const hasPublicBoard = Boolean(
+    String(proposal?.jobBoardUrl || proposal?.careersUrl || "").trim()
+  );
   const isSupportedAts = proposal?.classification === "supported_ats";
+  const isGenericPublic = proposal?.classification === "generic_public";
+
+  if (action === "approve-public-source") {
+    if (userConfirmed && isGenericPublic && hasPublicBoard) return;
+    throw makeError("only a user-confirmed generic public source can be approved", {
+      code: "COMPANY_PROPOSAL_NOT_APPROVABLE",
+      status: 422,
+    });
+  }
 
   // An explicit user keep/approve can resolve a borderline or
   // review-tier proposal without waiting on the auto-gate's confidence bar.
-  // It still refuses unsupported_public proposals and anything without a
-  // resolved board to approve into.
+  // Generic public careers pages use the separate, user-confirmed action
+  // above. This branch only writes resolved ATS boards.
   // A distinct code from the generic VALIDATION_FAILED bucket (reused across
   // unrelated schema/shape checks in this file) so the frontend translation
   // layer (apps/web/src/lib/errorCopy.js) can give this specific business
@@ -189,7 +211,7 @@ function assertApprovalAllowed(proposal, { userConfirmed = false } = {}) {
   // generic "something went wrong" message, which reads like a network
   // failure rather than a deliberate server-side refusal (issue #88).
   if (userConfirmed) {
-    if (isSupportedAts && hasBoard) return;
+    if (isSupportedAts && hasAtsBoard) return;
     throw makeError("only pending supported ATS proposals can be approved", {
       code: "COMPANY_PROPOSAL_NOT_APPROVABLE",
       status: 422,
@@ -200,7 +222,7 @@ function assertApprovalAllowed(proposal, { userConfirmed = false } = {}) {
     isSupportedAts &&
     proposal?.confidenceTier === "high-confidence" &&
     proposal?.proposedAction === "approve-supported-ats" &&
-    hasBoard;
+    hasAtsBoard;
   if (!supported) {
     throw makeError("only pending high-confidence supported ATS proposals can be approved", {
       code: "COMPANY_PROPOSAL_NOT_APPROVABLE",
@@ -264,7 +286,9 @@ function removeProposal(proposals, proposalIndex) {
 
 function finalStatusForAction(action, remainingProposals) {
   if (remainingProposals.some((proposal) => !proposal?.decision)) return "pending";
-  if (action === "approve-supported-ats") return "approved";
+  if (action === "approve-supported-ats" || action === "approve-public-source") {
+    return "approved";
+  }
   if (action === "reject") return "rejected";
   if (action === "suppress") return "suppressed";
   if (action === "escalate") return "escalated";
@@ -368,17 +392,28 @@ async function applyApproval({
   proposalIndex,
   now,
   companyAtsUpsertImpl,
+  publicSearchSourceUpsertImpl,
 }) {
   const userConfirmed = request.userConfirmed === true;
-  assertApprovalAllowed(proposal, { userConfirmed });
-  const sourceConfig = companyAtsUpsertImpl({
-    repoRoot,
-    env,
-    entry: {
-      name: proposal.company?.name,
-      careers_url: proposal.jobBoardUrl,
-    },
-  });
+  assertApprovalAllowed(proposal, { action: request.action, userConfirmed });
+  const sourceConfig =
+    request.action === "approve-public-source"
+      ? publicSearchSourceUpsertImpl({
+          repoRoot,
+          env,
+          entry: {
+            name: `${proposal.company?.name || "Company"} careers`,
+            url: proposal.jobBoardUrl || proposal.careersUrl,
+          },
+        })
+      : companyAtsUpsertImpl({
+          repoRoot,
+          env,
+          entry: {
+            name: proposal.company?.name,
+            careers_url: proposal.jobBoardUrl,
+          },
+        });
   // Approval means “track this company board”. The first-search pipeline owns
   // job publication so every offer passes the candidate's deterministic gates.
   // Publishing proposal scan samples here bypassed those gates and flooded Jobs.
@@ -575,6 +610,7 @@ export async function applyCompanyProposalDecision({
   gateProposal = defaultGateProposal,
   buildSeedContext = defaultBuildSeedContext,
   companyAtsUpsertImpl = defaultCompanyAtsUpsert,
+  publicSearchSourceUpsertImpl = defaultPublicSearchSourceUpsert,
   offersWithCapturedJobs = defaultOffersWithCapturedJobs,
 } = {}) {
   const request = normalizeDecisionBody(body);
@@ -587,7 +623,7 @@ export async function applyCompanyProposalDecision({
     action: request.action,
   });
 
-  if (request.action === "approve-supported-ats") {
+  if (request.action === "approve-supported-ats" || request.action === "approve-public-source") {
     return applyApproval({
       repoRoot,
       env,
@@ -597,6 +633,7 @@ export async function applyCompanyProposalDecision({
       proposalIndex: found.proposalIndex,
       now,
       companyAtsUpsertImpl,
+      publicSearchSourceUpsertImpl,
     });
   }
 

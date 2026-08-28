@@ -55,15 +55,23 @@ export function companyProposalDecisionIntent(artifact, proposal, decision) {
     return null;
   }
 
-  const action =
-    decision === "skip"
-      ? "reject"
-      : decision === "track" &&
-          proposal?.classification === "supported_ats" &&
-          proposal?.atsProvider &&
-          proposal?.jobBoardUrl
-        ? "approve-supported-ats"
-        : null;
+  let action = null;
+  if (decision === "skip") action = "reject";
+  if (
+    decision === "track" &&
+    proposal?.classification === "supported_ats" &&
+    proposal?.atsProvider &&
+    proposal?.jobBoardUrl
+  ) {
+    action = "approve-supported-ats";
+  }
+  if (
+    decision === "track" &&
+    proposal?.classification === "generic_public" &&
+    proposal?.jobBoardUrl
+  ) {
+    action = "approve-public-source";
+  }
   if (!action) return null;
 
   return {

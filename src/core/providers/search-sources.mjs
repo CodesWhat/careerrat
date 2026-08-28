@@ -26,6 +26,31 @@ export function canonicalSearchSourceUrl(value) {
   }
 }
 
+function normalizeLegacySearchSource(source) {
+  if (!source || typeof source !== "object" || source.source_type !== "manual-auth") {
+    return source;
+  }
+  return {
+    ...source,
+    source_type: "browser",
+    auth: source.auth !== false,
+  };
+}
+
+export function normalizeSearchSourceConfig(config) {
+  if (!config || typeof config !== "object") return config;
+  const key = Array.isArray(config.searches)
+    ? "searches"
+    : Array.isArray(config.sources)
+      ? "sources"
+      : null;
+  if (!key) return config;
+  const normalized = config[key].map(normalizeLegacySearchSource);
+  return normalized.some((entry, index) => entry !== config[key][index])
+    ? { ...config, [key]: normalized }
+    : config;
+}
+
 // Map a hostname to the saved browser session used when that source needs login.
 // Returns null for hosts that do not have a site-specific session.
 export function platformForHost(hostname) {
@@ -524,7 +549,7 @@ export function mergeSearchConfigs(existing, baseline) {
 // ---------------------------------------------------------------------------
 
 export function parseConfig(text) {
-  return parseYaml(text);
+  return normalizeSearchSourceConfig(parseYaml(text));
 }
 
 export function serializeConfig(config) {

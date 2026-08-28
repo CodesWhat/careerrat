@@ -903,18 +903,20 @@ test("POST /api/discovery/company-proposals returns review-only non-comp borderl
   seedCandidateForAICompanyDiscovery(repoRoot);
   const server = bootServer(repoRoot, {
     resolveCompanyBoard: async ({ seed }) => {
-      if (seed.name === "Unsupported Cache Co") {
+      if (seed.name === "Generic Public Co") {
         return {
           ok: true,
           companyName: seed.name,
-          companyDomain: "unsupported.example",
-          careersUrl: "https://unsupported.example/careers",
-          jobBoardUrl: "",
+          companyDomain: "generic.example",
+          careersUrl: "https://generic.example/careers",
+          jobBoardUrl: "https://generic.example/careers",
           atsProvider: "",
-          classification: "unsupported_public",
+          status: "generic_public",
+          classification: "generic_public",
           confidence: "medium",
-          provenance: [{ source: "cache", url: "https://unsupported.example/careers" }],
-          cacheOnly: true,
+          provenance: [{ source: "public-page-fetch", url: "https://generic.example/careers" }],
+          proposedAction: "approve-public-source",
+          promotable: true,
         };
       }
       return supportedResolution(seed);
@@ -938,15 +940,12 @@ test("POST /api/discovery/company-proposals returns review-only non-comp borderl
           errors: [],
         };
       }
-      return {
-        offers: [],
-        errors: [{ company, error: "unsupported provider" }],
-      };
+      throw new Error(`generic public source must not use deterministic scanner: ${company}`);
     },
   });
 
   const { status, body } = await postJson(server, "/api/discovery/company-proposals", {
-    manualSeeds: ["Partial Body Co", "Scanner Review Co", "Unsupported Cache Co"],
+    manualSeeds: ["Partial Body Co", "Scanner Review Co", "Generic Public Co"],
   });
 
   assert.equal(status, 200);
@@ -968,14 +967,12 @@ test("POST /api/discovery/company-proposals returns review-only non-comp borderl
   assert.equal(scannerReview.proposedAction, "review");
   assert.ok(scannerReview.reviewReasons.includes("scanner-review"));
 
-  const unsupported = body.data.proposals.find(
-    (entry) => entry.company.name === "Unsupported Cache Co"
-  );
-  assertProposalContract(unsupported);
-  assert.equal(unsupported.classification, "unsupported_public");
-  assert.equal(unsupported.confidenceTier, "borderline");
-  assert.equal(unsupported.proposedAction, "cache-only");
-  assert.ok(unsupported.reviewReasons.includes("unsupported-public-cache"));
+  const generic = body.data.proposals.find((entry) => entry.company.name === "Generic Public Co");
+  assertProposalContract(generic);
+  assert.equal(generic.classification, "generic_public");
+  assert.equal(generic.confidenceTier, "borderline");
+  assert.equal(generic.proposedAction, "approve-public-source");
+  assert.ok(generic.reviewReasons.includes("generic-public-source"));
 });
 
 test("POST /api/discovery/company-proposals hard-rejects tracked, excluded, in-play, unreachable, unsupported, and no-role companies", async () => {
@@ -1013,7 +1010,7 @@ test("POST /api/discovery/company-proposals hard-rejects tracked, excluded, in-p
           ok: false,
           companyName: seed.name,
           companyDomain: "unsupported-no-cache.example",
-          careersUrl: "",
+          careersUrl: "https://unsupported-no-cache.example/careers",
           jobBoardUrl: "",
           atsProvider: "",
           provenance: [],
@@ -1097,23 +1094,25 @@ test("VER-04 duplicate, excluded, in-play, and unsupported proposal states fail 
     chatRuntime,
     resolveCompanyBoard: async ({ seed }) => {
       calls.push({ name: "resolveCompanyBoard", seed });
-      if (seed.name === "Unsupported Cache Co") {
+      if (seed.name === "Generic Public Co") {
         return {
           ok: true,
           companyName: seed.name,
-          companyDomain: "unsupported-cache.example",
-          careersUrl: "https://unsupported-cache.example/careers",
-          jobBoardUrl: "",
+          companyDomain: "generic.example",
+          careersUrl: "https://generic.example/careers",
+          jobBoardUrl: "https://generic.example/careers",
           atsProvider: "",
-          classification: "unsupported_public",
+          status: "generic_public",
+          classification: "generic_public",
           confidence: "medium",
           provenance: [
             {
-              source: "cache",
-              url: "https://unsupported-cache.example/careers",
+              source: "public-page-fetch",
+              url: "https://generic.example/careers",
             },
           ],
-          cacheOnly: true,
+          proposedAction: "approve-public-source",
+          promotable: true,
         };
       }
       return supportedResolution(seed);
@@ -1121,12 +1120,7 @@ test("VER-04 duplicate, excluded, in-play, and unsupported proposal states fail 
     scanCompaniesImpl: async (config) => {
       const company = config.tracked_companies[0].name;
       calls.push({ name: "scanCompanies", company });
-      if (company === "Unsupported Cache Co") {
-        return {
-          offers: [],
-          errors: [{ company, error: "unsupported provider" }],
-        };
-      }
+      if (company === "Generic Public Co") throw new Error("generic source must not use ATS scan");
       return { offers: [matchingOffer(company)], errors: [] };
     },
     companyAtsUpsert: forbidden("companyAtsUpsert", calls),
@@ -1142,7 +1136,7 @@ test("VER-04 duplicate, excluded, in-play, and unsupported proposal states fail 
       "Excluded Co",
       "Applied Already Co",
       "Sourced Already Co",
-      "Unsupported Cache Co",
+      "Generic Public Co",
     ],
   });
 
@@ -1171,16 +1165,15 @@ test("VER-04 duplicate, excluded, in-play, and unsupported proposal states fail 
     assert.equal(rejected.capturedOffers.length, 0, rejected.company.name);
   }
 
-  const unsupported = body.data.proposals[0];
-  assertProposalContract(unsupported);
-  assert.equal(unsupported.company.name, "Unsupported Cache Co");
-  assert.equal(unsupported.classification, "unsupported_public");
-  assert.equal(unsupported.confidenceTier, "borderline");
-  assert.equal(unsupported.proposedAction, "cache-only");
-  assert.notEqual(unsupported.proposedAction, "approve-supported-ats");
-  assert.equal(unsupported.atsProvider, "");
-  assert.ok(unsupported.reviewReasons.includes("unsupported-public-cache"));
-  assert.equal(unsupported.capturedOffers.length, 0);
+  const generic = body.data.proposals[0];
+  assertProposalContract(generic);
+  assert.equal(generic.company.name, "Generic Public Co");
+  assert.equal(generic.classification, "generic_public");
+  assert.equal(generic.confidenceTier, "borderline");
+  assert.equal(generic.proposedAction, "approve-public-source");
+  assert.equal(generic.atsProvider, "");
+  assert.ok(generic.reviewReasons.includes("generic-public-source"));
+  assert.equal(generic.capturedOffers.length, 0);
 
   assert.equal(chatRuntime.starts.length, 0);
   for (const name of [

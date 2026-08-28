@@ -211,29 +211,30 @@ function rejectedResult({
   };
 }
 
-function unsupportedCacheProposal({ seed, resolution, scanResult, proposalId, version }) {
-  const reviewReasons = ["unsupported-public-cache"];
+function genericPublicProposal({ seed, resolution, scanResult, proposalId, version }) {
+  const reviewReasons = ["generic-public-source"];
+  const publicUrl = trimString(resolution?.jobBoardUrl || resolution?.careersUrl);
   return {
     proposal: {
       proposalId,
       company: proposalCompany(seed, resolution),
-      why: trimString(seed?.why || "Unsupported public careers page cached for review."),
+      why: trimString(seed?.why || "Public company careers page ready to add as a source."),
       roleFamily: trimString(seed?.role_family_hint),
       roleSeen: "",
       careersUrl: trimString(resolution?.careersUrl),
-      jobBoardUrl: trimString(resolution?.jobBoardUrl),
+      jobBoardUrl: publicUrl,
       atsProvider: "",
-      classification: "unsupported_public",
+      classification: "generic_public",
       confidenceTier: "borderline",
       provenance: list(resolution?.provenance),
       scanSummary: scanSummary({
-        status: "unsupported-public-cache",
+        status: "generic-public-source",
         scanResult,
         matchingOffers: [],
         reviewReasons,
       }),
       jdCapture: { status: "not-applicable", capturedCount: 0 },
-      proposedAction: "cache-only",
+      proposedAction: "approve-public-source",
       reviewReasons,
       rejectReasons: [],
       capturedOffers: [],
@@ -292,12 +293,17 @@ export function buildCompanyProposal({
     });
   }
 
-  const unsupportedCache =
-    resolution?.classification === "unsupported_public" ||
-    resolution?.cacheOnly === true ||
-    (!resolution?.atsProvider && Boolean(resolution?.careersUrl));
-  if (unsupportedCache) {
-    return unsupportedCacheProposal({ seed, resolution, scanResult, proposalId, version });
+  const hasVerifiedPublicUrl =
+    resolution?.ok !== false && Boolean(resolution?.jobBoardUrl || resolution?.careersUrl);
+  const genericPublic =
+    hasVerifiedPublicUrl &&
+    (resolution?.status === "generic_public" ||
+      resolution?.classification === "generic_public" ||
+      resolution?.classification === "unsupported_public" ||
+      resolution?.cacheOnly === true ||
+      !resolution?.atsProvider);
+  if (genericPublic) {
+    return genericPublicProposal({ seed, resolution, scanResult, proposalId, version });
   }
 
   if (!resolution?.atsProvider || !resolution?.jobBoardUrl) {

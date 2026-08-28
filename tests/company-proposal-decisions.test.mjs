@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
@@ -12,6 +12,7 @@ import {
   companyAtsUpsert,
   companyProposalBatchGet,
   companyProposalBatchPut,
+  publicSearchSourceUpsert,
   sourceConfigGet,
 } from "../src/core/db/verbs.mjs";
 import { buildCompanyProposal } from "../src/core/discovery/company-proposal-gate.mjs";
@@ -66,6 +67,7 @@ function bootServer(repoRoot, opts = {}) {
     scanCompaniesImpl: opts.scanCompaniesImpl,
     gateProposal: opts.gateProposal,
     companyAtsUpsertImpl: opts.companyAtsUpsertImpl,
+    publicSearchSourceUpsertImpl: opts.publicSearchSourceUpsertImpl,
     sourcedUpsertBatchImpl: opts.sourcedUpsertBatchImpl,
     captureAndPersistOffersIfDbImpl: opts.captureAndPersistOffersIfDbImpl,
     writeTrackerImpl: opts.writeTrackerImpl,
@@ -164,6 +166,31 @@ function supportedProposal(overrides = {}) {
     version: 1,
     ...overrides,
   };
+}
+
+function genericPublicProposal(overrides = {}) {
+  return supportedProposal({
+    company: { name: "Plain Co", domain: "plain.example" },
+    proposalId: "proposal-plain",
+    roleSeen: "",
+    careersUrl: "https://plain.example/careers",
+    jobBoardUrl: "https://plain.example/careers",
+    atsProvider: "",
+    classification: "generic_public",
+    confidenceTier: "borderline",
+    scanSummary: {
+      status: "generic-public-source",
+      currentRoleCount: 0,
+      matchingRoleCount: 0,
+      errors: [],
+      reviewReasons: ["generic-public-source"],
+    },
+    jdCapture: { status: "not-applicable", capturedCount: 0 },
+    proposedAction: "approve-public-source",
+    reviewReasons: ["generic-public-source"],
+    capturedOffers: [],
+    ...overrides,
+  });
 }
 
 function pendingBatch({
@@ -773,34 +800,48 @@ test("VER-05 userConfirmed lets a user explicitly keep a borderline supported AT
   assert.equal(stored.proposals[0].decision.decidedBy, "user-confirmed");
 });
 
-test("VER-05 userConfirmed still refuses unsupported_public and non-pending proposals", async () => {
+test("VER-05 userConfirmed persists generic public proposals as browser sources and still refuses non-pending proposals", async () => {
   const repoRoot = setupRepo();
   const calls = [];
   const server = bootServer(repoRoot, {
     companyAtsUpsertImpl: forbidden("companyAtsUpsert", calls),
+    publicSearchSourceUpsertImpl: (args) => {
+      calls.push({ name: "publicSearchSourceUpsert", args });
+      return publicSearchSourceUpsert(args);
+    },
     sourcedUpsertBatchImpl: forbidden("sourcedUpsertBatch", calls),
   });
 
   putBatch(
     repoRoot,
     pendingBatch({
-      proposals: [
-        supportedProposal({
-          classification: "unsupported_public",
-          atsProvider: "",
-          jobBoardUrl: "",
-          confidenceTier: "borderline",
-          proposedAction: "cache-only",
-        }),
-      ],
+      proposals: [genericPublicProposal()],
     })
   );
   let response = await postJson(server, "/api/discovery/company-proposal-decisions", {
-    ...decisionRequest(),
+    ...decisionRequest({
+      proposalId: "proposal-plain",
+      action: "approve-public-source",
+    }),
     userConfirmed: true,
   });
-  assert.equal(response.status, 422);
-  assert.equal(response.body.code, "COMPANY_PROPOSAL_NOT_APPROVABLE");
+  assert.equal(response.status, 200);
+  assert.equal(response.body.data.decision.action, "approve-public-source");
+  assert.equal(response.body.data.sourceConfig.status, "added");
+  assert.deepEqual(
+    sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches.map((source) => ({
+      source_type: source.source_type,
+      url: source.url,
+      enabled: source.enabled,
+    })),
+    [
+      {
+        source_type: "browser",
+        url: "https://plain.example/careers",
+        enabled: true,
+      },
+    ]
+  );
 
   putBatch(
     repoRoot,
@@ -825,5 +866,29 @@ test("VER-05 userConfirmed still refuses unsupported_public and non-pending prop
   assert.equal(response.status, 409);
   assert.equal(response.body.code, "CONFLICT");
 
+  assert.deepEqual(
+    calls.map((call) => call.name),
+    ["publicSearchSourceUpsert"]
+  );
+});
+
+test("generic public proposals cannot write a source without explicit user confirmation", async () => {
+  const repoRoot = setupRepo();
+  const calls = [];
+  const server = bootServer(repoRoot, {
+    publicSearchSourceUpsertImpl: forbidden("publicSearchSourceUpsert", calls),
+  });
+  putBatch(repoRoot, pendingBatch({ proposals: [genericPublicProposal()] }));
+
+  const response = await postJson(server, "/api/discovery/company-proposal-decisions", {
+    batchId: "batch-acme",
+    proposalId: "proposal-plain",
+    action: "approve-public-source",
+    expectedVersion: 1,
+  });
+
+  assert.equal(response.status, 422);
+  assert.equal(response.body.code, "COMPANY_PROPOSAL_NOT_APPROVABLE");
   assert.equal(calls.length, 0);
+  assert.equal(sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches.length, 0);
 });
