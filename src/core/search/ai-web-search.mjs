@@ -47,10 +47,11 @@ import {
 } from "../ai/skill-runtime.mjs";
 import { dbExists } from "../db/connection.mjs";
 import { buildDbSeenSets } from "../db/scan-context.mjs";
-import { candidateConfigGet } from "../db/verbs.mjs";
+import { candidateConfigGet, sourceConfigGet } from "../db/verbs.mjs";
 import { hydrateJobOffer } from "../intake/resolve.mjs";
 import { validatePublicHttpUrl } from "../net/public-http-fetch.mjs";
 import { computeAllows } from "../profile/modes.mjs";
+import { buildSourceUrl } from "../providers/source-url.mjs";
 import {
   addPostingIdentity,
   extractReqId,
@@ -94,6 +95,10 @@ const MAX_FRESHNESS_RECOVERY_TURNS = 2;
 const MAX_USEFUL_SET_TOP_UP_TURNS = 3;
 const MIN_USEFUL_SET_ROLES = 3;
 const MIN_USEFUL_SET_BUCKETS = 2;
+const MAX_SEARCH_QUERY_LENGTH = 100;
+const MAX_CONFIGURED_SOURCE_HINTS = 4;
+const MAX_CANONICAL_DISQUALIFICATIONS = 20;
+const MAX_FETCHED_POSTING_DECISIONS = 20;
 const AI_WEB_SEARCH_TURN_LIMITS = Object.freeze({
   scope: "prompt-turn",
   web_search_calls: 2,
@@ -304,6 +309,31 @@ function normalizedSourceUrl(value) {
   } catch {
     return String(value || "").trim();
   }
+}
+
+function fetchedPostingAccountabilityErrors(data, toolTrace) {
+  const accountedUrls = new Set(
+    [...(Array.isArray(data?.roles) ? data.roles : []), ...(data?.rejected_postings || [])]
+      .map((entry) => normalizedSourceUrl(entry?.url))
+      .filter(Boolean)
+  );
+  const missingUrls = [
+    ...new Set(
+      toolTrace
+        .filter(
+          (item) =>
+            item.kind === "source" && item.status === "completed" && isPostingEvidenceUrl(item.url)
+        )
+        .map((item) => normalizedSourceUrl(item.url))
+        .filter((url) => url && !accountedUrls.has(url))
+    ),
+  ];
+  return missingUrls.map((url) => ({
+    path: "rejected_postings",
+    message:
+      "successfully fetched exact posting must appear in roles[].url or " +
+      `rejected_postings[].url with a short factual reason: ${url}`,
+  }));
 }
 
 const GENERIC_CAREER_HUB_SEGMENTS = new Set([
@@ -571,6 +601,73 @@ function normalizedTitleWords(value) {
   );
 }
 
+function sourceTargetUrl(source) {
+  const saved = String(source?.url || source?.rssUrl || "").trim();
+  if (saved) return saved;
+  try {
+    return String(buildSourceUrl(source)?.url || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function validatedEnabledSourceHost(source) {
+  if (!source || source.enabled === false || source.login_skipped === true) return "";
+  const checked = validatePublicHttpUrl(sourceTargetUrl(source));
+  if (!checked.ok) return "";
+  return new URL(checked.url).hostname.replace(/^www\./, "").toLowerCase();
+}
+
+function sourceMatchesTitles(source, titles) {
+  if (!titles.length) return false;
+  const sourceWords = normalizedTitleWords(
+    [source?.query, source?.searchState?.searchQuery, source?.label].filter(Boolean).join(" ")
+  );
+  return titles.some((title) => {
+    const titleWords = normalizedTitleWords(title);
+    return titleWords.size > 0 && [...titleWords].every((word) => sourceWords.has(word));
+  });
+}
+
+function configuredSourceHosts(
+  sourceConfig,
+  titles,
+  { excludedHosts = [], limit = MAX_CONFIGURED_SOURCE_HINTS } = {}
+) {
+  const entries = Array.isArray(sourceConfig?.searches)
+    ? sourceConfig.searches
+    : Array.isArray(sourceConfig?.sources)
+      ? sourceConfig.sources
+      : [];
+  const excluded = new Set(
+    excludedHosts
+      .map((host) =>
+        String(host || "")
+          .replace(/^www\./, "")
+          .toLowerCase()
+      )
+      .filter(Boolean)
+  );
+  const candidates = entries
+    .map((source, index) => ({
+      host: validatedEnabledSourceHost(source),
+      index,
+      matched: sourceMatchesTitles(source, titles),
+    }))
+    .filter(({ host }) => host && !excluded.has(host));
+  const hosts = [];
+  const seen = new Set();
+  for (const candidate of candidates.sort(
+    (left, right) => Number(right.matched) - Number(left.matched) || left.index - right.index
+  )) {
+    if (seen.has(candidate.host)) continue;
+    seen.add(candidate.host);
+    hosts.push(candidate.host);
+    if (hosts.length === limit) break;
+  }
+  return hosts;
+}
+
 function normalizedTitleTokens(value) {
   return String(value || "")
     .toLowerCase()
@@ -602,11 +699,25 @@ function phraseRanges(words, phrase) {
   return ranges;
 }
 
+function configuredTitlePhrases(title) {
+  const phrases = [normalizedTitleTokens(title)];
+  const [head, ...qualifiers] = String(title || "").split(",");
+  if (head && qualifiers.length) {
+    phrases.push(normalizedTitleTokens(`${qualifiers.join(" ")} ${head}`));
+  }
+  return phrases.filter((phrase, index, all) => {
+    const key = phrase.join(" ");
+    return key && all.findIndex((candidate) => candidate.join(" ") === key) === index;
+  });
+}
+
 function configuredTitlesNamedByPrompt(prompt, bucket) {
   const promptWords = normalizedTitleTokens(prompt?.text);
   const matches = (Array.isArray(bucket?.titles) ? bucket.titles : []).map((title) => {
     const titleWords = normalizedTitleTokens(title);
-    const fullRanges = phraseRanges(promptWords, titleWords);
+    const fullRanges = configuredTitlePhrases(title).flatMap((phrase) =>
+      phraseRanges(promptWords, phrase)
+    );
     const core = GENERIC_TARGET_TITLE_SUFFIXES.has(titleWords.at(-1))
       ? titleWords.slice(0, -1)
       : [];
@@ -690,7 +801,7 @@ function searchPlanTitles(prompt, candidateContext) {
       titles.push(String(title).trim());
     }
   }
-  return titles.slice(0, 4);
+  return titles;
 }
 
 function parseSearchPlanRemoteIntent(prompt) {
@@ -733,7 +844,10 @@ function parseSearchPlanRemoteIntent(prompt) {
       if (!isNegated || occurrenceOutsideScope) explicit = true;
       scope ||=
         occurrenceOutsideScope ||
-        (!isNegated && after.match(/\b(?:in|within)\s+(?:the\s+)?([^,]+?)\s*$/i)?.[1]) ||
+        (!isNegated &&
+          after.match(
+            /\b(?:in|within)\s+(?:the\s+)?(.+?)(?=\s+(?:and|but)\s+(?:available|eligible|open|accessible)\b|$)/i
+          )?.[1]) ||
         "";
     }
   }
@@ -762,41 +876,140 @@ function searchTitleClause(titles, fallback = "") {
     : `(${titles.map(quoteSearchTerm).join(" OR ")})`;
 }
 
-function compactSearchQuery(titles, locationClause, fallback) {
+function searchQuery(titles, locationClause, sourceClause = "") {
+  return [searchTitleClause(titles), locationClause, sourceClause].filter(Boolean).join(" ");
+}
+
+function boundedFallbackQuery(fallback, locationClause, sourceClause = "") {
+  const tail = [[locationClause, sourceClause], [locationClause], [sourceClause], []]
+    .map((parts) => parts.filter(Boolean).join(" "))
+    .find((candidate) => candidate.length <= MAX_SEARCH_QUERY_LENGTH - 3);
+  const available = Math.max(0, MAX_SEARCH_QUERY_LENGTH - tail.length - (tail ? 1 : 0) - 2);
+  const normalized = String(fallback || "")
+    .replace(/["\r\n]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const clipped = normalized.slice(0, available);
+  const title =
+    clipped.length < normalized.length ? clipped.replace(/\s+\S*$/, "").trim() : clipped;
+  return [quoteSearchTerm(title), tail].filter(Boolean).join(" ");
+}
+
+function boundedSearchQuery(titles, locationClause, sourceClause = "") {
+  const query = searchQuery(titles, locationClause, sourceClause);
+  if (query.length <= MAX_SEARCH_QUERY_LENGTH) return query;
+  const withoutSource = searchQuery(titles, locationClause);
+  if (withoutSource.length <= MAX_SEARCH_QUERY_LENGTH) return withoutSource;
+  const titlesOnly = searchTitleClause(titles);
+  if (titlesOnly.length <= MAX_SEARCH_QUERY_LENGTH) return titlesOnly;
+  return boundedFallbackQuery(titles.join(" OR "), "");
+}
+
+function directSourceClause(titles, locationClause, sourceHosts = [], excludedHosts = []) {
+  const excluded = new Set(
+    excludedHosts.map((host) =>
+      String(host || "")
+        .replace(/^www\./, "")
+        .toLowerCase()
+    )
+  );
+  const candidates = sourceHosts.length
+    ? [
+        `site:${sourceHosts[0]}`,
+        "careers",
+        ...sourceHosts.slice(1).map((host) => `site:${host}`),
+        ...COMMON_ATS_SEARCH_HOSTS.map((host) => `site:${host}`),
+      ]
+    : ["careers", ...COMMON_ATS_SEARCH_HOSTS.map((host) => `site:${host}`)];
+  const sources = [];
+  for (const candidate of candidates) {
+    if (candidate.startsWith("site:") && excluded.has(candidate.slice("site:".length))) continue;
+    if (sources.includes(candidate)) continue;
+    const candidateSources = [...sources, candidate];
+    const candidateClause =
+      candidateSources.length === 1 ? candidateSources[0] : `(${candidateSources.join(" OR ")})`;
+    if (searchQuery(titles, locationClause, candidateClause).length > MAX_SEARCH_QUERY_LENGTH) {
+      continue;
+    }
+    sources.push(candidate);
+  }
+  if (!sources.length) return "";
+  return sources.length === 1 ? sources[0] : `(${sources.join(" OR ")})`;
+}
+
+function partitionSearchTitles(titles) {
+  if (titles.length <= 1) return [titles, titles];
+  for (let split = titles.length - 1; split >= 1; split -= 1) {
+    const broadTitles = titles.slice(0, split);
+    const directTitles = titles.slice(split);
+    if (
+      searchTitleClause(broadTitles).length <= MAX_SEARCH_QUERY_LENGTH &&
+      searchTitleClause(directTitles).length <= MAX_SEARCH_QUERY_LENGTH
+    ) {
+      return [broadTitles, directTitles];
+    }
+  }
+  return [[titles[0]], titles.slice(1)];
+}
+
+function buildSearchQueryHints(
+  titles,
+  locationClause,
+  fallback,
+  initialKind,
+  sourceHosts = [],
+  excludedHosts = []
+) {
   if (!titles.length) {
-    return [quoteSearchTerm(String(fallback || "").slice(0, 80)), locationClause]
-      .filter(Boolean)
-      .join(" ")
-      .slice(0, 100);
+    const sourceClause = directSourceClause([], locationClause, sourceHosts, excludedHosts);
+    const directQuery = boundedFallbackQuery(fallback, locationClause, sourceClause || "careers");
+    return [
+      { kind: initialKind, query: boundedFallbackQuery(fallback, locationClause) },
+      {
+        kind: sourceHosts.some((host) => directQuery.includes(`site:${host}`))
+          ? "configured-source-or-direct"
+          : "direct-employer-or-ats",
+        query: directQuery,
+      },
+    ];
   }
-  const selected = [];
-  for (const title of titles) {
-    const query = [searchTitleClause([...selected, title]), locationClause]
-      .filter(Boolean)
-      .join(" ");
-    if (query.length > 100 && selected.length) break;
-    selected.push(title);
-  }
-  return [searchTitleClause(selected), locationClause].filter(Boolean).join(" ").slice(0, 100);
+  const [broadTitles, directTitles] = partitionSearchTitles(titles);
+  const sourceClause = directSourceClause(directTitles, locationClause, sourceHosts, excludedHosts);
+  const directQuery = boundedSearchQuery(directTitles, locationClause, sourceClause);
+  return [
+    { kind: initialKind, query: boundedSearchQuery(broadTitles, locationClause) },
+    {
+      kind: sourceHosts.some((host) => directQuery.includes(`site:${host}`))
+        ? "configured-source-or-direct"
+        : "direct-employer-or-ats",
+      query: directQuery,
+    },
+  ];
 }
 
 function buildPromptSearchPlan(
   prompt,
   candidateContext,
-  { rejectedCandidates = [], missingTargetTitles = [] } = {}
+  { sourceConfig, rejectedCandidates = [], missingTargetTitles = [] } = {}
 ) {
   const titles = missingTargetTitles.length
     ? missingTargetTitles
     : searchPlanTitles(prompt, candidateContext);
-  const titleClause = titles.length ? searchTitleClause(titles) : quoteSearchTerm(prompt.text);
   const locationClause = searchPlanLocationClause(prompt, candidateContext?.location);
-  const directHostClause = [
-    "careers",
-    ...COMMON_ATS_SEARCH_HOSTS.map((host) => `site:${host}`),
-  ].join(" OR ");
-  const directQuery = [titleClause, locationClause, `(${directHostClause})`]
-    .filter(Boolean)
-    .join(" ");
+  const rejectedHosts = rejectedCandidates
+    .map(({ offer }) => sourceHost(offer?.url))
+    .filter(Boolean);
+  const sourceHints = configuredSourceHosts(sourceConfig, titles, {
+    excludedHosts: rejectedHosts,
+  });
+  const queryHints = buildSearchQueryHints(
+    titles,
+    locationClause,
+    prompt.text,
+    missingTargetTitles.length ? "missing-target-title" : "target-title-and-location",
+    sourceHints,
+    rejectedHosts
+  );
 
   // Native agent CLIs dispatch their own WebSearch/WebFetch calls before the
   // server sees a tool event, so CareerRat cannot preempt an over-budget call
@@ -805,13 +1018,8 @@ function buildPromptSearchPlan(
   // without provider-specific hooks.
   return Object.freeze({
     limits: AI_WEB_SEARCH_TURN_LIMITS,
-    query_hints: Object.freeze([
-      Object.freeze({
-        kind: missingTargetTitles.length ? "missing-target-title" : "target-title-and-location",
-        query: compactSearchQuery(titles, locationClause, prompt.text),
-      }),
-      Object.freeze({ kind: "direct-employer-or-ats", query: directQuery }),
-    ]),
+    query_hints: Object.freeze(queryHints.map((hint) => Object.freeze(hint))),
+    source_hints: Object.freeze(sourceHints),
     ...(missingTargetTitles.length
       ? {
           focus: Object.freeze({
@@ -936,8 +1144,12 @@ export async function runAiWebSearch({
     config,
     includeSearchLimits: true,
   });
+  const sourceConfig = sourceConfigGet({ repoRoot, env, name: "search-sources" }).data;
   const searchPlansByPrompt = new Map(
-    selected.map((prompt) => [prompt.id, buildPromptSearchPlan(prompt, candidateContext)])
+    selected.map((prompt) => [
+      prompt.id,
+      buildPromptSearchPlan(prompt, candidateContext, { sourceConfig }),
+    ])
   );
   // Scoped once for the whole run, not per-attempt — see buildAiWebSearchEnv's
   // own comment on why search-jobs needs a per-call override here rather
@@ -989,6 +1201,7 @@ export async function runAiWebSearch({
       search_plan:
         rejectedCandidates.length || topUp
           ? buildPromptSearchPlan(prompt, candidateContext, {
+              sourceConfig,
               rejectedCandidates,
               missingTargetTitles,
             })
@@ -1024,12 +1237,13 @@ export async function runAiWebSearch({
           ...(executionPlan ? { executionPlan } : { aiOperation: "research.web" }),
           useExecutionPlanRoute: Boolean(executionPlan),
           input: correction
-            ? `${typeof baseInput === "string" ? baseInput : JSON.stringify(baseInput)}\n\n${correction}`
+            ? `${typeof baseInput === "string" ? baseInput : JSON.stringify(baseInput)}\n\n${correction}\n\nDo not run WebSearch, WebFetch, or any other tools during this correction. Return the complete corrected JSON. Every successfully fetched exact posting named above must appear in roles[].url or rejected_postings[].url with a short factual reason.`
             : baseInput,
           repoRoot,
           env: skillEnv,
           signal,
           toolProfile: "chat",
+          ...(correction ? { tools: [] } : {}),
           outputSchema,
           timeoutMs: AI_WEB_SEARCH_PROMPT_TIMEOUT_MS,
           onEvent: (evt) => {
@@ -1106,7 +1320,8 @@ export async function runAiWebSearch({
         schema: outputSchema,
         manual: MANUAL_FALLBACK,
         structuredMode: "fallback",
-        maxRetries: searchInstruction ? 0 : 1,
+        maxRetries: 1,
+        validateData: (data) => fetchedPostingAccountabilityErrors(data, toolTrace),
         invoke: async ({ correction }) => {
           if (correction) {
             onProgress?.({
@@ -1147,6 +1362,7 @@ export async function runAiWebSearch({
       return {
         promptId: prompt.id,
         roles: [],
+        rejectedPostings: [],
         toolTrace,
         errors: [message],
         topUp,
@@ -1159,6 +1375,9 @@ export async function runAiWebSearch({
     }
 
     const roles = Array.isArray(outcome.body.data?.roles) ? outcome.body.data.roles : [];
+    const rejectedPostings = Array.isArray(outcome.body.data?.rejected_postings)
+      ? outcome.body.data.rejected_postings
+      : [];
     const coverage = normalizeQueryResults({
       selected: [prompt],
       queriesRun: outcome.body.data?.queries_run,
@@ -1178,6 +1397,7 @@ export async function runAiWebSearch({
     return {
       promptId: prompt.id,
       roles,
+      rejectedPostings,
       toolTrace,
       errors: [],
       topUp,
@@ -1644,6 +1864,20 @@ export async function runAiWebSearch({
     ),
   ];
   const coverage = mergePromptCoverage({ selected, outcomes: allPromptOutcomes });
+  const fetchedPostingDecisionKeys = new Set();
+  const fetchedPostingDecisions = [];
+  for (const outcome of allPromptOutcomes) {
+    for (const decision of outcome.rejectedPostings || []) {
+      const url = normalizedSourceUrl(decision?.url);
+      const reason = String(decision?.reason || "").trim();
+      const key = `${url}\n${reason}`;
+      if (!url || !reason || fetchedPostingDecisionKeys.has(key)) continue;
+      fetchedPostingDecisionKeys.add(key);
+      fetchedPostingDecisions.push({ promptId: outcome.promptId, url, reason });
+      if (fetchedPostingDecisions.length >= MAX_FETCHED_POSTING_DECISIONS) break;
+    }
+    if (fetchedPostingDecisions.length >= MAX_FETCHED_POSTING_DECISIONS) break;
+  }
 
   const canonicalQualification = requalifyCanonicalOffers(canonicalCandidates, {
     config,
@@ -1663,6 +1897,21 @@ export async function runAiWebSearch({
     if (reasonCounts[key] === 0) delete reasonCounts[key];
   }
   const disqualified = Object.values(reasonCounts).reduce((sum, count) => sum + count, 0);
+  const canonicalDisqualifications = [
+    ...canonicalQualification.filteredSeniority,
+    ...canonicalQualification.filteredLocation,
+    ...canonicalQualification.filteredAge,
+    ...canonicalQualification.filteredSalary,
+    ...canonicalQualification.filteredEligibility,
+  ]
+    .slice(0, MAX_CANONICAL_DISQUALIFICATIONS)
+    .map((offer) => ({
+      company: String(offer.company || ""),
+      title: String(offer.title || ""),
+      url: String(offer.url || ""),
+      location: offer.location == null ? null : String(offer.location),
+      reason: String(offer.qualificationReason || "canonical-hard-gate-rejection"),
+    }));
 
   // A disconnect that lands after the model finished but before this point
   // must not write a partial result or return a success-shaped summary.
@@ -1703,6 +1952,8 @@ export async function runAiWebSearch({
     invalid,
     disqualified,
     reasonCounts,
+    canonicalDisqualifications,
+    fetchedPostingDecisions,
     partial: persistedOffers.filter((offer) => offer.bodyPartial === true).length,
     unreadable: captureFailures.length,
     errors: promptErrors,

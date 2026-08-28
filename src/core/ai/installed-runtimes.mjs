@@ -2591,6 +2591,7 @@ export const RUNTIME_STREAMING_UNSUPPORTED = "RUNTIME_STREAMING_UNSUPPORTED";
 export async function runInstalledRuntimeStream({
   runtime,
   prompt,
+  outputSchema,
   model,
   effort,
   tools = [],
@@ -2644,6 +2645,7 @@ export async function runInstalledRuntimeStream({
     definition,
     skill,
     tools: providerTools,
+    outputSchema,
     streaming: true,
   });
   const childEnv = buildInstalledRuntimeChildEnv({ env });
@@ -2668,10 +2670,20 @@ export async function runInstalledRuntimeStream({
     }
   }
 
+  let tempDir = null;
   let skillCwd = null;
   let taskCwd = null;
   let stagedReadPath = null;
   try {
+    let schemaPath = null;
+    if (definition?.protocol === "codex-jsonl" && outputSchema) {
+      tempDir = mkdtempSync(join(tmpdir(), "careerrat-runtime-schema-"));
+      chmodSync(tempDir, 0o700);
+      schemaPath = join(tempDir, "output-schema.json");
+      writeFileSync(schemaPath, `${JSON.stringify(sanitizeCodexOutputSchema(outputSchema))}\n`, {
+        mode: 0o600,
+      });
+    }
     let installedPrompt = String(prompt || "");
     if (skill) {
       skillCwd = materializeIsolatedSkillCwd({ repoRoot, skill });
@@ -2704,6 +2716,9 @@ export async function runInstalledRuntimeStream({
       chmodSync(taskCwd, 0o700);
     }
     if (definition?.protocol === "acp") {
+      installedPrompt = promptWithStructuredContract({ prompt: installedPrompt, outputSchema });
+    }
+    if (definition?.protocol === "acp") {
       const mcpServers = acpScopedToolsServers({
         allowPublicWeb: providerTools.includes("WebSearch") || providerTools.includes("WebFetch"),
         stagedReadPath,
@@ -2726,6 +2741,8 @@ export async function runInstalledRuntimeStream({
     const invocation = buildInstalledRuntimeInvocation({
       runtimeId: runtime.id,
       executablePath: runtime.path,
+      schema: outputSchema,
+      schemaPath,
       model,
       effort,
       tools,
@@ -2981,6 +2998,7 @@ export async function runInstalledRuntimeStream({
 
     return { ...result, runtimeId: runtime.id };
   } finally {
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
     if (skillCwd) rmSync(skillCwd, { recursive: true, force: true });
     if (taskCwd) rmSync(taskCwd, { recursive: true, force: true });
   }

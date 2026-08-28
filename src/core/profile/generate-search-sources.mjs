@@ -318,16 +318,29 @@ function hospitalityTarget(targeting, domain) {
   );
 }
 
-function boundedHospitalityTitles(titles, { inferred } = {}) {
+function boundedHospitalityTitles(roleBuckets, { inferred } = {}) {
   const queries = [];
   const seen = new Set();
-  for (const value of titles) {
-    const title = String(value || "").trim();
-    const key = title.toLowerCase();
-    if (!title || seen.has(key) || (inferred && !HOSPITALITY_TITLE_RE.test(title))) continue;
-    seen.add(key);
-    queries.push(title);
-    if (queries.length === MAX_HOSPITALITY_QUERY_TITLES) break;
+  const buckets = (roleBuckets || []).map((bucket) => bucket?.titles || []);
+  const cursors = buckets.map(() => 0);
+
+  while (queries.length < MAX_HOSPITALITY_QUERY_TITLES) {
+    let added = false;
+    for (let bucketIndex = 0; bucketIndex < buckets.length; bucketIndex += 1) {
+      while (cursors[bucketIndex] < buckets[bucketIndex].length) {
+        const value = buckets[bucketIndex][cursors[bucketIndex]];
+        cursors[bucketIndex] += 1;
+        const title = String(value || "").trim();
+        const key = title.toLowerCase();
+        if (!title || seen.has(key) || (inferred && !HOSPITALITY_TITLE_RE.test(title))) continue;
+        seen.add(key);
+        queries.push(title);
+        added = true;
+        break;
+      }
+      if (queries.length === MAX_HOSPITALITY_QUERY_TITLES) break;
+    }
+    if (!added) break;
   }
   return queries;
 }
@@ -495,7 +508,7 @@ export function buildSearchSources(targeting, profile) {
   }
 
   const hospitalityLocation = usLocationParts(loc.home);
-  const hospitalityQueries = boundedHospitalityTitles(positiveTitles, {
+  const hospitalityQueries = boundedHospitalityTitles(targeting.role_buckets, {
     inferred: !hasExplicitDomain,
   });
   let hasRunnableHospitalitySources = false;

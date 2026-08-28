@@ -3521,6 +3521,106 @@ test("runInstalledRuntimeStream normalizes Codex CareerRat fetch activity", asyn
   ]);
 });
 
+test("runInstalledRuntimeStream applies Claude structured output while preserving activity streaming", async () => {
+  const outputSchema = {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    required: ["roles"],
+    additionalProperties: false,
+    properties: { roles: { type: "array", items: { type: "string" } } },
+  };
+  let invocationArgs = [];
+  const received = [];
+  const result = await runInstalledRuntimeStream({
+    runtime: verifiedRuntime({ id: "claude", path: "/safe/claude", name: "Claude Code" }),
+    prompt: "find roles",
+    tools: ["WebSearch", "WebFetch"],
+    outputSchema,
+    onMessage: (message) => received.push(message),
+    spawnSyncImpl: verifiedClaudeVersion,
+    spawnImpl(_command, args) {
+      invocationArgs = args;
+      return fakeStreamingChild({
+        chunks: [
+          ndjson([
+            {
+              type: "assistant",
+              message: {
+                content: [
+                  {
+                    type: "tool_use",
+                    id: "fetch-1",
+                    name: "WebFetch",
+                    input: { url: "https://example.com/jobs/1" },
+                  },
+                ],
+              },
+            },
+            {
+              type: "result",
+              subtype: "success",
+              structured_output: { roles: [] },
+            },
+          ]),
+        ],
+      });
+    },
+  });
+
+  const schemaIndex = invocationArgs.indexOf("--json-schema");
+  assert.ok(schemaIndex >= 0);
+  assert.deepEqual(JSON.parse(invocationArgs[schemaIndex + 1]), {
+    type: "object",
+    required: ["roles"],
+    additionalProperties: false,
+    properties: { roles: { type: "array", items: { type: "string" } } },
+  });
+  assert.equal(result.text, '{"roles":[]}');
+  assert.equal(
+    received.some((message) => message.type === "assistant"),
+    true
+  );
+});
+
+test("runInstalledRuntimeStream stages and removes the Codex output schema", async () => {
+  const outputSchema = {
+    type: "object",
+    required: ["roles"],
+    additionalProperties: false,
+    properties: { roles: { type: "array", items: { type: "string" } } },
+  };
+  let schemaPath = null;
+  let stagedSchema = null;
+  const result = await runInstalledRuntimeStream({
+    runtime: verifiedRuntime({ id: "codex", path: "/safe/codex", name: "Codex" }),
+    prompt: "find roles",
+    tools: ["WebSearch", "WebFetch"],
+    outputSchema,
+    spawnImpl(_command, args) {
+      const schemaIndex = args.indexOf("--output-schema");
+      assert.ok(schemaIndex >= 0);
+      schemaPath = args[schemaIndex + 1];
+      stagedSchema = JSON.parse(readFileSync(schemaPath, "utf8"));
+      return fakeStreamingChild({
+        chunks: [
+          ndjson([
+            { type: "thread.started", thread_id: "thread-schema" },
+            {
+              type: "item.completed",
+              item: { id: "message-1", type: "agent_message", text: '{"roles":[]}' },
+            },
+            { type: "turn.completed" },
+          ]),
+        ],
+      });
+    },
+  });
+
+  assert.deepEqual(stagedSchema, outputSchema);
+  assert.equal(result.text, '{"roles":[]}');
+  assert.equal(existsSync(schemaPath), false);
+});
+
 test("runInstalledRuntimeStream gives Codex only the selected CareerRat skill workspace", async () => {
   const repoRoot = tempRepoWithOneSkill("research-company", "Marker: CODEX_SKILL_SCOPE.\n");
   let spawnedCwd = null;

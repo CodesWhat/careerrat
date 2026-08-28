@@ -16,6 +16,7 @@ import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection
 import { closeAll } from "../src/core/db/connection.mjs";
 import { readDbScannerRows } from "../src/core/db/scan-context.mjs";
 import { candidateConfigPatch, candidateSetupInitialize } from "../src/core/db/verbs.mjs";
+import { healSearchSourceConfig } from "../src/core/onboarding/first-search-run.mjs";
 import { runAiWebSearch } from "../src/core/search/ai-web-search.mjs";
 import { saveSearchPrompts } from "../src/core/search/search-prompts.mjs";
 import {
@@ -45,6 +46,7 @@ const env = {
   CAREERRAT_DESKTOP_CLI_ONLY: "1",
 };
 const receiptDirectory = resolve(join(repoRoot, LIVE_SEARCH_RECEIPT_DIRECTORY));
+const MAX_DIAGNOSTIC_CAPTURE_FAILURES = 10;
 
 function currentSourceRevision() {
   return execFileSync("git", ["rev-parse", "HEAD"], {
@@ -93,6 +95,15 @@ function safeResult(result) {
     failedPromptIds: result.failedPromptIds,
     queryResults: result.queryResults,
     sources: result.sources,
+    captureFailures: Array.isArray(result.captureFailures)
+      ? result.captureFailures.slice(0, MAX_DIAGNOSTIC_CAPTURE_FAILURES)
+      : [],
+    canonicalDisqualifications: Array.isArray(result.canonicalDisqualifications)
+      ? result.canonicalDisqualifications.slice(0, MAX_DIAGNOSTIC_CAPTURE_FAILURES)
+      : [],
+    fetchedPostingDecisions: Array.isArray(result.fetchedPostingDecisions)
+      ? result.fetchedPostingDecisions.slice(0, MAX_DIAGNOSTIC_CAPTURE_FAILURES)
+      : [],
   };
 }
 
@@ -309,6 +320,7 @@ try {
     env,
     prompts: fixture.prompts,
   });
+  healSearchSourceConfig({ repoRoot, env });
 
   const runtime = detectInstalledRuntimes({ env }).find((entry) => entry.id === runtimeId);
   if (!runtime?.available) throw new Error(`${runtimeId} is not installed.`);

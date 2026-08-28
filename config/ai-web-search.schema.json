@@ -47,6 +47,19 @@
         }
       }
     },
+    "rejected_postings": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "required": ["url", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "url": { "type": "string", "minLength": 1, "maxLength": 2048 },
+          "reason": { "type": "string", "minLength": 1, "maxLength": 240 }
+        }
+      }
+    },
     "queries_run": {
       "type": "array",
       "items": {

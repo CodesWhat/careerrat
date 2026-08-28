@@ -1158,6 +1158,116 @@ test("runSkillStream: a selected installed CLI bypasses the Agent SDK and stream
   }
 });
 
+test("runSkillStream forwards installed public-web activity but emits only the final structured assistant result", async () => {
+  const repoRoot = tempRepoWithSkill("search-jobs");
+  const env = { CAREERRAT_RUNTIME_SKILLS: "search-jobs" };
+  const outputSchema = {
+    type: "object",
+    required: ["roles"],
+    additionalProperties: false,
+    properties: { roles: { type: "array", items: { type: "string" } } },
+  };
+  writeInstalledRuntimeSelection({ repoRoot, env, runtimeId: "codex" });
+  try {
+    const events = [];
+    const streamCalls = [];
+    const result = await runSkillStream({
+      skill: "search-jobs",
+      input: "find roles",
+      repoRoot,
+      env,
+      toolProfile: "chat",
+      outputSchema,
+      runtimeInventory: [verifiedRuntime("codex", "/safe/codex")],
+      runInstalledRuntimeImpl: async () => {
+        throw new Error("public-web skill runs must use the installed streaming adapter");
+      },
+      runInstalledRuntimeStreamImpl: async (input) => {
+        streamCalls.push(input);
+        input.onMessage({
+          type: "assistant",
+          message: {
+            content: [
+              {
+                type: "tool_use",
+                id: "fetch-1",
+                name: "mcp__careerrat_scoped_tools__fetch",
+                input: { url: "https://example.com/jobs/1" },
+              },
+            ],
+          },
+        });
+        input.onMessage({
+          type: "user",
+          message: {
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "fetch-1",
+                content: "Fetched https://example.com/jobs/1",
+                is_error: false,
+              },
+            ],
+          },
+        });
+        input.onMessage({
+          type: "assistant",
+          message: { content: [{ type: "text", text: "intermediate text must stay hidden" }] },
+        });
+        return { text: '{"roles":[]}', runtimeId: "codex", usage: null };
+      },
+      loadSdk: async () => {
+        throw new Error("Agent SDK must not load for an installed runtime");
+      },
+      onEvent: (event) => events.push(event),
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(streamCalls.length, 1);
+    assert.deepEqual(streamCalls[0].tools, ["WebSearch", "WebFetch", "Skill"]);
+    assert.deepEqual(streamCalls[0].outputSchema, outputSchema);
+    assert.deepEqual(
+      events.map(({ type }) => type),
+      ["system", "tool_use", "tool_result", "assistant", "result"]
+    );
+    assert.equal(events[1].data.name, "WebFetch");
+    assert.equal(events.filter(({ type }) => type === "assistant").length, 1);
+    assert.equal(events.at(-2).data.message.content[0].text, '{"roles":[]}');
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("runSkillStream makes an installed public-web correction structurally Skill-only", async () => {
+  const repoRoot = tempRepoWithSkill("search-jobs");
+  const env = { CAREERRAT_RUNTIME_SKILLS: "search-jobs" };
+  writeInstalledRuntimeSelection({ repoRoot, env, runtimeId: "claude" });
+  try {
+    const oneShotCalls = [];
+    await runSkillStream({
+      skill: "search-jobs",
+      input: "Return corrected JSON without tools",
+      repoRoot,
+      env,
+      tools: [],
+      runtimeInventory: [verifiedRuntime("claude", "/safe/claude")],
+      runInstalledRuntimeImpl: async (input) => {
+        oneShotCalls.push(input);
+        return { text: "{}", runtimeId: "claude", usage: null };
+      },
+      runInstalledRuntimeStreamImpl: async () => {
+        throw new Error("a Skill-only correction must preserve the one-shot path");
+      },
+      onEvent: () => {},
+    });
+
+    assert.equal(oneShotCalls.length, 1);
+    assert.deepEqual(oneShotCalls[0].tools, ["Skill"]);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("runSkillStream resolves a named operation once for the selected installed runtime", async () => {
   const repoRoot = tempRepoWithSkill("search-jobs");
   const env = { CAREERRAT_RUNTIME_SKILLS: "search-jobs" };
@@ -1267,8 +1377,12 @@ test("durable AI web search hydrates verified Claude and Codex capabilities with
         env,
         executionPlan,
         useExecutionPlanRoute: true,
-        outputSchema: { type: "object" },
-        runInstalledRuntimeImpl: async (input) => {
+        toolProfile: "chat",
+        outputSchema: { type: "object", properties: {}, additionalProperties: false },
+        runInstalledRuntimeImpl: async () => {
+          throw new Error("durable public-web search must use installed streaming");
+        },
+        runInstalledRuntimeStreamImpl: async (input) => {
           calls.push(input);
           return { text: "{}", runtimeId, usage: null };
         },

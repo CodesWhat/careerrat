@@ -111,6 +111,44 @@ test("completed native AI searches emit diagnostics before the release gate writ
   assert.equal(script.match(/writeFileSync\(receiptPath/g)?.length, 1);
 });
 
+test("failed native AI search acceptance preserves bounded row diagnostics before cleanup", () => {
+  const script = readFileSync(
+    new URL("../scripts/qa-live-runtime-search.mjs", import.meta.url),
+    "utf8"
+  );
+  const safeResult = script.slice(
+    script.indexOf("function safeResult"),
+    script.indexOf("function normalizedTitleWords")
+  );
+  const diagnostic = script.indexOf('kind: "native-ai-search-diagnostic"');
+  const verification = script.indexOf("verifyLiveSearchReceiptForReview(receipt)");
+  const cleanup = script.indexOf("rmSync(qaHome");
+
+  assert.match(safeResult, /captureFailures:/);
+  assert.match(safeResult, /result\.captureFailures/);
+  assert.match(safeResult, /slice\(0, MAX_DIAGNOSTIC_CAPTURE_FAILURES\)/);
+  assert.match(safeResult, /canonicalDisqualifications:/);
+  assert.match(safeResult, /result\.canonicalDisqualifications/);
+  assert.match(safeResult, /fetchedPostingDecisions:/);
+  assert.match(safeResult, /result\.fetchedPostingDecisions/);
+  assert.ok(diagnostic < verification, "the diagnostic must precede a failing acceptance gate");
+  assert.ok(verification < cleanup, "cleanup must not erase evidence before the gate fails");
+});
+
+test("native AI search fixtures heal generated source config before the live search", () => {
+  const script = readFileSync(
+    new URL("../scripts/qa-live-runtime-search.mjs", import.meta.url),
+    "utf8"
+  );
+  const targetingPatch = script.indexOf('name: "targeting"');
+  const heal = script.indexOf("healSearchSourceConfig({ repoRoot, env })");
+  const search = script.indexOf("await runAiWebSearch");
+
+  assert.match(script, /import \{ healSearchSourceConfig \}/);
+  assert.ok(targetingPatch < heal, "source healing must use the completed fixture targeting");
+  assert.ok(heal < search, "the live search must consume the healed source snapshot");
+});
+
 test("native AI search acceptance keeps the version-one receipt path compatible", () => {
   const receipts = readFileSync(
     new URL("../scripts/lib/live-search-receipts.mjs", import.meta.url),

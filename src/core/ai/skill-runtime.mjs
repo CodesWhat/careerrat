@@ -39,7 +39,7 @@ import { resolveModelConfig } from "./ai-config.mjs";
 import { loadAIPreferences } from "./ai-preferences.mjs";
 import { resolveAIRoute, resolveAIRouteForExecutionPlan } from "./call-ai.mjs";
 import { CHAT_ANSWER_MODE_GUIDANCE } from "./chat-answer-mode.mjs";
-import { runInstalledRuntime } from "./installed-runtimes.mjs";
+import { runInstalledRuntime, runInstalledRuntimeStream } from "./installed-runtimes.mjs";
 import {
   aiRuntimeIdForRoute,
   assertAIExecutionPlanForRuntime,
@@ -53,6 +53,13 @@ import {
   resolveRuntimeTools,
 } from "./runtime-tools.mjs";
 import { appendUsageEvent, computeCost, deriveUsageFeature } from "./usage-log.mjs";
+
+const INSTALLED_PUBLIC_FETCH_TOOL = "mcp__careerrat_scoped_tools__fetch";
+
+function normalizeInstalledRuntimeEvent(event) {
+  if (event?.type !== "tool_use" || event.data?.name !== INSTALLED_PUBLIC_FETCH_TOOL) return event;
+  return { ...event, data: { ...event.data, name: "WebFetch" } };
+}
 
 // ---------------------------------------------------------------------------
 // Skill allowlist
@@ -559,6 +566,7 @@ export async function runSkillStream({
   useExecutionPlanRoute = false,
   runtimeInventory = null,
   runInstalledRuntimeImpl = runInstalledRuntime,
+  runInstalledRuntimeStreamImpl = runInstalledRuntimeStream,
 } = {}) {
   if (typeof onEvent !== "function") {
     throw new TypeError("runSkillStream: onEvent callback is required");
@@ -611,8 +619,14 @@ export async function runSkillStream({
   const candidateNote = agentApplicationDefaultsNote({ repoRoot, env, skill });
 
   if (route.type === "installed") {
-    const installedRuntimeTools = resolveInstalledSkillRuntimeTools({ skill });
+    const requestedRuntimeTools = new Set(runtimeTools);
+    const installedRuntimeTools = resolveInstalledSkillRuntimeTools({ skill }).filter(
+      (tool) => tool === "Skill" || requestedRuntimeTools.has(tool)
+    );
     const installedPosture = installedSkillRuntimePosture({ skill });
+    const streamPublicWebActivity = installedRuntimeTools.some(
+      (tool) => tool === "WebSearch" || tool === "WebFetch"
+    );
     const prompt = [
       buildPrompt({ skill, input }),
       candidateNote,
@@ -629,7 +643,7 @@ export async function runSkillStream({
       },
     });
     try {
-      const result = await runInstalledRuntimeImpl({
+      const runtimeInput = {
         runtime: route.runtime,
         prompt,
         cwd: repoRoot,
@@ -654,7 +668,18 @@ export async function runSkillStream({
         approvedReadPaths,
         outputSchema,
         timeoutMs,
-      });
+      };
+      const result = streamPublicWebActivity
+        ? await runInstalledRuntimeStreamImpl({
+            ...runtimeInput,
+            onMessage(message) {
+              for (const rawEvent of mapSdkMessage(message, { env })) {
+                const event = normalizeInstalledRuntimeEvent(rawEvent);
+                if (event.type === "tool_use" || event.type === "tool_result") onEvent(event);
+              }
+            },
+          })
+        : await runInstalledRuntimeImpl(runtimeInput);
       if (signal?.aborted) return { ok: false, aborted: true };
       onEvent({
         type: "assistant",

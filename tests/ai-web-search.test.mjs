@@ -17,6 +17,7 @@ import { readDbScannerRows } from "../src/core/db/scan-context.mjs";
 import {
   candidateConfigPatch,
   candidateSetupInitialize,
+  sourceConfigPut,
   sourcedUpsertBatch,
 } from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
@@ -135,6 +136,322 @@ test("AI web search requires nullable basis-specific compensation fields", () =>
   assert.ok(roleSchema.required.includes("annual_earnings_text"));
   assert.deepEqual(roleSchema.properties.base_comp_text.type, ["string", "null"]);
   assert.deepEqual(roleSchema.properties.annual_earnings_text.type, ["string", "null"]);
+});
+
+test("AI web search schema bounds explicit fetched-posting rejections", () => {
+  const schema = JSON.parse(
+    readFileSync(new URL("../config/ai-web-search.schema.json", import.meta.url), "utf8")
+  );
+  const rejectionSchema = schema.properties.rejected_postings;
+
+  assert.equal(rejectionSchema.type, "array");
+  assert.equal(rejectionSchema.maxItems, 4);
+  assert.deepEqual(rejectionSchema.items.required, ["url", "reason"]);
+  assert.equal(rejectionSchema.items.additionalProperties, false);
+  assert.equal(rejectionSchema.items.properties.reason.maxLength, 240);
+});
+
+test("runAiWebSearch corrects a schema-valid reply that silently drops a fetched exact posting", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        {
+          name: "Engineering",
+          titles: ["Applied AI Engineer", "Platform Engineer", "Reliability Engineer"],
+        },
+      ],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      {
+        id: "p1",
+        text: "Find Applied AI Engineer, Platform Engineer, and Reliability Engineer jobs",
+      },
+    ],
+  });
+  const fetchedUrl = "https://job-boards.greenhouse.io/550/jobs/5186736008";
+  const roles = [
+    role({ url: "https://jobs.example.test/applied-ai", title: "Applied AI Engineer" }),
+    role({ url: "https://jobs.example.test/platform", title: "Platform Engineer" }),
+    role({ url: "https://jobs.example.test/reliability", title: "Reliability Engineer" }),
+  ];
+  const inputs = [];
+  const invocations = [];
+
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async (options) => {
+      invocations.push(options);
+      const { input, onEvent } = options;
+      inputs.push(input);
+      if (inputs.length === 1) {
+        onEvent({
+          type: "tool_use",
+          data: { id: "fetch-550", name: "WebFetch", input: { url: fetchedUrl } },
+        });
+        onEvent({
+          type: "tool_result",
+          data: { toolUseId: "fetch-550", content: "Exact live job posting", isError: false },
+        });
+      }
+      emitAssistantJson(onEvent, {
+        roles,
+        rejected_postings:
+          inputs.length === 1
+            ? []
+            : [{ url: fetchedUrl, reason: "The role is outside the saved seniority target." }],
+        queries_run: [{ prompt_id: "p1", query: "engineering jobs", status: "completed" }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver(),
+  });
+
+  assert.equal(inputs.length, 2);
+  assert.equal(typeof inputs[1], "string");
+  assert.match(inputs[1], /successfully fetched exact posting/i);
+  assert.match(inputs[1], /job-boards\.greenhouse\.io\/550\/jobs\/5186736008/);
+  assert.match(inputs[1], /do not run (?:WebSearch|web tools)/i);
+  assert.deepEqual(invocations[1].tools, []);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.new, 3, JSON.stringify(result));
+  assert.deepEqual(result.fetchedPostingDecisions, [
+    {
+      promptId: "p1",
+      url: fetchedUrl,
+      reason: "The role is outside the saved seniority target.",
+    },
+  ]);
+});
+
+test("runAiWebSearch fails the prompt after one correction when a fetched exact posting stays unaccounted", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  const fetchedUrl = "https://job-boards.greenhouse.io/550/jobs/4919621008";
+  let calls = 0;
+
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ onEvent }) => {
+      calls += 1;
+      if (calls === 1) {
+        onEvent({
+          type: "tool_use",
+          data: { id: "fetch-550", name: "WebFetch", input: { url: fetchedUrl } },
+        });
+        onEvent({
+          type: "tool_result",
+          data: { toolUseId: "fetch-550", content: "Exact live job posting", isError: false },
+        });
+      }
+      emitAssistantJson(onEvent, {
+        roles: [],
+        rejected_postings: [],
+        queries_run: [{ prompt_id: "p1", query: "hospitality jobs", status: "completed" }],
+      });
+      return { ok: true };
+    },
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(result.found, 0);
+  assert.equal(result.new, 0);
+  assert.equal(result.errors.length, 1);
+  assert.deepEqual(result.failedPromptIds, ["p1"]);
+});
+
+test("runAiWebSearch corrects an unaccounted fetch during freshness recovery without tools", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Engineering", titles: ["Platform Engineer"] }],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [{ id: "p1", text: "Find Platform Engineer jobs" }],
+  });
+  const expiredUrl = "https://jobs.example.test/expired-platform";
+  const omittedFetchedUrl = "https://jobs.example.test/rejected-platform";
+  const freshRoles = [1, 2, 3].map((index) =>
+    role({
+      company: `Fresh Platform ${index}`,
+      title: "Platform Engineer",
+      url: `https://jobs.example.test/fresh-platform-${index}`,
+    })
+  );
+  const invocations = [];
+
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async (options) => {
+      invocations.push(options);
+      const { onEvent } = options;
+      if (invocations.length === 1) {
+        emitAssistantJson(onEvent, {
+          roles: [
+            role({ company: "Expired Platform", title: "Platform Engineer", url: expiredUrl }),
+          ],
+          queries_run: [{ prompt_id: "p1", query: "platform jobs", status: "completed" }],
+        });
+      } else {
+        if (invocations.length === 2) {
+          onEvent({
+            type: "tool_use",
+            data: { id: "recovery-fetch", name: "WebFetch", input: { url: omittedFetchedUrl } },
+          });
+          onEvent({
+            type: "tool_result",
+            data: { toolUseId: "recovery-fetch", content: "Exact posting", isError: false },
+          });
+        }
+        emitAssistantJson(onEvent, {
+          roles: freshRoles,
+          rejected_postings:
+            invocations.length === 2
+              ? []
+              : [{ url: omittedFetchedUrl, reason: "Outside the saved location." }],
+          queries_run: [{ prompt_id: "p1", query: "fresh platform jobs", status: "completed" }],
+        });
+      }
+      return { ok: true };
+    },
+    resolveJobUrlImpl: async (url) =>
+      specificResolution(url, {
+        title: "Platform Engineer",
+        liveness:
+          url === expiredUrl
+            ? { result: "expired", reason: "The posting is no longer active." }
+            : { result: "active", reason: "visible apply control" },
+      }),
+  });
+
+  assert.equal(invocations.length, 3);
+  assert.deepEqual(invocations[2].tools, []);
+  assert.match(invocations[2].input, /do not run WebSearch, WebFetch, or any other tools/i);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.new, 3, JSON.stringify(result));
+});
+
+test("runAiWebSearch corrects an unaccounted fetch during useful-set top-up without tools", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Engineering", titles: ["Platform Engineer"] }],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [{ id: "p1", text: "Find Platform Engineer jobs" }],
+  });
+  const omittedFetchedUrl = "https://jobs.example.test/rejected-top-up";
+  const topUpRoles = [2, 3].map((index) =>
+    role({
+      company: `Top Up Platform ${index}`,
+      title: "Platform Engineer",
+      url: `https://jobs.example.test/top-up-platform-${index}`,
+    })
+  );
+  const invocations = [];
+
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async (options) => {
+      invocations.push(options);
+      const { onEvent } = options;
+      if (invocations.length === 1) {
+        emitAssistantJson(onEvent, {
+          roles: [
+            role({
+              company: "Initial Platform",
+              title: "Platform Engineer",
+              url: "https://jobs.example.test/initial-platform",
+            }),
+          ],
+          queries_run: [{ prompt_id: "p1", query: "platform jobs", status: "completed" }],
+        });
+      } else {
+        if (invocations.length === 2) {
+          onEvent({
+            type: "tool_use",
+            data: { id: "top-up-fetch", name: "WebFetch", input: { url: omittedFetchedUrl } },
+          });
+          onEvent({
+            type: "tool_result",
+            data: { toolUseId: "top-up-fetch", content: "Exact posting", isError: false },
+          });
+        }
+        emitAssistantJson(onEvent, {
+          roles: topUpRoles,
+          rejected_postings:
+            invocations.length === 2
+              ? []
+              : [{ url: omittedFetchedUrl, reason: "Below a saved hard requirement." }],
+          queries_run: [{ prompt_id: "p1", query: "more platform jobs", status: "completed" }],
+        });
+      }
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver({
+      title: "Platform Engineer",
+      liveness: { result: "active", reason: "visible apply control" },
+    }),
+  });
+
+  assert.equal(invocations.length, 3);
+  assert.deepEqual(invocations[2].tools, []);
+  assert.match(invocations[2].input, /do not run WebSearch, WebFetch, or any other tools/i);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.new, 3, JSON.stringify(result));
+});
+
+test("runAiWebSearch does not demand an output decision for a failed WebFetch", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  let calls = 0;
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ onEvent }) => {
+      calls += 1;
+      onEvent({
+        type: "tool_use",
+        data: {
+          id: "failed-fetch",
+          name: "WebFetch",
+          input: { url: "https://jobs.example.test/unreadable-role" },
+        },
+      });
+      onEvent({
+        type: "tool_result",
+        data: { toolUseId: "failed-fetch", content: "Request timed out", isError: true },
+      });
+      emitAssistantJson(onEvent, {
+        roles: [],
+        rejected_postings: [],
+        queries_run: [{ prompt_id: "p1", query: "jobs", status: "failed", error: "timed out" }],
+      });
+      return { ok: true };
+    },
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(result.errors.length, 0);
+  assert.deepEqual(result.failedPromptIds, ["p1"]);
 });
 
 after(() => {
@@ -322,24 +639,372 @@ test("runAiWebSearch gives each prompt compact target-title and location query h
   });
   assert.equal(inputs[0].search_plan.query_hints.length, 2);
   assert.notEqual(inputs[0].search_plan.query_hints[0].query, savedPrompt);
-  assert.ok(inputs[0].search_plan.query_hints[0].query.length <= 100);
+  for (const { query } of inputs[0].search_plan.query_hints) {
+    assert.ok(query.length <= 100, query);
+    assert.match(query, /"New York, NY"/);
+    assert.match(query, /\bremote\b/i);
+  }
   assert.match(inputs[0].search_plan.query_hints[0].query, /"Platform Engineer"/);
-  assert.match(inputs[0].search_plan.query_hints[0].query, /"Site Reliability Engineer"/);
-  assert.match(inputs[0].search_plan.query_hints[0].query, /"New York, NY"/);
-  assert.match(inputs[0].search_plan.query_hints[0].query, /\bremote\b/i);
   assert.doesNotMatch(
     inputs[0].search_plan.query_hints[0].query,
     /prioritize direct employer postings|generic career pages|expired listings/i
   );
   assert.equal(inputs[0].search_plan.query_hints[1].kind, "direct-employer-or-ats");
-  assert.match(inputs[0].search_plan.query_hints[1].query, /"Platform Engineer"/);
   assert.match(inputs[0].search_plan.query_hints[1].query, /"Site Reliability Engineer"/);
-  assert.match(inputs[0].search_plan.query_hints[1].query, /"New York, NY"/);
-  assert.match(inputs[0].search_plan.query_hints[1].query, /\bremote\b/i);
-  assert.match(inputs[0].search_plan.query_hints[1].query, /\bcareers\b/i);
-  assert.match(inputs[0].search_plan.query_hints[1].query, /site:job-boards\.greenhouse\.io/);
-  assert.match(inputs[0].search_plan.query_hints[1].query, /site:jobs\.lever\.co/);
+  assert.match(inputs[0].search_plan.query_hints[1].query, /\bcareers\b|\bsite:/i);
   assert.doesNotMatch(inputs[0].search_plan.query_hints[1].query, /claude|codex|hospitality/i);
+});
+
+test("runAiWebSearch keeps the exact event fixture hints atomic and scopes remote to the US", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        {
+          name: "Event and venue operations",
+          titles: ["Event Operations Manager", "Event Coordinator", "Venue Operations Manager"],
+        },
+      ],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      {
+        id: "p1",
+        text: "Find currently active Event Operations Manager, Event Coordinator, and Venue Operations Manager roles that are either local to New York City or remote anywhere in the United States and available to a New York resident.",
+      },
+    ],
+  });
+  const inputs = [];
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      emitAssistantJson(onEvent, {
+        roles: [],
+        queries_run: [{ prompt_id: "p1", query: "event operations", status: "completed" }],
+      });
+      return { ok: true };
+    },
+  });
+
+  const hints = inputs[0].search_plan.query_hints;
+  assert.equal(hints.length, 2);
+  for (const { query } of hints) {
+    assert.ok(query.length <= 100, query);
+    assert.equal((query.match(/"/g) || []).length % 2, 0, query);
+    assert.equal((query.match(/\(/g) || []).length, (query.match(/\)/g) || []).length, query);
+    assert.match(query, /remote "United States"/);
+    assert.doesNotMatch(query, /available to a New York resident/i);
+  }
+});
+
+test("runAiWebSearch recognizes a comma-qualified configured title in prompt word order", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        {
+          name: "Hospitality operations",
+          titles: [
+            "Operations Manager, Food & Beverage",
+            "Assistant General Manager",
+            "General Manager",
+          ],
+        },
+      ],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      {
+        id: "p1",
+        text: "Find currently active Food and Beverage Operations Manager, Assistant General Manager, and General Manager openings in New York City hospitality businesses.",
+      },
+    ],
+  });
+  const inputs = [];
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      emitAssistantJson(onEvent, {
+        roles: [],
+        queries_run: [{ prompt_id: "p1", query: "hospitality operations", status: "completed" }],
+      });
+      return { ok: true };
+    },
+  });
+
+  assert.ok(
+    inputs[0].search_plan.query_hints.some(({ query }) =>
+      query.includes('"Operations Manager, Food & Beverage"')
+    ),
+    JSON.stringify(inputs[0].search_plan)
+  );
+});
+
+test("runAiWebSearch partitions all five explicit bar titles across two bounded hints", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: false,
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  const titles = [
+    "Bar Manager",
+    "Assistant Bar Manager",
+    "Bar Operations Lead",
+    "Lead Bartender",
+    "Head Bartender",
+  ];
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Bar leadership", titles }],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      {
+        id: "p1",
+        text: "Find currently active Bar Manager, Assistant Bar Manager, Bar Operations Lead, Lead Bartender, and Head Bartender openings in New York City.",
+      },
+    ],
+  });
+  const inputs = [];
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      emitAssistantJson(onEvent, {
+        roles: [],
+        queries_run: [{ prompt_id: "p1", query: "bar leadership", status: "completed" }],
+      });
+      return { ok: true };
+    },
+  });
+
+  const hints = inputs[0].search_plan.query_hints;
+  assert.equal(hints.length, 2);
+  for (const { query } of hints) {
+    assert.ok(query.length <= 100, query);
+    assert.equal((query.match(/"/g) || []).length % 2, 0, query);
+    assert.equal((query.match(/\(/g) || []).length, (query.match(/\)/g) || []).length, query);
+  }
+  for (const title of titles) {
+    assert.equal(
+      hints.filter(({ query }) => query.includes(`"${title}"`)).length,
+      1,
+      `${title}: ${JSON.stringify(hints)}`
+    );
+  }
+});
+
+test("runAiWebSearch drops optional clauses before clipping one whole configured title", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  const title =
+    "Principal Customer Platform Reliability and Distributed Systems Operations Engineering Manager";
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: false,
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Platform leadership", titles: [title] }],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [{ id: "p1", text: `Find ${title} openings in New York City.` }],
+  });
+  const inputs = [];
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      emitAssistantJson(onEvent, {
+        roles: [],
+        queries_run: [{ prompt_id: "p1", query: "platform leadership", status: "completed" }],
+      });
+      return { ok: true };
+    },
+  });
+
+  for (const { query } of inputs[0].search_plan.query_hints) {
+    assert.ok(query.length <= 100, query);
+    assert.equal((query.match(/"/g) || []).length % 2, 0, query);
+    assert.equal((query.match(/\(/g) || []).length, (query.match(/\)/g) || []).length, query);
+    assert.match(query, new RegExp(`^"${title}"(?: |$)`));
+    assert.doesNotMatch(query, /New York, NY/);
+  }
+});
+
+test("runAiWebSearch clips at a word boundary only when one title cannot fit by itself", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  const title =
+    "Principal Customer Platform Reliability and Distributed Systems Operations Engineering Management Strategy Director";
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: false,
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Platform leadership", titles: [title] }],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [{ id: "p1", text: `Find ${title} openings in New York City.` }],
+  });
+  const inputs = [];
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      emitAssistantJson(onEvent, {
+        roles: [],
+        queries_run: [{ prompt_id: "p1", query: "platform leadership", status: "completed" }],
+      });
+      return { ok: true };
+    },
+  });
+
+  for (const { query } of inputs[0].search_plan.query_hints) {
+    assert.ok(query.length <= 100, query);
+    const clippedTitle = query.match(/^"([^"]+)"$/)?.[1];
+    assert.ok(clippedTitle, query);
+    assert.notEqual(clippedTitle, title);
+    assert.equal(title.startsWith(`${clippedTitle} `), true, query);
+  }
+});
+
+test("runAiWebSearch partitions an unsplittable pair into one whole title per hint", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  const titles = [
+    "Principal Platform Reliability and Distributed Systems Operations Program Manager",
+    "Principal Infrastructure Reliability and Distributed Systems Operations Program Manager",
+  ];
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: false,
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Platform leadership", titles }],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [{ id: "p1", text: `Find ${titles.join(" and ")} openings in New York City.` }],
+  });
+  const inputs = [];
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      emitAssistantJson(onEvent, {
+        roles: [],
+        queries_run: [{ prompt_id: "p1", query: "platform leadership", status: "completed" }],
+      });
+      return { ok: true };
+    },
+  });
+
+  const hints = inputs[0].search_plan.query_hints;
+  for (const { query } of hints) {
+    assert.ok(query.length <= 100, query);
+    assert.equal((query.match(/"/g) || []).length % 2, 0, query);
+    assert.equal((query.match(/\(/g) || []).length, (query.match(/\)/g) || []).length, query);
+  }
+  for (const title of titles) {
+    assert.equal(
+      hints.filter(({ query }) => query.includes(`"${title}"`)).length,
+      1,
+      `${title}: ${JSON.stringify(hints)}`
+    );
+  }
 });
 
 test("runAiWebSearch keeps a configured core title in query hints beside longer siblings", async () => {
@@ -1484,9 +2149,15 @@ test("AI web-search skill gives each saved prompt a small exploration budget", (
   assert.match(skill, /query_hints.*(?:in order|exactly)/i);
   assert.match(skill, /never emit an aggregator search\/results page/i);
   assert.match(skill, /employer-owned career|employer career/i);
+  assert.match(skill, /source_hints.*(?:never|do not).*(?:another|extra).*(?:query|search)/i);
   assert.match(skill, /at least two (?:different )?(?:source )?hosts/i);
   assert.match(skill, /no more than one candidate from the same third-party host/i);
   assert.match(skill, /do not stop after (?:the )?first (?:viable )?(?:lead|match)/i);
+  assert.match(skill, /every successfully fetched posting-specific URL.*accounted/i);
+  assert.match(skill, /roles\[\].*rejected_postings\[\]/i);
+  assert.match(skill, /never silently drop a fetched exact posting/i);
+  assert.match(skill, /rejected_postings\[\].*four-fetch turn limit/i);
+  assert.match(skill, /correction.*do not run WebSearch, WebFetch, or any other tool/i);
 });
 
 test("AI web-search skill preserves only posting-specific blocked leads as unverified partials", () => {
@@ -2119,6 +2790,29 @@ test("runAiWebSearch requalifies canonical job facts before capture", async () =
   assert.equal(result.new, 0);
   assert.equal(result.disqualified, 3);
   assert.deepEqual(result.reasonCounts, { location: 2, salary: 1 });
+  assert.deepEqual(result.canonicalDisqualifications, [
+    {
+      company: "Stealth Startup",
+      title: "Founding Software Engineer",
+      url: "https://jobs.example.test/stealth",
+      location: "San Francisco, CA (Remote)",
+      reason: "onsite-not-allowed",
+    },
+    {
+      company: "David",
+      title: "Software Engineer, AI & Internal Tools",
+      url: "https://jobs.example.test/david",
+      location: "New York, NY (Remote)",
+      reason: "office-days-exceed-preference",
+    },
+    {
+      company: "Credence",
+      title: "AI Software Engineer",
+      url: "https://jobs.example.test/credence",
+      location: "Tysons Corner, VA (Remote)",
+      reason: "comp-below-floor",
+    },
+  ]);
   assert.equal(readDbScannerRows({ repoRoot }).length, 0);
   assert.equal(existsSync(userPath({ repoRoot }, "workspace/jobs")), false);
 });
@@ -5114,6 +5808,314 @@ test("runAiWebSearch reports exact failed saved prompts and successful queries",
       error: "search timed out",
     },
   ]);
+});
+
+test("runAiWebSearch prioritizes prompt-matched enabled public source hints within the fixed query budget", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: { home: "New York, NY", remote: false, hybrid: true, onsite: true },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Field operations", titles: ["Field Operations Manager"] }],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [{ id: "p1", text: "Find Field Operations Manager jobs in New York City" }],
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "specialist.example",
+          source_type: "browser",
+          label: "Field Operations Manager board",
+          url: "https://specialist.example/jobs?role=field-operations",
+          enabled: true,
+        },
+        {
+          provider: "other.example",
+          source_type: "browser",
+          label: "Other roles",
+          url: "https://other.example/jobs",
+          enabled: true,
+        },
+        {
+          provider: "disabled.example",
+          source_type: "browser",
+          label: "Field Operations Manager disabled",
+          url: "https://disabled.example/jobs",
+          enabled: false,
+        },
+        {
+          provider: "skipped.example",
+          source_type: "browser",
+          label: "Field Operations Manager skipped",
+          url: "https://skipped.example/jobs",
+          enabled: true,
+          login_skipped: true,
+        },
+        {
+          provider: "private.example",
+          source_type: "browser",
+          label: "Field Operations Manager private",
+          url: "http://127.0.0.1/jobs",
+          enabled: true,
+        },
+      ],
+    },
+  });
+  const inputs = [];
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      emitAssistantJson(onEvent, {
+        roles: [],
+        queries_run: [{ prompt_id: "p1", query: "field operations", status: "completed" }],
+      });
+      return { ok: true };
+    },
+  });
+
+  const plan = inputs[0].search_plan;
+  assert.equal(plan.query_hints.length, 2);
+  assert.equal(plan.source_hints[0], "specialist.example");
+  assert.ok(plan.source_hints.includes("other.example"));
+  assert.doesNotMatch(
+    JSON.stringify(plan),
+    /disabled\.example|skipped\.example|127\.0\.0\.1|role=field-operations/
+  );
+  assert.match(plan.query_hints[1].query, /site:specialist\.example/);
+  for (const { query } of plan.query_hints) {
+    assert.ok(query.length <= 100, query);
+    assert.equal((query.match(/"/g) || []).length % 2, 0, query);
+    assert.equal((query.match(/\(/g) || []).length, (query.match(/\)/g) || []).length, query);
+  }
+});
+
+test("runAiWebSearch recovery excludes a rejected common ATS host and keeps one source snapshot", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Field operations", titles: ["Field Operations Manager"] }],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [{ id: "p1", text: "Find Field Operations Manager jobs" }],
+  });
+  const firstSourceConfig = {
+    searches: [
+      {
+        provider: "greenhouse",
+        source_type: "browser",
+        label: "Field Operations Manager one",
+        url: "https://job-boards.greenhouse.io/550/jobs/5186736008",
+        enabled: true,
+      },
+      {
+        provider: "source-two.example",
+        source_type: "browser",
+        label: "Field Operations Manager two",
+        url: "https://source-two.example/jobs",
+        enabled: true,
+      },
+    ],
+  };
+  sourceConfigPut({ repoRoot, name: "search-sources", data: firstSourceConfig });
+  const rejectedUrls = new Set([
+    "https://job-boards.greenhouse.io/550/jobs/5186736008",
+    "https://job-boards.greenhouse.io/550/jobs/4919621008",
+  ]);
+  const inputs = [];
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      if (inputs.length === 1) {
+        sourceConfigPut({
+          repoRoot,
+          name: "search-sources",
+          data: {
+            searches: [
+              ...firstSourceConfig.searches,
+              {
+                provider: "source-three.example",
+                source_type: "browser",
+                label: "Field Operations Manager three",
+                url: "https://source-three.example/jobs",
+                enabled: true,
+              },
+            ],
+          },
+        });
+      }
+      emitAssistantJson(onEvent, {
+        roles:
+          inputs.length === 1
+            ? [
+                role({
+                  company: "Expired Field One",
+                  title: "Field Operations Manager",
+                  url: [...rejectedUrls][0],
+                }),
+                role({
+                  company: "Expired Field Two",
+                  title: "Field Operations Manager",
+                  url: [...rejectedUrls][1],
+                }),
+              ]
+            : [1, 2, 3].map((index) =>
+                role({
+                  company: `Fresh Field ${index}`,
+                  title: "Field Operations Manager",
+                  url: `https://source-two.example/jobs/fresh-${index}`,
+                })
+              ),
+        queries_run: [
+          {
+            prompt_id: kickoff.prompts[0].id,
+            query: `field query ${inputs.length}`,
+            status: "completed",
+          },
+        ],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: async (url) =>
+      rejectedUrls.has(url)
+        ? specificResolution(url, {
+            title: "Field Operations Manager",
+            liveness: { result: "expired", reason: "The posting is no longer active." },
+          })
+        : specificResolution(url, {
+            title: "Field Operations Manager",
+            liveness: { result: "active", reason: "visible apply control" },
+          }),
+  });
+
+  const initialPlan = inputs[0].search_plan;
+  const recoveryPlan = JSON.parse(inputs[1].split("\n\n", 1)[0]).search_plan;
+  assert.equal(initialPlan.source_hints[0], "job-boards.greenhouse.io");
+  assert.doesNotMatch(
+    JSON.stringify(recoveryPlan.source_hints),
+    /job-boards\.greenhouse\.io|source-three\.example/
+  );
+  assert.doesNotMatch(
+    JSON.stringify(recoveryPlan.query_hints),
+    /job-boards\.greenhouse\.io|source-three\.example/
+  );
+  assert.equal(recoveryPlan.source_hints[0], "source-two.example");
+  assert.match(recoveryPlan.query_hints[1].query, /site:source-two\.example/);
+  assert.equal(recoveryPlan.query_hints.length, 2);
+  assert.ok(recoveryPlan.query_hints.every(({ query }) => query.length <= 100));
+});
+
+test("runAiWebSearch top-up prioritizes the configured source for the missing title", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        {
+          name: "Operations leadership",
+          titles: ["Field Operations Manager", "Venue Services Manager"],
+        },
+      ],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [{ id: "p1", text: "Find Field Operations Manager and Venue Services Manager jobs" }],
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "field.example",
+          source_type: "browser",
+          label: "Field Operations Manager board",
+          url: "https://field.example/jobs",
+          enabled: true,
+        },
+        {
+          provider: "venue.example",
+          source_type: "browser",
+          label: "Venue Services Manager board",
+          url: "https://venue.example/jobs",
+          enabled: true,
+        },
+      ],
+    },
+  });
+  const inputs = [];
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      emitAssistantJson(onEvent, {
+        roles:
+          inputs.length === 1
+            ? [
+                role({
+                  company: "Initial Field",
+                  title: "Field Operations Manager",
+                  url: "https://field.example/jobs/initial",
+                }),
+              ]
+            : [1, 2].map((index) =>
+                role({
+                  company: `Fresh Venue ${index}`,
+                  title: "Venue Services Manager",
+                  url: `https://venue.example/jobs/fresh-${index}`,
+                })
+              ),
+        queries_run: [
+          {
+            prompt_id: kickoff.prompts[0].id,
+            query: `operations query ${inputs.length}`,
+            status: "completed",
+          },
+        ],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver({
+      liveness: { result: "active", reason: "visible apply control" },
+    }),
+  });
+
+  const topUpPlan = JSON.parse(inputs[1].split("\n\n", 1)[0]).search_plan;
+  assert.equal(topUpPlan.source_hints[0], "venue.example");
+  assert.match(topUpPlan.query_hints[1].query, /site:venue\.example/);
+  assert.equal(topUpPlan.query_hints.length, 2);
+  assert.ok(topUpPlan.query_hints.every(({ query }) => query.length <= 100));
 });
 
 test("runAiWebSearch throws only its documented missing-DB and missing-prompt preconditions", async () => {

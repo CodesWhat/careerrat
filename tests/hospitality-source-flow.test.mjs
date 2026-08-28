@@ -292,3 +292,46 @@ test("hospitality title-query boards cover a bounded deduplicated set of target 
     1
   );
 });
+
+test("hospitality title-query boards allocate the bounded title cap across role buckets", () => {
+  const config = buildSearchSources(
+    {
+      ...targeting,
+      role_buckets: [
+        {
+          name: "Bar leadership",
+          priority: "primary",
+          titles: ["Bar Manager", "Assistant Bar Manager", "Bar Operations Lead", "Lead Bartender"],
+        },
+        {
+          name: "Hospitality operations",
+          priority: "secondary",
+          titles: ["Operations Manager, Food & Beverage", "Assistant General Manager"],
+        },
+        {
+          name: "Event and venue operations",
+          priority: "adjacent",
+          titles: ["Event Operations Manager", "Venue Operations Manager"],
+        },
+      ],
+    },
+    profile
+  );
+  const queryProviders = new Set(["oysterlink", "hcareers", "hospitalityonline"]);
+  const queriesByProvider = Object.groupBy(
+    config.searches.filter((source) => queryProviders.has(source.provider)),
+    (source) => source.provider
+  );
+
+  for (const provider of queryProviders) {
+    assert.deepEqual(
+      queriesByProvider[provider].map((source) => source.label.split(" · ").at(-1)),
+      [
+        "Bar Manager",
+        "Operations Manager, Food & Beverage",
+        "Event Operations Manager",
+        "Assistant Bar Manager",
+      ]
+    );
+  }
+});
