@@ -20,6 +20,7 @@ import { healSearchSourceConfig } from "../src/core/onboarding/first-search-run.
 import { runAiWebSearch } from "../src/core/search/ai-web-search.mjs";
 import { saveSearchPrompts } from "../src/core/search/search-prompts.mjs";
 import {
+  annotateCanonicalReadableRows,
   buildLiveSearchReceipt,
   LIVE_SEARCH_RECEIPT_DIRECTORY,
   liveSearchReceiptFilename,
@@ -132,7 +133,10 @@ function roleMatchesBucket(role, bucket) {
 
 function presentedSetReceipt({ fixture, result, rows }) {
   const presentedRows = rows.filter(
-    (row) => Number.isFinite(Number(row.fitScore)) && Number(row.fitScore) >= result.fitFloor
+    (row) =>
+      row.canonicalReadable === true &&
+      Number.isFinite(Number(row.fitScore)) &&
+      Number(row.fitScore) >= result.fitFloor
   );
   const presentedRoleCount = new Set(
     presentedRows
@@ -356,18 +360,21 @@ try {
       if (event?.message) console.error(`[${runtimeId}/${fixtureId}] ${event.message}`);
     },
   });
-  const rows = readDbScannerRows({ repoRoot, env })
-    .filter((row) => row.source === "ai-web-search")
-    .map((row) => ({
-      company: row.company,
-      role: row.role,
-      location: row.loc,
-      fitScore: row.fitScore,
-      partial: row.scanner?.bodyPartial === true,
-      qualificationUnknowns: row.scanner?.qualificationUnknowns || [],
-      unverified: row.scanner?.unverified === true,
-      source: row.link,
-    }));
+  const rows = annotateCanonicalReadableRows({
+    rows: readDbScannerRows({ repoRoot, env })
+      .filter((row) => row.source === "ai-web-search")
+      .map((row) => ({
+        company: row.company,
+        role: row.role,
+        location: row.loc,
+        fitScore: row.fitScore,
+        partial: row.scanner?.bodyPartial === true,
+        qualificationUnknowns: row.scanner?.qualificationUnknowns || [],
+        unverified: row.scanner?.unverified === true,
+        source: row.link,
+      })),
+    sources: result.sources,
+  });
   const usefulSet = presentedSetReceipt({ fixture, result, rows });
   const summary = safeResult(result);
   const completedAt = new Date().toISOString();

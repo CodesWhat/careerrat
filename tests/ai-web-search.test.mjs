@@ -4894,6 +4894,113 @@ test("runAiWebSearch tops up an underfilled three-prompt useful set once on the 
   );
 });
 
+test("runAiWebSearch tops up a useful set made only of deferred posting leads", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: false,
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        { name: "Bar leadership", titles: ["Bar Manager", "Head Bartender"] },
+        { name: "Hospitality operations", titles: ["Assistant General Manager"] },
+      ],
+      fit_bands: { fit_floor: 65 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      {
+        id: "p1",
+        text: "Find Bar Manager, Head Bartender, and Assistant General Manager jobs in New York City",
+      },
+    ],
+  });
+
+  const blockedRoles = [
+    ["Bar One", "Bar Manager", "blocked-bar-manager"],
+    ["Bar Two", "Head Bartender", "blocked-head-bartender"],
+    ["Restaurant Three", "Assistant General Manager", "blocked-assistant-manager"],
+  ].map(([company, title, id]) =>
+    role({
+      company,
+      title,
+      location: "New York, NY",
+      url: `https://www.indeed.com/viewjob?jk=${id}`,
+      body_text: null,
+      body_partial: true,
+    })
+  );
+  const readableRoles = [
+    ["Bar Four", "Bar Manager", "bar-manager"],
+    ["Bar Five", "Head Bartender", "head-bartender"],
+    ["Restaurant Six", "Assistant General Manager", "assistant-general-manager"],
+  ].map(([company, title, slug]) =>
+    role({
+      company,
+      title,
+      location: "New York, NY",
+      url: `https://${slug}.example/jobs/${slug}`,
+    })
+  );
+  const inputs = [];
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      emitAssistantJson(onEvent, {
+        roles: typeof input === "string" ? readableRoles : blockedRoles,
+        queries_run: [
+          {
+            prompt_id: kickoff.prompts[0].id,
+            query: typeof input === "string" ? "direct employer hospitality jobs" : "NYC jobs",
+            status: "completed",
+          },
+        ],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: async (url) =>
+      url.includes("indeed.com")
+        ? {
+            bodyFetchStatus: "deferred",
+            url,
+            reason: "The exact posting requires a browser session.",
+          }
+        : specificResolution(url, {
+            location: "New York, NY",
+            liveness: { result: "active", reason: "visible apply control" },
+          }),
+  });
+
+  assert.equal(inputs.length, 2);
+  assert.equal(typeof inputs[1], "string");
+  assert.match(inputs[1], /exact posting requires a browser session/i);
+  assert.match(inputs[1], /"rejected_source_hosts":\["www\.indeed\.com"\]/);
+  assert.equal(result.new, 6, JSON.stringify(result));
+  assert.equal(result.partial, 3, JSON.stringify(result));
+  assert.equal(result.presented, 3, JSON.stringify(result));
+  assert.equal(
+    readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search").length,
+    6
+  );
+});
+
 test("runAiWebSearch replaces a canonical row that cannot form a complete presented result", async () => {
   const repoRoot = repo({ prompts: 3 });
   candidateConfigPatch({

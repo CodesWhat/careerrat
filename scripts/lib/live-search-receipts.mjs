@@ -75,15 +75,48 @@ function rowIdentity({ runtimeId, fixtureId, company, role, location, source }) 
     .digest("hex");
 }
 
+function normalizedHttpUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    url.hash = "";
+    return url.href;
+  } catch {
+    return raw;
+  }
+}
+
+export function annotateCanonicalReadableRows({ rows, sources } = {}) {
+  const readableUrls = new Set();
+  for (const source of Array.isArray(sources) ? sources : []) {
+    if (source?.status !== "completed") continue;
+    for (const value of [source.url, source.canonicalUrl]) {
+      const url = normalizedHttpUrl(value);
+      if (url) readableUrls.add(url);
+    }
+  }
+  return (Array.isArray(rows) ? rows : []).map((row) => ({
+    ...row,
+    canonicalReadable: readableUrls.has(normalizedHttpUrl(row?.source)),
+  }));
+}
+
 function automaticRows({ runtimeId, fixtureId, rows, fitFloor }) {
   return (rows || [])
-    .filter((row) => Number.isFinite(Number(row.fitScore)) && Number(row.fitScore) >= fitFloor)
+    .filter(
+      (row) =>
+        row.canonicalReadable === true &&
+        Number.isFinite(Number(row.fitScore)) &&
+        Number(row.fitScore) >= fitFloor
+    )
     .map((row) => ({
       identity: rowIdentity({ runtimeId, fixtureId, ...row }),
       company: String(row.company || "").trim(),
       role: String(row.role || "").trim(),
       location: String(row.location || "").trim(),
       fitScore: Number(row.fitScore),
+      canonicalReadable: true,
       unverified: row.unverified === true,
       source: String(row.source || "").trim(),
     }));
@@ -213,6 +246,9 @@ function assertReceipt(receipt, { requireManualLiveness = true } = {}) {
     }
     if (!Number.isFinite(row.fitScore) || row.fitScore < NATIVE_AI_SEARCH_ACCEPTANCE.fitFloor) {
       throw new Error(`${combination} contains a row below the visible fit floor.`);
+    }
+    if (row.canonicalReadable !== true) {
+      throw new Error(`${combination} contains a row without canonical readable evidence.`);
     }
     if (row.unverified !== true) {
       throw new Error(`${combination} does not preserve the AI unverified state.`);

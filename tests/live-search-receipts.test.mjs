@@ -14,6 +14,7 @@ function resultRows(fixtureId) {
     role: `${fixtureId} role ${index + 1}`,
     location: index === 0 ? "New York, NY" : "Remote, United States",
     fitScore: 80 - index,
+    canonicalReadable: true,
     unverified: true,
     source: `https://jobs.example.test/${fixtureId}/${index + 1}`,
   }));
@@ -158,4 +159,75 @@ test("native AI search review must name every exact emitted row identity", async
       }),
     /every exact row identity/i
   );
+});
+
+test("native AI search receipts count only canonically readable persisted rows", async () => {
+  const receiptModule = await loadReceiptModule();
+  assert.equal(typeof receiptModule.annotateCanonicalReadableRows, "function");
+  const blockedRows = resultRows("hospitality").map((row, index) => ({
+    ...row,
+    company: `Blocked company ${index + 1}`,
+    source: `https://www.indeed.com/viewjob?jk=blocked-${index + 1}`,
+  }));
+  const readableRows = resultRows("hospitality");
+  const rows = receiptModule.annotateCanonicalReadableRows({
+    rows: [...blockedRows, ...readableRows],
+    sources: [
+      ...blockedRows.map((row) => ({ url: row.source, status: "deferred" })),
+      ...readableRows.map((row) => ({ url: row.source, status: "completed" })),
+    ],
+  });
+
+  assert.equal(rows.length, 6, "the diagnostic must retain every persisted row");
+  assert.deepEqual(
+    rows.map((row) => row.canonicalReadable),
+    [false, false, false, true, true, true]
+  );
+
+  const receipt = receiptModule.buildLiveSearchReceipt({
+    sourceRevision: SOURCE_REVISION,
+    runtimeId: "codex",
+    fixtureId: "hospitality",
+    providerFallback: false,
+    completedAt: "2026-08-27T12:00:00.000Z",
+    summary: { presented: 3, fitFloor: 65, errors: [], failedPromptIds: [] },
+    usefulSet: {
+      presentedRoleCount: 3,
+      presentedBucketCount: 2,
+      presentedBuckets: ["primary", "secondary"],
+    },
+    rows,
+  });
+
+  assert.equal(receipt.counts.presentedRows, 3);
+  assert.equal(receipt.rows.length, 3);
+  assert.ok(receipt.rows.every((row) => row.canonicalReadable === true));
+  assert.ok(receipt.rows.every((row) => row.source.includes("jobs.example.test")));
+  assert.equal(receiptModule.verifyLiveSearchReceiptForReview(receipt), "codex/hospitality");
+  assert.equal(receipt.manualLiveness.verified, false);
+});
+
+test("deferred-only native AI search evidence cannot become review-ready", async () => {
+  const receiptModule = await loadReceiptModule();
+  const rows = resultRows("engineering").map((row) => ({
+    ...row,
+    canonicalReadable: false,
+  }));
+  const receipt = receiptModule.buildLiveSearchReceipt({
+    sourceRevision: SOURCE_REVISION,
+    runtimeId: "codex",
+    fixtureId: "engineering",
+    providerFallback: false,
+    completedAt: "2026-08-27T12:00:00.000Z",
+    summary: { presented: 0, fitFloor: 65, errors: [], failedPromptIds: [] },
+    usefulSet: { presentedRoleCount: 0, presentedBucketCount: 0, presentedBuckets: [] },
+    rows,
+  });
+
+  assert.equal(receipt.rows.length, 0);
+  assert.throws(
+    () => receiptModule.verifyLiveSearchReceiptForReview(receipt),
+    /too few presented rows/i
+  );
+  assert.equal(receipt.manualLiveness.verified, false);
 });

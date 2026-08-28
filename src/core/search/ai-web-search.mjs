@@ -157,10 +157,15 @@ function offerHasCompletePresentationIdentity(offer, options) {
   return missingPresentationIdentityFields(offer, options).length === 0;
 }
 
+function offerHasReadableCanonicalEvidence(offer) {
+  return offer?.bodyFetchStatus !== "deferred";
+}
+
 function offerCanBePresented(offer, fitFloor, options) {
   const score = Number(offer?.score);
   return (
     offerHasCompletePresentationIdentity(offer, options) &&
+    offerHasReadableCanonicalEvidence(offer) &&
     Number.isFinite(score) &&
     score >= fitFloor
   );
@@ -1647,6 +1652,13 @@ export async function runAiWebSearch({
       addPostingIdentity(seenPostingKeys, canonicalOffer);
       canonicalCandidates.push(canonicalOffer);
       canonicalPromptIds.add(promptId);
+      if (canonicalOffer.bodyFetchStatus === "deferred") {
+        const reason =
+          canonicalOffer.bodyFetchReason ||
+          "The exact posting could not be read without a browser session.";
+        if (!rejectionsByPrompt.has(promptId)) rejectionsByPrompt.set(promptId, []);
+        rejectionsByPrompt.get(promptId).push({ offer: canonicalOffer, reason });
+      }
     }
 
     return { canonicalPromptIds, receiptPromptIds, rejectionsByPrompt };
@@ -2018,7 +2030,9 @@ export async function runAiWebSearch({
     searched: selected.length,
     found: roles.length,
     new: persistedOffers.length,
-    presented: persistedOffers.filter((offer) => offerMeetsFitFloor(offer, fitFloor)).length,
+    presented: persistedOffers.filter((offer) =>
+      offerCanBePresented(offer, fitFloor, presentationIdentityOptions)
+    ).length,
     fitFloor,
     duplicates,
     invalid,

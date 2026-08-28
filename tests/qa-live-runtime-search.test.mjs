@@ -111,6 +111,19 @@ test("completed native AI searches emit diagnostics before the release gate writ
   assert.equal(script.match(/writeFileSync\(receiptPath/g)?.length, 1);
 });
 
+test("native AI search diagnostics retain every persisted row while receipts use canonical readback", () => {
+  const script = readFileSync(
+    new URL("../scripts/qa-live-runtime-search.mjs", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(script, /annotateCanonicalReadableRows/);
+  assert.match(script, /sources:\s*result\.sources/);
+  assert.match(script, /const usefulSet = presentedSetReceipt\([\s\S]*rows/);
+  assert.match(script, /kind: "native-ai-search-diagnostic"[\s\S]*rows/);
+  assert.doesNotMatch(script, /reviewLiveSearchReceipt/);
+});
+
 test("failed native AI search acceptance preserves bounded row diagnostics before cleanup", () => {
   const script = readFileSync(
     new URL("../scripts/qa-live-runtime-search.mjs", import.meta.url),
