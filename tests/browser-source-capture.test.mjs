@@ -580,6 +580,29 @@ test("captureBrowserSearchSource reports unavailable app browser without consent
   assert.doesNotMatch(result.errors[0].error, /consent|permission|automation/i);
 });
 
+test("captureBrowserSearchSource refuses Orca before opening a job-site URL without interception", async () => {
+  let opened = false;
+  const result = await captureBrowserSearchSource({
+    source: source(),
+    session: {
+      available: true,
+      provider: "orca",
+      networkBoundary: "untrusted",
+      async open() {
+        opened = true;
+        throw new Error("must not open");
+      },
+    },
+    resolvePublicTargetImpl: resolvePublic,
+  });
+
+  assert.equal(opened, false);
+  assert.equal(result.offers.length, 0);
+  assert.equal(result.needsLogin, null);
+  assert.match(result.errors[0].error, /can't safely use the Orca browser/i);
+  assert.doesNotMatch(result.errors[0].error, /permission|consent/i);
+});
+
 test("captureBrowserSearchSource rejects a source whose hostname resolves to a private address", async () => {
   let opened = false;
   const result = await captureBrowserSearchSource({

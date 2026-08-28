@@ -77,10 +77,10 @@ export function detectPlaywrightTooling(dependencies = {}) {
 
 // `automatedApply` marks whether `apply-job`'s scripted/headless apply path
 // (createConfiguredApplyExecutor, src/core/apply/apply-executor-factory.mjs) can
-// drive this provider. `extension` is agent-driven, turn-by-turn only — it still
-// works for interactive, in-the-loop browsing (skills reading pages, agent-driven
-// apply while an agent is live) but has no callable surface for a headless script,
-// so automatic apply on this provider is not available yet.
+// drive this provider. `extension` is agent-driven, turn-by-turn only and has no
+// callable surface for a headless script. Orca is callable, but its browser CLI
+// cannot intercept and pin each request before it leaves the browser. Both remain
+// available for supervised browsing while automatic apply stays unavailable.
 export const PROVIDERS = {
   auto: {
     id: "auto",
@@ -104,7 +104,7 @@ export const PROVIDERS = {
     preferred: false,
     needs: "CareerRat running inside an Orca workspace with its browser available",
     storesCreds: false,
-    automatedApply: true,
+    automatedApply: false,
   },
   playwright: {
     id: "playwright",

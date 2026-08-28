@@ -17,6 +17,7 @@
 // Orca-shaped and out of scope here, so this module produces text it already
 // understands instead of leaving upload targets undetectable under this provider.
 
+import { createPublicBrowserProxy } from "../net/public-browser-proxy.mjs";
 import { resolvePublicHttpTarget } from "../net/public-http-fetch.mjs";
 import { abortableDelay, runAbortable, throwIfAborted } from "./cancellation.mjs";
 import { uniqueVoluntaryDeclineOption } from "./form-fill.mjs";
@@ -59,14 +60,47 @@ const TYPEAHEAD_SETTLE_DELAY_MS = 700;
 // least-recently-used tab is closed to free real browser resources.
 const MAX_OPEN_PAGES = 8;
 
-async function defaultLaunch({ profileDir, headless, channel }) {
-  const { chromium } = await import("playwright");
-  return chromium.launchPersistentContext(profileDir, {
-    headless,
-    ...(channel ? { channel } : {}),
-    viewport: { width: 1440, height: 1100 },
-  });
+export async function launchPublicPlaywrightContext({
+  profileDir,
+  headless,
+  channel,
+  createProxyImpl = createPublicBrowserProxy,
+  loadPlaywrightImpl = () => import("playwright"),
+} = {}) {
+  const proxy = await createProxyImpl();
+  try {
+    const { chromium } = await loadPlaywrightImpl();
+    const context = await chromium.launchPersistentContext(profileDir, {
+      headless,
+      ...(channel ? { channel } : {}),
+      viewport: { width: 1440, height: 1100 },
+      proxy: { server: proxy.url },
+      serviceWorkers: "block",
+      args: [
+        "--proxy-bypass-list=<-loopback>",
+        "--disable-quic",
+        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+      ],
+    });
+    const closeContext = context.close.bind(context);
+    let closed = false;
+    context.close = async (...args) => {
+      if (closed) return;
+      closed = true;
+      try {
+        await closeContext(...args);
+      } finally {
+        await proxy.close();
+      }
+    };
+    return context;
+  } catch (error) {
+    await proxy.close();
+    throw error;
+  }
 }
+
+const defaultLaunch = launchPublicPlaywrightContext;
 
 // Runs against the live matched elements (already in DOM/selector order, same
 // order `container.nth(index)` addresses). Self-contained — every helper is
@@ -690,13 +724,20 @@ export function createPlaywrightOps({
           if (typeof context?.route === "function") {
             await context.route("**/*", async (route) => {
               const request = route.request();
-              if (request?.isNavigationRequest?.() !== true) {
+              let protocol = "";
+              try {
+                protocol = new URL(request.url()).protocol;
+              } catch {
+                await route.abort("blockedbyclient");
+                return;
+              }
+              if (protocol !== "http:" && protocol !== "https:") {
                 await route.continue();
                 return;
               }
               const target = await resolvePublicTargetImpl(request.url());
               if (!target?.ok) {
-                const frame = request?.frame?.();
+                const frame = request?.isNavigationRequest?.() === true && request?.frame?.();
                 if (frame && typeof frame === "object") {
                   blockedNavigationByFrame.set(frame, {
                     url: request.url(),
@@ -769,6 +810,7 @@ export function createPlaywrightOps({
   }
 
   return {
+    networkBoundary: "pinned-public-http",
     async openTab({ url, signal }) {
       const context = await getContext(signal);
       let target = null;

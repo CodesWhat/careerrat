@@ -39,6 +39,7 @@ import { ingestAppleMail } from "../core/automation/apple-mail-ingest.mjs";
 import {
   classifyBrowserAuthState,
   createBrowserSessionManager,
+  unsafePublicBrowserReason,
 } from "../core/automation/browser-session.mjs";
 import {
   ingestPlatformMessagesInApp,
@@ -167,6 +168,10 @@ export async function openAuthenticatedSource(
       state: "needs-user",
       summary: `${site} couldn't open in CareerRat. Close and reopen CareerRat, then try again.`,
     };
+  }
+  const unsafeBrowser = unsafePublicBrowserReason(session);
+  if (unsafeBrowser) {
+    return { state: "needs-user", summary: unsafeBrowser };
   }
   try {
     const page = await session.open(initialTarget.url);

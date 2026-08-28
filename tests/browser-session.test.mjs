@@ -66,6 +66,26 @@ test("browser session manager reuses one platform session until it closes", asyn
   assert.equal(closes, 2);
 });
 
+test("configured sessions expose whether every network request has a pinned public boundary", () => {
+  const playwright = createConfiguredBrowserSession({
+    repoRoot: "/repo",
+    env: {},
+    platform: "linkedin",
+    loadAutomationImpl: () => ({ data: { session: { provider: "playwright" } } }),
+    launchImpl: async () => ({ close: async () => {} }),
+  });
+  const orca = createConfiguredBrowserSession({
+    repoRoot: "/repo",
+    env: {},
+    platform: "linkedin",
+    loadAutomationImpl: () => ({ data: { session: { provider: "orca" } } }),
+    runOrcaImpl: async () => ({}),
+  });
+
+  assert.equal(playwright.networkBoundary, "pinned-public-http");
+  assert.equal(orca.networkBoundary, "untrusted");
+});
+
 test("configured Playwright sessions forward an explicit browser channel", async () => {
   let launchOptions = null;
   const page = {

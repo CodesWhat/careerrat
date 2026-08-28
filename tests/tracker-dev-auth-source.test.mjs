@@ -105,6 +105,32 @@ test("authenticated source handoff hides technical browser startup errors", asyn
   );
 });
 
+test("authenticated source handoff refuses Orca before opening a login URL without interception", async () => {
+  let opened = false;
+  const result = await openAuthenticatedSource(
+    {
+      get() {
+        return {
+          available: true,
+          provider: "orca",
+          networkBoundary: "untrusted",
+          async open() {
+            opened = true;
+            throw new Error("must not open");
+          },
+        };
+      },
+    },
+    { platform: "linkedin", url: "https://www.linkedin.com/jobs/search/?keywords=platform" },
+    { resolvePublicTargetImpl: resolvePublic }
+  );
+
+  assert.equal(opened, false);
+  assert.equal(result.state, "needs-user");
+  assert.match(result.summary, /can't safely use the Orca browser/i);
+  assert.doesNotMatch(result.summary, /permission|consent/i);
+});
+
 test("authenticated source handoff refuses a private DNS target before creating a browser session", async () => {
   let sessionRequests = 0;
   const result = await openAuthenticatedSource(

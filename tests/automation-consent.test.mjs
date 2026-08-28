@@ -378,19 +378,19 @@ test("automation consent: auto uses the app-owned Playwright browser outside Orc
   assert.equal(autoOption.automatedApply, true);
 });
 
-test("automation consent: status auto option reports automatedApply:true inside an Orca workspace", () => {
+test("automation consent: status auto option reports automatedApply:false inside an Orca workspace", () => {
   const status = automationStatus({ root: emptyRoot, env: { ORCA_WORKTREE_ID: "worktree-123" } });
   const autoOption = status.session.options.find((o) => o.id === "auto");
   assert.equal(status.session.provider, "auto", "the default config must leave provider on auto");
   assert.equal(status.session.effectiveProvider, "orca");
-  assert.equal(autoOption.automatedApply, true);
+  assert.equal(autoOption.automatedApply, false);
 });
 
 test("automation consent: status options list concrete providers with their fixed automatedApply, unaffected by env", () => {
   const status = automationStatus({ root: emptyRoot, env: {} });
   const byId = Object.fromEntries(status.session.options.map((o) => [o.id, o.automatedApply]));
   assert.equal(byId.extension, false);
-  assert.equal(byId.orca, true);
+  assert.equal(byId.orca, false);
   assert.equal(byId.playwright, true);
 });
 

@@ -27,6 +27,7 @@ function wrapOps(ops, provider) {
   return {
     available: true,
     provider,
+    networkBoundary: ops.networkBoundary || "untrusted",
     get pageId() {
       return pageId;
     },
@@ -76,6 +77,15 @@ function wrapOps(ops, provider) {
       await ops.close?.();
     },
   };
+}
+
+export function unsafePublicBrowserReason(session) {
+  const hasPinnedBoundary = session?.networkBoundary === "pinned-public-http";
+  const isKnownUnsafe = session?.networkBoundary === "untrusted";
+  const isOrcaWithoutBoundary = session?.provider === "orca" && !hasPinnedBoundary;
+  if (!isKnownUnsafe && !isOrcaWithoutBoundary) return null;
+  const label = session?.provider === "orca" ? "the Orca browser" : "that browser connection";
+  return `CareerRat can't safely use ${label} for job-site links. Choose the CareerRat browser in Settings and try again.`;
 }
 
 export function classifyBrowserAuthState(page = {}) {

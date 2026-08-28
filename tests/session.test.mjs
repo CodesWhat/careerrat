@@ -83,6 +83,11 @@ test("Orca is a supported supervised session-browser provider without a credenti
   assert.equal(session.profileRoot, null);
 });
 
+test("Orca does not advertise automatic apply without a trustworthy request boundary", () => {
+  const session = resolveSession({ data: { session: { provider: "orca" } } });
+  assert.equal(session.descriptor.automatedApply, false);
+});
+
 test("automatic session setup uses Orca when CareerRat is running inside Orca", () => {
   assert.equal(PROVIDER_PREFERENCE[0], "auto");
   const session = resolveSession({
@@ -196,17 +201,17 @@ test("describeProviders reports automatedApply:true for app-owned automatic brow
   assert.equal(auto.automatedApply, true);
 });
 
-test("describeProviders reports automatedApply:true for the auto option inside an Orca workspace", () => {
+test("describeProviders reports automatedApply:false for the auto option inside an Orca workspace", () => {
   const providers = describeProviders({ env: { ORCA_WORKTREE_ID: "worktree-123" } });
   const auto = providers.find((p) => p.id === "auto");
-  assert.equal(auto.automatedApply, true);
+  assert.equal(auto.automatedApply, false);
 });
 
 test("describeProviders leaves the concrete providers' automatedApply untouched by env", () => {
   const providers = describeProviders({ env: {} });
   const byId = Object.fromEntries(providers.map((p) => [p.id, p.automatedApply]));
   assert.equal(byId.extension, false);
-  assert.equal(byId.orca, true);
+  assert.equal(byId.orca, false);
   assert.equal(byId.playwright, true);
 });
 

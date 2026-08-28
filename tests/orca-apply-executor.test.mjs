@@ -2192,14 +2192,16 @@ test("configured executor fails the extension provider immediately with an hones
   assert.doesNotMatch(extensionResult.reason, /playwright/i);
 });
 
-test("configured executor connects explicit Orca or automatic Orca detection", async () => {
+test("configured executor refuses explicit or automatically selected Orca before opening a URL", async () => {
+  let orcaCalls = 0;
   const execute = createConfiguredApplyExecutor({
     repoRoot: "/repo",
     env: {},
     mayRunImpl: allowApply,
     loadAutomationImpl: () => ({ data: { session: { provider: "orca" } } }),
     runOrcaImpl: async () => {
-      throw new Error("Orca is not running");
+      orcaCalls += 1;
+      throw new Error("Orca must not be called");
     },
   });
   const result = await execute({
@@ -2209,7 +2211,7 @@ test("configured executor connects explicit Orca or automatic Orca detection", a
   });
   assert.equal(result.available, false);
   assert.equal(result.state, "unavailable");
-  assert.match(result.reason, /Orca is not running/);
+  assert.match(result.reason, /automatic apply isn't available on the .*Orca/i);
 
   const automatic = createConfiguredApplyExecutor({
     repoRoot: "/repo",
@@ -2217,7 +2219,8 @@ test("configured executor connects explicit Orca or automatic Orca detection", a
     mayRunImpl: allowApply,
     loadAutomationImpl: () => ({ data: { session: { provider: "auto" } } }),
     runOrcaImpl: async () => {
-      throw new Error("automatic Orca attempted");
+      orcaCalls += 1;
+      throw new Error("automatic Orca must not be called");
     },
   });
   assert.equal(typeof automatic, "function");
@@ -2226,16 +2229,19 @@ test("configured executor connects explicit Orca or automatic Orca detection", a
     application: {},
     postingUrl: FORM_SNAPSHOT.origin,
   });
-  assert.match(automaticResult.reason, /automatic Orca attempted/);
+  assert.match(automaticResult.reason, /automatic apply isn't available on the .*Orca/i);
+  assert.equal(orcaCalls, 0);
 });
 
 test("configured executor never exposes browser CLI commands in user-facing failures", async () => {
+  let orcaCalls = 0;
   const execute = createConfiguredApplyExecutor({
     repoRoot: "/repo",
     env: {},
     mayRunImpl: allowApply,
     loadAutomationImpl: () => ({ data: { session: { provider: "orca" } } }),
     runOrcaImpl: async () => {
+      orcaCalls += 1;
       throw new Error("Command failed: orca click --page browser-page-123 --element @e9 --json");
     },
   });
@@ -2247,9 +2253,7 @@ test("configured executor never exposes browser CLI commands in user-facing fail
   });
 
   assert.equal(result.state, "unavailable");
-  assert.equal(
-    result.reason,
-    "The Orca supervised browser couldn't open the application. Check Browser automation in Settings and try again."
-  );
+  assert.match(result.reason, /automatic apply isn't available on the .*Orca/i);
   assert.doesNotMatch(result.reason, /orca click|--page|@e9|Command failed/i);
+  assert.equal(orcaCalls, 0);
 });

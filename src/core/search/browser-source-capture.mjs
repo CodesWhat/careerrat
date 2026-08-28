@@ -1,4 +1,7 @@
-import { classifyBrowserAuthState } from "../automation/browser-session.mjs";
+import {
+  classifyBrowserAuthState,
+  unsafePublicBrowserReason,
+} from "../automation/browser-session.mjs";
 import { resolvePublicHttpTarget, validatePublicHttpUrl } from "../net/public-http-fetch.mjs";
 import { resolveBrowserSourceIdentity } from "../providers/search-sources.mjs";
 import { extractReqId } from "../scoring/sourced-identity.mjs";
@@ -332,6 +335,14 @@ export async function captureBrowserSearchSource({
     return {
       offers: [],
       errors: [{ company: label, error: session?.reason || "The app browser is unavailable." }],
+      needsLogin: null,
+    };
+  }
+  const unsafeBrowser = unsafePublicBrowserReason(session);
+  if (unsafeBrowser) {
+    return {
+      offers: [],
+      errors: [{ company: label, error: unsafeBrowser }],
       needsLogin: null,
     };
   }

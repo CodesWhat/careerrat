@@ -7,7 +7,11 @@ import { test } from "node:test";
 import { createApplyDriver, uploadTargetsFromSnapshot } from "../src/core/apply/apply-driver.mjs";
 import { createConfiguredApplyExecutor } from "../src/core/apply/apply-executor-factory.mjs";
 import { createPlaywrightApplyExecutor } from "../src/core/apply/playwright-executor.mjs";
-import { collectControls, createPlaywrightOps } from "../src/core/apply/playwright-ops.mjs";
+import {
+  collectControls,
+  createPlaywrightOps,
+  launchPublicPlaywrightContext,
+} from "../src/core/apply/playwright-ops.mjs";
 import { buildMinimalPdf } from "./fixtures/pdf.mjs";
 
 const GREENHOUSE_URL = "https://job-boards.greenhouse.io/example/jobs/123";
@@ -605,6 +609,84 @@ test("playwright-ops forwards an explicit Chromium channel to the lazy launcher"
   await ops.close();
 
   assert.deepEqual(launches, [{ profileDir: "/tmp/profile", headless: true, channel: "chromium" }]);
+});
+
+test("default Playwright launch blocks service workers and sends every request through the pinned proxy", async () => {
+  let launchOptions = null;
+  let contextClosed = 0;
+  let proxyClosed = 0;
+  const context = {
+    async close() {
+      contextClosed += 1;
+    },
+  };
+  const launched = await launchPublicPlaywrightContext({
+    profileDir: "/tmp/profile",
+    headless: true,
+    channel: "chromium",
+    createProxyImpl: async () => ({
+      url: "http://127.0.0.1:43123",
+      async close() {
+        proxyClosed += 1;
+      },
+    }),
+    loadPlaywrightImpl: async () => ({
+      chromium: {
+        async launchPersistentContext(_profileDir, options) {
+          launchOptions = options;
+          return context;
+        },
+      },
+    }),
+  });
+
+  assert.equal(launchOptions.proxy.server, "http://127.0.0.1:43123");
+  assert.equal(launchOptions.serviceWorkers, "block");
+  assert.ok(launchOptions.args.includes("--proxy-bypass-list=<-loopback>"));
+  assert.ok(launchOptions.args.includes("--disable-quic"));
+  assert.ok(
+    launchOptions.args.includes("--force-webrtc-ip-handling-policy=disable_non_proxied_udp")
+  );
+  await launched.close();
+  assert.equal(contextClosed, 1);
+  assert.equal(proxyClosed, 1);
+});
+
+test("Playwright aborts a private subresource before it leaves the browser", async () => {
+  let routeHandler = null;
+  let privateRequestSent = false;
+  const context = {
+    async route(_pattern, handler) {
+      routeHandler = handler;
+    },
+    async newPage() {
+      return minimalFakePage("https://jobs.example.test/");
+    },
+    async close() {},
+  };
+  const ops = createPlaywrightOps({
+    launchImpl: async () => context,
+    profileDir: "/tmp/profile",
+    resolvePublicTargetImpl: async (rawUrl) =>
+      String(rawUrl).includes("127.0.0.1")
+        ? { ok: false, reason: "private or local host is not fetchable" }
+        : { ok: true, url: new URL(rawUrl).toString() },
+  });
+
+  await ops.openTab({ url: "https://jobs.example.test/" });
+  await routeHandler({
+    request: () => ({
+      url: () => "http://127.0.0.1:7777/internal.json",
+      isNavigationRequest: () => false,
+    }),
+    continue: async () => {
+      privateRequestSent = true;
+    },
+    abort: async () => {},
+  });
+
+  assert.equal(privateRequestSent, false);
+  await ops.close();
 });
 
 test("Playwright aborts a redirected private navigation before the request is sent", async () => {
@@ -1983,13 +2065,15 @@ test("configured executor fails the extension provider immediately with an hones
   assert.doesNotMatch(result.reason, /playwright/i);
 });
 
-test("configured executor still dispatches provider orca to the orca executor", async () => {
+test("configured executor does not dispatch provider orca without a trustworthy request boundary", async () => {
+  let orcaCalls = 0;
   const execute = createConfiguredApplyExecutor({
     repoRoot: "/repo",
     env: {},
     loadAutomationImpl: () => ({ data: { session: { provider: "orca" } } }),
     mayRunImpl: () => ({ allowed: true }),
     runOrcaImpl: async () => {
+      orcaCalls += 1;
       throw new Error("Orca is not running");
     },
   });
@@ -2000,7 +2084,8 @@ test("configured executor still dispatches provider orca to the orca executor", 
     postingUrl: GREENHOUSE_URL,
   });
   assert.equal(result.available, false);
-  assert.match(result.reason, /Orca is not running/);
+  assert.match(result.reason, /automatic apply isn't available on the .*Orca/i);
+  assert.equal(orcaCalls, 0);
 });
 
 test("createPlaywrightApplyExecutor mirrors createOrcaApplyExecutor's composition shape", async () => {

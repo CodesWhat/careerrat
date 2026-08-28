@@ -1,26 +1,31 @@
 import { loadAutomation } from "../automation/consent.mjs";
 import { automaticApplyGap, PROVIDERS, resolveSession } from "../automation/session.mjs";
 import { throwIfAborted } from "./cancellation.mjs";
-import { createOrcaApplyExecutor } from "./orca-executor.mjs";
 import { createPlaywrightApplyExecutor } from "./playwright-executor.mjs";
 
-// The extension provider is agent-driven, turn-by-turn (session.mjs "deliberately
-// drives NOTHING") — it has no callable surface for a headless script to run a
-// form-fill against. Rather than leaving that gap to surface as a silent no-op or
-// a raw error further up the stack, this factory hands back an executor that fails
-// immediately and honestly. The reason text comes from the same core verdict the
-// CLI uses (session.mjs#automaticApplyGap), so the two surfaces can't drift onto
-// different explanations of the same gap.
-function createExtensionApplyExecutor() {
+// Providers without a trustworthy scripted-apply surface fail immediately and
+// honestly here: the extension is agent-driven only, while Orca cannot intercept
+// each outbound browser request before it leaves. The reason text comes from the
+// same core verdict the CLI uses (session.mjs#automaticApplyGap), so the two
+// surfaces can't drift onto different explanations of the same gap.
+function createUnavailableApplyExecutor(provider) {
   const reason =
-    automaticApplyGap("extension")?.reason ??
-    "The browser extension provider doesn't support automatic apply yet.";
+    automaticApplyGap(provider)?.reason ??
+    `The ${PROVIDERS[provider]?.label || provider} provider doesn't support automatic apply yet.`;
   return async () => ({
     available: false,
     verified: false,
     state: "unavailable",
     reason,
   });
+}
+
+function createExtensionApplyExecutor() {
+  return createUnavailableApplyExecutor("extension");
+}
+
+function createOrcaApplyExecutor() {
+  return createUnavailableApplyExecutor("orca");
 }
 
 const EXECUTOR_FACTORIES = {
