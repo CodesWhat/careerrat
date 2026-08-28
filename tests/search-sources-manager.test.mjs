@@ -276,6 +276,33 @@ test("login preflight keeps a durable No quiet on later searches", () => {
   );
 });
 
+test("login preflight ignores ordinary disabled public browser sources", () => {
+  assert.deepEqual(
+    pendingSourceLoginRequests({
+      searches: [
+        {
+          provider: "linkedin.com",
+          platform: "linkedin",
+          source_type: "browser",
+          label: "LinkedIn public search",
+          url: "https://www.linkedin.com/jobs/search/?keywords=operations",
+          enabled: false,
+        },
+        {
+          provider: "indeed.com",
+          platform: "indeed",
+          source_type: "browser",
+          auth: false,
+          label: "Indeed public search",
+          url: "https://www.indeed.com/jobs?q=operations",
+          enabled: false,
+        },
+      ],
+    }),
+    []
+  );
+});
+
 // ---------------------------------------------------------------------------
 // setEnabled — immutability and selector types
 // ---------------------------------------------------------------------------

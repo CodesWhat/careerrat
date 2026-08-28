@@ -24,7 +24,7 @@ function sourceUrl(source) {
 function sourceIdentity(source, url) {
   const identity = resolveBrowserSourceIdentity(source, url);
   if (!identity.ok) return null;
-  if (source?.auth !== true && !identity.knownPlatform) return null;
+  if (source?.auth !== true) return null;
   return identity;
 }
 
