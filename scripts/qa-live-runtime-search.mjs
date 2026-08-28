@@ -354,12 +354,26 @@ try {
     }));
   const usefulSet = presentedSetReceipt({ fixture, result, rows });
   const summary = safeResult(result);
+  const completedAt = new Date().toISOString();
+  console.log(
+    JSON.stringify({
+      schemaVersion: 1,
+      kind: "live-search-diagnostic",
+      sourceRevision,
+      runtimeId,
+      fixtureId,
+      completedAt,
+      summary,
+      usefulSet,
+      rows,
+    })
+  );
   const receipt = buildLiveSearchReceipt({
     sourceRevision,
     runtimeId,
     fixtureId,
     providerFallback: false,
-    completedAt: new Date().toISOString(),
+    completedAt,
     summary,
     usefulSet,
     rows,
@@ -369,7 +383,7 @@ try {
   mkdirSync(receiptDirectory, { recursive: true });
   const receiptPath = join(receiptDirectory, liveSearchReceiptFilename(runtimeId, fixtureId));
   writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
-  console.log(JSON.stringify({ summary, usefulSet, rows, receiptPath }, null, 2));
+  console.log(JSON.stringify({ kind: "live-search-receipt", receiptPath }));
 } catch (error) {
   console.error(`[${runtimeId}/${fixtureId}] ${error?.message || String(error)}`);
   process.exitCode = 1;

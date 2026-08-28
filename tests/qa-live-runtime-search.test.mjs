@@ -48,3 +48,26 @@ test("live-search verification binds the selected runtime to its current executa
     /verification:\s*\{\s*\.\.\.identity,\s*capabilities: probe\.capabilities,\s*checkedAt:/
   );
 });
+
+test("completed live searches emit diagnostics before the release gate writes a receipt", () => {
+  const script = readFileSync(
+    new URL("../scripts/qa-live-runtime-search.mjs", import.meta.url),
+    "utf8"
+  );
+
+  const diagnostic = script.indexOf('kind: "live-search-diagnostic"');
+  const verification = script.indexOf("verifyLiveSearchReceiptForReview(receipt)");
+  const receiptWrite = script.indexOf("writeFileSync(receiptPath");
+
+  assert.notEqual(diagnostic, -1, "completed runs must expose a machine-readable diagnostic");
+  assert.match(
+    script.slice(diagnostic, verification),
+    /sourceRevision[\s\S]*runtimeId[\s\S]*fixtureId[\s\S]*summary[\s\S]*usefulSet[\s\S]*rows/
+  );
+  assert.ok(diagnostic < verification, "diagnostics must be emitted before release verification");
+  assert.ok(
+    verification < receiptWrite,
+    "canonical receipts must be written only after verification"
+  );
+  assert.equal(script.match(/writeFileSync\(receiptPath/g)?.length, 1);
+});
