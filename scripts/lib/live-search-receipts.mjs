@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { hasCompleteCareerRatCapabilities } from "../../src/core/ai/installed-runtimes.mjs";
 
 export const LIVE_SEARCH_RECEIPT_DIRECTORY = ".github/release-evidence/live-search";
 
@@ -91,15 +92,57 @@ export function annotateCanonicalReadableRows({ rows, sources } = {}) {
   const readableUrls = new Set();
   for (const source of Array.isArray(sources) ? sources : []) {
     if (source?.status !== "completed") continue;
+    const lane = String(source.discoveryLane || "").trim() || "*";
     for (const value of [source.url, source.canonicalUrl]) {
       const url = normalizedHttpUrl(value);
-      if (url) readableUrls.add(url);
+      if (url) readableUrls.add(`${lane}|${url}`);
     }
   }
-  return (Array.isArray(rows) ? rows : []).map((row) => ({
-    ...row,
-    canonicalReadable: readableUrls.has(normalizedHttpUrl(row?.source)),
-  }));
+  return (Array.isArray(rows) ? rows : []).map((row) => {
+    const url = normalizedHttpUrl(row?.source);
+    const lane = String(row?.discoveryLane || "").trim();
+    return {
+      ...row,
+      canonicalReadable: readableUrls.has(`${lane}|${url}`) || readableUrls.has(`*|${url}`),
+    };
+  });
+}
+
+export function canonicalSourcesFromUnifiedSearch({ deterministicResult, aiResult } = {}) {
+  const receipts = [];
+  const seen = new Set();
+  const add = (value, discoveryLane) => {
+    const url = normalizedHttpUrl(value);
+    const key = `${discoveryLane}|${url}`;
+    if (!url || seen.has(key)) return;
+    seen.add(key);
+    receipts.push({ url, status: "completed", discoveryLane });
+  };
+
+  for (const offer of Array.isArray(deterministicResult?.offers)
+    ? deterministicResult.offers
+    : []) {
+    if (
+      offer?.bodyPartial !== false ||
+      Number(offer?.bodyChars) <= 0 ||
+      offer?.liveness?.result !== "active"
+    ) {
+      continue;
+    }
+    add(offer.url, "deterministic");
+  }
+  const completedAiUrls = new Set(
+    (Array.isArray(aiResult?.sources) ? aiResult.sources : [])
+      .filter((source) => source?.status === "completed")
+      .flatMap((source) => [source.url, source.canonicalUrl])
+      .map(normalizedHttpUrl)
+      .filter(Boolean)
+  );
+  for (const offer of Array.isArray(aiResult?.offers) ? aiResult.offers : []) {
+    const url = normalizedHttpUrl(offer?.url);
+    if (completedAiUrls.has(url)) add(url, "ai-web");
+  }
+  return receipts;
 }
 
 function automaticRows({ runtimeId, fixtureId, rows, fitFloor }) {
@@ -107,6 +150,7 @@ function automaticRows({ runtimeId, fixtureId, rows, fitFloor }) {
     .filter(
       (row) =>
         row.canonicalReadable === true &&
+        row.partial !== true &&
         Number.isFinite(Number(row.fitScore)) &&
         Number(row.fitScore) >= fitFloor
     )
@@ -117,6 +161,8 @@ function automaticRows({ runtimeId, fixtureId, rows, fitFloor }) {
       location: String(row.location || "").trim(),
       fitScore: Number(row.fitScore),
       canonicalReadable: true,
+      discoveryLane: String(row.discoveryLane || "").trim(),
+      partial: false,
       unverified: row.unverified === true,
       source: String(row.source || "").trim(),
     }));
@@ -128,7 +174,11 @@ export function buildLiveSearchReceipt({
   fixtureId,
   providerFallback,
   completedAt,
+  runtimeVerification,
+  laneStatuses,
   summary,
+  expectedPromptIds,
+  aiSummary,
   usefulSet,
   rows,
 }) {
@@ -148,6 +198,24 @@ export function buildLiveSearchReceipt({
   const distinctRoles = new Set(emittedRows.map((row) => row.role.toLowerCase()).filter(Boolean))
     .size;
   const presentedBuckets = [...new Set((usefulSet?.presentedBuckets || []).map(String))].sort();
+  const expectedAiPromptIds = (expectedPromptIds || [])
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  const aiQueryResults = (Array.isArray(aiSummary?.queryResults) ? aiSummary.queryResults : []).map(
+    (entry) => ({
+      promptId: String(entry?.promptId || "").trim(),
+      status: String(entry?.status || "").trim(),
+      queries: (Array.isArray(entry?.queries) ? entry.queries : []).map((query) => ({
+        query: String(query?.query || "").trim(),
+        status: String(query?.status || "").trim(),
+      })),
+    })
+  );
+  const aiErrors = Array.isArray(aiSummary?.errors) ? [...aiSummary.errors] : [];
+  const failedAiPromptIds = Array.isArray(aiSummary?.failedPromptIds)
+    ? [...aiSummary.failedPromptIds]
+    : [];
+  const canonicalAiRows = emittedRows.filter((row) => row.discoveryLane === "ai-web").length;
 
   return {
     schemaVersion: 1,
@@ -155,18 +223,44 @@ export function buildLiveSearchReceipt({
     runtimeId,
     fixtureId,
     providerFallback: providerFallback === true,
+    runtime: {
+      id: runtimeId,
+      path: String(runtimeVerification?.path || "").trim(),
+      realPath: String(runtimeVerification?.realPath || "").trim(),
+      version: String(runtimeVerification?.version || "").trim(),
+      binaryFingerprint: String(runtimeVerification?.binaryFingerprint || "")
+        .trim()
+        .toLowerCase(),
+      capabilities:
+        runtimeVerification?.capabilities && typeof runtimeVerification.capabilities === "object"
+          ? { ...runtimeVerification.capabilities }
+          : null,
+    },
+    lanes: {
+      deterministic: String(laneStatuses?.deterministic || "").trim(),
+      aiWeb: String(laneStatuses?.aiWeb || "").trim(),
+    },
     completedAt: validDate(completedAt, "Native AI search completion time"),
     thresholds: { ...NATIVE_AI_SEARCH_ACCEPTANCE },
     counts: {
       presentedRows: emittedRows.length,
       distinctRoles,
       presentedBuckets: presentedBuckets.length,
+      canonicalAiRows,
     },
     summary: {
       presented: Number(summary?.presented || 0),
       fitFloor,
-      errors: Array.isArray(summary?.errors) ? [...summary.errors] : [],
-      failedPromptIds: Array.isArray(summary?.failedPromptIds) ? [...summary.failedPromptIds] : [],
+      errors: aiErrors,
+      failedPromptIds: failedAiPromptIds,
+    },
+    ai: {
+      expectedPromptIds: expectedAiPromptIds,
+      searched: Number(aiSummary?.searched || 0),
+      queryResults: aiQueryResults,
+      errors: aiErrors,
+      failedPromptIds: failedAiPromptIds,
+      canonicalRows: canonicalAiRows,
     },
     presentedBuckets,
     rows: emittedRows,
@@ -205,6 +299,22 @@ function assertReceipt(receipt, { requireManualLiveness = true } = {}) {
     throw new Error(`${combination} used provider fallback.`);
   }
   if (
+    receipt.runtime?.id !== receipt.runtimeId ||
+    !String(receipt.runtime?.path || "").trim() ||
+    !String(receipt.runtime?.realPath || "").trim() ||
+    !String(receipt.runtime?.version || "").trim() ||
+    !/^[a-f0-9]{64}$/.test(String(receipt.runtime?.binaryFingerprint || "")) ||
+    !hasCompleteCareerRatCapabilities(receipt.runtime?.capabilities, receipt.runtimeId)
+  ) {
+    throw new Error(`${combination} has no verified runtime execution identity.`);
+  }
+  if (receipt.lanes?.deterministic !== "succeeded") {
+    throw new Error(`${combination} deterministic lane did not succeed.`);
+  }
+  if (receipt.lanes?.aiWeb !== "succeeded") {
+    throw new Error(`${combination} AI lane did not succeed.`);
+  }
+  if (
     Object.entries(NATIVE_AI_SEARCH_ACCEPTANCE).some(
       ([name, value]) => receipt.thresholds?.[name] !== value
     )
@@ -214,8 +324,37 @@ function assertReceipt(receipt, { requireManualLiveness = true } = {}) {
   if (receipt.summary?.fitFloor !== NATIVE_AI_SEARCH_ACCEPTANCE.fitFloor) {
     throw new Error(`${combination} does not expose the fit floor.`);
   }
-  if (receipt.summary?.errors?.length || receipt.summary?.failedPromptIds?.length) {
-    throw new Error(`${combination} completed with search failures.`);
+  if (receipt.ai?.errors?.length || receipt.ai?.failedPromptIds?.length) {
+    throw new Error(`${combination} completed with AI search failures.`);
+  }
+  const expectedPromptIds = Array.isArray(receipt.ai?.expectedPromptIds)
+    ? receipt.ai.expectedPromptIds.map(String)
+    : [];
+  const queryResults = Array.isArray(receipt.ai?.queryResults) ? receipt.ai.queryResults : [];
+  const coveredPromptIds = queryResults
+    .filter((entry) => entry?.status === "completed")
+    .map((entry) => String(entry.promptId || ""));
+  if (
+    expectedPromptIds.length === 0 ||
+    new Set(expectedPromptIds).size !== expectedPromptIds.length ||
+    receipt.ai?.searched !== expectedPromptIds.length ||
+    queryResults.length !== expectedPromptIds.length ||
+    new Set(coveredPromptIds).size !== expectedPromptIds.length ||
+    expectedPromptIds.some((promptId) => !coveredPromptIds.includes(promptId))
+  ) {
+    throw new Error(`${combination} does not have complete AI prompt coverage.`);
+  }
+  if (
+    queryResults.some(
+      (entry) =>
+        !Array.isArray(entry?.queries) ||
+        entry.queries.length === 0 ||
+        entry.queries.some(
+          (query) => !String(query?.query || "").trim() || query?.status !== "completed"
+        )
+    )
+  ) {
+    throw new Error(`${combination} does not have real query coverage for every AI prompt.`);
   }
   if (receipt.counts?.presentedRows < NATIVE_AI_SEARCH_ACCEPTANCE.minimumPresentedRows) {
     throw new Error(`${combination} has too few presented rows.`);
@@ -237,6 +376,14 @@ function assertReceipt(receipt, { requireManualLiveness = true } = {}) {
   if (receipt.presentedBuckets?.length !== receipt.counts.presentedBuckets) {
     throw new Error(`${combination} bucket count does not match its receipt.`);
   }
+  const canonicalAiRows = receipt.rows.filter((row) => row.discoveryLane === "ai-web").length;
+  if (
+    canonicalAiRows < 1 ||
+    receipt.counts?.canonicalAiRows !== canonicalAiRows ||
+    receipt.ai?.canonicalRows !== canonicalAiRows
+  ) {
+    throw new Error(`${combination} has no canonical AI contribution.`);
+  }
   if (receipt.summary?.presented !== receipt.counts.presentedRows) {
     throw new Error(`${combination} search summary does not match its exact presented rows.`);
   }
@@ -250,7 +397,10 @@ function assertReceipt(receipt, { requireManualLiveness = true } = {}) {
     if (row.canonicalReadable !== true) {
       throw new Error(`${combination} contains a row without canonical readable evidence.`);
     }
-    if (row.unverified !== true) {
+    if (!new Set(["deterministic", "ai-web"]).has(row.discoveryLane)) {
+      throw new Error(`${combination} contains a row without a discovery lane.`);
+    }
+    if (row.discoveryLane === "ai-web" && row.unverified !== true) {
       throw new Error(`${combination} does not preserve the AI unverified state.`);
     }
     let url;

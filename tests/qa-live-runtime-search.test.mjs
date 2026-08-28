@@ -84,8 +84,10 @@ test("native AI search verification binds the selected runtime to its current ex
   assert.match(script, /if \(!identity\) throw new Error/);
   assert.match(
     script,
-    /verification:\s*\{\s*\.\.\.identity,\s*capabilities: probe\.capabilities,\s*checkedAt:/
+    /const runtimeVerification = \{\s*\.\.\.identity,\s*capabilities: probe\.capabilities,\s*checkedAt:/
   );
+  assert.match(script, /verification: runtimeVerification/);
+  assert.match(script, /runtimeVerification,/);
 });
 
 test("completed native AI searches emit diagnostics before the release gate writes a receipt", () => {
@@ -124,6 +126,26 @@ test("native AI search diagnostics retain every persisted row while receipts use
   assert.doesNotMatch(script, /reviewLiveSearchReceipt/);
 });
 
+test("native search receipts exercise the deterministic-first product lane and count the combined rows", () => {
+  const script = readFileSync(
+    new URL("../scripts/qa-live-runtime-search.mjs", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(script, /import \{ runSourcedScan \} from "\.\/scan-sourced\.mjs"/);
+  assert.match(script, /import \{ runUnifiedJobSearch \}/);
+  assert.match(script, /await runUnifiedJobSearch\(/);
+  assert.match(script, /runDeterministic:[\s\S]*runSourcedScan\(/);
+  assert.match(script, /runAiWeb:[\s\S]*runAiWebSearch\([\s\S]*deterministic/);
+  assert.doesNotMatch(script, /\.filter\(\(row\) => row\.source === "ai-web-search"\)/);
+  assert.match(
+    script,
+    /discoveryLane:\s*row\.source === "ai-web-search" \? "ai-web" : "deterministic"/
+  );
+  assert.match(script, /expectedPromptIds:\s*fixture\.prompts\.map/);
+  assert.match(script, /aiSummary,/);
+});
+
 test("failed native AI search acceptance preserves bounded row diagnostics before cleanup", () => {
   const script = readFileSync(
     new URL("../scripts/qa-live-runtime-search.mjs", import.meta.url),
@@ -157,7 +179,7 @@ test("native AI search fixtures heal generated source config before the live sea
   );
   const targetingPatch = script.indexOf('name: "targeting"');
   const heal = script.indexOf("healSearchSourceConfig({ repoRoot, env })");
-  const search = script.indexOf("await runAiWebSearch");
+  const search = script.indexOf("await runUnifiedJobSearch");
 
   assert.match(script, /import \{ healSearchSourceConfig \}/);
   assert.ok(targetingPatch < heal, "source healing must use the completed fixture targeting");

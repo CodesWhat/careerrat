@@ -20,13 +20,16 @@ import { healSearchSourceConfig } from "../src/core/onboarding/first-search-run.
 import { runAiWebSearch } from "../src/core/search/ai-web-search.mjs";
 import { saveSearchPrompts } from "../src/core/search/search-prompts.mjs";
 import { titleMatchesBucket } from "../src/core/search/title-match.mjs";
+import { runUnifiedJobSearch } from "../src/core/search/unified-job-search.mjs";
 import {
   annotateCanonicalReadableRows,
   buildLiveSearchReceipt,
+  canonicalSourcesFromUnifiedSearch,
   LIVE_SEARCH_RECEIPT_DIRECTORY,
   liveSearchReceiptFilename,
   verifyLiveSearchReceiptForReview,
 } from "./lib/live-search-receipts.mjs";
+import { runSourcedScan } from "./scan-sourced.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const runtimeId = String(process.argv[2] || "").trim();
@@ -112,10 +115,22 @@ function safeResult(result) {
   };
 }
 
+function safeDeterministicResult(result) {
+  return {
+    scanned: result.scanned,
+    new: result.new,
+    presented: result.presented,
+    errors: result.errors,
+    loginRequests: result.loginRequests,
+    sourceCoverage: result.sourceCoverage,
+  };
+}
+
 function presentedSetReceipt({ fixture, result, rows }) {
   const presentedRows = rows.filter(
     (row) =>
       row.canonicalReadable === true &&
+      row.partial !== true &&
       Number.isFinite(Number(row.fitScore)) &&
       Number(row.fitScore) >= result.fitFloor
   );
@@ -131,7 +146,12 @@ function presentedSetReceipt({ fixture, result, rows }) {
   const presentedBuckets = (fixture.targeting.role_buckets || [])
     .filter((bucket) => presentedRows.some((row) => titleMatchesBucket(row.role, bucket)))
     .map((bucket) => bucket.name);
-  return { presentedRoleCount, presentedBucketCount: presentedBuckets.length, presentedBuckets };
+  return {
+    presentedRowCount: presentedRows.length,
+    presentedRoleCount,
+    presentedBucketCount: presentedBuckets.length,
+    presentedBuckets,
+  };
 }
 
 const FIXTURES = {
@@ -322,42 +342,82 @@ try {
     { env }
   );
   if (!identity) throw new Error(`${runtimeId} executable identity could not be verified.`);
+  const runtimeVerification = {
+    ...identity,
+    capabilities: probe.capabilities,
+    checkedAt: new Date().toISOString(),
+  };
   writeInstalledRuntimeSelection({
     repoRoot,
     env,
     runtimeId,
     providerFallback: false,
-    verification: {
-      ...identity,
-      capabilities: probe.capabilities,
-      checkedAt: new Date().toISOString(),
-    },
+    verification: runtimeVerification,
   });
 
-  const result = await runAiWebSearch({
-    repoRoot,
-    env,
-    onProgress(event) {
-      if (event?.message) console.error(`[${runtimeId}/${fixtureId}] ${event.message}`);
-    },
+  const unified = await runUnifiedJobSearch({
+    searchExecutionId: `release-${runtimeId}-${fixtureId}`,
+    runDeterministic: async ({ signal }) =>
+      runSourcedScan({
+        repoRoot,
+        env,
+        signal,
+        write: true,
+        verify: true,
+        onProgress(progress) {
+          console.error(
+            `[${runtimeId}/${fixtureId}] Deterministic sources ${progress.completedSources}/${progress.totalSources}`
+          );
+        },
+      }),
+    runAiWeb: async ({ deterministic, signal }) =>
+      runAiWebSearch({
+        repoRoot,
+        env,
+        deterministic,
+        signal,
+        onProgress(event) {
+          if (event?.message) console.error(`[${runtimeId}/${fixtureId}] ${event.message}`);
+        },
+      }),
+    aiAvailable: true,
+  });
+  if (unified.lanes.deterministic.status !== "succeeded") {
+    throw new Error("The deterministic search lane did not succeed.");
+  }
+  if (unified.lanes.aiWeb.status !== "succeeded") {
+    throw new Error("The selected native runtime AI lane did not succeed.");
+  }
+  const deterministicResult = unified.lanes.deterministic.result;
+  const aiResult = unified.lanes.aiWeb.result;
+  const canonicalSources = canonicalSourcesFromUnifiedSearch({
+    deterministicResult,
+    aiResult,
   });
   const rows = annotateCanonicalReadableRows({
-    rows: readDbScannerRows({ repoRoot, env })
-      .filter((row) => row.source === "ai-web-search")
-      .map((row) => ({
-        company: row.company,
-        role: row.role,
-        location: row.loc,
-        fitScore: row.fitScore,
-        partial: row.scanner?.bodyPartial === true,
-        qualificationUnknowns: row.scanner?.qualificationUnknowns || [],
-        unverified: row.scanner?.unverified === true,
-        source: row.link,
-      })),
-    sources: result.sources,
+    rows: readDbScannerRows({ repoRoot, env }).map((row) => ({
+      company: row.company,
+      role: row.role,
+      location: row.loc,
+      fitScore: row.fitScore,
+      partial: row.scanner?.bodyPartial === true,
+      qualificationUnknowns: row.scanner?.qualificationUnknowns || [],
+      discoveryLane: row.source === "ai-web-search" ? "ai-web" : "deterministic",
+      unverified: row.scanner?.unverified === true,
+      source: row.link,
+    })),
+    sources: canonicalSources,
   });
-  const usefulSet = presentedSetReceipt({ fixture, result, rows });
-  const summary = safeResult(result);
+  const usefulSet = presentedSetReceipt({ fixture, result: aiResult, rows });
+  const aiSummary = safeResult(aiResult);
+  const summary = {
+    presented: usefulSet.presentedRowCount,
+    fitFloor: aiResult.fitFloor,
+    errors: aiSummary.errors,
+    failedPromptIds: aiSummary.failedPromptIds,
+    deterministic: safeDeterministicResult(deterministicResult),
+    ai: aiSummary,
+  };
   const completedAt = new Date().toISOString();
   console.log(
     JSON.stringify({
@@ -367,6 +427,7 @@ try {
       runtimeId,
       fixtureId,
       completedAt,
+      searchExecutionId: unified.searchExecutionId,
       summary,
       usefulSet,
       rows,
@@ -378,7 +439,14 @@ try {
     fixtureId,
     providerFallback: false,
     completedAt,
+    runtimeVerification,
+    laneStatuses: {
+      deterministic: unified.lanes.deterministic.status,
+      aiWeb: unified.lanes.aiWeb.status,
+    },
     summary,
+    expectedPromptIds: fixture.prompts.map((prompt) => prompt.id),
+    aiSummary,
     usefulSet,
     rows,
   });
