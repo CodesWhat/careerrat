@@ -475,10 +475,15 @@ const NEW_YORK_CITY_ALIASES = new Set([
   "new york ny",
   "new york new york",
   "manhattan ny",
+  "manhattan new york",
   "brooklyn ny",
+  "brooklyn new york",
   "queens ny",
+  "queens new york",
   "bronx ny",
+  "bronx new york",
   "staten island ny",
+  "staten island new york",
 ]);
 const SAN_FRANCISCO_BAY_AREA_ALIASES = new Set([
   "bay area",

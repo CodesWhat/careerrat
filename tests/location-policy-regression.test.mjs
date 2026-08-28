@@ -521,6 +521,48 @@ test("NYC-only local scope accepts the metro and rejects other US cities", () =>
   ]);
 });
 
+test("New York home accepts every NYC borough without admitting nearby non-NYC places", () => {
+  const profile = {
+    candidate: { domain: "hospitality operations" },
+    location: {
+      home: "New York, NY",
+      remote: false,
+      hybrid: true,
+      onsite: true,
+      relocation: [],
+    },
+  };
+  const result = qualifyByLocation(
+    profile,
+    [
+      offer("manhattan", "Manhattan Corp", "Manhattan, New York, USA"),
+      offer("brooklyn", "Brooklyn Corp", "Brooklyn, New York, USA"),
+      offer("queens", "Queens Corp", "Queens, New York, USA"),
+      offer("bronx", "Bronx Corp", "Bronx, New York, USA"),
+      offer("staten-island", "Staten Island Corp", "Staten Island, New York, USA"),
+      offer("jersey-city", "Jersey City Corp", "Jersey City, NJ"),
+      offer("newark", "Newark Corp", "Newark, NJ"),
+      offer("yonkers", "Yonkers Corp", "Yonkers, NY"),
+      offer("long-island", "Long Island Corp", "Long Island, NY"),
+    ],
+    { generatedFilter: false }
+  );
+
+  assert.deepEqual(result.kept.map((row) => row.company).sort(), [
+    "Bronx Corp",
+    "Brooklyn Corp",
+    "Manhattan Corp",
+    "Queens Corp",
+    "Staten Island Corp",
+  ]);
+  assert.deepEqual(result.filteredLocation.map((row) => row.company).sort(), [
+    "Jersey City Corp",
+    "Long Island Corp",
+    "Newark Corp",
+    "Yonkers Corp",
+  ]);
+});
+
 test("worldwide remote scope keeps remote roles globally while local work stays NYC-only", () => {
   const profile = {
     candidate: { domain: "software engineering" },

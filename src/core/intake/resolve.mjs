@@ -208,7 +208,7 @@ export async function hydrateJobOffer(
       company: resolved.company || offer.company,
       title: resolved.title || visibleTitle || offer.title,
       location: requirePostingIdentity
-        ? String(resolved.location || "").trim()
+        ? preferredCanonicalLocation(resolved.location, offer.location)
         : preferredResolvedLocation(resolved.location, offer.location),
       comp: requirePostingIdentity
         ? String(resolved.comp || "").trim()
@@ -261,6 +261,13 @@ function preferredResolvedLocation(resolvedLocation, existingLocation) {
   if (!resolved) return existingLocation;
   if (existing && /^\d[\d\s#./-]*$/u.test(resolved)) return existingLocation;
   return resolvedLocation;
+}
+
+function preferredCanonicalLocation(resolvedLocation, existingLocation) {
+  const resolved = String(resolvedLocation || "").trim();
+  const existing = String(existingLocation || "").trim();
+  if (existing && /^\d[\d\s#./-]*$/u.test(resolved)) return existingLocation;
+  return resolved;
 }
 
 const CAREER_CONTEXT_SEGMENTS = new Set([
@@ -632,6 +639,7 @@ function normalizedProviderPostingUrl(value) {
 function fallbackCompanyFromUrl(url) {
   try {
     const slug = new URL(url).pathname.split("/").filter(Boolean)[0] || "";
+    if (/^\d+$/u.test(slug)) return null;
     const titleized = slug
       .split(/[-_]+/)
       .filter(Boolean)

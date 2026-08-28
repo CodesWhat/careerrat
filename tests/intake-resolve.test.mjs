@@ -128,6 +128,62 @@ test("hydrateJobOffer does not replace a usable location with a numeric ATS labe
   assert.equal(hydrated.bodyPartial, false);
 });
 
+test("strict Greenhouse hydration preserves offered identity when the board identifier is numeric", async () => {
+  const url = "https://job-boards.greenhouse.io/550/jobs/5186736008";
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Gracious Hospitality Management",
+      title: "Assistant General Manager (Bar Chimera)",
+      url,
+      location: "New York, NY",
+      bodyText: "Open-web preview.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        jsonResponse({
+          jobs: [
+            {
+              id: 5186736008,
+              title: "Assistant General Manager (Food &amp; Beverage)",
+              absolute_url: url,
+              location: { name: "550" },
+              content: `<p>${"Lead an active Midtown Manhattan restaurant operation. ".repeat(4)}</p>`,
+            },
+          ],
+        }),
+    }
+  );
+
+  assert.equal(hydrated.company, "Gracious Hospitality Management");
+  assert.equal(hydrated.location, "New York, NY");
+  assert.equal(hydrated.bodyPartial, false);
+});
+
+test("Greenhouse resolution decodes HTML entities in canonical titles", async () => {
+  const url = "https://job-boards.greenhouse.io/550/jobs/5186736008";
+  const result = await resolveJobUrl(url, {
+    resolveHost: publicResolver,
+    fetchImpl: async () =>
+      jsonResponse({
+        jobs: [
+          {
+            id: 5186736008,
+            title: "Operations Manager, Food &amp; Beverage",
+            absolute_url: url,
+            location: { name: "New York, NY" },
+            content: `<p>${"Lead an active hospitality operation. ".repeat(4)}</p>`,
+          },
+        ],
+      }),
+  });
+
+  assert.equal(result.title, "Operations Manager, Food & Beverage");
+});
+
 test("known ATS preserves a complete canonical body beyond the old 4000-character preview cap", async () => {
   const url = "https://job-boards.greenhouse.io/acme/jobs/long-body";
   const ending =
