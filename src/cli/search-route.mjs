@@ -36,8 +36,9 @@
 //                              frames, 10s ping heartbeat — see that route's
 //                              own comment below for the full frame
 //                              contract). 409 while a run is already in
-//                              flight; 501/422 pre-stream if no AI route is
-//                              configured / there are no saved prompts to run.
+//                              flight; 501 pre-stream if no AI route is
+//                              configured. When no prompts are saved, the
+//                              route generates and saves them before starting.
 //
 // `fetchImpl` is dependency-injected (defaults to the real global `fetch`)
 // the same way `runSkillStream` is in skill-run-route.mjs, so tests can drive
@@ -132,6 +133,7 @@ export function mountSearchRoutes({
   env = process.env,
   fetchImpl = fetch,
   runAiWebSearch = defaultRunAiWebSearch,
+  generateSearchPromptsImpl = generateSearchPrompts,
   captureBrowserSourceImpl,
   workspaceAgentRuntime,
   setIntervalImpl = setInterval,
@@ -401,7 +403,7 @@ export function mountSearchRoutes({
   addRoute("POST", "/api/search/prompts/generate", async (_req, res) => {
     let outcome;
     try {
-      outcome = await generateSearchPrompts({ repoRoot, env });
+      outcome = await generateSearchPromptsImpl({ repoRoot, env });
     } catch (err) {
       sendSearchPromptsError(res, err);
       return;
@@ -503,10 +505,11 @@ export function mountSearchRoutes({
   //                                               back as a "done" frame with
   //                                               a non-empty errors[])
   //
-  // Unlike resume-ai-stream, "no AI route configured" and "no saved prompts"
-  // are both zero-AI-call checks (an env read and a DB read) resolvable
-  // BEFORE opening the SSE response, so they come back as a real HTTP status
-  // (501 / 422) here rather than an in-band error frame. The per-mode prompt
+  // Unlike resume-ai-stream, "no AI route configured" is a zero-AI-call check
+  // resolvable BEFORE opening the SSE response, so it comes back as a real
+  // HTTP 501 rather than an in-band error frame. When the user has no saved
+  // prompts, the route generates and persists candidate-shaped prompts before
+  // opening the stream. The per-mode prompt
   // cap (modes.mjs's "search:ai-web" op — lean=1, standard=3, full=5) is
   // NOT a rejection: the op table never returns "skip" for it, only
   // "downshift" (lean) or "run" — lean mode narrows how many saved prompts
@@ -573,6 +576,30 @@ export function mountSearchRoutes({
     } catch (err) {
       sendSearchPromptsError(res, err);
       return;
+    }
+    if (!storedPrompts.length && !promptIds?.length) {
+      let generated;
+      try {
+        generated = await generateSearchPromptsImpl({ repoRoot, env });
+      } catch (err) {
+        sendSearchPromptsError(res, err);
+        return;
+      }
+      if (!generated.body?.ok) {
+        sendJson(res, generated.status, generated.body);
+        return;
+      }
+      try {
+        storedPrompts = saveSearchPrompts({
+          repoRoot,
+          env,
+          prompts: generated.body.data.prompts,
+          defaultSource: "generated",
+        }).prompts;
+      } catch (err) {
+        sendSearchPromptsError(res, err);
+        return;
+      }
     }
     const requested = promptIds?.length
       ? storedPrompts.filter((p) => promptIds.includes(p.id))
