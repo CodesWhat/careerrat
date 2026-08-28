@@ -576,6 +576,15 @@ function concentratedRejectedHosts(rejections) {
   );
 }
 
+function unreadableRejectedHosts(rejections) {
+  return new Set(
+    rejections
+      .filter(({ offer }) => offer?.bodyFetchStatus === "deferred")
+      .map(({ offer }) => sourceHost(offer?.url))
+      .filter(Boolean)
+  );
+}
+
 function freshnessRecoveryInstruction(rejections) {
   const rejectedPostings = rejections.slice(0, 40).map(({ offer, reason }) => ({
     url: offer.url,
@@ -943,7 +952,13 @@ function boundedSearchQuery(titles, locationClause, sourceClause = "") {
   return boundedFallbackQuery(titles.join(" OR "), "");
 }
 
-function directSourceClause(titles, locationClause, sourceHosts = [], excludedHosts = []) {
+function directSourceClause(
+  titles,
+  locationClause,
+  sourceHosts = [],
+  excludedHosts = [],
+  preferDirectSources = false
+) {
   const excluded = new Set(
     excludedHosts.map((host) =>
       String(host || "")
@@ -951,14 +966,14 @@ function directSourceClause(titles, locationClause, sourceHosts = [], excludedHo
         .toLowerCase()
     )
   );
-  const candidates = sourceHosts.length
-    ? [
-        `site:${sourceHosts[0]}`,
-        "careers",
-        ...sourceHosts.slice(1).map((host) => `site:${host}`),
-        ...COMMON_ATS_SEARCH_HOSTS.map((host) => `site:${host}`),
-      ]
-    : ["careers", ...COMMON_ATS_SEARCH_HOSTS.map((host) => `site:${host}`)];
+  const atsCandidates = COMMON_ATS_SEARCH_HOSTS.map((host) => `site:${host}`);
+  const directCandidates = ["careers", ...atsCandidates];
+  const configuredCandidates = sourceHosts.map((host) => `site:${host}`);
+  const candidates = preferDirectSources
+    ? [...directCandidates, ...configuredCandidates]
+    : sourceHosts.length
+      ? [configuredCandidates[0], "careers", ...configuredCandidates.slice(1), ...atsCandidates]
+      : directCandidates;
   const sources = [];
   for (const candidate of candidates) {
     if (candidate.startsWith("site:") && excluded.has(candidate.slice("site:".length))) continue;
@@ -996,10 +1011,17 @@ function buildSearchQueryHints(
   fallback,
   initialKind,
   sourceHosts = [],
-  excludedHosts = []
+  excludedHosts = [],
+  preferDirectSources = false
 ) {
   if (!titles.length) {
-    const sourceClause = directSourceClause([], locationClause, sourceHosts, excludedHosts);
+    const sourceClause = directSourceClause(
+      [],
+      locationClause,
+      sourceHosts,
+      excludedHosts,
+      preferDirectSources
+    );
     const directQuery = boundedFallbackQuery(fallback, locationClause, sourceClause || "careers");
     return [
       { kind: initialKind, query: boundedFallbackQuery(fallback, locationClause) },
@@ -1012,7 +1034,13 @@ function buildSearchQueryHints(
     ];
   }
   const [broadTitles, directTitles] = partitionSearchTitles(titles);
-  const sourceClause = directSourceClause(directTitles, locationClause, sourceHosts, excludedHosts);
+  const sourceClause = directSourceClause(
+    directTitles,
+    locationClause,
+    sourceHosts,
+    excludedHosts,
+    preferDirectSources
+  );
   const directQuery = boundedSearchQuery(directTitles, locationClause, sourceClause);
   return [
     { kind: initialKind, query: boundedSearchQuery(broadTitles, locationClause) },
@@ -1028,15 +1056,24 @@ function buildSearchQueryHints(
 function buildPromptSearchPlan(
   prompt,
   candidateContext,
-  { sourceConfig, rejectedCandidates = [], missingTargetTitles = [] } = {}
+  {
+    sourceConfig,
+    rejectedCandidates = [],
+    missingTargetTitles = [],
+    excludedHosts = [],
+    preferDirectSources = false,
+  } = {}
 ) {
   const titles = missingTargetTitles.length
     ? missingTargetTitles
     : searchPlanTitles(prompt, candidateContext);
   const locationClause = searchPlanLocationClause(prompt, candidateContext?.location);
-  const rejectedHosts = rejectedCandidates
-    .map(({ offer }) => sourceHost(offer?.url))
-    .filter(Boolean);
+  const rejectedHosts = [
+    ...new Set([
+      ...rejectedCandidates.map(({ offer }) => sourceHost(offer?.url)).filter(Boolean),
+      ...excludedHosts,
+    ]),
+  ];
   const sourceHints = configuredSourceHosts(sourceConfig, titles, {
     excludedHosts: rejectedHosts,
   });
@@ -1046,7 +1083,8 @@ function buildPromptSearchPlan(
     prompt.text,
     missingTargetTitles.length ? "missing-target-title" : "target-title-and-location",
     sourceHints,
-    rejectedHosts
+    rejectedHosts,
+    preferDirectSources
   );
 
   // Native agent CLIs dispatch their own WebSearch/WebFetch calls before the
@@ -1065,15 +1103,11 @@ function buildPromptSearchPlan(
           }),
         }
       : {}),
-    ...(rejectedCandidates.length && titles.length
+    ...((rejectedCandidates.length || rejectedHosts.length) && titles.length
       ? {
           rejected_sources: Object.freeze({
             urls: Object.freeze(rejectedCandidates.map(({ offer }) => offer?.url).filter(Boolean)),
-            hosts: Object.freeze([
-              ...new Set(
-                rejectedCandidates.map(({ offer }) => sourceHost(offer?.url)).filter(Boolean)
-              ),
-            ]),
+            hosts: Object.freeze(rejectedHosts),
           }),
         }
       : {}),
@@ -1211,6 +1245,7 @@ export async function runAiWebSearch({
   ) {
     const promptNumber = promptIndex + 1;
     const topUp = Array.isArray(topUpCandidates);
+    const topUpRejectedHosts = topUp ? topUpState.rejectedSourceHosts || [] : [];
     const searchInstruction = rejectedCandidates.length
       ? freshnessRecoveryInstruction(rejectedCandidates)
       : topUp
@@ -1245,6 +1280,8 @@ export async function runAiWebSearch({
               sourceConfig,
               rejectedCandidates,
               missingTargetTitles,
+              excludedHosts: topUpRejectedHosts,
+              preferDirectSources: topUpRejectedHosts.length > 0,
             })
           : searchPlansByPrompt.get(prompt.id),
       result_url_policy: RESULT_URL_POLICY,
@@ -1512,7 +1549,7 @@ export async function runAiWebSearch({
         }
         const offerHost = sourceHost(offer.url);
         if (recovery && rejectedSourceHostsByPrompt.get(outcome.promptId)?.has(offerHost)) {
-          const reason = `Source host ${offerHost} already produced a concentrated rejected batch.`;
+          const reason = `Source host ${offerHost} already produced an unreadable or concentrated rejected batch.`;
           captureFailures.push({
             company: offer.company,
             title: offer.title,
@@ -1870,6 +1907,10 @@ export async function runAiWebSearch({
         reason: "CareerRat already accepted or rejected this posting in the current run.",
       }));
     const canonicalRejections = canonicalRejectionsByPrompt.get(topUpSpec.prompt.id) || [];
+    const topUpRejectedHosts = new Set([
+      ...concentratedRejectedHosts(canonicalRejections),
+      ...unreadableRejectedHosts(canonicalRejections),
+    ]);
     const consideredByUrl = new Map();
     for (const candidate of [...canonicalRejections, ...genericConsideredCandidates]) {
       const url = normalizedSourceUrl(candidate.offer?.url);
@@ -1890,13 +1931,14 @@ export async function runAiWebSearch({
         missingBuckets: state.missingBuckets.map(
           (bucket) => bucket.name || JSON.stringify(bucket.titles)
         ),
-        rejectedSourceHosts: [...concentratedRejectedHosts(canonicalRejections)],
+        rejectedSourceHosts: [...topUpRejectedHosts],
       },
     });
     allPromptOutcomes.push(topUpOutcome);
     const topUpCollection = await collectPromptOutcomes([topUpOutcome], {
       recovery: true,
       rejectedPostingKeys: consideredPostingKeys,
+      rejectedSourceHostsByPrompt: new Map([[topUpSpec.prompt.id, topUpRejectedHosts]]),
     });
     mergeCanonicalRejections(topUpCollection.rejectionsByPrompt);
     if ((topUpOutcome.errors || []).length > 0 || (topUpOutcome.failedPromptIds || []).length > 0) {

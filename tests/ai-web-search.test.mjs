@@ -4929,6 +4929,28 @@ test("runAiWebSearch tops up a useful set made only of deferred posting leads", 
       },
     ],
   });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "indeed",
+          source_type: "url-query",
+          label: "Bar and hospitality management",
+          url: "https://www.indeed.com/jobs?q=bar+manager",
+          enabled: true,
+        },
+        {
+          provider: "specialist.example",
+          source_type: "browser",
+          label: "Bar and hospitality management",
+          url: "https://specialist.example/jobs",
+          enabled: true,
+        },
+      ],
+    },
+  });
 
   const blockedRoles = [
     ["Bar One", "Bar Manager", "blocked-bar-manager"],
@@ -4963,8 +4985,23 @@ test("runAiWebSearch tops up a useful set made only of deferred posting leads", 
     runSkillStream: async ({ input, onEvent }) => {
       inputs.push(input);
       const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      const roles =
+        typeof input !== "string"
+          ? blockedRoles
+          : inputs.length === 2
+            ? [
+                role({
+                  company: "Blocked replacement",
+                  title: "Bar Manager",
+                  location: "New York, NY",
+                  url: "https://www.indeed.com/viewjob?jk=blocked-replacement",
+                  body_text: null,
+                  body_partial: true,
+                }),
+              ]
+            : readableRoles;
       emitAssistantJson(onEvent, {
-        roles: typeof input === "string" ? readableRoles : blockedRoles,
+        roles,
         queries_run: [
           {
             prompt_id: kickoff.prompts[0].id,
@@ -4988,10 +5025,17 @@ test("runAiWebSearch tops up a useful set made only of deferred posting leads", 
           }),
   });
 
-  assert.equal(inputs.length, 2);
+  assert.equal(inputs.length, 3);
   assert.equal(typeof inputs[1], "string");
   assert.match(inputs[1], /exact posting requires a browser session/i);
   assert.match(inputs[1], /"rejected_source_hosts":\["www\.indeed\.com"\]/);
+  const firstTopUpPlan = JSON.parse(inputs[1].split("\n\n", 1)[0]).search_plan;
+  const secondTopUpPlan = JSON.parse(inputs[2].split("\n\n", 1)[0]).search_plan;
+  assert.equal(firstTopUpPlan.source_hints[0], "specialist.example");
+  assert.deepEqual(firstTopUpPlan.rejected_sources.hosts, ["www.indeed.com"]);
+  assert.equal(firstTopUpPlan.query_hints[1].kind, "direct-employer-or-ats");
+  assert.doesNotMatch(JSON.stringify(firstTopUpPlan.query_hints), /indeed\.com/);
+  assert.doesNotMatch(JSON.stringify(secondTopUpPlan.query_hints), /indeed\.com/);
   assert.equal(result.new, 6, JSON.stringify(result));
   assert.equal(result.partial, 3, JSON.stringify(result));
   assert.equal(result.presented, 3, JSON.stringify(result));
