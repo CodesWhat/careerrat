@@ -412,6 +412,121 @@ test("runAiWebSearch keeps a configured core title in query hints beside longer 
   assert.ok(quotedTerms.includes('"Bar Manager"'), JSON.stringify(inputs[0].search_plan));
 });
 
+test("runAiWebSearch does not broaden one explicitly named longer title to its generic parent", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        {
+          name: "Bar leadership",
+          titles: ["Bar Manager", "Assistant Bar Manager"],
+        },
+      ],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [{ id: "p1", text: "Find Assistant Bar Manager jobs in New York City" }],
+  });
+  const inputs = [];
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      emitAssistantJson(onEvent, {
+        roles: [1, 2, 3].map((index) =>
+          role({
+            company: `Assistant Bar Group ${index}`,
+            title: "Assistant Bar Manager",
+            url: `https://assistant-bar-${index}.example/jobs/assistant-bar-manager`,
+          })
+        ),
+        queries_run: [{ prompt_id: "p1", query: "assistant bar manager", status: "completed" }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver(),
+  });
+
+  const quotedTerms = inputs[0].search_plan.query_hints.flatMap(
+    ({ query }) => query.match(/"[^"]+"/g) || []
+  );
+  assert.ok(quotedTerms.includes('"Assistant Bar Manager"'));
+  assert.ok(!quotedTerms.includes('"Bar Manager"'), JSON.stringify(inputs[0].search_plan));
+});
+
+test("runAiWebSearch keeps every explicitly named overlapping title in useful-set top-ups", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        {
+          name: "Bar leadership",
+          titles: ["Bar Manager", "Assistant Bar Manager"],
+        },
+      ],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      {
+        id: "p1",
+        text: "Find Bar Manager and Assistant Bar Manager jobs in New York City",
+      },
+    ],
+  });
+  const inputs = [];
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      const topUp = typeof input === "string";
+      emitAssistantJson(onEvent, {
+        roles: topUp
+          ? [
+              role({
+                company: "Bar Manager Group",
+                title: "Bar Manager",
+                url: "https://bar-manager.example/jobs/bar-manager",
+              }),
+            ]
+          : [1, 2, 3].map((index) =>
+              role({
+                company: `Assistant Group ${index}`,
+                title: "Assistant Bar Manager",
+                url: `https://assistant-group-${index}.example/jobs/assistant-bar-manager`,
+              })
+            ),
+        queries_run: [
+          {
+            prompt_id: kickoff.prompts[0].id,
+            query: topUp ? "bar manager top-up" : "assistant bar manager",
+            status: "completed",
+          },
+        ],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver(),
+  });
+
+  assert.equal(inputs.length, 2);
+  const topUpPlan = JSON.parse(inputs[1].split("\n\n", 1)[0]).search_plan;
+  assert.deepEqual(topUpPlan.focus.missing_target_titles, ["Bar Manager"]);
+});
+
 test("runAiWebSearch does not add remote when a hospitality prompt does not request it", async () => {
   const repoRoot = repo({ prompts: 1 });
   candidateConfigPatch({
@@ -475,6 +590,77 @@ test("runAiWebSearch does not add remote when a hospitality prompt does not requ
   assert.ok(
     inputs[0].search_plan.query_hints.every(({ query }) => !/\bremote\b/i.test(query)),
     JSON.stringify(inputs[0].search_plan)
+  );
+});
+
+test("runAiWebSearch does not treat negated remote wording as a remote search request", async () => {
+  const repoRoot = repo({ mode: "full", prompts: 5 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Platform engineering", titles: ["Platform Engineer"] }],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      { id: "exclude", text: "Find Platform Engineer jobs in NYC; exclude remote roles" },
+      { id: "no", text: "Find Platform Engineer jobs in NYC; no remote roles" },
+      { id: "not", text: "Find Platform Engineer jobs in NYC, not remote" },
+      { id: "excluded", text: "Find Platform Engineer jobs in NYC; remote roles excluded" },
+      { id: "positive", text: "Find Platform Engineer jobs in NYC or remote in the US" },
+    ],
+  });
+  const plans = new Map();
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      const promptId = kickoff.prompts[0].id;
+      plans.set(promptId, kickoff.search_plan);
+      emitAssistantJson(onEvent, {
+        roles: [1, 2, 3].map((index) =>
+          role({
+            company: `${promptId} Platform ${index}`,
+            title: "Platform Engineer",
+            location: promptId === "positive" ? "Remote, US" : "New York, NY",
+            url: `https://${promptId}-${index}.example/jobs/platform-engineer`,
+          })
+        ),
+        queries_run: [{ prompt_id: promptId, query: `${promptId} platform`, status: "completed" }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver(),
+  });
+
+  for (const promptId of ["exclude", "no", "not", "excluded"]) {
+    assert.ok(
+      plans.get(promptId).query_hints.every(({ query }) => !/\bremote\b/i.test(query)),
+      JSON.stringify(plans.get(promptId))
+    );
+  }
+  assert.ok(
+    plans.get("positive").query_hints.some(({ query }) => /\bremote\b/i.test(query)),
+    JSON.stringify(plans.get("positive"))
   );
 });
 

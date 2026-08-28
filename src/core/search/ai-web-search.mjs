@@ -571,6 +571,16 @@ function normalizedTitleWords(value) {
   );
 }
 
+function normalizedTitleTokens(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
 const GENERIC_TARGET_TITLE_SUFFIXES = new Set(["engineer", "engineering", "manager", "management"]);
 
 function titleMatchesBucket(title, bucket) {
@@ -581,22 +591,50 @@ function titleMatchesBucket(title, bucket) {
   });
 }
 
-function promptMatchesTitle(prompt, targetTitle) {
-  const promptWords = normalizedTitleWords(prompt?.text);
-  const target = normalizedTitleWords(targetTitle);
-  if (target.size > 0 && [...target].every((word) => promptWords.has(word))) return true;
-  const targetWords = [...target];
-  const core = GENERIC_TARGET_TITLE_SUFFIXES.has(targetWords.at(-1))
-    ? targetWords.slice(0, -1)
-    : [];
-  return core.length >= 2 && core.every((word) => promptWords.has(word));
+function phraseRanges(words, phrase) {
+  if (!phrase.length || phrase.length > words.length) return [];
+  const ranges = [];
+  for (let start = 0; start <= words.length - phrase.length; start += 1) {
+    if (phrase.every((word, index) => words[start + index] === word)) {
+      ranges.push({ start, end: start + phrase.length });
+    }
+  }
+  return ranges;
 }
 
 function configuredTitlesNamedByPrompt(prompt, bucket) {
-  const matches = (Array.isArray(bucket?.titles) ? bucket.titles : []).filter((title) =>
-    promptMatchesTitle(prompt, title)
-  );
-  return mostSpecificTitles(matches);
+  const promptWords = normalizedTitleTokens(prompt?.text);
+  const matches = (Array.isArray(bucket?.titles) ? bucket.titles : []).map((title) => {
+    const titleWords = normalizedTitleTokens(title);
+    const fullRanges = phraseRanges(promptWords, titleWords);
+    const core = GENERIC_TARGET_TITLE_SUFFIXES.has(titleWords.at(-1))
+      ? titleWords.slice(0, -1)
+      : [];
+    return {
+      title,
+      titleLength: titleWords.length,
+      ranges: fullRanges.length
+        ? fullRanges
+        : core.length >= 2
+          ? phraseRanges(promptWords, core)
+          : [],
+    };
+  });
+  return matches
+    .filter(({ titleLength, ranges }, index) =>
+      ranges.some(
+        (range) =>
+          !matches.some(
+            (other, otherIndex) =>
+              otherIndex !== index &&
+              other.titleLength > titleLength &&
+              other.ranges.some(
+                (otherRange) => otherRange.start <= range.start && otherRange.end >= range.end
+              )
+          )
+      )
+    )
+    .map(({ title }) => title);
 }
 
 function mostSpecificTitles(titles) {
@@ -637,9 +675,7 @@ function searchPlanTitles(prompt, candidateContext) {
   for (const bucket of Array.isArray(candidateContext?.role_buckets)
     ? candidateContext.role_buckets
     : []) {
-    const namedTitles = (Array.isArray(bucket?.titles) ? bucket.titles : []).filter((title) =>
-      promptMatchesTitle(prompt, title)
-    );
+    const namedTitles = configuredTitlesNamedByPrompt(prompt, bucket);
     const selectedTitles = namedTitles.length
       ? namedTitles
       : promptMatchesBucketName(prompt, bucket)
@@ -661,7 +697,12 @@ function searchPlanLocationClause(prompt, location = {}) {
   const alternatives = [];
   const home = quoteSearchTerm(location.home);
   const promptText = String(prompt?.text || "");
-  const remoteIsExplicit = /\bremote\b/i.test(promptText);
+  const remoteIsNegated = [
+    /\b(?:exclude|excluding|no|not|without)\s+(?:any\s+)?(?:fully\s+)?remote\b/i,
+    /\b(?:do\s+not|don't)\s+(?:include|show|find|search(?:\s+for)?)\s+(?:fully\s+)?remote\b/i,
+    /\bremote(?:\s+(?:roles?|jobs?|work|positions?))?\s+(?:are\s+)?(?:excluded|not\s+allowed|off\s+limits)\b/i,
+  ].some((pattern) => pattern.test(promptText));
+  const remoteIsExplicit = /\bremote\b/i.test(promptText) && !remoteIsNegated;
   if (home) alternatives.push(home);
   if (location.remote === true && remoteIsExplicit) alternatives.push("remote");
   if (!home && location.hybrid === true) alternatives.push("hybrid");

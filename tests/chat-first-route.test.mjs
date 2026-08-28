@@ -255,6 +255,96 @@ test("mission control choices persist one action, replay idempotently, and resto
   assert.equal(completed.choicePrompt, undefined);
 });
 
+test("mission Resume choice recovers a live leased step after server restart without stranding the mission", async () => {
+  const repoRoot = tempRepo();
+  const api = await import("../src/core/db/verbs.mjs");
+  appUpsert({
+    repoRoot,
+    row: {
+      id: "app-choice-restart",
+      company: "Restart Corp",
+      role: "Platform Engineer",
+      status: "applied",
+      evaluation: { gate: "keep" },
+    },
+  });
+  const created = api.missionCreateForJobs({
+    repoRoot,
+    id: "mission-choice-restart",
+    jobs: [{ type: "application", id: "app-choice-restart" }],
+    mode: "draft",
+  });
+  const runningStep = {
+    ...created.mission.steps[0],
+    status: "running",
+    currentAttempt: {
+      id: "attempt-before-restart",
+      number: 1,
+      fence: 1,
+      status: "running",
+      startedAt: created.mission.createdAt,
+      leaseExpiresAt: "2099-01-01T00:00:00.000Z",
+      idempotency: {
+        key: `mission-choice-restart:${created.mission.steps[0].id}`,
+        classification: "receipt-required",
+      },
+    },
+  };
+  const db = openDb({ repoRoot });
+  db.prepare("UPDATE mission_steps SET data = ? WHERE mission_id = ? AND id = ?").run(
+    JSON.stringify(runningStep),
+    created.mission.id,
+    runningStep.id
+  );
+  api.missionSetStatus({ repoRoot, id: created.mission.id, status: "paused" });
+  const paused = api
+    .chatFirstStateGet({ repoRoot })
+    .missions.find((mission) => mission.id === created.mission.id);
+  const resumePrompt = paused.choicePrompt;
+  const payload = {
+    entityType: "mission",
+    entityId: created.mission.id,
+    choice: {
+      promptId: resumePrompt.id,
+      version: resumePrompt.version,
+      optionIds: [resumePrompt.options[0].id],
+    },
+  };
+  const calls = [];
+  const routes = await boot(repoRoot, {
+    workspaceAgentRuntime: {
+      executeIntent: async ({ intent }) => {
+        calls.push(intent.type);
+        return { operationResult: { ok: true } };
+      },
+    },
+  });
+
+  const resumed = await invoke(routes, "POST", "/api/chat-first/choice/resolve", payload);
+
+  assert.equal(resumed.status, 200, JSON.stringify(resumed.body));
+  assert.equal(resumed.body.data.handled, true);
+  assert.equal(resumed.body.data.result.mission.status, "paused");
+  assert.equal(
+    resumed.body.data.result.mission.choicePrompt.options[0].actionRef.type,
+    "mission.resume"
+  );
+  assert.equal(resumed.body.data.result.mission.steps[0].status, "blocked");
+  assert.equal(resumed.body.data.result.mission.steps[0].result.requiresReconciliation, true);
+  assert.deepEqual(calls, []);
+
+  const beforeReplayVersion = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+  const replay = await invoke(routes, "POST", "/api/chat-first/choice/resolve", payload);
+  assert.equal(replay.status, 200);
+  assert.equal(replay.body.data.reused, true);
+  assert.equal(replay.body.data.result.mission.status, "paused");
+  assert.equal(
+    db.prepare("SELECT version FROM meta WHERE id = 1").get().version,
+    beforeReplayVersion
+  );
+  assert.deepEqual(calls, []);
+});
+
 test("mock End is durable and idempotent while ordinary free text remains an answer", async () => {
   const repoRoot = tempRepo();
   const api = await import("../src/core/db/verbs.mjs");

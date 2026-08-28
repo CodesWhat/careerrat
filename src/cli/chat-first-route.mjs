@@ -253,7 +253,9 @@ export function mountChatFirstRoutes({
     const resolved = chatFirstChoiceResolve({ ...pathCtx, ...body });
     const mission = resolved?.result?.mission;
     if (!resolved.reused && resolved.handled && mission?.status === "running") {
-      const { mission: executedMission, ...execution } = await executeMission(mission.id);
+      const { mission: executedMission, ...execution } = await executeMission(mission.id, {
+        resume: true,
+      });
       return {
         ...resolved,
         ...execution,
