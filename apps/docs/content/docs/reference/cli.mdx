@@ -29,6 +29,9 @@ The primary entry point. Run as `careerrat <command> [args] [--flags]`.
 | `strategy-review` | Stamp a strategy-review run |
 | `analytics` | Compute tracker analytics |
 | `evidence` | Read, validate, or add evidence claims |
+| `questions` | Fetch a job's real application-form questions, no browser |
+| `data` | sqlite-backed data layer: status, init, import, export, verify, plus per-domain verbs |
+| `health` | Record the company-health skill's role-scoped rating |
 | `gate` | Safely update gate data such as comp floors and exclusions |
 | `learnings` | Read or append per-role-family learnings |
 | `status-map` | Inspect ATS status normalization |
@@ -78,8 +81,8 @@ developing from a source checkout or running lower-level maintenance tools.
 |--------|-------------|
 | `capture:search-sources` | Bulk-capture board listing pages |
 | `capture:board` | Capture a single board page |
-| `analyze-outcomes` | Read outcome analytics from tracker |
-| `check-job-links` | Check liveness of sourced job links |
+| `analyze:outcomes` | Read outcome analytics from tracker |
+| `check:jobs` | Check liveness of sourced job links |
 | `scan:sourced` | Scan configured sourced rows |
 | `delta:sourced` | Show sourced-row deltas |
 | `calibrate:style` | Build writing-style calibration artifacts |
