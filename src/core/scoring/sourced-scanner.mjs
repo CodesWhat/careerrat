@@ -1265,7 +1265,7 @@ function gateFromScoreAndFlags(score, flags, modes = {}) {
 const ANNUAL_WORK_HOURS = 2_080;
 const BASE_COMP_LABEL_RE =
   /\b(?:base\s+(?:salary|pay|comp(?:ensation)?)|salary(?:\s+(?:range|band))?)\b/i;
-const ADJACENT_BARE_BASE_PREFIX_RE = /\bbase\s*:?\s*$/i;
+const ADJACENT_BARE_BASE_PREFIX_RE = /(?:^|[:;,|•])\s*base\s*:?\s*$/i;
 const ADJACENT_BARE_BASE_SUFFIX_RE =
   /^[\s,]*(?:(?:USD|CAD|MXN|EUR|GBP)\b[\s,]*)?(?:(?:per\s+(?:year|annum)|a\s+year|annually|annualized)\b[\s,]*)?base\b/i;
 const VARIABLE_COMP_LABEL_RE =

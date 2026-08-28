@@ -103,10 +103,13 @@ test("explicit base compensation labels classify a guaranteed-base band", () => 
   const expected = { base: { min: 95_000, max: 120_000 }, annualEarnings: null };
 
   assert.deepEqual(
-    ["Base compensation: $95k-$120k", "Base comp: $95k-$120k"].map((text) =>
-      sourcedScanner.extractCompensationBands(text)
-    ),
-    [expected, expected]
+    [
+      "Base compensation: $95k-$120k",
+      "Base comp: $95k-$120k",
+      "Base: $95k-$120k",
+      "$95k-$120k base",
+    ].map((text) => sourcedScanner.extractCompensationBands(text)),
+    [expected, expected, expected, expected]
   );
 });
 
@@ -114,6 +117,18 @@ test("compensation parsing does not treat customer base as a base-pay label", ()
   assert.deepEqual(
     sourcedScanner.extractCompensationBands(
       "Compensation is $95k-$120k depending on experience while helping expand our customer base"
+    ),
+    {
+      base: null,
+      annualEarnings: null,
+    }
+  );
+});
+
+test("compensation parsing does not treat customer base before pay as a base-pay label", () => {
+  assert.deepEqual(
+    sourcedScanner.extractCompensationBands(
+      "Compensation for helping expand our customer base: $95k-$120k"
     ),
     {
       base: null,
