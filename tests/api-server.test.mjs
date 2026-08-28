@@ -271,14 +271,35 @@ test("tracker-dev preserves LinkedIn optimization's frozen plan across provider 
   }
 });
 
-test("only the listening workspace owner can recover durable background work", async () => {
+test("only the listening workspace owner starts durable background recovery", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
-  const first = createDevServer({ repoRoot });
-  const second = createDevServer({ repoRoot });
+  const recoveries = [];
+  const isolatedRuntime = (owner) => ({
+    recoverOrphanedSourcingRuns() {
+      recoveries.push({
+        owner,
+        runId: sourcingRunLatest({ repoRoot, purpose: "manual-search" }).run?.id || null,
+      });
+    },
+    async recoverAdjacentRoleCoaching() {},
+    async runTurn() {
+      throw new Error("not used");
+    },
+    async executeIntent() {
+      throw new Error("not used");
+    },
+    async captureIntake() {
+      throw new Error("not used");
+    },
+    async shutdownSourcingWorkers() {},
+  });
+  const first = createDevServer({ repoRoot, workspaceAgentRuntime: isolatedRuntime("first") });
+  const second = createDevServer({ repoRoot, workspaceAgentRuntime: isolatedRuntime("second") });
 
   assert.equal(typeof first.listen, "function");
   await first.listen({ port: 0, host: "127.0.0.1" });
+  assert.deepEqual(recoveries, [{ owner: "first", runId: null }]);
 
   const liveSearch = sourcingRunStart({
     repoRoot,
@@ -312,18 +333,24 @@ test("only the listening workspace owner can recover durable background work", a
     );
     assert.equal(sourcingRunLatest({ repoRoot, purpose: "manual-search" }).run.status, "running");
     assert.equal(intakeOne({ repoRoot, id: liveIntakeId }).status, "running");
+    assert.deepEqual(recoveries, [{ owner: "first", runId: null }]);
 
     await new Promise((resolve) => first.server.close(resolve));
     await second.listen({ port: 0, host: "127.0.0.1" });
 
     const recoveredSearch = sourcingRunLatest({ repoRoot, purpose: "manual-search" }).run;
     assert.equal(recoveredSearch.id, liveSearch.id);
-    assert.equal(recoveredSearch.status, "failed");
-    assert.equal(recoveredSearch.error.code, "NO_DETERMINISTIC_SOURCES");
+    assert.equal(recoveredSearch.status, "running");
+    assert.deepEqual(recoveries, [
+      { owner: "first", runId: null },
+      { owner: "second", runId: liveSearch.id },
+    ]);
     const recoveredIntake = intakeOne({ repoRoot, id: liveIntakeId });
     assert.equal(recoveredIntake.status, "error");
     assert.equal(recoveredIntake.operation.error.code, "INTAKE_SERVER_RESTARTED");
   } finally {
+    await first.shutdownSourcingWorkers?.();
+    await second.shutdownSourcingWorkers?.();
     first.chatRuntime.shutdown();
     second.chatRuntime.shutdown();
     if (first.server.listening) await new Promise((resolve) => first.server.close(resolve));
@@ -632,7 +659,10 @@ test("the production workspace runtime imports an explicitly confirmed board URL
   const dev = createDevServer({ repoRoot });
   dev.startWatching();
   await new Promise((resolve) => dev.server.listen(0, resolve));
-  const sourceUrl = "https://remoteok.com/remote-dev-jobs?order_by=date";
+  // Keep this source-operation test isolated from the automatic expanded
+  // search owned by public sources. Login-backed sources stay pending until
+  // the separate point-of-use decision.
+  const sourceUrl = "https://www.linkedin.com/jobs/search/?keywords=platform";
   let importedLabel;
   try {
     let body = await runWorkspaceIntentOverHttp(

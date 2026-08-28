@@ -109,9 +109,12 @@ function seedNoDeterministicSources(repoRoot) {
       location_filter: null,
       searches: [
         {
-          label: "Browser-only board",
+          provider: "linkedin.com",
+          label: "LinkedIn operations",
           source_type: "browser",
-          url: "https://example.test/search?q=ai",
+          auth: true,
+          platform: "linkedin",
+          url: "https://www.linkedin.com/jobs/search/?keywords=operations",
           enabled: false,
         },
         {
@@ -337,11 +340,11 @@ test("POST /api/sourcing/first-run/start honors an explicit search before onboar
   }
 });
 
-test("first run with every deterministic source disabled records an actionable setup error", async () => {
+test("first run with only a pending login source completes and keeps the login choice actionable", async () => {
   const repoRoot = tempRepo();
   markSearchReady(repoRoot);
-  // Remove target titles so no role query can be generated. The stored broad
-  // source is explicitly disabled, preserving the no-runnable-source premise.
+  // Remove target titles so no role query can be generated. The only saved
+  // source remains disabled until its point-of-use login choice.
   candidateConfigPatch({
     repoRoot,
     name: "targeting",
@@ -354,13 +357,16 @@ test("first run with every deterministic source disabled records an actionable s
   try {
     const start = await postJson(server, "/api/sourcing/first-run/start", {});
     assert.equal(start.status, 202);
+    assert.equal(start.body.sources.deterministicSources.attempted, 0);
+    assert.equal(start.body.sources.deterministicSources.pendingLogins, 1);
     assertNoRuntimeHandoff(start.body);
 
-    const latest = await waitForLatestStatus(server, "failed");
+    const latest = await waitForLatestStatus(server, "completed");
     assert.equal(latest.status, 200);
-    assert.equal(latest.body.run.status, "failed");
-    assert.equal(latest.body.run.error.code, "NO_DETERMINISTIC_SOURCES");
-    assert.match(latest.body.run.error.message, /enabled job sources/i);
+    assert.equal(latest.body.run.status, "completed");
+    assert.equal(latest.body.run.error, null);
+    assert.equal(latest.body.run.summary.zeroResults, true);
+    assert.equal(latest.body.run.summary.deterministicSources.pendingLogins, 1);
     assertNoRuntimeHandoff(latest.body);
   } finally {
     await closeServer(server);
