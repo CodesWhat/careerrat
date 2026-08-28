@@ -156,7 +156,7 @@ test("high-volume application mode promotes medium scanner matches without chang
     title: "Operations Manager",
     company: "Acme",
     location: "Remote US",
-    comp: "$200k - $230k",
+    baseComp: "$200k - $230k",
     bodyText:
       "Own cross-functional rollout, customer onboarding, and operational process design. ".repeat(
         8

@@ -945,6 +945,7 @@ function scoreSourcedOfferFromConfig(
   const title = String(offer.title || "").toLowerCase();
   const company = String(offer.company || "").toLowerCase();
   const location = String(offer.location || "").toLowerCase();
+  const compEvidence = resolveCompensationEvidence(offer);
   const compText = compensationEvidenceText(offer, { includeBody: false });
   const body = String(offer.bodyText || offer.description || "");
   const text = `${title}\n${body}`.toLowerCase();
@@ -1085,10 +1086,12 @@ function scoreSourcedOfferFromConfig(
         add(4, "comp clears floor");
       }
     } else {
-      flag("comp-unposted");
+      flag(compEvidence.unclassifiedComp ? "comp-uncertain" : "comp-unposted");
     }
   } else {
-    if (!compBands.base && !compBands.annualEarnings) flag("comp-unposted");
+    if (!compBands.base && !compBands.annualEarnings) {
+      flag(compEvidence.unclassifiedComp ? "comp-uncertain" : "comp-unposted");
+    }
   }
   if (hasMinimumAnnualEarnings) {
     if (compStanding.annualEarnings === "below") {
@@ -1246,6 +1249,7 @@ function gateFromScoreAndFlags(score, flags, modes = {}) {
     flags.some(
       (flag) =>
         flag === "comp-unposted" ||
+        flag === "comp-uncertain" ||
         flag === "top-of-band-only" ||
         flag === "annual-earnings-overlap" ||
         flag === "annual-earnings-unverified" ||
@@ -1259,7 +1263,7 @@ function gateFromScoreAndFlags(score, flags, modes = {}) {
 }
 
 const ANNUAL_WORK_HOURS = 2_080;
-const BASE_COMP_LABEL_RE = /\b(?:base\s+(?:salary|pay)|salary(?:\s+(?:range|band))?)\b/i;
+const BASE_COMP_LABEL_RE = /\b(?:base(?:\s+(?:salary|pay))?|salary(?:\s+(?:range|band))?)\b/i;
 const VARIABLE_COMP_LABEL_RE =
   /\b(?:on-target\s+earnings|ote|bonus|equity|commission|total\s+comp(?:ensation)?|variable\s+(?:pay|compensation)|incentive\s+(?:pay|compensation))\b/i;
 const ANNUAL_EARNINGS_LABEL_RE =
@@ -1334,10 +1338,23 @@ export function extractCompBand(text = "", { baseOnly = false } = {}) {
     let foundRange = false;
     for (const match of normalized.matchAll(re)) {
       const prefix = normalized.slice(0, match.index);
+      const suffix = normalized.slice(match.index + match[0].length);
       const baseLabelIndex = lastLabelIndex(prefix, BASE_COMP_LABEL_RE);
       const variableLabelIndex = lastLabelIndex(prefix, VARIABLE_COMP_LABEL_RE);
-      const rangeIsBase = baseLabelIndex >= 0 && baseLabelIndex > variableLabelIndex;
-      const rangeIsVariable = variableLabelIndex >= 0 && variableLabelIndex > baseLabelIndex;
+      const suffixBaseLabelIndex = suffix.search(BASE_COMP_LABEL_RE);
+      const suffixVariableLabelIndex = suffix.search(VARIABLE_COMP_LABEL_RE);
+      const prefixIsBase = baseLabelIndex >= 0 && baseLabelIndex > variableLabelIndex;
+      const prefixIsVariable = variableLabelIndex >= 0 && variableLabelIndex > baseLabelIndex;
+      const rangeIsBase =
+        prefixIsBase ||
+        (!prefixIsVariable &&
+          suffixBaseLabelIndex >= 0 &&
+          (suffixVariableLabelIndex < 0 || suffixBaseLabelIndex < suffixVariableLabelIndex));
+      const rangeIsVariable =
+        prefixIsVariable ||
+        (!prefixIsBase &&
+          suffixVariableLabelIndex >= 0 &&
+          (suffixBaseLabelIndex < 0 || suffixVariableLabelIndex < suffixBaseLabelIndex));
       const rangeIsHourly = rangeIsBase && hourly;
       if (
         !plausibleCompensationMatch(line, match, [match[1], match[3]], [match[2], match[4]], {
@@ -1384,7 +1401,11 @@ export function extractCompBand(text = "", { baseOnly = false } = {}) {
     }
   }
 
-  return explicitBaseCandidates[0] || (baseOnly ? nonVariableCandidates[0] : candidates[0]) || null;
+  return (
+    explicitBaseCandidates[0] ||
+    (baseOnly ? null : nonVariableCandidates[0] || candidates[0]) ||
+    null
+  );
 }
 
 function extractAnnualEarningsBand(text = "") {

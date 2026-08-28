@@ -854,7 +854,7 @@ test("promoted scanner facts reach job threads and their AI context", async () =
         title: "Staff JavaScript Engineer",
         url: "https://jobs.example.test/scanner-facts",
         location: "Remote - United States",
-        comp: "$185,000 - $215,000",
+        baseComp: "$185,000 - $215,000",
         fit: "high",
         score: 91,
       },

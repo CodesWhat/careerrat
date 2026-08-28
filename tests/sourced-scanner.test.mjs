@@ -83,6 +83,22 @@ test("compensation parsing rejects calendar years and unitless shorthand", () =>
   });
 });
 
+test("unlabeled compensation stays unclassified instead of becoming guaranteed base", () => {
+  assert.deepEqual(sourcedScanner.extractCompensationBands("$95k-$120k"), {
+    base: null,
+    annualEarnings: null,
+  });
+  assert.deepEqual(sourcedScanner.extractCompensationBands("Base salary: $95k-$120k per year"), {
+    base: { min: 95_000, max: 120_000 },
+    annualEarnings: null,
+  });
+  assert.deepEqual(sourcedScanner.resolveCompensationEvidence({ comp: "$95k-$120k" }), {
+    baseComp: "",
+    annualEarningsComp: "",
+    unclassifiedComp: "$95k-$120k",
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Filter + infrastructure tests (unchanged)
 // ---------------------------------------------------------------------------
@@ -1057,7 +1073,7 @@ test("FDE title with JANE config scores in keep territory (high or med fit, like
       company: "Acme",
       title: "Forward Deployed Engineer",
       location: "New York City",
-      comp: "USD 205000-265000",
+      comp: "Base salary: USD 205000-265000",
       bodyText:
         "Build working prototypes with customers using LLM APIs, RAG, agents, MCP connectors, and production integrations. Drive adoption with enterprise teams.",
     },
@@ -1116,7 +1132,7 @@ test("comp posted below $200K floor with JANE config gets comp-below-floor flag 
       company: "Acme",
       title: "Applied AI Engineer",
       location: "Remote - US",
-      comp: "$130,000 - $170,000",
+      comp: "Base salary: $130,000 - $170,000",
       bodyText: "Build AI-powered solutions for enterprise customers using LLM APIs and agents.",
     },
     JANE_TECH_CONFIG
@@ -1552,7 +1568,7 @@ test("qualification gate filters stale, below-floor, and explicit sponsorship-co
         url: "https://jobs.example.com/cheap",
         location: "Remote - US",
         postedAt: "2026-08-08T00:00:00Z",
-        comp: "$140,000 - $180,000 base",
+        comp: "Base pay: $140,000 - $180,000",
       },
       {
         company: "NoVisaCo",
@@ -2114,6 +2130,38 @@ test("basis-specific offer fields participate in scanner hard gates", () => {
   });
 });
 
+test("scanner keeps an unlabeled pay range reviewable above a guaranteed-base floor", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Unknown Basis Corp",
+        title: "Bar Manager",
+        url: "https://jobs.example.test/unknown-basis",
+        location: "New York, NY",
+        comp: "$95k-$120k",
+        bodyText: "Manage the venue team and daily service operations.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_base: 130_000 },
+          location: { home: "New York, NY", onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.filteredSalary.length, 0);
+  assert.equal(result.kept.length, 1);
+  assert.ok(result.kept[0].qualificationUnknowns.includes("compensation"));
+  assert.ok(result.kept[0].ruleFlags.includes("comp-uncertain"));
+  assert.equal(result.kept[0].gate, "review");
+});
+
 test("guaranteed base pay can clear an annual earnings floor", () => {
   const result = filterAndDedupeOffers(
     [
@@ -2226,7 +2274,7 @@ test("config-driven scorer: offer with posted comp below floor gets comp-below-f
       company: "SmallClinic",
       title: "Registered Nurse",
       location: "Columbus, OH",
-      comp: "$60,000 - $80,000",
+      comp: "Base salary: $60,000 - $80,000",
       bodyText:
         "RN position providing bedside registered nurse care in outpatient clinic setting. Full time nursing role.",
     },

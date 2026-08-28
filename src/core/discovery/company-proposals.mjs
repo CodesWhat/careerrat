@@ -112,6 +112,7 @@ function scoringConfigFromContext(context = {}) {
     profile: {
       compensation: {
         minimum_base: context.compensationFloors?.minimum_base,
+        minimum_annual_earnings: context.compensationFloors?.minimum_annual_earnings,
       },
       location: {
         home: context.locationPosture?.home,
@@ -143,7 +144,9 @@ function prepareScanResult(scanResult = {}, context = {}) {
     locationFilter: buildLocationFilter(),
     config: scoringConfigFromContext(context),
   });
-  const scoredByUrl = new Map(scored.kept.map((offer) => [offer.url, offer]));
+  const scoredByUrl = new Map(
+    [...scored.kept, ...scored.filteredSalary].map((offer) => [offer.url, offer])
+  );
   const preparedOffers = offers
     .map((offer) => (offerHasScannerGate(offer) ? offer : scoredByUrl.get(offer.url)))
     .filter(Boolean);
@@ -153,6 +156,7 @@ function prepareScanResult(scanResult = {}, context = {}) {
     offers: preparedOffers,
     filteredTitle: scored.filteredTitle,
     filteredLocation: scored.filteredLocation,
+    filteredSalary: scored.filteredSalary,
     duplicates: scored.duplicates,
     possibleDuplicates: scored.possibleDuplicates,
     invalid: scored.invalid,

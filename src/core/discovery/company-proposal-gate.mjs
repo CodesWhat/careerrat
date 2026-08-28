@@ -1,6 +1,16 @@
-import { extractCompBand } from "../scoring/sourced-scanner.mjs";
+import { assessCompensationFloors } from "../profile/compensation.mjs";
+import {
+  extractCompensationBands,
+  resolveCompensationEvidence,
+} from "../scoring/sourced-scanner.mjs";
 
-const COMP_REVIEW_FLAGS = new Set(["comp-unposted", "comp-uncertain", "top-of-band-only"]);
+const COMP_REVIEW_FLAGS = new Set([
+  "comp-unposted",
+  "comp-uncertain",
+  "top-of-band-only",
+  "annual-earnings-overlap",
+  "annual-earnings-unverified",
+]);
 const HARD_CUT_PREFIXES = ["cut-risk"];
 const HARD_CUT_FLAGS = new Set(["excluded-company"]);
 
@@ -103,38 +113,77 @@ function hasRequiredOfferFields(offer) {
   return Boolean(offer?.company && offer?.title && offer?.url);
 }
 
-function minimumBase(context) {
-  const floor = Number(context?.compensationFloors?.minimum_base ?? context?.minimum_base);
-  return Number.isFinite(floor) ? floor : null;
+function positiveNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
 }
 
 function offerTextForComp(offer) {
-  return [offer?.comp, offer?.bodyText, offer?.description, offer?.rawText]
+  const evidence = resolveCompensationEvidence(offer);
+  return [
+    evidence.baseComp ? `Base pay: ${evidence.baseComp}` : "",
+    evidence.annualEarningsComp ? `Annual earnings: ${evidence.annualEarningsComp}` : "",
+    evidence.unclassifiedComp ? `Compensation: ${evidence.unclassifiedComp}` : "",
+    offer?.bodyText,
+    offer?.description,
+    offer?.rawText,
+  ]
     .filter(Boolean)
     .join("\n");
 }
 
-function compStateForOffer(offer, floor) {
-  const flags = ruleFlags(offer);
-  if (flags.includes("comp-below-floor")) return "below-floor";
-  if (flags.includes("comp-uncertain")) return "uncertain";
-  if (flags.includes("top-of-band-only")) return "top-of-band-only";
-  if (flags.includes("comp-unposted")) return "unposted";
-  if (floor === null) return "clears-floor";
-
-  const band = extractCompBand(offerTextForComp(offer));
-  if (!band) return "unposted";
-  if (band.max < floor) return "below-floor";
-  if (band.min < floor) return "top-of-band-only";
-  return "clears-floor";
+function compensationFloors(context) {
+  return {
+    minimumBase: positiveNumber(context?.compensationFloors?.minimum_base ?? context?.minimum_base),
+    minimumAnnualEarnings: positiveNumber(
+      context?.compensationFloors?.minimum_annual_earnings ?? context?.minimum_annual_earnings
+    ),
+  };
 }
 
-function compReviewReason(state) {
-  if (state === "unposted") return "comp-unposted";
-  if (state === "uncertain") return "comp-uncertain";
-  if (state === "top-of-band-only") return "top-of-band-only";
-  if (state === "below-floor") return "comp-below-floor";
-  return "";
+function compStateForOffer(offer, floors) {
+  const flags = ruleFlags(offer);
+  const evidence = resolveCompensationEvidence(offer);
+  const bands = extractCompensationBands(offerTextForComp(offer));
+  const standing = assessCompensationFloors({
+    baseBand: bands.base,
+    annualEarningsBand: bands.annualEarnings,
+    ...floors,
+  });
+  const rejectReasons = [];
+  const reviewReasons = [];
+
+  if (standing.base === "below") {
+    rejectReasons.push("comp-below-floor");
+  }
+  if (standing.annualEarnings === "below") {
+    rejectReasons.push("annual-earnings-below-floor");
+  }
+
+  if (floors.minimumBase !== null) {
+    if (standing.base === "overlap") {
+      reviewReasons.push("top-of-band-only");
+    } else if (standing.base === "unknown") {
+      reviewReasons.push(
+        flags.includes("comp-uncertain") || evidence.unclassifiedComp
+          ? "comp-uncertain"
+          : "comp-unposted"
+      );
+    }
+  }
+  if (floors.minimumAnnualEarnings !== null) {
+    if (standing.annualEarnings === "overlap") {
+      reviewReasons.push("annual-earnings-overlap");
+    } else if (standing.annualEarnings === "unknown") {
+      reviewReasons.push("annual-earnings-unverified");
+    }
+  }
+
+  return {
+    rejectReasons: unique(rejectReasons),
+    reviewReasons: unique(reviewReasons),
+    clearsFloors: rejectReasons.length === 0 && reviewReasons.length === 0,
+  };
 }
 
 function jdCaptureSummary(capturedOffers) {
@@ -253,7 +302,7 @@ export function buildCompanyProposal({
   version = 1,
 } = {}) {
   const company = proposalCompany(seed, resolution);
-  const floor = minimumBase(context);
+  const floors = compensationFloors(context);
   const offers = list(scanResult?.offers).filter(hasRequiredOfferFields);
 
   if (companyMatches(context?.trackedCompanies, company)) {
@@ -332,22 +381,24 @@ export function buildCompanyProposal({
     });
   }
 
-  const compStates = offers.map((offer) => compStateForOffer(offer, floor));
-  if (compStates.every((state) => state === "below-floor")) {
+  const compStates = offers.map((offer) => compStateForOffer(offer, floors));
+  if (compStates.every((state) => state.rejectReasons.length > 0)) {
+    const rejectReasons = unique(compStates.flatMap((state) => state.rejectReasons));
+    const reason = rejectReasons[0];
     return rejectedResult({
       seed,
       resolution,
       scanResult,
       proposalId,
       version,
-      reason: "comp-below-floor",
-      rejectReasons: ["comp-below-floor"],
-      status: "comp-below-floor",
+      reason,
+      rejectReasons,
+      status: reason,
     });
   }
 
   const viableOffers = offers.filter((offer, index) => {
-    if (compStates[index] === "below-floor") return false;
+    if (compStates[index].rejectReasons.length > 0) return false;
     if (hasHardCutFlag(offer)) return false;
     return offer.gate !== "likely-cut";
   });
@@ -370,16 +421,15 @@ export function buildCompanyProposal({
   );
   const jdCapture = jdCaptureSummary(captured);
   const compStateForViableOffer = (offer) => compStates[offers.indexOf(offer)];
-  const hasClearComp = viableOffers.some(
-    (offer) => compStateForViableOffer(offer) === "clears-floor"
-  );
+  const hasClearComp = viableOffers.some((offer) => compStateForViableOffer(offer).clearsFloors);
   const reviewReasons = [];
 
   if (!hasClearComp) {
     for (const offer of viableOffers) {
-      const reason = compReviewReason(compStateForViableOffer(offer));
-      if (COMP_REVIEW_FLAGS.has(reason) && !reviewReasons.includes(reason)) {
-        reviewReasons.push(reason);
+      for (const reason of compStateForViableOffer(offer).reviewReasons) {
+        if (COMP_REVIEW_FLAGS.has(reason) && !reviewReasons.includes(reason)) {
+          reviewReasons.push(reason);
+        }
       }
     }
   }
@@ -398,7 +448,7 @@ export function buildCompanyProposal({
   const roleSeen = trimString(viableOffers[0]?.title);
   const compStatus = hasClearComp
     ? "clears-floor"
-    : compStates.find((state) => state !== "below-floor") || "";
+    : compStateForViableOffer(viableOffers[0]).reviewReasons[0] || "";
 
   return {
     proposal: {
@@ -417,7 +467,7 @@ export function buildCompanyProposal({
         status: "matching-roles-found",
         scanResult,
         matchingOffers: viableOffers,
-        compStatus: floor === null ? "" : compStatus,
+        compStatus,
         reviewReasons,
       }),
       jdCapture,

@@ -309,7 +309,7 @@ function matchingOffer(company, overrides = {}) {
     title: "Applied AI Engineer",
     url: `https://jobs.lever.co/${company.toLowerCase().replace(/[^a-z0-9]+/g, "-")}/ai-engineer`,
     location: "Remote",
-    comp: "$220,000 - $260,000",
+    comp: "Base salary: $220,000 - $260,000",
     bodyText: "Build agentic developer workflows, LLM tool use, and customer-facing AI prototypes.",
     fit: "high",
     score: 88,
@@ -393,7 +393,7 @@ test("POST /api/discovery/company-proposals auto-adds a validated manual-seed co
             title: "Applied AI Engineer",
             url: "https://jobs.lever.co/acme/ai-engineer",
             location: "Remote",
-            comp: "$220,000 - $260,000",
+            comp: "Base salary: $220,000 - $260,000",
             bodyText:
               "Build agentic developer workflows, LLM tool use, and customer-facing AI prototypes.",
             fit: "high",
@@ -511,7 +511,7 @@ test("an explicit discovery request auto-adds a deterministically validated comp
           title: "Applied AI Engineer",
           url: "https://jobs.lever.co/acme/ai-engineer",
           location: "Remote",
-          comp: "$220,000 - $260,000",
+          comp: "Base salary: $220,000 - $260,000",
           bodyText: "Build agentic developer workflows and customer-facing AI prototypes.",
           fit: "high",
           score: 88,
@@ -603,7 +603,7 @@ test("POST /api/discovery/company-proposals turns AI seeds into deterministic re
             title: "Applied AI Engineer",
             url: "https://jobs.lever.co/seeded/ai-engineer",
             location: "Remote",
-            comp: "$220,000 - $260,000",
+            comp: "Base salary: $220,000 - $260,000",
             bodyText: "Build agentic developer workflows and customer-facing prototypes.",
             fit: "high",
             score: 90,
@@ -679,7 +679,7 @@ test("company proposal rescoring preserves worldwide remote scope in its candida
           title: "Applied AI Engineer",
           url: "https://jobs.lever.co/worldwide-remote/ai-engineer",
           location: "Remote - EMEA",
-          comp: "$220,000 - $260,000",
+          comp: "Base salary: $220,000 - $260,000",
           bodyText: "Build agentic developer workflows and customer-facing prototypes.",
         },
       ],
@@ -830,7 +830,7 @@ test("POST /api/discovery/company-proposals applies comp-plausibility flags to c
     [
       "Below Floor Co",
       matchingOffer("Below Floor Co", {
-        comp: "$120,000 - $170,000",
+        comp: "Base salary: $120,000 - $170,000",
         gate: "likely-cut",
         fit: "stretch",
         score: 42,
@@ -848,7 +848,7 @@ test("POST /api/discovery/company-proposals applies comp-plausibility flags to c
     [
       "Top Band Co",
       matchingOffer("Top Band Co", {
-        comp: "$170,000 - $220,000",
+        comp: "Base salary: $170,000 - $220,000",
         gate: "review",
         ruleFlags: ["top-of-band-only"],
       }),
@@ -896,6 +896,93 @@ test("POST /api/discovery/company-proposals applies comp-plausibility flags to c
     assert.notEqual(proposal.proposedAction, "approve-supported-ats");
     assert.ok(proposal.reviewReasons.includes(reason));
   }
+});
+
+test("POST /api/discovery/company-proposals scores annual cash floors before proposal gating", async () => {
+  const repoRoot = tempRepo();
+  seedCandidateForAICompanyDiscovery(repoRoot);
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      compensation: {
+        minimum_base: null,
+        minimum_annual_earnings: 200_000,
+      },
+    },
+  });
+  const server = bootServer(repoRoot, {
+    resolveCompanyBoard: async ({ seed }) => supportedResolution(seed),
+    scanCompaniesImpl: async () => ({
+      offers: [
+        matchingOffer("Annual Cash Co", {
+          location: "Remote - United States",
+          comp: "",
+          baseComp: "$120,000-$140,000 base salary",
+          annualEarningsComp: "$180,000-$220,000 annual cash earnings",
+          score: null,
+          fit: null,
+          gate: null,
+          ruleFlags: [],
+        }),
+      ],
+      errors: [],
+    }),
+  });
+
+  const { status, body } = await postJson(server, "/api/discovery/company-proposals", {
+    manualSeeds: [{ name: "Annual Cash Co", domain_hint: "annual-cash.example" }],
+  });
+
+  assert.equal(status, 200);
+  assert.equal(body.data.rejected.length, 0, JSON.stringify(body.data.rejected, null, 2));
+  assert.equal(body.data.proposals.length, 1);
+  const proposal = body.data.proposals[0];
+  assert.ok(proposal.reviewReasons.includes("annual-earnings-overlap"));
+  assert.ok(proposal.capturedOffers[0].ruleFlags.includes("annual-earnings-overlap"));
+});
+
+test("POST /api/discovery/company-proposals preserves annual cash hard misses for an honest rejection", async () => {
+  const repoRoot = tempRepo();
+  seedCandidateForAICompanyDiscovery(repoRoot);
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      compensation: {
+        minimum_base: null,
+        minimum_annual_earnings: 200_000,
+      },
+    },
+  });
+  const server = bootServer(repoRoot, {
+    resolveCompanyBoard: async ({ seed }) => supportedResolution(seed),
+    scanCompaniesImpl: async () => ({
+      offers: [
+        matchingOffer("Low Annual Cash Co", {
+          location: "Remote - United States",
+          comp: "",
+          baseComp: "$20 per hour",
+          annualEarningsComp: "$140,000-$180,000 annual cash earnings",
+          score: null,
+          fit: null,
+          gate: null,
+          ruleFlags: [],
+        }),
+      ],
+      errors: [],
+    }),
+  });
+
+  const { status, body } = await postJson(server, "/api/discovery/company-proposals", {
+    manualSeeds: [{ name: "Low Annual Cash Co", domain_hint: "low-annual-cash.example" }],
+  });
+
+  assert.equal(status, 200);
+  assert.equal(body.data.proposals.length, 0);
+  assert.equal(body.data.rejected.length, 1);
+  assert.equal(body.data.rejected[0].reason, "annual-earnings-below-floor");
+  assert.ok(body.data.rejected[0].rejectReasons.includes("annual-earnings-below-floor"));
 });
 
 test("POST /api/discovery/company-proposals returns review-only non-comp borderline states", async () => {

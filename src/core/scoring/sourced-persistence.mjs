@@ -203,7 +203,8 @@ function explicitBaseCompensationRange(bodyText) {
     const adjacentLabel = ADJACENT_BASE_COMPENSATION_LABEL_RE.test(clauses[index - 1] || "");
     if (!EXPLICIT_BASE_COMPENSATION_RE.test(clause) && !adjacentLabel) continue;
     if (NON_BASE_COMPENSATION_RE.test(clause)) continue;
-    if (!extractCompBand(clause, { baseOnly: true })) continue;
+    const compensationClause = adjacentLabel ? `${clauses[index - 1]} ${clause}` : clause;
+    if (!extractCompBand(compensationClause, { baseOnly: true })) continue;
     for (const match of clause.matchAll(COMPENSATION_RANGE_RE)) {
       const min = normalizedCompensationAmount(match[1], match[2]);
       const max = normalizedCompensationAmount(match[3], match[4]);
