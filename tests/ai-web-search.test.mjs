@@ -841,6 +841,7 @@ test("runAiWebSearch partitions all five explicit bar titles across two bounded 
     assert.ok(query.length <= 100, query);
     assert.equal((query.match(/"/g) || []).length % 2, 0, query);
     assert.equal((query.match(/\(/g) || []).length, (query.match(/\)/g) || []).length, query);
+    assert.match(query, /"New York, NY"/);
   }
   for (const title of titles) {
     assert.equal(

@@ -990,14 +990,14 @@ function directSourceClause(
   return sources.length === 1 ? sources[0] : `(${sources.join(" OR ")})`;
 }
 
-function partitionSearchTitles(titles) {
+function partitionSearchTitles(titles, locationClause) {
   if (titles.length <= 1) return [titles, titles];
   for (let split = titles.length - 1; split >= 1; split -= 1) {
     const broadTitles = titles.slice(0, split);
     const directTitles = titles.slice(split);
     if (
-      searchTitleClause(broadTitles).length <= MAX_SEARCH_QUERY_LENGTH &&
-      searchTitleClause(directTitles).length <= MAX_SEARCH_QUERY_LENGTH
+      searchQuery(broadTitles, locationClause).length <= MAX_SEARCH_QUERY_LENGTH &&
+      searchQuery(directTitles, locationClause).length <= MAX_SEARCH_QUERY_LENGTH
     ) {
       return [broadTitles, directTitles];
     }
@@ -1033,7 +1033,7 @@ function buildSearchQueryHints(
       },
     ];
   }
-  const [broadTitles, directTitles] = partitionSearchTitles(titles);
+  const [broadTitles, directTitles] = partitionSearchTitles(titles, locationClause);
   const sourceClause = directSourceClause(
     directTitles,
     locationClause,
