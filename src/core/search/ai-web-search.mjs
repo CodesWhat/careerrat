@@ -530,7 +530,12 @@ function freshnessRecoveryInstruction(rejections) {
 function usefulSetTopUpInstruction(
   consideredCandidates,
   missingTargetTitles = [],
-  { survivorRoles = [], representedBuckets = [], missingBuckets = [] } = {}
+  {
+    survivorRoles = [],
+    representedBuckets = [],
+    missingBuckets = [],
+    rejectedSourceHosts = [],
+  } = {}
 ) {
   const consideredPostings = consideredCandidates.slice(0, 60).map(({ offer, reason }) => ({
     url: offer.url,
@@ -542,13 +547,14 @@ function usefulSetTopUpInstruction(
     missingTargetTitles.length
       ? `Prioritize these configured target titles that are still unrepresented: ${missingTargetTitles.join(", ")}.`
       : "Prioritize a distinct configured target title that is still unrepresented when one is available.",
-    "Search employer-owned career pages and direct ATS postings first. Do not repeat an already considered URL or requisition, and do not loosen title, location, compensation, freshness, or fit requirements.",
+    "Search employer-owned career pages and direct ATS postings first. Do not repeat an already considered URL or requisition or use a host listed in rejected_source_hosts. Do not loosen title, location, compensation, freshness, or fit requirements.",
     JSON.stringify({
       missing_target_titles: missingTargetTitles,
       survivor_roles: survivorRoles,
       represented_buckets: representedBuckets,
       missing_buckets: missingBuckets,
       considered_postings: consideredPostings,
+      rejected_source_hosts: rejectedSourceHosts,
     }),
   ].join("\n");
 }
@@ -1236,12 +1242,29 @@ export async function runAiWebSearch({
     return { canonicalPromptIds, receiptPromptIds, rejectionsByPrompt };
   }
 
+  const canonicalRejectionsByPrompt = new Map();
+  function mergeCanonicalRejections(rejectionsByPrompt) {
+    for (const [promptId, rejections] of rejectionsByPrompt) {
+      const merged = new Map(
+        (canonicalRejectionsByPrompt.get(promptId) || []).map((rejection) => [
+          `${normalizedSourceUrl(rejection.offer?.url)}\n${rejection.reason}`,
+          rejection,
+        ])
+      );
+      for (const rejection of rejections) {
+        merged.set(`${normalizedSourceUrl(rejection.offer?.url)}\n${rejection.reason}`, rejection);
+      }
+      canonicalRejectionsByPrompt.set(promptId, [...merged.values()]);
+    }
+  }
+
   const initialCollection = await collectPromptOutcomes(promptOutcomes);
+  mergeCanonicalRejections(initialCollection.rejectionsByPrompt);
   let recoverySpecs = selected
     .map((prompt, promptIndex) => ({
       prompt,
       promptIndex,
-      rejectedCandidates: initialCollection.rejectionsByPrompt.get(prompt.id) || [],
+      rejectedCandidates: canonicalRejectionsByPrompt.get(prompt.id) || [],
     }))
     .filter(
       ({ prompt, rejectedCandidates }) =>
@@ -1279,6 +1302,7 @@ export async function runAiWebSearch({
       rejectedSourceHostsByPrompt,
       allowCanonicalReplacement: true,
     });
+    mergeCanonicalRejections(recoveryCollection.rejectionsByPrompt);
     recoverySpecs = recoverySpecs
       .filter(
         ({ prompt }) =>
@@ -1287,10 +1311,7 @@ export async function runAiWebSearch({
       )
       .map((spec) => ({
         ...spec,
-        rejectedCandidates: [
-          ...spec.rejectedCandidates,
-          ...(recoveryCollection.rejectionsByPrompt.get(spec.prompt.id) || []),
-        ],
+        rejectedCandidates: canonicalRejectionsByPrompt.get(spec.prompt.id) || [],
       }));
   }
 
@@ -1418,12 +1439,19 @@ export async function runAiWebSearch({
           left.topUpCount - right.topUpCount ||
           left.promptIndex - right.promptIndex
       )[0];
-    const consideredCandidates = roles
+    const genericConsideredCandidates = roles
       .filter((role) => role?.company && role?.title && role?.url && isPostingEvidenceUrl(role.url))
       .map((role) => ({
         offer: { company: role.company, title: role.title, url: role.url },
         reason: "CareerRat already accepted or rejected this posting in the current run.",
       }));
+    const canonicalRejections = canonicalRejectionsByPrompt.get(topUpSpec.prompt.id) || [];
+    const consideredByUrl = new Map();
+    for (const candidate of [...canonicalRejections, ...genericConsideredCandidates]) {
+      const url = normalizedSourceUrl(candidate.offer?.url);
+      if (url && !consideredByUrl.has(url)) consideredByUrl.set(url, candidate);
+    }
+    const consideredCandidates = [...consideredByUrl.values()];
     const consideredPostingKeys = new Set();
     for (const { offer } of consideredCandidates) addPostingIdentity(consideredPostingKeys, offer);
     topUpCounts.set(topUpSpec.prompt.id, topUpSpec.topUpCount + 1);
@@ -1438,13 +1466,15 @@ export async function runAiWebSearch({
         missingBuckets: state.missingBuckets.map(
           (bucket) => bucket.name || JSON.stringify(bucket.titles)
         ),
+        rejectedSourceHosts: [...concentratedRejectedHosts(canonicalRejections)],
       },
     });
     allPromptOutcomes.push(topUpOutcome);
-    await collectPromptOutcomes([topUpOutcome], {
+    const topUpCollection = await collectPromptOutcomes([topUpOutcome], {
       recovery: true,
       rejectedPostingKeys: consideredPostingKeys,
     });
+    mergeCanonicalRejections(topUpCollection.rejectionsByPrompt);
     if ((topUpOutcome.errors || []).length > 0 || (topUpOutcome.failedPromptIds || []).length > 0) {
       break;
     }

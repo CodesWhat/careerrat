@@ -3581,6 +3581,156 @@ test("runAiWebSearch continues prioritized useful-set recovery after an empty to
   assert.equal(result.presented, 3, JSON.stringify(result));
 });
 
+test("runAiWebSearch carries partial-success canonical rejection evidence into its first top-up", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        { name: "Bar leadership", titles: ["Bar Manager", "Head Bartender", "Lead Bartender"] },
+      ],
+      fit_bands: { fit_floor: 65 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      {
+        id: "p1",
+        text: "Find active Bar Manager, Head Bartender, and Lead Bartender jobs in New York City",
+      },
+    ],
+  });
+
+  const activeUrl = "https://active-bar.example/jobs/bar-manager";
+  const staleHost = "stale-board.example";
+  const staleHeadUrl = `https://${staleHost}/jobs/head-bartender`;
+  const staleLeadUrl = `https://${staleHost}/jobs/lead-bartender`;
+  const replacementHeadUrl = "https://direct-head.example/jobs/head-bartender";
+  const replacementLeadUrl = "https://direct-lead.example/jobs/lead-bartender";
+  const inputs = [];
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      const firstTopUp =
+        typeof input === "string" && input.includes("canonical result set is still underfilled");
+      const informedTopUp =
+        firstTopUp &&
+        input.includes(staleHeadUrl) &&
+        input.includes(staleLeadUrl) &&
+        input.includes(`"rejected_source_hosts":["${staleHost}"]`) &&
+        input.includes("no longer available") &&
+        input.includes("does not identify one specific job posting");
+      const roles =
+        inputs.length === 1
+          ? [
+              role({
+                company: "Active Bar",
+                title: "Bar Manager",
+                location: "New York, NY",
+                url: activeUrl,
+              }),
+              role({
+                company: "Stale Head",
+                title: "Head Bartender",
+                location: "New York, NY",
+                url: staleHeadUrl,
+              }),
+              role({
+                company: "Stale Lead",
+                title: "Lead Bartender",
+                location: "New York, NY",
+                url: staleLeadUrl,
+              }),
+            ]
+          : informedTopUp
+            ? [
+                role({
+                  company: "Direct Head",
+                  title: "Head Bartender",
+                  location: "New York, NY",
+                  url: replacementHeadUrl,
+                }),
+                role({
+                  company: "Direct Lead",
+                  title: "Lead Bartender",
+                  location: "New York, NY",
+                  url: replacementLeadUrl,
+                }),
+              ]
+            : [];
+      emitAssistantJson(onEvent, {
+        roles,
+        queries_run: [
+          {
+            prompt_id: kickoff.prompts[0].id,
+            query: `bar leadership query ${inputs.length}`,
+            status: "completed",
+          },
+        ],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: async (url) => {
+      if (url === staleHeadUrl) {
+        return specificResolution(url, {
+          bodyText: fullJd("No longer available"),
+          liveness: {
+            result: "expired",
+            reason: `The canonical posting at ${url} is no longer available.`,
+          },
+        });
+      }
+      if (url === staleLeadUrl) {
+        return {
+          bodyFetchStatus: "unavailable",
+          bodyFetchReason: "The job description could not be read from the canonical page.",
+          bodyText: "",
+          url,
+        };
+      }
+      return specificResolution(url, {
+        location: "New York, NY",
+        title:
+          url === activeUrl
+            ? "Bar Manager"
+            : url === replacementHeadUrl
+              ? "Head Bartender"
+              : "Lead Bartender",
+        liveness: { result: "active", reason: "visible apply control" },
+      });
+    },
+  });
+
+  const firstTopUpInput = inputs.find(
+    (input) =>
+      typeof input === "string" && input.includes("canonical result set is still underfilled")
+  );
+  assert.ok(firstTopUpInput);
+  assert.match(firstTopUpInput, /no longer available/i);
+  assert.match(firstTopUpInput, /does not identify one specific job posting/i);
+  assert.match(firstTopUpInput, /"rejected_source_hosts":\["stale-board\.example"\]/);
+  assert.equal(result.presented, 3, JSON.stringify(result));
+});
+
 test("runAiWebSearch retries a missing target bucket within the bounded useful-set cap", async () => {
   const repoRoot = repo({ prompts: 3 });
   candidateConfigPatch({
