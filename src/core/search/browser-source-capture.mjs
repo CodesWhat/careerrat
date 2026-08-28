@@ -3,6 +3,75 @@ import { resolvePublicHttpTarget, validatePublicHttpUrl } from "../net/public-ht
 import { extractReqId } from "../scoring/sourced-identity.mjs";
 
 const SOURCE_SPECS = Object.freeze({
+  indeed: {
+    rowSelectors: ["[data-jk]", ".job_seen_beacon", ".resultContent", ".tapItem"],
+    fields: {
+      title: {
+        selectors: ["h2.jobTitle a", "a[data-jk]", "a.jcs-JobTitle"],
+      },
+      company: {
+        selectors: ["[data-testid='company-name']", ".companyName", "[data-testid='companyName']"],
+      },
+      location: {
+        selectors: [
+          "[data-testid='text-location']",
+          ".companyLocation",
+          "[data-testid='job-location']",
+        ],
+      },
+      url: {
+        selectors: ["a[data-jk][href]", "h2.jobTitle a[href]", "a.jcs-JobTitle[href]"],
+        kind: "href",
+      },
+    },
+    bodySelectors: [
+      "#jobDescriptionText",
+      "[data-testid='jobsearch-JobComponent-description']",
+      "[data-testid='job-description']",
+      "main",
+    ],
+  },
+  glassdoor: {
+    rowSelectors: [
+      "[data-test='jobListing']",
+      "li[data-test='jobListing']",
+      "[data-job-id]",
+      "li[class*='JobsList_jobListItem']",
+    ],
+    fields: {
+      title: {
+        selectors: ["[data-test='job-title']", "[data-test='job-link']", "a[data-test='job-link']"],
+      },
+      company: {
+        selectors: [
+          "[data-test='employer-name']",
+          "[data-test='job-employer']",
+          "[class*='employerName']",
+        ],
+      },
+      location: {
+        selectors: [
+          "[data-test='emp-location']",
+          "[data-test='job-location']",
+          "[class*='location']",
+        ],
+      },
+      url: {
+        selectors: [
+          "a[href*='/job-listing/']",
+          "a[data-test='job-link'][href]",
+          "a[href*='/partner/jobListing.htm']",
+        ],
+        kind: "href",
+      },
+    },
+    bodySelectors: [
+      "[data-test='jobDescriptionContent']",
+      "[data-test='job-description']",
+      "[class*='JobDetails_jobDescription']",
+      "main",
+    ],
+  },
   linkedin: {
     rowSelectors: ["[data-job-id]", ".job-card-container", "li.jobs-search-results__list-item"],
     fields: {
@@ -17,6 +86,12 @@ const SOURCE_SPECS = Object.freeze({
       },
       url: { selectors: ['a[href*="/jobs/view/"]'], kind: "href" },
     },
+    bodySelectors: [
+      ".jobs-description__content",
+      ".jobs-description-content__text",
+      "#job-details",
+      "main",
+    ],
   },
   wellfound: {
     rowSelectors: ["[data-test='StartupResult']", "article", "li", "[role='listitem']"],
@@ -91,6 +166,8 @@ const SOURCE_SPECS = Object.freeze({
 
 function normalizedProvider(source = {}) {
   const explicit = String(source.platform || source.provider || "").toLowerCase();
+  if (explicit.includes("indeed")) return "indeed";
+  if (explicit.includes("glassdoor")) return "glassdoor";
   if (explicit.includes("linkedin")) return "linkedin";
   if (explicit.includes("wellfound")) return "wellfound";
   if (explicit.includes("hiringcafe") || explicit.includes("hiring.cafe")) return "hiringcafe";
@@ -123,6 +200,94 @@ function normalizedText(value) {
     .trim();
 }
 
+function normalizedBodyText(value) {
+  return String(value || "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function loginRequest(source, url) {
+  const platformLabel = displayPlatform(source);
+  return {
+    platform: String(source.platform || normalizedProvider(source)).toLowerCase(),
+    label: platformLabel,
+    sourceLabel: String(source.label || source.provider || "Browser source"),
+    url,
+    prompt: `Do you want to log into ${platformLabel} so I can use it?`,
+  };
+}
+
+function partialBodyResult(offer, error) {
+  return {
+    offer,
+    error: error?.message || String(error),
+    needsLogin: null,
+  };
+}
+
+async function capturePostingBody({ offer, session, source, spec, resolvePublicTargetImpl }) {
+  const initialTarget = await resolvePublicTargetImpl(offer.url);
+  if (!initialTarget?.ok) {
+    return {
+      offer: null,
+      error: initialTarget?.reason || "The job URL is not publicly reachable.",
+      needsLogin: null,
+    };
+  }
+  let page;
+  try {
+    page = await session.open(initialTarget.url);
+  } catch (error) {
+    if (error?.code === "UNSAFE_BROWSER_NAVIGATION") {
+      return { offer: null, error: error.message, needsLogin: null };
+    }
+    return partialBodyResult(offer, error);
+  }
+  const finalTarget = await resolvePublicTargetImpl(page?.url || initialTarget.url);
+  if (!finalTarget?.ok) {
+    return {
+      offer: null,
+      error: finalTarget?.reason || "The browser was redirected to a non-public network address.",
+      needsLogin: null,
+    };
+  }
+  if (classifyBrowserAuthState(page)) {
+    return { offer: null, error: null, needsLogin: loginRequest(source, initialTarget.url) };
+  }
+  let extracted;
+  try {
+    extracted = await session.extractText({
+      selectors: spec.bodySelectors || ["main", "body"],
+      maxText: 100_000,
+    });
+  } catch (error) {
+    return partialBodyResult(offer, error);
+  }
+  const bodyText = normalizedBodyText(extracted?.text || page?.text);
+  if (bodyText.length < 40) {
+    return partialBodyResult(
+      offer,
+      new Error(`CareerRat could not read the full job description at ${offer.url}.`)
+    );
+  }
+  const url = finalTarget.url;
+  const req = extractReqId(url);
+  return {
+    offer: {
+      ...offer,
+      url,
+      bodyText,
+      bodyPartial: false,
+      capturedUrl: url,
+      reqId: req.id || offer.reqId,
+    },
+    error: null,
+    needsLogin: null,
+  };
+}
+
 function normalizedOffer(row, { source, provider, searchUrl }) {
   const title = normalizedText(row?.title);
   const company = normalizedText(row?.company || source.company);
@@ -137,6 +302,7 @@ function normalizedOffer(row, { source, provider, searchUrl }) {
     location: normalizedText(row?.location),
     bodyText: "",
     bodyPartial: true,
+    bodyCapture: "session-browser",
     source: `${provider}-browser`,
     sourceId: String(source.id || ""),
     sourceLabel: String(source.label || source.id || source.provider || "Browser source"),
@@ -184,17 +350,10 @@ export async function captureBrowserSearchSource({
     }
     const auth = classifyBrowserAuthState(page);
     if (auth) {
-      const platformLabel = displayPlatform(source);
       return {
         offers: [],
         errors: [],
-        needsLogin: {
-          platform: String(source.platform || normalizedProvider(source)).toLowerCase(),
-          label: platformLabel,
-          sourceLabel: label,
-          url,
-          prompt: `Do you want to log into ${platformLabel} so I can use it?`,
-        },
+        needsLogin: loginRequest(source, url),
       };
     }
 
@@ -213,7 +372,25 @@ export async function captureBrowserSearchSource({
       seen.add(offer.url);
       offers.push(offer);
     }
-    return { offers, errors: [], needsLogin: null };
+    const captured = [];
+    const errors = [];
+    let needsLogin = null;
+    for (const offer of offers) {
+      const result = await capturePostingBody({
+        offer,
+        session,
+        source,
+        spec,
+        resolvePublicTargetImpl,
+      });
+      if (result.offer) captured.push(result.offer);
+      if (result.error) errors.push({ company: offer.company || label, error: result.error });
+      if (result.needsLogin) {
+        needsLogin = result.needsLogin;
+        break;
+      }
+    }
+    return { offers: captured, errors, needsLogin };
   } catch (error) {
     return {
       offers: [],

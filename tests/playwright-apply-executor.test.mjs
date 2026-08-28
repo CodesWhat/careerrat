@@ -610,6 +610,7 @@ test("playwright-ops forwards an explicit Chromium channel to the lazy launcher"
 test("Playwright aborts a redirected private navigation before the request is sent", async () => {
   let routeHandler = null;
   let privateRequestSent = false;
+  const frame = {};
   const context = {
     async route(pattern, handler) {
       assert.equal(pattern, "**/*");
@@ -623,7 +624,7 @@ test("Playwright aborts a redirected private navigation before the request is se
             request: () => ({
               url: () => "https://jobs.example.test/search",
               isNavigationRequest: () => true,
-              frame: () => ({ parentFrame: () => null }),
+              frame: () => frame,
             }),
             continue: async () => {},
             abort: async () => assert.fail("the public hop must not be aborted"),
@@ -633,7 +634,7 @@ test("Playwright aborts a redirected private navigation before the request is se
             request: () => ({
               url: () => "http://127.0.0.1:7777/admin",
               isNavigationRequest: () => true,
-              frame: () => ({ parentFrame: () => null }),
+              frame: () => frame,
             }),
             continue: async () => {
               privateRequestSent = true;
@@ -646,6 +647,7 @@ test("Playwright aborts a redirected private navigation before the request is se
             throw new Error("Navigation blocked by CareerRat's public-network boundary.");
         },
         async close() {},
+        mainFrame: () => frame,
       };
     },
   };
@@ -660,7 +662,12 @@ test("Playwright aborts a redirected private navigation before the request is se
 
   await assert.rejects(
     () => ops.openTab({ url: "https://jobs.example.test/search" }),
-    /public-network boundary/i
+    (error) => {
+      assert.equal(error.code, "UNSAFE_BROWSER_NAVIGATION");
+      assert.equal(error.url, "http://127.0.0.1:7777/admin");
+      assert.match(error.message, /public-network boundary/i);
+      return true;
+    }
   );
   assert.equal(privateRequestSent, false);
 });

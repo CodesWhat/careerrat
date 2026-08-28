@@ -648,7 +648,35 @@ export function createPlaywrightOps({
   const pages = new Map(); // pageId -> Page, Map iteration order = LRU order (oldest first)
   const latestRefs = new Map(); // pageId -> Map(ref -> {locator, fileInput}), replaced on every snapshot()
   const evictedPageIds = new Set();
+  const blockedNavigationByFrame = new WeakMap();
   let pageCounter = 0;
+
+  function blockedNavigationError(target, originalError) {
+    const frame = target?.mainFrame?.();
+    const blocked = frame && blockedNavigationByFrame.get(frame);
+    if (!blocked) return originalError;
+    blockedNavigationByFrame.delete(frame);
+    const error = new Error(
+      `Navigation blocked by CareerRat's public-network boundary: ${blocked.reason}`,
+      { cause: originalError }
+    );
+    error.code = "UNSAFE_BROWSER_NAVIGATION";
+    error.url = blocked.url;
+    return error;
+  }
+
+  async function navigatePage(target, action, signal) {
+    try {
+      const result = await runAbortable(signal, action);
+      const frame = target?.mainFrame?.();
+      if (frame) blockedNavigationByFrame.delete(frame);
+      return result;
+    } catch (error) {
+      const navigationError = blockedNavigationError(target, error);
+      throwIfAborted(signal);
+      throw navigationError;
+    }
+  }
 
   async function getContext(signal) {
     throwIfAborted(signal);
@@ -668,6 +696,13 @@ export function createPlaywrightOps({
               }
               const target = await resolvePublicTargetImpl(request.url());
               if (!target?.ok) {
+                const frame = request?.frame?.();
+                if (frame && typeof frame === "object") {
+                  blockedNavigationByFrame.set(frame, {
+                    url: request.url(),
+                    reason: target?.reason || "unsafe navigation target",
+                  });
+                }
                 await route.abort("blockedbyclient");
                 return;
               }
@@ -741,7 +776,11 @@ export function createPlaywrightOps({
         throwIfAborted(signal);
         target = await context.newPage();
         throwIfAborted(signal);
-        await runAbortable(signal, () => target.goto(url, { waitUntil: "domcontentloaded" }));
+        await navigatePage(
+          target,
+          () => target.goto(url, { waitUntil: "domcontentloaded" }),
+          signal
+        );
       } catch (error) {
         // A failed goto must not leak the new page. It was never added to
         // `pages`, so evictLeastRecentlyUsed can never find it to close it,
@@ -772,13 +811,13 @@ export function createPlaywrightOps({
 
     async navigate({ pageId, url, signal }) {
       const target = page(pageId);
-      await runAbortable(signal, () => target.goto(url, { waitUntil: "domcontentloaded" }));
+      await navigatePage(target, () => target.goto(url, { waitUntil: "domcontentloaded" }), signal);
       return { pageId, url: target.url() };
     },
 
     async back({ pageId, signal }) {
       const target = page(pageId);
-      await runAbortable(signal, () => target.goBack({ waitUntil: "domcontentloaded" }));
+      await navigatePage(target, () => target.goBack({ waitUntil: "domcontentloaded" }), signal);
       return { pageId, url: target.url() };
     },
 

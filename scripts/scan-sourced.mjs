@@ -587,14 +587,20 @@ export async function runSourcedScan({
     deferPartialCandidatePolicy: true,
   });
 
-  if (filtered.kept.some((offer) => offer?.bodyPartial === true)) {
+  if (
+    filtered.kept.some(
+      (offer) => offer?.bodyPartial === true && offer?.bodyCapture !== "session-browser"
+    )
+  ) {
     filtered = {
       ...filtered,
       kept: await mapWithConcurrency(
         filtered.kept,
         (offer) => {
           ensureActive();
-          return hydrateOfferImpl(offer, { fetchImpl: fetchForRun, resolveHost });
+          return offer?.bodyPartial === true && offer?.bodyCapture !== "session-browser"
+            ? hydrateOfferImpl(offer, { fetchImpl: fetchForRun, resolveHost })
+            : offer;
         },
         PARTIAL_HYDRATION_CONCURRENCY
       ),

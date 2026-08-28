@@ -106,7 +106,7 @@ function readIndex(body, length) {
 }
 
 function searchLegitimacy(search) {
-  if (search?.auth === true) return "login-needed";
+  if (search?.auth === true) return search?.enabled === false ? "login-needed" : "supported";
   if (search?.source_type === "rss" || search?.rssUrl) return "supported";
   if (["ats", "board"].includes(search?.source_type) && isBoardProviderSupported(search.provider)) {
     return "supported";

@@ -145,7 +145,7 @@ CareerRat resolves the current session browser and reuses its signed-in session.
 Snapshot or read the current page state before each action — never rely on hardcoded
 selectors. Drive the live DOM turn-by-turn.
 
-Scrape the visible postings (title, company, URL, posted date where available). Then feed every scraped posting through the **same** existing pipeline this skill already uses for other sources: intake → dedupe against tracker and `workspace/jobs/` → liveness check → coarse triage (STEP 3) → JD save (STEP 4) → watermark (STEP 5). Do not invent a parallel pipeline.
+Scrape the visible postings (title, company, URL, posted date where available), then open each exact posting in that same session and capture the full visible JD before leaving the authenticated browser path. Preserve an unreadable but posting-specific result as `bodyPartial: true` for later Evaluate; drop it only when its URL is unsafe or the page reaches an auth challenge. Feed every scraped posting through the **same** existing pipeline this skill already uses for other sources: intake → dedupe against tracker and `workspace/jobs/` → liveness check → coarse triage (STEP 3) → JD save (STEP 4) → watermark (STEP 5). A session-captured full body is already canonical input and must not be fetched again over public HTTP. Do not invent a parallel pipeline.
 
 **LinkedIn URL-filter recipe (keep each saved search to ~1 page).** Encode the candidate's hard gates directly in the saved-search URL so the platform pre-filters server-side and you read one page per keyword instead of paging through noise. Build/maintain the `url:` of each `platform: linkedin` source in source config from these query params:
 
@@ -354,6 +354,7 @@ coverage before another refresh.
 
 - **One point-of-use choice.** Ask the site-specific Yes/No login question only when that source needs it. Yes opens that source; No skips it while the sweep continues. Never replace this with a Settings checklist.
 - **Same pipeline, no parallel track.** Postings scraped from authenticated sources flow through the same intake → dedupe → liveness → triage pipeline as every other source. No special path.
+- **Capture while the session can read it.** Open each exact result in the same session and carry its full visible JD into persistence. Never throw that body away and try to recover a login-only posting over public HTTP.
 - **Visible auth challenges stay with the user.** Ask the point-of-use Yes/No question for a login wall. Stop for CAPTCHA, 2FA, or an unexpected account-selection/interstitial screen. Never bypass them.
 - **Local-only.** Scraped pages and screenshots stay under `workspace/`. Nothing goes outbound.
 - **Tool-agnostic browser prose.** Keep the provider on `auto` and use the available

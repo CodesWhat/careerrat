@@ -330,6 +330,15 @@ test("source maintenance lists provider, watermark, legitimacy, and enabled stat
           enabled: false,
           auth: true,
         },
+        {
+          provider: "indeed",
+          platform: "indeed",
+          source_type: "browser",
+          label: "Indeed NYC",
+          url: "https://www.indeed.com/jobs?q=operations&l=New+York%2C+NY",
+          enabled: true,
+          auth: true,
+        },
       ],
     },
   });
@@ -373,6 +382,7 @@ test("source maintenance lists provider, watermark, legitimacy, and enabled stat
       legitimacy: "verified-ats",
     });
     assert.equal(body.searches[1].legitimacy, "login-needed");
+    assert.equal(body.searches[2].legitimacy, "supported");
   } finally {
     await closeServer(server);
   }

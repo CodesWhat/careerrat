@@ -2226,6 +2226,128 @@ test("runSourcedScan materializes generated query-only HiringCafe sources", asyn
   }
 });
 
+test("runSourcedScan preserves a login-backed session JD without public rehydration", async () => {
+  const repoRoot = tempRepo();
+  const fullBody =
+    "Lead the beverage program, coach the team, manage inventory, and deliver polished service for a New York City venue. ".repeat(
+      12
+    );
+  try {
+    candidateSetupInitialize({ repoRoot });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: {
+        location: {
+          home: "New York, NY",
+          remote: true,
+          remote_scope: "home-country",
+          hybrid: true,
+          onsite: true,
+          relocation: [],
+        },
+      },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "targeting",
+      patch: {
+        role_buckets: [{ name: "Bar leadership", titles: ["Bar Manager"] }],
+        fit_bands: { fit_floor: 0 },
+      },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "sourced-scan",
+      data: {
+        title_filter: { positive: ["Bar Manager"], negative: [] },
+        location_filter: null,
+        tracked_companies: [],
+      },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "linkedin",
+            platform: "linkedin",
+            source_type: "browser",
+            auth: true,
+            label: "LinkedIn NYC",
+            url: "https://www.linkedin.com/jobs/search/?keywords=bar%20manager",
+            enabled: true,
+          },
+        ],
+      },
+    });
+    let publicHydrationCalls = 0;
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: true,
+      captureBrowserSourceImpl: async () => ({
+        offers: [
+          {
+            company: "Example Hospitality",
+            title: "Bar Manager",
+            url: "https://www.linkedin.com/jobs/view/bar-manager-1234567890",
+            location: "New York, NY",
+            bodyText: fullBody,
+            bodyPartial: false,
+            bodyCapture: "session-browser",
+            source: "linkedin-browser",
+            sourceProvider: "linkedin",
+            capturedUrl: "https://www.linkedin.com/jobs/view/bar-manager-1234567890",
+          },
+          {
+            company: "Example Hotel",
+            title: "Bar Manager",
+            url: "https://www.linkedin.com/jobs/view/bar-manager-9876543210",
+            location: "New York, NY",
+            bodyText: "",
+            bodyPartial: true,
+            bodyCapture: "session-browser",
+            source: "linkedin-browser",
+            sourceProvider: "linkedin",
+            capturedUrl: "https://www.linkedin.com/jobs/view/bar-manager-9876543210",
+          },
+        ],
+        errors: [
+          {
+            company: "Example Hotel",
+            error: "CareerRat could not read the full job description.",
+          },
+        ],
+        needsLogin: null,
+      }),
+      hydrateOfferImpl: async () => {
+        publicHydrationCalls += 1;
+        throw new Error("login-backed JDs must not be rehydrated over public HTTP");
+      },
+    });
+
+    assert.equal(publicHydrationCalls, 0);
+    assert.equal(summary.new, 2);
+    const complete = summary.offers.find((offer) => offer.company === "Example Hospitality");
+    const partial = summary.offers.find((offer) => offer.company === "Example Hotel");
+    assert.equal(complete.bodyPartial, false);
+    assert.equal(complete.bodyChars, fullBody.trim().length);
+    assert.equal(partial.bodyPartial, true);
+    assert.equal(partial.bodyChars, 0);
+    const jdText = readFileSync(userPath({ repoRoot }, complete.artifacts.jd), "utf8");
+    assert.match(jdText, /partial: false/);
+    assert.match(jdText, /Lead the beverage program/);
+    assert.equal(jdText.includes(fullBody.trim()), true);
+    const partialJdText = readFileSync(userPath({ repoRoot }, partial.artifacts.jd), "utf8");
+    assert.match(partialJdText, /partial: true/);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("runSourcedScan returns a contextual login request without failing the rest of search", async () => {
   const repoRoot = tempRepo();
   try {
