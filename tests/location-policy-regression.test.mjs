@@ -514,6 +514,46 @@ test("US country-only locations do not override remote permission or an explicit
   );
 });
 
+test("US country-only locations respect body text that requires working on-site", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Brooklyn, NY",
+      remote: true,
+      hybrid: false,
+      onsite: false,
+      relocation: [],
+    },
+  };
+  const onsite = offer("country-required-onsite", "Required Onsite Corp", "United States");
+  onsite.bodyText = "This position requires working on-site at our New York office.";
+
+  const result = qualifyByLocation(profile, [onsite], { generatedFilter: false });
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredLocation[0]?.qualificationReason, "onsite-not-allowed");
+});
+
+test("incidental hybrid-workplace wording does not classify a remote role as hybrid", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Brooklyn, NY",
+      remote: true,
+      hybrid: false,
+      onsite: false,
+      relocation: [],
+    },
+  };
+  const remote = offer("country-hybrid-product", "Hybrid Product Corp", "United States");
+  remote.bodyText = "Build tools that support our hybrid workplace.";
+
+  const result = qualifyByLocation(profile, [remote], { generatedFilter: false });
+
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.filteredLocation.length, 0);
+});
+
 test("US-only remote scope rejects foreign, global, and region-unknown remote roles", () => {
   const profile = {
     candidate: { domain: "software engineering" },
