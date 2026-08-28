@@ -113,6 +113,13 @@ test("explicit base compensation labels classify a guaranteed-base band", () => 
   );
 });
 
+test("compensation parsing does not treat a base case forecast as a base-pay label", () => {
+  assert.deepEqual(sourcedScanner.extractCompensationBands("$95k-$120k base case forecast"), {
+    base: null,
+    annualEarnings: null,
+  });
+});
+
 test("compensation parsing does not treat customer base as a base-pay label", () => {
   assert.deepEqual(
     sourcedScanner.extractCompensationBands(
