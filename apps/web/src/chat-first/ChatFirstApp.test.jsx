@@ -319,7 +319,10 @@ describe("ChatFirstAppView", () => {
           searches: { enabled: 1 },
           deterministicSources: { attempted: 1 },
         })),
-        getRuntimeConfig: vi.fn(async () => ({ ai: { available: true } })),
+        getRuntimeConfig: vi.fn(async () => ({
+          ai: { available: true },
+          aiWebSearch: { available: true },
+        })),
       },
       retry: hydrated.retry,
       runDeterministicLane,
@@ -342,7 +345,10 @@ describe("ChatFirstAppView", () => {
           enabledTrackedCompanies: 0,
           deterministicSources: { attempted: 0 },
         })),
-        getRuntimeConfig: vi.fn(async () => ({ ai: { available: true } })),
+        getRuntimeConfig: vi.fn(async () => ({
+          ai: { available: true },
+          aiWebSearch: { available: true },
+        })),
       },
       runDeterministicLane,
       runAiLane,
@@ -792,7 +798,10 @@ describe("ChatFirstAppView", () => {
       enabledTrackedCompanies: 1,
       deterministicSources: { attempted: 3 },
     };
-    const runtimeStatus = { ai: { available: true, route: "installed" } };
+    const runtimeStatus = {
+      ai: { available: true, route: "installed" },
+      aiWebSearch: { available: true },
+    };
     const api = {
       getSearchSourceStatus: vi.fn(async () => sourceStatus),
       getRuntimeConfig: vi.fn(async () => runtimeStatus),
@@ -867,6 +876,26 @@ describe("ChatFirstAppView", () => {
     expect(runAiLane).not.toHaveBeenCalled();
   });
 
+  it("uses the dedicated AI search capability instead of the generic AI route status", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const runDeterministicLane = vi.fn(async () => ({ ok: true }));
+    const runAiLane = vi.fn(async () => ({ ok: true }));
+
+    await module.runChatFirstJobSearch({
+      api: {
+        getRuntimeConfig: vi.fn(async () => ({
+          ai: { available: true, route: "installed" },
+          aiWebSearch: { available: false },
+        })),
+      },
+      runDeterministicLane,
+      runAiLane,
+    });
+
+    expect(runDeterministicLane).toHaveBeenCalledOnce();
+    expect(runAiLane).not.toHaveBeenCalled();
+  });
+
   it("retries only the exact failed AI prompts through the chat-first search wrapper", async () => {
     const module = await import("./ChatFirstApp.jsx");
     const api = {
@@ -876,6 +905,7 @@ describe("ChatFirstAppView", () => {
       })),
       getRuntimeConfig: vi.fn(async () => ({
         ai: { available: true, route: "installed" },
+        aiWebSearch: { available: true },
       })),
       startSearchRun: vi.fn(),
       getSourcingRun: vi.fn(),

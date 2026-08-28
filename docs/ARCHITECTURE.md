@@ -222,6 +222,10 @@ typed routes and the workspace agent. The generic chat surface exposes only
 `ingest-profile`, `research-boards`, `research-company`, `research-comp`, and
 `company-health`. Company discovery stays on the app-owned reviewed proposal
 path, and `search-jobs` stays on its dedicated AI web-search route.
+`CAREERRAT_RUNTIME_SKILLS` controls only the generic `POST /api/skill/run`
+surface. An explicitly empty generic allowlist does not disable dedicated,
+app-owned routes such as AI web search; each dedicated route grants only its
+own scoped skill for that call.
 
 CareerRat owns the workflow executor, durable threads, context assembly, and
 write-back. That product layer is provider-neutral. Runtime adapters translate a

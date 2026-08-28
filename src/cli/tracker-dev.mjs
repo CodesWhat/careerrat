@@ -894,7 +894,7 @@ Routes:
 
 Local app APIs:
   GET  /api/health                      { ok, version }
-  GET  /api/runtime/config              { skills: [...] }: the embedded runtime's allowlist
+  GET  /api/runtime/config              generic runtime and app-owned AI capability status
   POST /api/skill/run                   Run a SKILL.md via the embedded Agent SDK runtime (SSE)
   GET  /api/onboard/state               Candidate-file + key + search-config status
   POST /api/onboard/init                Seed candidate/ from templates (never overwrites)

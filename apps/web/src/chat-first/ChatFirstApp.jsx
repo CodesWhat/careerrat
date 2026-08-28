@@ -514,11 +514,11 @@ export async function runChatFirstJobSearch({
     // The deterministic server route owns source healing and still runs when
     // optional AI availability cannot be read.
   }
-  const aiConfigured = runtimeConfig?.ai?.available === true;
+  const aiSearchAvailable = runtimeConfig?.aiWebSearch?.available === true;
   const capabilities = jobSearchCapabilities({
     ai: {
-      configured: aiConfigured,
-      executable: aiConfigured,
+      configured: aiSearchAvailable,
+      executable: aiSearchAvailable,
     },
   });
 
