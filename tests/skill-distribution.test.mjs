@@ -233,7 +233,7 @@ test("native browser workflow skills describe their CareerRat-owned in-app bound
   }
 });
 
-test("public docs describe CareerRat-owned browser workflows and native status writes", () => {
+test("public docs scope CareerRat-owned browser workflows to private accounts", () => {
   const catalog = readFileSync(
     join(root, "apps", "docs", "content", "docs", "reference", "skills.mdx"),
     "utf8"
@@ -256,10 +256,13 @@ test("public docs describe CareerRat-owned browser workflows and native status w
     join(root, "apps", "docs", "content", "docs", "advanced", "architecture.mdx"),
   ]) {
     const source = readFileSync(path, "utf8");
-    assert.match(source, /CareerRat-owned browser workflows/i);
+    assert.match(source, /CareerRat-owned private-account browser workflows/i);
+    assert.doesNotMatch(source, /robots-disallowed/i);
     assert.match(source, /autoApplicable[\s\S]{0,300}atomic/i);
     assert.match(source, /track-outcomes[\s\S]{0,300}candidate-reported/i);
   }
+
+  assert.doesNotMatch(readFileSync(join(root, "docs", "SOURCES.md"), "utf8"), /robots-disallowed/i);
 });
 
 test("public setup docs derive their shipped skill count from the canonical catalog", () => {

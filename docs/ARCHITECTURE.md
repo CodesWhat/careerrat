@@ -140,8 +140,8 @@ The public-intel scanner path is local-first:
 
 1. Resolve supported ATS boards deterministically.
 2. Extract public careers-page links and metadata without AI.
-3. Record clean no-results, empty pages, blocked pages, robots-disallowed pages,
-   login-gated pages, and useless pages as metadata only.
+3. Record clean no-results, empty pages, blocked pages, login-gated pages, and
+   useless pages as metadata only.
 4. Use bounded AI only for ambiguous reachable public text, with schema
    validation and one corrective retry.
 5. Treat model-suggested URLs/providers as advisory until deterministic

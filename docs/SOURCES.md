@@ -73,8 +73,8 @@ The scanner cascade runs in this order:
 
 1. Supported ATS APIs and known provider links.
 2. Deterministic public-page extraction for visible careers/job-board links.
-3. Metadata-only no-result handling for empty, blocked, robots-disallowed,
-   login-gated, and useless pages.
+3. Metadata-only no-result handling for empty, blocked, login-gated, and useless
+   pages.
 4. Bounded AI fallback only for ambiguous reachable public text.
 5. Review queue for ambiguous or conflicting metadata.
 
