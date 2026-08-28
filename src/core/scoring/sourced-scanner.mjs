@@ -1425,7 +1425,7 @@ export function extractCompensationBands(text = "") {
   };
 }
 
-export function classifyCompensationText(text = "") {
+function classifyCompensationText(text = "") {
   const value = String(text || "").trim();
   if (!value) return "unknown";
   const bands = extractCompensationBands(value);
@@ -1449,7 +1449,7 @@ export function resolveCompensationEvidence(offer = {}) {
   };
 }
 
-export function compensationEvidenceText(offer = {}, { includeBody = true } = {}) {
+function compensationEvidenceText(offer = {}, { includeBody = true } = {}) {
   const evidence = resolveCompensationEvidence(offer);
   return [
     evidence.baseComp ? `Base pay: ${evidence.baseComp}` : "",
