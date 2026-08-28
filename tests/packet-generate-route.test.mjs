@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { after, test } from "node:test";
+import { after, before, test } from "node:test";
 import { mountPacketRoutes } from "../src/cli/packet-route.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
@@ -361,7 +361,44 @@ async function postRaw(server, path, bodyText) {
   return { status: res.status, body };
 }
 
-after(() => {
+// These route tests exercise the real /api/packet/generate → generatePacket
+// → exportPacketArtifacts pipeline, which always renders a PDF (exports.mjs
+// requestedFormats() puts "pdf" in the set unconditionally). mountPacketRoutes
+// has no injection point for exportPacketArtifacts on this route, so the only
+// way to keep real generation coverage without a live Chromium is the same
+// loopback desktop-renderer escape hatch renderPdf() already ships for the
+// Electron client (see tests/pdf-renderer.test.mjs, ISSUE-028): point it at
+// a fake local server that hands back a minimal valid PDF.
+const FAKE_PDF_BYTES = Buffer.from("%PDF-1.4\n%CareerRat test fixture\n%%EOF\n", "utf8");
+
+function startFakePdfRenderer() {
+  const server = createServer((req, res) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      res.writeHead(200, { "content-type": "application/pdf" });
+      res.end(FAKE_PDF_BYTES);
+    });
+  });
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => resolve(server));
+  });
+}
+
+let fakePdfRenderer;
+let savedDesktopRenderUrl;
+let savedDesktopRenderToken;
+
+before(async () => {
+  fakePdfRenderer = await startFakePdfRenderer();
+  const { port } = fakePdfRenderer.address();
+  savedDesktopRenderUrl = process.env.CAREERRAT_DESKTOP_PDF_RENDER_URL;
+  savedDesktopRenderToken = process.env.CAREERRAT_DESKTOP_PDF_RENDER_TOKEN;
+  process.env.CAREERRAT_DESKTOP_PDF_RENDER_URL = `http://127.0.0.1:${port}/render`;
+  process.env.CAREERRAT_DESKTOP_PDF_RENDER_TOKEN = "packet-generate-route-test-fixture";
+});
+
+after(async () => {
   closeAll();
   for (const root of cleanupRoots.splice(0)) {
     try {
@@ -370,6 +407,11 @@ after(() => {
       // best-effort cleanup
     }
   }
+  await closeServer(fakePdfRenderer);
+  if (savedDesktopRenderUrl === undefined) delete process.env.CAREERRAT_DESKTOP_PDF_RENDER_URL;
+  else process.env.CAREERRAT_DESKTOP_PDF_RENDER_URL = savedDesktopRenderUrl;
+  if (savedDesktopRenderToken === undefined) delete process.env.CAREERRAT_DESKTOP_PDF_RENDER_TOKEN;
+  else process.env.CAREERRAT_DESKTOP_PDF_RENDER_TOKEN = savedDesktopRenderToken;
 });
 
 test("POST /api/packet/gate: 409 when SQLite has not been initialized", async () => {
