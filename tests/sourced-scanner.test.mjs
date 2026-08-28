@@ -113,6 +113,17 @@ test("explicit base compensation labels classify a guaranteed-base band", () => 
   );
 });
 
+test("trailing bare base labels remain explicit before compensation prose", () => {
+  const expected = { base: { min: 95_000, max: 120_000 }, annualEarnings: null };
+
+  assert.deepEqual(
+    ["$95k-$120k base, depending on experience", "$95k-$120k base, plus bonus and equity"].map(
+      (text) => sourcedScanner.extractCompensationBands(text)
+    ),
+    [expected, expected]
+  );
+});
+
 test("compensation parsing does not treat a base case forecast as a base-pay label", () => {
   assert.deepEqual(sourcedScanner.extractCompensationBands("$95k-$120k base case forecast"), {
     base: null,

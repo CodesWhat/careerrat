@@ -1267,7 +1267,7 @@ const BASE_COMP_LABEL_RE =
   /\b(?:base\s+(?:salary|pay|comp(?:ensation)?)|salary(?:\s+(?:range|band))?)\b/i;
 const ADJACENT_BARE_BASE_PREFIX_RE = /(?:^|[:;,|•])\s*base\s*:?\s*$/i;
 const ADJACENT_BARE_BASE_SUFFIX_RE =
-  /^[\s,]*(?:(?:USD|CAD|MXN|EUR|GBP)\b[\s,]*)?(?:(?:per\s+(?:year|annum)|a\s+year|annually|annualized)\b[\s,]*)?base\b[\s\p{P}]*(?:(?:per\s+(?:year|annum|hour|hr)|a\s+year|annually|annualized|hourly|\/\s*(?:year|yr|hour|hr))\b)?[\s\p{P}]*$/iu;
+  /^[\s,]*(?:(?:USD|CAD|MXN|EUR|GBP)\b[\s,]*)?(?:(?:per\s+(?:year|annum)|a\s+year|annually|annualized)\b[\s,]*)?base\b(?=\s*(?:$|[,.;:!?()[\]{}•–—]|(?:per\s+(?:year|annum|hour|hr)|a\s+year|annually|annualized|hourly|\/\s*(?:year|yr|hour|hr))\b))/iu;
 const VARIABLE_COMP_LABEL_RE =
   /\b(?:on-target\s+earnings|ote|bonus|equity|commission|total\s+comp(?:ensation)?|variable\s+(?:pay|compensation)|incentive\s+(?:pay|compensation))\b/i;
 const ANNUAL_EARNINGS_LABEL_RE =
@@ -1330,7 +1330,7 @@ export function extractCompBand(text = "", { baseOnly = false } = {}) {
     .filter((line) => /\$|\b(compensation|salary|base|pay range|annual|usd)\b/i.test(line));
 
   for (const line of lines) {
-    const normalized = line.replace(/,/g, "");
+    const normalized = line.replace(/(?<=\d),(?=\d{3}\b)/g, "");
     const explicitBase = BASE_COMP_LABEL_RE.test(line);
     const variableComp = VARIABLE_COMP_LABEL_RE.test(line);
     const annualEarnings = ANNUAL_EARNINGS_LABEL_RE.test(line);
