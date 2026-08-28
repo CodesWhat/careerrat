@@ -1,5 +1,5 @@
 import { fetchPublicHttpText } from "../net/public-http-fetch.mjs";
-import { APPLY_PATTERNS, classifyLiveness } from "./liveness-core.mjs";
+import { APPLY_PATTERNS, classifyLiveness, primaryPostingText } from "./liveness-core.mjs";
 
 const LIVENESS_MAX_BYTES = 1024 * 1024;
 
@@ -13,7 +13,7 @@ export function htmlToText(html = "") {
 }
 
 export function extractApplyControlsFromHtml(html = "") {
-  const text = htmlToText(html);
+  const text = primaryPostingText(htmlToText(html));
   return APPLY_PATTERNS.some((pattern) => pattern.test(text)) ? ["Apply"] : [];
 }
 

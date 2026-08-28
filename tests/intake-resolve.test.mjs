@@ -1624,6 +1624,61 @@ test("plain fetch: a long body with a visible apply control -> resolved, active 
   assert.match(result.bodyText, /Staff Engineer/);
 });
 
+test("plain fetch: page-level Accel closure expires a posting with an active structured description", async () => {
+  const url =
+    "https://jobs.accel.com/companies/squarespace/jobs/84408668-staff-software-engineer-backend-communications-platform";
+  const description = "Build reliable communications platform services. ".repeat(20);
+  const posting = {
+    "@context": "https://schema.org",
+    "@type": "JobPosting",
+    title: "Staff Software Engineer, Backend (Communications Platform)",
+    hiringOrganization: { "@type": "Organization", name: "Squarespace" },
+    description,
+  };
+  const html = `<html><head><script type="application/ld+json">${JSON.stringify(posting)}</script></head><body><h1>${posting.title}</h1><p>This job is no longer accepting applications</p><h2>See open jobs similar to this role</h2><a>Apply</a></body></html>`;
+
+  const result = await resolveJobUrl(url, {
+    fetchImpl: async () => htmlResponse(html, { finalUrl: url }),
+    resolveHost: publicResolver,
+  });
+
+  assert.equal(result.bodyFetchStatus, "resolved");
+  assert.equal(result.liveness.result, "expired");
+  assert.match(result.bodyText, /Build reliable communications platform services/);
+  assert.doesNotMatch(result.bodyText, /no longer accepting applications/);
+});
+
+test("hydrateJobOffer rejects a page-level Built In removal outside the structured description", async () => {
+  const url = "https://www.builtinnyc.com/job/staff-platform-engineer-1745/6283094";
+  const posting = {
+    "@context": "https://schema.org",
+    "@type": "JobPosting",
+    title: "Staff Platform Engineer (1745)",
+    hiringOrganization: { "@type": "Organization", name: "Collibra" },
+    description: "Build and operate a secure internal platform. ".repeat(20),
+  };
+  const html = `<html><head><script type="application/ld+json">${JSON.stringify(posting)}</script></head><body><h1>${posting.title}</h1><p>Sorry, this job was removed at 04:14 p.m. (EST) on Friday, Jun 27, 2025</p><h2>Similar Jobs</h2><a>Easy Apply</a></body></html>`;
+
+  const result = await hydrateJobOffer(
+    {
+      company: "Collibra",
+      title: posting.title,
+      url,
+      bodyText: "Unverified open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      rejectExpired: true,
+      fetchImpl: async () => htmlResponse(html, { finalUrl: url }),
+      resolveHost: publicResolver,
+    }
+  );
+
+  assert.equal(result.bodyFetchStatus, "unavailable");
+  assert.match(result.bodyFetchReason, /job was removed/i);
+});
+
 test("plain aggregator fetch: prefers the structured JobPosting body over site navigation and footer noise", async () => {
   const html = readFileSync(
     join(import.meta.dirname, "fixtures/intake/job-posting-with-site-chrome.html"),

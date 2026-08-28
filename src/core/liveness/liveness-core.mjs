@@ -1,8 +1,7 @@
-const HARD_EXPIRED_PATTERNS = [
+const PRIMARY_EXPIRED_PATTERNS = [
   /job (is )?no longer available/i,
   /job.*no longer open/i,
   /position has been filled/i,
-  /(?:account|career page) is no longer active/i,
   /this job has expired/i,
   /job posting has expired/i,
   /\bjob expired\b/i,
@@ -10,14 +9,25 @@ const HARD_EXPIRED_PATTERNS = [
   /this (position|role|job) (is )?no longer/i,
   /this job (listing )?is closed/i,
   /job (listing )?not found/i,
-  /the page you are looking for doesn.t exist/i,
+  /sorry,?\s+this job was removed\b/i,
   /applications?\s+(?:(?:have|are|is)\s+)?closed/i,
   /closed on \d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i,
   /closed on (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2}/i,
+  /\b(?:expired|archived):\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2},?\s+\d{4}\b/i,
 ];
 
-const PRIMARY_EXPIRED_PATTERNS = [
-  /\b(?:expired|archived):\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2},?\s+\d{4}\b/i,
+const PAGE_EXPIRED_PATTERNS = [
+  /(?:account|career page) is no longer active/i,
+  /the page you are looking for doesn.t exist/i,
+];
+
+const RECOMMENDATION_SECTION_PATTERNS = [
+  /\bother jobs you might like\b/i,
+  /\brecommended jobs\b/i,
+  /\brelated jobs\b/i,
+  /\bsimilar jobs\b/i,
+  /\bjobs you (?:may|might) (?:also )?like\b/i,
+  /\bsee open jobs similar to\b/i,
 ];
 
 const LISTING_PAGE_PATTERNS = [/\d+\s+jobs?\s+found/i, /search for jobs page is loaded/i];
@@ -50,6 +60,16 @@ function hasApplyControl(controls = []) {
   return controls.some((control) => APPLY_PATTERNS.some((pattern) => pattern.test(control)));
 }
 
+export function primaryPostingText(bodyText = "") {
+  const header = String(bodyText).slice(0, 2000);
+  let end = header.length;
+  for (const pattern of RECOMMENDATION_SECTION_PATTERNS) {
+    const match = pattern.exec(header);
+    if (match && match.index < end) end = match.index;
+  }
+  return header.slice(0, end);
+}
+
 export function classifyLiveness({
   status = 0,
   finalUrl = "",
@@ -65,7 +85,7 @@ export function classifyLiveness({
     return { result: "expired", code: "expired_url", reason: `redirect to ${finalUrl}` };
   }
 
-  const primaryExpired = firstMatch(PRIMARY_EXPIRED_PATTERNS, bodyText.slice(0, 2000));
+  const primaryExpired = firstMatch(PRIMARY_EXPIRED_PATTERNS, primaryPostingText(bodyText));
   if (primaryExpired) {
     return {
       result: "expired",
@@ -74,7 +94,7 @@ export function classifyLiveness({
     };
   }
 
-  const expiredBody = firstMatch(HARD_EXPIRED_PATTERNS, bodyText);
+  const expiredBody = firstMatch(PAGE_EXPIRED_PATTERNS, bodyText);
   if (expiredBody) {
     return {
       result: "expired",

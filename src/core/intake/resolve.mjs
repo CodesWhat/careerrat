@@ -698,12 +698,13 @@ async function resolvePlainFetch({
   const structuredPostings = extractStructuredJobPostings(html);
   const structuredPosting = structuredPostings.length === 1 ? structuredPostings[0] : null;
   const structuredBody = structuredPosting?.description || "";
-  const bodyText = structuredBody || htmlToTextLiveness(html);
+  const pageText = htmlToTextLiveness(html);
+  const bodyText = structuredBody || pageText;
   const cappedPreview = isCappedPreviewUrl(fetched.finalUrl || url);
   const classified = classifyLiveness({
     status: fetched.status,
     finalUrl,
-    bodyText,
+    bodyText: pageText,
     applyControls: extractApplyControlsFromHtml(html),
   });
 

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { checkUrlLiveness } from "../src/core/liveness/job-link-checker.mjs";
+import {
+  checkUrlLiveness,
+  extractApplyControlsFromHtml,
+} from "../src/core/liveness/job-link-checker.mjs";
 
 const SPA_RESPONSE = async () =>
   new Response("<html><body>Loading</body></html>", {
@@ -9,6 +12,15 @@ const SPA_RESPONSE = async () =>
     headers: { "content-type": "text/html" },
   });
 const publicResolver = async () => [{ address: "93.184.216.34", family: 4 }];
+
+test("recommendation-card apply links are not primary posting controls", () => {
+  const controls = extractApplyControlsFromHtml(`
+    <main><h1>Staff Platform Engineer</h1><p>This role has been removed.</p></main>
+    <aside><h2>Similar Jobs</h2><a>Easy Apply</a></aside>
+  `);
+
+  assert.deepEqual(controls, []);
+});
 
 test("short Ashby SPA shell is uncertain rather than expired", async () => {
   const result = await checkUrlLiveness("https://jobs.ashbyhq.com/acme/123", {

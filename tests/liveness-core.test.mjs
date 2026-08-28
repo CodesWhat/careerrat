@@ -27,6 +27,46 @@ test("expired body text wins even when generic apply text is present", () => {
   assert.equal(result.code, "expired_body");
 });
 
+test("a primary no-longer-accepting banner expires an Accel portfolio posting", () => {
+  const result = classifyLiveness({
+    status: 200,
+    finalUrl:
+      "https://jobs.accel.com/companies/squarespace/jobs/84408668-staff-software-engineer-backend-communications-platform",
+    bodyText:
+      "Staff Software Engineer, Backend (Communications Platform) Squarespace This job is no longer accepting applications See open jobs at Squarespace. See open jobs similar to this role.",
+    applyControls: ["Apply to a similar job"],
+  });
+
+  assert.equal(result.result, "expired");
+  assert.equal(result.code, "expired_body");
+});
+
+test("a primary removed-job banner expires a Built In posting", () => {
+  const result = classifyLiveness({
+    status: 200,
+    finalUrl: "https://www.builtinnyc.com/job/staff-platform-engineer-1745/6283094",
+    bodyText:
+      "Collibra Staff Platform Engineer (1745) Sorry, this job was removed at 04:14 p.m. (EST) on Friday, Jun 27, 2025 Remote or Hybrid Hiring Remotely in USA Similar Jobs Headway Director of Customer Experience Operations Easy Apply",
+    applyControls: ["Easy Apply"],
+  });
+
+  assert.equal(result.result, "expired");
+  assert.equal(result.code, "expired_body");
+});
+
+test("a stale recommendation does not expire the active primary posting", () => {
+  const result = classifyLiveness({
+    status: 200,
+    finalUrl: "https://jobs.example.com/active-role",
+    bodyText:
+      "Active Staff Platform Engineer Apply now Primary job details. Similar Jobs Staff Backend Engineer This job is no longer accepting applications",
+    applyControls: ["Apply now", "Apply to a similar job"],
+  });
+
+  assert.equal(result.result, "active");
+  assert.equal(result.code, "apply_control_visible");
+});
+
 test("an inactive employer account wins over generic application-site controls", () => {
   const result = classifyLiveness({
     status: 200,
