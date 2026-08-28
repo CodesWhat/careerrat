@@ -65,13 +65,13 @@ search and extraction work stays efficient. **Faster**, **Balanced**, and
 controls how long the selected runtime reasons. The setting never ranks Claude
 Code against OpenAI Codex or silently changes providers.
 
-v0.16.6 is the current release. It gives Claude Code and Codex the same complete
-CareerRat workflow, keeps long searches and application missions durable across
-navigation and restart, and turns finite questions into normal clickable choices
-that can also be answered in text. Search combines built-in boards with AI
-open-web discovery, keeps AI leads clearly unverified, then checks readable full
-postings against location, office-day, compensation, seniority, eligibility, and
-fit rules before treating them as verified.
+CareerRat gives Claude Code and Codex the same complete workflow, keeps long
+searches and application missions durable across navigation and restart, and
+turns finite questions into normal clickable choices that can also be answered
+in text. Search combines built-in boards with AI open-web discovery, keeps AI
+leads clearly unverified, then checks readable full postings against location,
+office-day, compensation, seniority, eligibility, and fit rules before treating
+them as verified.
 
 Application questions now stay with the exact job thread. CareerRat can prepare
 a reviewed form through the final safe step, but CAPTCHA, sensitive attestations,

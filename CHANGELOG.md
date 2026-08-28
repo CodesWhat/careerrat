@@ -4,7 +4,7 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.16.6] - 2026-08-27
+## [0.16.6] - 2026-08-28
 
 ### Changed
 
@@ -31,8 +31,8 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Verification
 
-- Before the later search and application-review fixes, Claude Code 2.1.247 completed the production AI-search path in 123.592 seconds, beyond the removed 120-second cutoff, with two roles, four recorded queries, two saved job descriptions, and no retry or error. Codex CLI 0.150.1 completed the same isolated source-level path in 29.445 seconds with one role, one recorded query, one saved job description, and no retry or error. Both workspaces passed data verification and left the real CareerRat databases unchanged.
-- The repository suite passes 4,222 tests with 16 intentional skips and no failures. The web suite passes all 905 tests. The release gate also covers the production web, docs, and website builds, Biome, Qlty, Knip, placeholder checks, real Chromium UI and supervised application preparation, the exact Claude/Codex hospitality and engineering search matrix, signed/notarized Mac packaging, native updating, and unsigned Windows packaging QA.
+- Promotion requires one clean source revision to pass the repository and web suites, production web/docs/website builds, Biome, Qlty, Knip, placeholder and dependency checks, real Chromium UI and supervised application preparation, and the exact Claude Code/Codex hospitality and engineering native-search matrix with every emitted role manually reviewed.
+- The tagged release workflow must then build and verify the signed, notarized, and stapled Mac app and updater feed, prove a real native update from the previous public version, and complete unsigned Windows packaging QA. A public Windows installer remains conditional on trusted SignPath Foundation signing and is not a macOS release blocker.
 
 ## [0.16.5] - 2026-08-27
 
