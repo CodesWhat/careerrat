@@ -1,5 +1,5 @@
 import { classifyBrowserAuthState } from "../automation/browser-session.mjs";
-import { validatePublicHttpUrl } from "../net/public-http-fetch.mjs";
+import { resolvePublicHttpTarget, validatePublicHttpUrl } from "../net/public-http-fetch.mjs";
 import { extractReqId } from "../scoring/sourced-identity.mjs";
 
 const SOURCE_SPECS = Object.freeze({
@@ -147,7 +147,12 @@ function normalizedOffer(row, { source, provider, searchUrl }) {
   };
 }
 
-export async function captureBrowserSearchSource({ source, session, maxRows = 100 } = {}) {
+export async function captureBrowserSearchSource({
+  source,
+  session,
+  maxRows = 100,
+  resolvePublicTargetImpl = resolvePublicHttpTarget,
+} = {}) {
   const label = String(source?.label || source?.provider || "Browser source");
   if (!session?.available) {
     return {
@@ -165,7 +170,18 @@ export async function captureBrowserSearchSource({ source, session, maxRows = 10
   }
 
   try {
+    const initialTarget = await resolvePublicTargetImpl(url);
+    if (!initialTarget?.ok) {
+      throw new Error(initialTarget?.reason || "The source URL is not publicly reachable.");
+    }
+    url = initialTarget.url;
     const page = await session.open(url);
+    const finalTarget = await resolvePublicTargetImpl(page?.url || url);
+    if (!finalTarget?.ok) {
+      throw new Error(
+        finalTarget?.reason || "The browser was redirected to a non-public network address."
+      );
+    }
     const auth = classifyBrowserAuthState(page);
     if (auth) {
       const platformLabel = displayPlatform(source);

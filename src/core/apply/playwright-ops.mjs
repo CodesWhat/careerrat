@@ -17,6 +17,7 @@
 // Orca-shaped and out of scope here, so this module produces text it already
 // understands instead of leaving upload targets undetectable under this provider.
 
+import { resolvePublicHttpTarget } from "../net/public-http-fetch.mjs";
 import { abortableDelay, runAbortable, throwIfAborted } from "./cancellation.mjs";
 import { uniqueVoluntaryDeclineOption } from "./form-fill.mjs";
 
@@ -641,6 +642,7 @@ export function createPlaywrightOps({
   profileDir,
   headless = false,
   channel,
+  resolvePublicTargetImpl = resolvePublicHttpTarget,
 } = {}) {
   let contextPromise = null;
   const pages = new Map(); // pageId -> Page, Map iteration order = LRU order (oldest first)
@@ -655,12 +657,29 @@ export function createPlaywrightOps({
       // openTab retries the launch instead of replaying a stale failure (a
       // transient profile lock or crash would otherwise permanently disable
       // this provider until process restart).
-      contextPromise = launchImpl({ profileDir, headless, ...(channel ? { channel } : {}) }).catch(
-        (error) => {
+      contextPromise = launchImpl({ profileDir, headless, ...(channel ? { channel } : {}) })
+        .then(async (context) => {
+          if (typeof context?.route === "function") {
+            await context.route("**/*", async (route) => {
+              const request = route.request();
+              if (request?.isNavigationRequest?.() !== true) {
+                await route.continue();
+                return;
+              }
+              const target = await resolvePublicTargetImpl(request.url());
+              if (!target?.ok) {
+                await route.abort("blockedbyclient");
+                return;
+              }
+              await route.continue();
+            });
+          }
+          return context;
+        })
+        .catch((error) => {
           contextPromise = null;
           throw error;
-        }
-      );
+        });
     }
     return runAbortable(signal, () => contextPromise);
   }

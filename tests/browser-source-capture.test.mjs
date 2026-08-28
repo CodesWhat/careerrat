@@ -3,6 +3,8 @@ import test from "node:test";
 
 import { captureBrowserSearchSource } from "../src/core/search/browser-source-capture.mjs";
 
+const resolvePublic = async (rawUrl) => ({ ok: true, url: new URL(rawUrl).toString() });
+
 function source(overrides = {}) {
   return {
     provider: "linkedin",
@@ -39,7 +41,11 @@ test("captureBrowserSearchSource captures an already-authenticated source throug
     },
   };
 
-  const result = await captureBrowserSearchSource({ source: source(), session });
+  const result = await captureBrowserSearchSource({
+    source: source(),
+    session,
+    resolvePublicTargetImpl: resolvePublic,
+  });
 
   assert.equal(result.needsLogin, null);
   assert.deepEqual(result.errors, []);
@@ -87,7 +93,11 @@ test("captureBrowserSearchSource returns one contextual login handoff instead of
     },
   };
 
-  const result = await captureBrowserSearchSource({ source: source(), session });
+  const result = await captureBrowserSearchSource({
+    source: source(),
+    session,
+    resolvePublicTargetImpl: resolvePublic,
+  });
 
   assert.equal(extracted, false);
   assert.deepEqual(result.errors, []);
@@ -131,6 +141,7 @@ test("captureBrowserSearchSource captures posting-shaped rows from an arbitrary 
       url: "https://jobs.example.com/search?q=operations",
     }),
     session,
+    resolvePublicTargetImpl: resolvePublic,
   });
 
   assert.equal(result.offers.length, 1);
@@ -153,4 +164,51 @@ test("captureBrowserSearchSource reports unavailable app browser without consent
     },
   ]);
   assert.doesNotMatch(result.errors[0].error, /consent|permission|automation/i);
+});
+
+test("captureBrowserSearchSource rejects a source whose hostname resolves to a private address", async () => {
+  let opened = false;
+  const result = await captureBrowserSearchSource({
+    source: source({ url: "https://jobs.example.test/search" }),
+    session: {
+      available: true,
+      async open() {
+        opened = true;
+        return {};
+      },
+    },
+    resolvePublicTargetImpl: async () => ({
+      ok: false,
+      reason: "host resolved to a private, local, or non-public address",
+    }),
+  });
+
+  assert.equal(opened, false);
+  assert.equal(result.offers.length, 0);
+  assert.match(result.errors[0].error, /private|non-public/i);
+});
+
+test("captureBrowserSearchSource rejects a redirect that lands on a private address before extraction", async () => {
+  let extracted = false;
+  const result = await captureBrowserSearchSource({
+    source: source({ url: "https://jobs.example.test/search" }),
+    session: {
+      available: true,
+      async open() {
+        return { url: "http://127.0.0.1:7777/admin", title: "Admin", text: "private" };
+      },
+      async extractRows() {
+        extracted = true;
+        return { rows: [] };
+      },
+    },
+    resolvePublicTargetImpl: async (rawUrl) =>
+      String(rawUrl).includes("127.0.0.1")
+        ? { ok: false, reason: "private or local host is not fetchable" }
+        : { ok: true, url: new URL(rawUrl).toString() },
+  });
+
+  assert.equal(extracted, false);
+  assert.equal(result.offers.length, 0);
+  assert.match(result.errors[0].error, /private|local/i);
 });

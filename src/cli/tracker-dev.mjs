@@ -53,7 +53,7 @@ import {
   createCompanyDiscoveryOperationKind,
   startCompanyDiscoveryOperation,
 } from "../core/discovery/company-operation.mjs";
-import { validatePublicHttpUrl } from "../core/net/public-http-fetch.mjs";
+import { resolvePublicHttpTarget, validatePublicHttpUrl } from "../core/net/public-http-fetch.mjs";
 import { resolveUserPaths } from "../core/paths/workspace.mjs";
 import { acquireWorkspaceRuntimeOwnership } from "../core/runtime/workspace-runtime-ownership.mjs";
 import { captureBrowserSearchSource } from "../core/search/browser-source-capture.mjs";
@@ -141,10 +141,21 @@ function authenticatedSourceSite(platform) {
   );
 }
 
-export async function openAuthenticatedSource(browserSessionManager, { platform, url } = {}) {
+export async function openAuthenticatedSource(
+  browserSessionManager,
+  { platform, url } = {},
+  { resolvePublicTargetImpl = resolvePublicHttpTarget } = {}
+) {
   const site = authenticatedSourceSite(platform);
   const checked = validatePublicHttpUrl(url);
   if (!checked.ok) {
+    return {
+      state: "needs-user",
+      summary: `CareerRat couldn't open that ${site} link. Add a public job-site URL and try again.`,
+    };
+  }
+  const initialTarget = await resolvePublicTargetImpl(checked.url);
+  if (!initialTarget?.ok) {
     return {
       state: "needs-user",
       summary: `CareerRat couldn't open that ${site} link. Add a public job-site URL and try again.`,
@@ -158,7 +169,14 @@ export async function openAuthenticatedSource(browserSessionManager, { platform,
     };
   }
   try {
-    const page = await session.open(checked.url);
+    const page = await session.open(initialTarget.url);
+    const finalTarget = await resolvePublicTargetImpl(page?.url || initialTarget.url);
+    if (!finalTarget?.ok) {
+      return {
+        state: "needs-user",
+        summary: `CareerRat couldn't open that ${site} link. Add a public job-site URL and try again.`,
+      };
+    }
     const auth = classifyBrowserAuthState(page);
     if (auth) {
       return {

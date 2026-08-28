@@ -607,6 +607,64 @@ test("playwright-ops forwards an explicit Chromium channel to the lazy launcher"
   assert.deepEqual(launches, [{ profileDir: "/tmp/profile", headless: true, channel: "chromium" }]);
 });
 
+test("Playwright aborts a redirected private navigation before the request is sent", async () => {
+  let routeHandler = null;
+  let privateRequestSent = false;
+  const context = {
+    async route(pattern, handler) {
+      assert.equal(pattern, "**/*");
+      routeHandler = handler;
+    },
+    async newPage() {
+      return {
+        async goto() {
+          assert.equal(typeof routeHandler, "function");
+          await routeHandler({
+            request: () => ({
+              url: () => "https://jobs.example.test/search",
+              isNavigationRequest: () => true,
+              frame: () => ({ parentFrame: () => null }),
+            }),
+            continue: async () => {},
+            abort: async () => assert.fail("the public hop must not be aborted"),
+          });
+          let blocked = false;
+          await routeHandler({
+            request: () => ({
+              url: () => "http://127.0.0.1:7777/admin",
+              isNavigationRequest: () => true,
+              frame: () => ({ parentFrame: () => null }),
+            }),
+            continue: async () => {
+              privateRequestSent = true;
+            },
+            abort: async () => {
+              blocked = true;
+            },
+          });
+          if (blocked)
+            throw new Error("Navigation blocked by CareerRat's public-network boundary.");
+        },
+        async close() {},
+      };
+    },
+  };
+  const ops = createPlaywrightOps({
+    launchImpl: async () => context,
+    profileDir: "/tmp/profile",
+    resolvePublicTargetImpl: async (rawUrl) =>
+      String(rawUrl).includes("127.0.0.1")
+        ? { ok: false, reason: "private or local host is not fetchable" }
+        : { ok: true, url: new URL(rawUrl).toString() },
+  });
+
+  await assert.rejects(
+    () => ops.openTab({ url: "https://jobs.example.test/search" }),
+    /public-network boundary/i
+  );
+  assert.equal(privateRequestSent, false);
+});
+
 // ---------------------------------------------------------------------------
 // P1-1: a transient launch failure (profile lock, momentary crash) must not
 // permanently disable the provider — getContext() has to clear the cached
