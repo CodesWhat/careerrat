@@ -249,7 +249,7 @@ describe("FirstRunExperience", () => {
     expect(html).toContain("Detected on this computer. Sign in before CareerRat can use it.");
     expect(html).not.toContain("account already signed in");
     expect(html).toContain("Sign in");
-    expect(html).toContain("I already use another AI tool");
+    expect(html).toContain("Set up another supported AI tool");
     expect(html).toContain("Install guide");
     expect(html).toContain("Runtime check failed.");
     expect(html).toContain("Check again");
@@ -351,7 +351,10 @@ describe("FirstRunExperience", () => {
     expect(html).not.toMatch(/curl|install\.sh|\| bash/i);
     expect(html).toContain("Install inside CareerRat");
     expect(html).toContain("Check setup");
-    expect(html).toContain("I already use another AI tool");
+    expect(html).toContain("Choose Claude Code or OpenAI Codex");
+    expect(html).toContain("Set up OpenAI Codex instead");
+    expect(html).not.toContain("You only need a Claude account");
+    expect(html).not.toContain("Set up Claude");
     const alternateTools = html.match(
       /<details class="cf-first-run__engine-missing">.*<\/details>/
     )?.[0];

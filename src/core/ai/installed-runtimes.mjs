@@ -1890,7 +1890,7 @@ export async function startInstalledRuntimeGuidedSetup(
 ) {
   if (runtimeId !== "claude" || platform !== "darwin") {
     throw runtimeError(
-      "Guided setup is only available for Claude Code on macOS.",
+      "In-app installation isn't available for this AI tool or operating system. Use its setup guide instead.",
       "RUNTIME_GUIDED_SETUP_UNSUPPORTED"
     );
   }

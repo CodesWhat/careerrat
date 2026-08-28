@@ -43,7 +43,7 @@ The current macOS release is a signed and notarized Apple Silicon app for macOS
 1. [Download the latest `.dmg`](https://github.com/CodesWhat/careerrat/releases/latest).
 2. Open CareerRat.
 3. Choose Claude Code or Codex if it is ready. If neither is installed, CareerRat
-   walks you through getting Claude, installing it inside the app, and signing in.
+   offers in-app Claude Code setup and the official OpenAI Codex setup guide.
 
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) and
 [OpenAI Codex](https://developers.openai.com/codex/cli/) are CareerRat's only
@@ -85,16 +85,16 @@ resizable, maximizable, and supports full screen, with a minimum working size of
 
 ## First run
 
-If CareerRat does not find Claude Code or Codex, it gives you one recommended
-Claude path in plain English. Claude Code needs a paid Claude plan. Pro is
-enough; Max provides more usage. You can
+If CareerRat does not find Claude Code or Codex, it shows both supported choices
+in plain English. CareerRat can install Claude Code inside the app. Claude Code
+needs a paid Claude plan. Pro is enough; Max provides more usage. You can
 [get Claude through Scott's referral](https://claude.ai/referral/rOLHwxlsfA),
 then click **Install inside CareerRat**. The app runs Anthropic's official
 installer, shows its progress in the CareerRat window, and reports a clear retry
 if it fails. Click **Sign in**, finish in the browser, and return to CareerRat.
 The app checks for Claude in the background and also keeps a visible **Check
-setup** button. Already use Codex? Expand **I already use another AI tool**
-instead.
+setup** button. To use Codex, expand **Set up OpenAI Codex instead** and follow
+its official install guide.
 
 Choose the available AI engine, then drop a PDF, DOCX, image, or text resume into
 the conversation, or just start talking. Paul fills in “What Paul knows” beside

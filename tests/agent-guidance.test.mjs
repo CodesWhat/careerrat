@@ -44,6 +44,25 @@ test("a missing Claude skill shim does not override runtime-neutral agent guidan
   assert.match(guidance.message, /Ask your agent to run research-boards next/);
 });
 
+test("a configured login-backed source routes to search instead of another setup gate", () => {
+  const guidance = buildAgentGuidance({
+    searchReadiness: {
+      exists: true,
+      valid: true,
+      total: 1,
+      enabled: 0,
+      pendingLogin: 1,
+      withLastRun: 0,
+    },
+    companyAtsReadiness: { valid: true, configured: false },
+  });
+
+  assert.equal(guidance.nextSkill, "search-jobs");
+  assert.match(guidance.message, /run search-jobs/i);
+  assert.match(guidance.reason, /login choice/i);
+  assert.doesNotMatch(guidance.reason, /nothing useful to sweep/i);
+});
+
 test("discovery completion is durable and idempotent", () => {
   const root = mkdtempSync(join(tmpdir(), "careerrat-agent-guidance-"));
   roots.push(root);

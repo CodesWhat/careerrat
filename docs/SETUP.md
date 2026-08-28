@@ -119,9 +119,10 @@ defaults are `standard` usage and `balanced` application mode.
 
 Setup starts as one plain-language conversation. It uses the résumé and facts
 already available, asks only for missing information, and saves progress after
-each settled answer. You can stop at any point and resume later. External browser,
-mail, calendar, messaging, and application permissions stay off until a concrete
-task needs one; CareerRat explains and asks for that specific capability then.
+each settled answer. You can stop at any point and resume later. Saved job-site
+search login uses one point-of-use Yes/No question and no permission matrix.
+Separate private-account browser, mail, calendar, messaging, and application
+actions ask for their own concrete capability only when that action is needed.
 
 `careerrat doctor` reports whether setup is complete or still in progress.
 

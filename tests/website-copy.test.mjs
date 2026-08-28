@@ -341,6 +341,45 @@ test("public surfaces keep the provider-neutral installed-runtime contract align
   );
 });
 
+test("first-run setup presents Claude Code and Codex as choices, not a preferred provider", async () => {
+  const paths = {
+    readme: "README.md",
+    install: "apps/docs/content/docs/getting-started/install.mdx",
+    firstRun: "apps/web/src/chat-first/FirstRunExperience.jsx",
+  };
+  const copy = Object.fromEntries(
+    await Promise.all(
+      Object.entries(paths).map(async ([name, path]) => [name, await readFile(path, "utf8")])
+    )
+  );
+
+  for (const name of Object.keys(paths)) {
+    assert.match(copy[name], /Claude Code/i, `${paths[name]} should name Claude Code`);
+    assert.match(copy[name], /(?:OpenAI )?Codex/i, `${paths[name]} should name Codex`);
+    assert.doesNotMatch(
+      copy[name],
+      /only need a Claude account|recommended Claude path|another AI tool|Set up Claude/i,
+      `${paths[name]} should not make Codex the secondary setup path`
+    );
+  }
+});
+
+test("search docs reserve capability gates for separate private-account workflows", async () => {
+  const setup = await readFile("docs/SETUP.md", "utf8");
+  const browser = await readFile("apps/docs/content/docs/advanced/browser-automation.mdx", "utf8");
+  const decomposition = await readFile("docs/architecture/skill-decomposition.yml", "utf8");
+
+  assert.match(setup, /private-account browser/i);
+  assert.match(setup, /saved job-site\s+search/i);
+  assert.doesNotMatch(setup, /External browser,[\s\S]{0,80}permissions stay off/i);
+  assert.match(browser, /private-account uses\s+below/i);
+  assert.doesNotMatch(browser, /Logged-in Layer-3 uses are\s+opt-in/i);
+  assert.doesNotMatch(
+    decomposition,
+    /Browser-authenticated LinkedIn, Wellfound, webmail, or logged-in portal discovery/i
+  );
+});
+
 test("website provides a keyboard skip link and preserves approved button variants", async () => {
   const page = await readFile("apps/website/src/app/page.tsx", "utf8");
   const styles = await readFile("apps/website/src/app/globals.css", "utf8");

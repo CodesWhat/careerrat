@@ -1198,8 +1198,9 @@ Authenticated, logged-in browser automation (status polling, in-platform messagi
 supervised application preparation, LinkedIn profile optimize/apply, session webmail
 access, relationship sourcing, and calendar provider sync) is
 **opt-in and defaults OFF**. No
-`candidate/automation.yml` means **nothing is automated** — that is the safe,
-intended state. The three-layer substrate (static `WebFetch` → headless capture →
+`candidate/automation.yml` means **none of those private-account actions run**.
+Saved job-source login follows the separate point-of-use flow below. The
+three-layer substrate (static `WebFetch` → headless capture →
 the live "session browser") is mapped in `docs/BROWSER.md`; this contract governs
 the authenticated, agent-driven uses of Layer 3.
 

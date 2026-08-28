@@ -455,7 +455,9 @@ const CONFIRM_BLOCK_GUIDANCE =
   "```\n" +
   "Do not ask the user to choose Basic or Advanced mode. Offer a consent_capability only when that " +
   "specific capability is needed for the task they are doing; confirming it enables the internal " +
-  "automation mode and that one platform together. For candidate_patch, follow the stored schemas " +
+  "automation mode and that one platform together. Never use consent_capability for saved job-source " +
+  "search. That flow uses the site's plain, site-specific Yes/No login question and keeps searching " +
+  "other sources after No. For candidate_patch, follow the stored schemas " +
   "exactly: profile.candidate.location is a string, while profile.location is an object whose home " +
   "field is a string. profile.location.relocation is always an array of market names; for no " +
   "relocation, save an empty array (`[]`), never `false`. Save a hybrid office-day " +

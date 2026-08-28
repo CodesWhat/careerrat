@@ -247,7 +247,7 @@ skills:
           - "D-13"
           - "D-14"
     deferred:
-      - step: "Browser-authenticated LinkedIn, Wellfound, webmail, or logged-in portal discovery."
+      - step: "Private-account people, message, webmail, or logged-in portal discovery beyond saved job-source search."
         owner: "planned:v2-browser-surface"
         owner_type: "planned_policy"
         decisions:

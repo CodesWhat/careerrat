@@ -190,7 +190,10 @@ function ClaudeSetupGuide({ guidedSetup, submitting, onStartGuidedSetup, onRefre
       <div className="cf-first-run__beginner-heading">
         <span className="cf-first-run__beginner-kicker">NO IDEA WHERE TO START?</span>
         <h2>New to AI tools? We’ll walk you through it.</h2>
-        <p>You only need a Claude account and about two minutes.</p>
+        <p>
+          Choose Claude Code or OpenAI Codex. Claude Code has an in-app installer, and Codex has a
+          setup guide.
+        </p>
       </div>
       <ol className="cf-first-run__setup-steps">
         <li>
@@ -430,7 +433,7 @@ export function EngineSelection({
         ) : null}
         <fieldset className="cf-first-run__engine-choices">
           <legend className="cf-first-run__engine-legend">
-            {needsFirstTool ? "Set up Claude" : "Detected AI tools"}
+            {needsFirstTool ? "Set up an AI tool" : "Detected AI tools"}
           </legend>
           {detectedChoices.length > 0 ? (
             detectedChoices.map((engine) => (
@@ -454,7 +457,9 @@ export function EngineSelection({
         </fieldset>
         {alternateMissingChoices.length > 0 ? (
           <details className="cf-first-run__engine-missing">
-            <summary>I already use another AI tool</summary>
+            <summary>
+              {needsFirstTool ? "Set up OpenAI Codex instead" : "Set up another supported AI tool"}
+            </summary>
             <div className="cf-first-run__engine-missing-list">
               {alternateMissingChoices.map((engine) => (
                 <div className="cf-first-run__engine-missing-row" key={engine.id}>

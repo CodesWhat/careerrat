@@ -323,6 +323,13 @@ function runReadiness(rows) {
   return {
     total: rows.length,
     enabled: enabled.length,
+    pendingLogin: rows.filter(
+      (row) =>
+        row.enabled === false &&
+        row.source_type === "browser" &&
+        row.auth === true &&
+        row.login_skipped !== true
+    ).length,
     withLastRun: enabled.filter((row) => row.lastRunAt).length,
   };
 }
@@ -333,7 +340,11 @@ function printRunReadiness(rows) {
   console.log(
     `\n${readiness.enabled} enabled ${searchWord} configured; ${readiness.withLastRun}/${readiness.enabled} have run watermarks.`
   );
-  if (readiness.enabled === 0) {
+  if (readiness.pendingLogin > 0) {
+    console.log(
+      "Next: Ask your agent to run search-jobs. CareerRat will ask whether you want to log in, then continue with the other sources."
+    );
+  } else if (readiness.enabled === 0) {
     console.log("Next: ask your agent to run setup-searches or enable sources before search-jobs.");
   } else if (readiness.withLastRun === 0) {
     console.log(
