@@ -339,12 +339,12 @@ describe("ProfileSettingsController source setup", () => {
 });
 
 describe("ProfileSettingsController permission consent", () => {
-  it("does not expose the removed authenticated-search Settings write path", async () => {
+  it("does not expose a job-source login Settings write path", async () => {
     const module = await import("./ProfileSettingsController.jsx");
     const api = createApi();
     api.getAutomationSettings.mockResolvedValue({
       capabilities: [
-        { capability: "authenticated_search", enabled: true },
+        { capability: "source_login", enabled: true },
         { capability: "authenticated_apply_preparation", enabled: true },
         { capability: "mail_access", enabled: false },
       ],
@@ -353,17 +353,17 @@ describe("ProfileSettingsController permission consent", () => {
     renderController(module, api);
     await flushEffects();
     const view = renderController(module, api);
-    await settingsProps(view).onPermissionChange("authenticated_search", false);
+    await settingsProps(view).onPermissionChange("source_login", false);
 
     expect(api.saveCandidateFile).not.toHaveBeenCalled();
   });
 
-  it("preserves a source-scoped LinkedIn grant when a visible permission is turned off", async () => {
+  it("does not preserve consent for a hidden job-source permission", async () => {
     const module = await import("./ProfileSettingsController.jsx");
     const api = createApi();
     api.getAutomationSettings.mockResolvedValue({
       capabilities: [
-        { capability: "authenticated_search", enabled: true },
+        { capability: "source_login", enabled: true },
         { capability: "authenticated_apply_preparation", enabled: true },
       ],
     });
@@ -375,7 +375,7 @@ describe("ProfileSettingsController permission consent", () => {
 
     expect(api.saveCandidateFile).toHaveBeenCalledWith(
       "automation",
-      expect.objectContaining({ consent: expect.objectContaining({ linkedin: true }) })
+      expect.objectContaining({ consent: expect.objectContaining({ linkedin: false }) })
     );
   });
 });

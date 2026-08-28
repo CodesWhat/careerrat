@@ -129,7 +129,7 @@ These drive the bundled browser session (Layer 2 per `docs/BROWSER.md`). In DB w
 into `workspace/jobs/*.md` with `artifacts.jd` mirrored onto the row. Without `--ingest`, they
 are snapshot-only diagnostics/fallback artifacts. Use them as a manual fallback, not a first step.
 
-### Authenticated browser sources (M12 Phase 2)
+### Login-backed browser sources
 
 Sources with `source_type: "browser"`, `auth: true`, and a `platform` field use that site's saved browser session. There is no separate search permission matrix.
 
@@ -157,7 +157,7 @@ Scrape the visible postings (title, company, URL, posted date where available). 
 
 Verify the salary-band integer renders the expected floor on the live page before trusting it (LinkedIn occasionally renumbers bands). When a term still returns multiple pages after these filters, tighten `f_TPR` rather than paging.
 
-**Safety:** halt immediately and ask the user if you encounter a captcha, a 2FA prompt, a login wall, or any unexpected interstitial. Never attempt to bypass an auth challenge. Keep all scraped pages and screenshots under `workspace/` only. Never run an authenticated source on a schedule — always user-initiated with the agent in the loop.
+**Safety:** halt immediately and ask the user if you encounter a captcha, a 2FA prompt, a login wall, or any unexpected interstitial. Never attempt to bypass an auth challenge. Keep all scraped pages and screenshots under `workspace/` only. Once the user enables a source, it participates in normal searches like every other enabled source.
 
 ## STEP 2 — Incremental delta (if a prior snapshot exists)
 
@@ -359,4 +359,4 @@ coverage before another refresh.
 - **Tool-agnostic browser prose.** Keep the provider on `auto` and use the available
   session browser. Never ask the user to choose a CLI, extension, or browser driver, and
   never name an MCP namespace or vendor tool.
-- **Domain-neutral.** No hardcoded platforms beyond what source config and `consent.mjs` define. No bracketed placeholder tokens — if a detail is unknown, omit or go generic.
+- **Domain-neutral.** No hardcoded platforms beyond what source config defines. No bracketed placeholder tokens — if a detail is unknown, omit or go generic.

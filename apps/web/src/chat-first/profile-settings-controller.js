@@ -68,7 +68,6 @@ const VOLUNTARY_FORM_POLICY_OPTIONS = [
 ];
 
 const PERMISSION_PLATFORMS = Object.freeze({
-  authenticated_search: ["linkedin", "indeed", "wellfound", "glassdoor"],
   authenticated_apply_preparation: [
     "greenhouse",
     "lever",
@@ -431,9 +430,10 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
       source: publicSyncPreference.source || "default",
       updatedAt: publicSyncPreference.updatedAt || null,
     },
-    permissionState: ["authenticated_search", "authenticated_apply_preparation", "mail_access"].map(
-      (id) => ({ id, enabled: capabilityEnabled(automation, id) })
-    ),
+    permissionState: ["authenticated_apply_preparation", "mail_access"].map((id) => ({
+      id,
+      enabled: capabilityEnabled(automation, id),
+    })),
     permissions: [
       {
         id: "draft_documents",
@@ -614,7 +614,7 @@ export function profileSectionSavePlan(
 }
 
 export function permissionPatch(id, enabled, currentPermissions = []) {
-  if (id === "draft_documents" || id === "authenticated_search") return null;
+  if (!Object.hasOwn(PERMISSION_PLATFORMS, id)) return null;
   const value = Boolean(enabled);
   const platforms = PERMISSION_PLATFORMS[id] || [];
   const providerState = Object.fromEntries(platforms.map((platform) => [platform, value]));

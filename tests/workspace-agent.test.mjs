@@ -2450,7 +2450,7 @@ test("adding an authenticated source asks a durable site-specific Yes or No ques
 
   const message = result.messages.at(-1);
   assert.equal(message.text, "Do you want to log into LinkedIn so I can use it?");
-  assert.equal(message.metadata.state, "permission-needed");
+  assert.equal(message.metadata.state, "login-needed");
   assert.deepEqual(
     message.metadata.nextActions.map((action) => ({
       label: action.label,
@@ -2479,7 +2479,7 @@ test("adding an authenticated source asks a durable site-specific Yes or No ques
   );
 });
 
-test("Yes grants only the resolved authenticated platform and opens its exact saved URL", async () => {
+test("Yes enables the resolved login source and opens its exact saved URL without a global permission grant", async () => {
   const repoRoot = tempRepo();
   const sourceUrl = "https://www.linkedin.com/jobs/search/?keywords=platform&location=New%20York";
   const enabled = [];
@@ -2519,15 +2519,45 @@ test("Yes grants only the resolved authenticated platform and opens its exact sa
   assert.equal(opened[0].platform, "linkedin");
   assert.equal(opened[0].url, sourceUrl);
   assert.equal(opened[0].source.label, "LinkedIn search");
-  const automation = candidateConfigGet({ repoRoot, env: {} }).automation;
-  assert.equal(automation.capabilities.authenticated_search.enabled, true);
-  assert.equal(automation.capabilities.authenticated_search.platforms.linkedin, true);
-  assert.equal(automation.capabilities.authenticated_search.scoped_grants.linkedin, true);
-  assert.equal(automation.consent.linkedin, true);
-  assert.notEqual(automation.capabilities.authenticated_search.platforms.indeed, true);
-  assert.notEqual(automation.consent.indeed, true);
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, {});
   assert.equal(result.messages.at(-1).text, "LinkedIn is open for sign-in.");
   assert.equal(result.messages.at(-1).metadata.state, "needs-user");
+});
+
+test("Yes opens any configured login source without a hardcoded job-site allowlist", async () => {
+  const repoRoot = tempRepo();
+  const sourceUrl = "https://jobs.example.com/account/login?return_to=%2Fsearch";
+  const opened = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.auth-decision",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { selector: "Example Jobs", decision: "yes" },
+    },
+    setSearchSourceEnabledImpl: ({ enabled }) => ({
+      changed: true,
+      source: {
+        label: "Example Jobs",
+        target: sourceUrl,
+        enabled,
+        auth: true,
+        platform: "example-jobs",
+      },
+    }),
+    openAuthenticatedSourceImpl: async (input) => {
+      opened.push(input);
+      return { state: "ready", summary: "Example Jobs is open and ready." };
+    },
+  });
+
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0].platform, "example-jobs");
+  assert.equal(opened[0].url, sourceUrl);
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, {});
+  assert.equal(result.messages.at(-1).text, "Example Jobs is open and ready.");
 });
 
 test("Yes fails closed when the browser-session handoff is unavailable", async () => {
@@ -2653,7 +2683,7 @@ test("enabling an authenticated source asks at point of use and leaves it disabl
   ]);
   const message = result.messages.at(-1);
   assert.equal(message.text, "Do you want to log into LinkedIn so I can use it?");
-  assert.equal(message.metadata.state, "permission-needed");
+  assert.equal(message.metadata.state, "login-needed");
   assert.deepEqual(
     message.metadata.nextActions.map(({ label, intent }) => ({ label, intent })),
     [
@@ -9031,9 +9061,9 @@ test("settings.apply automation: a narrow platform patch preserves every other c
     name: "automation",
     patch: {
       capabilities: {
-        authenticated_search: {
+        messaging: {
           enabled: true,
-          platforms: { linkedin: true, indeed: true },
+          platforms: { linkedin: true, wellfound: true },
         },
         status_polling: {
           enabled: true,
@@ -9053,7 +9083,7 @@ test("settings.apply automation: a narrow platform patch preserves every other c
         change: {
           kind: "automation",
           op: "platform",
-          capability: "authenticated_search",
+          capability: "messaging",
           platform: "linkedin",
           enabled: false,
         },
@@ -9062,16 +9092,16 @@ test("settings.apply automation: a narrow platform patch preserves every other c
   });
 
   const automation = candidateConfigGet({ repoRoot, env: {} }).automation;
-  assert.equal(automation.capabilities.authenticated_search.platforms.linkedin, false);
+  assert.equal(automation.capabilities.messaging.platforms.linkedin, false);
   // Every other sibling must be untouched by the narrow patch.
-  assert.equal(automation.capabilities.authenticated_search.platforms.indeed, true);
-  assert.equal(automation.capabilities.authenticated_search.enabled, true);
+  assert.equal(automation.capabilities.messaging.platforms.wellfound, true);
+  assert.equal(automation.capabilities.messaging.enabled, true);
   assert.equal(automation.capabilities.status_polling.enabled, true);
   assert.equal(automation.capabilities.status_polling.platforms.greenhouse, true);
   assert.equal(automation.capabilities.status_polling.platforms.workday, true);
 });
 
-test("settings.apply cannot grant authenticated search outside a source login question", async () => {
+test("settings.apply cannot grant a source login as a global automation capability", async () => {
   const repoRoot = tempRepo();
 
   await assert.rejects(
@@ -9085,7 +9115,7 @@ test("settings.apply cannot grant authenticated search outside a source login qu
           change: {
             kind: "automation",
             op: "platform",
-            capability: "authenticated_search",
+            capability: "source_login",
             platform: "linkedin",
             enabled: true,
           },
@@ -9093,11 +9123,8 @@ test("settings.apply cannot grant authenticated search outside a source login qu
       },
     }),
     (error) => {
-      assert.equal(error.code, "SETTINGS_CHANGE_UNSUPPORTED");
-      assert.equal(
-        error.message,
-        "CareerRat asks about a job-site login only when that source needs it."
-      );
+      assert.equal(error.code, "SETTINGS_CHANGE_INVALID");
+      assert.equal(error.message, 'Unknown capability "source_login".');
       return true;
     }
   );

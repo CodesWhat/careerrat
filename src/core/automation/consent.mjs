@@ -45,12 +45,6 @@ export const CAPABILITIES = {
     summary: "read application status from ATS dashboards (read-only)",
     platforms: ["greenhouse", "workday", "ashby", "lever"],
   },
-  authenticated_search: {
-    phase: 2,
-    label: "Authenticated search scanning",
-    summary: "logged-in saved-search scraping",
-    platforms: ["linkedin", "indeed", "wellfound", "glassdoor"],
-  },
   messaging: {
     phase: 3,
     label: "In-platform messaging",

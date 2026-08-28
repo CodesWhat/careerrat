@@ -1893,7 +1893,7 @@ test("Dashboard adapter exposes safe read-only settings without current compensa
       },
       automation: {
         sessionProvider: "Browser extension",
-        enabledCapabilities: ["Status polling", "Authenticated search"],
+        enabledCapabilities: ["Status polling", "Messaging"],
       },
       files: ["candidate/profile.yml", "candidate/targeting.yml"],
     },
@@ -1904,10 +1904,7 @@ test("Dashboard adapter exposes safe read-only settings without current compensa
   assert.equal(vm.settings.profile.targetBase, "$240K");
   assert.equal(vm.settings.profile.remoteScope, "worldwide");
   assert.equal(vm.settings.automation.sessionProvider, "Browser extension");
-  assert.deepEqual(vm.settings.automation.enabledCapabilities, [
-    "Status polling",
-    "Authenticated search",
-  ]);
+  assert.deepEqual(vm.settings.automation.enabledCapabilities, ["Status polling", "Messaging"]);
   assert.equal(vm.settings.profile.currentBase, undefined);
   assert.doesNotMatch(JSON.stringify(vm.settings), /123K|currentBase|current_base/);
 });

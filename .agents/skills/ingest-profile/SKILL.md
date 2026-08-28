@@ -456,7 +456,6 @@ off. Never hand-edit `candidate/automation.yml`.
 | Key | Label | What it does | Platforms | Needs |
 |---|---|---|---|---|
 | `status_polling` | Portal status polling | Reads application status from ATS dashboards (read-only) | greenhouse, workday, ashby, lever | Session browser + ToS consent per platform |
-| `authenticated_search` | Authenticated search scanning | Runs logged-in saved-search scraping to surface new postings | linkedin, indeed, wellfound, glassdoor | Session browser + ToS consent per platform |
 | `messaging` | In-platform messaging | Reads in-platform DMs into `communications[]` (read-only; replies go through `email-comms`) | linkedin, wellfound | Session browser + ToS consent per platform |
 | `one_click_apply` | Authenticated application fill | Modal-driven application filling under the `apply-job` submit gate; always halts before final submit so only the user can submit | linkedin | Session browser + ToS consent |
 | `profile_optimize` | LinkedIn profile optimize (read + suggest) | Reads your profile and proposes honest, evidence-backed rewrites of headline / About / experience / Featured (read-only; dry-run preview, also runs as a no-browser fix-doc) | linkedin | Session browser + ToS consent |
@@ -469,6 +468,11 @@ off. Never hand-edit `candidate/automation.yml`.
 |---|---|---|---|
 | Mail capture (`ingest-mail`) | Reads job-search email locally from Apple Mail (read-only, no IMAP credentials leave the machine) | macOS Apple Mail only | macOS (`uname` must return `Darwin`); Apple Mail running; Automation access in System Settings → Privacy & Security |
 | Webmail capture (`mail_access`) | Reads job-search email from Gmail/Outlook through the session browser when explicitly enabled. Generic `webmail` is for verification-code reads only, not inbox sync. | gmail, outlook | Session browser + ToS consent per mail provider |
+
+Saved job sources do not use this capability matrix. If a source needs a login,
+ask “Do you want to log into <site> so I can use it?” with Yes and No choices at
+that point. Yes opens the source in CareerRat's visible browser. No skips it and
+continues the search.
 
 ---
 

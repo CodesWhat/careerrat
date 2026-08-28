@@ -24,7 +24,6 @@ const CONFIG_FILES = [
 
 const CAPABILITY_LABELS = {
   status_polling: "Status polling",
-  authenticated_search: "Authenticated search",
   messaging: "Messaging",
   authenticated_apply_preparation: "Authenticated apply preparation",
   mail_access: "Mail access",
@@ -79,8 +78,8 @@ function workAuthorization(auth = {}) {
 function enabledCapabilities(automation = {}) {
   const caps = automation.capabilities || {};
   return Object.entries(caps)
-    .filter(([, value]) => value?.enabled)
-    .map(([key]) => CAPABILITY_LABELS[key] || key.replace(/_/g, " "))
+    .filter(([key, value]) => value?.enabled && Object.hasOwn(CAPABILITY_LABELS, key))
+    .map(([key]) => CAPABILITY_LABELS[key])
     .sort((a, b) => a.localeCompare(b));
 }
 

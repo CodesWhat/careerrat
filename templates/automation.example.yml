@@ -35,7 +35,6 @@ setup_mode: basic
 # `careerrat automation revoke <platform> --write`.
 consent:
   linkedin: false
-  indeed: false
   wellfound: false
   greenhouse: false
   workday: false
@@ -44,7 +43,6 @@ consent:
   workable: false
   smartrecruiters: false
   external_ats: false
-  glassdoor: false
   gmail: false
   outlook: false
   webmail: false
@@ -69,15 +67,6 @@ capabilities:
       workday: false
       ashby: false
       lever: false
-
-  # Phase 2 — logged-in search scanning (your saved searches, behind auth).
-  authenticated_search:
-    enabled: false
-    platforms:
-      linkedin: false
-      indeed: false
-      wellfound: false
-      glassdoor: false
 
   # Phase 3 — read in-platform messages/DMs into communications[]. Highest ToS
   # exposure → strongest consent gate.

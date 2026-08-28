@@ -124,7 +124,6 @@ describe("profile settings controller mapping", () => {
       },
       automation: {
         capabilities: [
-          { capability: "authenticated_search", enabled: true },
           { capability: "authenticated_apply_preparation", enabled: false },
           { capability: "mail_access", enabled: false },
         ],
@@ -467,21 +466,22 @@ describe("profile settings controller mapping", () => {
     expect(permissionPatch("draft_documents", false)).toBeNull();
   });
 
-  it("does not offer an authenticated-search switch in normal Settings", () => {
+  it("does not carry a hidden job-source login switch in Settings state", () => {
     const model = buildProfileSettingsModel({
       automation: {
-        capabilities: [{ capability: "authenticated_search", enabled: true }],
+        capabilities: [{ capability: "source_login", enabled: true }],
       },
     });
-    expect(model.permissions.some((permission) => permission.id === "authenticated_search")).toBe(
+    expect(model.permissions.some((permission) => permission.id === "source_login")).toBe(false);
+    expect(model.permissionState.some((permission) => permission.id === "source_login")).toBe(
       false
     );
-    expect(permissionPatch("authenticated_search", true, model.permissions)).toBeNull();
+    expect(permissionPatch("source_login", true, model.permissions)).toBeNull();
   });
 
-  it("keeps shared provider consent while another visible permission still needs it", () => {
+  it("does not preserve consent for a removed hidden job-source permission", () => {
     const permissions = [
-      { id: "authenticated_search", enabled: true },
+      { id: "source_login", enabled: true },
       { id: "authenticated_apply_preparation", enabled: true },
       { id: "mail_access", enabled: false },
     ];
@@ -493,7 +493,7 @@ describe("profile settings controller mapping", () => {
         ashby: false,
         workable: false,
         smartrecruiters: false,
-        linkedin: true,
+        linkedin: false,
         external_ats: false,
       },
       capabilities: {

@@ -123,11 +123,6 @@ skills:
         decisions:
           - "D-10"
           - "D-11"
-      - step: "Authenticated board sources remain gated by the browser automation consent model."
-        owner: "planned:src/core/discovery/authenticated-board-source.mjs"
-        owner_type: "planned_ts_module"
-        decisions:
-          - "D-07"
     notes:
       - "research-boards finds boards and aggregators, not employers or individual applications."
       - "Candidate-specific discoveries must go to user source config and workspace research logs, not shipped docs."
@@ -333,11 +328,6 @@ skills:
           - "D-09"
           - "D-12"
     deferred:
-      - step: "Authenticated saved-search sources beyond explicit session-browser consent gates."
-        owner: "planned:v2-authenticated-source-runner"
-        owner_type: "planned_policy"
-        decisions:
-          - "D-07"
       - step: "Generic public career-page extractor integration into the scan offer shape."
         owner: "planned:src/core/discovery/public-career-extractor.mjs"
         owner_type: "planned_ts_module"
@@ -345,6 +335,7 @@ skills:
           - "D-07"
           - "D-14"
     notes:
+      - "Login-backed sources use their saved source state plus a point-of-use Yes/No browser handoff, not the global automation matrix."
       - "The deterministic scan path must not call AI."
       - "Search results remain sourced or reviewed-hold until evaluate-job owns the body-read gate."
   evaluate-job:

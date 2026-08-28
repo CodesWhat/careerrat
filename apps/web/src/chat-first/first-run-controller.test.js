@@ -438,30 +438,6 @@ describe("chat-first onboarding controller", () => {
     }
   );
 
-  it("does not expose authenticated-search permission choices during onboarding", () => {
-    const message = firstRunAssistantMessage(
-      `This needs an explicit choice.\n\n\`\`\`careerrat:confirm\n${JSON.stringify({ kind: "consent_capability", payload: { capability: "authenticated_search", platform: "linkedin" } })}\n\`\`\``,
-      "assistant-search-consent"
-    );
-    expect(message.text).toBe("I’ll ask about a job-site login only when a source needs it.");
-    expect(message.options).toEqual([]);
-    expect(message.blocks).toEqual([]);
-  });
-
-  it("refuses a direct authenticated-search permission write from onboarding", async () => {
-    const api = { saveCandidateFile: vi.fn() };
-    await expect(
-      applyFirstRunConfirmation(
-        {
-          kind: "consent_capability",
-          payload: { capability: "authenticated_search", platform: "linkedin" },
-        },
-        { api }
-      )
-    ).rejects.toThrow(/job source asks/i);
-    expect(api.saveCandidateFile).not.toHaveBeenCalled();
-  });
-
   it("keeps an explicit company confirmation from also becoming a yes-no question", () => {
     const message = firstRunAssistantMessage(
       [

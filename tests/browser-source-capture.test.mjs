@@ -74,7 +74,7 @@ test("captureBrowserSearchSource returns one contextual login handoff instead of
   let extracted = false;
   const session = {
     available: true,
-    async open(url) {
+    async open(_url) {
       return {
         url: "https://www.linkedin.com/login",
         title: "Sign in",

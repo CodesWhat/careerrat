@@ -32,6 +32,7 @@ test("Dashboard settings snapshot exposes onboarding config without private curr
       session: { provider: "extension" },
       capabilities: {
         status_polling: { enabled: true },
+        authenticated_search: { enabled: true },
         messaging: { enabled: false },
       },
     },

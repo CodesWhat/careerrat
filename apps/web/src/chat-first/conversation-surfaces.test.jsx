@@ -968,7 +968,7 @@ describe("TodayConversation", () => {
       role: "assistant",
       kind: "action_result",
       text: "Do you want to log into LinkedIn so I can use it?",
-      metadata: { state: "permission-needed", nextActions: actions },
+      metadata: { state: "login-needed", nextActions: actions },
     };
     const tree = MessageTranscript({ onIntentAction, messages: [message] });
     const buttons = [];

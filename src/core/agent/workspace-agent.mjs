@@ -4419,12 +4419,11 @@ export async function executeWorkspaceIntent({
         enabled: allow,
       });
       const source = operation?.source || {};
-      const platform = String(source.platform || "")
+      const platform = String(source.platform || source.provider || "")
         .trim()
         .toLowerCase();
-      const validPlatform = CAPABILITIES.authenticated_search.platforms.includes(platform);
       const url = String(source.target || source.url || "").trim();
-      if (source.auth !== true || !validPlatform || !url) {
+      if (source.auth !== true || !url) {
         if (allow) {
           try {
             await setSearchSourceEnabledImpl({ repoRoot, env, selector, enabled: false });
@@ -4485,21 +4484,6 @@ export async function executeWorkspaceIntent({
         error.status = 501;
         throw error;
       }
-      candidateConfigPatch({
-        repoRoot,
-        env,
-        name: "automation",
-        patch: {
-          consent: { [platform]: true },
-          capabilities: {
-            authenticated_search: {
-              enabled: true,
-              platforms: { [platform]: true },
-              scoped_grants: { [platform]: true },
-            },
-          },
-        },
-      });
       const handoff = await openAuthenticatedSourceImpl({ platform, url, source });
       const handoffState = String(handoff?.state || "needs-user");
       return appendActionResult({
@@ -4607,7 +4591,7 @@ export async function executeWorkspaceIntent({
         ].filter(Boolean),
         metadata: {
           state: authPending
-            ? "permission-needed"
+            ? "login-needed"
             : expandedSearch?.started
               ? "running"
               : added
@@ -4747,7 +4731,7 @@ export async function executeWorkspaceIntent({
             },
           ],
           metadata: {
-            state: "permission-needed",
+            state: "login-needed",
             nextActions: [
               sourceAuthDecisionAction({ label: "Yes", selector: label, decision: "yes" }),
               sourceAuthDecisionAction({
@@ -5816,14 +5800,6 @@ export async function executeWorkspaceIntent({
               "SETTINGS_CHANGE_INVALID"
             );
             error.details = { options: CAPABILITY_KEYS };
-            throw error;
-          }
-          if (capability === "authenticated_search") {
-            const error = actionError(
-              "CareerRat asks about a job-site login only when that source needs it.",
-              "SETTINGS_CHANGE_UNSUPPORTED"
-            );
-            error.details = { reason: "source-login", capability };
             throw error;
           }
           if (capability !== "status_polling") {
@@ -9270,8 +9246,6 @@ function settingsProfileFromText(text) {
 const AUTOMATION_CAPABILITY_PHRASES = {
   "status polling": "status_polling",
   "portal status polling": "status_polling",
-  "authenticated search": "authenticated_search",
-  "authenticated search scanning": "authenticated_search",
   messaging: "messaging",
   "in-platform messaging": "messaging",
   "authenticated apply preparation": "authenticated_apply_preparation",
@@ -9303,8 +9277,8 @@ function matchAutomationPlatformPhrase(text) {
 }
 
 // "turn off <capability> [on <platform>]" (any capability — disabling is
-// always allowed), "turn on status polling / authenticated search [on
-// <platform>]" (the ONLY capabilities allowed to enable from Ask — see the
+// always allowed), "turn on status polling [on <platform>]" (the ONLY
+// capability allowed to enable from Ask — see the
 // settings.apply handler's own capability-tier restriction, enforced there
 // too since REST can call the intent directly), "set setup mode to
 // advanced/basic", "use <provider> for browser sessions".
