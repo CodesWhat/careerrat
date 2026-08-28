@@ -635,10 +635,10 @@ test("runAiWebSearch isolates a failed prompt and preserves successful siblings 
     resolveJobUrlImpl: canonicalResolver(),
   });
 
-  assert.deepEqual(Object.fromEntries(callCount), { p1: 1, p2: 1, p3: 1 });
-  assert.deepEqual(receivedPromptIds.slice().sort(), ["p1", "p2", "p3"]);
+  assert.deepEqual(Object.fromEntries(callCount), { p1: 3, p2: 1, p3: 2 });
+  assert.deepEqual(receivedPromptIds.slice().sort(), ["p1", "p1", "p1", "p2", "p3", "p3"]);
   assert.equal(maxActive, 2);
-  assert.equal(result.found, 2);
+  assert.equal(result.found, 5);
   assert.equal(result.new, 2);
   assert.deepEqual(result.failedPromptIds, ["p2"]);
   assert.deepEqual(
@@ -1000,7 +1000,7 @@ test("runAiWebSearch hard-dedupes batch and drops stale pre-hydration cut gates"
           promptId: "p1",
           prompt: "Find role 1",
           status: "completed",
-          queries: [{ query: "ai jobs", status: "completed", error: null }],
+          queries: Array(4).fill({ query: "ai jobs", status: "completed", error: null }),
         },
         {
           promptId: "p2",
@@ -3067,6 +3067,116 @@ test("runAiWebSearch includes configured engineering titles named without the ge
   assert.equal(result.presented, 3, JSON.stringify(result));
 });
 
+test("runAiWebSearch lets successful siblings recover useful coverage without masking a failed prompt", async () => {
+  const repoRoot = repo({ prompts: 3 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        { name: "Bar leadership", titles: ["Bar Manager", "Head Bartender"] },
+        { name: "Hospitality operations", titles: ["Assistant General Manager"] },
+      ],
+      fit_bands: { fit_floor: 65 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      {
+        id: "p1",
+        text: "Find Bar Manager and Assistant General Manager jobs in New York City",
+      },
+      { id: "p2", text: "Find Event Operations jobs in New York City" },
+      { id: "p3", text: "Find Head Bartender jobs in New York City" },
+    ],
+  });
+  const executionPlan = Object.freeze({
+    operation: "research.web",
+    runtimeId: "claude",
+    resolved: Object.freeze({ model: "claude-sonnet-4-6", effort: "medium" }),
+  });
+  const calls = new Map();
+  const receivedPlans = [];
+  const topUpInputs = [];
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    executionPlan,
+    runSkillStream: async ({ input, onEvent, executionPlan: receivedPlan }) => {
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      const promptId = kickoff.prompts[0].id;
+      const attempt = (calls.get(promptId) || 0) + 1;
+      calls.set(promptId, attempt);
+      receivedPlans.push(receivedPlan);
+      if (typeof input === "string") topUpInputs.push(input);
+      if (promptId === "p2") {
+        return { ok: false, error: "The saved search timed out." };
+      }
+      const roles =
+        promptId === "p1"
+          ? [
+              role({
+                company: attempt === 1 ? "Bar One" : "Restaurant Three",
+                title: attempt === 1 ? "Bar Manager" : "Assistant General Manager",
+                location: "New York, NY",
+                url:
+                  attempt === 1
+                    ? "https://bar-one.example/jobs/bar-manager"
+                    : "https://restaurant-three.example/jobs/assistant-general-manager",
+              }),
+            ]
+          : [
+              role({
+                company: "Bar Two",
+                title: "Head Bartender",
+                location: "New York, NY",
+                url: "https://bar-two.example/jobs/head-bartender",
+              }),
+            ];
+      emitAssistantJson(onEvent, {
+        roles,
+        queries_run: [
+          { prompt_id: promptId, query: `${promptId} query ${attempt}`, status: "completed" },
+        ],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver({
+      location: "New York, NY",
+      liveness: { result: "active", reason: "visible apply control" },
+    }),
+  });
+
+  assert.deepEqual(Object.fromEntries(calls), { p1: 2, p2: 1, p3: 1 });
+  assert.deepEqual(receivedPlans, Array(4).fill(executionPlan));
+  assert.equal(topUpInputs.length, 1);
+  assert.match(topUpInputs[0], /Assistant General Manager/);
+  assert.match(topUpInputs[0], /Bar Manager/);
+  assert.match(topUpInputs[0], /Head Bartender/);
+  assert.match(topUpInputs[0], /Bar leadership/);
+  assert.match(topUpInputs[0], /Hospitality operations/);
+  assert.equal(result.new, 3, JSON.stringify(result));
+  assert.equal(result.presented, 3, JSON.stringify(result));
+  assert.deepEqual(result.failedPromptIds, ["p2"]);
+  assert.equal(result.queryResults.find((entry) => entry.promptId === "p2")?.status, "failed");
+  assert.match(result.errors.join(" "), /couldn't finish/i);
+});
+
 test("runAiWebSearch tops up an underfilled three-prompt useful set once on the frozen provider", async () => {
   const repoRoot = repo({ prompts: 3 });
   candidateConfigPatch({
@@ -3942,7 +4052,7 @@ test("runAiWebSearch reports exact failed saved prompts and successful queries",
       promptId: "p1",
       prompt: "Find role 1",
       status: "completed",
-      queries: [{ query: "first query", status: "completed", error: null }],
+      queries: Array(4).fill({ query: "first query", status: "completed", error: null }),
     },
     {
       promptId: "p2",

@@ -501,7 +501,11 @@ function freshnessRecoveryInstruction(rejections) {
   ].join("\n");
 }
 
-function usefulSetTopUpInstruction(consideredCandidates, missingTargetTitles = []) {
+function usefulSetTopUpInstruction(
+  consideredCandidates,
+  missingTargetTitles = [],
+  { survivorRoles = [], representedBuckets = [], missingBuckets = [] } = {}
+) {
   const consideredPostings = consideredCandidates.slice(0, 60).map(({ offer, reason }) => ({
     url: offer.url,
     reason: String(reason || "CareerRat already considered this posting.").slice(0, 240),
@@ -515,6 +519,9 @@ function usefulSetTopUpInstruction(consideredCandidates, missingTargetTitles = [
     "Search employer-owned career pages and direct ATS postings first. Do not repeat an already considered URL or requisition, and do not loosen title, location, compensation, freshness, or fit requirements.",
     JSON.stringify({
       missing_target_titles: missingTargetTitles,
+      survivor_roles: survivorRoles,
+      represented_buckets: representedBuckets,
+      missing_buckets: missingBuckets,
       considered_postings: consideredPostings,
     }),
   ].join("\n");
@@ -696,14 +703,19 @@ export async function runAiWebSearch({
   async function runSavedPrompt(
     prompt,
     promptIndex,
-    { rejectedCandidates = [], topUpCandidates = null, missingTargetTitles = [] } = {}
+    {
+      rejectedCandidates = [],
+      topUpCandidates = null,
+      missingTargetTitles = [],
+      topUpState = {},
+    } = {}
   ) {
     const promptNumber = promptIndex + 1;
     const topUp = Array.isArray(topUpCandidates);
     const searchInstruction = rejectedCandidates.length
       ? freshnessRecoveryInstruction(rejectedCandidates)
       : topUp
-        ? usefulSetTopUpInstruction(topUpCandidates, missingTargetTitles)
+        ? usefulSetTopUpInstruction(topUpCandidates, missingTargetTitles, topUpState)
         : null;
     const lifecycle = {
       phase: "prompt",
@@ -1215,9 +1227,11 @@ export async function runAiWebSearch({
   }
   const requiredTitleCount = Math.min(MIN_USEFUL_SET_ROLES, selectedTargetTitles.size);
   const interimCoverage = mergePromptCoverage({ selected, outcomes: allPromptOutcomes });
-  const canRecoverUsefulSet =
-    interimCoverage.failedPromptIds.length === 0 &&
-    allPromptOutcomes.every((outcome) => (outcome.errors || []).length === 0);
+  const usefulSetPromptIds = new Set(
+    interimCoverage.queryResults
+      .filter((entry) => entry.status === "completed")
+      .map((entry) => entry.promptId)
+  );
 
   function usefulSetState() {
     const qualification = requalifyCanonicalOffers(canonicalCandidates, { config });
@@ -1258,6 +1272,14 @@ export async function runAiWebSearch({
       missingBuckets: targetBuckets.filter(
         (bucket) => !representedBuckets.has(bucket.name || JSON.stringify(bucket.titles))
       ),
+      representedBuckets: targetBuckets.filter((bucket) =>
+        representedBuckets.has(bucket.name || JSON.stringify(bucket.titles))
+      ),
+      survivorRoles: offers.slice(0, 40).map((offer) => ({
+        company: offer.company,
+        title: offer.title,
+        url: offer.url,
+      })),
       missingTargetTitles: [...selectedTargetTitles.entries()]
         .filter(([key]) => !representedTargetTitles.has(key))
         .map(([, target]) => target),
@@ -1267,7 +1289,7 @@ export async function runAiWebSearch({
   const topUpCounts = new Map(selected.map((prompt) => [prompt.id, 0]));
   for (
     let topUpTurn = 0;
-    canRecoverUsefulSet && topUpTurn < MAX_USEFUL_SET_TOP_UP_TURNS;
+    usefulSetPromptIds.size > 0 && topUpTurn < MAX_USEFUL_SET_TOP_UP_TURNS;
     topUpTurn += 1
   ) {
     const state = usefulSetState();
@@ -1284,6 +1306,7 @@ export async function runAiWebSearch({
           promptMatchesBucket(prompt, bucket)
         ),
       }))
+      .filter(({ prompt }) => usefulSetPromptIds.has(prompt.id))
       .sort(
         (left, right) =>
           Number(right.missingTargetTitles.length > 0) -
@@ -1304,6 +1327,15 @@ export async function runAiWebSearch({
     const topUpOutcome = await runSavedPrompt(topUpSpec.prompt, topUpSpec.promptIndex, {
       topUpCandidates: consideredCandidates,
       missingTargetTitles: topUpSpec.missingTargetTitles.map((target) => target.title),
+      topUpState: {
+        survivorRoles: state.survivorRoles,
+        representedBuckets: state.representedBuckets.map(
+          (bucket) => bucket.name || JSON.stringify(bucket.titles)
+        ),
+        missingBuckets: state.missingBuckets.map(
+          (bucket) => bucket.name || JSON.stringify(bucket.titles)
+        ),
+      },
     });
     allPromptOutcomes.push(topUpOutcome);
     await collectPromptOutcomes([topUpOutcome], {
