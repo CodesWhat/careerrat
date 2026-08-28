@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { classifyLiveness } from "../src/core/liveness/liveness-core.mjs";
+import { classifyLiveness, primaryPostingText } from "../src/core/liveness/liveness-core.mjs";
 
 test("classifies a visible apply control as active", () => {
   const result = classifyLiveness({
@@ -65,6 +65,15 @@ test("a stale recommendation does not expire the active primary posting", () => 
 
   assert.equal(result.result, "active");
   assert.equal(result.code, "apply_control_visible");
+});
+
+test("primary posting text finds a recommendation boundary after a long description", () => {
+  const bodyText = `Staff Platform Engineer ${"Detailed responsibility. ".repeat(110)}Final primary requirement. Similar Jobs This job is no longer accepting applications`;
+
+  const primary = primaryPostingText(bodyText);
+
+  assert.match(primary, /Final primary requirement/);
+  assert.doesNotMatch(primary, /Similar Jobs|no longer accepting applications/);
 });
 
 test("an inactive employer account wins over generic application-site controls", () => {

@@ -61,13 +61,13 @@ function hasApplyControl(controls = []) {
 }
 
 export function primaryPostingText(bodyText = "") {
-  const header = String(bodyText).slice(0, 2000);
-  let end = header.length;
+  const text = String(bodyText);
+  let end = text.length;
   for (const pattern of RECOMMENDATION_SECTION_PATTERNS) {
-    const match = pattern.exec(header);
+    const match = pattern.exec(text);
     if (match && match.index < end) end = match.index;
   }
-  return header.slice(0, end);
+  return text.slice(0, end);
 }
 
 export function classifyLiveness({
@@ -85,7 +85,10 @@ export function classifyLiveness({
     return { result: "expired", code: "expired_url", reason: `redirect to ${finalUrl}` };
   }
 
-  const primaryExpired = firstMatch(PRIMARY_EXPIRED_PATTERNS, primaryPostingText(bodyText));
+  const primaryExpired = firstMatch(
+    PRIMARY_EXPIRED_PATTERNS,
+    primaryPostingText(bodyText).slice(0, 2000)
+  );
   if (primaryExpired) {
     return {
       result: "expired",

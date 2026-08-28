@@ -22,6 +22,52 @@ test("recommendation-card apply links are not primary posting controls", () => {
   assert.deepEqual(controls, []);
 });
 
+test("prose containing apply is not an interactive apply control", () => {
+  const controls = extractApplyControlsFromHtml(`
+    <main>
+      <h1>Staff Platform Engineer</h1>
+      <p>Apply systems thinking to reliable distributed infrastructure.</p>
+    </main>
+  `);
+
+  assert.deepEqual(controls, []);
+});
+
+test("real apply links and buttons are detected from their accessible labels", () => {
+  for (const html of [
+    `<a href="/jobs/123/apply"><span>Apply now</span></a>`,
+    `<button type="button" aria-label="Submit application"></button>`,
+    `<input type="submit" value="Start application">`,
+    `<div role="button" title="Easy Apply"></div>`,
+  ]) {
+    assert.equal(extractApplyControlsFromHtml(html).length, 1, html);
+  }
+});
+
+test("a real apply button after a long primary description remains detectable", () => {
+  const html = `<main><h1>Staff Platform Engineer</h1><p>${"Detailed responsibility. ".repeat(110)}</p><button>Apply now</button></main>`;
+
+  assert.deepEqual(extractApplyControlsFromHtml(html), ["Apply now"]);
+});
+
+test("a recommendation boundary after a long description excludes its apply controls", () => {
+  const html = `<main><h1>Staff Platform Engineer</h1><p>${"Detailed responsibility. ".repeat(110)}</p></main><aside><h2>Similar Jobs</h2><a href="/jobs/other">Easy Apply</a></aside>`;
+
+  assert.deepEqual(extractApplyControlsFromHtml(html), []);
+});
+
+test("liveness stays active when the primary apply button follows a long job description", async () => {
+  const html = `<html><body><main><h1>Staff Platform Engineer</h1><p>${"Detailed responsibility. ".repeat(110)}</p><button>Apply now</button></main></body></html>`;
+  const result = await checkUrlLiveness("https://jobs.example.com/staff-platform-engineer", {
+    fetchImpl: async () =>
+      new Response(html, { status: 200, headers: { "content-type": "text/html" } }),
+    resolveHost: publicResolver,
+  });
+
+  assert.equal(result.result, "active");
+  assert.equal(result.code, "apply_control_visible");
+});
+
 test("short Ashby SPA shell is uncertain rather than expired", async () => {
   const result = await checkUrlLiveness("https://jobs.ashbyhq.com/acme/123", {
     fetchImpl: SPA_RESPONSE,

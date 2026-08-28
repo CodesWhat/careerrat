@@ -1,3 +1,4 @@
+import { Parser } from "htmlparser2";
 import { fetchPublicHttpText } from "../net/public-http-fetch.mjs";
 import { APPLY_PATTERNS, classifyLiveness, primaryPostingText } from "./liveness-core.mjs";
 
@@ -13,8 +14,77 @@ export function htmlToText(html = "") {
 }
 
 export function extractApplyControlsFromHtml(html = "") {
-  const text = primaryPostingText(htmlToText(html));
-  return APPLY_PATTERNS.some((pattern) => pattern.test(text)) ? ["Apply"] : [];
+  let visibleText = "";
+  let ignoredDepth = 0;
+  const activeControls = [];
+  const controls = [];
+  const parser = new Parser(
+    {
+      onopentag(name, attributes) {
+        if (ignoredDepth > 0) {
+          ignoredDepth += 1;
+          return;
+        }
+        if (name === "script" || name === "style" || name === "template") {
+          ignoredDepth = 1;
+          return;
+        }
+
+        visibleText += " ";
+        const role = String(attributes.role || "")
+          .trim()
+          .toLowerCase();
+        const type = String(attributes.type || "")
+          .trim()
+          .toLowerCase();
+        const interactive =
+          name === "a" ||
+          name === "button" ||
+          (name === "input" && type === "submit") ||
+          role === "button";
+        if (!interactive) return;
+
+        const control = {
+          name,
+          start: visibleText.length,
+          label: [attributes["aria-label"], attributes.title, attributes.value]
+            .map((value) => String(value || "").trim())
+            .filter(Boolean)
+            .join(" "),
+          text: "",
+        };
+        activeControls.push(control);
+        if (name === "input") {
+          controls.push(control);
+          activeControls.pop();
+        }
+      },
+      ontext(text) {
+        if (ignoredDepth > 0) return;
+        visibleText += text;
+        for (const control of activeControls) control.text += text;
+      },
+      onclosetag(name) {
+        if (ignoredDepth > 0) {
+          ignoredDepth -= 1;
+          return;
+        }
+        visibleText += " ";
+        const index = activeControls.findLastIndex((control) => control.name === name);
+        if (index < 0) return;
+        controls.push(...activeControls.splice(index));
+      },
+    },
+    { decodeEntities: true }
+  );
+  parser.end(String(html || ""));
+  controls.push(...activeControls);
+
+  const primaryEnd = primaryPostingText(visibleText).length;
+  return controls
+    .filter((control) => control.start <= primaryEnd)
+    .map((control) => `${control.label} ${control.text}`.replace(/\s+/g, " ").trim())
+    .filter((label) => APPLY_PATTERNS.some((pattern) => pattern.test(label)));
 }
 
 export async function checkUrlLiveness(
