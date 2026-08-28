@@ -769,6 +769,21 @@ test("runAiWebSearch keeps US-remote scope separate from the following NYC hybri
       },
     ],
   });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "hiringcafe",
+          source_type: "browser",
+          label: "Developer Infrastructure Engineer and Developer Experience Engineer",
+          url: "https://hiring.cafe/?searchState=developer-infrastructure",
+          enabled: true,
+        },
+      ],
+    },
+  });
   let plan = null;
 
   await runAiWebSearch({
@@ -792,6 +807,12 @@ test("runAiWebSearch keeps US-remote scope separate from the following NYC hybri
     assert.match(query, /"New York, NY"/);
     assert.match(query, /remote "United States"/i);
     assert.doesNotMatch(query, /office days/i);
+  }
+  for (const title of ["Developer Infrastructure Engineer", "Developer Experience Engineer"]) {
+    assert.ok(
+      plan.query_hints.some(({ query }) => query.includes(`"${title}"`) && !/\bsite:/i.test(query)),
+      `${title} needs one broad query: ${JSON.stringify(plan.query_hints)}`
+    );
   }
 });
 

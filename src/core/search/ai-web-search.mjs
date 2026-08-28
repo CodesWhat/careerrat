@@ -1328,6 +1328,21 @@ function buildSearchQueryHints(
     ];
   }
   const [broadTitles, directTitles = broadTitles] = titleGroups;
+  if (titleGroups.length > 1) {
+    const hints = titleGroups
+      .slice(0, 2)
+      .flatMap((hintTitles) => [
+        { kind: initialKind, query: boundedSearchQuery(hintTitles, locationClause) },
+        sourceHint(hintTitles, false),
+      ]);
+    const seenQueries = new Set();
+    return hints.filter(({ query }) => {
+      const key = normalizedSearchQuery(query);
+      if (seenQueries.has(key)) return false;
+      seenQueries.add(key);
+      return true;
+    });
+  }
   return [
     { kind: initialKind, query: boundedSearchQuery(broadTitles, locationClause) },
     sourceHint(directTitles, false),
