@@ -92,6 +92,12 @@ function safeResult(result) {
     presented: result.presented,
     fitFloor: result.fitFloor,
     duplicates: result.duplicates,
+    canonicalOverlaps: Array.isArray(result.canonicalOverlaps)
+      ? result.canonicalOverlaps.map((overlap) => ({
+          promptId: String(overlap?.promptId || ""),
+          url: String(overlap?.url || ""),
+        }))
+      : [],
     disqualified: result.disqualified,
     reasonCounts: result.reasonCounts,
     partial: result.partial,

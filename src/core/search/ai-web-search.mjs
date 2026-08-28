@@ -1751,7 +1751,7 @@ export async function runAiWebSearch({
                     kind: "source",
                     url: rawUrl,
                     host,
-                    status: "completed",
+                    status: "pending",
                     error: null,
                   };
                   toolTrace.push(item);
@@ -1768,9 +1768,13 @@ export async function runAiWebSearch({
             }
             if (evt.type === "tool_result") {
               const item = toolCalls.get(evt.data?.toolUseId);
-              if (item && evt.data?.isError) {
-                item.status = "failed";
-                item.error = safeToolError(evt.data?.content);
+              if (item) {
+                if (evt.data?.isError) {
+                  item.status = "failed";
+                  item.error = safeToolError(evt.data?.content);
+                } else {
+                  item.status = "completed";
+                }
               }
               return;
             }
@@ -1925,10 +1929,29 @@ export async function runAiWebSearch({
   const allPromptOutcomes = [...promptOutcomes];
   const roles = [];
   const { seenPostingKeys } = buildDbSeenSets({ repoRoot, env });
+  const deterministicOffers = deterministicCoverage?.offers || [];
+  const deterministicOffersByUrl = new Map(
+    deterministicOffers
+      .map((offer) => [normalizedSourceUrl(offer?.url), offer])
+      .filter(([url]) => Boolean(url))
+  );
   const deterministicPostingKeys = new Set();
-  for (const offer of deterministicCoverage?.offers || []) {
-    addPostingIdentity(deterministicPostingKeys, offer);
-  }
+  for (const offer of deterministicOffers) addPostingIdentity(deterministicPostingKeys, offer);
+  const canonicalOverlapKeys = new Set();
+  const canonicalOverlaps = [];
+  const matchingDeterministicOffer = (candidate) => {
+    const url = normalizedSourceUrl(candidate?.url);
+    return url ? deterministicOffersByUrl.get(url) || null : null;
+  };
+  const hasCompletedSourceTrace = (promptId, offer, completedSourceUrlsByPrompt) =>
+    completedSourceUrlsByPrompt.get(promptId)?.has(normalizedSourceUrl(offer?.url)) === true;
+  const recordCanonicalOverlap = (promptId, offer) => {
+    const url = normalizedSourceUrl(offer?.url);
+    const key = `${promptId}\n${url}`;
+    if (!promptId || !url || canonicalOverlapKeys.has(key)) return;
+    canonicalOverlapKeys.add(key);
+    canonicalOverlaps.push({ promptId, url });
+  };
   const preliminaryPostingKeys = new Set(seenPostingKeys);
   const canonicalCandidates = [];
   const captureFailures = [];
@@ -1947,6 +1970,16 @@ export async function runAiWebSearch({
       allowCanonicalReplacement = false,
     } = {}
   ) {
+    const completedSourceUrlsByPrompt = new Map();
+    for (const outcome of outcomes) {
+      const completedUrls = completedSourceUrlsByPrompt.get(outcome.promptId) || new Set();
+      for (const trace of outcome.toolTrace || []) {
+        if (trace.kind !== "source" || trace.status !== "completed") continue;
+        const url = normalizedSourceUrl(trace.url);
+        if (url) completedUrls.add(url);
+      }
+      completedSourceUrlsByPrompt.set(outcome.promptId, completedUrls);
+    }
     const preliminary = [];
     const receiptOnly = [];
     const rejectionsByPrompt = new Map();
@@ -1960,7 +1993,19 @@ export async function runAiWebSearch({
         const key = normalizeCompanyRoleKey(role.company, role.title);
         const req = extractReqId(role.url);
         const offer = toScanOffer(role, { key, reqId: req.id });
-        if (postingIdentityIsSeen(offer, deterministicPostingKeys)) {
+        const deterministicDuplicate = postingIdentityIsSeen(offer, deterministicPostingKeys);
+        if (deterministicDuplicate) {
+          const deterministicOverlap = matchingDeterministicOffer(offer);
+          if (
+            deterministicOverlap &&
+            hasCompletedSourceTrace(
+              outcome.promptId,
+              deterministicOverlap,
+              completedSourceUrlsByPrompt
+            )
+          ) {
+            recordCanonicalOverlap(outcome.promptId, deterministicOverlap);
+          }
           duplicates += 1;
           continue;
         }
@@ -2099,6 +2144,13 @@ export async function runAiWebSearch({
       }
 
       if (canonicalDuplicate) {
+        const deterministicOverlap = matchingDeterministicOffer(canonicalOffer);
+        if (
+          deterministicOverlap &&
+          hasCompletedSourceTrace(promptId, deterministicOverlap, completedSourceUrlsByPrompt)
+        ) {
+          recordCanonicalOverlap(promptId, deterministicOverlap);
+        }
         if (!isReceiptOnly) duplicates += 1;
         const existingIndex = matchingCanonicalCandidateIndex(canonicalCandidates, canonicalOffer);
         if (
@@ -2521,6 +2573,7 @@ export async function runAiWebSearch({
     ).length,
     fitFloor,
     duplicates,
+    canonicalOverlaps,
     invalid,
     disqualified,
     reasonCounts,

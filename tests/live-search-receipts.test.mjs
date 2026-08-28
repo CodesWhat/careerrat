@@ -7,6 +7,10 @@ async function loadReceiptModule() {
 
 const SOURCE_REVISION = "a".repeat(40);
 const CURRENT_REVISION = "b".repeat(40);
+const PROMPT_IDS = Object.freeze({
+  hospitality: ["nyc-bar-leadership", "nyc-hospitality-operations", "event-and-venue-operations"],
+  engineering: ["us-remote-engineering", "nyc-hybrid-engineering", "developer-infrastructure"],
+});
 
 function resultRows(fixtureId) {
   return [0, 1, 2].map((index) => ({
@@ -21,12 +25,13 @@ function resultRows(fixtureId) {
   }));
 }
 
-function completeAiSummary() {
+function completeAiSummary(fixtureId = "engineering") {
   return {
     searched: 3,
     errors: [],
     failedPromptIds: [],
-    queryResults: ["primary", "secondary", "adjacent"].map((promptId) => ({
+    canonicalOverlaps: [],
+    queryResults: PROMPT_IDS[fixtureId].map((promptId) => ({
       promptId,
       status: "completed",
       queries: [{ query: `${promptId} exact jobs`, status: "completed" }],
@@ -70,8 +75,8 @@ async function acceptedReceipt(runtimeId, fixtureId) {
       errors: [],
       failedPromptIds: [],
     },
-    expectedPromptIds: ["primary", "secondary", "adjacent"],
-    aiSummary: completeAiSummary(),
+    expectedPromptIds: PROMPT_IDS[fixtureId],
+    aiSummary: completeAiSummary(fixtureId),
     usefulSet: {
       presentedRoleCount: 3,
       presentedBucketCount: 2,
@@ -173,7 +178,7 @@ test("native AI search receipt gate rejects missing, stale, fallback, weak, or u
   );
 });
 
-test("native AI search receipts require complete native AI coverage and one canonical AI row", async () => {
+test("native AI search receipts require complete native AI coverage and canonical AI evidence", async () => {
   const receiptModule = await loadReceiptModule();
   const build = ({ rows = resultRows("engineering"), aiSummary = completeAiSummary() } = {}) =>
     receiptModule.buildLiveSearchReceipt({
@@ -185,7 +190,7 @@ test("native AI search receipts require complete native AI coverage and one cano
       runtimeVerification: runtimeVerification("codex"),
       laneStatuses: SUCCEEDED_LANES,
       summary: { presented: 3, fitFloor: 65, errors: [], failedPromptIds: [] },
-      expectedPromptIds: ["primary", "secondary", "adjacent"],
+      expectedPromptIds: PROMPT_IDS.engineering,
       aiSummary,
       usefulSet: {
         presentedRoleCount: 3,
@@ -280,7 +285,86 @@ test("native AI search receipts require complete native AI coverage and one cano
   });
   assert.throws(
     () => receiptModule.verifyLiveSearchReceiptForReview(deterministicOnly),
-    /canonical AI contribution/i
+    /canonical AI evidence/i
+  );
+
+  const overlapOnly = build({
+    rows: resultRows("engineering").map((row) => ({
+      ...row,
+      discoveryLane: "deterministic",
+      unverified: false,
+    })),
+    aiSummary: {
+      ...completeAiSummary(),
+      canonicalOverlaps: [
+        {
+          promptId: PROMPT_IDS.engineering[0],
+          url: resultRows("engineering")[0].source,
+        },
+      ],
+    },
+  });
+  assert.equal(overlapOnly.counts.canonicalAiRows, 0);
+  assert.equal(overlapOnly.counts.canonicalAiOverlapRows, 1);
+  assert.deepEqual(overlapOnly.ai.canonicalOverlapRows, [
+    {
+      promptIds: [PROMPT_IDS.engineering[0]],
+      rowIdentity: overlapOnly.rows[0].identity,
+      source: overlapOnly.rows[0].source,
+    },
+  ]);
+  assert.equal(receiptModule.verifyLiveSearchReceiptForReview(overlapOnly), "codex/engineering");
+
+  const unreadableOverlap = build({
+    rows: resultRows("engineering").map((row) => ({
+      ...row,
+      discoveryLane: "deterministic",
+      unverified: false,
+    })),
+    aiSummary: {
+      ...completeAiSummary(),
+      canonicalOverlaps: [
+        {
+          promptId: PROMPT_IDS.engineering[0],
+          url: "https://jobs.example.test/engineering/unreadable",
+        },
+      ],
+    },
+  });
+  assert.throws(
+    () => receiptModule.verifyLiveSearchReceiptForReview(unreadableOverlap),
+    /canonical AI evidence/i
+  );
+
+  assert.throws(
+    () =>
+      receiptModule.verifyLiveSearchReceiptForReview({
+        ...overlapOnly,
+        ai: {
+          ...overlapOnly.ai,
+          canonicalOverlapRows: [
+            {
+              ...overlapOnly.ai.canonicalOverlapRows[0],
+              rowIdentity: "f".repeat(64),
+            },
+          ],
+        },
+      }),
+    /canonical AI overlap evidence/i
+  );
+
+  const shrunkPromptContract = {
+    ...accepted,
+    ai: {
+      ...accepted.ai,
+      expectedPromptIds: [PROMPT_IDS.engineering[0]],
+      searched: 1,
+      queryResults: accepted.ai.queryResults.slice(0, 1),
+    },
+  };
+  assert.throws(
+    () => receiptModule.verifyLiveSearchReceiptForReview(shrunkPromptContract),
+    /fixture prompt contract/i
   );
 });
 
@@ -296,7 +380,7 @@ test("native AI search review must name every exact emitted row identity", async
     runtimeVerification: runtimeVerification("codex"),
     laneStatuses: SUCCEEDED_LANES,
     summary: { presented: 3, fitFloor: 65, errors: [], failedPromptIds: [] },
-    expectedPromptIds: ["primary", "secondary", "adjacent"],
+    expectedPromptIds: PROMPT_IDS.engineering,
     aiSummary: completeAiSummary(),
     usefulSet: { presentedRoleCount: 3, presentedBucketCount: 2, presentedBuckets: ["a", "b"] },
     rows: resultRows("engineering"),
@@ -346,8 +430,8 @@ test("native AI search receipts count only canonically readable persisted rows",
     runtimeVerification: runtimeVerification("codex"),
     laneStatuses: SUCCEEDED_LANES,
     summary: { presented: 3, fitFloor: 65, errors: [], failedPromptIds: [] },
-    expectedPromptIds: ["primary", "secondary", "adjacent"],
-    aiSummary: completeAiSummary(),
+    expectedPromptIds: PROMPT_IDS.hospitality,
+    aiSummary: completeAiSummary("hospitality"),
     usefulSet: {
       presentedRoleCount: 3,
       presentedBucketCount: 2,
@@ -458,7 +542,7 @@ test("deferred-only native AI search evidence cannot become review-ready", async
     runtimeVerification: runtimeVerification("codex"),
     laneStatuses: SUCCEEDED_LANES,
     summary: { presented: 0, fitFloor: 65, errors: [], failedPromptIds: [] },
-    expectedPromptIds: ["primary", "secondary", "adjacent"],
+    expectedPromptIds: PROMPT_IDS.engineering,
     aiSummary: completeAiSummary(),
     usefulSet: { presentedRoleCount: 0, presentedBucketCount: 0, presentedBuckets: [] },
     rows,

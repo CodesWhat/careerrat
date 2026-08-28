@@ -58,11 +58,12 @@ export function extractReqId(rawUrl = "") {
         id: `hireology:${hireology[1]}`,
       };
     const workday = path.match(/_([a-z]{1,8}\d{4,}(?:-\d+)?)(?:\/|$)/i);
-    if (/^[\w-]+\.wd[\w-]*\.myworkdayjobs\.com$/i.test(url.hostname) && workday)
+    const workdayHost = url.hostname.match(/^([\w-]+)\.wd[\w-]*\.myworkdayjobs\.com$/i);
+    if (workdayHost && workday)
       return {
         provider: "workday",
         value: workday[1],
-        id: `workday:${workday[1].toLowerCase()}`,
+        id: `workday:${workdayHost[1].toLowerCase()}:${workday[1].toLowerCase()}`,
       };
   } catch {
     return { provider: null, value: null, id: null };

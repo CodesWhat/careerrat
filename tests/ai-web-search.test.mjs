@@ -3256,6 +3256,7 @@ test("runAiWebSearch recovers bounded source receipts for roles deduped before p
   assert.deepEqual(result.sources, [
     { url: duplicateUrl, status: "completed", host: "jobs.lever.co" },
   ]);
+  assert.deepEqual(result.canonicalOverlaps, []);
   assert.doesNotMatch(JSON.stringify(result.sources), /PRIVATE CANONICAL BODY/);
   assert.equal(readDbScannerRows({ repoRoot }).length, 1);
 });
@@ -3304,6 +3305,7 @@ test("runAiWebSearch reconciles a role persisted by a parallel lane after discov
   assert.equal(result.new, 0);
   assert.equal(result.duplicates, 1);
   assert.deepEqual(result.offers, []);
+  assert.deepEqual(result.canonicalOverlaps, []);
   assert.equal(readDbScannerRows({ repoRoot }).length, 1);
 });
 
@@ -7647,6 +7649,8 @@ test("runAiWebSearch uses deterministic coverage to plan unresolved sources and 
     },
   });
   const knownUrl = "https://covered.example/jobs/existing-field";
+  const knownReqUrl = "https://job-boards.greenhouse.io/example/jobs/1234567";
+  const alternateKnownReqUrl = "https://boards.greenhouse.io/example/jobs/1234567";
   const hydrationUrls = [];
   const inputs = [];
 
@@ -7707,6 +7711,11 @@ test("runAiWebSearch uses deterministic coverage to plan unresolved sources and 
           title: "Field Operations Manager",
           url: knownUrl,
         },
+        {
+          company: "Known Venue Company",
+          title: "Venue Services Manager",
+          url: knownReqUrl,
+        },
       ],
     },
     runSkillStream: async ({ input, onEvent }) => {
@@ -7717,6 +7726,11 @@ test("runAiWebSearch uses deterministic coverage to plan unresolved sources and 
             company: "Existing Operations Company",
             title: "Field Operations Manager",
             url: knownUrl,
+          }),
+          role({
+            company: "Known Venue Company",
+            title: "Venue Services Manager",
+            url: alternateKnownReqUrl,
           }),
           role({
             company: "Existing Operations Company",
@@ -7773,12 +7787,17 @@ test("runAiWebSearch uses deterministic coverage to plan unresolved sources and 
   ]);
   assert.doesNotMatch(JSON.stringify(plan.source_hints), /covered\.example/);
   assert.deepEqual(plan.deterministic_coverage, {
-    covered_companies: ["Existing Operations Company", "Example Company"],
+    covered_companies: ["Existing Operations Company", "Known Venue Company", "Example Company"],
     known_postings: [
       {
         company: "Existing Operations Company",
         title: "Field Operations Manager",
         url: knownUrl,
+      },
+      {
+        company: "Known Venue Company",
+        title: "Venue Services Manager",
+        url: knownReqUrl,
       },
     ],
     sources: [
@@ -7801,12 +7820,77 @@ test("runAiWebSearch uses deterministic coverage to plan unresolved sources and 
     ],
   });
   assert.equal(hydrationUrls.includes(knownUrl), false);
+  assert.equal(hydrationUrls.includes(alternateKnownReqUrl), false);
   assert.equal(
     hydrationUrls.includes("https://covered.example/jobs/another-field-requisition"),
     true
   );
   assert.equal(result.new, 4, JSON.stringify(result));
   assert.ok(result.duplicates >= 1, JSON.stringify(result));
+  assert.deepEqual(result.canonicalOverlaps, []);
+
+  const runOverlapProof = (completeFetch) =>
+    runAiWebSearch({
+      repoRoot,
+      env: {},
+      deterministic: {
+        status: "succeeded",
+        sources: [],
+        offers: [
+          {
+            company: "Existing Operations Company",
+            title: "Field Operations Manager",
+            url: knownUrl,
+          },
+        ],
+      },
+      runSkillStream: async ({ onEvent }) => {
+        onEvent({
+          type: "tool_use",
+          data: { id: "known-fetch", name: "WebFetch", input: { url: knownUrl } },
+        });
+        if (completeFetch) {
+          onEvent({
+            type: "tool_result",
+            data: { toolUseId: "known-fetch", isError: false, content: "Posting body" },
+          });
+        }
+        emitAssistantJson(onEvent, {
+          roles: [
+            role({
+              company: "Existing Operations Company",
+              title: "Field Operations Manager",
+              url: knownUrl,
+            }),
+          ],
+          queries_run: [
+            {
+              prompt_id: "p1",
+              query: "verify deterministic operations posting",
+              status: "completed",
+            },
+          ],
+        });
+        return { ok: true };
+      },
+      resolveJobUrlImpl: async (url) =>
+        specificResolution(url, {
+          title: "Field Operations Manager",
+          location: "New York, NY",
+          liveness: { result: "active", reason: "visible apply control" },
+        }),
+    });
+
+  const fetchedResult = await runOverlapProof(true);
+
+  assert.deepEqual(fetchedResult.canonicalOverlaps, [
+    {
+      promptId: "p1",
+      url: knownUrl,
+    },
+  ]);
+  const abandonedFetchResult = await runOverlapProof(false);
+  assert.deepEqual(abandonedFetchResult.canonicalOverlaps, []);
 });
 
 test("runAiWebSearch recovery excludes a rejected common ATS host and keeps one source snapshot", async () => {

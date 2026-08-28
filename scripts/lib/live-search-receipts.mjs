@@ -10,6 +10,19 @@ const RUNTIME_IDS = ["claude", "codex"];
 const FIXTURE_IDS = ["hospitality", "engineering"];
 const SOURCE_REVISION_PATTERN = /^[a-f0-9]{40}$/i;
 
+export const EXPECTED_LIVE_SEARCH_PROMPT_IDS = Object.freeze({
+  hospitality: Object.freeze([
+    "nyc-bar-leadership",
+    "nyc-hospitality-operations",
+    "event-and-venue-operations",
+  ]),
+  engineering: Object.freeze([
+    "us-remote-engineering",
+    "nyc-hybrid-engineering",
+    "developer-infrastructure",
+  ]),
+});
+
 export const NATIVE_AI_SEARCH_ACCEPTANCE = Object.freeze({
   fitFloor: 65,
   minimumPresentedRows: 3,
@@ -216,6 +229,29 @@ export function buildLiveSearchReceipt({
     ? [...aiSummary.failedPromptIds]
     : [];
   const canonicalAiRows = emittedRows.filter((row) => row.discoveryLane === "ai-web").length;
+  const emittedRowsByUrl = new Map(emittedRows.map((row) => [normalizedHttpUrl(row.source), row]));
+  const canonicalOverlapRowsByIdentity = new Map();
+  for (const overlap of Array.isArray(aiSummary?.canonicalOverlaps)
+    ? aiSummary.canonicalOverlaps
+    : []) {
+    const promptId = String(overlap?.promptId || "").trim();
+    const row = emittedRowsByUrl.get(normalizedHttpUrl(overlap?.url));
+    if (!promptId || row?.discoveryLane !== "deterministic") continue;
+    const existing = canonicalOverlapRowsByIdentity.get(row.identity) || {
+      promptIds: new Set(),
+      rowIdentity: row.identity,
+      source: row.source,
+    };
+    existing.promptIds.add(promptId);
+    canonicalOverlapRowsByIdentity.set(row.identity, existing);
+  }
+  const canonicalAiOverlapRows = [...canonicalOverlapRowsByIdentity.values()]
+    .map((entry) => ({
+      promptIds: [...entry.promptIds].sort(),
+      rowIdentity: entry.rowIdentity,
+      source: entry.source,
+    }))
+    .sort((left, right) => left.rowIdentity.localeCompare(right.rowIdentity));
 
   return {
     schemaVersion: 1,
@@ -247,6 +283,7 @@ export function buildLiveSearchReceipt({
       distinctRoles,
       presentedBuckets: presentedBuckets.length,
       canonicalAiRows,
+      canonicalAiOverlapRows: canonicalAiOverlapRows.length,
     },
     summary: {
       presented: Number(summary?.presented || 0),
@@ -261,6 +298,7 @@ export function buildLiveSearchReceipt({
       errors: aiErrors,
       failedPromptIds: failedAiPromptIds,
       canonicalRows: canonicalAiRows,
+      canonicalOverlapRows: canonicalAiOverlapRows,
     },
     presentedBuckets,
     rows: emittedRows,
@@ -330,6 +368,13 @@ function assertReceipt(receipt, { requireManualLiveness = true } = {}) {
   const expectedPromptIds = Array.isArray(receipt.ai?.expectedPromptIds)
     ? receipt.ai.expectedPromptIds.map(String)
     : [];
+  const fixturePromptIds = EXPECTED_LIVE_SEARCH_PROMPT_IDS[receipt.fixtureId];
+  if (
+    expectedPromptIds.length !== fixturePromptIds.length ||
+    expectedPromptIds.some((promptId, index) => promptId !== fixturePromptIds[index])
+  ) {
+    throw new Error(`${combination} does not match its fixture prompt contract.`);
+  }
   const queryResults = Array.isArray(receipt.ai?.queryResults) ? receipt.ai.queryResults : [];
   const coveredPromptIds = queryResults
     .filter((entry) => entry?.status === "completed")
@@ -377,12 +422,38 @@ function assertReceipt(receipt, { requireManualLiveness = true } = {}) {
     throw new Error(`${combination} bucket count does not match its receipt.`);
   }
   const canonicalAiRows = receipt.rows.filter((row) => row.discoveryLane === "ai-web").length;
+  const canonicalAiOverlapRows = Array.isArray(receipt.ai?.canonicalOverlapRows)
+    ? receipt.ai.canonicalOverlapRows
+    : [];
+  const receiptRowsByIdentity = new Map(receipt.rows.map((row) => [row.identity, row]));
+  const overlapIdentitySet = new Set();
+  for (const overlap of canonicalAiOverlapRows) {
+    const row = receiptRowsByIdentity.get(String(overlap?.rowIdentity || ""));
+    const promptIds = Array.isArray(overlap?.promptIds) ? overlap.promptIds.map(String) : [];
+    if (
+      row?.discoveryLane !== "deterministic" ||
+      normalizedHttpUrl(overlap?.source) !== normalizedHttpUrl(row.source) ||
+      promptIds.length === 0 ||
+      new Set(promptIds).size !== promptIds.length ||
+      promptIds.some((promptId) => !coveredPromptIds.includes(promptId)) ||
+      overlapIdentitySet.has(row.identity)
+    ) {
+      throw new Error(`${combination} has invalid canonical AI overlap evidence.`);
+    }
+    overlapIdentitySet.add(row.identity);
+  }
   if (
-    canonicalAiRows < 1 ||
+    canonicalAiRows + canonicalAiOverlapRows.length < 1 ||
     receipt.counts?.canonicalAiRows !== canonicalAiRows ||
     receipt.ai?.canonicalRows !== canonicalAiRows
   ) {
-    throw new Error(`${combination} has no canonical AI contribution.`);
+    throw new Error(`${combination} has no canonical AI evidence.`);
+  }
+  if (
+    receipt.counts?.canonicalAiOverlapRows !== canonicalAiOverlapRows.length ||
+    overlapIdentitySet.size !== canonicalAiOverlapRows.length
+  ) {
+    throw new Error(`${combination} canonical AI overlap count does not match its evidence.`);
   }
   if (receipt.summary?.presented !== receipt.counts.presentedRows) {
     throw new Error(`${combination} search summary does not match its exact presented rows.`);

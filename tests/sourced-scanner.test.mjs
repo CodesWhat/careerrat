@@ -1213,7 +1213,7 @@ test("extracts canonical req ids from common ATS URLs", () => {
       {
         provider: "workday",
         value: requisition,
-        id: `workday:${requisition.toLowerCase()}`,
+        id: `workday:shakeshack:${requisition.toLowerCase()}`,
       }
     );
   }
@@ -1222,6 +1222,17 @@ test("extracts canonical req ids from common ATS URLs", () => {
     null
   );
   assert.equal(extractReqId("https://careers.example.com/jobs/123456").id, null);
+});
+
+test("scopes Workday requisition identity to its tenant", () => {
+  const shakeShack = extractReqId(
+    "https://shakeshack.wd5.myworkdayjobs.com/External/job/Manager_JR12269"
+  );
+  const acme = extractReqId("https://acme.wd3.myworkdayjobs.com/Careers/job/Manager_JR12269");
+
+  assert.equal(shakeShack.id, "workday:shakeshack:jr12269");
+  assert.equal(acme.id, "workday:acme:jr12269");
+  assert.notEqual(shakeShack.id, acme.id);
 });
 
 // ---------------------------------------------------------------------------
