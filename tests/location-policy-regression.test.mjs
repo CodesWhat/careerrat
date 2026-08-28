@@ -563,6 +563,50 @@ test("New York home accepts every NYC borough without admitting nearby non-NYC p
   ]);
 });
 
+test("New York home accepts an NYC postal code without admitting nearby or non-NYC postal codes", () => {
+  const profile = {
+    candidate: { domain: "hospitality operations" },
+    location: {
+      home: "New York, NY",
+      remote: false,
+      hybrid: true,
+      onsite: true,
+      relocation: [],
+    },
+  };
+  const result = qualifyByLocation(
+    profile,
+    [
+      offer("manhattan-postal", "Manhattan Postal Corp", "New York, 10010, USA"),
+      offer("brooklyn-postal", "Brooklyn Postal Corp", "New York, 11201, USA"),
+      offer("jersey-city-postal", "Jersey City Postal Corp", "Jersey City, 07302, USA"),
+      offer("newark-postal", "Newark Postal Corp", "Newark, 07102, USA"),
+      offer("yonkers-postal", "Yonkers Postal Corp", "Yonkers, 10701, USA"),
+      offer("long-island-postal", "Long Island Postal Corp", "Long Island, 11501, USA"),
+      offer("non-nyc-new-york-postal", "Non-NYC New York Postal Corp", "New York, 10701, USA"),
+      offer(
+        "contradictory-new-york-postal",
+        "Contradictory New York Postal Corp",
+        "New York, NY 10701, USA"
+      ),
+    ],
+    { generatedFilter: false }
+  );
+
+  assert.deepEqual(result.kept.map((row) => row.company).sort(), [
+    "Brooklyn Postal Corp",
+    "Manhattan Postal Corp",
+  ]);
+  assert.deepEqual(result.filteredLocation.map((row) => row.company).sort(), [
+    "Contradictory New York Postal Corp",
+    "Jersey City Postal Corp",
+    "Long Island Postal Corp",
+    "Newark Postal Corp",
+    "Non-NYC New York Postal Corp",
+    "Yonkers Postal Corp",
+  ]);
+});
+
 test("worldwide remote scope keeps remote roles globally while local work stays NYC-only", () => {
   const profile = {
     candidate: { domain: "software engineering" },

@@ -485,6 +485,15 @@ const NEW_YORK_CITY_ALIASES = new Set([
   "staten island ny",
   "staten island new york",
 ]);
+const NEW_YORK_CITY_POSTAL_RANGES = Object.freeze([
+  [10001, 10282],
+  [10301, 10314],
+  [10451, 10475],
+  [11004, 11005],
+  [11101, 11109],
+  [11201, 11256],
+  [11351, 11697],
+]);
 const SAN_FRANCISCO_BAY_AREA_ALIASES = new Set([
   "bay area",
   "sf bay area",
@@ -497,12 +506,24 @@ const SAN_FRANCISCO_BAY_AREA_ALIASES = new Set([
   "berkeley ca",
 ]);
 
+function hasNewYorkCityPostalCode(value) {
+  return [...String(value || "").matchAll(/\b(\d{5})(?:-\d{4})?\b/g)].some((match) => {
+    const postalCode = Number(match[1]);
+    return NEW_YORK_CITY_POSTAL_RANGES.some(
+      ([minimum, maximum]) => postalCode >= minimum && postalCode <= maximum
+    );
+  });
+}
+
 function normalizePlace(value) {
   const normalized = String(value || "")
     .toLowerCase()
     .replace(/\b(remote|hybrid|on[ -]?site|in[ -]?office)\b/g, " ")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+  if (/(?:^| )new york(?: |$)/.test(normalized) && /\b\d{5}(?: \d{4})?\b/.test(normalized)) {
+    return hasNewYorkCityPostalCode(normalized) ? "new york city" : normalized;
+  }
   if (placeContainsAlias(normalized, NEW_YORK_CITY_ALIASES)) return "new york city";
   if (placeContainsAlias(normalized, SAN_FRANCISCO_BAY_AREA_ALIASES)) {
     return "san francisco bay area";
