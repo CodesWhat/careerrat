@@ -99,6 +99,17 @@ test("unlabeled compensation stays unclassified instead of becoming guaranteed b
   });
 });
 
+test("explicit base compensation labels classify a guaranteed-base band", () => {
+  const expected = { base: { min: 95_000, max: 120_000 }, annualEarnings: null };
+
+  assert.deepEqual(
+    ["Base compensation: $95k-$120k", "Base comp: $95k-$120k"].map((text) =>
+      sourcedScanner.extractCompensationBands(text)
+    ),
+    [expected, expected]
+  );
+});
+
 test("compensation parsing does not treat customer base as a base-pay label", () => {
   assert.deepEqual(
     sourcedScanner.extractCompensationBands(
