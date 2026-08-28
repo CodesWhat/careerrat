@@ -350,6 +350,137 @@ test("an exact Greenhouse requisition missing from its current board cannot cano
   assert.match(result.liveness.reason, /current greenhouse board no longer lists requisition/i);
 });
 
+test("Workday resolves a short posting URL to the current board row by requisition", async () => {
+  const shortUrl =
+    "https://shakeshack.wd5.myworkdayjobs.com/en-US/External/job/Assistant-General-Manager_JR12269";
+  const canonicalUrl =
+    "https://shakeshack.wd5.myworkdayjobs.com/External/job/New-York-NY/Assistant-General-Manager_JR12269";
+  let plainFetchCalled = false;
+  let detailFetchCalled = false;
+  const result = await resolveJobUrl(shortUrl, {
+    resolveHost: publicResolver,
+    fetchImpl: async (requestedUrl, init) => {
+      const requested = new URL(String(requestedUrl));
+      if (requested.pathname === "/wday/cxs/shakeshack/External/jobs") {
+        assert.equal(init.method, "POST");
+        return jsonResponse({
+          total: 1,
+          jobPostings: [
+            {
+              title: "Assistant General Manager",
+              externalPath: "/job/New-York-NY/Assistant-General-Manager_JR12269",
+              locationsText: "New York, NY",
+              postedOn: "Posted Today",
+            },
+          ],
+        });
+      }
+      if (
+        requested.pathname ===
+        "/wday/cxs/shakeshack/External/job/New-York-NY/Assistant-General-Manager_JR12269"
+      ) {
+        detailFetchCalled = true;
+        return jsonResponse({
+          jobPostingInfo: {
+            title: "Assistant General Manager",
+            location: "New York, NY",
+            jobDescription: `<p>${"Lead a busy restaurant team with clear operating standards. ".repeat(8)}</p>`,
+            externalUrl: canonicalUrl,
+            startDate: "2026-08-28",
+            jobReqId: "JR12269",
+          },
+        });
+      }
+      plainFetchCalled = true;
+      return htmlResponse("<html><body>Workday shell</body></html>", { finalUrl: shortUrl });
+    },
+  });
+
+  assert.equal(result.provider, "workday");
+  assert.equal(result.providerExactMatch, true);
+  assert.equal(result.title, "Assistant General Manager");
+  assert.equal(result.location, "New York, NY");
+  assert.equal(result.url, canonicalUrl);
+  assert.match(result.bodyText, /Lead a busy restaurant team/);
+  assert.equal(result.bodyPartial, false);
+  assert.equal(result.postedAt, "2026-08-28T00:00:00.000Z");
+  assert.equal(result.liveness?.result, undefined);
+  assert.equal(detailFetchCalled, true);
+  assert.equal(plainFetchCalled, false);
+});
+
+test("Workday keeps an oversized exact detail body explicitly partial", async () => {
+  const shortUrl =
+    "https://acme.wd3.myworkdayjobs.com/en-US/Careers/job/Operations-Manager_JR13123-1";
+  let detailFetchCalled = false;
+  const result = await resolveJobUrl(shortUrl, {
+    resolveHost: publicResolver,
+    fetchImpl: async (requestedUrl) => {
+      const requested = new URL(String(requestedUrl));
+      if (requested.pathname === "/wday/cxs/acme/Careers/jobs") {
+        return jsonResponse({
+          total: 1,
+          jobPostings: [
+            {
+              title: "Operations Manager",
+              externalPath: "/job/New-York-NY/Operations-Manager_JR13123-1",
+              locationsText: "New York, NY",
+            },
+          ],
+        });
+      }
+      if (
+        requested.pathname === "/wday/cxs/acme/Careers/job/New-York-NY/Operations-Manager_JR13123-1"
+      ) {
+        detailFetchCalled = true;
+        return jsonResponse({
+          jobPostingInfo: {
+            title: "Operations Manager",
+            location: "New York, NY",
+            jobDescription: `<p>${"A".repeat(70_000)}</p>`,
+            jobReqId: "JR13123-1",
+          },
+        });
+      }
+      return htmlResponse(LONG_ACTIVE_JD, { finalUrl: shortUrl });
+    },
+  });
+
+  assert.equal(detailFetchCalled, true);
+  assert.equal(result.bodyText.length, 65_536);
+  assert.equal(result.bodyPartial, true);
+  assert.match(result.reason, /safety limit/i);
+});
+
+test("Workday marks a missing requisition expired instead of borrowing another board row", async () => {
+  const missingUrl =
+    "https://shakeshack.wd5.myworkdayjobs.com/en-US/External/job/Assistant-General-Manager_JR99999";
+  let fetchCalls = 0;
+  const result = await resolveJobUrl(missingUrl, {
+    resolveHost: publicResolver,
+    fetchImpl: async (requestedUrl) => {
+      fetchCalls += 1;
+      assert.match(String(requestedUrl), /\/wday\/cxs\/shakeshack\/External\/jobs$/u);
+      return jsonResponse({
+        total: 1,
+        jobPostings: [
+          {
+            title: "Assistant General Manager",
+            externalPath: "/job/New-York-NY/Assistant-General-Manager_JR12269",
+            locationsText: "New York, NY",
+          },
+        ],
+      });
+    },
+  });
+
+  assert.equal(fetchCalls, 1);
+  assert.equal(result.url, missingUrl);
+  assert.equal(result.liveness.result, "expired");
+  assert.equal(result.liveness.code, "provider_posting_missing");
+  assert.match(result.liveness.reason, /workday board no longer lists requisition JR99999/i);
+});
+
 test("canonical ATS recovery cannot change a known requisition identity", async () => {
   const sourceUrl = "https://job-boards.greenhouse.io/acme/jobs/111111";
   const unrelatedUrl = "https://job-boards.greenhouse.io/acme/jobs/222222";

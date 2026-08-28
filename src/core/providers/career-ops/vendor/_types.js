@@ -121,6 +121,8 @@
  * @property {string} id                                                       Unique across all loaded providers.
  * @property {((entry: PortalEntry) => (DetectHit | null))} [detect]           Optional auto-detection.
  * @property {(entry: PortalEntry, ctx: Context) => Promise<Job[]>} fetch      Required.
+ * @property {(entry: PortalEntry, job: Job, ctx: Context) => Promise<Job>} [fetchDetail]
+ *                                                                            Optional exact-posting enrichment.
  */
 
 export {};

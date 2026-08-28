@@ -20,6 +20,7 @@ import {
 } from "../liveness/job-link-checker.mjs";
 import { classifyLiveness } from "../liveness/liveness-core.mjs";
 import { fetchPublicHttpText, validatePublicHttpUrl } from "../net/public-http-fetch.mjs";
+import { fetchCareerOpsPostingDetail } from "../providers/career-ops-registry.mjs";
 import { platformForHost } from "../providers/search-sources.mjs";
 import { extractReqId, fetchProvider, inferProvider } from "../scoring/sourced-scanner.mjs";
 import { extractJobPageIdentity, extractStructuredJobPostings } from "./job-posting-extract.mjs";
@@ -598,20 +599,33 @@ async function resolveViaProviderBoard({
     };
   }
 
+  let canonicalMatch = match;
+  try {
+    canonicalMatch = await fetchCareerOpsPostingDetail(
+      provider,
+      { careers_url: url, name: match.company || null },
+      { ...match, reqId: targetReqId.value },
+      { fetchImpl, resolveHost, signal }
+    );
+  } catch {
+    // Exact detail hydration is optional. Keep the current board row and let
+    // the existing posting-page fallback recover when this endpoint is absent.
+  }
+
   return {
     bodyFetchStatus: "resolved",
-    url: match.url || url,
+    url: canonicalMatch.url || url,
     provider,
     providerExactMatch: true,
-    title: match.title || null,
-    company: match.company || fallbackCompanyFromUrl(url),
-    location: match.location || null,
-    comp: match.comp || null,
-    postedAt: match.postedAt || null,
-    bodyText: match.bodyText || "",
-    bodyPartial: match.bodyPartial === true,
+    title: canonicalMatch.title || null,
+    company: canonicalMatch.company || fallbackCompanyFromUrl(url),
+    location: canonicalMatch.location || null,
+    comp: canonicalMatch.comp || null,
+    postedAt: canonicalMatch.postedAt || null,
+    bodyText: canonicalMatch.bodyText || "",
+    bodyPartial: canonicalMatch.bodyPartial === true,
     reason:
-      match.bodyPartial === true
+      canonicalMatch.bodyPartial === true
         ? "The job description exceeded the provider capture safety limit."
         : null,
   };

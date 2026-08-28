@@ -12,6 +12,7 @@
 // and omitted for the unbounded "30+ Days Ago" form.
 
 import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry } from './_http.mjs';
+import { htmlToTextCapture } from './_html-to-text.mjs';
 
 const PAGE_SIZE = 20;
 
@@ -109,6 +110,48 @@ function resolveEndpoint(entry) {
   return null;
 }
 
+function resolvePostingEndpoint(rawUrl) {
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:') return null;
+  const host = url.hostname.match(/^([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com$/i);
+  if (!host) return null;
+  const segments = url.pathname.split('/').filter(Boolean);
+  const jobIndex = segments.findIndex((segment) => segment.toLowerCase() === 'job');
+  if (jobIndex < 1 || jobIndex === segments.length - 1) return null;
+  const site = segments[jobIndex - 1];
+  const postingSegments = segments.slice(jobIndex + 1);
+  if (
+    !/^[\w-]+$/.test(site) ||
+    postingSegments.some((segment) =>
+      segment === '.' || segment === '..' || /%(?:2f|5c)/i.test(segment)
+    )
+  ) {
+    return null;
+  }
+  const tenant = host[1];
+  const origin = url.origin;
+  return {
+    api: `${origin}/wday/cxs/${tenant}/${site}/job/${postingSegments.join('/')}`,
+    origin,
+    referer: `${origin}/${site}/`,
+  };
+}
+
+function workdayHeaders({ origin, referer }) {
+  return {
+    accept: 'application/json',
+    'user-agent': BROWSER_LIKE_USER_AGENT,
+    'accept-language': 'en-US,en;q=0.9',
+    origin,
+    referer,
+  };
+}
+
 function parsePostedOn(label) {
   if (!label) return undefined;
   if (/posted\s+today/i.test(label)) return Date.now();
@@ -156,6 +199,35 @@ export default {
     return ep ? { url: ep.api } : null;
   },
 
+  async fetchDetail(_entry, job, ctx) {
+    const ep = resolvePostingEndpoint(job?.url);
+    if (!ep) throw new Error(`workday: cannot derive posting endpoint for ${job?.url || ''}`);
+    const expectedReqId = String(job?.reqId || '').trim();
+    if (!expectedReqId) throw new Error('workday: exact posting detail requires a requisition id');
+    const json = await ctx.fetchJson(ep.api, {
+      redirect: 'error',
+      headers: workdayHeaders(ep),
+    });
+    const detail = json?.jobPostingInfo;
+    const actualReqId = String(detail?.jobReqId || '').trim();
+    if (!actualReqId || actualReqId.toLowerCase() !== expectedReqId.toLowerCase()) {
+      throw new Error(`workday: posting detail requisition does not match ${expectedReqId}`);
+    }
+    const { text: description, truncated: descriptionPartial } =
+      htmlToTextCapture(detail.jobDescription);
+    const startDate = Date.parse(String(detail.startDate || ''));
+    return {
+      ...job,
+      title: String(detail.title || job.title || '').trim(),
+      location: String(detail.location || job.location || '').trim(),
+      ...(Number.isFinite(startDate) ? { postedAt: startDate } : {}),
+      ...(description ? { description } : {}),
+      bodyText: description,
+      bodyPartial: !description || descriptionPartial,
+      descriptionPartial,
+    };
+  },
+
   /**
    * Fetch all job postings for a Workday-backed entry, paginating through
    * the tenant's CXS API.
@@ -179,12 +251,8 @@ export default {
       method: 'POST',
       redirect: 'error',
       headers: {
+        ...workdayHeaders({ origin: ep.origin, referer: `${ep.jobBase}/` }),
         'content-type': 'application/json',
-        accept: 'application/json',
-        'user-agent': BROWSER_LIKE_USER_AGENT,
-        'accept-language': 'en-US,en;q=0.9',
-        origin: ep.origin,
-        referer: `${ep.jobBase}/`,
       },
     };
     const makeBody = (offset) => JSON.stringify({ limit: PAGE_SIZE, offset, searchText: '', appliedFacets: {} });

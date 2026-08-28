@@ -1115,6 +1115,22 @@ test("extracts canonical req ids from common ATS URLs", () => {
     extractReqId("https://www.linkedin.com/jobs/view/444555666/").id,
     "linkedin:444555666"
   );
+  for (const requisition of ["JR12269", "JR13123-1", "R100123149", "HB344468-3"]) {
+    assert.deepEqual(
+      extractReqId(
+        `https://shakeshack.wd5.myworkdayjobs.com/en-US/External/job/New-York-NY/Assistant-General-Manager_${requisition}`
+      ),
+      {
+        provider: "workday",
+        value: requisition,
+        id: `workday:${requisition.toLowerCase()}`,
+      }
+    );
+  }
+  assert.equal(
+    extractReqId("https://careers.example.com/jobs/Assistant-General-Manager_JR12269").id,
+    null
+  );
   assert.equal(extractReqId("https://careers.example.com/jobs/123456").id, null);
 });
 
