@@ -136,6 +136,36 @@ test("public copy keeps AI discovery broad and evaluation honest", async () => {
   assert.match(copy.website, /roles you set/i);
 });
 
+test("public copy explains job-site login as one point-of-use choice", async () => {
+  const paths = {
+    readme: "README.md",
+    website: "apps/website/src/app/page.tsx",
+    docsIndex: "apps/docs/content/docs/index.mdx",
+    firstJob: "apps/docs/content/docs/getting-started/first-job.mdx",
+    browserAutomation: "apps/docs/content/docs/advanced/browser-automation.mdx",
+    sources: "docs/SOURCES.md",
+  };
+  const copy = Object.fromEntries(
+    await Promise.all(
+      Object.entries(paths).map(async ([name, path]) => [name, await readFile(path, "utf8")])
+    )
+  );
+
+  for (const name of Object.keys(paths)) {
+    assert.match(
+      copy[name],
+      /Do\s+you\s+want\s+to\s+log\s+into\s+[^?]+?\s+so\s+I\s+can\s+use\s+it\?/i,
+      `${paths[name]} should show the actual site-login question`
+    );
+    assert.match(
+      copy[name],
+      /Yes[\s\S]{0,160}opens[\s\S]{0,160}No[\s\S]{0,160}skip/i,
+      `${paths[name]} should explain both answers`
+    );
+    assert.doesNotMatch(copy[name], /authenticated_search|authenticated search permission/i);
+  }
+});
+
 test("public docs explain durable background work without claiming interrupted work completed", async () => {
   const paths = {
     readme: "README.md",

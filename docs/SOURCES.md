@@ -13,8 +13,10 @@ owns the body-read gate.
 - ATS sources: use public or reverse-discovered company job APIs where stable.
 - Aggregators: collect broad matches, preserve their source labels, and dedupe
   against canonical job URLs.
-- Manual/auth sources: support saved browser sessions, but mark them as
-  interactive and do not require them for baseline setup.
+- Login-backed sources: use saved browser sessions and participate in normal
+  searches once enabled. At a login wall CareerRat asks “Do you want to log into
+  LinkedIn so I can use it?” Yes opens that exact saved search in the visible
+  app browser. No skips it and keeps searching the other sources.
 
 ## AI Open-Web Discovery
 
@@ -152,7 +154,7 @@ never written here.
 | Board | Domain tag(s) | Type | Confidence | Status | Notes |
 |---|---|---|---|---|---|
 | HiringCafe | general | aggregator | high | implemented | `src/core/providers/hiringcafe.mjs`; DOM extractor in `capture-search-sources.mjs`; field-neutral shipped default |
-| LinkedIn | general | aggregator | high | implemented | `extractLinkedIn` in `capture-search-sources.mjs`; disabled by default (auth brittleness); `--include-disabled` to surface |
+| LinkedIn | general | aggregator | high | implemented | Saved browser source with a point-of-use Yes/No login handoff; participates in normal searches once enabled |
 | Google Jobs | general | aggregator | high | planned | structured-data aggregator; field-neutral; no provider impl yet |
 | Wellfound | tech/software | aggregator | high | implemented | `src/core/providers/wellfound.mjs`; SPA browser source; tech-domain only |
 | Remote Vibe Coding Jobs | tech/software, remote | aggregator | high | implemented | URL builder in `source-url.mjs`; RSS via `src/core/providers/rss.mjs`; AI-native remote aggregator |

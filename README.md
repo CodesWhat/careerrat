@@ -126,6 +126,11 @@ boards and employer pages for that search. AI search can also keep a credible
 role from a board, employer page, or aggregator when automated fetching cannot
 read the whole job description.
 
+If a saved site needs a login, CareerRat asks “Do you want to log into LinkedIn
+so I can use it?” with Yes and No buttons. Yes opens that exact saved search in
+CareerRat's visible browser. No skips the site and keeps searching everywhere
+else. There is no separate search permission or Settings checklist.
+
 Those partial discoveries are not presented as proven jobs. Search labels them
 **AI · unverified** and preserves the visible title, company, location, pay,
 date, link, and search evidence. **Evaluate** then verifies liveness, captures
@@ -167,8 +172,9 @@ the [chat-first runtime](docs/CHAT_FIRST_RUNTIME.md).
 - Every job is read in full before tailoring or application work begins.
 - Generated claims must trace back to candidate evidence. Missing facts are
   asked for or left out, never invented.
-- Authenticated browser, mail, calendar, and message access is opt-in when a
-  specific workflow needs it.
+- A saved job site asks the plain Yes/No login question above only when it needs
+  a session. Other private-account browser, mail, calendar, and message actions
+  keep their own contextual controls.
 - Application automation fills safe, confirmed fields and can attach the
   generated résumé. When an application needs a candidate answer, the job thread
   shows that question in its review panel and saves the response against the
