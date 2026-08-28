@@ -50,7 +50,11 @@ function compactDollarAmount(amount, suffix) {
 }
 
 function searchCompensationLabel(job) {
-  const value = [job?.compCompact, job?.comp, job?.base].find(
+  const candidates =
+    job?.compBasis === "annual-earnings"
+      ? [job?.compCompact, job?.tc]
+      : [job?.compCompact, job?.comp, job?.base];
+  const value = candidates.find(
     (candidate) =>
       typeof candidate === "string" &&
       candidate.trim() &&
@@ -58,12 +62,15 @@ function searchCompensationLabel(job) {
   );
   if (!value) return "Comp not listed";
 
-  return value
+  const compact = value
     .trim()
     .replace(/\$([\d,]+(?:\.\d+)?)([kKmM]?)/g, (_, amount, suffix) =>
       compactDollarAmount(amount, suffix)
     )
     .replace(/(\$\d+(?:\.\d+)?[km]?)\s*[-–—]\s*(?=\$?\d)/gi, "$1–");
+  return job?.compBasis === "annual-earnings" && !/annual cash/i.test(compact)
+    ? `${compact} annual cash`
+    : compact;
 }
 
 function EmptyPanel({ children }) {

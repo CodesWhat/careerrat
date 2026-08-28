@@ -67,7 +67,16 @@ test("Dashboard labels annual cash separately while legacy total compensation st
       sources: [],
       communications: [],
     },
-    { now: new Date("2026-08-28T12:00:00.000Z") }
+    {
+      now: new Date("2026-08-28T12:00:00.000Z"),
+      settings: {
+        profile: {
+          minimumBaseK: 50,
+          minimumAnnualEarningsK: 85,
+          targetBaseK: 120,
+        },
+      },
+    }
   );
   const rows = new Map(vm.jobs.rows.map((row) => [row.id, row]));
 
@@ -83,6 +92,18 @@ test("Dashboard labels annual cash separately while legacy total compensation st
     rows.get("legacy-total-comp")?.compSummary,
     "$180,000 - $220,000 base · $240,000 - $300,000 TC"
   );
+  assert.equal(rows.get("sourced-annual-cash")?.compCompact, "$98K");
+  assert.equal(rows.get("sourced-annual-cash")?.compMidpointK, 97.5);
+  assert.equal(rows.get("sourced-annual-cash")?.drawer?.floor, 85);
+  assert.equal(rows.get("sourced-annual-cash")?.drawer?.ask, null);
+  assert.equal(rows.get("sourced-annual-cash")?.drawer?.marketLo, 85);
+  assert.equal(rows.get("sourced-annual-cash")?.drawer?.marketP50, 98);
+  assert.equal(rows.get("evaluated-annual-cash")?.compCompact, "$108K");
+  assert.equal(rows.get("evaluated-annual-cash")?.compMidpointK, 107.5);
+  assert.equal(rows.get("evaluated-annual-cash")?.drawer?.floor, 85);
+  assert.equal(rows.get("legacy-total-comp")?.compCompact, "$200K");
+  assert.equal(rows.get("legacy-total-comp")?.compMidpointK, 200);
+  assert.equal(rows.get("legacy-total-comp")?.drawer?.floor, 50);
 });
 
 test("Dashboard adapter limits Activity to the 12 most recent events without pruning history", () => {

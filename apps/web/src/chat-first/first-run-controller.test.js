@@ -627,6 +627,16 @@ describe("chat-first onboarding controller", () => {
     expect(fields).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          id: "compensationFloorType",
+          type: "select",
+          value: "both",
+          options: expect.arrayContaining([
+            { value: "both", label: "Keep both floors" },
+            { value: "guaranteed-base", label: "Guaranteed base pay only" },
+            { value: "annual-cash", label: "Annual cash earnings only" },
+          ]),
+        }),
+        expect.objectContaining({
           id: "minimumBase",
           value: "50000",
           label: "Minimum guaranteed base pay",
@@ -637,9 +647,6 @@ describe("chat-first onboarding controller", () => {
           label: "Minimum annual cash earnings",
         }),
       ])
-    );
-    expect(fields).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: "compensationFloorType" })])
     );
   });
 

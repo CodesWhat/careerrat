@@ -334,6 +334,53 @@ describe("WorkspaceBrowser", () => {
     expect.soft(html).not.toContain("Partial description");
   });
 
+  it("labels a tipped role by its annual cash value instead of its hourly base", async () => {
+    const { SearchJobRow } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <SearchJobRow
+        job={{
+          id: "tipped-role",
+          company: "Tips Co",
+          role: "Bartender",
+          modeLabel: "On-site",
+          location: "New York, NY",
+          fit: 88,
+          comp: "$11.35 per hour",
+          tc: "$85,000 - $110,000",
+          compBasis: "annual-earnings",
+          compCompact: "$98K",
+        }}
+        selected={false}
+      />
+    );
+
+    expect(html).toContain("$98k annual cash");
+    expect(html).not.toContain("$11.35");
+  });
+
+  it("does not relabel an hourly base as annual cash when the annual band is missing", async () => {
+    const { SearchJobRow } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <SearchJobRow
+        job={{
+          id: "tipped-role-missing-cash",
+          company: "Tips Co",
+          role: "Bartender",
+          modeLabel: "On-site",
+          location: "New York, NY",
+          fit: 88,
+          comp: "$11.35 per hour",
+          compBasis: "annual-earnings",
+          compCompact: "TBD",
+        }}
+        selected={false}
+      />
+    );
+
+    expect(html).toContain("Comp not listed");
+    expect(html).not.toContain("$11.35");
+  });
+
   it("shows the actionable details for a US-remote posting without listed compensation", async () => {
     const { SearchJobRow } = await loadBrowser();
     const html = renderToStaticMarkup(

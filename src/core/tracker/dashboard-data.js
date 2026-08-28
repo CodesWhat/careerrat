@@ -640,10 +640,9 @@ function buildSettingsStatus(settings = {}) {
 
 // The candidate's real compensation floor/target for the Jobs drawer's
 // Compensation Range pins (see compRangeView) — sourced from the settings
-// snapshot's raw $K figures (candidate/profile.yml's compensation.minimum_base
-// / target_base / expected_base, via settings-snapshot.mjs), never a
-// fabricated placeholder. floorK/askK are null when the candidate hasn't set
-// that field.
+// snapshot's raw $K figures (candidate/profile.yml's guaranteed-base and annual
+// cash fields, via settings-snapshot.mjs), never a fabricated placeholder.
+// Each basis stays separate and remains null when the candidate has not set it.
 function profileCompFromSettings(settings) {
   const profile = settings?.profile || {};
   // Number(null) is 0 (finite), so an unset field must be rejected before
@@ -654,8 +653,9 @@ function profileCompFromSettings(settings) {
     return Number.isFinite(number) ? number : null;
   };
   return {
-    floorK: compK(profile.minimumBaseK),
-    askK: compK(profile.targetBaseK) ?? compK(profile.expectedBaseK),
+    baseFloorK: compK(profile.minimumBaseK),
+    annualEarningsFloorK: compK(profile.minimumAnnualEarningsK),
+    baseAskK: compK(profile.targetBaseK) ?? compK(profile.expectedBaseK),
   };
 }
 
@@ -3711,7 +3711,10 @@ function secondaryCompBasis(row = {}) {
 function compactComp(base, tc, basis = null) {
   const baseDisplay = base || "TBD";
   const tcDisplay = tc || "";
-  const midpoint = medianMoneyK(baseDisplay) || medianMoneyK(tcDisplay);
+  const midpoint =
+    basis === "annual-earnings"
+      ? medianMoneyK(tcDisplay)
+      : medianMoneyK(baseDisplay) || medianMoneyK(tcDisplay);
   const secondaryLabel = basis === "annual-earnings" ? "Annual cash" : "TC";
   return {
     base: baseDisplay,
@@ -3931,11 +3934,14 @@ function compRangeView(row, sourceRecord = {}, profileComp = {}) {
     sourceRecord && typeof sourceRecord.compEstimate === "object"
       ? sourceRecord.compEstimate
       : null;
-  // profileComp.floorK/askK are already `number | null` (see
+  // profileComp values are already `number | null` (see
   // profileCompFromSettings) — check for null explicitly before Number()
   // coercion, since Number(null) is 0 (finite), not NaN.
-  const profileFloorK = profileComp.floorK != null ? Number(profileComp.floorK) : null;
-  const profileAskK = profileComp.askK != null ? Number(profileComp.askK) : null;
+  const annualEarnings = secondaryCompBasis(row) === "annual-earnings";
+  const selectedFloorK = annualEarnings ? profileComp.annualEarningsFloorK : profileComp.baseFloorK;
+  const selectedAskK = annualEarnings ? null : profileComp.baseAskK;
+  const profileFloorK = selectedFloorK != null ? Number(selectedFloorK) : null;
+  const profileAskK = selectedAskK != null ? Number(selectedAskK) : null;
   const floorK =
     est && Number.isFinite(Number(est.floorK))
       ? Math.round(Number(est.floorK))
@@ -3949,7 +3955,7 @@ function compRangeView(row, sourceRecord = {}, profileComp = {}) {
         ? Math.round(profileAskK)
         : null;
 
-  const postedBand = moneyBandK(row.comp);
+  const postedBand = moneyBandK(annualEarnings ? row.tc : row.comp);
   if (postedBand) {
     return {
       state: "posted",

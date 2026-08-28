@@ -906,6 +906,35 @@ describe("FirstRunExperience", () => {
     expect(onSave).toHaveBeenCalledWith(item, { remoteScope: "worldwide" });
   });
 
+  it("renders the explicit keep-or-switch compensation mode for two saved floors", async () => {
+    const { KnowledgeSectionEditor } = await loadFirstRun();
+    const { buildFirstRunKnowledge } = await import("./first-run-controller.js");
+    const knowledge = buildFirstRunKnowledge(
+      {
+        setupProgress: {
+          completedCount: 0,
+          total: 8,
+          items: [{ key: "quickFacts", done: false }],
+        },
+        data: {
+          profile: {
+            compensation: { minimum_base: 50000, minimum_annual_earnings: 85000 },
+          },
+        },
+      },
+      { name: "Claude Code" }
+    );
+    const item = knowledge.items.find((entry) => entry.id === "quickFacts");
+    const html = renderToStaticMarkup(<KnowledgeSectionEditor item={item} />);
+
+    expect(html).toContain("How should CareerRat screen pay?");
+    expect(html).toContain("Keep both floors");
+    expect(html).toContain("Guaranteed base pay only");
+    expect(html).toContain("Annual cash earnings only");
+    expect(html).toContain("Minimum guaranteed base pay");
+    expect(html).toContain("Minimum annual cash earnings");
+  });
+
   it("accepts resume files from the conversation drop target and Resume section picker", async () => {
     const { FirstRunChat } = await loadFirstRun();
     const onResumeFile = vi.fn();

@@ -1955,7 +1955,9 @@ describe("FirstRunController chat event reconciliation", () => {
         email: "jordan@example.test",
         phone: "+1 212 555 0199",
         home: "New York, NY",
+        compensationFloorType: "guaranteed-base",
         minimumBase: "$190,000",
+        minimumAnnualEarnings: "$85,000",
         remoteScope: "worldwide",
         hybrid: true,
         onsite: false,
@@ -1976,7 +1978,7 @@ describe("FirstRunController chat event reconciliation", () => {
         onsite: false,
         mode_preferences_confirmed: true,
       },
-      compensation: { minimum_base: 190000 },
+      compensation: { minimum_base: 190000, minimum_annual_earnings: null },
     });
 
     await view.props.onSaveKnowledgeSection(
@@ -1987,7 +1989,8 @@ describe("FirstRunController chat event reconciliation", () => {
         phone: "+1 212 555 0199",
         home: "New York, NY",
         compensationFloorType: "annual-cash",
-        compensationFloor: "$90,000",
+        minimumBase: "$50,000",
+        minimumAnnualEarnings: "$90,000",
         remoteScope: "home-country",
         hybrid: true,
         onsite: false,
@@ -1996,7 +1999,7 @@ describe("FirstRunController chat event reconciliation", () => {
     expect(api.saveCandidateFile).toHaveBeenCalledWith(
       "profile",
       expect.objectContaining({
-        compensation: { minimum_annual_earnings: 90000 },
+        compensation: { minimum_base: null, minimum_annual_earnings: 90000 },
       })
     );
 
@@ -2009,6 +2012,7 @@ describe("FirstRunController chat event reconciliation", () => {
         home: "New York, NY",
         minimumBase: "$50,000",
         minimumAnnualEarnings: "$85,000",
+        compensationFloorType: "both",
         remoteScope: "home-country",
         hybrid: true,
         onsite: false,

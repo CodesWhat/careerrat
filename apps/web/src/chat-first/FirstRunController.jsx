@@ -1170,16 +1170,32 @@ export function FirstRunController({
         });
       } else if (sectionId === "quickFacts") {
         const hasSeparateAnnualFloor = Object.hasOwn(values, "minimumAnnualEarnings");
-        const compensation = hasSeparateAnnualFloor
-          ? {
-              minimum_base: moneyAmount(values.minimumBase),
-              minimum_annual_earnings: moneyAmount(values.minimumAnnualEarnings),
-            }
-          : values.compensationFloorType === "annual-cash"
-            ? { minimum_annual_earnings: moneyAmount(values.compensationFloor) }
-            : {
-                minimum_base: moneyAmount(values.compensationFloor ?? values.minimumBase),
-              };
+        const compensationMode = String(values.compensationFloorType || "");
+        let compensation;
+        if (hasSeparateAnnualFloor) {
+          const minimumBase = moneyAmount(values.minimumBase);
+          const minimumAnnualEarnings = moneyAmount(values.minimumAnnualEarnings);
+          compensation =
+            compensationMode === "guaranteed-base"
+              ? { minimum_base: minimumBase, minimum_annual_earnings: null }
+              : compensationMode === "annual-cash"
+                ? { minimum_base: null, minimum_annual_earnings: minimumAnnualEarnings }
+                : {
+                    minimum_base: minimumBase,
+                    minimum_annual_earnings: minimumAnnualEarnings,
+                  };
+        } else {
+          compensation =
+            compensationMode === "annual-cash"
+              ? {
+                  minimum_base: null,
+                  minimum_annual_earnings: moneyAmount(values.compensationFloor),
+                }
+              : {
+                  minimum_base: moneyAmount(values.compensationFloor ?? values.minimumBase),
+                  minimum_annual_earnings: null,
+                };
+        }
         const remoteScope = values.remoteScope === "worldwide" ? "worldwide" : "home-country";
         await api.saveCandidateFile("profile", {
           candidate: {

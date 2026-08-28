@@ -266,6 +266,19 @@ function buildKnowledgeEditor(key, state) {
       hasMinimumBase && hasMinimumAnnualEarnings
         ? [
             editorField(
+              "compensationFloorType",
+              "How should CareerRat screen pay?",
+              "select",
+              "both",
+              {
+                options: [
+                  { value: "both", label: "Keep both floors" },
+                  { value: "guaranteed-base", label: "Guaranteed base pay only" },
+                  { value: "annual-cash", label: "Annual cash earnings only" },
+                ],
+              }
+            ),
+            editorField(
               "minimumBase",
               "Minimum guaranteed base pay",
               "number",
