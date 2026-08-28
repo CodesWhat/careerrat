@@ -30,3 +30,21 @@ test("both domain-neutral live-search fixtures save the receipt fit floor explic
     2
   );
 });
+
+test("live-search verification binds the selected runtime to its current executable identity", () => {
+  const script = readFileSync(
+    new URL("../scripts/qa-live-runtime-search.mjs", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(script, /installedRuntimeExecutionIdentity/);
+  assert.match(
+    script,
+    /installedRuntimeExecutionIdentity\(\s*\{ \.\.\.runtime, version: probe\.version \},\s*\{ env \}\s*\)/
+  );
+  assert.match(script, /if \(!identity\) throw new Error/);
+  assert.match(
+    script,
+    /verification:\s*\{\s*\.\.\.identity,\s*capabilities: probe\.capabilities,\s*checkedAt:/
+  );
+});

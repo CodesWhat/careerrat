@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import {
   detectInstalledRuntimes,
   hasCompleteCareerRatCapabilities,
+  installedRuntimeExecutionIdentity,
   probeInstalledRuntime,
 } from "../src/core/ai/installed-runtimes.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
@@ -315,13 +316,18 @@ try {
   if (!hasCompleteCareerRatCapabilities(probe.capabilities, runtimeId)) {
     throw new Error(`${runtimeId} did not pass the complete CareerRat capability probe.`);
   }
+  const identity = installedRuntimeExecutionIdentity(
+    { ...runtime, version: probe.version },
+    { env }
+  );
+  if (!identity) throw new Error(`${runtimeId} executable identity could not be verified.`);
   writeInstalledRuntimeSelection({
     repoRoot,
     env,
     runtimeId,
     providerFallback: false,
     verification: {
-      path: runtime.path,
+      ...identity,
       capabilities: probe.capabilities,
       checkedAt: new Date().toISOString(),
     },
