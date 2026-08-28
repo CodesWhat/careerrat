@@ -321,6 +321,15 @@ test("source maintenance lists provider, watermark, legitimacy, and enabled stat
           enabled: true,
           recency: { lastRunAt: "2026-08-09T10:00:00.000Z" },
         },
+        {
+          provider: "linkedin",
+          platform: "linkedin",
+          source_type: "browser",
+          label: "LinkedIn NYC",
+          url: "https://www.linkedin.com/jobs/search/?keywords=operations",
+          enabled: false,
+          auth: true,
+        },
       ],
     },
   });
@@ -363,6 +372,7 @@ test("source maintenance lists provider, watermark, legitimacy, and enabled stat
       lastRunAt: "2026-08-08T10:00:00.000Z",
       legitimacy: "verified-ats",
     });
+    assert.equal(body.searches[1].legitimacy, "login-needed");
   } finally {
     await closeServer(server);
   }
