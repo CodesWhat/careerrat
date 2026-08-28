@@ -2814,7 +2814,7 @@ test("prepare-only never clicks a sole Next control that submits the application
   );
 });
 
-test("prepare-only never reports an already-confirmed page as submitted or verified", async () => {
+test("prepare-only verifies an already-confirmed page after the user submits", async () => {
   const confirmationPage = {
     origin: `${GREENHOUSE_URL}/confirmation`,
     pageText: "Thank you for applying",
@@ -2831,13 +2831,13 @@ test("prepare-only never reports an already-confirmed page as submitted or verif
     prepareOnly: true,
   });
 
-  assert.equal(result.state, "awaiting-submit");
-  assert.equal(result.verified, false);
+  assert.equal(result.state, "submitted");
+  assert.equal(result.verified, true);
+  assert.equal(result.confirmation, "/confirmation");
   assert.equal(result.currentUrl, confirmationPage.origin);
-  assert.equal(result.session.prepareOnly, true);
   assert.equal(
     log.some(({ op }) => op === "screenshot"),
-    false
+    true
   );
 });
 
@@ -2881,6 +2881,65 @@ test("focusSession returns to the exact retained prepared page without opening o
   assert.equal(
     log.some((entry) => entry.op === "clickButton"),
     false
+  );
+});
+
+test("focusSession verifies the retained page after the user presses Submit", async () => {
+  let retainedPage = {
+    origin: `${GREENHOUSE_URL}?step=review`,
+    pageText: "Review your application",
+    refs: refsOf([["e1", "button", "Submit application", false]]),
+  };
+  const log = [];
+  const ops = {
+    async openTab() {
+      log.push({ op: "openTab" });
+      return { pageId: "page-user-submit" };
+    },
+    async snapshot() {
+      log.push({ op: "snapshot" });
+      return retainedPage;
+    },
+    async focusTab(args) {
+      log.push({ op: "focusTab", ...args });
+    },
+    async screenshot() {
+      log.push({ op: "screenshot" });
+      return { data: "", format: "png" };
+    },
+  };
+  const execute = makeDriver({ ops });
+  const request = {
+    applicationId: "app-user-submit",
+    application: { id: "app-user-submit" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  };
+
+  const prepared = await execute(request);
+  assert.equal(prepared.state, "awaiting-submit");
+
+  retainedPage = {
+    origin: `${GREENHOUSE_URL}/confirmation`,
+    pageText: "Thank you for applying",
+    refs: {},
+  };
+  const verified = await execute({ ...request, focusSession: true });
+
+  assert.equal(verified.state, "submitted");
+  assert.equal(verified.verified, true);
+  assert.equal(verified.confirmation, "/confirmation");
+  assert.equal(verified.artifacts[0].kind, "submission_confirmation");
+  assert.equal(
+    log.filter((entry) => entry.op === "openTab").length,
+    1,
+    "verification reuses the retained tab"
+  );
+  assert.equal(
+    log.some((entry) => entry.op === "clickButton"),
+    false,
+    "CareerRat never clicks Submit"
   );
 });
 

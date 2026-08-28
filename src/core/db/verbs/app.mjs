@@ -217,6 +217,10 @@ function applyStatusUpdate(app, { to, note, round, appliedAt, followUpDueAt, cle
     updated.conversations = conversations;
   }
   if (appliedAt != null) updated.appliedAt = String(appliedAt);
+  if (to === "applied") {
+    updated.nextAction = null;
+    updated.nextActionDue = null;
+  }
   if (followUpDueAt) updated.followUp = { ...(app.followUp || {}), dueAt: followUpDueAt };
   if (willClear) Object.assign(updated, applyRoundCompletionClearing(app));
   return { from, updated };

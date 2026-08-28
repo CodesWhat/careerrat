@@ -8504,36 +8504,39 @@ export async function executeWorkspaceIntent({
         now,
       });
     }
-    if (execution?.verified === true || execution?.state === "submitted") {
+    if (execution?.verified === true) {
+      const appliedAt = resolvedDate(execution.submittedAt, now);
+      appSetStatus({
+        repoRoot,
+        env,
+        id: normalized.entity.id,
+        to: "applied",
+        note: "Submission verified in the supervised browser.",
+        appliedAt,
+      });
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: `The supervised browser already shows a submission confirmation for ${applicationLabel(application)}. This application was not marked Applied; record it only after you confirm the submission.`,
+        text: `Verified the submission confirmation for ${applicationLabel(application)} and recorded it as Applied.`,
         artifacts: [
+          ...(Array.isArray(execution.artifacts) ? execution.artifacts : []),
           {
-            kind: "application_handoff",
-            title: `${applicationLabel(application)}: Submission confirmation needs review`,
+            kind: "application_status_receipt",
+            title: `${applicationLabel(application)}: Applied`,
             applicationId: normalized.entity.id,
-            submissionVerified: false,
-            executorAvailable: true,
-            session: execution.session || { provider: "session-browser" },
+            status: "applied",
+            appliedAt,
+            submissionVerified: true,
+            confirmation: execution.confirmation || null,
           },
         ],
         metadata: {
-          state: "manual-handoff",
+          state: "applied",
           applicationId: normalized.entity.id,
-          submissionVerified: false,
-          nextActions: [
-            {
-              label: "I applied",
-              intent: {
-                type: "application.record-external",
-                entity: { type: "application", id: normalized.entity.id },
-              },
-            },
-          ],
+          submissionVerified: true,
+          appliedAt,
         },
         operationResult: execution,
         now,

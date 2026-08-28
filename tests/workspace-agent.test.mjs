@@ -7678,9 +7678,9 @@ test("confirming a job-specific screening answer clears its packet gap and unblo
   });
 
   assert.equal(applyCalls, 1);
-  assert.equal(readApplication(repoRoot, "app-temporal").status, "reviewed-hold");
-  assert.equal(resumed.messages.at(-1).metadata.submissionVerified, false);
-  assert.notEqual(resumed.messages.at(-1).metadata.state, "blocked");
+  assert.equal(readApplication(repoRoot, "app-temporal").status, "applied");
+  assert.equal(resumed.messages.at(-1).metadata.submissionVerified, true);
+  assert.equal(resumed.messages.at(-1).metadata.state, "applied");
 });
 
 test("Apply on site returns a manual handoff without changing status when no executor is connected", async () => {
@@ -8026,7 +8026,7 @@ test("Apply on site rebuilds the packet after the live browser discovers rendere
   assert.equal(result.messages.at(-1).artifacts[0].questionCapture.answerableCount, 2);
 });
 
-test("Apply on site never writes Applied when its executor claims verified confirmation", async () => {
+test("Apply on site records Applied only after the supervised browser verifies confirmation", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot);
 
@@ -8068,11 +8068,13 @@ test("Apply on site never writes Applied when its executor claims verified confi
   assert.equal(calls[0].prepareOnly, true);
   assert.equal(calls[0].input.prepareOnly, true);
   const app = readApplication(repoRoot, "app-temporal");
-  assert.equal(app.status, "reviewed-hold");
-  assert.equal(app.appliedAt, undefined);
+  assert.equal(app.status, "applied");
+  assert.equal(app.appliedAt, "2026-08-09T15:45:00.000Z");
   assert.equal(result.messages.at(-1).kind, "action_result");
-  assert.equal(result.messages.at(-1).metadata.submissionVerified, false);
-  assert.match(result.messages.at(-1).text, /not marked Applied/i);
+  assert.equal(result.messages.at(-1).metadata.submissionVerified, true);
+  assert.equal(result.messages.at(-1).metadata.state, "applied");
+  assert.equal(result.messages.at(-1).metadata.nextActions, undefined);
+  assert.match(result.messages.at(-1).text, /verified.*recorded.*Applied/i);
 });
 
 test("Apply on site keeps an active supervised browser session without treating it as failure", async () => {
@@ -8309,9 +8311,10 @@ test("job.apply's resumeSession proceeds straight to the executor once the persi
   });
 
   assert.equal(applyCalls, 1, "a corroborated resumeSession must still reach the executor");
-  assert.equal(readApplication(repoRoot, "app-temporal").status, "reviewed-hold");
-  assert.equal(result.messages.at(-1).metadata.submissionVerified, false);
-  assert.notEqual(result.messages.at(-1).metadata.state, "blocked");
+  assert.equal(readApplication(repoRoot, "app-temporal").status, "applied");
+  assert.equal(result.messages.at(-1).metadata.submissionVerified, true);
+  assert.equal(result.messages.at(-1).metadata.state, "applied");
+  assert.equal(result.messages.at(-1).metadata.nextActions, undefined);
 });
 
 test("Draft reply uses the same agent context and persists a reviewable communication draft", async () => {

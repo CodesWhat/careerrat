@@ -858,25 +858,9 @@ async function submittedResult({
   saveScreenshotImpl,
   providerLabel,
   confirmation,
-  prepareOnly = false,
   signal,
 }) {
   throwIfAborted(signal);
-  if (prepareOnly === true) {
-    return {
-      available: true,
-      verified: false,
-      state: "awaiting-submit",
-      reason:
-        "This page looks submitted, but prepare-only mode does not verify or record applications. Review the page, then use I applied.",
-      currentUrl: snapshot.origin,
-      session: {
-        provider: providerLabel,
-        prepareOnly: true,
-        submitMode: "manual",
-      },
-    };
-  }
   const screenshot = await browserOp(ops, "screenshot", { pageId }, signal);
   throwIfAborted(signal);
   const path = saveScreenshotImpl({
@@ -963,6 +947,24 @@ export function createApplyDriver({
         );
         if (!retainedOriginIsTrusted(retainedSession, retainedSnapshot.origin)) {
           throw new Error("The prepared tab left the trusted application site.");
+        }
+        const confirmation = confirmationCheck({
+          pageText: retainedSnapshot.pageText,
+          currentUrl: retainedSnapshot.origin,
+        });
+        if (confirmation.submitted) {
+          return submittedResult({
+            ops,
+            pageId: retainedSession.pageId,
+            snapshot: retainedSnapshot,
+            applicationId,
+            repoRoot,
+            env,
+            saveScreenshotImpl,
+            providerLabel,
+            confirmation,
+            signal,
+          });
         }
         return {
           available: true,

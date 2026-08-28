@@ -312,7 +312,7 @@ test("job.prepare-submit resumes a persisted KEEP packet in forced prepare-only 
   assert.equal(JSON.stringify(last.metadata.nextActions).includes('"type":"job.apply"'), false);
 });
 
-test("job.apply is forced through the same prepare-only boundary and can never mark an application applied", async () => {
+test("job.apply keeps the user-owned Submit boundary and records a verified submission", async () => {
   const repoRoot = tempRepo();
   seedPreparedApplication(repoRoot);
   const calls = [];
@@ -336,11 +336,12 @@ test("job.apply is forced through the same prepare-only boundary and can never m
   assert.equal(calls.length, 1);
   assert.equal(calls[0].prepareOnly, true);
   assert.equal(calls[0].input.prepareOnly, true);
-  assert.equal(readApplication(repoRoot).status, "reviewed-hold");
-  assert.equal(readApplication(repoRoot).appliedAt, undefined);
+  assert.equal(readApplication(repoRoot).status, "applied");
+  assert.equal(readApplication(repoRoot).appliedAt, "2026-08-24T18:00:00.000Z");
   const last = result.messages.at(-1);
-  assert.equal(last.metadata.submissionVerified, false);
-  assert.match(last.text, /not marked Applied/i);
+  assert.equal(last.metadata.submissionVerified, true);
+  assert.equal(last.metadata.state, "applied");
+  assert.equal(last.metadata.nextActions, undefined);
 });
 
 test("job.prepare-submit forwards a focus-only request to the retained supervised session", async () => {
@@ -518,7 +519,7 @@ test("job.prepare-submit rebuilds after the JD is recaptured and reevaluated", a
   assert.equal(result.messages.at(-1).metadata.state, "blocked");
 });
 
-test("job.prepare-submit never records an application even if an executor claims submission", async () => {
+test("job.prepare-submit records Applied when the executor verifies the user's submission", async () => {
   const repoRoot = tempRepo();
   seedPreparedApplication(repoRoot);
 
@@ -536,13 +537,14 @@ test("job.prepare-submit never records an application even if an executor claims
   });
 
   const application = readApplication(repoRoot);
-  assert.equal(application.status, "reviewed-hold");
-  assert.equal(application.appliedAt, undefined);
+  assert.equal(application.status, "applied");
+  assert.equal(application.appliedAt, "2026-08-23T18:00:00.000Z");
   const last = result.messages.at(-1);
-  assert.equal(last.metadata.state, "manual-handoff");
-  assert.equal(last.metadata.submissionVerified, false);
+  assert.equal(last.metadata.state, "applied");
+  assert.equal(last.metadata.submissionVerified, true);
+  assert.equal(last.metadata.nextActions, undefined);
   assert.equal(JSON.stringify(last).includes('"type":"job.apply"'), false);
-  assert.match(last.text, /not marked Applied/i);
+  assert.match(last.text, /verified.*recorded.*Applied/i);
 });
 
 test("job.prepare-submit never hands a live-question recovery off to job.apply", async () => {

@@ -496,6 +496,26 @@ test("a pre-existing application row with role: null does not wedge later outcom
   assert.equal(result.ok, true);
 });
 
+test("appSetStatus clears a stale application CTA when submission is recorded", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+
+  appSetStatus({
+    repoRoot,
+    id: "app-non-interview",
+    to: "applied",
+    appliedAt: "2026-08-27T20:00:00.000Z",
+  });
+
+  const application = JSON.parse(
+    openDb({ repoRoot })
+      .prepare("SELECT data FROM applications WHERE id = ?")
+      .get("app-non-interview").data
+  );
+  assert.equal(application.nextAction, null);
+  assert.equal(application.nextActionDue, null);
+});
+
 // ---------------------------------------------------------------------------
 // appPersistEvaluation: the one write path for a packet-gate verdict landing
 // on an application (src/core/packet/evaluate.mjs). Regression coverage for
