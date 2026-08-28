@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-test("both live-search fixtures require three presented roles across two target buckets", () => {
+test("both native AI search fixtures require three presented roles across two target buckets", () => {
   const script = readFileSync(
     new URL("../scripts/qa-live-runtime-search.mjs", import.meta.url),
     "utf8"
@@ -18,7 +18,7 @@ test("both live-search fixtures require three presented roles across two target 
   assert.doesNotMatch(script, /fixtureId\s*===\s*"hospitality"[\s\S]*presented/);
 });
 
-test("both domain-neutral live-search fixtures save the receipt fit floor explicitly", () => {
+test("both domain-neutral native AI search fixtures save the receipt fit floor explicitly", () => {
   const script = readFileSync(
     new URL("../scripts/qa-live-runtime-search.mjs", import.meta.url),
     "utf8"
@@ -31,23 +31,46 @@ test("both domain-neutral live-search fixtures save the receipt fit floor explic
   );
 });
 
-test("live-search fixtures express saved compensation floors as annual base salary", () => {
+test("the hospitality native AI search fixture uses expected annual cash earnings", () => {
   const script = readFileSync(
     new URL("../scripts/qa-live-runtime-search.mjs", import.meta.url),
     "utf8"
   );
+  const hospitality = script.slice(script.indexOf("hospitality:"), script.indexOf("engineering:"));
 
-  assert.doesNotMatch(script, /salary or (?:credible )?total compensation/i);
-  assert.doesNotMatch(script, /roles paying at least \$[\d,]+/i);
-  assert.match(script, /\$85,000 minimum annual base salary/i);
-  assert.match(script, /\$150,000 minimum annual base salary/i);
+  assert.match(hospitality, /compensation:\s*\{\s*minimum_annual_earnings:\s*85000\s*\}/);
+  assert.doesNotMatch(hospitality, /minimum_base|target_base|minimum annual base salary/i);
+  assert.match(hospitality, /\$85,000 minimum expected annual cash earnings, including tips/i);
   assert.ok(
-    (script.match(/annual base salary/gi) || []).length >= 8,
-    "every live-search fixture prompt must preserve base-salary semantics"
+    (hospitality.match(/wages plus expected tips/gi) || []).length >= 3,
+    "every hospitality prompt must explain the tipped annual-cash floor plainly"
+  );
+  assert.ok(
+    (hospitality.match(/posted range cannot reach \$85,000/gi) || []).length >= 3,
+    "every hospitality prompt must preserve the comparable-range policy"
   );
 });
 
-test("live-search verification binds the selected runtime to its current executable identity", () => {
+test("the engineering native AI search fixture stays base-only", () => {
+  const script = readFileSync(
+    new URL("../scripts/qa-live-runtime-search.mjs", import.meta.url),
+    "utf8"
+  );
+  const engineering = script.slice(script.indexOf("engineering:"));
+
+  assert.match(
+    engineering,
+    /compensation:\s*\{\s*minimum_base:\s*150000,\s*target_base:\s*180000\s*\}/
+  );
+  assert.doesNotMatch(engineering, /minimum_annual_earnings|wages plus expected tips/i);
+  assert.match(engineering, /\$150,000 minimum annual base salary/i);
+  assert.ok(
+    (engineering.match(/annual base salary/gi) || []).length >= 4,
+    "the engineering fixture must retain its base-salary prompt contract"
+  );
+});
+
+test("native AI search verification binds the selected runtime to its current executable identity", () => {
   const script = readFileSync(
     new URL("../scripts/qa-live-runtime-search.mjs", import.meta.url),
     "utf8"
@@ -65,13 +88,13 @@ test("live-search verification binds the selected runtime to its current executa
   );
 });
 
-test("completed live searches emit diagnostics before the release gate writes a receipt", () => {
+test("completed native AI searches emit diagnostics before the release gate writes a receipt", () => {
   const script = readFileSync(
     new URL("../scripts/qa-live-runtime-search.mjs", import.meta.url),
     "utf8"
   );
 
-  const diagnostic = script.indexOf('kind: "live-search-diagnostic"');
+  const diagnostic = script.indexOf('kind: "native-ai-search-diagnostic"');
   const verification = script.indexOf("verifyLiveSearchReceiptForReview(receipt)");
   const receiptWrite = script.indexOf("writeFileSync(receiptPath");
 
@@ -86,4 +109,17 @@ test("completed live searches emit diagnostics before the release gate writes a 
     "canonical receipts must be written only after verification"
   );
   assert.equal(script.match(/writeFileSync\(receiptPath/g)?.length, 1);
+});
+
+test("native AI search acceptance keeps the version-one receipt path compatible", () => {
+  const receipts = readFileSync(
+    new URL("../scripts/lib/live-search-receipts.mjs", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(receipts, /NATIVE_AI_SEARCH_ACCEPTANCE/);
+  assert.match(receipts, /LIVE_SEARCH_ACCEPTANCE\s*=\s*NATIVE_AI_SEARCH_ACCEPTANCE/);
+  assert.match(receipts, /\.github\/release-evidence\/live-search/);
+  assert.match(receipts, /schemaVersion:\s*1/);
+  assert.doesNotMatch(receipts, /Unsupported live-search|Unexpected live-search/i);
 });

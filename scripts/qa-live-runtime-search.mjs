@@ -38,7 +38,7 @@ if (
   process.exit(2);
 }
 
-const qaHome = mkdtempSync(join(tmpdir(), `careerrat-live-${runtimeId}-${fixtureId}-`));
+const qaHome = mkdtempSync(join(tmpdir(), `careerrat-native-ai-${runtimeId}-${fixtureId}-`));
 const env = {
   ...process.env,
   CAREERRAT_HOME: qaHome,
@@ -56,7 +56,7 @@ function currentSourceRevision() {
 function assertCleanSourceRevision(expectedRevision) {
   const currentRevision = currentSourceRevision();
   if (currentRevision !== expectedRevision) {
-    throw new Error("The source revision changed while the live search was running.");
+    throw new Error("The source revision changed while the native AI search was running.");
   }
   const status = execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], {
     cwd: repoRoot,
@@ -70,7 +70,7 @@ function assertCleanSourceRevision(expectedRevision) {
     .find((path) => !String(path).startsWith(receiptPrefix));
   if (changedSourcePath) {
     throw new Error(
-      `Live-search evidence requires a clean source revision (${changedSourcePath}).`
+      `Native AI search evidence requires a clean source revision (${changedSourcePath}).`
     );
   }
 }
@@ -150,7 +150,7 @@ const FIXTURES = {
         onsite: true,
         relocation: [],
       },
-      compensation: { minimum_base: 85000, target_base: 100000 },
+      compensation: { minimum_annual_earnings: 85000 },
       authorization: { work_authorized: true, requires_sponsorship: false },
     },
     targeting: {
@@ -186,7 +186,7 @@ const FIXTURES = {
         "beverage program ownership",
         "training and advancement",
         "high-volume polished service",
-        "$85,000 minimum annual base salary",
+        "$85,000 minimum expected annual cash earnings, including tips",
       ],
       cut_signals: ["local role outside New York City", "remote role unavailable in New York"],
       excluded_companies: [],
@@ -202,15 +202,15 @@ const FIXTURES = {
     prompts: [
       {
         id: "nyc-bar-leadership",
-        text: "Find currently active Bar Manager, Assistant Bar Manager, Bar Operations Lead, Lead Bartender, and Head Bartender openings in New York City. Search the open web broadly, including specialist hospitality boards, employer career pages, and useful aggregators. When an annual base salary is posted, require its lower bound to be at least $85,000; do not count tips, bonuses, commissions, or total compensation toward that floor. Keep specific employer-and-role leads when base salary or the full posting still needs verification, but exclude local roles outside New York City.",
+        text: "Find currently active Bar Manager, Assistant Bar Manager, Bar Operations Lead, Lead Bartender, and Head Bartender openings in New York City. Search the open web broadly, including specialist hospitality boards, employer career pages, and useful aggregators. Morgan needs to earn at least $85,000 a year in cash from the job. For tipped roles, count wages plus expected tips. You may also count recurring commissions or cash bonuses, but not equity or benefits. Keep jobs when earnings are not posted so they can be checked later. Skip a job only when its posted range cannot reach $85,000; keep a range that crosses $85,000 for review. Exclude local roles outside New York City.",
       },
       {
         id: "nyc-hospitality-operations",
-        text: "Find currently active Food and Beverage Operations Manager, Assistant General Manager, and General Manager openings in New York City hospitality businesses. Search specialist hospitality boards, employer career pages, and the open web. When an annual base salary is posted, require its lower bound to be at least $85,000; do not count tips, bonuses, commissions, or total compensation toward that floor. Keep specific sourced leads when base salary still needs verification, but exclude local roles outside New York City.",
+        text: "Find currently active Food and Beverage Operations Manager, Assistant General Manager, and General Manager openings in New York City hospitality businesses. Search specialist hospitality boards, employer career pages, and the open web. Morgan needs to earn at least $85,000 a year in cash from the job. For tipped roles, count wages plus expected tips. You may also count recurring commissions or cash bonuses, but not equity or benefits. Keep jobs when earnings are not posted so they can be checked later. Skip a job only when its posted range cannot reach $85,000; keep a range that crosses $85,000 for review. Exclude local roles outside New York City.",
       },
       {
         id: "event-and-venue-operations",
-        text: "Find currently active Event Operations Manager, Event Coordinator, and Venue Operations Manager roles that are either local to New York City or remote anywhere in the United States and available to a New York resident. Search employer career pages, specialist boards, and the open web. When an annual base salary is posted, require its lower bound to be at least $85,000; do not count tips, bonuses, commissions, or total compensation toward that floor. Keep specific sourced leads with unverified base salary for later evaluation.",
+        text: "Find currently active Event Operations Manager, Event Coordinator, and Venue Operations Manager roles that are either local to New York City or remote anywhere in the United States and available to a New York resident. Search employer career pages, specialist boards, and the open web. Morgan needs to earn at least $85,000 a year in cash from the job. For tipped roles, count wages plus expected tips. You may also count recurring commissions or cash bonuses, but not equity or benefits. Keep jobs when earnings are not posted so they can be checked later. Skip a job only when its posted range cannot reach $85,000; keep a range that crosses $85,000 for review.",
       },
     ],
   },
@@ -359,7 +359,7 @@ try {
   console.log(
     JSON.stringify({
       schemaVersion: 1,
-      kind: "live-search-diagnostic",
+      kind: "native-ai-search-diagnostic",
       sourceRevision,
       runtimeId,
       fixtureId,
@@ -384,7 +384,7 @@ try {
   mkdirSync(receiptDirectory, { recursive: true });
   const receiptPath = join(receiptDirectory, liveSearchReceiptFilename(runtimeId, fixtureId));
   writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
-  console.log(JSON.stringify({ kind: "live-search-receipt", receiptPath }));
+  console.log(JSON.stringify({ kind: "native-ai-search-receipt", receiptPath }));
 } catch (error) {
   console.error(`[${runtimeId}/${fixtureId}] ${error?.message || String(error)}`);
   process.exitCode = 1;

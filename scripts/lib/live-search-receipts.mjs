@@ -9,12 +9,13 @@ const RUNTIME_IDS = ["claude", "codex"];
 const FIXTURE_IDS = ["hospitality", "engineering"];
 const SOURCE_REVISION_PATTERN = /^[a-f0-9]{40}$/i;
 
-export const LIVE_SEARCH_ACCEPTANCE = Object.freeze({
+export const NATIVE_AI_SEARCH_ACCEPTANCE = Object.freeze({
   fitFloor: 65,
   minimumPresentedRows: 3,
   minimumDistinctRoles: 3,
   minimumPresentedBuckets: 2,
 });
+export const LIVE_SEARCH_ACCEPTANCE = NATIVE_AI_SEARCH_ACCEPTANCE;
 
 export const EXPECTED_LIVE_SEARCH_COMBINATIONS = Object.freeze(
   RUNTIME_IDS.flatMap((runtimeId) =>
@@ -99,16 +100,16 @@ export function buildLiveSearchReceipt({
   rows,
 }) {
   if (!SOURCE_REVISION_PATTERN.test(String(sourceRevision || ""))) {
-    throw new Error("Live-search source revision must be a full commit SHA.");
+    throw new Error("Native AI search source revision must be a full commit SHA.");
   }
   if (!RUNTIME_IDS.includes(runtimeId))
-    throw new Error(`Unsupported live-search runtime: ${runtimeId}`);
+    throw new Error(`Unsupported native AI search runtime: ${runtimeId}`);
   if (!FIXTURE_IDS.includes(fixtureId))
-    throw new Error(`Unsupported live-search fixture: ${fixtureId}`);
+    throw new Error(`Unsupported native AI search fixture: ${fixtureId}`);
 
   const fitFloor = Number(summary?.fitFloor);
-  if (fitFloor !== LIVE_SEARCH_ACCEPTANCE.fitFloor) {
-    throw new Error(`Live-search fit floor must be ${LIVE_SEARCH_ACCEPTANCE.fitFloor}.`);
+  if (fitFloor !== NATIVE_AI_SEARCH_ACCEPTANCE.fitFloor) {
+    throw new Error(`Native AI search fit floor must be ${NATIVE_AI_SEARCH_ACCEPTANCE.fitFloor}.`);
   }
   const emittedRows = automaticRows({ runtimeId, fixtureId, rows, fitFloor });
   const distinctRoles = new Set(emittedRows.map((row) => row.role.toLowerCase()).filter(Boolean))
@@ -121,8 +122,8 @@ export function buildLiveSearchReceipt({
     runtimeId,
     fixtureId,
     providerFallback: providerFallback === true,
-    completedAt: validDate(completedAt, "Live-search completion time"),
-    thresholds: { ...LIVE_SEARCH_ACCEPTANCE },
+    completedAt: validDate(completedAt, "Native AI search completion time"),
+    thresholds: { ...NATIVE_AI_SEARCH_ACCEPTANCE },
     counts: {
       presentedRows: emittedRows.length,
       distinctRoles,
@@ -151,8 +152,8 @@ export function reviewLiveSearchReceipt({ receipt, reviewer, verifiedAt, rowIden
     ...receipt,
     manualLiveness: {
       verified: true,
-      reviewer: nonEmptyString(reviewer, "Live-search reviewer"),
-      verifiedAt: validDate(verifiedAt, "Live-search review time"),
+      reviewer: nonEmptyString(reviewer, "Native AI search reviewer"),
+      verifiedAt: validDate(verifiedAt, "Native AI search review time"),
       rowIdentities: exactRows,
     },
   };
@@ -161,7 +162,7 @@ export function reviewLiveSearchReceipt({ receipt, reviewer, verifiedAt, rowIden
 function assertReceipt(receipt, { requireManualLiveness = true } = {}) {
   const combination = `${receipt?.runtimeId}/${receipt?.fixtureId}`;
   if (!EXPECTED_LIVE_SEARCH_COMBINATIONS.includes(combination)) {
-    throw new Error(`Unexpected live-search receipt ${combination}.`);
+    throw new Error(`Unexpected native AI search receipt ${combination}.`);
   }
   if (receipt.schemaVersion !== 1) throw new Error(`${combination} has an unsupported schema.`);
   if (!SOURCE_REVISION_PATTERN.test(String(receipt.sourceRevision || ""))) {
@@ -171,25 +172,25 @@ function assertReceipt(receipt, { requireManualLiveness = true } = {}) {
     throw new Error(`${combination} used provider fallback.`);
   }
   if (
-    Object.entries(LIVE_SEARCH_ACCEPTANCE).some(
+    Object.entries(NATIVE_AI_SEARCH_ACCEPTANCE).some(
       ([name, value]) => receipt.thresholds?.[name] !== value
     )
   ) {
     throw new Error(`${combination} does not use the release acceptance thresholds.`);
   }
-  if (receipt.summary?.fitFloor !== LIVE_SEARCH_ACCEPTANCE.fitFloor) {
+  if (receipt.summary?.fitFloor !== NATIVE_AI_SEARCH_ACCEPTANCE.fitFloor) {
     throw new Error(`${combination} does not expose the fit floor.`);
   }
   if (receipt.summary?.errors?.length || receipt.summary?.failedPromptIds?.length) {
     throw new Error(`${combination} completed with search failures.`);
   }
-  if (receipt.counts?.presentedRows < LIVE_SEARCH_ACCEPTANCE.minimumPresentedRows) {
+  if (receipt.counts?.presentedRows < NATIVE_AI_SEARCH_ACCEPTANCE.minimumPresentedRows) {
     throw new Error(`${combination} has too few presented rows.`);
   }
-  if (receipt.counts?.distinctRoles < LIVE_SEARCH_ACCEPTANCE.minimumDistinctRoles) {
+  if (receipt.counts?.distinctRoles < NATIVE_AI_SEARCH_ACCEPTANCE.minimumDistinctRoles) {
     throw new Error(`${combination} has too few distinct roles.`);
   }
-  if (receipt.counts?.presentedBuckets < LIVE_SEARCH_ACCEPTANCE.minimumPresentedBuckets) {
+  if (receipt.counts?.presentedBuckets < NATIVE_AI_SEARCH_ACCEPTANCE.minimumPresentedBuckets) {
     throw new Error(`${combination} has too few target buckets.`);
   }
   if (receipt.rows?.length !== receipt.counts.presentedRows) {
@@ -210,7 +211,7 @@ function assertReceipt(receipt, { requireManualLiveness = true } = {}) {
     if (!row.company || !row.role || !row.location) {
       throw new Error(`${combination} contains an incomplete emitted row.`);
     }
-    if (!Number.isFinite(row.fitScore) || row.fitScore < LIVE_SEARCH_ACCEPTANCE.fitFloor) {
+    if (!Number.isFinite(row.fitScore) || row.fitScore < NATIVE_AI_SEARCH_ACCEPTANCE.fitFloor) {
       throw new Error(`${combination} contains a row below the visible fit floor.`);
     }
     if (row.unverified !== true) {
@@ -255,22 +256,22 @@ export function verifyLiveSearchReceiptSet({
   for (const receipt of receipts || []) {
     const combination = assertReceipt(receipt);
     if (byCombination.has(combination))
-      throw new Error(`Duplicate live-search receipt ${combination}.`);
+      throw new Error(`Duplicate native AI search receipt ${combination}.`);
     byCombination.set(combination, receipt);
   }
   for (const combination of EXPECTED_LIVE_SEARCH_COMBINATIONS) {
     if (!byCombination.has(combination))
-      throw new Error(`Missing live-search receipt ${combination}.`);
+      throw new Error(`Missing native AI search receipt ${combination}.`);
   }
   if (byCombination.size !== EXPECTED_LIVE_SEARCH_COMBINATIONS.length) {
-    throw new Error("Unexpected extra live-search receipts are present.");
+    throw new Error("Unexpected extra native AI search receipts are present.");
   }
 
   const sourceRevisions = new Set(
     [...byCombination.values()].map((receipt) => receipt.sourceRevision)
   );
   if (sourceRevisions.size !== 1)
-    throw new Error("Live-search receipts do not share one source revision.");
+    throw new Error("Native AI search receipts do not share one source revision.");
   const [sourceRevision] = sourceRevisions;
   if (!SOURCE_REVISION_PATTERN.test(String(currentRevision || ""))) {
     throw new Error("Current release revision must be a full commit SHA.");
@@ -278,9 +279,13 @@ export function verifyLiveSearchReceiptSet({
   if (String(currentRevision).toLowerCase() !== sourceRevision) {
     const allowedPaths = expectedReceiptPaths();
     const stalePath = changedPathsSinceSource.find((path) => !allowedPaths.has(String(path)));
-    if (stalePath) throw new Error(`Live-search evidence is stale because ${stalePath} changed.`);
+    if (stalePath) {
+      throw new Error(`Native AI search evidence is stale because ${stalePath} changed.`);
+    }
     if (changedPathsSinceSource.length === 0) {
-      throw new Error("Live-search evidence is stale because its source revision is not current.");
+      throw new Error(
+        "Native AI search evidence is stale because its source revision is not current."
+      );
     }
   }
 
@@ -302,7 +307,9 @@ export function verifyLiveSearchReceiptDirectory({
     cwd: root,
     encoding: "utf8",
   });
-  if (String(status).trim()) throw new Error("Release verification requires a clean worktree.");
+  if (String(status).trim()) {
+    throw new Error("Native AI search release verification requires a clean worktree.");
+  }
   const currentRevision = String(
     execFileSyncImpl("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" })
   ).trim();
@@ -316,7 +323,7 @@ export function verifyLiveSearchReceiptDirectory({
   }).sort();
   if (JSON.stringify(names) !== JSON.stringify(expectedNames)) {
     throw new Error(
-      `Live-search receipt directory must contain exactly: ${expectedNames.join(", ")}.`
+      `Native AI search receipt directory must contain exactly: ${expectedNames.join(", ")}.`
     );
   }
   const receipts = names.map((name) =>

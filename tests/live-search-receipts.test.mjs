@@ -48,8 +48,13 @@ async function acceptedReceipt(runtimeId, fixtureId) {
   });
 }
 
-test("four reviewed current-source receipts pass the release gate", async () => {
+test("four reviewed native AI search receipts pass the release gate", async () => {
   const receiptModule = await loadReceiptModule();
+  assert.equal(
+    receiptModule.LIVE_SEARCH_ACCEPTANCE,
+    receiptModule.NATIVE_AI_SEARCH_ACCEPTANCE,
+    "the renamed acceptance contract must preserve its existing export"
+  );
   assert.equal(typeof receiptModule.verifyLiveSearchReceiptSet, "function");
   const receipts = await Promise.all([
     acceptedReceipt("claude", "hospitality"),
@@ -76,7 +81,7 @@ test("four reviewed current-source receipts pass the release gate", async () => 
   assert.equal(result.sourceRevision, SOURCE_REVISION);
 });
 
-test("receipt gate rejects missing, stale, fallback, weak, or manually-unverified evidence", async () => {
+test("native AI search receipt gate rejects missing, stale, fallback, weak, or unreviewed evidence", async () => {
   const receiptModule = await loadReceiptModule();
   assert.equal(typeof receiptModule.verifyLiveSearchReceiptSet, "function");
   const receipts = await Promise.all([
@@ -129,7 +134,7 @@ test("receipt gate rejects missing, stale, fallback, weak, or manually-unverifie
   );
 });
 
-test("manual review must name every exact emitted row identity", async () => {
+test("native AI search review must name every exact emitted row identity", async () => {
   const receiptModule = await loadReceiptModule();
   assert.equal(typeof receiptModule.reviewLiveSearchReceipt, "function");
   const draft = receiptModule.buildLiveSearchReceipt({
