@@ -71,6 +71,20 @@ test("existing offer compensation takes precedence over canonical-body extractio
   assert.equal(row.base, "$230,000 - $270,000 base");
 });
 
+test("sourced rows persist base pay and annual earnings separately", () => {
+  const [row] = sourcedRowsFromScanOffers([
+    offer({
+      baseComp: "$11.35 per hour",
+      annualEarningsComp: "$95,000 - $120,000 including tips",
+      bodyText:
+        "Base pay: $11.35 per hour. Estimated annual earnings including tips: $95,000 - $120,000.",
+    }),
+  ]);
+
+  assert.equal(row.base, "$11.35 per hour");
+  assert.equal(row.tc, "$95,000 - $120,000 including tips");
+});
+
 test("partial bodies do not infer compensation but existing offer compensation still wins", () => {
   const rows = sourcedRowsFromScanOffers([
     offer({

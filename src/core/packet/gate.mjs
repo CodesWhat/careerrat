@@ -1,5 +1,6 @@
 import { BOUNDED_AI_CODES, runBoundedAI } from "../ai/bounded-ai.mjs";
 import { matchesExcluded, matchSignals } from "../evaluate/gate.mjs";
+import { assessCompensationFloors } from "../profile/compensation.mjs";
 import {
   buildPacketContext,
   capturePacketJobBody,
@@ -63,6 +64,9 @@ function reviewData({ applicationId, code, reason, ai = { used: false }, source 
       currency: null,
       minBase: null,
       maxBase: null,
+      minAnnualEarnings: null,
+      maxAnnualEarnings: null,
+      basis: null,
       source: "unknown",
       summary: "Compensation needs manual review.",
     },
@@ -102,6 +106,9 @@ function forcedCutData({ applicationId, reason, source }) {
       currency: null,
       minBase: null,
       maxBase: null,
+      minAnnualEarnings: null,
+      maxAnnualEarnings: null,
+      basis: null,
       source: "unknown",
       summary: "Compensation not evaluated: excluded company.",
     },
@@ -116,23 +123,83 @@ function forcedCutData({ applicationId, reason, source }) {
   };
 }
 
-function normalizeVerdict(verdict, { applicationId, ai, source }) {
+function positiveNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function completeBand(min, max) {
+  return min !== null && max !== null ? { min, max } : null;
+}
+
+function normalizeCompensation(rawComp = {}, profile = {}) {
+  const minBase = optionalNumber(rawComp.minBase);
+  const maxBase = optionalNumber(rawComp.maxBase);
+  const minAnnualEarnings = optionalNumber(rawComp.minAnnualEarnings);
+  const maxAnnualEarnings = optionalNumber(rawComp.maxAnnualEarnings);
+  const minimumBase = positiveNumber(profile?.compensation?.minimum_base);
+  const minimumAnnualEarningsFloor = positiveNumber(profile?.compensation?.minimum_annual_earnings);
+  const standing = assessCompensationFloors({
+    baseBand: completeBand(minBase, maxBase),
+    annualEarningsBand: completeBand(minAnnualEarnings, maxAnnualEarnings),
+    minimumBase,
+    minimumAnnualEarnings: minimumAnnualEarningsFloor,
+  });
+  const configuredStandings = [
+    ...(minimumBase ? [{ basis: "base", standing: standing.base }] : []),
+    ...(minimumAnnualEarningsFloor
+      ? [{ basis: "annual-earnings", standing: standing.annualEarnings }]
+      : []),
+  ];
+  const below = configuredStandings.find(({ standing: value }) => value === "below");
+  const unresolved = below || configuredStandings.find(({ standing: value }) => value !== "clear");
+  const floorConfigured = configuredStandings.length > 0;
+  const status = floorConfigured
+    ? below
+      ? "below-floor"
+      : unresolved
+        ? "unknown"
+        : "clears-floor"
+    : ["clears-floor", "below-floor"].includes(rawComp.status)
+      ? rawComp.status
+      : "unknown";
+  const rawBasis = ["base", "annual-earnings"].includes(rawComp.basis) ? rawComp.basis : null;
+  const basis =
+    unresolved?.basis ||
+    (minimumAnnualEarningsFloor ? "annual-earnings" : null) ||
+    (minimumBase ? "base" : null) ||
+    rawBasis;
+
+  return {
+    floorConfigured,
+    value: {
+      status,
+      currency: rawComp.currency ? String(rawComp.currency).slice(0, 12) : null,
+      minBase,
+      maxBase,
+      minAnnualEarnings,
+      maxAnnualEarnings,
+      basis,
+      source: ["job-description", "market"].includes(rawComp.source) ? rawComp.source : "unknown",
+      summary: boundedDisplayText(rawComp.summary, 130, "Compensation needs review."),
+    },
+  };
+}
+
+function normalizeVerdict(verdict, { applicationId, ai, source, profile }) {
   const gate = String(verdict?.gate || "review").toLowerCase();
-  const safeGate = gate === "keep" || gate === "cut" ? gate : "review";
+  const requestedGate = gate === "keep" || gate === "cut" ? gate : "review";
   const rawScore = Number(verdict?.fitScore);
   const fitScore = Number.isFinite(rawScore) ? Math.max(0, Math.min(100, Math.round(rawScore))) : 0;
   const fitBucket = fitScore >= 85 ? "high" : fitScore >= 65 ? "med" : "stretch";
-  const rawComp = verdict?.compensation || {};
-  const minBase = optionalNumber(rawComp.minBase);
-  const maxBase = optionalNumber(rawComp.maxBase);
-  const compensation = {
-    status: ["clears-floor", "below-floor"].includes(rawComp.status) ? rawComp.status : "unknown",
-    currency: rawComp.currency ? String(rawComp.currency).slice(0, 12) : null,
-    minBase,
-    maxBase,
-    source: ["job-description", "market"].includes(rawComp.source) ? rawComp.source : "unknown",
-    summary: boundedDisplayText(rawComp.summary, 130, "Compensation needs review."),
-  };
+  const normalizedCompensation = normalizeCompensation(verdict?.compensation, profile);
+  const compensation = normalizedCompensation.value;
+  const safeGate =
+    requestedGate === "keep" &&
+    normalizedCompensation.floorConfigured &&
+    compensation.status !== "clears-floor"
+      ? "review"
+      : requestedGate;
   return {
     appId: applicationId,
     applicationId,
@@ -343,6 +410,7 @@ export async function evaluatePacketGate({
             applicationId: request.applicationId,
             ai: aiResult.body.ai,
             source,
+            profile: context.profile,
           }),
         },
       };

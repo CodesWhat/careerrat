@@ -185,6 +185,8 @@ function openWebEvidenceBody(role) {
     role.source_evidence ? `Source evidence: ${role.source_evidence}` : "",
     role.location ? `Location shown: ${role.location}` : "",
     role.comp_text ? `Compensation shown: ${role.comp_text}` : "",
+    role.base_comp_text ? `Base pay shown: ${role.base_comp_text}` : "",
+    role.annual_earnings_text ? `Annual earnings shown: ${role.annual_earnings_text}` : "",
     role.posted_at ? `Listed: ${role.posted_at}` : "",
   ].filter(Boolean);
   return lines.join("\n");
@@ -204,6 +206,8 @@ function toScanOffer(role, { key, reqId }) {
     url: role.url,
     location: role.location || "",
     comp: role.comp_text || "",
+    baseComp: role.base_comp_text || "",
+    annualEarningsComp: role.annual_earnings_text || "",
     postedAt: role.posted_at || null,
     bodyText: bodyText || openWebEvidenceBody(role),
     bodyPartial: !bodyText || role.body_partial === true,

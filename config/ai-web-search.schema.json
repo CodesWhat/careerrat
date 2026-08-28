@@ -28,6 +28,8 @@
           "url": { "type": "string" },
           "location": { "type": ["string", "null"] },
           "comp_text": { "type": ["string", "null"] },
+          "base_comp_text": { "type": ["string", "null"] },
+          "annual_earnings_text": { "type": ["string", "null"] },
           "posted_at": { "type": ["string", "null"] },
           "body_text": { "type": ["string", "null"] },
           "body_partial": { "type": "boolean" },

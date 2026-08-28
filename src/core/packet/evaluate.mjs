@@ -1,9 +1,9 @@
 import { appPersistEvaluation } from "../db/verbs/app.mjs";
 import { evaluatePacketGate } from "./gate.mjs";
 
-function formatBaseRange(compensation = {}) {
-  const min = optionalNumber(compensation.minBase);
-  const max = optionalNumber(compensation.maxBase);
+function formatRange(minValue, maxValue) {
+  const min = optionalNumber(minValue);
+  const max = optionalNumber(maxValue);
   if (min === null && max === null) return null;
   const money = (value) => `$${Math.round(value).toLocaleString("en-US")}`;
   if (min !== null && max !== null) return `${money(min)} - ${money(max)}`;
@@ -37,7 +37,8 @@ function packetEvaluationProjection(evaluation) {
     fitScore: evaluation.fitScore ?? null,
     fitBucket: evaluation.fitBucket ?? null,
     fitBasis: "evaluated",
-    base: formatBaseRange(compensation),
+    base: formatRange(compensation.minBase, compensation.maxBase),
+    tc: formatRange(compensation.minAnnualEarnings, compensation.maxAnnualEarnings),
     compNote: String(compensation.summary || "").slice(0, 140),
     compEstimate: {
       source:

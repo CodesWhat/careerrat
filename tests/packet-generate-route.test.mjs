@@ -36,6 +36,9 @@ function typedGateVerdict({ gate = "keep" } = {}) {
       currency: "USD",
       minBase: 212000,
       maxBase: 286000,
+      minAnnualEarnings: null,
+      maxAnnualEarnings: null,
+      basis: "base",
       source: "job-description",
       summary: "$212k–$286k base clears the candidate floor.",
     },
@@ -435,12 +438,14 @@ test("POST /api/packet/gate: captures supplied JD body and stamps artifacts.jd b
     assert.equal(app.fitBucket, "high");
     assert.equal(app.fitBasis, "evaluated");
     assert.equal(app.base, "$212,000 - $286,000");
+    assert.equal(app.tc, null);
     assert.equal(app.compNote, "$212k–$286k base clears the candidate floor.");
     assert.deepEqual(app.roleFit, {
       why: ["JD centers on production AI workflow delivery"],
       risks: [],
     });
     assert.match(seen[0], /minimum_base|targeting|evidence/i);
+    assert.match(seen[0], /minAnnualEarnings\/maxAnnualEarnings/i);
     assert.match(seen[0], /complete plain-English sentences/i);
     assert.match(seen[0], /fitReasons.*72 characters/i);
   } finally {
@@ -867,6 +872,9 @@ test("POST /api/packet/gate: preserves unknown compensation as null instead of a
       currency: null,
       minBase: null,
       maxBase: null,
+      minAnnualEarnings: null,
+      maxAnnualEarnings: null,
+      basis: null,
       source: "job-description",
       summary: "No base compensation range is included in the saved job description.",
     },
@@ -889,6 +897,89 @@ test("POST /api/packet/gate: preserves unknown compensation as null instead of a
     assert.equal(app.compEstimate?.midpointK, null);
     assert.equal(app.compEstimate?.highK, null);
     assert.equal(app.compEstimate?.source, "none");
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/gate: persists tipped annual earnings separately from base pay", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: { compensation: { minimum_annual_earnings: 85_000 } },
+  });
+  const verdict = {
+    ...typedGateVerdict(),
+    compensation: {
+      status: "clears-floor",
+      currency: "USD",
+      minBase: 23_608,
+      maxBase: 23_608,
+      minAnnualEarnings: 95_000,
+      maxAnnualEarnings: 120_000,
+      basis: "annual-earnings",
+      source: "job-description",
+      summary: "$95k–$120k expected annual cash earnings include tips.",
+    },
+  };
+  const server = await bootServer(repoRoot, {
+    packetGateInvoke: async () => `\`\`\`json\n${JSON.stringify(verdict)}\n\`\`\``,
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-packet",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.data?.compensation?.status, "clears-floor");
+    assert.equal(body.data?.compensation?.basis, "annual-earnings");
+
+    const app = readApp(repoRoot, "app-packet");
+    assert.equal(app.base, "$23,608 - $23,608");
+    assert.equal(app.tc, "$95,000 - $120,000");
+    assert.equal(app.evaluation.compensation.minBase, 23_608);
+    assert.equal(app.evaluation.compensation.minAnnualEarnings, 95_000);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/gate: deterministically reviews an annual earnings overlap", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: { compensation: { minimum_annual_earnings: 85_000 } },
+  });
+  const verdict = {
+    ...typedGateVerdict(),
+    compensation: {
+      status: "clears-floor",
+      currency: "USD",
+      minBase: 23_608,
+      maxBase: 23_608,
+      minAnnualEarnings: 75_000,
+      maxAnnualEarnings: 95_000,
+      basis: "annual-earnings",
+      source: "job-description",
+      summary: "$75k–$95k expected annual cash earnings include tips.",
+    },
+  };
+  const server = await bootServer(repoRoot, {
+    packetGateInvoke: async () => `\`\`\`json\n${JSON.stringify(verdict)}\n\`\`\``,
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-packet",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.data?.compensation?.status, "unknown");
+    assert.equal(body.data?.gate, "review");
+    assert.equal(body.data?.manual?.required, true);
   } finally {
     await closeServer(server);
   }

@@ -131,7 +131,7 @@ test("generateSearchPrompts uses the exact frozen research.web execution plan", 
   assert.deepEqual(outcome.body.ai.executionPlan, executionPlan);
 });
 
-test("generateSearchPrompts defines minimum_base as an annual base-salary floor", async () => {
+test("generateSearchPrompts keeps overlapping base bands for review", async () => {
   const repoRoot = repo();
   let received;
 
@@ -161,9 +161,46 @@ test("generateSearchPrompts defines minimum_base as an annual base-salary floor"
   assert.equal(outcome.body.ok, true);
   const instructions = received.messages[0].content;
   assert.match(instructions, /minimum_base is a hard annual base-salary floor/i);
-  assert.match(instructions, /lower bound must meet or exceed minimum_base/i);
+  assert.match(instructions, /maximum is below minimum_base/i);
+  assert.match(instructions, /overlaps minimum_base, keep it for review/i);
   assert.match(instructions, /tips, commissions, bonuses, equity, OTE, or total compensation/i);
   assert.match(instructions, /compensation is not posted, keep it unverified/i);
+});
+
+test("generateSearchPrompts keeps annual earnings distinct from base salary", async () => {
+  const repoRoot = repo();
+  let received;
+
+  const outcome = await generateSearchPrompts({
+    repoRoot,
+    config: {
+      targeting: {
+        role_buckets: [{ name: "Bar leadership", titles: ["Lead Bartender"] }],
+      },
+      profile: {
+        compensation: { currency: "USD", minimum_annual_earnings: 85_000 },
+      },
+    },
+    call: async (options) => {
+      received = options;
+      return {
+        text: JSON.stringify({
+          prompts: [
+            { text: "Find Lead Bartender roles expected to earn at least $85,000 annually." },
+            { text: "Find bar leadership jobs with at least $85,000 in annual cash earnings." },
+          ],
+        }),
+      };
+    },
+  });
+
+  assert.equal(outcome.body.ok, true);
+  const instructions = received.messages[0].content;
+  assert.match(instructions, /"minimum_annual_earnings": 85000/);
+  assert.match(instructions, /includes wages, tips, commissions, and recurring cash bonuses/i);
+  assert.match(instructions, /does not include equity or benefits/i);
+  assert.match(instructions, /unknown or unposted earnings stay unverified/i);
+  assert.doesNotMatch(instructions, /minimum_annual_earnings[^\n]*base-salary floor/i);
 });
 
 test("buildSearchPromptContext: omits application_limits/company_history by default", () => {

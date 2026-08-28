@@ -35,7 +35,17 @@ export const packetGateAiVerdictSchema = {
     compensation: {
       type: "object",
       additionalProperties: false,
-      required: ["status", "currency", "minBase", "maxBase", "source", "summary"],
+      required: [
+        "status",
+        "currency",
+        "minBase",
+        "maxBase",
+        "minAnnualEarnings",
+        "maxAnnualEarnings",
+        "basis",
+        "source",
+        "summary",
+      ],
       properties: {
         status: {
           type: "string",
@@ -44,6 +54,12 @@ export const packetGateAiVerdictSchema = {
         currency: stringOrNull,
         minBase: { type: ["number", "null"], minimum: 0 },
         maxBase: { type: ["number", "null"], minimum: 0 },
+        minAnnualEarnings: { type: ["number", "null"], minimum: 0 },
+        maxAnnualEarnings: { type: ["number", "null"], minimum: 0 },
+        basis: {
+          type: ["string", "null"],
+          enum: ["base", "annual-earnings", null],
+        },
         source: {
           type: "string",
           enum: ["job-description", "market", "unknown"],

@@ -2,9 +2,10 @@
 // Zero runtime dependencies. Node v24 ESM.
 
 import { effectiveTargetingForRole } from "../deep-ingest/role-signal-overlay.mjs";
+import { assessCompensationFloors } from "../profile/compensation.mjs";
 import { shouldReviewMediumBodyReadFits } from "../profile/modes.mjs";
 import { parseYaml } from "../profile/yaml.mjs";
-import { extractCompBand } from "../scoring/sourced-scanner.mjs";
+import { extractCompensationBands } from "../scoring/sourced-scanner.mjs";
 import { classifyEstimateAgainstFloor, estimateCompFromComparables } from "./comp-comparables.mjs";
 import { assessLegitimacy } from "./legitimacy.mjs";
 
@@ -237,13 +238,102 @@ export function evaluateCompensation({ body, frontmatter, profile, bucket, track
     "\n"
   );
 
-  const band = extractCompBand(compSource);
+  const bands = extractCompensationBands(compSource);
+  const { floor, relo, label } = resolveCompFloor({ profile, frontmatter });
+  const hasBaseFloor = Number.isFinite(floor) && floor > 0;
+  const minimumAnnualEarnings = Number(profile?.compensation?.minimum_annual_earnings);
+  const hasAnnualEarningsFloor =
+    Number.isFinite(minimumAnnualEarnings) && minimumAnnualEarnings > 0;
+  const standing = assessCompensationFloors({
+    baseBand: bands.base,
+    annualEarningsBand: bands.annualEarnings,
+    minimumBase: hasBaseFloor ? floor : null,
+    minimumAnnualEarnings: hasAnnualEarningsFloor ? minimumAnnualEarnings : null,
+  });
+  const bandFields = {
+    baseBand: bands.base,
+    annualEarningsBand: bands.annualEarnings,
+  };
+
+  if (hasAnnualEarningsFloor) {
+    if (standing.annualEarnings === "below") {
+      return {
+        verdict: "below-floor",
+        reason: `annual earnings top out at $${bands.annualEarnings.max.toLocaleString()}, below your $${minimumAnnualEarnings.toLocaleString()} floor`,
+        band: bands.annualEarnings,
+        basis: "annual-earnings",
+        floor: minimumAnnualEarnings,
+        relo: false,
+        ...bandFields,
+      };
+    }
+    if (standing.annualEarnings === "overlap") {
+      return {
+        verdict: "review",
+        reason: `annual earnings range overlaps your $${minimumAnnualEarnings.toLocaleString()} floor`,
+        band: bands.annualEarnings || bands.base,
+        basis: "annual-earnings",
+        floor: minimumAnnualEarnings,
+        ...bandFields,
+      };
+    }
+    if (standing.annualEarnings === "unknown") {
+      return {
+        verdict: "review",
+        reason:
+          "annual earnings are unverified; posted base pay does not include unknown tips or variable cash",
+        band: bands.base,
+        basis: "annual-earnings",
+        floor: minimumAnnualEarnings,
+        ...bandFields,
+      };
+    }
+  }
+
+  if (standing.base === "below") {
+    const reloWhere = label && label !== "relocation" ? ` to ${label}` : "";
+    return {
+      verdict: "below-floor",
+      reason: relo
+        ? `relocation${reloWhere} requires $${floor.toLocaleString()} base; band tops at $${bands.base.max.toLocaleString()}`
+        : `band max $${bands.base.max.toLocaleString()} < floor $${floor.toLocaleString()}`,
+      band: bands.base,
+      basis: "base",
+      relo,
+      floor,
+      ...bandFields,
+    };
+  }
+
+  if (standing.base === "overlap") {
+    return {
+      verdict: "review",
+      reason: `base range overlaps your $${floor.toLocaleString()} floor`,
+      band: bands.base,
+      basis: "base",
+      floor,
+      relo,
+      ...bandFields,
+    };
+  }
+
+  if (standing.base === "unknown" && bands.annualEarnings) {
+    return {
+      verdict: "review",
+      reason: "base pay is unverified; annual earnings do not prove the guaranteed base floor",
+      band: null,
+      basis: "base",
+      floor,
+      relo,
+      ...bandFields,
+    };
+  }
 
   // No comp posted: instead of just handing the question back, estimate the
   // likely band from comparable roles already in the tracker (same role family
   // + same area, rejected ones included). An estimate is advisory only — it
   // pushes to REVIEW and never hard-cuts, since it's a guess, not a posted band.
-  if (!band) {
+  if (!bands.base && !bands.annualEarnings) {
     const estimate = estimateCompFromComparables({
       role: frontmatter?.role,
       loc: frontmatter?.location,
@@ -261,8 +351,7 @@ export function evaluateCompensation({ body, frontmatter, profile, bucket, track
       };
     }
 
-    const { floor } = resolveCompFloor({ profile, frontmatter });
-    const standing = classifyEstimateAgainstFloor(estimate, floor);
+    const standing = classifyEstimateAgainstFloor(estimate, hasBaseFloor ? floor : null);
     const range = `$${estimate.lowK}K–$${estimate.highK}K (mid $${estimate.midpointK}K)`;
     const floorText =
       floor != null && Number.isFinite(floor) ? `$${Math.round(floor / 1000)}K` : "";
@@ -275,6 +364,8 @@ export function evaluateCompensation({ body, frontmatter, profile, bucket, track
         estimate,
         confirmNeeded: true,
         floor: floor ?? undefined,
+        basis: "base",
+        ...bandFields,
       };
     }
 
@@ -285,43 +376,39 @@ export function evaluateCompensation({ body, frontmatter, profile, bucket, track
       estimate,
       confirmNeeded: true,
       floor: floor ?? undefined,
+      basis: "base",
+      ...bandFields,
     };
   }
 
-  const { floor, relo, label } = resolveCompFloor({ profile, frontmatter });
-
   // If no floor configured, treat as clear.
-  if (floor === null || !Number.isFinite(floor)) {
+  if (!hasBaseFloor && !hasAnnualEarningsFloor) {
+    const band = bands.base || bands.annualEarnings;
     return {
       verdict: "clear",
       reason: `band $${band.min.toLocaleString()}–$${band.max.toLocaleString()} (no floor configured)`,
       band,
+      basis: bands.base ? "base" : "annual-earnings",
       relo: false,
+      ...bandFields,
     };
   }
 
+  const band = hasAnnualEarningsFloor ? bands.annualEarnings || bands.base : bands.base;
+  const relevantFloor = hasAnnualEarningsFloor ? minimumAnnualEarnings : floor;
+  const relevantBasis = hasAnnualEarningsFloor ? "annual-earnings" : "base";
   const reloWhere = label && label !== "relocation" ? ` to ${label}` : "";
-
-  if (band.max < floor) {
-    return {
-      verdict: "below-floor",
-      reason: relo
-        ? `relocation${reloWhere} requires $${floor.toLocaleString()} base; band tops at $${band.max.toLocaleString()}`
-        : `band max $${band.max.toLocaleString()} < floor $${floor.toLocaleString()}`,
-      band,
-      relo,
-      floor,
-    };
-  }
 
   return {
     verdict: "clear",
     reason: relo
-      ? `band $${band.min.toLocaleString()}–$${band.max.toLocaleString()} clears relocation${reloWhere} floor $${floor.toLocaleString()}`
-      : `band $${band.min.toLocaleString()}–$${band.max.toLocaleString()} clears floor $${floor.toLocaleString()}`,
+      ? `band $${band.min.toLocaleString()}–$${band.max.toLocaleString()} clears relocation${reloWhere} floor $${relevantFloor.toLocaleString()}`
+      : `band $${band.min.toLocaleString()}–$${band.max.toLocaleString()} clears floor $${relevantFloor.toLocaleString()}`,
     band,
+    basis: relevantBasis,
     relo: false,
-    floor,
+    floor: relevantFloor,
+    ...bandFields,
   };
 }
 

@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { effectiveTargetingForRole } from "../deep-ingest/role-signal-overlay.mjs";
 import { guardedFetch } from "../net/public-http-fetch.mjs";
 import { userPath } from "../paths/workspace.mjs";
+import { assessCompensationFloors } from "../profile/compensation.mjs";
 import { scannerLikelyKeepThreshold } from "../profile/modes.mjs";
 import {
   fetchCareerOpsProvider,
@@ -786,16 +787,29 @@ function postingAgeEligibility(offer, config, now) {
 }
 
 function salaryEligibility(offer, config) {
-  const floor = Number(config?.profile?.compensation?.minimum_base);
-  const band = extractCompBand(
-    [offer?.comp, offer?.bodyText, offer?.description].filter(Boolean).join("\n"),
-    { baseOnly: true }
+  const compensation = config?.profile?.compensation || {};
+  const bands = extractCompensationBands(
+    [offer?.comp, offer?.bodyText, offer?.description].filter(Boolean).join("\n")
   );
-  if (!band) return { eligible: true, unknown: "compensation" };
-  if (Number.isFinite(floor) && floor > 0 && band.min < floor) {
-    return { eligible: false, reason: "comp-below-floor", band };
+  const standing = assessCompensationFloors({
+    baseBand: bands.base,
+    annualEarningsBand: bands.annualEarnings,
+    minimumBase: compensation.minimum_base,
+    minimumAnnualEarnings: compensation.minimum_annual_earnings,
+  });
+  if (standing.base === "below") {
+    return { eligible: false, reason: "comp-below-floor", band: bands.base };
   }
-  return { eligible: true };
+  if (standing.annualEarnings === "below") {
+    return {
+      eligible: false,
+      reason: "annual-earnings-below-floor",
+      annualEarningsBand: bands.annualEarnings,
+    };
+  }
+  const unknown =
+    standing.base === "unknown" || standing.annualEarnings === "unknown" ? "compensation" : null;
+  return { eligible: true, unknown };
 }
 
 function contentEligibility(offer, config) {
@@ -861,6 +875,7 @@ function qualifyCandidateOffer(
       bucket: "salary",
       reason: salary.reason,
       compBand: salary.band,
+      annualEarningsBand: salary.annualEarningsBand,
     };
   }
   const content = contentEligibility(offer, config);
@@ -899,6 +914,9 @@ export function requalifyCanonicalOffers(
           ? {}
           : { distanceMiles: qualification.distanceMiles }),
         ...(qualification.compBand ? { compBand: qualification.compBand } : {}),
+        ...(qualification.annualEarningsBand
+          ? { annualEarningsBand: qualification.annualEarningsBand }
+          : {}),
       });
       continue;
     }
@@ -1038,20 +1056,31 @@ function scoreSourcedOfferFromConfig(
     }
   }
 
-  // --- Comp floor from profile.compensation.minimum_base ---
+  // --- Compensation floors ---
   const minimumBase =
     profile && profile.compensation && profile.compensation.minimum_base != null
       ? Number(profile.compensation.minimum_base)
       : null;
-  const comp = extractCompBand(`${compText}\n${body}`, {
-    baseOnly: minimumBase !== null && Number.isFinite(minimumBase),
+  const minimumAnnualEarnings =
+    profile?.compensation?.minimum_annual_earnings != null
+      ? Number(profile.compensation.minimum_annual_earnings)
+      : null;
+  const hasMinimumBase = Number.isFinite(minimumBase) && minimumBase > 0;
+  const hasMinimumAnnualEarnings =
+    Number.isFinite(minimumAnnualEarnings) && minimumAnnualEarnings > 0;
+  const compBands = extractCompensationBands(`${compText}\n${body}`);
+  const compStanding = assessCompensationFloors({
+    baseBand: compBands.base,
+    annualEarningsBand: compBands.annualEarnings,
+    minimumBase: hasMinimumBase ? minimumBase : null,
+    minimumAnnualEarnings: hasMinimumAnnualEarnings ? minimumAnnualEarnings : null,
   });
-  if (minimumBase !== null && Number.isFinite(minimumBase)) {
-    if (comp) {
-      if (comp.max < minimumBase) {
+  if (hasMinimumBase) {
+    if (compBands.base) {
+      if (compStanding.base === "below") {
         add(-24, "base below floor");
         flag("comp-below-floor");
-      } else if (comp.min < minimumBase) {
+      } else if (compStanding.base === "overlap") {
         add(-6, "must land top of band");
         flag("top-of-band-only");
       } else {
@@ -1061,7 +1090,20 @@ function scoreSourcedOfferFromConfig(
       flag("comp-unposted");
     }
   } else {
-    if (!comp) flag("comp-unposted");
+    if (!compBands.base && !compBands.annualEarnings) flag("comp-unposted");
+  }
+  if (hasMinimumAnnualEarnings) {
+    if (compStanding.annualEarnings === "below") {
+      add(-24, "annual earnings below floor");
+      flag("annual-earnings-below-floor");
+    } else if (compStanding.annualEarnings === "overlap") {
+      add(-6, "annual earnings range overlaps floor");
+      flag("annual-earnings-overlap");
+    } else if (compStanding.annualEarnings === "clear") {
+      add(4, "annual earnings clear floor");
+    } else {
+      flag("annual-earnings-unverified");
+    }
   }
 
   // --- Location bonus from profile.location ---
@@ -1195,7 +1237,10 @@ function gateFromScoreAndFlags(score, flags, modes = {}) {
   if (
     flags.some(
       (flag) =>
-        flag.startsWith("cut-risk") || flag === "excluded-company" || flag === "comp-below-floor"
+        flag.startsWith("cut-risk") ||
+        flag === "excluded-company" ||
+        flag === "comp-below-floor" ||
+        flag === "annual-earnings-below-floor"
     )
   )
     return "likely-cut";
@@ -1204,6 +1249,8 @@ function gateFromScoreAndFlags(score, flags, modes = {}) {
       (flag) =>
         flag === "comp-unposted" ||
         flag === "top-of-band-only" ||
+        flag === "annual-earnings-overlap" ||
+        flag === "annual-earnings-unverified" ||
         flag === "ca-comp-unverified" ||
         flag === "family-cold"
     )
@@ -1217,6 +1264,9 @@ const ANNUAL_WORK_HOURS = 2_080;
 const BASE_COMP_LABEL_RE = /\b(?:base\s+(?:salary|pay)|salary(?:\s+(?:range|band))?)\b/i;
 const VARIABLE_COMP_LABEL_RE =
   /\b(?:on-target\s+earnings|ote|bonus|equity|commission|total\s+comp(?:ensation)?|variable\s+(?:pay|compensation)|incentive\s+(?:pay|compensation))\b/i;
+const ANNUAL_EARNINGS_LABEL_RE =
+  /\b(?:annual\s+(?:cash\s+)?earnings|estimated\s+annual\s+earnings|on-target\s+earnings|ote|total\s+cash\s+comp(?:ensation)?|including\s+(?:tips|commissions?))\b/i;
+const EQUITY_COMP_LABEL_RE = /\b(?:equity|stock|options?)\b/i;
 const HOURLY_COMP_RE = /\b(?:hourly|per\s+(?:hour|hr))\b|\/\s*(?:hour|hr)\b/i;
 
 function lastLabelIndex(value, pattern) {
@@ -1238,7 +1288,9 @@ export function extractCompBand(text = "", { baseOnly = false } = {}) {
     const normalized = line.replace(/,/g, "");
     const explicitBase = BASE_COMP_LABEL_RE.test(line);
     const variableComp = VARIABLE_COMP_LABEL_RE.test(line);
+    const annualEarnings = ANNUAL_EARNINGS_LABEL_RE.test(line);
     const hourly = HOURLY_COMP_RE.test(line);
+    if (baseOnly && annualEarnings && !explicitBase) continue;
     const re =
       /(?:usd\s*)?\$?\s*(\d{2,6}(?:\.\d+)?)(\s*k)?\s*(?:-|–|—|to)\s*(?:usd\s*)?\$?\s*(\d{2,6}(?:\.\d+)?)(\s*k)?/gi;
     let foundRange = false;
@@ -1255,7 +1307,8 @@ export function extractCompBand(text = "", { baseOnly = false } = {}) {
       const max = rangeIsHourly
         ? Number(match[3]) * ANNUAL_WORK_HOURS
         : normalizeMoney(match[3], match[4]);
-      if (min >= 50000 && max >= min && max <= 1200000) {
+      const minimum = rangeIsBase ? 1_000 : 50_000;
+      if (min >= minimum && max >= min && max <= 1200000) {
         const candidate = { min, max };
         candidates.push(candidate);
         if (rangeIsBase) explicitBaseCandidates.push(candidate);
@@ -1276,7 +1329,8 @@ export function extractCompBand(text = "", { baseOnly = false } = {}) {
       explicitBase && hourly
         ? Number(single[1]) * ANNUAL_WORK_HOURS
         : normalizeMoney(single[1], single[2]);
-    if (amount >= 50000 && amount <= 1200000) {
+    const minimum = explicitBase ? 1_000 : 50_000;
+    if (amount >= minimum && amount <= 1200000) {
       const candidate = { min: amount, max: amount };
       candidates.push(candidate);
       if (explicitBase) explicitBaseCandidates.push(candidate);
@@ -1285,6 +1339,43 @@ export function extractCompBand(text = "", { baseOnly = false } = {}) {
   }
 
   return explicitBaseCandidates[0] || (baseOnly ? nonVariableCandidates[0] : candidates[0]) || null;
+}
+
+function extractAnnualEarningsBand(text = "") {
+  const lines = String(text || "")
+    .split(/\n|\. /)
+    .filter((line) => ANNUAL_EARNINGS_LABEL_RE.test(line) && !EQUITY_COMP_LABEL_RE.test(line));
+
+  for (const line of lines) {
+    const normalized = line.replace(/,/g, "");
+    const hourly = HOURLY_COMP_RE.test(line);
+    const range = normalized.match(
+      /(?:usd\s*)?\$?\s*(\d{2,6}(?:\.\d+)?)(\s*k)?\s*(?:-|–|—|to)\s*(?:usd\s*)?\$?\s*(\d{2,6}(?:\.\d+)?)(\s*k)?/i
+    );
+    if (range) {
+      const min = hourly
+        ? Number(range[1]) * ANNUAL_WORK_HOURS
+        : normalizeMoney(range[1], range[2]);
+      const max = hourly
+        ? Number(range[3]) * ANNUAL_WORK_HOURS
+        : normalizeMoney(range[3], range[4]);
+      if (min >= 1_000 && max >= min && max <= 1_200_000) return { min, max };
+    }
+    const single = normalized.match(/(?:USD\s*)?\$\s*(\d{2,7}(?:\.\d+)?)(\s*k)?\b/i);
+    if (!single) continue;
+    const amount = hourly
+      ? Number(single[1]) * ANNUAL_WORK_HOURS
+      : normalizeMoney(single[1], single[2]);
+    if (amount >= 1_000 && amount <= 1_200_000) return { min: amount, max: amount };
+  }
+  return null;
+}
+
+export function extractCompensationBands(text = "") {
+  return {
+    base: extractCompBand(text, { baseOnly: true }),
+    annualEarnings: extractAnnualEarningsBand(text),
+  };
 }
 
 function normalizeMoney(value, suffix = "") {
@@ -1550,6 +1641,9 @@ export function filterAndDedupeOffers(
           ? {}
           : { distanceMiles: qualification.distanceMiles }),
         ...(qualification.compBand ? { compBand: qualification.compBand } : {}),
+        ...(qualification.annualEarningsBand
+          ? { annualEarningsBand: qualification.annualEarningsBand }
+          : {}),
       });
       continue;
     }

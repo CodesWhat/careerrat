@@ -129,6 +129,22 @@ test("POST /api/boards/preview: derives f_SB2 from minimumBase and f_TPR from wi
   }
 });
 
+test("POST /api/boards/preview: annual earnings never drives LinkedIn f_SB2", async () => {
+  const server = await bootServer(tempRepo());
+  try {
+    const { status, body } = await postJson(server, "/api/boards/preview", {
+      keywords: "Lead Bartender",
+      location: "New York, NY",
+      minimumAnnualEarnings: 85000,
+    });
+
+    assert.equal(status, 200);
+    assert.doesNotMatch(body.linkedin.url, /[?&]f_SB2=/);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/boards/preview: missing keywords -> 400", async () => {
   const server = await bootServer(tempRepo());
   try {

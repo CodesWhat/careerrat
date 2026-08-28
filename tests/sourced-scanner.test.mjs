@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 
+import * as sourcedScanner from "../src/core/scoring/sourced-scanner.mjs";
 import {
   buildLocationFilter,
   buildTitleFilter,
@@ -33,6 +34,24 @@ const JANE_TECH_CONFIG = {
     location: { home: "new york", relocation: [] },
   },
 };
+
+test("compensation parsing separates base pay from annual cash earnings", () => {
+  const bands = sourcedScanner.extractCompensationBands(
+    "Base pay: $11.35 per hour. Estimated annual earnings including tips: $95,000 - $120,000."
+  );
+
+  assert.deepEqual(bands.base, { min: 23_608, max: 23_608 });
+  assert.deepEqual(bands.annualEarnings, { min: 95_000, max: 120_000 });
+});
+
+test("annual cash earnings parsing ignores adjacent non-cash benefits", () => {
+  const bands = sourcedScanner.extractCompensationBands(
+    "Estimated annual earnings including tips: $95,000 - $120,000, plus benefits."
+  );
+
+  assert.equal(bands.base, null);
+  assert.deepEqual(bands.annualEarnings, { min: 95_000, max: 120_000 });
+});
 
 // ---------------------------------------------------------------------------
 // Filter + infrastructure tests (unchanged)
@@ -1690,7 +1709,7 @@ test("qualification recognizes an annual salary sentence below the saved floor",
   assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
 });
 
-test("qualification rejects a posted range whose lower bound is below the hard floor", () => {
+test("qualification keeps a posted range that overlaps the hard floor for review", () => {
   const result = filterAndDedupeOffers(
     [
       {
@@ -1714,9 +1733,9 @@ test("qualification rejects a posted range whose lower bound is below the hard f
     }
   );
 
-  assert.equal(result.kept.length, 0);
-  assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
-  assert.deepEqual(result.filteredSalary[0]?.compBand, { min: 75000, max: 85000 });
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.filteredSalary.length, 0);
+  assert.ok(result.kept[0].ruleFlags.includes("top-of-band-only"));
 });
 
 test("qualification recognizes a single annual salary below the saved floor", () => {
@@ -1882,7 +1901,7 @@ test("qualification treats variable and total compensation without base pay as u
   assert.ok(result.kept.every((offer) => offer.qualificationUnknowns.includes("compensation")));
 });
 
-test("qualification annualizes an explicit hourly base-pay range before applying the floor", () => {
+test("qualification keeps an annualized hourly base range that overlaps the floor", () => {
   const result = filterAndDedupeOffers(
     [
       {
@@ -1906,9 +1925,9 @@ test("qualification annualizes an explicit hourly base-pay range before applying
     }
   );
 
-  assert.equal(result.kept.length, 0);
-  assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
-  assert.deepEqual(result.filteredSalary[0]?.compBand, { min: 83200, max: 93600 });
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.filteredSalary.length, 0);
+  assert.ok(result.kept[0].ruleFlags.includes("top-of-band-only"));
 });
 
 test("qualification annualizes a single explicit hourly base-pay amount", () => {
@@ -1938,6 +1957,104 @@ test("qualification annualizes a single explicit hourly base-pay amount", () => 
   assert.equal(result.kept.length, 0);
   assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
   assert.deepEqual(result.filteredSalary[0]?.compBand, { min: 83200, max: 83200 });
+});
+
+test("annual earnings floor keeps low tipped base pay unverified", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Tipped Bar",
+        title: "Lead Bartender",
+        url: "https://jobs.example.test/tipped-bar",
+        location: "New York, NY",
+        bodyText: "Base pay: $11.35 per hour plus tips.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Lead Bartender"] }] },
+        profile: {
+          compensation: { minimum_annual_earnings: 85000 },
+          location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.filteredSalary.length, 0);
+  assert.ok(result.kept[0].qualificationUnknowns.includes("compensation"));
+  assert.ok(result.kept[0].ruleFlags.includes("annual-earnings-unverified"));
+  assert.equal(result.kept[0].gate, "review");
+});
+
+test("annual earnings floor compares explicit tipped earnings without treating them as base", () => {
+  const offers = [
+    ["Clear Bar", "$95,000 - $120,000", "annual-earnings-clear"],
+    ["Overlap Bar", "$80,000 - $95,000", "annual-earnings-overlap"],
+    ["Below Bar", "$60,000 - $75,000", "annual-earnings-below-floor"],
+  ].map(([company, range]) => ({
+    company,
+    title: "Lead Bartender",
+    url: `https://jobs.example.test/${company.toLowerCase().replaceAll(" ", "-")}`,
+    location: "New York, NY",
+    bodyText: `Estimated annual earnings including tips: ${range}.`,
+  }));
+  const result = filterAndDedupeOffers(offers, {
+    titleFilter: () => true,
+    locationFilter: () => true,
+    config: {
+      targeting: { role_buckets: [{ titles: ["Lead Bartender"] }] },
+      profile: {
+        compensation: { minimum_annual_earnings: 85000 },
+        location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+      },
+    },
+  });
+
+  assert.deepEqual(
+    result.kept.map((offer) => [offer.company, offer.ruleFlags]),
+    [
+      ["Clear Bar", []],
+      ["Overlap Bar", ["annual-earnings-overlap"]],
+    ]
+  );
+  assert.equal(result.filteredSalary[0]?.company, "Below Bar");
+  assert.equal(result.filteredSalary[0]?.qualificationReason, "annual-earnings-below-floor");
+  assert.deepEqual(result.filteredSalary[0]?.annualEarningsBand, { min: 60000, max: 75000 });
+  assert.equal(result.kept.find((offer) => offer.company === "Overlap Bar")?.gate, "review");
+});
+
+test("guaranteed base pay can clear an annual earnings floor", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Guaranteed Bar",
+        title: "Bar Manager",
+        url: "https://jobs.example.test/guaranteed-bar",
+        location: "New York, NY",
+        bodyText: "Base pay: $50 per hour.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_annual_earnings: 85000 },
+          location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.filteredSalary.length, 0);
+  assert.equal(result.kept[0].qualificationUnknowns.includes("compensation"), false);
+  assert.equal(result.kept[0].ruleFlags.includes("annual-earnings-unverified"), false);
 });
 
 // ---------------------------------------------------------------------------

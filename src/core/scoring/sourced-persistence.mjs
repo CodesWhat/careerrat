@@ -246,7 +246,8 @@ function renderCapturedJob({ offer, savedAt }) {
     company: offer.company || "",
     role: offer.title || "",
     reqId: offer.reqId || null,
-    comp: offer.comp || null,
+    comp: offer.baseComp || offer.comp || null,
+    tc: offer.annualEarningsComp || null,
     location: offer.location || null,
     source: offer.url || "",
     sourceName: offer.source || "capture",
@@ -275,7 +276,8 @@ function renderCapturedJob({ offer, savedAt }) {
     `# ${offer.title || "Open role"} - ${offer.company || "Unknown company"}`,
     "",
     offer.location ? `- Location: ${offer.location}` : "",
-    offer.comp ? `- Compensation: ${offer.comp}` : "",
+    offer.baseComp || offer.comp ? `- Base pay: ${offer.baseComp || offer.comp}` : "",
+    offer.annualEarningsComp ? `- Annual earnings: ${offer.annualEarningsComp}` : "",
     offer.url ? `- Source: ${offer.url}` : "",
     "",
     "## Capture triage",
@@ -337,9 +339,11 @@ export function sourcedRowsFromScanOffers(offers, nowIso = new Date().toISOStrin
       link: offer.url,
       loc: offer.location || "",
       base:
+        offer.baseComp ||
         offer.comp ||
         (offer.bodyPartial === true ? null : explicitBaseCompensationRange(offerBodyText(offer))) ||
         "verify",
+      tc: offer.annualEarningsComp || null,
       fitScore: Number.isFinite(fitScore) ? fitScore : 0,
       fitBucket: offer.fit || "",
       fitBasis: "triage",

@@ -1567,6 +1567,61 @@ test("runAiWebSearch keeps posting-shaped deferred leads and rejects a generic o
   );
 });
 
+test("runAiWebSearch persists base pay and annual earnings in separate fields", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: assistantJson({
+      roles: [
+        role({
+          company: "Tipped Bar",
+          title: "Lead Bartender",
+          url: "https://jobs.example.test/tipped-bar",
+          base_comp_text: "$11.35 per hour",
+          annual_earnings_text: "$95,000 - $120,000 including tips",
+          body_text:
+            "Base pay: $11.35 per hour. Estimated annual earnings including tips: $95,000 - $120,000.",
+        }),
+      ],
+      queries_run: [{ prompt_id: "p1", query: "NYC lead bartender jobs" }],
+    }),
+    resolveJobUrlImpl: canonicalResolver(),
+  });
+
+  assert.equal(result.new, 1, JSON.stringify(result));
+  const row = readDbScannerRows({ repoRoot }).find((item) => item.company === "Tipped Bar");
+  assert.equal(row.base, "$11.35 per hour");
+  assert.equal(row.tc, "$95,000 - $120,000 including tips");
+});
+
+test("runAiWebSearch never copies annual earnings into base pay", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: assistantJson({
+      roles: [
+        role({
+          company: "Tips Only Bar",
+          title: "Bartender",
+          url: "https://jobs.example.test/tips-only-bar",
+          comp_text: null,
+          annual_earnings_text: "$85,000 - $110,000 including tips",
+          body_text: "Estimated annual earnings including tips: $85,000 - $110,000.",
+        }),
+      ],
+      queries_run: [{ prompt_id: "p1", query: "NYC bartender jobs" }],
+    }),
+    resolveJobUrlImpl: canonicalResolver(),
+  });
+
+  assert.equal(result.new, 1, JSON.stringify(result));
+  const row = readDbScannerRows({ repoRoot }).find((item) => item.company === "Tips Only Bar");
+  assert.equal(row.base, "verify");
+  assert.equal(row.tc, "$85,000 - $110,000 including tips");
+});
+
 test("runAiWebSearch reports the count visible at the candidate's saved fit floor", async () => {
   const repoRoot = repo({ prompts: 1 });
   candidateConfigPatch({
@@ -2318,7 +2373,7 @@ test("runAiWebSearch sends recovery candidates through the existing hard gates",
       if (url === belowFloorUrl) {
         return specificResolution(url, {
           location: "New York, NY",
-          bodyText: fullJd("Base salary: $75,000 - $85,000 per year"),
+          bodyText: fullJd("Base salary: $75,000 - $84,000 per year"),
         });
       }
       return specificResolution(url, {
@@ -2468,7 +2523,7 @@ test("runAiWebSearch continues recovery when canonical hard gates erase the firs
         bodyText: url.includes("expired")
           ? fullJd("Expired posting")
           : url.includes("below-floor")
-            ? fullJd("Base salary: $75,000 - $95,000 per year")
+            ? fullJd("Base salary: $75,000 - $80,000 per year")
             : fullJd("Base salary: $90,000 - $100,000 per year"),
         liveness: url.includes("expired")
           ? { result: "expired", reason: "Expired posting." }

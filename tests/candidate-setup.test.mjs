@@ -422,6 +422,21 @@ describe("candidate setup DB readiness and document formats", () => {
     assert.match(config.setup.missing.apply_ready.join("\n"), /compensation floor/i);
   });
 
+  it("accepts minimum annual earnings as the candidate compensation floor", () => {
+    const repoRoot = buildDbRoot();
+
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: { compensation: { minimum_annual_earnings: 85_000 } },
+    });
+
+    const config = candidateConfigGet({ repoRoot });
+    assert.equal(config.profile.compensation.minimum_annual_earnings, 85_000);
+    assert.ok(!config.setup.missing.gate_ready.includes("compensation floor"));
+    assert.ok(!config.setup.missing.apply_ready.includes("compensation floor"));
+  });
+
   it("lets a résumé-less candidate search after they choose to build their profile from answers", () => {
     const repoRoot = buildDbRoot();
 
