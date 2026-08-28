@@ -49,6 +49,7 @@ import { dbExists } from "../db/connection.mjs";
 import { buildDbSeenSets } from "../db/scan-context.mjs";
 import { candidateConfigGet } from "../db/verbs.mjs";
 import { hydrateJobOffer } from "../intake/resolve.mjs";
+import { validatePublicHttpUrl } from "../net/public-http-fetch.mjs";
 import { computeAllows } from "../profile/modes.mjs";
 import {
   addPostingIdentity,
@@ -265,32 +266,14 @@ const GENERIC_CAREER_HUB_SEGMENTS = new Set([
   "open-positions",
   "opportunities",
   "positions",
+  "results",
   "search",
+  "search-results",
   "work-for-us",
   "work-with-us",
 ]);
 
-const POSTING_ID_QUERY_KEYS = new Set([
-  "gh_jid",
-  "jid",
-  "jk",
-  "jl",
-  "job_id",
-  "jobid",
-  "joblistingid",
-  "req_id",
-  "reqid",
-  "requisition_id",
-  "requisitionid",
-  "vjk",
-]);
-
 function isGenericCareerHubUrl(url) {
-  const hasPostingId = [...url.searchParams].some(
-    ([key, value]) => POSTING_ID_QUERY_KEYS.has(key.toLowerCase()) && value.trim()
-  );
-  if (hasPostingId) return false;
-
   const segments = url.pathname
     .split("/")
     .map((segment) => segment.trim().toLowerCase())
@@ -301,9 +284,11 @@ function isGenericCareerHubUrl(url) {
 }
 
 export function isPostingEvidenceUrl(rawUrl) {
+  const checked = validatePublicHttpUrl(rawUrl);
+  if (!checked.ok) return false;
   let url;
   try {
-    url = new URL(rawUrl);
+    url = new URL(checked.url);
   } catch {
     return false;
   }
@@ -318,7 +303,6 @@ export function isPostingEvidenceUrl(rawUrl) {
 
   const host = url.hostname.replace(/^www\./i, "").toLowerCase();
   const path = url.pathname.toLowerCase();
-  if (isGenericCareerHubUrl(url)) return false;
   if (host === "linkedin.com" || host.endsWith(".linkedin.com")) {
     return /^\/jobs\/view\/[^/]*\d+\/?$/i.test(path);
   }
@@ -338,7 +322,7 @@ export function isPostingEvidenceUrl(rawUrl) {
   if (host === "wellfound.com" || host.endsWith(".wellfound.com")) {
     return /^\/jobs\/\d+(?:[-/]|$)/i.test(path);
   }
-  return true;
+  return !isGenericCareerHubUrl(url);
 }
 
 function mergeSourceReceipts(toolTrace, recoveredSources) {
@@ -434,7 +418,9 @@ function mergePromptCoverage({ selected, outcomes }) {
       .flatMap((outcome) => outcome.queryResults || [])
       .filter((entry) => entry.promptId === prompt.id);
     const queries = entries.flatMap((entry) => entry.queries || []);
-    const failure = entries.find((entry) => entry.status === "failed");
+    const primaryEntries = entries.filter((entry) => entry.auxiliary !== true);
+    const authoritativeEntries = primaryEntries.length ? primaryEntries : entries;
+    const failure = authoritativeEntries.find((entry) => entry.status === "failed");
     return {
       promptId: prompt.id,
       prompt: prompt.text,
@@ -483,7 +469,7 @@ function freshnessRecoveryInstruction(rejections) {
   ].join("\n");
 }
 
-function usefulSetTopUpInstruction(consideredCandidates) {
+function usefulSetTopUpInstruction(consideredCandidates, missingTargetTitles = []) {
   const consideredPostings = consideredCandidates.slice(0, 60).map(({ offer, reason }) => ({
     url: offer.url,
     reason: String(reason || "CareerRat already considered this posting.").slice(0, 240),
@@ -491,8 +477,14 @@ function usefulSetTopUpInstruction(consideredCandidates) {
   return [
     "CareerRat's canonical result set is still underfilled after the saved prompts finished.",
     "Run one bounded additional search on the same provider for this saved prompt. Return additional, distinct, currently active posting-specific roles that satisfy every original candidate boundary.",
+    missingTargetTitles.length
+      ? `Prioritize these configured target titles that are still unrepresented: ${missingTargetTitles.join(", ")}.`
+      : "Prioritize a distinct configured target title that is still unrepresented when one is available.",
     "Search employer-owned career pages and direct ATS postings first. Do not repeat an already considered URL or requisition, and do not loosen title, location, compensation, freshness, or fit requirements.",
-    JSON.stringify({ considered_postings: consideredPostings }),
+    JSON.stringify({
+      missing_target_titles: missingTargetTitles,
+      considered_postings: consideredPostings,
+    }),
   ].join("\n");
 }
 
@@ -508,6 +500,8 @@ function normalizedTitleWords(value) {
   );
 }
 
+const GENERIC_TARGET_TITLE_SUFFIXES = new Set(["engineer", "engineering", "manager", "management"]);
+
 function titleMatchesBucket(title, bucket) {
   const actual = normalizedTitleWords(title);
   return (Array.isArray(bucket?.titles) ? bucket.titles : []).some((targetTitle) => {
@@ -516,12 +510,46 @@ function titleMatchesBucket(title, bucket) {
   });
 }
 
-function promptMatchesBucket(prompt, bucket) {
+function promptMatchesTitle(prompt, targetTitle) {
   const promptWords = normalizedTitleWords(prompt?.text);
-  return (Array.isArray(bucket?.titles) ? bucket.titles : []).some((targetTitle) => {
-    const target = normalizedTitleWords(targetTitle);
-    return target.size > 0 && [...target].every((word) => promptWords.has(word));
+  const target = normalizedTitleWords(targetTitle);
+  if (target.size > 0 && [...target].every((word) => promptWords.has(word))) return true;
+  const targetWords = [...target];
+  const core = GENERIC_TARGET_TITLE_SUFFIXES.has(targetWords.at(-1))
+    ? targetWords.slice(0, -1)
+    : [];
+  return core.length >= 2 && core.every((word) => promptWords.has(word));
+}
+
+function configuredTitlesNamedByPrompt(prompt, bucket) {
+  const matches = (Array.isArray(bucket?.titles) ? bucket.titles : []).filter((title) =>
+    promptMatchesTitle(prompt, title)
+  );
+  return mostSpecificTitles(matches);
+}
+
+function mostSpecificTitles(titles) {
+  return titles.filter((title) => {
+    const words = normalizedTitleWords(title);
+    return !titles.some((otherTitle) => {
+      if (otherTitle === title) return false;
+      const otherWords = normalizedTitleWords(otherTitle);
+      return otherWords.size > words.size && [...words].every((word) => otherWords.has(word));
+    });
   });
+}
+
+function promptMatchesBucketName(prompt, bucket) {
+  const promptWords = normalizedTitleWords(prompt?.text);
+  const bucketWords = normalizedTitleWords(bucket?.name);
+  return bucketWords.size >= 2 && [...bucketWords].every((word) => promptWords.has(word));
+}
+
+function promptMatchesBucket(prompt, bucket) {
+  return (
+    configuredTitlesNamedByPrompt(prompt, bucket).length > 0 ||
+    promptMatchesBucketName(prompt, bucket)
+  );
 }
 
 // search-jobs is deliberately excluded from the embedded runtime's default
@@ -640,14 +668,14 @@ export async function runAiWebSearch({
   async function runSavedPrompt(
     prompt,
     promptIndex,
-    { rejectedCandidates = [], topUpCandidates = null } = {}
+    { rejectedCandidates = [], topUpCandidates = null, missingTargetTitles = [] } = {}
   ) {
     const promptNumber = promptIndex + 1;
     const topUp = Array.isArray(topUpCandidates);
     const searchInstruction = rejectedCandidates.length
       ? freshnessRecoveryInstruction(rejectedCandidates)
       : topUp
-        ? usefulSetTopUpInstruction(topUpCandidates)
+        ? usefulSetTopUpInstruction(topUpCandidates, missingTargetTitles)
         : null;
     const lifecycle = {
       phase: "prompt",
@@ -822,7 +850,18 @@ export async function runAiWebSearch({
         foundCount: 0,
         error: message,
       });
-      return { promptId: prompt.id, roles: [], toolTrace, errors: [message], ...coverage };
+      return {
+        promptId: prompt.id,
+        roles: [],
+        toolTrace,
+        errors: [message],
+        topUp,
+        queryResults: coverage.queryResults.map((entry) => ({
+          ...entry,
+          auxiliary: topUp,
+        })),
+        failedPromptIds: coverage.failedPromptIds,
+      };
     }
 
     const roles = Array.isArray(outcome.body.data?.roles) ? outcome.body.data.roles : [];
@@ -842,7 +881,18 @@ export async function runAiWebSearch({
       foundCount: roles.length,
       ...(promptFailed ? { error: coverage.queryResults[0]?.error } : {}),
     });
-    return { promptId: prompt.id, roles, toolTrace, errors: [], ...coverage };
+    return {
+      promptId: prompt.id,
+      roles,
+      toolTrace,
+      errors: [],
+      topUp,
+      queryResults: coverage.queryResults.map((entry) => ({
+        ...entry,
+        auxiliary: topUp,
+      })),
+      failedPromptIds: coverage.failedPromptIds,
+    };
   }
 
   const promptOutcomes = await mapBounded(
@@ -940,6 +990,7 @@ export async function runAiWebSearch({
           resolveJobUrlImpl,
           force: true,
           rejectExpired: true,
+          requirePostingIdentity: true,
           signal,
           resolutionCache,
         });
@@ -1072,6 +1123,32 @@ export async function runAiWebSearch({
     selected.some((prompt) => promptMatchesBucket(prompt, bucket))
   );
   const requiredBucketCount = Math.min(MIN_USEFUL_SET_BUCKETS, targetBuckets.length);
+  const selectedTargetTitles = new Map();
+  for (const bucket of targetBuckets) {
+    const scopedTitleKeys = new Set();
+    for (const prompt of selected) {
+      const namedTitles = configuredTitlesNamedByPrompt(prompt, bucket);
+      const promptTitles = namedTitles.length
+        ? namedTitles
+        : promptMatchesBucketName(prompt, bucket)
+          ? bucket.titles
+          : [];
+      for (const title of promptTitles) scopedTitleKeys.add(String(title).trim().toLowerCase());
+    }
+    for (const title of bucket.titles) {
+      const key = String(title || "")
+        .trim()
+        .toLowerCase();
+      if (!key || !scopedTitleKeys.has(key)) continue;
+      const existing = selectedTargetTitles.get(key) || {
+        title: String(title).trim(),
+        buckets: [],
+      };
+      existing.buckets.push(bucket);
+      selectedTargetTitles.set(key, existing);
+    }
+  }
+  const requiredTitleCount = Math.min(MIN_USEFUL_SET_ROLES, selectedTargetTitles.size);
   const interimCoverage = mergePromptCoverage({ selected, outcomes: allPromptOutcomes });
   const canRecoverUsefulSet =
     interimCoverage.failedPromptIds.length === 0 &&
@@ -1085,12 +1162,40 @@ export async function runAiWebSearch({
         .filter((bucket) => offers.some((offer) => titleMatchesBucket(offer.title, bucket)))
         .map((bucket) => bucket.name || JSON.stringify(bucket.titles))
     );
+    const distinctRoleTitles = new Set(
+      offers
+        .map((offer) =>
+          String(offer.title || "")
+            .trim()
+            .toLowerCase()
+        )
+        .filter(Boolean)
+    );
+    const representedTargetTitles = new Set();
+    for (const offer of offers) {
+      const matchingTargetTitles = [...selectedTargetTitles.values()]
+        .filter((target) =>
+          target.buckets.some((bucket) =>
+            titleMatchesBucket(offer.title, { ...bucket, titles: [target.title] })
+          )
+        )
+        .map((target) => target.title);
+      for (const title of mostSpecificTitles(matchingTargetTitles)) {
+        representedTargetTitles.add(String(title).trim().toLowerCase());
+      }
+    }
     return {
       complete:
-        offers.length >= MIN_USEFUL_SET_ROLES && representedBuckets.size >= requiredBucketCount,
+        offers.length >= MIN_USEFUL_SET_ROLES &&
+        representedBuckets.size >= requiredBucketCount &&
+        distinctRoleTitles.size >= requiredTitleCount &&
+        representedTargetTitles.size >= requiredTitleCount,
       missingBuckets: targetBuckets.filter(
         (bucket) => !representedBuckets.has(bucket.name || JSON.stringify(bucket.titles))
       ),
+      missingTargetTitles: [...selectedTargetTitles.entries()]
+        .filter(([key]) => !representedTargetTitles.has(key))
+        .map(([, target]) => target),
     };
   }
 
@@ -1107,12 +1212,17 @@ export async function runAiWebSearch({
         prompt,
         promptIndex,
         topUpCount: topUpCounts.get(prompt.id) || 0,
+        missingTargetTitles: state.missingTargetTitles.filter((target) =>
+          target.buckets.some((bucket) => promptMatchesBucket(prompt, bucket))
+        ),
         targetsMissingBucket: state.missingBuckets.some((bucket) =>
           promptMatchesBucket(prompt, bucket)
         ),
       }))
       .sort(
         (left, right) =>
+          Number(right.missingTargetTitles.length > 0) -
+            Number(left.missingTargetTitles.length > 0) ||
           Number(right.targetsMissingBucket) - Number(left.targetsMissingBucket) ||
           left.topUpCount - right.topUpCount ||
           left.promptIndex - right.promptIndex
@@ -1128,6 +1238,7 @@ export async function runAiWebSearch({
     topUpCounts.set(topUpSpec.prompt.id, topUpSpec.topUpCount + 1);
     const topUpOutcome = await runSavedPrompt(topUpSpec.prompt, topUpSpec.promptIndex, {
       topUpCandidates: consideredCandidates,
+      missingTargetTitles: topUpSpec.missingTargetTitles.map((target) => target.title),
     });
     allPromptOutcomes.push(topUpOutcome);
     await collectPromptOutcomes([topUpOutcome], {
@@ -1140,7 +1251,24 @@ export async function runAiWebSearch({
   }
 
   const toolTrace = allPromptOutcomes.flatMap((result) => result.toolTrace);
-  const promptErrors = [...new Set(allPromptOutcomes.flatMap((result) => result.errors))];
+  const promptErrors = [
+    ...new Set(
+      allPromptOutcomes.filter((result) => result.topUp !== true).flatMap((result) => result.errors)
+    ),
+  ];
+  const warnings = [
+    ...new Set(
+      allPromptOutcomes
+        .filter((result) => result.topUp === true)
+        .flatMap((result) => [
+          ...(result.errors || []),
+          ...(result.queryResults || [])
+            .filter((entry) => entry.status === "failed")
+            .map((entry) => entry.error)
+            .filter(Boolean),
+        ])
+    ),
+  ];
   const coverage = mergePromptCoverage({ selected, outcomes: allPromptOutcomes });
 
   const canonicalQualification = requalifyCanonicalOffers(canonicalCandidates, {
@@ -1204,6 +1332,7 @@ export async function runAiWebSearch({
     partial: persistedOffers.filter((offer) => offer.bodyPartial === true).length,
     unreadable: captureFailures.length,
     errors: promptErrors,
+    warnings,
     captureFailures: captureFailures.slice(0, 10),
     revalidatedExisting,
     offers: persistedOffers.map((offer) => ({

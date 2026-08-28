@@ -22,7 +22,7 @@ import { classifyLiveness } from "../liveness/liveness-core.mjs";
 import { fetchPublicHttpText, validatePublicHttpUrl } from "../net/public-http-fetch.mjs";
 import { platformForHost } from "../providers/search-sources.mjs";
 import { extractReqId, fetchProvider, inferProvider } from "../scoring/sourced-scanner.mjs";
-import { extractStructuredJobDescription } from "./job-posting-extract.mjs";
+import { extractJobPageIdentity, extractStructuredJobPostings } from "./job-posting-extract.mjs";
 
 const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_MAX_BYTES = 1024 * 1024;
@@ -103,20 +103,25 @@ async function resolveJobUrlUncached(
   }
 
   if (isSpaJobHost(parsed.hostname) || platformForHost(parsed.hostname)) {
+    let postingEvidence;
     if (probePostingRedirect) {
-      const expiredRedirect = await resolveDefinitivePostingRedirect({
+      const redirectProbe = await resolveDefinitivePostingRedirect({
         url: rawUrl,
         fetchImpl,
         resolveHost,
         timeoutMs,
         signal,
       });
-      if (expiredRedirect) return mergeProviderMetadata(providerResolution, expiredRedirect);
+      if (redirectProbe?.liveness) {
+        return mergeProviderMetadata(providerResolution, redirectProbe);
+      }
+      postingEvidence = redirectProbe?.postingEvidence;
     }
     return mergeProviderMetadata(providerResolution, {
       bodyFetchStatus: "deferred",
       url: rawUrl,
       provider,
+      ...(postingEvidence ? { postingEvidence } : {}),
       reason:
         "SPA-rendered or login-gated host: no session browser available to a headless intake route; " +
         "evaluate-job's own STEP 0 browser-escalation path handles this once confirmed",
@@ -144,6 +149,7 @@ export async function hydrateJobOffer(
     resolveJobUrlImpl = resolveJobUrl,
     force = false,
     rejectExpired = false,
+    requirePostingIdentity = false,
     minBodyChars = MIN_USABLE_BODY_CHARS,
     signal,
     resolutionCache,
@@ -165,6 +171,7 @@ export async function hydrateJobOffer(
       signal,
       resolutionCache,
       probePostingRedirect: true,
+      requirePostingIdentity,
     });
   } catch (error) {
     resolved = {
@@ -183,20 +190,58 @@ export async function hydrateJobOffer(
       bodyFetchReason: resolved.liveness.reason || "The job posting is no longer available.",
     };
   }
+  if (requirePostingIdentity && postingIdentityAssessment(offer, resolved) !== "specific") {
+    return {
+      ...offer,
+      ...(existingBody ? { bodyText: existingBody } : {}),
+      bodyPartial: true,
+      bodyFetchStatus: "unavailable",
+      bodyFetchReason: "This link does not identify one specific job posting.",
+    };
+  }
+  const visibleTitle = requirePostingIdentity ? canonicalVisibleTitle(offer, resolved) : "";
   if (resolved?.bodyFetchStatus === "resolved" && canonicalBody.length >= minBodyChars) {
     const bodyPartial = resolved?.bodyPartial === true;
     return {
       ...offer,
       url: resolved.url || offer.url,
       company: resolved.company || offer.company,
-      title: resolved.title || offer.title,
-      location: preferredResolvedLocation(resolved.location, offer.location),
-      comp: resolved.comp || offer.comp,
+      title: resolved.title || visibleTitle || offer.title,
+      location: requirePostingIdentity
+        ? String(resolved.location || "").trim()
+        : preferredResolvedLocation(resolved.location, offer.location),
+      comp: requirePostingIdentity
+        ? String(resolved.comp || "").trim()
+        : resolved.comp || offer.comp,
+      postedAt: requirePostingIdentity
+        ? resolved.postedAt || null
+        : resolved.postedAt || offer.postedAt,
       bodyText: canonicalBody,
       bodyPartial,
       ...(bodyPartial && resolved?.reason ? { bodyFetchReason: resolved.reason } : {}),
       ...(resolved.provider ? { provider: resolved.provider } : {}),
       ...(resolved.url && resolved.url !== offer.url ? { capturedUrl: offer.url } : {}),
+    };
+  }
+
+  if (requirePostingIdentity) {
+    return {
+      ...offer,
+      url: resolved?.url || offer.url,
+      company: resolved?.company || offer.company,
+      title: resolved?.title || offer.title,
+      location: String(resolved?.location || "").trim(),
+      comp: String(resolved?.comp || "").trim(),
+      postedAt: resolved?.postedAt || null,
+      bodyText: "",
+      description: "",
+      rawText: "",
+      bodyPartial: true,
+      bodyFetchStatus: "deferred",
+      bodyFetchReason:
+        resolved?.reason || "The full job description was not available from this source.",
+      ...(resolved?.provider ? { provider: resolved.provider } : {}),
+      ...(resolved?.url && resolved.url !== offer.url ? { capturedUrl: offer.url } : {}),
     };
   }
 
@@ -218,6 +263,240 @@ function preferredResolvedLocation(resolvedLocation, existingLocation) {
   return resolvedLocation;
 }
 
+const CAREER_CONTEXT_SEGMENTS = new Set([
+  "career",
+  "careers",
+  "employment",
+  "job",
+  "jobs",
+  "openings",
+  "opportunities",
+  "positions",
+]);
+
+const GENERIC_HUB_SEGMENTS = new Set([
+  ...CAREER_CONTEXT_SEGMENTS,
+  "index",
+  "index.html",
+  "location",
+  "locations",
+  "results",
+  "search",
+  "search-results",
+]);
+
+const HARD_GENERIC_HUB_SEGMENTS = new Set([
+  "location",
+  "locations",
+  "results",
+  "search",
+  "search-results",
+]);
+
+const ROLE_LISTING_WORDS = new Set(["jobs", "openings", "opportunities", "positions", "roles"]);
+
+const TITLE_IDENTITY_IGNORED_WORDS = new Set([
+  "and",
+  "at",
+  "career",
+  "careers",
+  "for",
+  "in",
+  "job",
+  "jobs",
+  "of",
+  "position",
+  "role",
+  "the",
+]);
+
+const TITLE_IDENTITY_QUALIFIERS = new Set([
+  "ii",
+  "iii",
+  "iv",
+  "junior",
+  "jr",
+  "lead",
+  "principal",
+  "senior",
+  "sr",
+  "staff",
+]);
+
+const TITLE_IDENTITY_ALIASES = new Map([
+  ["asst", "assistant"],
+  ["eng", "engineer"],
+  ["jr", "junior"],
+  ["mgr", "manager"],
+  ["sr", "senior"],
+]);
+
+function normalizedIdentityWords(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/u)
+    .filter((word) => word && !TITLE_IDENTITY_IGNORED_WORDS.has(word))
+    .map((word) => TITLE_IDENTITY_ALIASES.get(word) || word);
+}
+
+function identityCarriesTitleCore(identity, title) {
+  const titleCore = String(title || "").split(/\s(?:[-—|])\s|\s*\(/u, 1)[0];
+  const expected = normalizedIdentityWords(titleCore).filter(
+    (word) => !TITLE_IDENTITY_QUALIFIERS.has(word)
+  );
+  if (!expected.length) return false;
+  const actual = new Set(normalizedIdentityWords(identity));
+  return expected.every((word) => actual.has(word));
+}
+
+function identityCarriesTitle(identity, title) {
+  const expected = normalizedIdentityWords(title);
+  const actual = new Set(normalizedIdentityWords(identity));
+  const qualifiers = expected.filter((word) => TITLE_IDENTITY_QUALIFIERS.has(word));
+  return qualifiers.every((word) => actual.has(word)) && identityCarriesTitleCore(identity, title);
+}
+
+function hasNonemptyQuery(url, ...keys) {
+  return keys.some((key) => String(url.searchParams.get(key) || "").trim());
+}
+
+function isTrustedPlatformPostingUrl(rawUrl) {
+  const checked = validatePublicHttpUrl(rawUrl);
+  if (!checked.ok) return false;
+  try {
+    const url = new URL(checked.url);
+    if (extractReqId(url).id) return true;
+    if (platformForHost(url.hostname) === "indeed") {
+      return /^\/viewjob\/?$/iu.test(url.pathname) && hasNonemptyQuery(url, "jk", "vjk");
+    }
+    if (
+      (url.hostname === "wellfound.com" || url.hostname === "www.wellfound.com") &&
+      /^\/jobs\/\d+(?:[-/]|$)/iu.test(url.pathname)
+    ) {
+      return true;
+    }
+    if (
+      url.hostname === "careers.snowflake.com" &&
+      /\/(?:[a-z]{2}\/)?(?:[a-z]{2}\/)?job\/[^/]+/iu.test(url.pathname)
+    ) {
+      return true;
+    }
+    if (
+      url.hostname === "www.coinbase.com" &&
+      /^\/careers\/positions\/[^/]+\/?$/iu.test(url.pathname)
+    ) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function isGenericHubUrl(rawUrl, title) {
+  try {
+    const url = new URL(rawUrl);
+    const segments = url.pathname
+      .split("/")
+      .map((segment) => segment.trim().toLowerCase())
+      .filter(Boolean);
+    if (segments.some((segment) => HARD_GENERIC_HUB_SEGMENTS.has(segment))) return true;
+    if (
+      segments.some((segment) => {
+        const words = segment.split(/[^a-z0-9]+/u).filter(Boolean);
+        return words.length > 1 && words.some((word) => ROLE_LISTING_WORDS.has(word));
+      })
+    ) {
+      return true;
+    }
+    if (segments.length === 0 || segments.every((segment) => GENERIC_HUB_SEGMENTS.has(segment))) {
+      return true;
+    }
+    const firstHostLabel = url.hostname.replace(/^www\./iu, "").split(".")[0];
+    if (
+      (firstHostLabel === "careers" || firstHostLabel === "jobs") &&
+      !identityCarriesTitle(url.pathname, title)
+    ) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function hasRoleListingLanguage(value) {
+  const text = String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return (
+    /\bjobs\b/u.test(text) ||
+    /\b(?:job|role|position) (?:listings?|results?)\b/u.test(text) ||
+    /\b(?:browse|find|search|view)\b.{0,40}\b(?:jobs|openings|positions|roles)\b/u.test(text) ||
+    /\b(?:available|current|open) (?:openings|positions|roles)\b/u.test(text)
+  );
+}
+
+function canonicalVisibleTitle(offer, resolved) {
+  const claimedTitle = resolved?.title || offer?.title;
+  const headings = Array.isArray(resolved?.postingEvidence?.headings)
+    ? resolved.postingEvidence.headings
+    : [];
+  return (
+    headings.find((heading) => {
+      const text = String(heading || "").trim();
+      return (
+        text.length > 0 &&
+        text.length <= 160 &&
+        !hasRoleListingLanguage(text) &&
+        identityCarriesTitleCore(text, claimedTitle)
+      );
+    }) || ""
+  );
+}
+
+function isStrongDeferredPostingUrl(rawUrl, evidence) {
+  return evidence?.guardedRedirectProbe === true && isTrustedPlatformPostingUrl(rawUrl);
+}
+
+function postingIdentityAssessment(offer, resolved) {
+  const evidence = resolved?.postingEvidence;
+  const destinationUrl = evidence?.finalUrl || resolved?.url;
+  const redirected =
+    Boolean(evidence?.finalUrl && offer?.url) &&
+    normalizeComparableUrl(evidence.finalUrl) !== normalizeComparableUrl(offer.url);
+  const title = resolved?.title || canonicalVisibleTitle(offer, resolved) || offer?.title;
+  if (
+    resolved?.bodyFetchStatus === "deferred" &&
+    isStrongDeferredPostingUrl(resolved?.url || offer?.url, evidence)
+  ) {
+    return "specific";
+  }
+  if (!evidence) return resolved?.providerExactMatch === true ? "specific" : "unknown";
+  if (Number(evidence.structuredPostingCount) > 1) return "generic";
+  if (Array.isArray(evidence.canonicalPostingUrls) && evidence.canonicalPostingUrls.length > 1) {
+    return "generic";
+  }
+  if (Number(evidence.structuredPostingCount) === 1) return "specific";
+  if (!destinationUrl || isGenericHubUrl(destinationUrl, title)) return "generic";
+  const pageIdentities = [
+    evidence.pageTitle,
+    ...(Array.isArray(evidence.headings) ? evidence.headings : []),
+  ];
+  if (pageIdentities.some((identity) => hasRoleListingLanguage(identity))) return "generic";
+  const identities = [
+    destinationUrl,
+    ...pageIdentities,
+    ...(!redirected && offer?.url ? [offer.url] : []),
+  ];
+  if (identities.some((identity) => identityCarriesTitle(identity, title))) return "specific";
+  return "unknown";
+}
+
 function mergeProviderMetadata(providerResolution, result) {
   if (!providerResolution) return result;
   return {
@@ -228,6 +507,9 @@ function mergeProviderMetadata(providerResolution, result) {
     company: result.company || providerResolution.company,
     location: result.location || providerResolution.location,
     comp: result.comp || providerResolution.comp,
+    postedAt: result.postedAt || providerResolution.postedAt,
+    providerExactMatch:
+      result.providerExactMatch === true || providerResolution.providerExactMatch === true,
   };
 }
 
@@ -271,7 +553,7 @@ async function resolveViaProviderBoard({
   }
   const match = (jobs || []).find((job) => {
     if (!job.url) return false;
-    if (job.url === url) return true;
+    if (normalizedProviderPostingUrl(job.url) === normalizedProviderPostingUrl(url)) return true;
     if (!targetReqId.id) return false;
     const jobReqId = extractReqId(job.url);
     return jobReqId.id === targetReqId.id;
@@ -300,10 +582,12 @@ async function resolveViaProviderBoard({
     bodyFetchStatus: "resolved",
     url: match.url || url,
     provider,
+    providerExactMatch: true,
     title: match.title || null,
     company: match.company || fallbackCompanyFromUrl(url),
     location: match.location || null,
     comp: match.comp || null,
+    postedAt: match.postedAt || null,
     bodyText: match.bodyText || "",
     bodyPartial: match.bodyPartial === true,
     reason:
@@ -311,6 +595,25 @@ async function resolveViaProviderBoard({
         ? "The job description exceeded the provider capture safety limit."
         : null,
   };
+}
+
+const TRACKING_QUERY_KEYS = new Set(["ref", "referrer", "source", "sourceid", "trackingid"]);
+
+function normalizedProviderPostingUrl(value) {
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    for (const key of [...url.searchParams.keys()]) {
+      if (key.toLowerCase().startsWith("utm_") || TRACKING_QUERY_KEYS.has(key.toLowerCase())) {
+        url.searchParams.delete(key);
+      }
+    }
+    url.searchParams.sort();
+    if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/u, "");
+    return url.toString();
+  } catch {
+    return String(value || "").trim();
+  }
 }
 
 function fallbackCompanyFromUrl(url) {
@@ -355,11 +658,16 @@ async function resolvePlainFetch({
   }
 
   const html = fetched.rawText;
-  const bodyText = extractStructuredJobDescription(html) || htmlToTextLiveness(html);
+  const finalUrl = fetched.finalUrl || url;
+  const pageIdentity = extractJobPageIdentity(html);
+  const structuredPostings = extractStructuredJobPostings(html);
+  const structuredPosting = structuredPostings.length === 1 ? structuredPostings[0] : null;
+  const structuredBody = structuredPosting?.description || "";
+  const bodyText = structuredBody || htmlToTextLiveness(html);
   const cappedPreview = isCappedPreviewUrl(fetched.finalUrl || url);
   const classified = classifyLiveness({
     status: fetched.status,
-    finalUrl: fetched.finalUrl || url,
+    finalUrl,
     bodyText,
     applyControls: extractApplyControlsFromHtml(html),
   });
@@ -369,21 +677,29 @@ async function resolvePlainFetch({
       bodyFetchStatus: "resolved",
       url,
       provider,
-      title: null,
-      company: null,
-      location: null,
-      comp: null,
+      title: structuredPosting?.title || null,
+      company: structuredPosting?.company || null,
+      location: structuredPosting?.location || null,
+      comp: structuredPosting?.comp || null,
+      postedAt: structuredPosting?.postedAt || null,
       bodyText,
       bodyPartial: cappedPreview,
       ...(cappedPreview
         ? { reason: "The source exposes a capped preview instead of the complete job description." }
         : {}),
       liveness: classified,
+      postingEvidence: {
+        ...pageIdentity,
+        finalUrl,
+        structuredPostingCount: structuredPostings.length,
+        canonicalPostingUrls: [],
+      },
     };
   }
 
   const sourceReqId = extractReqId(url);
-  for (const canonicalUrl of extractCanonicalAtsUrls(html, fetched.finalUrl || url)) {
+  const canonicalPostingUrls = extractCanonicalAtsUrls(html, finalUrl);
+  for (const canonicalUrl of canonicalPostingUrls.length === 1 ? canonicalPostingUrls : []) {
     const canonicalProvider = inferProvider({ careers_url: canonicalUrl });
     if (!canonicalProvider) continue;
     const canonicalReqId = extractReqId(canonicalUrl);
@@ -406,7 +722,7 @@ async function resolvePlainFetch({
       return { ...resolved, sourceUrl: url };
     }
   }
-  const applicationUrl = extractEmbeddedApplicationUrl(html, fetched.finalUrl || url);
+  const applicationUrl = extractEmbeddedApplicationUrl(html, finalUrl);
 
   if (classified.code === "insufficient_content" || classified.code === "bot_challenge") {
     return { bodyFetchStatus: "deferred", url, provider, reason: classified.reason };
@@ -418,19 +734,26 @@ async function resolvePlainFetch({
   // (there's no usable text to hand the classify step at all).
   return {
     bodyFetchStatus: "resolved",
-    url: applicationUrl || url,
-    ...(applicationUrl ? { sourceUrl: url } : {}),
+    url: applicationUrl || finalUrl,
+    ...(applicationUrl || finalUrl !== url ? { sourceUrl: url } : {}),
     provider,
-    title: null,
-    company: null,
-    location: null,
-    comp: null,
+    title: structuredPosting?.title || null,
+    company: structuredPosting?.company || null,
+    location: structuredPosting?.location || null,
+    comp: structuredPosting?.comp || null,
+    postedAt: structuredPosting?.postedAt || null,
     bodyText,
     bodyPartial: cappedPreview,
     ...(cappedPreview
       ? { reason: "The source exposes a capped preview instead of the complete job description." }
       : {}),
     liveness: classified,
+    postingEvidence: {
+      ...pageIdentity,
+      finalUrl,
+      structuredPostingCount: structuredPostings.length,
+      canonicalPostingUrls,
+    },
   };
 }
 
@@ -491,6 +814,7 @@ async function resolveDefinitivePostingRedirect({
     readErrorBody: false,
     signal,
   });
+  if (!fetched.ok && fetched.code !== "response_too_large") return null;
   const finalUrl = fetched.finalUrl || url;
   const liveness = classifyLiveness({
     status: Number(fetched.status || 0),
@@ -498,7 +822,10 @@ async function resolveDefinitivePostingRedirect({
     bodyText: "",
     applyControls: [],
   });
-  if (!new Set(["expired_url", "http_gone"]).has(liveness.code)) return null;
+  const postingEvidence = { guardedRedirectProbe: true, finalUrl };
+  if (!new Set(["expired_url", "http_gone"]).has(liveness.code)) {
+    return { postingEvidence };
+  }
   return {
     bodyFetchStatus: "resolved",
     url,
@@ -510,6 +837,7 @@ async function resolveDefinitivePostingRedirect({
     bodyText: "",
     bodyPartial: true,
     liveness,
+    postingEvidence,
   };
 }
 

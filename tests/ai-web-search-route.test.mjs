@@ -284,6 +284,50 @@ test("AI web-search route persists exact failed prompts and accepts retry prompt
   assert.equal(durable.error.sources[0].url, "https://jobs.example.test");
 });
 
+test("AI web-search route durably warns when only an auxiliary top-up query failed", async () => {
+  const repoRoot = tempRepo();
+  const res = response();
+  const warning = "The additional search query timed out.";
+  await handlerFor({
+    repoRoot,
+    runAiWebSearch: async () => ({
+      searched: 1,
+      found: 1,
+      new: 1,
+      presented: 1,
+      duplicates: 0,
+      errors: [],
+      warnings: [warning],
+      failedPromptIds: [],
+      queryResults: [
+        {
+          promptId: "p1",
+          prompt: "Find AI roles",
+          status: "completed",
+          queries: [
+            { query: "AI roles", status: "completed", error: null },
+            {
+              query: "Find AI roles",
+              status: "failed",
+              error: warning,
+            },
+          ],
+        },
+      ],
+      sources: [{ url: "https://jobs.example.test/role", status: "completed" }],
+    }),
+  })(request(), res);
+
+  assert.equal(sseFrames(res).at(-1).type, "done");
+  const durable = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+  assert.equal(durable.status, "completed");
+  assert.equal(durable.summary.new, 1);
+  assert.deepEqual(durable.summary.failedPromptIds, []);
+  assert.deepEqual(durable.summary.errors, []);
+  assert.deepEqual(durable.summary.warnings, [warning]);
+  assert.equal(durable.summary.queryResults[0].queries[1].error, warning);
+});
+
 test("AI web-search route preserves candidate-safe provider-cap guidance", async () => {
   const repoRoot = tempRepo();
   const message =

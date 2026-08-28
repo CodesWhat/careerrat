@@ -85,6 +85,7 @@ test("known ATS (Greenhouse) board fetch succeeds and finds the matching posting
   const result = await resolveJobUrl(url, { fetchImpl, resolveHost: publicResolver });
   assert.equal(result.bodyFetchStatus, "resolved");
   assert.equal(result.provider, "greenhouse");
+  assert.equal(result.providerExactMatch, true);
   assert.equal(result.title, "Staff Engineer");
   assert.equal(
     result.company,
@@ -335,6 +336,7 @@ test("hydrateJobOffer rejects an exact ATS requisition missing from its successf
     {
       force: true,
       rejectExpired: true,
+      requirePostingIdentity: true,
       resolveHost: publicResolver,
       fetchImpl: async (requestedUrl) => {
         assert.equal(new URL(String(requestedUrl)).hostname, "api.ashbyhq.com");
@@ -385,6 +387,64 @@ test("hydrateJobOffer adopts canonical provider identity instead of model-suppli
   assert.equal(hydrated.title, "Senior IT Systems Engineer");
   assert.equal(hydrated.provider, "greenhouse");
   assert.equal(hydrated.bodyPartial, false);
+});
+
+test("hydrateJobOffer accepts an exact provider match with an opaque requisition URL", async () => {
+  const url = "https://careers.smartrecruiters.com/acme/opaque-reference";
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Acme",
+      title: "Platform Engineer",
+      url,
+      bodyText: "Unverified open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveJobUrlImpl: async () => ({
+        bodyFetchStatus: "resolved",
+        url,
+        provider: "smartrecruiters",
+        providerExactMatch: true,
+        title: "Platform Engineer",
+        company: "Acme",
+        bodyText:
+          "Build and operate the company platform with the product engineering team. ".repeat(8),
+      }),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, undefined);
+  assert.equal(hydrated.bodyPartial, false);
+  assert.match(hydrated.bodyText, /Build and operate/);
+});
+
+test("opaque provider posting identity ignores tracking queries and trailing slashes", async () => {
+  const capturedUrl =
+    "https://acme.recruitee.com/o/platform-engineer/?utm_source=partner#application";
+  const canonicalUrl = "https://acme.recruitee.com/o/platform-engineer";
+  const result = await resolveJobUrl(capturedUrl, {
+    resolveHost: publicResolver,
+    fetchImpl: async (requestedUrl) => {
+      assert.equal(String(requestedUrl), "https://acme.recruitee.com/api/offers/");
+      return jsonResponse({
+        offers: [
+          {
+            title: "Platform Engineer",
+            careers_url: canonicalUrl,
+            location: "Remote, United States",
+            description: `<p>${"Build and operate the product platform. ".repeat(12)}</p>`,
+          },
+        ],
+      });
+    },
+  });
+
+  assert.equal(result.bodyFetchStatus, "resolved");
+  assert.equal(result.providerExactMatch, true);
+  assert.equal(result.url, canonicalUrl);
+  assert.equal(result.title, "Platform Engineer");
 });
 
 test("non-ATS SPA-listed host (Wellfound) -> deferred without ever calling fetchImpl", async () => {
@@ -446,12 +506,16 @@ test("hydrateJobOffer keeps an exact SPA posting deferred when the redirect prob
       company: "COTE NYC",
       title: "Bar Manager",
       url: sourceUrl,
-      bodyText: "Unverified open-web evidence.",
+      location: "Invented, NY",
+      comp: "$999,999",
+      postedAt: "2020-01-01",
+      bodyText: "Model-controlled open-web evidence.",
       bodyPartial: true,
     },
     {
       force: true,
       rejectExpired: true,
+      requirePostingIdentity: true,
       resolveHost: publicResolver,
       fetchImpl: async () => {
         requested += 1;
@@ -463,7 +527,875 @@ test("hydrateJobOffer keeps an exact SPA posting deferred when the redirect prob
   assert.equal(requested, 1);
   assert.equal(hydrated.bodyFetchStatus, "deferred");
   assert.equal(hydrated.bodyPartial, true);
+  assert.equal(hydrated.bodyText, "");
+  assert.equal(hydrated.location, "");
+  assert.equal(hydrated.comp, "");
+  assert.equal(hydrated.postedAt, null);
   assert.match(hydrated.bodyFetchReason, /SPA-rendered or login-gated/);
+});
+
+test("hydrateJobOffer rejects an unrecognized deferred board URL without guarded evidence", async () => {
+  const url = "https://culinaryagents.com/jobs/12345/bartender";
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Dante NYC",
+      title: "Bartender",
+      url,
+      location: "New York, NY",
+      bodyText: "Unverified open-web evidence for one active bartender opening.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveJobUrlImpl: async () => ({
+        bodyFetchStatus: "deferred",
+        url,
+        reason: "The board needs a browser session.",
+      }),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.equal(hydrated.bodyPartial, true);
+  assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
+});
+
+test("hydrateJobOffer rejects a deferred generic hub without posting-shaped URL evidence", async () => {
+  const url = "https://culinaryagents.com/jobs/search-results";
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Dante NYC",
+      title: "Bartender",
+      url,
+      bodyText: "Unverified open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveJobUrlImpl: async () => ({
+        bodyFetchStatus: "deferred",
+        url,
+        reason: "The board needs a browser session.",
+      }),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
+});
+
+test("an arbitrary posting-id query cannot prove deferred identity on an unrecognized host", async () => {
+  const url = "https://careers.example.test/jobs?job_id=12345";
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Acme",
+      title: "Platform Engineer",
+      url,
+      bodyText: "Model-controlled open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveJobUrlImpl: async () => ({
+        bodyFetchStatus: "deferred",
+        url,
+        reason: "The site needs a browser session.",
+        postingEvidence: { guardedRedirectProbe: true, finalUrl: url },
+      }),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
+});
+
+test("an invented numeric job path cannot prove deferred posting identity", async () => {
+  const url = "https://jobs.example.test/platform-engineer-12345";
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Acme",
+      title: "Platform Engineer",
+      url,
+      bodyText: "Model-controlled open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveJobUrlImpl: async () => ({
+        bodyFetchStatus: "deferred",
+        url,
+        reason: "The site needs a browser session.",
+      }),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
+});
+
+test("a known platform URL fails closed when its guarded probe cannot resolve the host", async () => {
+  const url = "https://www.indeed.com/viewjob?jk=active-but-unreachable";
+  let fetched = false;
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Acme",
+      title: "Platform Engineer",
+      url,
+      bodyText: "Model-controlled open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveHost: async () => [],
+      fetchImpl: async () => {
+        fetched = true;
+        throw new Error("unreachable hosts must not be fetched");
+      },
+    }
+  );
+
+  assert.equal(fetched, false);
+  assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
+});
+
+test("hydrateJobOffer rejects a readable multi-role careers location page", async () => {
+  const url = "https://careers.example.test/new-york";
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Example Hospitality",
+      title: "Bartender",
+      url,
+      bodyText: "Unverified open-web evidence for one bartender opening.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      rejectExpired: true,
+      requirePostingIdentity: true,
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        htmlResponse(
+          `<html><head><title>New York careers</title></head><body><h1>New York</h1><h2>Bartender</h2><h2>Server</h2><h2>General Manager</h2><p>${"Join our New York team across several restaurants and choose the role that fits you. ".repeat(8)}</p><label>Choose a position<select><option>Bartender</option><option>Server</option><option>General Manager</option></select></label><button>Apply</button></body></html>`,
+          { finalUrl: url }
+        ),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.equal(hydrated.bodyPartial, true);
+  assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
+});
+
+test("hydrateJobOffer fails closed when a readable page has no posting identity", async () => {
+  const url = "https://www.example.test/locations/new-york";
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Example Hospitality",
+      title: "Bartender",
+      url,
+      location: "New York, NY",
+      bodyText: "Unverified open-web evidence for one bartender opening.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        htmlResponse(
+          `<html><head><title>Open roles in New York</title></head><body><h1>New York</h1><p>${"Browse openings across our New York locations and teams. ".repeat(12)}</p><button>Apply</button></body></html>`,
+          { finalUrl: url }
+        ),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
+});
+
+test("a generic career search page cannot become specific from the claimed title", async () => {
+  const url = "https://www.example.test/careers/search-results";
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Example Hospitality",
+      title: "Bartender",
+      url,
+      bodyText: "Unverified open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        htmlResponse(
+          `<html><head><title>Bartender jobs in New York</title></head><body><h1>Bartender jobs in New York</h1><p>${"Browse current bartender jobs across our New York venues. ".repeat(12)}</p><button>Apply</button></body></html>`,
+          { finalUrl: url }
+        ),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
+});
+
+test("a role-category board page cannot become specific from matching title words", async () => {
+  const url = "https://board.example.test/bartender-jobs-new-york";
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Dante NYC",
+      title: "Bartender",
+      url,
+      bodyText: "Model-controlled open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        htmlResponse(
+          `<html><head><title>Bartender Jobs in New York</title></head><body><h1>Bartender Jobs in New York</h1><h2>Dante NYC</h2><h2>Death &amp; Co</h2><p>${"Browse current bartender jobs from restaurants and bars across New York. ".repeat(12)}</p><button>Apply</button></body></html>`,
+          { finalUrl: url }
+        ),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
+});
+
+test("a location in the claimed title cannot make a location landing page posting-specific", async () => {
+  const url = "https://careers.example.test/new-york";
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Example Hospitality",
+      title: "Bartender - New York",
+      url,
+      bodyText: "Unverified open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        htmlResponse(
+          `<html><head><title>New York careers</title></head><body><h1>New York</h1><p>${"Browse restaurant roles across New York and choose a position. ".repeat(10)}</p><button>Apply</button></body></html>`,
+          { finalUrl: url }
+        ),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
+});
+
+test("hydrateJobOffer rejects a careers page with multiple structured job postings", async () => {
+  const url = "https://careers.example.test/new-york";
+  const structured = [
+    {
+      "@context": "https://schema.org",
+      "@type": "JobPosting",
+      title: "Bartender",
+      description: `<p>${"Build a polished beverage program and serve guests. ".repeat(8)}</p>`,
+    },
+    {
+      "@context": "https://schema.org",
+      "@type": "JobPosting",
+      title: "General Manager",
+      description: `<p>${"Lead restaurant operations and develop the team. ".repeat(10)}</p>`,
+    },
+  ];
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Example Hospitality",
+      title: "Bartender",
+      url,
+      bodyText: "Unverified open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        htmlResponse(
+          `<html><head><title>Bartender jobs in New York</title>${structured.map((posting) => `<script type="application/ld+json">${JSON.stringify(posting)}</script>`).join("")}</head><body><h1>Bartender jobs in New York</h1><button>Apply</button></body></html>`,
+          { finalUrl: url }
+        ),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
+  assert.doesNotMatch(hydrated.bodyText, /Lead restaurant operations/);
+});
+
+test("empty JobPosting metadata does not prove a generic page is one posting", async () => {
+  const url = "https://careers.example.test/jobs";
+  const posting = { "@context": "https://schema.org", "@type": "JobPosting" };
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Acme",
+      title: "Platform Engineer",
+      url,
+      bodyText: "Model-controlled open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        htmlResponse(
+          `<html><head><script type="application/ld+json">${JSON.stringify(posting)}</script></head><body><h1>Engineering jobs</h1><p>${"Browse every current role across our engineering teams and locations. ".repeat(10)}</p><button>Apply</button></body></html>`,
+          { finalUrl: url }
+        ),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
+});
+
+test("identifier labels cannot collapse distinct structured postings", async () => {
+  const url = "https://careers.example.test/jobs";
+  const postings = [
+    {
+      "@context": "https://schema.org",
+      "@type": "JobPosting",
+      title: "Platform Engineer",
+      url,
+      identifier: { "@type": "PropertyValue", name: "Job ID" },
+      description: `<p>${"Build the shared product platform and production infrastructure. ".repeat(8)}</p>`,
+    },
+    {
+      "@context": "https://schema.org",
+      "@type": "JobPosting",
+      title: "Product Manager",
+      url,
+      identifier: { "@type": "PropertyValue", name: "Job ID" },
+      description: `<p>${"Lead product discovery, planning, and delivery with engineering. ".repeat(8)}</p>`,
+    },
+  ];
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Acme",
+      title: "Platform Engineer",
+      url,
+      bodyText: "Model-controlled open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        htmlResponse(
+          `<html><head>${postings.map((posting) => `<script type="application/ld+json">${JSON.stringify(posting)}</script>`).join("")}</head><body><h1>Engineering jobs</h1><button>Apply</button></body></html>`,
+          { finalUrl: url }
+        ),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
+});
+
+test("hydrateJobOffer accepts one structured posting at a generic-looking careers URL", async () => {
+  const url = "https://careers.example.test/new-york";
+  const canonicalBody = "Own the beverage program and lead polished guest service. ".repeat(10);
+  const posting = {
+    "@context": "https://schema.org",
+    "@type": "JobPosting",
+    title: "Lead Bartender",
+    description: `<p>${canonicalBody}</p>`,
+    hiringOrganization: { "@type": "Organization", name: "Example Hospitality Group" },
+  };
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Example Hospitality",
+      title: "Bartender",
+      url,
+      bodyText: "Unverified open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        htmlResponse(
+          `<html><head><script type="application/ld+json">${JSON.stringify(posting)}</script></head><body><button>Apply</button></body></html>`,
+          { finalUrl: url }
+        ),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, undefined);
+  assert.equal(hydrated.bodyPartial, false);
+  assert.equal(hydrated.title, "Lead Bartender");
+  assert.equal(hydrated.company, "Example Hospitality Group");
+  assert.match(hydrated.bodyText, /Own the beverage program/);
+});
+
+test("duplicate structured metadata for one posting is still one posting identity", async () => {
+  const url = "https://careers.example.test/new-york/lead-bartender";
+  const posting = {
+    "@context": "https://schema.org",
+    "@type": "JobPosting",
+    title: "Lead Bartender",
+    url,
+    identifier: { "@type": "PropertyValue", value: "BAR-42" },
+    description: `<p>${"Own the bar program and train the opening team. ".repeat(10)}</p>`,
+  };
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Example Hospitality",
+      title: "Lead Bartender",
+      url,
+      bodyText: "Unverified open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        htmlResponse(
+          `<html><head>${[posting, posting].map((item) => `<script type="application/ld+json">${JSON.stringify(item)}</script>`).join("")}</head><body><p>${"Own the bar program and train the opening team. ".repeat(10)}</p><button>Apply</button></body></html>`,
+          { finalUrl: url }
+        ),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, undefined);
+  assert.equal(hydrated.bodyPartial, false);
+  assert.match(hydrated.bodyText, /Own the bar program/);
+});
+
+test("duplicate structured metadata dedupes when only one copy has an identifier", async () => {
+  const url = "https://careers.example.test/new-york/lead-bartender";
+  const posting = {
+    "@context": "https://schema.org",
+    "@type": "JobPosting",
+    title: "Lead Bartender",
+    url,
+    description: `<p>${"Own the bar program and train the opening team. ".repeat(10)}</p>`,
+  };
+  const postings = [
+    { ...posting, identifier: { "@type": "PropertyValue", value: "BAR-42" } },
+    posting,
+  ];
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Example Hospitality",
+      title: "Lead Bartender",
+      url,
+      bodyText: "Model-controlled open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        htmlResponse(
+          `<html><head>${postings.map((item) => `<script type="application/ld+json">${JSON.stringify(item)}</script>`).join("")}</head><body><button>Apply</button></body></html>`,
+          { finalUrl: url }
+        ),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, undefined);
+  assert.equal(hydrated.bodyPartial, false);
+  assert.match(hydrated.bodyText, /Own the bar program/);
+});
+
+test("structured postings with a shared page URL remain distinct by identifier", async () => {
+  const url = "https://careers.example.test/new-york";
+  const postings = [
+    {
+      "@context": "https://schema.org",
+      "@type": "JobPosting",
+      title: "Bartender",
+      url,
+      identifier: { "@type": "PropertyValue", value: "BAR-42" },
+      description: `<p>${"Own the bar program and train the opening team. ".repeat(10)}</p>`,
+    },
+    {
+      "@context": "https://schema.org",
+      "@type": "JobPosting",
+      title: "General Manager",
+      url,
+      identifier: { "@type": "PropertyValue", value: "GM-84" },
+      description: `<p>${"Lead restaurant operations and develop the management team. ".repeat(10)}</p>`,
+    },
+  ];
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Example Hospitality",
+      title: "Bartender",
+      url,
+      bodyText: "Unverified open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        htmlResponse(
+          `<html><head>${postings.map((posting) => `<script type="application/ld+json">${JSON.stringify(posting)}</script>`).join("")}</head><body><button>Apply</button></body></html>`,
+          { finalUrl: url }
+        ),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
+});
+
+test("hydrateJobOffer accepts a readable career detail URL that carries the role title", async () => {
+  const url = "https://careers.example.test/careers/assistant-general-manager-new-york";
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Example Hospitality",
+      title: "Assistant General Manager",
+      url,
+      bodyText: "Unverified open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        htmlResponse(
+          `<html><head><title>Assistant General Manager | Example Hospitality</title></head><body><h1>Assistant General Manager</h1><p>${"Lead restaurant operations, coach the team, and deliver polished guest service. ".repeat(8)}</p><button>Apply</button></body></html>`,
+          { finalUrl: url }
+        ),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, undefined);
+  assert.equal(hydrated.bodyPartial, false);
+  assert.match(hydrated.bodyText, /Lead restaurant operations/);
+});
+
+test("a canonical visible title replaces model-inflated seniority", async () => {
+  const url = "https://careers.example.test/careers/software-engineer";
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Acme",
+      title: "Senior Software Engineer",
+      url,
+      bodyText: "Model-controlled open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        htmlResponse(
+          `<html><head><title>Software Engineer | Acme</title></head><body><h1>Software Engineer</h1><p>${"Build and maintain the product platform with the software engineering team. ".repeat(10)}</p><button>Apply</button></body></html>`,
+          { finalUrl: url }
+        ),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, undefined);
+  assert.equal(hydrated.title, "Software Engineer");
+  assert.doesNotMatch(hydrated.title, /Senior/);
+});
+
+test("a detail URL without claimed seniority needs matching canonical visible title evidence", async () => {
+  const url = "https://careers.example.test/careers/software-engineer";
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Acme",
+      title: "Senior Software Engineer",
+      url,
+      bodyText: "Model-controlled open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        htmlResponse(
+          `<html><head><title>Join Acme</title></head><body><h1>Build with us</h1><p>${"Build and maintain the product platform with the software engineering team. ".repeat(10)}</p><button>Apply</button></body></html>`,
+          { finalUrl: url }
+        ),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
+});
+
+test("the final redirect destination can prove plain-page posting identity", async () => {
+  const sourceUrl = "https://links.example.test/opening?id=42";
+  const finalUrl = "https://careers.example.test/careers/assistant-general-manager-new-york";
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Example Hospitality",
+      title: "Assistant General Manager",
+      url: sourceUrl,
+      bodyText: "Unverified open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        htmlResponse(
+          `<html><head><title>Assistant General Manager | Example Hospitality</title></head><body><h1>Assistant General Manager</h1><p>${"Lead restaurant operations, coach the team, and deliver polished guest service. ".repeat(8)}</p><button>Apply</button></body></html>`,
+          { finalUrl }
+        ),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, undefined);
+  assert.equal(hydrated.url, finalUrl);
+  assert.equal(hydrated.capturedUrl, sourceUrl);
+});
+
+test("a generic final redirect cannot borrow posting identity from its source URL", async () => {
+  const sourceUrl = "https://job-boards.greenhouse.io/acme/jobs/123456";
+  const finalUrl = "https://careers.example.test/jobs";
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Acme",
+      title: "Platform Engineer",
+      url: sourceUrl,
+      bodyText: "Unverified open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveHost: publicResolver,
+      fetchImpl: async (requestedUrl) => {
+        if (new URL(String(requestedUrl)).hostname === "boards-api.greenhouse.io") {
+          throw new Error("board API unavailable");
+        }
+        return htmlResponse(
+          `<html><head><title>Engineering jobs</title></head><body><h1>Engineering jobs</h1><p>${"Browse current engineering openings across every team and location. ".repeat(12)}</p><button>Apply</button></body></html>`,
+          { finalUrl }
+        );
+      },
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
+});
+
+test("exact provider metadata cannot bless a readable generic destination body", async () => {
+  const sourceUrl = "https://job-boards.greenhouse.io/acme/jobs/123456";
+  const finalUrl = "https://careers.example.test/jobs";
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Acme",
+      title: "Platform Engineer",
+      url: sourceUrl,
+      bodyText: "Unverified open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveJobUrlImpl: async () => ({
+        bodyFetchStatus: "resolved",
+        url: finalUrl,
+        providerExactMatch: true,
+        title: "Platform Engineer",
+        bodyText:
+          "Browse every current engineering opening across all teams and locations. ".repeat(10),
+        postingEvidence: {
+          finalUrl,
+          pageTitle: "Engineering jobs",
+          headings: ["Engineering jobs"],
+          structuredPostingCount: 0,
+          canonicalPostingUrls: [],
+        },
+      }),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
+});
+
+test("an exact-looking provider URL cannot override contradictory readable evidence", async () => {
+  const url = "https://job-boards.greenhouse.io/acme/jobs/123456";
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Acme",
+      title: "Senior Software Engineer",
+      url,
+      bodyText: "Model-controlled open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveJobUrlImpl: async () => ({
+        bodyFetchStatus: "resolved",
+        url,
+        title: null,
+        bodyText:
+          "Browse every current engineering opening across all teams and locations. ".repeat(10),
+        postingEvidence: {
+          finalUrl: url,
+          pageTitle: "Engineering Jobs",
+          headings: ["Engineering Jobs"],
+          structuredPostingCount: 2,
+          canonicalPostingUrls: [
+            "https://job-boards.greenhouse.io/acme/jobs/111111",
+            "https://job-boards.greenhouse.io/acme/jobs/222222",
+          ],
+        },
+      }),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
+});
+
+test("structured posting facts replace model-controlled location compensation and date", async () => {
+  const url = "https://careers.example.test/careers/beverage-manager";
+  const posting = {
+    "@context": "https://schema.org",
+    "@type": "JobPosting",
+    title: "Beverage Manager",
+    description: `<p>${"Own the beverage program, train the team, and lead service. ".repeat(10)}</p>`,
+    hiringOrganization: { "@type": "Organization", name: "Example Hospitality Group" },
+    jobLocation: {
+      "@type": "Place",
+      address: {
+        "@type": "PostalAddress",
+        addressLocality: "New York",
+        addressRegion: "NY",
+        addressCountry: "US",
+      },
+    },
+    baseSalary: {
+      "@type": "MonetaryAmount",
+      currency: "USD",
+      value: {
+        "@type": "QuantitativeValue",
+        minValue: 90000,
+        maxValue: 110000,
+        unitText: "YEAR",
+      },
+    },
+    datePosted: "2026-08-20",
+  };
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Wrong Company",
+      title: "Bar Manager",
+      url,
+      location: "Los Angeles, CA",
+      comp: "$40,000",
+      postedAt: "2020-01-01",
+      bodyText: "Unverified open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        htmlResponse(
+          `<html><head><script type="application/ld+json">${JSON.stringify(posting)}</script></head><body><button>Apply</button></body></html>`,
+          { finalUrl: url }
+        ),
+    }
+  );
+
+  assert.equal(hydrated.company, "Example Hospitality Group");
+  assert.equal(hydrated.title, "Beverage Manager");
+  assert.equal(hydrated.location, "New York, NY, US");
+  assert.equal(hydrated.comp, "$90,000 to $110,000 per year");
+  assert.equal(hydrated.postedAt, "2026-08-20T00:00:00.000Z");
+});
+
+test("hard posting identity does not retain unverified model facts absent from the page", async () => {
+  const url = "https://careers.example.test/careers/assistant-general-manager";
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Example Hospitality",
+      title: "Assistant General Manager",
+      url,
+      location: "Los Angeles, CA",
+      comp: "$200,000",
+      postedAt: "2020-01-01",
+      bodyText: "Unverified open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveHost: publicResolver,
+      fetchImpl: async () =>
+        htmlResponse(
+          `<html><head><title>Assistant General Manager</title></head><body><h1>Assistant General Manager</h1><p>${"Lead restaurant operations and coach the service team. ".repeat(10)}</p><button>Apply</button></body></html>`,
+          { finalUrl: url }
+        ),
+    }
+  );
+
+  assert.equal(hydrated.bodyFetchStatus, undefined);
+  assert.equal(hydrated.location, "");
+  assert.equal(hydrated.comp, "");
+  assert.equal(hydrated.postedAt, null);
+});
+
+test("hydrateJobOffer rejects a careers page with several canonical ATS posting links", async () => {
+  const url = "https://careers.example.test/new-york";
+  const firstPosting = "https://job-boards.greenhouse.io/acme/jobs/111111";
+  const secondPosting = "https://jobs.lever.co/acme/22222222-2222-4222-8222-222222222222";
+  const requested = [];
+  const hydrated = await hydrateJobOffer(
+    {
+      company: "Example Hospitality",
+      title: "Bartender",
+      url,
+      bodyText: "Unverified open-web evidence.",
+      bodyPartial: true,
+    },
+    {
+      force: true,
+      requirePostingIdentity: true,
+      resolveHost: publicResolver,
+      fetchImpl: async (requestedUrl) => {
+        requested.push(String(requestedUrl));
+        assert.equal(String(requestedUrl), url);
+        return htmlResponse(
+          `<html><head><title>Bartender jobs in New York</title></head><body><h1>Bartender jobs in New York</h1><a href="${firstPosting}">Bartender</a><a href="${secondPosting}">General Manager</a><p>${"Browse several current New York openings across the restaurant group. ".repeat(8)}</p><button>Apply</button></body></html>`,
+          { finalUrl: url }
+        );
+      },
+    }
+  );
+
+  assert.deepEqual(requested, [url]);
+  assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
 });
 
 test("plain fetch: a long body with a visible apply control -> resolved, active liveness", async () => {
