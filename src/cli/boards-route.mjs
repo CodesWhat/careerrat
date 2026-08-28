@@ -343,8 +343,9 @@ export function setSearchSourceEnabled({
       ? requireBrowserSourceIdentity(existing, existing.url)
       : null;
   const normalized = identity ? { ...userOwned, platform: identity.platform } : userOwned;
-  if (enabled || loginDecision === "yes") delete normalized.login_skipped;
-  if (loginDecision === "no") normalized.login_skipped = true;
+  const loginSource = existing.source_type === "browser" && existing.auth === true;
+  if (!loginSource || enabled || loginDecision === "yes") delete normalized.login_skipped;
+  if (loginSource && loginDecision === "no") normalized.login_skipped = true;
   const changed =
     existing.enabled !== enabled ||
     existing.enabled_reason != null ||

@@ -4856,7 +4856,6 @@ export async function executeWorkspaceIntent({
         env,
         selector,
         enabled: input.enabled,
-        ...(input.enabled ? {} : { loginDecision: "no" }),
       });
       const source = operation?.source || {};
       const label = String(source.label || source.provider || selector);

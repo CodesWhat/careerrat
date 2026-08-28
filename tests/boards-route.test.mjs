@@ -578,6 +578,40 @@ test("source toggles prefer an exact visible label over another source's hostnam
   );
 });
 
+test("a public source disable never persists a login skip marker", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "remoteok",
+          source_type: "board",
+          label: "RemoteOK",
+          url: "https://remoteok.com/api",
+          enabled: true,
+        },
+      ],
+    },
+  });
+
+  const result = setSearchSourceEnabled({
+    repoRoot,
+    selector: "RemoteOK",
+    enabled: false,
+    loginDecision: "no",
+  });
+
+  assert.equal(result.source.enabled, false);
+  assert.equal(result.source.loginSkipped, undefined);
+  assert.equal(
+    sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches[0].login_skipped,
+    undefined
+  );
+});
+
 test("source login toggles one exact URL when saved labels are duplicated", () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
