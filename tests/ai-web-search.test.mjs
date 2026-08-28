@@ -174,6 +174,49 @@ test("AI web search uses the provider-neutral web research policy without changi
   assert.equal(calls[0].useExecutionPlanRoute, true);
 });
 
+test("runAiWebSearch gives every initial prompt the strict result URL routing policy", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  const inputs = [];
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      emitAssistantJson(onEvent, {
+        roles: [
+          role({
+            company: "Direct One",
+            title: "Applied AI Engineer One",
+            url: "https://jobs.example.test/direct-one",
+          }),
+          role({
+            company: "Direct Two",
+            title: "Applied AI Engineer Two",
+            url: "https://jobs.example.test/direct-two",
+          }),
+          role({
+            company: "Direct Three",
+            title: "Applied AI Engineer Three",
+            url: "https://jobs.example.test/direct-three",
+          }),
+        ],
+        queries_run: [{ prompt_id: "p1", query: "direct employer roles", status: "completed" }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver(),
+  });
+
+  assert.equal(typeof inputs[0], "object");
+  assert.deepEqual(inputs[0].result_url_policy, [
+    "Prefer employer-owned career pages and direct ATS postings.",
+    "Use third-party boards to discover employer-and-title pairs, and attempt to resolve a direct posting URL before returning the third-party URL.",
+    "Return one exact current posting URL, never a search, category, location, career-hub, or redirect-wrapper URL.",
+    "If an exact posting-specific third-party page is browser-blocked after that direct-resolution attempt, return it with body_text null and body_partial true so CareerRat can preserve it as an explicitly unverified partial lead.",
+    "Reject generic pages, expired redirects, unsafe or private URLs, and postings whose canonical evidence names a different job.",
+  ]);
+});
+
 test("runAiWebSearch rejects aggregator result pages and expired redirects before hydration", async () => {
   const repoRoot = repo({ prompts: 1 });
   const directUrl = "https://www.linkedin.com/jobs/view/assistant-general-manager-5186736008";
@@ -611,6 +654,103 @@ test("AI web-search skill gives each saved prompt a small exploration budget", (
   assert.match(skill, /at least two (?:different )?(?:source )?hosts/i);
   assert.match(skill, /no more than one candidate from the same third-party host/i);
   assert.match(skill, /do not stop after (?:the )?first (?:viable )?(?:lead|match)/i);
+});
+
+test("AI web-search skill preserves only posting-specific blocked leads as unverified partials", () => {
+  const skill = readFileSync(
+    new URL("../.agents/skills/search-jobs/SKILL.md", import.meta.url),
+    "utf8"
+  );
+  assert.match(skill, /posting-specific.*(?:browser-blocked|browser session)/i);
+  assert.match(skill, /body_text.*null.*body_partial.*true/i);
+  assert.match(skill, /explicitly unverified partial/i);
+  assert.match(skill, /generic.*(?:search|category|career-hub).*(?:drop|reject)/i);
+  assert.match(skill, /expired.*redirect.*(?:drop|reject)/i);
+  assert.match(skill, /unsafe|private URL/i);
+  assert.match(skill, /mismatched|different (?:job|requisition|posting)/i);
+});
+
+test("runAiWebSearch preserves posting-specific blocked third-party URLs as unverified partials", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  const blockedRoles = [
+    role({
+      company: "LinkedIn Hospitality",
+      title: "Bar Manager",
+      location: "New York, NY",
+      url: "https://www.linkedin.com/jobs/view/bar-manager-5186736008",
+      body_text: null,
+      body_partial: true,
+    }),
+    role({
+      company: "Indeed Hospitality",
+      title: "Assistant General Manager",
+      location: "New York, NY",
+      url: "https://www.indeed.com/viewjob?jk=abc123",
+      body_text: null,
+      body_partial: true,
+    }),
+    role({
+      company: "Glassdoor Hospitality",
+      title: "Venue Operations Manager",
+      location: "New York, NY",
+      url: "https://www.glassdoor.com/job-listing/venue-operations-manager-acme-JV_IC1132348_KO0,24_KE25,29.htm?jl=123",
+      body_text: null,
+      body_partial: true,
+    }),
+  ];
+  let calls = 0;
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      calls += 1;
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      emitAssistantJson(onEvent, {
+        roles: calls === 1 ? blockedRoles : [],
+        queries_run: [
+          {
+            prompt_id: kickoff.prompts[0].id,
+            query: `posting-specific blocked roles ${calls}`,
+            status: "completed",
+          },
+        ],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: async (url) => ({
+      bodyFetchStatus: "deferred",
+      url,
+      bodyText: "",
+      bodyPartial: true,
+      bodyFetchReason: "The exact posting requires a browser session.",
+    }),
+  });
+
+  assert.equal(result.new, 3, JSON.stringify(result));
+  assert.equal(result.partial, 3);
+  assert.equal(result.unreadable, 0);
+  assert.ok(result.sources.every((source) => source.status === "deferred"));
+  const saved = readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search");
+  assert.deepEqual(
+    saved.map((row) => row.link).sort(),
+    blockedRoles.map((item) => item.url).sort()
+  );
+  assert.ok(saved.every((row) => row.scanner?.bodyPartial === true));
+  assert.ok(saved.every((row) => row.scanner?.unverified === true));
 });
 
 test("runAiWebSearch reports structured prompt lifecycle and periodic health", async () => {
@@ -1164,7 +1304,7 @@ test("runAiWebSearch persists a safety-capped canonical body as partial, never f
   assert.doesNotMatch(capture, /partial: false/);
 });
 
-test("runAiWebSearch rejects a model excerpt when canonical recovery has no trusted evidence", async () => {
+test("runAiWebSearch preserves a direct posting with browser-blocked evidence as unverified", async () => {
   const repoRoot = repo({ prompts: 1 });
   const excerpt =
     "The posting excerpt says this role owns a production platform and works with TypeScript.";
@@ -1182,18 +1322,16 @@ test("runAiWebSearch rejects a model excerpt when canonical recovery has no trus
     }),
   });
 
-  assert.equal(result.new, 0);
-  assert.equal(result.partial, 0);
-  assert.equal(result.unreadable, 1);
-  assert.ok(result.sources.some((source) => source.status === "failed"));
-  assert.match(result.captureFailures[0].reason, /one specific job posting/i);
-  assert.equal(
-    readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search").length,
-    0
-  );
+  assert.equal(result.new, 1);
+  assert.equal(result.partial, 1);
+  assert.equal(result.unreadable, 0);
+  assert.ok(result.sources.some((source) => source.status === "deferred"));
+  const [saved] = readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search");
+  assert.equal(saved.scanner.bodyPartial, true);
+  assert.equal(saved.scanner.unverified, true);
 });
 
-test("runAiWebSearch rejects an unsupported aggregator lead when canonical recovery defers", async () => {
+test("runAiWebSearch preserves a posting-specific specialist-board lead when capture defers", async () => {
   const repoRoot = repo({ prompts: 1 });
   candidateConfigPatch({
     repoRoot,
@@ -1233,20 +1371,19 @@ test("runAiWebSearch rejects an unsupported aggregator lead when canonical recov
     }),
   });
 
-  assert.equal(result.new, 0, JSON.stringify(result));
-  assert.equal(result.partial, 0);
-  assert.equal(result.unreadable, 1);
+  assert.equal(result.new, 1, JSON.stringify(result));
+  assert.equal(result.partial, 1);
+  assert.equal(result.unreadable, 0);
   assert.deepEqual(result.errors, [], JSON.stringify(result));
-  assert.deepEqual(result.offers, []);
-  assert.match(result.captureFailures[0].reason, /one specific job posting/i);
-  assert.ok(result.sources.some((source) => source.status === "failed"));
+  assert.equal(result.offers[0].url, "https://culinaryagents.com/jobs/12345/bartender");
+  assert.ok(result.sources.some((source) => source.status === "deferred"));
   assert.equal(
     readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search").length,
-    0
+    1
   );
 });
 
-test("runAiWebSearch rejects a synthetic deferred batch without trusted posting evidence", async () => {
+test("runAiWebSearch keeps posting-shaped deferred leads and rejects a generic openings page", async () => {
   const repoRoot = repo({ prompts: 1 });
   candidateConfigPatch({
     repoRoot,
@@ -1299,15 +1436,16 @@ test("runAiWebSearch rejects a synthetic deferred batch without trusted posting 
     }),
   });
 
-  assert.equal(result.new, 0, JSON.stringify(result));
-  assert.equal(result.partial, 0);
-  assert.equal(result.unreadable, 12);
+  assert.equal(result.new, 11, JSON.stringify(result));
+  assert.equal(result.partial, 11);
+  assert.equal(result.unreadable, 1);
   assert.equal(result.sources.length, 12);
-  assert.ok(result.sources.every((source) => source.status === "failed"));
-  assert.ok(result.captureFailures.every(({ reason }) => /one specific job posting/i.test(reason)));
+  assert.equal(result.sources.filter((source) => source.status === "deferred").length, 11);
+  assert.equal(result.sources.filter((source) => source.status === "failed").length, 1);
+  assert.match(result.captureFailures[0].reason, /one specific job posting/i);
   assert.equal(
     readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search").length,
-    0
+    11
   );
 });
 
@@ -1649,6 +1787,103 @@ test("runAiWebSearch never rehydrates a rejected URL repeated by recovery", asyn
       .map((row) => row.link),
     [activeUrl]
   );
+});
+
+test("runAiWebSearch lets recovery replace a third-party URL with a canonical direct URL for the same role", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Hospitality operations", titles: ["Assistant General Manager"] }],
+      fit_bands: { fit_floor: 65 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      {
+        id: "p1",
+        text: "Find active Assistant General Manager jobs in New York City",
+      },
+    ],
+  });
+  const thirdPartyUrl = "https://www.linkedin.com/jobs/view/assistant-general-manager-5186736008";
+  const directUrl = "https://job-boards.greenhouse.io/hospitalitygroup/jobs/998877";
+  const inputs = [];
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      const kickoff = typeof input === "string" ? JSON.parse(input.split("\n\n", 1)[0]) : input;
+      const mayResolveSameRole =
+        typeof input === "string" &&
+        /same employer(?:-and-title| and title)|same role/i.test(input) &&
+        /canonical direct|employer-owned|direct ATS/i.test(input);
+      emitAssistantJson(onEvent, {
+        roles:
+          inputs.length === 1
+            ? [
+                role({
+                  company: "Hospitality Group",
+                  title: "Assistant General Manager",
+                  location: "New York, NY",
+                  url: thirdPartyUrl,
+                }),
+              ]
+            : mayResolveSameRole
+              ? [
+                  role({
+                    company: "Hospitality Group",
+                    title: "Assistant General Manager",
+                    location: "New York, NY",
+                    url: directUrl,
+                  }),
+                ]
+              : [],
+        queries_run: [
+          {
+            prompt_id: kickoff.prompts[0].id,
+            query: `assistant general manager ${inputs.length}`,
+            status: "completed",
+          },
+        ],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: async (url) =>
+      url === thirdPartyUrl
+        ? {
+            bodyFetchStatus: "unavailable",
+            url,
+            bodyText: "",
+            bodyFetchReason: "The third-party page could not prove one specific posting.",
+          }
+        : specificResolution(url, {
+            company: "Hospitality Group",
+            title: "Assistant General Manager",
+            location: "New York, NY",
+            liveness: { result: "active", reason: "visible apply control" },
+          }),
+  });
+
+  assert.equal(result.new, 1, JSON.stringify(result));
+  assert.equal(result.offers[0]?.url, directUrl);
 });
 
 test("runAiWebSearch sends recovery candidates through the existing hard gates", async () => {

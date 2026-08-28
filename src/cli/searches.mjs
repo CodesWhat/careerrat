@@ -26,7 +26,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mayRun } from "../core/automation/consent.mjs";
 import { dbExists } from "../core/db/connection.mjs";
 import { sourceConfigGet, sourceConfigPut } from "../core/db/verbs.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
@@ -256,30 +255,7 @@ function runToggle(selector, enabled) {
     console.error(err.message);
     return 1;
   }
-  if (enabled) warnIfAuthGateClosed(config, next);
   return writeConfig(next, { mode: enabled ? "enable" : "disable", selector });
-}
-
-// Enabling an authenticated (logged-in) browser source is allowed, but the source
-// won't actually run at scan time unless the automation consent gate is open for
-// its platform (mayRun's three-part AND: capability · platform · ToS consent). Per
-// the Browser Automation Contract, surface exactly which switch is still off rather
-// than silently enabling a source that can't run.
-function warnIfAuthGateClosed(before, after) {
-  const prev = before.searches ?? [];
-  const now = after.searches ?? [];
-  const flipped = now.find((s, i) => s.enabled === true && prev[i]?.enabled !== true);
-  if (flipped?.auth !== true || !flipped.platform) return;
-  const { allowed, reasons } = mayRun({
-    capability: "authenticated_search",
-    platform: flipped.platform,
-    root,
-  });
-  if (allowed) return;
-  console.error(
-    `Note: "${flipped.label || flipped.platform}" is an authenticated source, enabled, but it will NOT run until authenticated_search is allowed for "${flipped.platform}":`
-  );
-  for (const reason of reasons || []) console.error(`  - ${reason}`);
 }
 
 // ---------------------------------------------------------------------------

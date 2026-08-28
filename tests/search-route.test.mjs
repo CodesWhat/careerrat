@@ -251,6 +251,56 @@ test("POST /api/search/scan: DB source config is enough when legacy config files
   }
 });
 
+test("POST /api/search/scan: browser source login is requested at the point of use", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  putDbSearchSources(repoRoot, [
+    {
+      provider: "LinkedIn",
+      platform: "linkedin",
+      label: "LinkedIn roles",
+      source_type: "browser",
+      url: "https://www.linkedin.com/jobs/search/?keywords=operations",
+      enabled: true,
+    },
+  ]);
+
+  const seen = [];
+  const server = await bootServer(repoRoot, {
+    captureBrowserSourceImpl: async (source) => {
+      seen.push(source);
+      return {
+        offers: [],
+        errors: [],
+        needsLogin: {
+          platform: "linkedin",
+          label: "LinkedIn",
+          sourceLabel: "LinkedIn roles",
+          url: source.url,
+          prompt: "Do you want to log into LinkedIn so I can use it?",
+        },
+      };
+    },
+  });
+  try {
+    const { status, body } = await postJson(server, "/api/search/scan", {});
+    assert.equal(status, 200);
+    assert.equal(seen.length, 1);
+    assert.deepEqual(body.loginRequests, [
+      {
+        platform: "linkedin",
+        label: "LinkedIn",
+        sourceLabel: "LinkedIn roles",
+        url: "https://www.linkedin.com/jobs/search/?keywords=operations",
+        prompt: "Do you want to log into LinkedIn so I can use it?",
+      },
+    ]);
+    assert.deepEqual(body.errors, []);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/search/scan: DB mode ignores legacy source files when DB source config is empty", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
@@ -508,7 +558,7 @@ test("GET /api/search/sources: reports only DB enabled/total searches and tracke
   }
 });
 
-test("GET /api/search/sources: reports deterministic attempted source counts separately from browser/auth/url-query sources", async () => {
+test("GET /api/search/sources: reports browser, authenticated, and URL-query sources as runnable", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
   putDbSearchSources(repoRoot, [
@@ -562,11 +612,12 @@ test("GET /api/search/sources: reports deterministic attempted source counts sep
     const body = await res.json();
     assert.equal(res.status, 200);
     assert.deepEqual(body.deterministicSources, {
-      attempted: 3,
+      attempted: 6,
       rss: 1,
       boards: 0,
+      browser: 3,
       supportedAtsCompanies: 2,
-      skipped: 3,
+      skipped: 0,
     });
   } finally {
     await closeServer(server);

@@ -21,6 +21,7 @@ import {
   prepareFirstSearchSources,
   runFirstSearchInBackground,
   startFirstSearchRun,
+  startManualSearchRun,
 } from "../src/core/onboarding/first-search-run.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { buildWellfoundUrl } from "../src/core/providers/wellfound.mjs";
@@ -244,7 +245,7 @@ test("prepareFirstSearchSources replaces stale country blocks when remote scope 
   assert.deepEqual(worldwide.sourcedScan.location_filter.block, []);
 });
 
-test("first search parks with an actionable location error before creating a live run", async () => {
+test("first search can start before location preferences are filled in", async () => {
   const repoRoot = tempRepo();
   markSearchReady(repoRoot);
   candidateConfigPatch({
@@ -265,11 +266,36 @@ test("first search parks with an actionable location error before creating a liv
   const result = await startFirstSearchRun({ repoRoot, env: {} });
 
   assert.equal(result.ok, true);
-  assert.equal(result.parked, true);
-  assert.equal(result.run.status, "not_started");
-  assert.equal(result.run.error.code, "SEARCH_LOCATION_REQUIRED");
-  assert.match(result.run.error.message, /add your location|remote/i);
-  assert.equal(sourcingRunLatest({ repoRoot, purpose: "first-search" }).run, null);
+  assert.equal(result.parked, undefined);
+  assert.equal(result.run.status, "running");
+  assert.equal(sourcingRunLatest({ repoRoot, purpose: "first-search" }).run.id, result.run.id);
+});
+
+test("an explicit manual search can start before the onboarding readiness gate", async () => {
+  const repoRoot = tempRepo();
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      title_filter: {},
+      location_filter: null,
+      searches: [
+        {
+          label: "Public roles",
+          source_type: "browser",
+          url: "https://example.test/jobs",
+          enabled: true,
+        },
+      ],
+      tracked_companies: [],
+      source_catalog: {},
+    },
+  });
+
+  const result = await startManualSearchRun({ repoRoot, env: {} });
+
+  assert.equal(result.run.status, "running");
+  assert.equal(result.sources.deterministicSources.browser, 1);
 });
 
 test("prepareFirstSearchSources only re-syncs stored entries owned by the domain gate", async () => {
@@ -576,7 +602,7 @@ test("prepareFirstSearchSources caps the AI rescue prompt at 20 bare company nam
   assert.equal(promptInput.companies.includes("Candidate Company 21"), false);
 });
 
-test("countDeterministicSources counts RSS, supported boards, and ATS while skipping other enabled searches", () => {
+test("countDeterministicSources counts every runnable public and browser source", () => {
   const counts = countDeterministicSources({
     searchSources: {
       searches: [
@@ -604,7 +630,12 @@ test("countDeterministicSources counts RSS, supported boards, and ATS while skip
           enabled: true,
         },
         { source_type: "board", provider: "remotive", enabled: false },
-        { source_type: "board", provider: "unknown", enabled: true },
+        {
+          source_type: "board",
+          provider: "unknown",
+          url: "https://example.test/custom-board",
+          enabled: true,
+        },
         {
           source_type: "rss",
           rssUrl: "https://example.test/off.xml",
@@ -626,11 +657,12 @@ test("countDeterministicSources counts RSS, supported boards, and ATS while skip
   });
 
   assert.deepEqual(counts, {
-    attempted: 5,
+    attempted: 9,
     rss: 1,
     boards: 2,
+    browser: 4,
     supportedAtsCompanies: 2,
-    skipped: 4,
+    skipped: 0,
   });
 });
 
@@ -652,6 +684,7 @@ test("countDeterministicSources accepts sources as the search list key", () => {
     attempted: 2,
     rss: 1,
     boards: 1,
+    browser: 0,
     supportedAtsCompanies: 0,
     skipped: 0,
   });
@@ -910,6 +943,68 @@ test("the shared worker can own deterministic terminal settlement", async () => 
   assert.equal(result.settlement.status, "completed");
   assert.equal(result.settlement.summary.zeroResults, true);
   assert.equal(sourcingRunLatest({ repoRoot, purpose: "first-search" }).run.status, "running");
+});
+
+test("background search runs browser sources and preserves point-of-use login requests", async () => {
+  const repoRoot = tempRepo();
+  sourceConfigPut({
+    repoRoot,
+    name: "sourced-scan",
+    data: { title_filter: {}, location_filter: null, tracked_companies: [] },
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      title_filter: {},
+      location_filter: null,
+      searches: [
+        {
+          provider: "LinkedIn",
+          platform: "linkedin",
+          label: "LinkedIn roles",
+          source_type: "auth",
+          url: "https://www.linkedin.com/jobs/search/?keywords=operations",
+          enabled: true,
+        },
+      ],
+    },
+  });
+  const started = sourcingRunStart({ repoRoot, purpose: "manual-search" });
+  const seen = [];
+
+  await runFirstSearchInBackground({
+    repoRoot,
+    env: {},
+    runId: started.run.id,
+    captureBrowserSourceImpl: async (source) => {
+      seen.push(source.url);
+      return {
+        offers: [],
+        errors: [],
+        needsLogin: {
+          platform: "linkedin",
+          label: "LinkedIn",
+          sourceLabel: source.label,
+          url: source.url,
+          prompt: "Do you want to log into LinkedIn so I can use it?",
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(seen, ["https://www.linkedin.com/jobs/search/?keywords=operations"]);
+  const completed = sourcingRunLatest({ repoRoot, purpose: "manual-search" }).run;
+  assert.equal(completed.status, "completed");
+  assert.deepEqual(completed.summary.loginRequests, [
+    {
+      platform: "linkedin",
+      label: "LinkedIn",
+      sourceLabel: "LinkedIn roles",
+      url: "https://www.linkedin.com/jobs/search/?keywords=operations",
+      prompt: "Do you want to log into LinkedIn so I can use it?",
+    },
+  ]);
 });
 
 test("completed search runs preserve bounded rejection evidence", async () => {

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { runSourcedScan } from "../../../scripts/scan-sourced.mjs";
-import { candidateConfigGet, hasSearchLocation } from "../db/verbs/candidate.mjs";
+import { candidateConfigGet } from "../db/verbs/candidate.mjs";
 import { companyBoardResolutionGet } from "../db/verbs/company-discovery.mjs";
 import { companyAtsUpsert, sourceConfigGet, sourceConfigPut } from "../db/verbs/source-config.mjs";
 import {
@@ -47,15 +47,8 @@ const COMPANY_BOARD_AI_HINT_MAX_NAMES = 20;
 
 const NO_DETERMINISTIC_SOURCES = Object.freeze({
   code: "NO_DETERMINISTIC_SOURCES",
-  message:
-    "No deterministic first-search sources are ready. Add an RSS source or supported public ATS company before starting local sourcing.",
-  action: "Add an RSS source or supported public ATS company, then retry first search.",
-});
-
-const SEARCH_LOCATION_REQUIRED = Object.freeze({
-  code: "SEARCH_LOCATION_REQUIRED",
-  message: "Add your location or turn on Remote to start searching.",
-  action: "Add a home location or enable Remote, then retry first search.",
+  message: "No enabled job sources are ready yet.",
+  action: "Add or enable a job source, then retry the search.",
 });
 
 const STATUS_LABELS = Object.freeze({
@@ -125,13 +118,6 @@ function buildSourcingRunFingerprint({ purpose, mode, config, searchSources, sou
     sourcedScan: stableValue(sourcedScan || {}, { sourceConfig: true }),
   });
   return createHash("sha256").update(JSON.stringify(input)).digest("hex");
-}
-
-function makeError(message, code, extra = {}) {
-  const err = new Error(message);
-  err.code = code;
-  Object.assign(err, extra);
-  return err;
 }
 
 function asArray(value) {
@@ -359,6 +345,13 @@ function isFetchableBoard(entry = {}) {
   );
 }
 
+function isBrowserSearchSource(entry = {}) {
+  if (!isEnabled(entry) || !entry.url || isFetchableRss(entry) || isFetchableBoard(entry)) {
+    return false;
+  }
+  return true;
+}
+
 function supportedAtsCompanies(sourcedScan = {}) {
   return asArray(sourcedScan.tracked_companies).filter((entry) => {
     if (!entry || entry.enabled === false) return false;
@@ -369,10 +362,6 @@ function supportedAtsCompanies(sourcedScan = {}) {
 
 function sourceSetupError() {
   return { ...NO_DETERMINISTIC_SOURCES };
-}
-
-function searchLocationError() {
-  return { ...SEARCH_LOCATION_REQUIRED };
 }
 
 function trackedCompanyNames(candidateConfig) {
@@ -612,6 +601,7 @@ function currentSourceConfigs(pathCtx) {
 
 function normalizeRunSummary(summary = {}, deterministicSources) {
   const errors = Array.isArray(summary.errors) ? summary.errors : [];
+  const loginRequests = Array.isArray(summary.loginRequests) ? summary.loginRequests : [];
   return {
     attemptedSources: deterministicSources.attempted,
     scanned: Number(summary.scanned || 0),
@@ -627,21 +617,11 @@ function normalizeRunSummary(summary = {}, deterministicSources) {
     rejectionSamples: clone(summary.rejectionSamples || {}),
     errorCount: errors.length,
     errors: clone(errors),
+    loginRequests: clone(loginRequests),
     offerCount: Array.isArray(summary.offers) ? summary.offers.length : 0,
     zeroResults: Number(summary.new || 0) === 0,
     deterministicSources: clone(deterministicSources),
   };
-}
-
-function ensureSearchReady(pathCtx, config = candidateConfigGet(pathCtx)) {
-  const setup = config.setup || {};
-  if (setup.readiness?.search_ready !== true) {
-    throw makeError("Candidate setup is not search-ready", "NOT_SEARCH_READY", {
-      readiness: setup.readiness || {},
-      missing: setup.missing || {},
-    });
-  }
-  return config;
 }
 
 async function startSearchRun({
@@ -656,34 +636,6 @@ async function startSearchRun({
 } = {}) {
   const pathCtx = { repoRoot, env };
   const config = candidateConfigGet(pathCtx);
-  if (!hasSearchLocation(config.profile)) {
-    return {
-      ok: true,
-      parked: true,
-      reused: false,
-      run: {
-        status: "not_started",
-        label: STATUS_LABELS.not_started,
-        error: searchLocationError(),
-      },
-      sources: {
-        searches: 0,
-        enabledSearches: 0,
-        trackedCompanies: 0,
-        enabledTrackedCompanies: 0,
-        deterministicSources: {
-          attempted: 0,
-          rss: 0,
-          boards: 0,
-          supportedAtsCompanies: 0,
-          skipped: 0,
-        },
-      },
-      readiness: config.setup?.readiness || {},
-      missing: config.setup?.missing || {},
-    };
-  }
-  ensureSearchReady(pathCtx, config);
   const prepared = await prepareFirstSearchSources({
     repoRoot,
     env,
@@ -744,12 +696,14 @@ export function countDeterministicSources({ searchSources, sourcedScan } = {}) {
   const enabledSearches = searchList(searchSources).filter(isEnabled);
   const rss = enabledSearches.filter(isFetchableRss).length;
   const boards = enabledSearches.filter(isFetchableBoard).length;
+  const browser = enabledSearches.filter(isBrowserSearchSource).length;
   const supportedAts = supportedAtsCompanies(sourcedScan).length;
-  const skipped = enabledSearches.length - rss - boards;
+  const skipped = enabledSearches.length - rss - boards - browser;
   return {
-    attempted: rss + boards + supportedAts,
+    attempted: rss + boards + browser + supportedAts,
     rss,
     boards,
+    browser,
     supportedAtsCompanies: supportedAts,
     skipped,
   };
@@ -926,6 +880,7 @@ export async function runFirstSearchInBackground({
   signal,
   heartbeatMs = 30_000,
   settle = true,
+  captureBrowserSourceImpl,
 } = {}) {
   const pathCtx = { repoRoot, env };
   let heartbeat = null;
@@ -979,6 +934,7 @@ export async function runFirstSearchInBackground({
       repoRoot,
       env,
       fetchImpl,
+      captureBrowserSourceImpl,
       write: true,
       verify: true,
       assertActive: () => sourcingRunAssertActive({ ...pathCtx, id: runId }),

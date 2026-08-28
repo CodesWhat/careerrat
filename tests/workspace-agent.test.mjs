@@ -4620,6 +4620,7 @@ test("the workspace runtime starts the job sweep before recurring company discov
   const backgroundStarted = new Promise((resolve) => {
     markBackgroundStarted = resolve;
   });
+  const captureBrowserSourceImpl = async () => ({ offers: [], errors: [] });
   const runtime = createWorkspaceAgentRuntime({
     repoRoot,
     env: {},
@@ -4640,7 +4641,9 @@ test("the workspace runtime starts the job sweep before recurring company discov
         meta: { version: 1, seedSource: "ai" },
       };
     },
-    runSearchInBackgroundImpl: async ({ runId }) => {
+    captureBrowserSourceImpl,
+    runSearchInBackgroundImpl: async ({ runId, captureBrowserSourceImpl: captureImpl }) => {
+      assert.equal(captureImpl, captureBrowserSourceImpl);
       markBackgroundStarted(runId);
       return {
         id: runId,

@@ -527,14 +527,14 @@ test("hydrateJobOffer keeps an exact SPA posting deferred when the redirect prob
   assert.equal(requested, 1);
   assert.equal(hydrated.bodyFetchStatus, "deferred");
   assert.equal(hydrated.bodyPartial, true);
-  assert.equal(hydrated.bodyText, "");
-  assert.equal(hydrated.location, "");
-  assert.equal(hydrated.comp, "");
-  assert.equal(hydrated.postedAt, null);
+  assert.equal(hydrated.bodyText, "Model-controlled open-web evidence.");
+  assert.equal(hydrated.location, "Invented, NY");
+  assert.equal(hydrated.comp, "$999,999");
+  assert.equal(hydrated.postedAt, "2020-01-01");
   assert.match(hydrated.bodyFetchReason, /SPA-rendered or login-gated/);
 });
 
-test("hydrateJobOffer rejects an unrecognized deferred board URL without guarded evidence", async () => {
+test("hydrateJobOffer preserves a posting-specific deferred board URL without a source allowlist", async () => {
   const url = "https://culinaryagents.com/jobs/12345/bartender";
   const hydrated = await hydrateJobOffer(
     {
@@ -556,9 +556,9 @@ test("hydrateJobOffer rejects an unrecognized deferred board URL without guarded
     }
   );
 
-  assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.equal(hydrated.bodyFetchStatus, "deferred");
   assert.equal(hydrated.bodyPartial, true);
-  assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
+  assert.match(hydrated.bodyText, /Unverified open-web evidence/);
 });
 
 test("hydrateJobOffer rejects a deferred generic hub without posting-shaped URL evidence", async () => {
@@ -583,6 +583,7 @@ test("hydrateJobOffer rejects a deferred generic hub without posting-shaped URL 
   );
 
   assert.equal(hydrated.bodyFetchStatus, "unavailable");
+  assert.equal(hydrated.bodyPartial, true);
   assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
 });
 
@@ -612,7 +613,7 @@ test("an arbitrary posting-id query cannot prove deferred identity on an unrecog
   assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
 });
 
-test("an invented numeric job path cannot prove deferred posting identity", async () => {
+test("a posting-shaped deferred URL stays as an unverified lead without a source allowlist", async () => {
   const url = "https://jobs.example.test/platform-engineer-12345";
   const hydrated = await hydrateJobOffer(
     {
@@ -633,11 +634,12 @@ test("an invented numeric job path cannot prove deferred posting identity", asyn
     }
   );
 
-  assert.equal(hydrated.bodyFetchStatus, "unavailable");
-  assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
+  assert.equal(hydrated.bodyFetchStatus, "deferred");
+  assert.equal(hydrated.bodyPartial, true);
+  assert.equal(hydrated.bodyText, "Model-controlled open-web evidence.");
 });
 
-test("a known platform URL fails closed when its guarded probe cannot resolve the host", async () => {
+test("a known platform URL stays unverified when its guarded probe cannot resolve the host", async () => {
   const url = "https://www.indeed.com/viewjob?jk=active-but-unreachable";
   let fetched = false;
   const hydrated = await hydrateJobOffer(
@@ -660,8 +662,9 @@ test("a known platform URL fails closed when its guarded probe cannot resolve th
   );
 
   assert.equal(fetched, false);
-  assert.equal(hydrated.bodyFetchStatus, "unavailable");
-  assert.match(hydrated.bodyFetchReason, /one specific job posting/i);
+  assert.equal(hydrated.bodyFetchStatus, "deferred");
+  assert.equal(hydrated.bodyPartial, true);
+  assert.equal(hydrated.bodyText, "Model-controlled open-web evidence.");
 });
 
 test("hydrateJobOffer rejects a readable multi-role careers location page", async () => {

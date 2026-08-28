@@ -25,7 +25,7 @@ Activated when the kickoff input is JSON containing `"mode": "ai-web-search"` (a
 
 **Tool surface is restricted to Read, Glob, Grep, WebFetch, WebSearch, and Skill.** No Bash, no Write, no Edit, no session browser, and no `careerrat`/npm CLI commands are available in this mode — the embedded runtime enforces this at the tool-allowlist level, so do not attempt any of them. Everything STEP 0-8 above does through a CLI command, a file write, or the session browser is out of scope here; see "Skip" below.
 
-For each entry in `prompts`, run `WebSearch` using that prompt's text (or a close paraphrase) as the query. Use at most 2 `WebSearch` calls per saved prompt and at most 4 job-posting `WebFetch` calls per saved prompt. Search broadly before spending the fetch budget, with a practical goal of 3-5 viable leads per prompt when the open web has them. Make one query employer-first: target employer-owned career pages and direct ATS postings instead of another aggregator-only query. Keep the candidate set diverse across at least two different source hosts whenever two viable hosts exist, and return no more than one candidate from the same third-party host in one prompt turn. Keep credible, role-specific leads from direct postings, employer career pages, specialist boards, and useful aggregators. Every aggregator result must use that role's specific posting URL. Never emit an aggregator search/results page or an expired-posting redirect as a role URL; follow the result to its direct posting, or drop it when no direct URL is available. An employer's own current openings page may be kept only when the named role is visibly present there. A result does not disappear just because its full JD needs a browser session or blocks automated fetching. For up to four promising direct posting URLs, use `WebFetch` to improve the capture. When a fetched page is archived, expired, gone, or for a different requisition, discard it and use the remaining search budget to find a replacement instead of returning a dead lead. If the full body is still unavailable for another reason, return the title, company, URL, visible location/comp/date, and factual search-result evidence with `body_text: null` and `body_partial: true`. The server will preserve it as an explicitly unverified lead; the later Evaluate step owns liveness and full-JD verification. Drop results that lack a specific role and employer, violate the candidate's hard filters, duplicate another result, are known to be expired, or have only a generic aggregator results URL. A saved `minimum_base` is a hard floor: when a base-salary range is posted, its lower bound must meet the floor; an upper bound that merely reaches the floor is not enough. Compensation may stay unverified when the posting does not show it.
+For each entry in `prompts`, run `WebSearch` using that prompt's text (or a close paraphrase) as the query. Use at most 2 `WebSearch` calls per saved prompt and at most 4 job-posting `WebFetch` calls per saved prompt. Search broadly before spending the fetch budget, with a practical goal of 3-5 viable leads per prompt when the open web has them. Make one query employer-first: target employer-owned career pages and direct ATS postings instead of another aggregator-only query. Keep the candidate set diverse across at least two different source hosts whenever two viable hosts exist, and return no more than one candidate from the same third-party host in one prompt turn. Third-party boards are useful discovery sources: resolve their employer-and-title leads to an employer-owned or direct ATS posting when one is available. Never emit an aggregator search/results page. Every returned URL must identify one posting, never a generic search, category, location, career-hub, or redirect-wrapper page. An employer's own current openings page may be kept only when the named role is visibly present there. For up to four promising posting URLs, use `WebFetch` to improve the capture. When a fetched page is archived, expired, gone, mismatched, or for a different job, requisition, or posting, discard it and use the remaining search budget to find a replacement instead of returning a dead lead. If a posting-specific third-party URL still needs a browser session or is browser-blocked after a direct-posting resolution attempt, return the title, company, exact URL, visible location/comp/date, and factual search-result evidence with `body_text: null` and `body_partial: true`; CareerRat preserves it as an explicitly unverified partial lead. Reject an expired redirect. Drop generic search, category, location, and career-hub pages; unsafe or private URLs; results that lack a specific role and employer; postings whose canonical evidence names a different job; hard-filter violations; and duplicates. A saved `minimum_base` is a hard floor: when a base-salary range is posted, its lower bound must meet the floor; an upper bound that merely reaches the floor is not enough. Compensation may stay unverified when the posting does not show it.
 
 Score every posting you keep using the **STEP 3 — Coarse triage** rules above, verbatim — the same `fitScore`/`fitBucket`/`fitBasis`/`ruleFlags`/one-line-reason shape, no new rules invented here. Score against the `candidate` context object in the kickoff input (role buckets with their fit/down signals, top-level `keep_signals`/`cut_signals`, excluded companies, comp floor, location posture, work authorization) rather than reading `candidate/targeting.yml` directly — `candidate/targeting.yml`, `candidate/profile.yml`, and the learnings inputs STEP 3 also lists are not reachable in this mode (no CLI, no tracker read). The `candidate` context object additionally carries compact `application_limits[]` (`{company, status, reapply_after}`, only companies with a `caution`/`blocked` status) and `company_history[]` (`{company, flags}`, flags drawn from `active`/`recent-rejection`/`prior-sourced`) summaries when the server had tracker data to build them — use those directly to apply `app-limit-*` and `company-history-*`, the same way STEP 3 does from a live tracker read. `oe-candidate` still requires you to confirm all three of its conditions from the posting itself plus the given `candidate` context. If a flag's underlying data isn't present in the context (an empty or absent `application_limits`/`company_history`, or no learnings), omit that flag rather than guessing.
 
@@ -127,33 +127,13 @@ are snapshot-only diagnostics/fallback artifacts. Use them as a manual fallback,
 
 ### Authenticated browser sources (M12 Phase 2)
 
-Sources with `source_type: "browser"`, `auth: true`, and a `platform` field (one of
-`linkedin`, `indeed`, `wellfound`, `glassdoor`) are authenticated browser sources —
-logged-in saved-search or results pages that require a session. These default to
-`enabled: false` and are never run automatically.
+Sources with `source_type: "browser"`, `auth: true`, and a `platform` field use that site's saved browser session. There is no separate search permission matrix.
 
-**Two gates, both required.** For each such source, run it only if:
+When an enabled source reaches a login wall, ask exactly one contextual question in chat: “Do you want to log into LinkedIn so I can use it?” Render Yes and No choices and accept the same words as text. Yes opens the source's exact saved-search URL in the visible CareerRat browser. No skips that source and continues the rest of the sweep. Keep the decision durable so navigation does not duplicate the prompt or lose the running search.
 
-1. The source's own `enabled` is `true` in source config, AND
-2. `careerrat automation status --json` shows `authenticated_search` `allowed: true` for that source's `platform`.
+For a disabled authenticated source the user explicitly asks to use, ask the same question at that point, then enable only that source on Yes. Do not redirect the user to Settings and do not require capability, platform, terms, or consent switches.
 
-The `allowed` field encodes the three-part AND from `mayRun()` in `src/core/automation/consent.mjs` (capability global switch · per-platform switch · per-platform ToS consent). Never re-derive that predicate here.
-
-**If either gate is not met — skip and explain how to opt in. Do not open a browser.**
-
-To enable a source:
-
-1. Read that platform's terms of service yourself.
-2. Record ToS consent: `careerrat automation consent <platform> --write`
-3. Enable the capability global switch: `careerrat automation enable authenticated_search --write`
-4. Enable for the specific platform: `careerrat automation enable authenticated_search <platform> --write`
-5. Set `enabled: true` for the source entry through the owning source-config command in DB mode,
-   or in `config/search-sources.yml` in legacy mode.
-6. Verify: `careerrat automation status --json`
-
-Then stop for that source and continue with the next.
-
-**If both gates pass — scrape via the session browser.**
+After the session is ready, scrape via the session browser.
 
 Navigate to the source's saved-search URL in the session browser (Layer 3 per
 `docs/BROWSER.md`). Keep the provider on `auto` unless the user explicitly changes it;
@@ -368,11 +348,9 @@ coverage before another refresh.
 
 ## Rules — authenticated browser sources
 
-- **Both gates required.** Never scrape an authenticated source unless the source's `enabled` is `true` AND `careerrat automation status --json` shows `authenticated_search` `allowed: true` for its platform. If either is false, skip and explain the opt-in steps; do not open a browser.
-- **`allowed` encodes the three-part AND.** The `allowed` field from `mayRun()` in `src/core/automation/consent.mjs` is the single predicate (capability global · platform · ToS consent). Never re-derive it in prose.
+- **One point-of-use choice.** Ask the site-specific Yes/No login question only when that source needs it. Yes opens that source; No skips it while the sweep continues. Never replace this with a Settings checklist.
 - **Same pipeline, no parallel track.** Postings scraped from authenticated sources flow through the same intake → dedupe → liveness → triage pipeline as every other source. No special path.
-- **User-initiated only. Never on a schedule.**
-- **Halt on any auth challenge** (captcha, 2FA, login wall, unexpected interstitial). Never bypass.
+- **Visible auth challenges stay with the user.** Ask the point-of-use Yes/No question for a login wall. Stop for CAPTCHA, 2FA, or an unexpected account-selection/interstitial screen. Never bypass them.
 - **Local-only.** Scraped pages and screenshots stay under `workspace/`. Nothing goes outbound.
 - **Tool-agnostic browser prose.** Keep the provider on `auto` and use the available
   session browser. Never ask the user to choose a CLI, extension, or browser driver, and

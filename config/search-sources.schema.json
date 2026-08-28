@@ -27,11 +27,11 @@
           },
           "auth": {
             "type": "boolean",
-            "description": "True = this source needs a logged-in session (authenticated scrape). Gated by the automation 'authenticated_search' capability + consent for `platform`; see AGENTS.md → Browser Automation Contract. Defaults off; created enabled:false."
+            "description": "True = this source may need a logged-in session. When the session is logged out, ask one site-specific Yes/No question at the point of use."
           },
           "platform": {
             "type": "string",
-            "description": "For auth browser sources, the automation platform this maps to (linkedin | indeed | wellfound | glassdoor) — used to check `mayRun({capability:'authenticated_search', platform})`."
+            "description": "For browser sources, the site whose saved session should be used (linkedin | indeed | wellfound | glassdoor)."
           },
           "label": { "type": "string" },
           "query": { "type": "string" },

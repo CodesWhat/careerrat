@@ -7,7 +7,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
-import { mayRun } from "../src/core/automation/consent.mjs";
 import { defaultProfileRoot } from "../src/core/automation/session.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { parseYaml } from "../src/core/profile/yaml.mjs";
@@ -101,7 +100,6 @@ export async function captureSearchSources({
   waitMs = 800,
   now = new Date(),
   chromium,
-  mayRunImpl = mayRun,
 } = {}) {
   if (!chromium) throw new Error("captureSearchSources requires a Playwright chromium instance");
   if (!Array.isArray(sources) || sources.length === 0)
@@ -134,39 +132,6 @@ export async function captureSearchSources({
   }
 
   for (const [provider, providerSources] of groupByProvider(browserSources)) {
-    const allowedSources = [];
-    for (const source of providerSources) {
-      if (source.auth !== true) {
-        allowedSources.push(source);
-        continue;
-      }
-      const platform = String(source.platform || provider).toLowerCase();
-      let permission;
-      try {
-        permission = mayRunImpl({
-          capability: "authenticated_search",
-          platform,
-          root: repoRoot,
-          env,
-        });
-      } catch (error) {
-        permission = { allowed: false, reasons: [error?.message || String(error)] };
-      }
-      if (permission?.allowed) {
-        allowedSources.push(source);
-        continue;
-      }
-      errors.push({
-        id: source.id,
-        label: source.label || source.id,
-        provider,
-        error:
-          (Array.isArray(permission?.reasons) ? permission.reasons : []).join("; ") ||
-          `authenticated_search on ${platform} is off`,
-      });
-    }
-    if (allowedSources.length === 0) continue;
-
     mkdirSync(resolvedProfileRoot, { recursive: true });
     const context = await launchContext({
       chromium,
@@ -178,7 +143,7 @@ export async function captureSearchSources({
     let loginPaused = false;
     try {
       const page = context.pages()[0] || (await context.newPage());
-      for (const source of allowedSources) {
+      for (const source of providerSources) {
         try {
           const searchUrl = searchSourceUrl(source);
           await page.bringToFront();

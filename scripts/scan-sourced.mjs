@@ -138,7 +138,10 @@ function searchListKey(config) {
 function isFetchableSearchSource(source) {
   if (!source || source.enabled === false) return false;
   if (source.source_type === "rss" || source.rssUrl) return true;
-  return ["ats", "board"].includes(source.source_type) && isBoardProviderSupported(source.provider);
+  if (["ats", "board"].includes(source.source_type)) {
+    return isBoardProviderSupported(source.provider) || Boolean(source.url);
+  }
+  return Boolean(source.url);
 }
 
 function normalizedIdentityValue(value) {
@@ -223,6 +226,7 @@ function searchSourceTasks(searchSources) {
   const entries = searchSources[key];
   const rss = [];
   const boards = [];
+  const browsers = [];
   entries.forEach((source, sourceIndex) => {
     if (!source || source.enabled === false) return;
     if (source.source_type === "rss" || source.rssUrl) {
@@ -234,10 +238,15 @@ function searchSourceTasks(searchSources) {
     ) {
       boards.push({ kind: "board", source, sourceIndex });
     }
+    const supportedBoard =
+      ["ats", "board"].includes(source.source_type) && isBoardProviderSupported(source.provider);
+    if (!source.rssUrl && !supportedBoard && source.url) {
+      browsers.push({ kind: "browser", source, sourceIndex });
+    }
   });
   // The whole-scan path concatenated RSS results before board results. Keeping
   // that order makes cross-source dedup choose the exact same winner.
-  return [...rss, ...boards];
+  return [...rss, ...boards, ...browsers];
 }
 
 function singleSearchSourceConfig(searchSources, source) {
@@ -377,6 +386,7 @@ export async function runSourcedScan({
   assertActive,
   writeGuard,
   hydrateOfferImpl = hydratePartialOffer,
+  captureBrowserSourceImpl,
   signal,
 } = {}) {
   const ensureActive = () => {
@@ -410,7 +420,7 @@ export async function runSourcedScan({
   const titleFilter = buildTitleFilter(config.title_filter);
   const locationFilter = buildLocationFilter(config.location_filter);
 
-  const scanned = { offers: [], errors: [] };
+  const scanned = { offers: [], errors: [], loginRequests: [] };
   const savedAt = new Date();
   const configuredCompanyCap = Number(
     candidateConfig?.targeting?.search_preferences?.presentation_cap_per_company
@@ -464,8 +474,9 @@ export async function runSourcedScan({
   }
 
   function acceptBatch(result) {
-    scanned.offers.push(...result.offers);
-    scanned.errors.push(...result.errors);
+    scanned.offers.push(...(result.offers || []));
+    scanned.errors.push(...(result.errors || []));
+    if (result.needsLogin) scanned.loginRequests.push(result.needsLogin);
   }
 
   const companyResults = await mapWithConcurrency(
@@ -499,7 +510,20 @@ export async function runSourcedScan({
       const result =
         task.kind === "rss"
           ? await scanSearchSources(singleton, { fetchImpl: fetchForRun, resolveHost })
-          : await scanBoards(singleton, { fetchImpl: fetchForRun, resolveHost });
+          : task.kind === "board"
+            ? await scanBoards(singleton, { fetchImpl: fetchForRun, resolveHost })
+            : typeof captureBrowserSourceImpl === "function"
+              ? await captureBrowserSourceImpl(task.source)
+              : {
+                  offers: [],
+                  errors: [
+                    {
+                      company: task.source.label || task.source.provider || "Browser source",
+                      error: "Open this search in the CareerRat app so its browser can read it.",
+                    },
+                  ],
+                  needsLogin: null,
+                };
       ensureActive();
       await reportBatch(result, {
         kind: task.kind,
@@ -512,7 +536,9 @@ export async function runSourcedScan({
   for (const { task, result } of searchSourceResults) {
     acceptBatch(result);
 
-    if (result.errors.length > 0) failedSourceIndexes.add(task.sourceIndex);
+    if ((result.errors || []).length > 0 || result.needsLogin) {
+      failedSourceIndexes.add(task.sourceIndex);
+    }
     const remaining = (remainingTasksBySource.get(task.sourceIndex) || 1) - 1;
     remainingTasksBySource.set(task.sourceIndex, remaining);
     if (
@@ -703,6 +729,7 @@ export async function runSourcedScan({
       (filtered.expired?.length || 0) +
       filtered.overflow.length,
     errors: scanned.errors,
+    loginRequests: scanned.loginRequests,
     coldFamilies,
     revalidatedExisting,
     offers: outputOffers,

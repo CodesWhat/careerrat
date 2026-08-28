@@ -230,10 +230,10 @@ export async function hydrateJobOffer(
       url: resolved?.url || offer.url,
       company: resolved?.company || offer.company,
       title: resolved?.title || offer.title,
-      location: String(resolved?.location || "").trim(),
-      comp: String(resolved?.comp || "").trim(),
-      postedAt: resolved?.postedAt || null,
-      bodyText: "",
+      location: String(resolved?.location || offer.location || "").trim(),
+      comp: String(resolved?.comp || offer.comp || "").trim(),
+      postedAt: resolved?.postedAt || offer.postedAt || null,
+      ...(existingBody ? { bodyText: existingBody } : { bodyText: "" }),
       description: "",
       rawText: "",
       bodyPartial: true,
@@ -368,8 +368,20 @@ function isTrustedPlatformPostingUrl(rawUrl) {
   try {
     const url = new URL(checked.url);
     if (extractReqId(url).id) return true;
+    if (
+      (url.hostname === "linkedin.com" || url.hostname.endsWith(".linkedin.com")) &&
+      /^\/jobs\/view\/[^/]*\d+\/?$/iu.test(url.pathname)
+    ) {
+      return true;
+    }
     if (platformForHost(url.hostname) === "indeed") {
       return /^\/viewjob\/?$/iu.test(url.pathname) && hasNonemptyQuery(url, "jk", "vjk");
+    }
+    if (
+      (url.hostname === "glassdoor.com" || url.hostname.endsWith(".glassdoor.com")) &&
+      hasNonemptyQuery(url, "jl", "jobListingId")
+    ) {
+      return true;
     }
     if (
       (url.hostname === "wellfound.com" || url.hostname === "www.wellfound.com") &&
@@ -459,8 +471,9 @@ function canonicalVisibleTitle(offer, resolved) {
   );
 }
 
-function isStrongDeferredPostingUrl(rawUrl, evidence) {
-  return evidence?.guardedRedirectProbe === true && isTrustedPlatformPostingUrl(rawUrl);
+function isStrongDeferredPostingUrl(rawUrl, _evidence, title) {
+  if (isTrustedPlatformPostingUrl(rawUrl)) return true;
+  return !isGenericHubUrl(rawUrl, title) && identityCarriesTitle(rawUrl, title);
 }
 
 function postingIdentityAssessment(offer, resolved) {
@@ -472,7 +485,7 @@ function postingIdentityAssessment(offer, resolved) {
   const title = resolved?.title || canonicalVisibleTitle(offer, resolved) || offer?.title;
   if (
     resolved?.bodyFetchStatus === "deferred" &&
-    isStrongDeferredPostingUrl(resolved?.url || offer?.url, evidence)
+    isStrongDeferredPostingUrl(resolved?.url || offer?.url, evidence, title)
   ) {
     return "specific";
   }

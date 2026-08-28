@@ -14,10 +14,8 @@ function slug(s) {
     .replace(/^-|-$/g, "");
 }
 
-// Map a hostname to the automation platform an authenticated search source binds
-// to (the `mayRun({capability:"authenticated_search", platform})` key). Returns null
-// for hosts that don't need a logged-in session. Kept in sync with the
-// authenticated_search platforms in src/core/automation/consent.mjs.
+// Map a hostname to the saved browser session used when that source needs login.
+// Returns null for hosts that do not have a site-specific session.
 export function platformForHost(hostname) {
   const host = String(hostname || "")
     .replace(/^www\./, "")
@@ -202,11 +200,9 @@ export function addSearchFromUrl(config, pastedUrl, { label, enabled = true } = 
     return { ...config, searches: [...(config.searches ?? []), entry] };
   }
 
-  // Authenticated-search hosts (LinkedIn / Indeed / Glassdoor): logged-in result
-  // pages that need a session. Create a browser source bound to its automation
-  // platform, OFF by default — it stays inert until the user enables the source AND
-  // grants the `authenticated_search` consent (npm run automation). Two switches by
-  // design; see AGENTS.md → Browser Automation Contract.
+  // Authenticated-search hosts (LinkedIn / Indeed / Glassdoor) use the app's saved
+  // browser session. The source starts disabled so its first use can ask one clear,
+  // site-specific Yes/No question instead of hiding the choice in Settings.
   const authPlatform = platformForHost(host);
   if (authPlatform) {
     const entry = {

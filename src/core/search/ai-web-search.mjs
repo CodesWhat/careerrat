@@ -90,6 +90,13 @@ const MAX_FRESHNESS_RECOVERY_TURNS = 2;
 const MAX_USEFUL_SET_TOP_UP_TURNS = 3;
 const MIN_USEFUL_SET_ROLES = 3;
 const MIN_USEFUL_SET_BUCKETS = 2;
+const RESULT_URL_POLICY = Object.freeze([
+  "Prefer employer-owned career pages and direct ATS postings.",
+  "Use third-party boards to discover employer-and-title pairs, and attempt to resolve a direct posting URL before returning the third-party URL.",
+  "Return one exact current posting URL, never a search, category, location, career-hub, or redirect-wrapper URL.",
+  "If an exact posting-specific third-party page is browser-blocked after that direct-resolution attempt, return it with body_text null and body_partial true so CareerRat can preserve it as an explicitly unverified partial lead.",
+  "Reject generic pages, expired redirects, unsafe or private URLs, and postings whose canonical evidence names a different job.",
+]);
 
 function savedFitFloor(config = {}) {
   const raw = config?.targeting?.fit_bands?.fit_floor;
@@ -246,6 +253,16 @@ function sourceHost(url) {
     return new URL(url).hostname || url;
   } catch {
     return url;
+  }
+}
+
+function normalizedSourceUrl(value) {
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return String(value || "").trim();
   }
 }
 
@@ -459,9 +476,10 @@ function freshnessRecoveryInstruction(rejections) {
   const rejectedSourceHosts = [...concentratedRejectedHosts(rejections)];
   return [
     "CareerRat's canonical checker rejected every usable candidate from this saved prompt for liveness, posting-identity, or saved hard-filter reasons.",
-    "Run one fresh replacement search on the same provider. Return different, currently active, posting-specific roles that still satisfy every original candidate boundary.",
+    "Run one fresh replacement search on the same provider. Return currently active, posting-specific roles that still satisfy every original candidate boundary.",
+    "For a rejected third-party URL, first look for the canonical employer-owned or direct ATS posting for the same employer and title. A different canonical direct URL for the same role or requisition is a valid replacement.",
     "Search employer-owned career pages and direct ATS postings first. Return candidates from at least two source hosts when the open web has them, with no more than one candidate from the same third-party host.",
-    "Do not return any rejected URL below, another URL for the same rejected requisition, or a host listed in rejected_source_hosts. Do not loosen title, location, compensation, freshness, or fit requirements.",
+    "Do not return an exact rejected URL below or a host listed in rejected_source_hosts. Do not loosen title, location, compensation, freshness, or fit requirements.",
     JSON.stringify({
       rejected_postings: rejectedPostings,
       rejected_source_hosts: rejectedSourceHosts,
@@ -700,6 +718,7 @@ export async function runAiWebSearch({
       mode: "ai-web-search",
       prompts: [{ id: prompt.id, text: prompt.text }],
       candidate: candidateContext,
+      result_url_policy: RESULT_URL_POLICY,
     };
     const toolCalls = new Map();
     const toolTrace = [];
@@ -918,7 +937,9 @@ export async function runAiWebSearch({
     {
       recovery = false,
       rejectedPostingKeys = new Set(),
+      rejectedSourceUrls = new Set(),
       rejectedSourceHostsByPrompt = new Map(),
+      allowCanonicalReplacement = false,
     } = {}
   ) {
     const preliminary = [];
@@ -934,7 +955,12 @@ export async function runAiWebSearch({
         const key = normalizeCompanyRoleKey(role.company, role.title);
         const req = extractReqId(role.url);
         const offer = toScanOffer(role, { key, reqId: req.id });
-        if (recovery && postingIdentityIsSeen(offer, rejectedPostingKeys)) {
+        const exactRejectedUrl = rejectedSourceUrls.has(normalizedSourceUrl(offer.url));
+        if (
+          recovery &&
+          (exactRejectedUrl ||
+            (!allowCanonicalReplacement && postingIdentityIsSeen(offer, rejectedPostingKeys)))
+        ) {
           duplicates += 1;
           continue;
         }
@@ -956,7 +982,12 @@ export async function runAiWebSearch({
         }
         const entry = { offer, promptId: outcome.promptId };
         const isDuplicate = postingIdentityIsSeen(offer, preliminaryPostingKeys);
-        if (isDuplicate) {
+        const canonicalReplacement =
+          recovery &&
+          allowCanonicalReplacement &&
+          !exactRejectedUrl &&
+          !postingIdentityIsSeen(offer, seenPostingKeys);
+        if (isDuplicate && !canonicalReplacement) {
           duplicates += 1;
           receiptOnly.push(entry);
           continue;
@@ -1082,9 +1113,13 @@ export async function runAiWebSearch({
     recoveryTurn += 1
   ) {
     const rejectedPostingKeys = new Set();
+    const rejectedSourceUrls = new Set();
     const rejectedSourceHostsByPrompt = new Map();
     for (const { prompt, rejectedCandidates } of recoverySpecs) {
-      for (const { offer } of rejectedCandidates) addPostingIdentity(rejectedPostingKeys, offer);
+      for (const { offer } of rejectedCandidates) {
+        addPostingIdentity(rejectedPostingKeys, offer);
+        rejectedSourceUrls.add(normalizedSourceUrl(offer?.url));
+      }
       rejectedSourceHostsByPrompt.set(prompt.id, concentratedRejectedHosts(rejectedCandidates));
     }
     const recoveryOutcomes = await mapBounded(
@@ -1097,7 +1132,9 @@ export async function runAiWebSearch({
     const recoveryCollection = await collectPromptOutcomes(recoveryOutcomes, {
       recovery: true,
       rejectedPostingKeys,
+      rejectedSourceUrls,
       rejectedSourceHostsByPrompt,
+      allowCanonicalReplacement: true,
     });
     recoverySpecs = recoverySpecs
       .filter(

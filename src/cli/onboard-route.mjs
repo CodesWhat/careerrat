@@ -1046,17 +1046,6 @@ export function prepareQuickStartSourcing({ repoRoot, env = process.env } = {}) 
   }
 
   const setup = config.setup || {};
-  if (setup.readiness?.search_ready !== true) {
-    return {
-      status: 409,
-      body: {
-        ok: false,
-        error: "Candidate setup is not search-ready",
-        readiness: setup.readiness || {},
-        missing: setup.missing || {},
-      },
-    };
-  }
 
   const check = validateDbProfileAndTargeting(repoRoot, config);
   if (!check.valid) {
@@ -1291,17 +1280,6 @@ export async function prepareQuickStartFirstSearch({
   }
 
   const setup = config.setup || {};
-  if (setup.readiness?.search_ready !== true) {
-    return {
-      status: 409,
-      body: {
-        ok: false,
-        error: "Candidate setup is not search-ready",
-        readiness: setup.readiness || {},
-        missing: setup.missing || {},
-      },
-    };
-  }
 
   const check = validateDbProfileAndTargeting(repoRoot, config);
   if (!check.valid) {

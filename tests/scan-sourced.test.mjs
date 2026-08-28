@@ -2132,6 +2132,159 @@ test("DB mode merges board offers, filters their titles, and stamps board waterm
   }
 });
 
+test("runSourcedScan includes enabled browser sources in the normal durable search", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: {
+        location: {
+          home: "New York, NY",
+          remote: true,
+          remote_scope: "home-country",
+          hybrid: true,
+          onsite: true,
+          relocation: [],
+        },
+      },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "targeting",
+      patch: {
+        role_buckets: [{ name: "Bar leadership", titles: ["Bar Manager"] }],
+        fit_bands: { fit_floor: 0 },
+      },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "sourced-scan",
+      data: {
+        title_filter: { positive: ["Bar Manager"], negative: [] },
+        location_filter: null,
+        tracked_companies: [],
+      },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "linkedin",
+            platform: "linkedin",
+            source_type: "browser",
+            auth: true,
+            label: "LinkedIn NYC",
+            url: "https://www.linkedin.com/jobs/search/?keywords=bar%20manager",
+            enabled: true,
+            recency: { mode: "since-last-run" },
+          },
+        ],
+      },
+    });
+    const captured = [];
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: true,
+      captureBrowserSourceImpl: async (source) => {
+        captured.push(source);
+        return {
+          offers: [
+            {
+              company: "Example Hospitality",
+              title: "Bar Manager",
+              url: "https://www.linkedin.com/jobs/view/bar-manager-1234567890",
+              location: "New York, NY",
+              bodyText: "Unverified browser result for a Bar Manager role in New York City.",
+              bodyPartial: true,
+              source: "linkedin-browser",
+              sourceProvider: "linkedin",
+            },
+          ],
+          errors: [],
+          needsLogin: null,
+        };
+      },
+      hydrateOfferImpl: async (offer) => offer,
+    });
+
+    assert.equal(captured.length, 1);
+    assert.equal(summary.scanned, 1);
+    assert.equal(summary.new, 1);
+    assert.deepEqual(summary.loginRequests, []);
+    assert.equal(summary.offers[0].title, "Bar Manager");
+    const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    assert.match(stored.searches[0].recency.lastRunAt, /^\d{4}-\d{2}-\d{2}T/);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("runSourcedScan returns a contextual login request without failing the rest of search", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({
+      repoRoot,
+      name: "sourced-scan",
+      data: { title_filter: { positive: [], negative: [] }, tracked_companies: [] },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "linkedin",
+            platform: "linkedin",
+            source_type: "browser",
+            auth: true,
+            label: "LinkedIn NYC",
+            url: "https://www.linkedin.com/jobs/search/?keywords=operations",
+            enabled: true,
+          },
+        ],
+      },
+    });
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: true,
+      captureBrowserSourceImpl: async () => ({
+        offers: [],
+        errors: [],
+        needsLogin: {
+          platform: "linkedin",
+          label: "LinkedIn",
+          sourceLabel: "LinkedIn NYC",
+          url: "https://www.linkedin.com/jobs/search/?keywords=operations",
+          prompt: "Do you want to log into LinkedIn so I can use it?",
+        },
+      }),
+    });
+
+    assert.equal(summary.scanned, 0);
+    assert.deepEqual(summary.errors, []);
+    assert.deepEqual(summary.loginRequests, [
+      {
+        platform: "linkedin",
+        label: "LinkedIn",
+        sourceLabel: "LinkedIn NYC",
+        url: "https://www.linkedin.com/jobs/search/?keywords=operations",
+        prompt: "Do you want to log into LinkedIn so I can use it?",
+      },
+    ]);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("explicit config mode in a DB workspace captures output without mutating DB product state", async () => {
   const repoRoot = tempRepo();
   try {

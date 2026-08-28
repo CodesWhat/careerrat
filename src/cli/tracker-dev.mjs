@@ -55,6 +55,7 @@ import {
 } from "../core/discovery/company-operation.mjs";
 import { resolveUserPaths } from "../core/paths/workspace.mjs";
 import { acquireWorkspaceRuntimeOwnership } from "../core/runtime/workspace-runtime-ownership.mjs";
+import { captureBrowserSearchSource } from "../core/search/browser-source-capture.mjs";
 import { securityHeaders } from "../core/security/browser-policy.mjs";
 import { mimeFor, resolvePort, safeAssetPath } from "../core/tracker/dev-server.mjs";
 import {
@@ -269,6 +270,13 @@ export function createDevServer({
         applications,
         createSessionImpl: (options) => browserSessionManager.get(options),
       }),
+    captureBrowserSourceImpl: (source) =>
+      captureBrowserSearchSource({
+        source,
+        session: browserSessionManager.get({
+          platform: source?.platform || source?.provider || "search",
+        }),
+      }),
   }),
 } = {}) {
   // Boot-load any stored BYOK key from .internal/ai.env (see ai-env.mjs)
@@ -416,7 +424,19 @@ export function createDevServer({
   // deterministic (non-AI) ATS-board sweep. Its HTTP surface (run/read the
   // sweep) is src/cli/search-route.mjs. No page mounted here — apps/web's SPA
   // Jobs surface is the only client.
-  const searchRoutes = mountSearchRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
+  const searchRoutes = mountSearchRoutes({
+    addRoute,
+    repoRoot,
+    env,
+    workspaceAgentRuntime,
+    captureBrowserSourceImpl: (source) =>
+      captureBrowserSearchSource({
+        source,
+        session: browserSessionManager.get({
+          platform: source?.platform || source?.provider || "search",
+        }),
+      }),
+  });
   mountSourcingRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
 
   // M4 of the paid-POC journey — the /packet view: review a gated

@@ -132,6 +132,7 @@ export function mountSearchRoutes({
   env = process.env,
   fetchImpl = fetch,
   runAiWebSearch = defaultRunAiWebSearch,
+  captureBrowserSourceImpl,
   workspaceAgentRuntime,
   setIntervalImpl = setInterval,
   clearIntervalImpl = clearInterval,
@@ -293,7 +294,13 @@ export function mountSearchRoutes({
 
     scanning = true;
     try {
-      const summary = await runSourcedScan({ repoRoot, env, fetchImpl, write: true });
+      const summary = await runSourcedScan({
+        repoRoot,
+        env,
+        fetchImpl,
+        captureBrowserSourceImpl,
+        write: true,
+      });
       sendJson(res, 200, summary);
     } catch (err) {
       if (sendDbError(res, err)) return;

@@ -27,6 +27,7 @@ function handlerFor({
   repoRoot,
   env = { ANTHROPIC_API_KEY: "test-key" },
   runAiWebSearch,
+  generateSearchPrompts,
   workspaceAgentRuntime,
   setIntervalImpl,
   clearIntervalImpl,
@@ -35,6 +36,7 @@ function handlerFor({
     repoRoot,
     env,
     runAiWebSearch,
+    generateSearchPrompts,
     workspaceAgentRuntime,
     setIntervalImpl,
     clearIntervalImpl,
@@ -45,6 +47,7 @@ function mountedRoutesFor({
   repoRoot,
   env = { ANTHROPIC_API_KEY: "test-key" },
   runAiWebSearch,
+  generateSearchPrompts,
   workspaceAgentRuntime,
   setIntervalImpl,
   clearIntervalImpl,
@@ -55,6 +58,7 @@ function mountedRoutesFor({
     repoRoot,
     env,
     runAiWebSearch,
+    ...(generateSearchPrompts ? { generateSearchPromptsImpl: generateSearchPrompts } : {}),
     workspaceAgentRuntime,
     ...(setIntervalImpl ? { setIntervalImpl } : {}),
     ...(clearIntervalImpl ? { clearIntervalImpl } : {}),
@@ -124,7 +128,7 @@ test("AI web-search route returns 501/422/400/413 before opening SSE", async () 
 
   const noPrompts = response();
   await handlerFor({ repoRoot: tempRepo({ prompts: 0 }), runAiWebSearch: async () => ({}) })(
-    request(),
+    request('{"promptIds":["missing"]}'),
     noPrompts
   );
   assert.equal(noPrompts.status, 422);
@@ -142,6 +146,31 @@ test("AI web-search route returns 501/422/400/413 before opening SSE", async () 
     tooLarge
   );
   assert.equal(tooLarge.status, 413);
+});
+
+test("AI web-search generates candidate prompts automatically when none are saved", async () => {
+  const repoRoot = tempRepo({ prompts: 0 });
+  let searches = 0;
+  const res = response();
+  await handlerFor({
+    repoRoot,
+    generateSearchPrompts: async () => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: { prompts: [{ text: "Find current operations roles in New York" }] },
+      },
+    }),
+    runAiWebSearch: async ({ promptIds }) => {
+      searches += 1;
+      assert.equal(promptIds.length, 1);
+      return { searched: 1, found: 0, new: 0, duplicates: 0, errors: [] };
+    },
+  })(request(), res);
+
+  assert.equal(res.status, 200);
+  assert.equal(searches, 1);
+  assert.equal(sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run.status, "completed");
 });
 
 test("AI web-search route streams activity before done and emits heartbeat comments", async () => {

@@ -3251,18 +3251,25 @@ describe("POST /api/onboard/candidate/evidence/remove", () => {
 // ---------------------------------------------------------------------------
 
 describe("POST /api/onboard/quick-start", () => {
-  it("409s when DB setup exists but is not search-ready", async () => {
+  it("starts an explicit search even while candidate setup is still in progress", async () => {
     const repoRoot = buildTempRoot();
     const { server } = await bootServer(repoRoot);
     try {
       await postJson(server, "/api/onboard/init", {});
+      await postJson(server, "/api/onboard/candidate/targeting", {
+        data: {
+          role_buckets: [
+            { name: "Operations", priority: "primary", titles: ["Operations Manager"] },
+          ],
+        },
+      });
 
       const { status, body } = await postJson(server, "/api/onboard/quick-start", {});
-      assert.equal(status, 409);
-      assert.equal(body.ok, false);
-      assert.match(body.error, /not search-ready/i);
+      assert.equal(status, 202, JSON.stringify(body));
+      assert.equal(body.ok, true);
+      assert.equal(body.run.status, "running");
       assert.equal(body.readiness.search_ready, false);
-      assert.deepEqual(body.missing.search_ready, ["source resume", "role titles"]);
+      assert.deepEqual(body.missing.search_ready, ["source resume"]);
       assert.equal(existsSync(candidatePath(repoRoot, "config/search-sources.yml")), false);
     } finally {
       await closeServer(server);
