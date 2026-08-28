@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -9,6 +9,7 @@ import { after, test } from "node:test";
 import { mountSearchRoutes } from "../src/cli/search-route.mjs";
 import { createWorkspaceAgentRuntime } from "../src/core/agent/workspace-agent.mjs";
 import { writeAIPreferences } from "../src/core/ai/ai-preferences.mjs";
+import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { candidateSetupInitialize, sourcingRunLatest } from "../src/core/db/verbs.mjs";
 import { saveSearchPrompts } from "../src/core/search/search-prompts.mjs";
@@ -413,6 +414,57 @@ test("AI web-search route freezes the saved provider-neutral preferences at run 
   assert.equal(receivedExecutionPlan.resolved.effort, "high");
   const durable = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
   assert.deepEqual(durable.metadata.aiExecutionPlan, receivedExecutionPlan);
+});
+
+test("AI web-search route freezes verified installed-runtime evidence for durable execution", async () => {
+  const capabilities = {
+    completion: true,
+    structuredOutput: true,
+    appWorkflows: true,
+    exactRead: true,
+    publicWeb: true,
+    liveActivity: true,
+    resumable: true,
+  };
+  for (const runtimeId of ["claude", "codex"]) {
+    const repoRoot = tempRepo();
+    const binDir = join(repoRoot, "bin");
+    const executablePath = join(binDir, runtimeId);
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(executablePath, "#!/bin/sh\nexit 0\n", "utf8");
+    chmodSync(executablePath, 0o755);
+    const env = { PATH: binDir, CAREERRAT_DESKTOP_SHELL: "1" };
+    writeInstalledRuntimeSelection({
+      repoRoot,
+      env,
+      runtimeId,
+      verification: {
+        path: executablePath,
+        capabilities,
+        checkedAt: "2026-08-27T16:00:00.000Z",
+      },
+    });
+    let receivedExecutionPlan;
+    const res = response();
+    await handlerFor({
+      repoRoot,
+      env,
+      runAiWebSearch: async ({ executionPlan }) => {
+        receivedExecutionPlan = executionPlan;
+        return { searched: 1, found: 1, new: 1, duplicates: 0, errors: [] };
+      },
+    })(request(), res);
+
+    assert.equal(res.status, 200, runtimeId);
+    assert.deepEqual(receivedExecutionPlan.installedRuntime, {
+      path: executablePath,
+      capabilities,
+    });
+    assert.deepEqual(
+      sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run.metadata.aiExecutionPlan,
+      receivedExecutionPlan
+    );
+  }
 });
 
 test("AI web-search route rejects a concurrent run with 409", async () => {

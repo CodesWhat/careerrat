@@ -375,7 +375,7 @@ test("auth probe exposes only bounded readiness state, never CLI account output"
   assert.equal(calls[0].executablePath, "/safe/codex");
   assert.deepEqual(
     calls.map(({ args }) => args),
-    [["login", "status"]]
+    [["--version"], ["login", "status"]]
   );
   assert.equal(calls[0].options.shell, false);
   assert.ok(calls[0].options.timeout > 0);
@@ -437,6 +437,40 @@ test("supported runtimes stay unready until the bounded completion smoke succeed
     },
     capabilityReason: "Codex is installed and signed in, but it didn't return a usable test reply.",
   });
+});
+
+test("Codex production readiness passes its detected version into the completion smoke", async () => {
+  const invocations = [];
+  let completionInput;
+  const result = await probeInstalledRuntimeCore(
+    { id: "codex", name: "Codex", path: "/safe/codex", available: true },
+    {
+      spawnSyncImpl(executablePath, args) {
+        invocations.push({ executablePath, args });
+        return args[0] === "--version"
+          ? { status: 0, stdout: "codex-cli 0.149.1", stderr: "" }
+          : { status: 0, stdout: "Logged in", stderr: "" };
+      },
+      completionProbeImpl: async (input) => {
+        completionInput = input;
+        return {
+          ok: true,
+          cached: false,
+          checkedAt: "2026-08-27T16:00:00.000Z",
+          probeMessage: "Codex returned a test reply and is ready.",
+          action: null,
+          actionLabel: null,
+        };
+      },
+    }
+  );
+
+  assert.equal(result.status, "ready");
+  assert.equal(completionInput.version, "0.149.1");
+  assert.deepEqual(
+    invocations.map(({ args }) => args),
+    [["--version"], ["login", "status"]]
+  );
 });
 
 test("completion smoke uses the exact no-tool runtime boundary and caches only a bounded receipt", async () => {
@@ -587,7 +621,7 @@ test("Windows readiness probes launch detected Claude and Codex npm shims throug
     );
 
     assert.equal(ready.ready, true);
-    assert.equal(calls.length, runtimeCase.id === "claude" ? 2 : 1);
+    assert.equal(calls.length, 2);
     for (const call of calls) {
       assert.equal(call.command, comspec);
       assert.deepEqual(call.args.slice(0, 4), ["/d", "/s", "/v:off", "/c"]);
@@ -931,7 +965,7 @@ test("Codex readiness depends on authentication rather than a complete-workflow 
     },
     capabilityReason: null,
   });
-  assert.deepEqual(calls, [["login", "status"]]);
+  assert.deepEqual(calls, [["--version"], ["login", "status"]]);
 });
 
 test("Skill-only Claude runs are completion-only and do not require the tool boundary version", async () => {

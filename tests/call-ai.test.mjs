@@ -19,6 +19,7 @@ import {
   callAI,
   extractSSEEvents,
   resolveAIRoute,
+  resolveAIRouteForExecutionPlan,
   sanitizeNativeOutputSchema,
 } from "../src/core/ai/call-ai.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
@@ -755,6 +756,26 @@ test("callAI can execute a server-owned frozen plan after the selected runtime c
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("a durable installed-runtime plan rejects a different detected executable", () => {
+  const route = resolveAIRouteForExecutionPlan(
+    {
+      operation: "research.web",
+      runtimeId: "codex",
+      installedRuntime: {
+        path: "/safe/original-codex",
+        capabilities: VERIFIED_CAPABILITIES,
+      },
+    },
+    {},
+    {
+      runtimeInventory: [verifiedInstalled("codex", "Codex", "/safe/replacement-codex")],
+    }
+  );
+
+  assert.equal(route.type, "none");
+  assert.match(route.error, /executable.*changed/i);
 });
 
 test("callAI (installed): tier smallFast on the claude runtime resolves config/ai.json#smallFastModel, not the env base default", async () => {

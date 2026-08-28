@@ -1,3 +1,8 @@
+import {
+  isSupportedInstalledRuntime,
+  sanitizeInstalledRuntimeCapabilityEvidence,
+} from "./installed-runtimes.mjs";
+
 export const AI_POLICY_VERSION = 1;
 export const AI_ADAPTER_VERSION = 1;
 
@@ -88,6 +93,57 @@ function deepFreeze(value) {
   return Object.freeze(value);
 }
 
+const INSTALLED_RUNTIME_EVIDENCE_KEYS = Object.freeze(["path", "capabilities"]);
+
+function normalizeInstalledRuntimeEvidence(runtimeId, value, { persisted = false } = {}) {
+  if (value == null) return null;
+  if (!isSupportedInstalledRuntime(runtimeId)) {
+    throw policyError(`installed-runtime evidence is invalid for ${runtimeId}`);
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw policyError("installed-runtime evidence must be an object");
+  }
+  if (value.id != null && String(value.id).trim() !== runtimeId) {
+    throw policyError("installed-runtime evidence belongs to another runtime");
+  }
+  if (
+    persisted &&
+    Object.keys(value).some((key) => !INSTALLED_RUNTIME_EVIDENCE_KEYS.includes(key))
+  ) {
+    throw policyError("installed-runtime evidence contains unsupported fields");
+  }
+  const path = typeof value.path === "string" ? value.path.trim() : "";
+  if (!path || path.length > 4096 || path.includes("\0")) {
+    throw policyError("installed-runtime evidence has an invalid executable path");
+  }
+  if (!value.capabilities || typeof value.capabilities !== "object") {
+    throw policyError("installed-runtime evidence has invalid capabilities");
+  }
+  const capabilities = sanitizeInstalledRuntimeCapabilityEvidence(runtimeId, value.capabilities);
+  if (persisted) {
+    const acceptedKeys = Object.keys(capabilities);
+    const suppliedKeys = Object.keys(value.capabilities);
+    if (
+      suppliedKeys.length !== acceptedKeys.length ||
+      suppliedKeys.some(
+        (key) => !acceptedKeys.includes(key) || typeof value.capabilities[key] !== "boolean"
+      )
+    ) {
+      throw policyError("installed-runtime capability evidence is not bounded");
+    }
+  }
+  if (capabilities.completion !== true) {
+    throw policyError("installed-runtime evidence has no verified completion capability");
+  }
+  return { path, capabilities };
+}
+
+export function assertInstalledRuntimeExecutionEvidence(plan) {
+  return normalizeInstalledRuntimeEvidence(plan?.runtimeId, plan?.installedRuntime, {
+    persisted: true,
+  });
+}
+
 export function resolveAIExecutionPlan({
   operation,
   runtimeId,
@@ -95,6 +151,7 @@ export function resolveAIExecutionPlan({
   reasoning,
   preferences,
   capabilities,
+  installedRuntime,
   modelOverride,
   effortOverride,
 } = {}) {
@@ -127,6 +184,7 @@ export function resolveAIExecutionPlan({
   let modelSource = modelOverride ? "operator-override" : runtimeMap ? "alias" : "provider-default";
   const normalizedCapabilities = normalizeCapabilities(capabilities);
   const fallbackReasons = [];
+  const runtimeEvidence = normalizeInstalledRuntimeEvidence(selectedRuntime, installedRuntime);
 
   if (
     resolvedModel &&
@@ -167,6 +225,7 @@ export function resolveAIExecutionPlan({
       effort: resolvedEffort,
       speedTier: null,
     },
+    ...(runtimeEvidence ? { installedRuntime: runtimeEvidence } : {}),
     fallback: fallbackReasons.length
       ? {
           reason: fallbackReasons.join(" "),
@@ -198,6 +257,7 @@ export function assertAIExecutionPlanForRuntime(plan, runtimeId) {
   if (!AI_OPERATION_DEFAULTS[plan.operation]) {
     throw policyError(`unknown AI operation in execution plan: ${plan.operation || "(empty)"}`);
   }
+  if (plan.installedRuntime != null) assertInstalledRuntimeExecutionEvidence(plan);
   return deepFreeze(plan);
 }
 

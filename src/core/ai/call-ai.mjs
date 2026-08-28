@@ -33,6 +33,7 @@ import {
 import {
   aiRuntimeIdForRoute,
   assertAIExecutionPlanForRuntime,
+  assertInstalledRuntimeExecutionEvidence,
   resolveAIExecutionPlan,
 } from "./operation-policy.mjs";
 import { loadInstalledRuntimeSelection } from "./runtime-selection.mjs";
@@ -161,16 +162,37 @@ export function resolveAIRouteForExecutionPlan(
 ) {
   const runtimeId = String(executionPlan?.runtimeId || "").trim();
   if (runtimeId === "claude" || runtimeId === "codex") {
+    const installedRuntime = assertInstalledRuntimeExecutionEvidence(executionPlan);
     const inventory = runtimeInventory || detectInstalledRuntimes({ env });
     const runtime = inventory.find(
       (candidate) => candidate?.id === runtimeId && candidate?.available === true
     );
-    return runtime
-      ? { type: "installed", runtime }
-      : {
-          type: "none",
-          error: `the ${runtimeId} runtime selected for this work is no longer available`,
-        };
+    if (!runtime) {
+      return {
+        type: "none",
+        error: `the ${runtimeId} runtime selected for this work is no longer available`,
+      };
+    }
+    if (!installedRuntime) return { type: "installed", runtime };
+    if (runtime.path !== installedRuntime.path) {
+      return {
+        type: "none",
+        error: `the ${runtimeId} executable selected for this work has changed; start the work again`,
+      };
+    }
+    const capabilityState = installedRuntimeCapabilities(runtimeId, {
+      available: true,
+      capabilityEvidence: installedRuntime.capabilities,
+    });
+    return {
+      type: "installed",
+      runtime: {
+        ...runtime,
+        capabilities: capabilityState.capabilities,
+        capabilitiesVerified: true,
+        capabilityTier: capabilityState.capabilityTier,
+      },
+    };
   }
   if (runtimeId === "anthropic-api") {
     const apiKey = String(env.ANTHROPIC_API_KEY || "").trim();

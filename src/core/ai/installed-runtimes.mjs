@@ -970,7 +970,7 @@ export async function probeInstalledRuntime(
   let capabilityOverrides = {};
   let capabilityReason = null;
 
-  if (definition.minimumBoundaryVersion) {
+  if (definition.supported === true || definition.minimumBoundaryVersion) {
     const versionInvocation = runtimeProcessInvocation(runtime.path, ["--version"], {
       env: childEnv,
       platform,
@@ -984,11 +984,12 @@ export async function probeInstalledRuntime(
       timeoutMs,
     });
     if (
-      versionResult?.status !== 0 ||
-      !versionAtLeast(
-        `${versionResult?.stdout || ""}\n${versionResult?.stderr || ""}`,
-        definition.minimumBoundaryVersion
-      )
+      definition.minimumBoundaryVersion &&
+      (versionResult?.status !== 0 ||
+        !versionAtLeast(
+          `${versionResult?.stdout || ""}\n${versionResult?.stderr || ""}`,
+          definition.minimumBoundaryVersion
+        ))
     ) {
       capabilityOverrides = {
         exactRead: false,

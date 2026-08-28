@@ -568,6 +568,7 @@ export function mountSearchRoutes({
       operation: "research.web",
       runtimeId: aiRuntimeIdForRoute(route),
       preferences: loadAIPreferences({ repoRoot, env }),
+      ...(route.type === "installed" ? { installedRuntime: route.runtime } : {}),
     });
 
     let storedPrompts;

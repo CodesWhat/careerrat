@@ -1,7 +1,21 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { AI_OPERATION_DEFAULTS, resolveAIExecutionPlan } from "../src/core/ai/operation-policy.mjs";
+import {
+  AI_OPERATION_DEFAULTS,
+  assertAIExecutionPlanForRuntime,
+  resolveAIExecutionPlan,
+} from "../src/core/ai/operation-policy.mjs";
+
+const VERIFIED_INSTALLED_CAPABILITIES = Object.freeze({
+  completion: true,
+  structuredOutput: true,
+  appWorkflows: true,
+  exactRead: true,
+  publicWeb: true,
+  liveActivity: true,
+  resumable: true,
+});
 
 test("automatic policy keeps Paul strong and routes web research to the balanced model", () => {
   const paul = resolveAIExecutionPlan({
@@ -166,6 +180,65 @@ test("execution plans are immutable receipts", () => {
   assert.throws(() => {
     plan.resolved.model = "haiku";
   }, TypeError);
+});
+
+test("installed-runtime plans persist only bounded executable and capability evidence", () => {
+  const plan = resolveAIExecutionPlan({
+    operation: "research.web",
+    runtimeId: "codex",
+    installedRuntime: {
+      id: "codex",
+      name: "Codex",
+      path: "/safe/codex",
+      available: true,
+      warning: "not durable",
+      capabilities: {
+        ...VERIFIED_INSTALLED_CAPABILITIES,
+        taskTools: true,
+        research: true,
+        invented: true,
+      },
+    },
+  });
+
+  assert.deepEqual(plan.installedRuntime, {
+    path: "/safe/codex",
+    capabilities: VERIFIED_INSTALLED_CAPABILITIES,
+  });
+  assert.equal(Object.isFrozen(plan.installedRuntime), true);
+  assert.equal(Object.isFrozen(plan.installedRuntime.capabilities), true);
+});
+
+test("installed-runtime evidence is rejected when its executable or runtime provenance is invalid", () => {
+  assert.throws(
+    () =>
+      resolveAIExecutionPlan({
+        operation: "research.web",
+        runtimeId: "codex",
+        installedRuntime: {
+          id: "claude",
+          path: "/safe/codex",
+          capabilities: VERIFIED_INSTALLED_CAPABILITIES,
+        },
+      }),
+    { code: "AI_POLICY_INVALID" }
+  );
+  assert.throws(
+    () =>
+      assertAIExecutionPlanForRuntime(
+        {
+          operation: "research.web",
+          runtimeId: "codex",
+          installedRuntime: {
+            path: "/safe/codex",
+            capabilities: VERIFIED_INSTALLED_CAPABILITIES,
+            injected: true,
+          },
+        },
+        "codex"
+      ),
+    { code: "AI_POLICY_INVALID" }
+  );
 });
 
 test("invalid policy values fail before a provider is invoked", () => {

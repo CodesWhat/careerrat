@@ -8,13 +8,14 @@
 // abort handling) without spawning a CLI subprocess.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mock, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_MODEL, DEFAULT_SMALL_FAST_MODEL } from "../src/core/ai/ai-config.mjs";
 import { writeAIPreferences } from "../src/core/ai/ai-preferences.mjs";
+import { resolveAIExecutionPlan } from "../src/core/ai/operation-policy.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 import { createRuntimeToolPolicy } from "../src/core/ai/runtime-tool-policy.mjs";
 import {
@@ -1235,6 +1236,65 @@ test("runSkillStream can execute a server-owned frozen plan after the selected r
     assert.equal(result.executionPlan.runtimeId, "codex");
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("durable AI web search hydrates verified Claude and Codex capabilities without injected inventory", async () => {
+  const capabilities = {
+    completion: true,
+    structuredOutput: true,
+    appWorkflows: true,
+    exactRead: true,
+    publicWeb: true,
+    liveActivity: true,
+    resumable: true,
+  };
+  for (const runtimeId of ["claude", "codex"]) {
+    const repoRoot = tempRepoWithSkill("search-jobs");
+    const binDir = join(repoRoot, "bin");
+    const executablePath = join(binDir, runtimeId);
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(executablePath, "#!/bin/sh\nexit 0\n", "utf8");
+    chmodSync(executablePath, 0o755);
+    const env = {
+      PATH: binDir,
+      CAREERRAT_RUNTIME_SKILLS: "search-jobs",
+    };
+    const executionPlan = resolveAIExecutionPlan({
+      operation: "research.web",
+      runtimeId,
+      installedRuntime: {
+        id: runtimeId,
+        path: executablePath,
+        available: true,
+        capabilities,
+      },
+    });
+    try {
+      const calls = [];
+      const result = await runSkillStream({
+        skill: "search-jobs",
+        input: "find roles",
+        repoRoot,
+        env,
+        executionPlan,
+        useExecutionPlanRoute: true,
+        outputSchema: { type: "object" },
+        runInstalledRuntimeImpl: async (input) => {
+          calls.push(input);
+          return { text: "{}", runtimeId, usage: null };
+        },
+        onEvent: () => {},
+      });
+
+      assert.equal(result.ok, true, runtimeId);
+      assert.equal(calls.length, 1, runtimeId);
+      assert.equal(calls[0].runtime.path, executablePath, runtimeId);
+      assert.equal(calls[0].runtime.capabilities.publicWeb, true, runtimeId);
+      assert.deepEqual(calls[0].tools, ["WebSearch", "WebFetch", "Skill"], runtimeId);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
   }
 });
 
