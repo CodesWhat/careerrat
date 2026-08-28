@@ -816,6 +816,63 @@ test("runAiWebSearch keeps US-remote scope separate from the following NYC hybri
   }
 });
 
+test("runAiWebSearch recognizes a plain-English remote eligibility scope", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: false,
+        onsite: false,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Platform", titles: ["Staff Platform Engineer"] }],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      {
+        id: "p1",
+        text: "Find Staff Platform Engineer remote roles available to candidates in the United States.",
+      },
+    ],
+  });
+  let plan = null;
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      plan ??=
+        typeof input === "string"
+          ? JSON.parse(input.split("\n\n", 1)[0]).search_plan
+          : input.search_plan;
+      emitAssistantJson(onEvent, {
+        roles: [],
+        queries_run: [{ prompt_id: "p1", query: "staff platform", status: "completed" }],
+      });
+      return { ok: true };
+    },
+  });
+
+  for (const { query } of plan.query_hints) {
+    assert.match(query, /remote "United States"/i);
+    assert.doesNotMatch(query, /candidates/i);
+  }
+});
+
 test("runAiWebSearch recognizes a comma-qualified configured title in prompt word order", async () => {
   const repoRoot = repo({ prompts: 1 });
   candidateConfigPatch({
@@ -1268,6 +1325,98 @@ test("runAiWebSearch partitions an unsplittable pair into one whole title per hi
       `${title}: ${JSON.stringify(hints)}`
     );
   }
+});
+
+test("runAiWebSearch gives every three-way split title an open-web query before source hints", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  const titles = [
+    "Developer Infrastructure Engineer",
+    "Developer Experience Engineer",
+    "Site Reliability Engineering Manager",
+  ];
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: true,
+        remote_scope: "home-country",
+        hybrid: true,
+        onsite: false,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Developer infrastructure", titles }],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      {
+        id: "p1",
+        text: `Find ${titles.join(", ")} roles that are remote in the United States.`,
+      },
+    ],
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "hiringcafe",
+          source_type: "browser",
+          label: titles.join(" and "),
+          url: "https://hiring.cafe/?searchState=developer-infrastructure",
+          enabled: true,
+        },
+      ],
+    },
+  });
+  const plans = [];
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      plans.push(
+        typeof input === "string"
+          ? JSON.parse(input.split("\n\n", 1)[0]).search_plan
+          : input.search_plan
+      );
+      emitAssistantJson(onEvent, {
+        roles: [],
+        queries_run: [{ prompt_id: "p1", query: "developer infrastructure", status: "completed" }],
+      });
+      return { ok: true };
+    },
+  });
+
+  const [plan] = plans;
+  assert.equal(plan.query_hints.length, 4);
+  for (const title of titles) {
+    assert.ok(
+      plan.query_hints.some(
+        ({ query }) => query.includes(`"${title}"`) && !/\b(?:site:|careers)\b/i.test(query)
+      ),
+      `${title} needs one open-web query: ${JSON.stringify(plan.query_hints)}`
+    );
+  }
+  assert.ok(
+    plans
+      .slice(1)
+      .some(({ query_hints: hints }) =>
+        hints.some(({ query }) => query.includes("site:hiring.cafe"))
+      ),
+    `configured-first top-up lost its source: ${JSON.stringify(plans)}`
+  );
 });
 
 test("runAiWebSearch keeps a configured core title in query hints beside longer siblings", async () => {

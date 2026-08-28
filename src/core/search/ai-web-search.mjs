@@ -1082,15 +1082,18 @@ function parseSearchPlanRemoteIntent(prompt) {
         ? "United States"
         : "";
       const isNegated = prefixIsNegated || suffixIsNegated;
+      const directScope = after.match(
+        /^\s*(?:anywhere\s+)?(?:in|within)\s+(?:the\s+)?(.+?)(?=\s+(?:and|but|or)\s+(?:(?:available|eligible|open|accessible)|(?:hybrid|on-?site|in-office))\b|$)/i
+      )?.[1];
+      const eligibilityScope = after.match(
+        /^\s*(?:(?:roles?|jobs?|work|positions?)\s+)?(?:that\s+are\s+)?(?:available|eligible|open|accessible)\s+(?:to|for)\s+(?:(?:candidates?|workers?|applicants?|people)\s+)?(?:located\s+)?(?:in|within)\s+(?:the\s+)?(.+?)(?=\s+(?:and|but|or)\s+(?:hybrid|on-?site|in-office)\b|$)/i
+      )?.[1];
 
       if (!isNegated || occurrenceOutsideScope) explicit = true;
       scope ||=
         occurrenceOutsideScope ||
         (!isNegated && prefixScope) ||
-        (!isNegated &&
-          after.match(
-            /^\s*(?:anywhere\s+)?(?:in|within)\s+(?:the\s+)?(.+?)(?=\s+(?:and|but)\s+(?:available|eligible|open|accessible)\b|$)/i
-          )?.[1]) ||
+        (!isNegated && (directScope || eligibilityScope)) ||
         "";
     }
   }
@@ -1310,12 +1313,28 @@ function buildSearchQueryHints(
       const sourceGroups = titleGroups.slice(0, 4);
       const configuredSourceIndex =
         configuredSourceFirst && sourceHosts.length ? sourceGroups.length - 1 : -1;
-      const hints = sourceGroups.map((hintTitles, index) =>
-        sourceHint(hintTitles, index !== configuredSourceIndex)
-      );
-      for (const hintTitles of titleGroups) {
+      const sourceIndexes = sourceGroups.map((_, index) => index);
+      if (configuredSourceIndex >= 0) {
+        sourceIndexes.splice(configuredSourceIndex, 1);
+        sourceIndexes.unshift(configuredSourceIndex);
+      }
+      const candidates = [
+        ...sourceGroups.map((hintTitles) => ({
+          kind: initialKind,
+          query: boundedSearchQuery(hintTitles, locationClause),
+        })),
+        ...sourceIndexes.map((index) =>
+          sourceHint(sourceGroups[index], index !== configuredSourceIndex)
+        ),
+      ];
+      const seenQueries = new Set();
+      const hints = [];
+      for (const hint of candidates) {
+        const key = normalizedSearchQuery(hint.query);
+        if (seenQueries.has(key)) continue;
+        seenQueries.add(key);
+        hints.push(hint);
         if (hints.length >= 4) break;
-        hints.push({ kind: initialKind, query: boundedSearchQuery(hintTitles, locationClause) });
       }
       return hints;
     }
