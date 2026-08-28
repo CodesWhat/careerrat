@@ -1352,7 +1352,7 @@ function buildSearchQueryHints(
       .slice(0, 2)
       .flatMap((hintTitles) => [
         { kind: initialKind, query: boundedSearchQuery(hintTitles, locationClause) },
-        sourceHint(hintTitles, false),
+        sourceHint(hintTitles, !configuredSourceFirst),
       ]);
     const seenQueries = new Set();
     return hints.filter(({ query }) => {

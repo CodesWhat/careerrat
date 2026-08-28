@@ -790,7 +790,7 @@ test("runAiWebSearch keeps US-remote scope separate from the following NYC hybri
     repoRoot,
     env: {},
     runSkillStream: async ({ input, onEvent }) => {
-      plan =
+      plan ??=
         typeof input === "string"
           ? JSON.parse(input.split("\n\n", 1)[0]).search_plan
           : input.search_plan;
@@ -812,6 +812,15 @@ test("runAiWebSearch keeps US-remote scope separate from the following NYC hybri
     assert.ok(
       plan.query_hints.some(({ query }) => query.includes(`"${title}"`) && !/\bsite:/i.test(query)),
       `${title} needs one broad query: ${JSON.stringify(plan.query_hints)}`
+    );
+    assert.ok(
+      plan.query_hints.some(
+        ({ query }) =>
+          query.includes(`"${title}"`) &&
+          /\bcareers\b|site:(?:jobs\.ashbyhq\.com|job-boards\.greenhouse\.io)/i.test(query) &&
+          !query.includes("site:hiring.cafe")
+      ),
+      `${title} needs one direct employer or ATS query: ${JSON.stringify(plan.query_hints)}`
     );
   }
 });
