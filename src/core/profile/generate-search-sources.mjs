@@ -518,7 +518,21 @@ export function buildSearchSources(targeting, profile) {
         what: hospitalityQuery,
         where: hospitalityLocation.queryLocation,
       }).toString();
+      const culinaryAgentsSearch = new URLSearchParams({
+        "search[name]": hospitalityQuery,
+        "search[location]": hospitalityLocation.queryLocation,
+        "search[country]": "US",
+      }).toString();
       searches.push(
+        {
+          provider: "culinaryagents",
+          source_type: "board",
+          label: `Culinary Agents · ${hospitalityQuery}`,
+          url: `https://culinaryagents.com/search/jobs?${culinaryAgentsSearch}`,
+          enabled: true,
+          enabled_reason: "hospitality-domain",
+          max_results: HOSPITALITY_RESULTS_PER_QUERY,
+        },
         {
           provider: "oysterlink",
           source_type: "board",

@@ -1,4 +1,5 @@
 const detailPathByProvider = Object.freeze({
+  culinaryagents: "/jobs/719098-Head-Bartender",
   oysterlink: "/job-posting/bartender-nyc/",
   hcareers: "/jobs/4364335-bartender",
   hospitalityonline: "/jobs/4364579-bartender",
@@ -6,6 +7,7 @@ const detailPathByProvider = Object.freeze({
 });
 
 const hostByProvider = Object.freeze({
+  culinaryagents: "culinaryagents.com",
   oysterlink: "oysterlink.com",
   hcareers: "www.hcareers.com",
   hospitalityonline: "www.hospitalityonline.com",
@@ -13,6 +15,8 @@ const hostByProvider = Object.freeze({
 });
 
 export const listUrlByProvider = Object.freeze({
+  culinaryagents:
+    "https://culinaryagents.com/search/jobs?search%5Bname%5D=Head+Bartender&search%5Blocation%5D=New+York%2C+NY&search%5Bcountry%5D=US",
   oysterlink: "https://oysterlink.com/jobs/bartender/new-york-ny/",
   hcareers: "https://www.hcareers.com/jobs?what=Bartender&where=New+York%2C+NY",
   hospitalityonline: "https://www.hospitalityonline.com/jobs?what=Bartender&where=New+York%2C+NY",
@@ -79,6 +83,16 @@ function structuredPosting({
 }
 
 export const detailHtmlByProvider = Object.freeze({
+  culinaryagents: structuredPosting({
+    title: "Head Bartender",
+    company: "SelaV Hotel",
+    city: "Brooklyn",
+    region: "NY",
+    datePosted: "2026-08-24",
+    min: 27,
+    max: 32,
+    unitText: "HOUR",
+  }),
   oysterlink: structuredPosting({
     title: "Bartender",
     company: "Oyster Hotel",

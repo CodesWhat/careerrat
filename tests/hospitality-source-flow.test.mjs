@@ -44,10 +44,13 @@ const PUBLIC_ADDRESS = [{ address: "93.184.216.34", family: 4 }];
 test("hospitality source generation scans relevant local roles without making Arbeitnow the baseline", async () => {
   const config = buildSearchSources(targeting, profile);
   const hospitalitySources = config.searches.filter((source) =>
-    ["oysterlink", "hcareers", "hospitalityonline", "ihirehospitality"].includes(source.provider)
+    ["culinaryagents", "oysterlink", "hcareers", "hospitalityonline", "ihirehospitality"].includes(
+      source.provider
+    )
   );
 
   assert.deepEqual([...new Set(hospitalitySources.map((source) => source.provider))].sort(), [
+    "culinaryagents",
     "hcareers",
     "hospitalityonline",
     "ihirehospitality",
@@ -129,7 +132,7 @@ test("hospitality source generation scans relevant local roles without making Ar
     )
   );
   assert.equal(
-    filtered.kept.every((offer) => /New York/.test(offer.location)),
+    filtered.kept.every((offer) => /New York|Brooklyn/.test(offer.location)),
     true
   );
   assert.equal(
@@ -151,7 +154,13 @@ test("hospitality boards are not seeded for unrelated software targets", () => {
 
   assert.equal(
     config.searches.some((source) =>
-      ["oysterlink", "hcareers", "hospitalityonline", "ihirehospitality"].includes(source.provider)
+      [
+        "culinaryagents",
+        "oysterlink",
+        "hcareers",
+        "hospitalityonline",
+        "ihirehospitality",
+      ].includes(source.provider)
     ),
     false
   );
@@ -178,9 +187,13 @@ test("explicit software domains and ambiguous server or event words never enable
 
     assert.equal(
       config.searches.some((source) =>
-        ["oysterlink", "hcareers", "hospitalityonline", "ihirehospitality"].includes(
-          source.provider
-        )
+        [
+          "culinaryagents",
+          "oysterlink",
+          "hcareers",
+          "hospitalityonline",
+          "ihirehospitality",
+        ].includes(source.provider)
       ),
       false,
       JSON.stringify(candidate)
@@ -226,7 +239,7 @@ test("hospitality source generation normalizes common New York location forms", 
     assert.equal(oyster.url, "https://oysterlink.com/jobs/bartender/new-york-ny/", home);
     assert.deepEqual(
       [...new Set(providers)].sort(),
-      ["hcareers", "hospitalityonline", "ihirehospitality", "oysterlink"],
+      ["culinaryagents", "hcareers", "hospitalityonline", "ihirehospitality", "oysterlink"],
       home
     );
   }
@@ -266,15 +279,16 @@ test("hospitality title-query boards cover a bounded deduplicated set of target 
     },
     profile
   );
-  const queryProviders = new Set(["oysterlink", "hcareers", "hospitalityonline"]);
+  const queryProviders = new Set(["culinaryagents", "oysterlink", "hcareers", "hospitalityonline"]);
   const queriesByProvider = Object.groupBy(
     config.searches.filter((source) => queryProviders.has(source.provider)),
     (source) => source.provider
   );
 
   for (const provider of queryProviders) {
+    const sources = queriesByProvider[provider];
     assert.deepEqual(
-      queriesByProvider[provider].map((source) => source.label.split(" · ").at(-1)),
+      sources.map((source) => source.label.split(" · ").at(-1)),
       [
         "Bartender",
         "Event Operations Manager",
@@ -283,9 +297,20 @@ test("hospitality title-query boards cover a bounded deduplicated set of target 
       ]
     );
     assert.equal(
-      queriesByProvider[provider].every((source) => source.max_results === 8),
+      sources.every((source) => source.max_results === 8),
       true
     );
+    if (provider === "culinaryagents") {
+      for (const [index, source] of sources.entries()) {
+        const url = new URL(source.url);
+        assert.equal(url.hostname, "culinaryagents.com");
+        assert.equal(url.pathname, "/search/jobs");
+        assert.equal(url.searchParams.get("search[name]"), source.label.split(" · ").at(-1));
+        assert.equal(url.searchParams.get("search[location]"), "New York, NY");
+        assert.equal(url.searchParams.get("search[country]"), "US");
+        assert.equal(index < 4, true);
+      }
+    }
   }
   assert.equal(
     config.searches.filter((source) => source.provider === "ihirehospitality").length,
@@ -317,7 +342,7 @@ test("hospitality title-query boards allocate the bounded title cap across role 
     },
     profile
   );
-  const queryProviders = new Set(["oysterlink", "hcareers", "hospitalityonline"]);
+  const queryProviders = new Set(["culinaryagents", "oysterlink", "hcareers", "hospitalityonline"]);
   const queriesByProvider = Object.groupBy(
     config.searches.filter((source) => queryProviders.has(source.provider)),
     (source) => source.provider

@@ -9,6 +9,11 @@ const DETAIL_CONCURRENCY = 4;
 const MIN_BODY_CHARS = 40;
 
 const PROVIDERS = Object.freeze({
+  culinaryagents: {
+    host: "culinaryagents.com",
+    listPath: /^\/search\/jobs\/?$/,
+    detailPath: /^\/jobs\/\d+-(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2})+\/?$/,
+  },
   oysterlink: {
     host: "oysterlink.com",
     listPath: /^\/jobs\/[a-z0-9-]+\/[a-z0-9-]+\/?$/,
@@ -304,6 +309,10 @@ async function fetchHospitalityBoard(provider, entry = {}, options = {}) {
 
 export function fetchOysterLink(entry, options) {
   return fetchHospitalityBoard("oysterlink", entry, options);
+}
+
+export function fetchCulinaryAgents(entry, options) {
+  return fetchHospitalityBoard("culinaryagents", entry, options);
 }
 
 export function fetchHcareers(entry, options) {

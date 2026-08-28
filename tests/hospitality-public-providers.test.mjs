@@ -58,6 +58,88 @@ const expectedComp = Object.freeze({
   ihirehospitality: "$60,000 to $70,000 per year",
 });
 
+test("culinaryagents reads its current public search and posting paths", async () => {
+  const providers = await import("../src/core/providers/hospitality-public.mjs");
+  assert.equal(typeof providers.fetchCulinaryAgents, "function");
+  const { calls, options } = requestOptions("culinaryagents");
+
+  const offers = await providers.fetchCulinaryAgents(
+    { url: listUrlByProvider.culinaryagents },
+    options
+  );
+
+  assert.deepEqual(
+    calls.map((call) => call.url),
+    [listUrlByProvider.culinaryagents, detailUrlByProvider.culinaryagents]
+  );
+  assert.deepEqual(
+    offers.map(({ title, company, location, comp, bodyPartial, provider }) => ({
+      title,
+      company,
+      location,
+      comp,
+      bodyPartial,
+      provider,
+    })),
+    [
+      {
+        title: "Head Bartender",
+        company: "SelaV Hotel",
+        location: "Brooklyn, NY, US",
+        comp: "$27 to $32 per hour",
+        bodyPartial: false,
+        provider: "culinaryagents",
+      },
+    ]
+  );
+});
+
+test("culinaryagents rejects off-host and non-search listing paths before fetch", async () => {
+  const { fetchCulinaryAgents } = await import("../src/core/providers/hospitality-public.mjs");
+  assert.equal(typeof fetchCulinaryAgents, "function");
+  let called = false;
+  const options = {
+    fetchImpl: async () => {
+      called = true;
+      return new Response("");
+    },
+  };
+
+  for (const url of [
+    "https://example.com/search/jobs?search[name]=Head+Bartender",
+    "https://culinaryagents.com/jobs/719098-Head-Bartender",
+  ]) {
+    await assert.rejects(fetchCulinaryAgents({ url }, options), /untrusted listing URL/i);
+  }
+  assert.equal(called, false);
+});
+
+test("culinaryagents accepts a same-host posting with an encoded slug", async () => {
+  const { fetchCulinaryAgents } = await import("../src/core/providers/hospitality-public.mjs");
+  const detailUrl = "https://culinaryagents.com/jobs/719135-Servers-%2526-Hosts";
+  const calls = [];
+  const offers = await fetchCulinaryAgents(
+    { url: listUrlByProvider.culinaryagents },
+    {
+      fetchImpl: async (url) => {
+        calls.push(url);
+        return new Response(
+          url === listUrlByProvider.culinaryagents
+            ? '<a href="/jobs/719135-Servers-%2526-Hosts">Servers &amp; Hosts</a>'
+            : detailHtmlByProvider.culinaryagents,
+          { status: 200, headers: { "content-type": "text/html" } }
+        );
+      },
+      resolveHost: async () => PUBLIC_ADDRESS,
+      dispatcherFactory: () => ({ close: async () => {} }),
+      now: new Date("2026-08-27T12:00:00Z"),
+    }
+  );
+
+  assert.deepEqual(calls, [listUrlByProvider.culinaryagents, detailUrl]);
+  assert.equal(offers.length, 1);
+});
+
 for (const [provider, fetchProvider] of cases) {
   test(`${provider} reads public listing links and normalizes full schema.org job bodies`, async () => {
     const { calls, options } = requestOptions(provider);

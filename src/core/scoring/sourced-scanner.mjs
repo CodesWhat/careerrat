@@ -11,6 +11,7 @@ import {
   isCareerOpsProviderSupported,
 } from "../providers/career-ops-registry.mjs";
 import {
+  fetchCulinaryAgents,
   fetchHcareers,
   fetchHospitalityOnline,
   fetchIHireHospitality,
@@ -43,6 +44,7 @@ const BOARD_PROVIDERS = {
   remoteok: (entry, { fetchImpl }) => fetchRemoteOk(entry, fetchImpl),
   remotive: (entry, { fetchImpl }) => fetchRemotive(entry, fetchImpl),
   workingnomads: (entry, { fetchImpl }) => fetchWorkingNomads(entry, fetchImpl),
+  culinaryagents: fetchCulinaryAgents,
   oysterlink: fetchOysterLink,
   hcareers: fetchHcareers,
   hospitalityonline: fetchHospitalityOnline,
