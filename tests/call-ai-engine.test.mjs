@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { callAI, describeAIEngine } from "../src/core/ai/call-ai.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
+import { createVerifiedRuntimeExecutable } from "./helpers/installed-runtime-fixture.mjs";
 
 function tempRoot() {
   return mkdtempSync(join(tmpdir(), "careerrat-call-ai-engine-"));
@@ -82,30 +83,21 @@ test("describeAIEngine: none route returns null rather than a fake engine", () =
 test("callAI (installed runtime): result carries numeric elapsedMs and the installed engine", async () => {
   const root = tempRoot();
   try {
-    writeInstalledRuntimeSelection({ repoRoot: root, env: {}, runtimeId: "codex" });
+    const executable = createVerifiedRuntimeExecutable({ root, runtimeId: "codex" });
+    const env = { CAREERRAT_DESKTOP_SHELL: "1" };
+    writeInstalledRuntimeSelection({
+      repoRoot: root,
+      env,
+      runtimeId: "codex",
+      verification: { ...executable.evidence, checkedAt: "2026-08-27T16:00:00.000Z" },
+    });
     const result = await callAI({
       messages: [{ role: "user", content: "hi" }],
       system: "Answer briefly.",
       maxTokens: 16,
       root,
-      env: { CAREERRAT_DESKTOP_SHELL: "1" },
-      runtimeInventory: [
-        {
-          id: "codex",
-          name: "Codex",
-          path: "/safe/codex",
-          available: true,
-          capabilities: {
-            completion: true,
-            structuredOutput: true,
-            appWorkflows: true,
-            exactRead: true,
-            publicWeb: true,
-            liveActivity: true,
-            resumable: true,
-          },
-        },
-      ],
+      env,
+      runtimeInventory: [executable.runtime],
       runInstalledRuntimeImpl: async () => ({
         text: "hello from codex",
         runtimeId: "codex",

@@ -8,24 +8,10 @@ import { after, test } from "node:test";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { appUpsert, commUpsert, sourcedUpsertBatch } from "../src/core/db/verbs.mjs";
 import { createAppOperationManager } from "../src/core/runtime/app-operation-manager.mjs";
+import { verifiedInstalledExecutionPlan } from "./helpers/installed-runtime-fixture.mjs";
 
 const cleanupRoots = [];
-const testExecutionPlan = (operation) => ({
-  policyVersion: 1,
-  operation,
-  runtimeId: "codex",
-  adapterVersion: 1,
-  requested: { quality: "automatic", reasoning: "automatic" },
-  resolved: {
-    quality: "best",
-    reasoning: "medium",
-    model: "gpt-5.6-sol",
-    modelSource: "alias",
-    effort: "medium",
-    speedTier: null,
-  },
-  fallback: null,
-});
+const testExecutionPlan = (operation) => verifiedInstalledExecutionPlan(operation);
 
 function tempRepo({ db = true } = {}) {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-chat-first-route-"));

@@ -16,6 +16,7 @@ import {
   DEEP_INGEST_REQUIRED_LANES,
   deepIngestLaneSetState,
 } from "../src/core/db/verbs.mjs";
+import { verifiedRuntimeEvidence } from "./helpers/installed-runtime-fixture.mjs";
 
 const cleanupRoots = [];
 
@@ -2453,6 +2454,7 @@ test("application mission attempts freeze their provider-neutral plan and reuse 
       effort: "medium",
       speedTier: null,
     },
+    installedRuntime: verifiedRuntimeEvidence("/fixture/codex"),
     fallback: null,
   };
   let resolverCalls = 0;
@@ -2876,6 +2878,7 @@ test("mock start retries the same empty active session after AI failure and turn
       effort: "high",
       speedTier: null,
     },
+    installedRuntime: verifiedRuntimeEvidence("/fixture/codex"),
     fallback: null,
   };
   let failedRequest;

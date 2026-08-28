@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -13,6 +13,10 @@ import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { candidateSetupInitialize, sourcingRunLatest } from "../src/core/db/verbs.mjs";
 import { saveSearchPrompts } from "../src/core/search/search-prompts.mjs";
+import {
+  createVerifiedRuntimeExecutable,
+  VERIFIED_RUNTIME_CAPABILITIES,
+} from "./helpers/installed-runtime-fixture.mjs";
 
 const roots = [];
 
@@ -417,30 +421,17 @@ test("AI web-search route freezes the saved provider-neutral preferences at run 
 });
 
 test("AI web-search route freezes verified installed-runtime evidence for durable execution", async () => {
-  const capabilities = {
-    completion: true,
-    structuredOutput: true,
-    appWorkflows: true,
-    exactRead: true,
-    publicWeb: true,
-    liveActivity: true,
-    resumable: true,
-  };
   for (const runtimeId of ["claude", "codex"]) {
     const repoRoot = tempRepo();
-    const binDir = join(repoRoot, "bin");
-    const executablePath = join(binDir, runtimeId);
-    mkdirSync(binDir, { recursive: true });
-    writeFileSync(executablePath, "#!/bin/sh\nexit 0\n", "utf8");
-    chmodSync(executablePath, 0o755);
-    const env = { PATH: binDir, CAREERRAT_DESKTOP_SHELL: "1" };
+    const executable = createVerifiedRuntimeExecutable({ root: repoRoot, runtimeId });
+    const env = { PATH: join(repoRoot, "bin"), CAREERRAT_DESKTOP_SHELL: "1" };
     writeInstalledRuntimeSelection({
       repoRoot,
       env,
       runtimeId,
       verification: {
-        path: executablePath,
-        capabilities,
+        ...executable.evidence,
+        capabilities: VERIFIED_RUNTIME_CAPABILITIES,
         checkedAt: "2026-08-27T16:00:00.000Z",
       },
     });
@@ -456,10 +447,7 @@ test("AI web-search route freezes verified installed-runtime evidence for durabl
     })(request(), res);
 
     assert.equal(res.status, 200, runtimeId);
-    assert.deepEqual(receivedExecutionPlan.installedRuntime, {
-      path: executablePath,
-      capabilities,
-    });
+    assert.deepEqual(receivedExecutionPlan.installedRuntime, executable.evidence);
     assert.deepEqual(
       sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run.metadata.aiExecutionPlan,
       receivedExecutionPlan

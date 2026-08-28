@@ -58,6 +58,7 @@ import {
 } from "../src/core/profile/candidate-setup.mjs";
 import { parseYaml, stringifyYaml } from "../src/core/profile/yaml.mjs";
 import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
+import { verifiedInstalledExecutionPlan } from "./helpers/installed-runtime-fixture.mjs";
 
 const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const cleanupRoots = [];
@@ -2163,7 +2164,9 @@ describe("POST /api/onboard/resume-ai", () => {
         uploadDigest: "b".repeat(64),
         uploadPath: "workspace/intake/resume-uploads/old-resume.pdf",
         filename: "old-resume.pdf",
-        executionPlan: { operation: "structured.extraction", runtimeId: "claude" },
+        executionPlan: verifiedInstalledExecutionPlan("structured.extraction", {
+          runtimeId: "claude",
+        }),
         ownerId: "old-app-process",
       }).operation;
       const { runtime } = mountDirectRuntime(
