@@ -41,6 +41,7 @@ import {
   addProviderSource,
   addSearchFromQuery,
   addSearchFromUrl,
+  canonicalSearchSourceUrl,
   listSearches,
   validateConfig,
 } from "../core/providers/search-sources.mjs";
@@ -285,7 +286,13 @@ function sourceSelectorTiers(source) {
   return tiers;
 }
 
-export function setSearchSourceEnabled({ repoRoot, env = process.env, selector, enabled } = {}) {
+export function setSearchSourceEnabled({
+  repoRoot,
+  env = process.env,
+  selector,
+  sourceUrl,
+  enabled,
+} = {}) {
   const pathCtx = { repoRoot, env };
   const normalizedSelector = sourceSelectorKey(selector);
   if (!normalizedSelector) badRequest("source selector is required");
@@ -293,11 +300,22 @@ export function setSearchSourceEnabled({ repoRoot, env = process.env, selector, 
   const current = readDbSearchSources(pathCtx);
   const model = maintenanceView(pathCtx);
   let matches = [];
-  for (let tier = 0; tier < 4; tier += 1) {
-    matches = model.searches.filter((source) =>
-      sourceSelectorTiers(source)[tier].has(normalizedSelector)
+  const canonicalUrl = sourceUrl == null ? "" : canonicalSearchSourceUrl(sourceUrl);
+  if (sourceUrl != null) {
+    if (!canonicalUrl) badRequest("source URL is invalid");
+    matches = model.searches.filter(
+      (source) => canonicalSearchSourceUrl(source.target) === canonicalUrl
     );
-    if (matches.length) break;
+    if (!matches.length) {
+      badRequest("That saved search source no longer matches the login question.");
+    }
+  } else {
+    for (let tier = 0; tier < 4; tier += 1) {
+      matches = model.searches.filter((source) =>
+        sourceSelectorTiers(source)[tier].has(normalizedSelector)
+      );
+      if (matches.length) break;
+    }
   }
   if (!matches.length) badRequest(`No search source matches "${selector}"`);
   if (matches.length > 1) {

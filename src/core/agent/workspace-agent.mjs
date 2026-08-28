@@ -95,7 +95,7 @@ import { findCompLeak, findCurrentBaseToken } from "../profile/comp-guard.mjs";
 import { computeEvidenceWrite, loadEvidence } from "../profile/evidence-writer.mjs";
 import { applyGateWrite, GATE_APPLY_SUMMARIES } from "../profile/gate-apply.mjs";
 import { GATE_ROUTES } from "../profile/gate-writer.mjs";
-import { platformForHost } from "../providers/search-sources.mjs";
+import { canonicalSearchSourceUrl, platformForHost } from "../providers/search-sources.mjs";
 import {
   isStale,
   listResearch,
@@ -2559,14 +2559,14 @@ function authSourceSiteLabel(platform, source = {}) {
   return key ? `${key[0].toUpperCase()}${key.slice(1)}` : "this site";
 }
 
-function sourceAuthDecisionAction({ label, selector, decision, primary }) {
+function sourceAuthDecisionAction({ label, selector, sourceUrl, decision, primary }) {
   return {
     label,
     ...(primary === false ? { primary: false } : {}),
     intent: {
       type: "source.auth-decision",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-      input: { selector, decision },
+      input: { selector, sourceUrl, decision },
     },
   };
 }
@@ -3088,7 +3088,7 @@ async function handleSourceLoginChoice({
   const normalized = normalizeWorkspaceIntent({
     type: "source.auth-decision",
     entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-    input: { selector: sourceLogin.selector, decision },
+    input: { selector: sourceLogin.selector, sourceUrl: sourceLogin.url, decision },
   });
   return executeSourceAuthDecision({
     repoRoot,
@@ -3685,6 +3685,13 @@ async function executeSourceAuthDecision({
   const input = normalized.input || {};
   const selector = String(input.selector || "").trim();
   if (!selector) throw actionError("Name the search source to change.", "SOURCE_REQUIRED");
+  const sourceUrl = canonicalSearchSourceUrl(input.sourceUrl);
+  if (!sourceUrl) {
+    throw actionError(
+      "That login question is missing its saved source. Start the search again.",
+      "SOURCE_LOGIN_STALE"
+    );
+  }
   const decision = String(input.decision || "")
     .trim()
     .toLowerCase();
@@ -3696,6 +3703,7 @@ async function executeSourceAuthDecision({
     repoRoot,
     env,
     selector,
+    sourceUrl,
     enabled: allow,
   });
   const source = operation?.source || {};
@@ -3703,10 +3711,14 @@ async function executeSourceAuthDecision({
     .trim()
     .toLowerCase();
   const url = String(source.target || source.url || "").trim();
-  if (source.auth !== true || !url) {
+  if (
+    !url ||
+    canonicalSearchSourceUrl(url) !== sourceUrl ||
+    String(source.sourceType || source.source_type || "").trim() !== "browser"
+  ) {
     if (allow) {
       try {
-        await setSearchSourceEnabledImpl({ repoRoot, env, selector, enabled: false });
+        await setSearchSourceEnabledImpl({ repoRoot, env, selector, sourceUrl, enabled: false });
       } catch {
         // The source remains unusable because no browser handoff follows.
       }
@@ -3756,7 +3768,7 @@ async function executeSourceAuthDecision({
   }
 
   if (typeof openAuthenticatedSourceImpl !== "function") {
-    await setSearchSourceEnabledImpl({ repoRoot, env, selector, enabled: false });
+    await setSearchSourceEnabledImpl({ repoRoot, env, selector, sourceUrl, enabled: false });
     const error = actionError(
       `CareerRat couldn't open ${site} for sign-in. Try again.`,
       "SOURCE_SETUP_UNAVAILABLE"
@@ -3813,6 +3825,7 @@ async function executeSourceAuthDecision({
               sourceAuthDecisionAction({
                 label: "Check again",
                 selector: source.label || selector,
+                sourceUrl: url,
                 decision: "yes",
               }),
             ],

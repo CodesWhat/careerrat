@@ -2526,10 +2526,25 @@ test("typing Yes answers a pending source-login question without calling the mod
     },
   });
 
-  assert.deepEqual(enabled, [{ repoRoot, env: {}, selector: "LinkedIn search", enabled: true }]);
+  assert.deepEqual(enabled, [
+    {
+      repoRoot,
+      env: {},
+      selector: "LinkedIn search",
+      sourceUrl: "https://www.linkedin.com/jobs/search?keywords=platform",
+      enabled: true,
+    },
+  ]);
   assert.equal(opened[0].url, sourceUrl);
   assert.equal(result.messages.at(-1).text, "LinkedIn is open for sign-in.");
-  assert.equal(result.messages.at(-1).metadata.nextActions[0].label, "Check again");
+  assert.deepEqual(result.messages.at(-1).metadata.nextActions[0], {
+    label: "Check again",
+    intent: {
+      type: "source.auth-decision",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { selector: "LinkedIn search", sourceUrl, decision: "yes" },
+    },
+  });
   const question = result.messages.find((message) => message.metadata?.sourceLogin);
   assert.equal(question.metadata.choicePrompt.state, "resolved");
   assert.deepEqual(question.metadata.choicePrompt.selectedOptionIds, ["yes"]);
@@ -2608,7 +2623,7 @@ test("Yes enables the resolved login source and opens its exact saved URL withou
     intent: {
       type: "source.auth-decision",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-      input: { selector: "LinkedIn search", decision: "yes" },
+      input: { selector: "LinkedIn search", sourceUrl, decision: "yes" },
     },
     setSearchSourceEnabledImpl: (input) => {
       enabled.push(input);
@@ -2632,7 +2647,15 @@ test("Yes enables the resolved login source and opens its exact saved URL withou
     },
   });
 
-  assert.deepEqual(enabled, [{ repoRoot, env: {}, selector: "LinkedIn search", enabled: true }]);
+  assert.deepEqual(enabled, [
+    {
+      repoRoot,
+      env: {},
+      selector: "LinkedIn search",
+      sourceUrl: "https://www.linkedin.com/jobs/search?keywords=platform&location=New+York",
+      enabled: true,
+    },
+  ]);
   assert.equal(opened.length, 1);
   assert.equal(opened[0].platform, "linkedin");
   assert.equal(opened[0].url, sourceUrl);
@@ -2653,13 +2676,14 @@ test("Yes opens any configured login source without a hardcoded job-site allowli
     intent: {
       type: "source.auth-decision",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-      input: { selector: "Example Jobs", decision: "yes" },
+      input: { selector: "Example Jobs", sourceUrl, decision: "yes" },
     },
     setSearchSourceEnabledImpl: ({ enabled }) => ({
       changed: true,
       source: {
         label: "Example Jobs",
         target: sourceUrl,
+        sourceType: "browser",
         enabled,
         auth: true,
         platform: "example-jobs",
@@ -2684,6 +2708,51 @@ test("Yes opens any configured login source without a hardcoded job-site allowli
   );
 });
 
+test("Yes opens a login-detected browser source without legacy auth metadata", async () => {
+  const repoRoot = tempRepo();
+  const sourceUrl = "https://wellfound.com/jobs";
+  const enabled = [];
+  const opened = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.auth-decision",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { selector: "Wellfound import", sourceUrl, decision: "yes" },
+    },
+    setSearchSourceEnabledImpl: (input) => {
+      enabled.push(input);
+      return {
+        changed: true,
+        source: {
+          index: 4,
+          provider: "Wellfound",
+          label: "Wellfound import",
+          target: sourceUrl,
+          sourceType: "browser",
+          enabled: input.enabled,
+          auth: false,
+          platform: null,
+        },
+      };
+    },
+    openAuthenticatedSourceImpl: async (input) => {
+      opened.push(input);
+      return { state: "needs-user", summary: "Wellfound is open for sign-in." };
+    },
+  });
+
+  assert.deepEqual(enabled, [
+    { repoRoot, env: {}, selector: "Wellfound import", sourceUrl, enabled: true },
+  ]);
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0].platform, "wellfound");
+  assert.equal(opened[0].url, sourceUrl);
+  assert.equal(result.messages.at(-1).text, "Wellfound is open for sign-in.");
+});
+
 test("a successful login check resumes the saved-source search", async () => {
   const repoRoot = tempRepo();
   const sourceUrl = "https://www.linkedin.com/jobs/search/?keywords=platform";
@@ -2695,7 +2764,7 @@ test("a successful login check resumes the saved-source search", async () => {
     intent: {
       type: "source.auth-decision",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-      input: { selector: "LinkedIn search", decision: "yes" },
+      input: { selector: "LinkedIn search", sourceUrl, decision: "yes" },
     },
     setSearchSourceEnabledImpl: ({ enabled }) => ({
       changed: true,
@@ -2739,7 +2808,7 @@ test("Yes fails closed when the browser-session handoff is unavailable", async (
       intent: {
         type: "source.auth-decision",
         entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-        input: { selector: "LinkedIn search", decision: "yes" },
+        input: { selector: "LinkedIn search", sourceUrl, decision: "yes" },
       },
       setSearchSourceEnabledImpl: (input) => {
         enabled.push(input.enabled);
@@ -2748,6 +2817,7 @@ test("Yes fails closed when the browser-session handoff is unavailable", async (
           source: {
             label: "LinkedIn search",
             target: sourceUrl,
+            sourceType: "browser",
             enabled: input.enabled,
             auth: true,
             platform: "linkedin",
@@ -2776,7 +2846,11 @@ test("No keeps the authenticated source disabled and continues the rest of the s
     intent: {
       type: "source.auth-decision",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-      input: { selector: "Indeed search", decision: "no" },
+      input: {
+        selector: "Indeed search",
+        sourceUrl: "https://www.indeed.com/jobs?q=operations",
+        decision: "no",
+      },
     },
     setSearchSourceEnabledImpl: (input) => {
       enabled.push(input);
@@ -2803,7 +2877,15 @@ test("No keeps the authenticated source disabled and continues the rest of the s
     },
   });
 
-  assert.deepEqual(enabled, [{ repoRoot, env: {}, selector: "Indeed search", enabled: false }]);
+  assert.deepEqual(enabled, [
+    {
+      repoRoot,
+      env: {},
+      selector: "Indeed search",
+      sourceUrl: "https://www.indeed.com/jobs?q=operations",
+      enabled: false,
+    },
+  ]);
   assert.equal(browserCalls, 0);
   assert.deepEqual(searchCalls, [{ repoRoot, env: {}, fetchImpl: undefined }]);
   assert.equal(

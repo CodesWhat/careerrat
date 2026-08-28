@@ -173,6 +173,19 @@ test("addSearchFromUrl with hiring.cafe URL validates against real schema", () =
   assert.ok(result.valid, `schema errors: ${JSON.stringify(result.errors)}`);
 });
 
+test("addSearchFromUrl deduplicates a HiringCafe URL against a generated query source", () => {
+  const generated = addSearchFromQuery(emptyConfig(), { query: "Bartender" });
+  const { url } = buildHiringCafeUrl({ query: "bartender" });
+
+  const result = addSearchFromUrl(generated, url, {
+    label: "HiringCafe bartender",
+    sourceType: "url-query",
+  });
+
+  assert.equal(result, generated);
+  assert.equal(result.searches.length, 1);
+});
+
 // ---------------------------------------------------------------------------
 // addSearchFromUrl — generic (LinkedIn)
 // ---------------------------------------------------------------------------

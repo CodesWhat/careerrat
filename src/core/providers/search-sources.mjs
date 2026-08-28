@@ -14,7 +14,7 @@ function slug(s) {
     .replace(/^-|-$/g, "");
 }
 
-function canonicalSourceUrl(value) {
+export function canonicalSearchSourceUrl(value) {
   try {
     const parsed = new URL(value);
     parsed.hash = "";
@@ -172,10 +172,10 @@ export function addSearchFromUrl(
   }
 
   const host = parsed.hostname.replace(/^www\./, "");
-  const canonicalTarget = canonicalSourceUrl(pastedUrl);
+  const canonicalTarget = canonicalSearchSourceUrl(pastedUrl);
   const duplicate = (config.searches ?? []).some((source) => {
     const existingTarget = source.url || source.rssUrl;
-    return existingTarget && canonicalSourceUrl(existingTarget) === canonicalTarget;
+    return existingTarget && canonicalSearchSourceUrl(existingTarget) === canonicalTarget;
   });
   if (duplicate) return config;
 
@@ -219,6 +219,19 @@ export function addSearchFromUrl(
   if (host.includes("hiring.cafe")) {
     const searchState = parseHiringCafeSearchState(pastedUrl);
     const query = searchState.searchQuery ?? undefined;
+    const normalizedQuery = String(query || "")
+      .trim()
+      .toLowerCase();
+    const duplicateQuery =
+      normalizedQuery &&
+      (config.searches ?? []).some(
+        (source) =>
+          slug(source.provider) === "hiringcafe" &&
+          String(source.query || source.searchState?.searchQuery || "")
+            .trim()
+            .toLowerCase() === normalizedQuery
+      );
+    if (duplicateQuery) return config;
 
     const entry = {
       provider: "HiringCafe",

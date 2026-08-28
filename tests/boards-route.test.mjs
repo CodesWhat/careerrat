@@ -521,6 +521,89 @@ test("source toggles prefer an exact visible label over another source's hostnam
   );
 });
 
+test("source login toggles one exact URL when saved labels are duplicated", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const firstUrl = "https://www.linkedin.com/jobs/search/?keywords=operations";
+  const secondUrl = "https://www.linkedin.com/jobs/search/?keywords=platform";
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "linkedin.com",
+          source_type: "browser",
+          label: "linkedin.com (authenticated)",
+          url: firstUrl,
+          enabled: false,
+        },
+        {
+          provider: "linkedin.com",
+          source_type: "browser",
+          label: "linkedin.com (authenticated)",
+          url: secondUrl,
+          enabled: false,
+        },
+      ],
+    },
+  });
+
+  const result = setSearchSourceEnabled({
+    repoRoot,
+    selector: "linkedin.com (authenticated)",
+    sourceUrl: `${secondUrl}#results`,
+    enabled: true,
+  });
+
+  assert.equal(result.source.target, secondUrl);
+  assert.deepEqual(
+    sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches.map((source) => ({
+      url: source.url,
+      enabled: source.enabled,
+    })),
+    [
+      { url: firstUrl, enabled: false },
+      { url: secondUrl, enabled: true },
+    ]
+  );
+});
+
+test("source login toggles reject a stale URL instead of mutating by label", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "wellfound",
+          source_type: "browser",
+          label: "Wellfound import",
+          url: "https://wellfound.com/jobs",
+          enabled: false,
+        },
+      ],
+    },
+  });
+
+  assert.throws(
+    () =>
+      setSearchSourceEnabled({
+        repoRoot,
+        selector: "Wellfound import",
+        sourceUrl: "https://wellfound.com/jobs/changed",
+        enabled: true,
+      }),
+    /no longer matches/i
+  );
+  assert.equal(
+    sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches[0].enabled,
+    false
+  );
+});
+
 test("source maintenance adds, edits, disables, and removes a supported company board", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
