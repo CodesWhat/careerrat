@@ -186,7 +186,7 @@ const FIXTURES = {
         "beverage program ownership",
         "training and advancement",
         "high-volume polished service",
-        "$85,000 or more in salary or credible total compensation",
+        "$85,000 minimum annual base salary",
       ],
       cut_signals: ["local role outside New York City", "remote role unavailable in New York"],
       excluded_companies: [],
@@ -202,15 +202,15 @@ const FIXTURES = {
     prompts: [
       {
         id: "nyc-bar-leadership",
-        text: "Find currently active Bar Manager, Assistant Bar Manager, Bar Operations Lead, Lead Bartender, and Head Bartender openings in New York City. Search the open web broadly, including specialist hospitality boards, employer career pages, and useful aggregators. Prefer roles that can credibly reach $85,000 in salary or total compensation. Keep specific employer-and-role leads when compensation or the full posting still needs verification, but exclude local roles outside New York City.",
+        text: "Find currently active Bar Manager, Assistant Bar Manager, Bar Operations Lead, Lead Bartender, and Head Bartender openings in New York City. Search the open web broadly, including specialist hospitality boards, employer career pages, and useful aggregators. When an annual base salary is posted, require its lower bound to be at least $85,000; do not count tips, bonuses, commissions, or total compensation toward that floor. Keep specific employer-and-role leads when base salary or the full posting still needs verification, but exclude local roles outside New York City.",
       },
       {
         id: "nyc-hospitality-operations",
-        text: "Find currently active Food and Beverage Operations Manager, Assistant General Manager, and General Manager openings in New York City hospitality businesses. Search specialist hospitality boards, employer career pages, and the open web. Prefer roles paying at least $85,000 with a path toward $100,000. Keep specific sourced leads when compensation still needs verification, but exclude local roles outside New York City.",
+        text: "Find currently active Food and Beverage Operations Manager, Assistant General Manager, and General Manager openings in New York City hospitality businesses. Search specialist hospitality boards, employer career pages, and the open web. When an annual base salary is posted, require its lower bound to be at least $85,000; do not count tips, bonuses, commissions, or total compensation toward that floor. Keep specific sourced leads when base salary still needs verification, but exclude local roles outside New York City.",
       },
       {
         id: "event-and-venue-operations",
-        text: "Find currently active Event Operations Manager, Event Coordinator, and Venue Operations Manager roles that are either local to New York City or remote anywhere in the United States and available to a New York resident. Search employer career pages, specialist boards, and the open web. Prefer hospitality-transferable roles paying at least $85,000, while keeping specific sourced leads with unverified compensation for later evaluation.",
+        text: "Find currently active Event Operations Manager, Event Coordinator, and Venue Operations Manager roles that are either local to New York City or remote anywhere in the United States and available to a New York resident. Search employer career pages, specialist boards, and the open web. When an annual base salary is posted, require its lower bound to be at least $85,000; do not count tips, bonuses, commissions, or total compensation toward that floor. Keep specific sourced leads with unverified base salary for later evaluation.",
       },
     ],
   },
@@ -250,6 +250,7 @@ const FIXTURES = {
         "developer infrastructure",
         "B2B SaaS",
         "US remote or New York City hybrid",
+        "$150,000 minimum annual base salary",
       ],
       cut_signals: ["more than two office days", "local role outside New York City"],
       excluded_companies: [],
@@ -258,15 +259,15 @@ const FIXTURES = {
     prompts: [
       {
         id: "us-remote-engineering",
-        text: "Find currently active Staff Platform Engineer and Staff Backend Engineer roles that are remote anywhere in the United States. Search employer career pages, specialist boards, and the open web. Keep specific employer-and-role leads when the full posting needs a browser session, and exclude foreign-only or state-restricted roles that do not include New York.",
+        text: "Find currently active Staff Platform Engineer and Staff Backend Engineer roles that are remote anywhere in the United States. Search employer career pages, specialist boards, and the open web. When an annual base salary is posted, require its lower bound to be at least $150,000; do not count bonuses, commissions, equity, OTE, or total compensation toward that floor. Keep specific employer-and-role leads when base salary or the full posting needs verification, and exclude foreign-only or state-restricted roles that do not include New York.",
       },
       {
         id: "nyc-hybrid-engineering",
-        text: "Find currently active Staff Platform Engineer, Staff Backend Engineer, and Infrastructure Engineer roles in New York City that are hybrid with no more than two required office days per week. Search employer career pages, specialist boards, and the open web. Exclude local roles outside New York City and roles requiring three or more office days.",
+        text: "Find currently active Staff Platform Engineer, Staff Backend Engineer, and Infrastructure Engineer roles in New York City that are hybrid with no more than two required office days per week. Search employer career pages, specialist boards, and the open web. When an annual base salary is posted, require its lower bound to be at least $150,000; do not count bonuses, commissions, equity, OTE, or total compensation toward that floor. Keep specific leads with unverified base salary. Exclude local roles outside New York City and roles requiring three or more office days.",
       },
       {
         id: "developer-infrastructure",
-        text: "Find currently active Developer Infrastructure, Developer Experience, Internal Developer Platform, and Staff Infrastructure Software Engineer roles that are either US-remote or hybrid in New York City with at most two office days. Search broadly and keep specific employer-and-role leads even when the full posting needs a browser session.",
+        text: "Find currently active Developer Infrastructure, Developer Experience, Internal Developer Platform, and Staff Infrastructure Software Engineer roles that are either US-remote or hybrid in New York City with at most two office days. Search broadly. When an annual base salary is posted, require its lower bound to be at least $150,000; do not count bonuses, commissions, equity, OTE, or total compensation toward that floor. Keep specific employer-and-role leads even when base salary or the full posting needs a browser session.",
       },
     ],
   },

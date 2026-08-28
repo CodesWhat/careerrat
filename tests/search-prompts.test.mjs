@@ -131,6 +131,41 @@ test("generateSearchPrompts uses the exact frozen research.web execution plan", 
   assert.deepEqual(outcome.body.ai.executionPlan, executionPlan);
 });
 
+test("generateSearchPrompts defines minimum_base as an annual base-salary floor", async () => {
+  const repoRoot = repo();
+  let received;
+
+  const outcome = await generateSearchPrompts({
+    repoRoot,
+    config: {
+      targeting: {
+        role_buckets: [{ name: "Operations", titles: ["Operations Manager"] }],
+      },
+      profile: {
+        compensation: { currency: "USD", minimum_base: 85_000 },
+      },
+    },
+    call: async (options) => {
+      received = options;
+      return {
+        text: JSON.stringify({
+          prompts: [
+            { text: "Find Operations Manager roles with an $85,000 annual base salary." },
+            { text: "Find operations leadership openings with an $85,000 base salary." },
+          ],
+        }),
+      };
+    },
+  });
+
+  assert.equal(outcome.body.ok, true);
+  const instructions = received.messages[0].content;
+  assert.match(instructions, /minimum_base is a hard annual base-salary floor/i);
+  assert.match(instructions, /lower bound must meet or exceed minimum_base/i);
+  assert.match(instructions, /tips, commissions, bonuses, equity, OTE, or total compensation/i);
+  assert.match(instructions, /compensation is not posted, keep it unverified/i);
+});
+
 test("buildSearchPromptContext: omits application_limits/company_history by default", () => {
   const repoRoot = repo();
   candidateConfigPatch({

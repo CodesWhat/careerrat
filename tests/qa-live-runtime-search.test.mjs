@@ -31,6 +31,22 @@ test("both domain-neutral live-search fixtures save the receipt fit floor explic
   );
 });
 
+test("live-search fixtures express saved compensation floors as annual base salary", () => {
+  const script = readFileSync(
+    new URL("../scripts/qa-live-runtime-search.mjs", import.meta.url),
+    "utf8"
+  );
+
+  assert.doesNotMatch(script, /salary or (?:credible )?total compensation/i);
+  assert.doesNotMatch(script, /roles paying at least \$[\d,]+/i);
+  assert.match(script, /\$85,000 minimum annual base salary/i);
+  assert.match(script, /\$150,000 minimum annual base salary/i);
+  assert.ok(
+    (script.match(/annual base salary/gi) || []).length >= 8,
+    "every live-search fixture prompt must preserve base-salary semantics"
+  );
+});
+
 test("live-search verification binds the selected runtime to its current executable identity", () => {
   const script = readFileSync(
     new URL("../scripts/qa-live-runtime-search.mjs", import.meta.url),
