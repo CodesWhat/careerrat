@@ -1194,9 +1194,9 @@ asking the user to re-provide conversation history.
 
 ## Browser Automation Contract
 
-Authenticated, logged-in browser automation (status polling, authenticated search,
-in-platform messaging, supervised application preparation, LinkedIn profile optimize/apply,
-session webmail access, relationship sourcing, and calendar provider sync) is
+Authenticated, logged-in browser automation (status polling, in-platform messaging,
+supervised application preparation, LinkedIn profile optimize/apply, session webmail
+access, relationship sourcing, and calendar provider sync) is
 **opt-in and defaults OFF**. No
 `candidate/automation.yml` means **nothing is automated** — that is the safe,
 intended state. The three-layer substrate (static `WebFetch` → headless capture →
@@ -1292,15 +1292,22 @@ a guess at unsupported years/metrics/dates/tool depth, a security clearance or l
 claim not in evidence, private current compensation, a contradiction of `honesty.yml`,
 or a materially new disclosure not captured during onboarding.
 
-**Phased rollout.** Each capability becomes usable when its skill ships (M12 Phase 1–4):
+**Job-source login is point-of-use, not an automation permission.** A pasted
+LinkedIn, Indeed, Glassdoor, or other login-backed search URL becomes a disabled
+browser source. When a sweep reaches it, ask one plain question in chat: “Do you
+want to log into <site> so I can use it?” Yes enables only that source and opens its
+exact saved URL in the visible CareerRat browser. No leaves it disabled and continues
+with every other source. Accept Yes or No as buttons or typed text. Preserve the
+pending choice and sweep state across navigation. Never send the user to Settings or
+require setup-mode, capability, platform, consent, or terms-of-service switches for
+job search. CAPTCHA and 2FA remain visible user stops.
+
+**Phased rollout.** Each gated capability becomes usable when its skill ships (M12 Phase 1–4):
 `status_polling` (read-only status) — **shipped as the `sync-status` skill**, which polls
 ATS dashboards and hands transitions to `track-outcomes` (the owner of canonical
 tracker status transitions; DB mode writes via `careerrat data`, legacy mode writes tracker JSON);
-`authenticated_search` — **wired into `search-jobs` / `setup-searches`**: a pasted
-LinkedIn/Indeed/Glassdoor search URL becomes a `source_type:"browser"`, `auth:true`,
-`enabled:false` source bound to its `platform`, and `search-jobs` runs it only when both the
-source is enabled and `authenticated_search` is `allowed` for that platform; `messaging` — **shipped as the
-`ingest-messages` skill** (the browser analog of `ingest-mail`: reads LinkedIn/Wellfound DMs
+`messaging` — **shipped as the `ingest-messages` skill** (the browser analog of
+`ingest-mail`: reads LinkedIn/Wellfound DMs
 into `communications[]` under the strongest consent gate, with reply drafts going to
 `email-comms`); and `authenticated_apply_preparation` — **shipped as supervised LinkedIn Easy Apply
 preparation in `apply-job` STEP 7b** (fill and advance the modal, always stop before the final

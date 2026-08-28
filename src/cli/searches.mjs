@@ -337,7 +337,7 @@ function printRunReadiness(rows) {
     console.log("Next: ask your agent to run setup-searches or enable sources before search-jobs.");
   } else if (readiness.withLastRun === 0) {
     console.log(
-      "Next: Ask your agent to run search-jobs to scan these sources. `modes allows search:sweep:broad` reports permission, not run history."
+      "Next: Ask your agent to run search-jobs to scan these sources. `modes allows search:sweep:broad` reports the background-mode setting, not run history."
     );
   } else if (readiness.withLastRun < readiness.enabled) {
     const missing = readiness.enabled - readiness.withLastRun;

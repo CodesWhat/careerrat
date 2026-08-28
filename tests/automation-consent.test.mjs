@@ -67,6 +67,7 @@ test("automation consent: relationship_sourcing supports LinkedIn and Wellfound"
 test("job-source login is not part of the global automation permission matrix", () => {
   const template = parseYaml(readFileSync(join(root, "templates/automation.example.yml"), "utf8"));
   const schema = loadJson("config/automation.schema.json");
+  const router = readFileSync(join(root, "AGENTS.md"), "utf8");
 
   assert.equal(Object.hasOwn(CAPABILITIES, "authenticated_search"), false);
   assert.equal(Object.hasOwn(defaultAutomation().capabilities, "authenticated_search"), false);
@@ -75,6 +76,8 @@ test("job-source login is not part of the global automation permission matrix", 
     Object.hasOwn(schema.properties.capabilities.properties, "authenticated_search"),
     false
   );
+  assert.doesNotMatch(router, /authenticated[_ ]search/i);
+  assert.match(router, /Do you\s+want to log into <site> so I can use it\?/);
 });
 
 test("automation consent: supervised apply preparation replaces the removed one-click capability", () => {
