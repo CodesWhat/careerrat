@@ -104,6 +104,9 @@ function safeResult(result) {
     fetchedPostingDecisions: Array.isArray(result.fetchedPostingDecisions)
       ? result.fetchedPostingDecisions.slice(0, MAX_DIAGNOSTIC_CAPTURE_FAILURES)
       : [],
+    validationFailures: Array.isArray(result.validationFailures)
+      ? result.validationFailures.slice(0, MAX_DIAGNOSTIC_CAPTURE_FAILURES)
+      : [],
   };
 }
 

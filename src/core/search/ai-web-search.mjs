@@ -1363,6 +1363,9 @@ export async function runAiWebSearch({
         promptId: prompt.id,
         roles: [],
         rejectedPostings: [],
+        validationFailures: Array.isArray(outcome.body.error?.details)
+          ? outcome.body.error.details
+          : [],
         toolTrace,
         errors: [message],
         topUp,
@@ -1398,6 +1401,7 @@ export async function runAiWebSearch({
       promptId: prompt.id,
       roles,
       rejectedPostings,
+      validationFailures: [],
       toolTrace,
       errors: [],
       topUp,
@@ -1864,6 +1868,16 @@ export async function runAiWebSearch({
     ),
   ];
   const coverage = mergePromptCoverage({ selected, outcomes: allPromptOutcomes });
+  const validationFailures = allPromptOutcomes
+    .flatMap((outcome) =>
+      (outcome.validationFailures || []).map((failure) => ({
+        promptId: outcome.promptId,
+        path: String(failure?.path || ""),
+        message: String(failure?.message || ""),
+      }))
+    )
+    .filter((failure) => failure.path || failure.message)
+    .slice(0, 20);
   const fetchedPostingDecisionKeys = new Set();
   const fetchedPostingDecisions = [];
   for (const outcome of allPromptOutcomes) {
@@ -1958,6 +1972,7 @@ export async function runAiWebSearch({
     unreadable: captureFailures.length,
     errors: promptErrors,
     warnings,
+    validationFailures,
     captureFailures: captureFailures.slice(0, 10),
     revalidatedExisting,
     offers: persistedOffers.map((offer) => ({

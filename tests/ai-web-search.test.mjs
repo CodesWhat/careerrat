@@ -265,6 +265,15 @@ test("runAiWebSearch fails the prompt after one correction when a fetched exact 
   assert.equal(result.new, 0);
   assert.equal(result.errors.length, 1);
   assert.deepEqual(result.failedPromptIds, ["p1"]);
+  assert.deepEqual(result.validationFailures, [
+    {
+      promptId: "p1",
+      path: "rejected_postings",
+      message:
+        "successfully fetched exact posting must appear in roles[].url or " +
+        `rejected_postings[].url with a short factual reason: ${fetchedUrl}`,
+    },
+  ]);
 });
 
 test("runAiWebSearch corrects an unaccounted fetch during freshness recovery without tools", async () => {

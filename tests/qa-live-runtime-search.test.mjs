@@ -131,6 +131,8 @@ test("failed native AI search acceptance preserves bounded row diagnostics befor
   assert.match(safeResult, /result\.canonicalDisqualifications/);
   assert.match(safeResult, /fetchedPostingDecisions:/);
   assert.match(safeResult, /result\.fetchedPostingDecisions/);
+  assert.match(safeResult, /validationFailures:/);
+  assert.match(safeResult, /result\.validationFailures/);
   assert.ok(diagnostic < verification, "the diagnostic must precede a failing acceptance gate");
   assert.ok(verification < cleanup, "cleanup must not erase evidence before the gate fails");
 });
