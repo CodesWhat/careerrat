@@ -62,6 +62,20 @@ test("company operation input caps manual seed text before it becomes durable", 
   assert.equal(parsed.manualSeeds[0].source_hint.length, 200);
 });
 
+test("company discovery preserves an explicit user request but not an automatic search trigger", () => {
+  assert.equal(
+    parseCompanyDiscoveryOperationRequest({ requestedByUser: true }).requestedByUser,
+    true
+  );
+  assert.equal(
+    parseCompanyDiscoveryOperationRequest({
+      requestedByUser: true,
+      trigger: { kind: "search-run", id: "search-1" },
+    }).requestedByUser,
+    undefined
+  );
+});
+
 test("company discovery freezes its provider-neutral plan before deduped work starts", async () => {
   const repoRoot = tempRepo();
   const release = deferred();

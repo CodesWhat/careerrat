@@ -93,8 +93,8 @@ function normalizeDecisionBody(body = {}) {
     note: String(body.note || "").trim(),
     // userConfirmed marks an explicit user keep/approve (e.g. onboarding's
     // Companies step Save & Next) rather than an unattended auto-gate
-    // approval. It is the review the confirm-first gate exists to require,
-    // so it relaxes the confidence-tier/proposedAction bar in
+    // approval. It resolves the remaining ambiguous proposal, so it relaxes
+    // the confidence-tier/proposedAction bar in
     // assertApprovalAllowed below — it never bypasses classification or
     // pending-state checks.
     userConfirmed: body.userConfirmed === true || body.user_confirmed === true,
@@ -178,8 +178,7 @@ function assertApprovalAllowed(proposal, { userConfirmed = false } = {}) {
     Boolean(String(proposal?.atsProvider || "").trim());
   const isSupportedAts = proposal?.classification === "supported_ats";
 
-  // An explicit user keep/approve (userConfirmed) IS the review the
-  // confirm-first gate exists to require, so it can approve a borderline or
+  // An explicit user keep/approve can resolve a borderline or
   // review-tier proposal without waiting on the auto-gate's confidence bar.
   // It still refuses unsupported_public proposals and anything without a
   // resolved board to approve into.

@@ -1,6 +1,6 @@
 ---
 name: discover-companies
-description: Continuously discover companies LIKELY to be hiring the candidate's target roles from their company thesis and role context → resolve each to a scannable ATS careers board → legitimacy-screen and dedup → propose adding to CareerRat tracked-company source config, confirm-first. Named focus companies are priority examples, never an allowlist. Upstream of search-jobs; turns a closed company set into a growing one.
+description: Discover companies likely to be hiring the candidate's target roles → resolve, validate, dedupe, and add high-confidence public ATS boards; review only ambiguous or unsupported results.
 metadata:
   tier_1_inputs:
     - profile.candidate.domain
@@ -22,7 +22,7 @@ Discovers **companies** likely to be hiring the candidate's target roles, resolv
 each to a careers board the scanner can sweep, screens them, and proposes adding them
 to the CareerRat source config (`careerrat companies`: SQLite in DB workspaces,
 legacy `config/sourced-scan.json` otherwise). Never writes a company without explicit
-user confirmation. Never duplicates a company already tracked, applied to, sourced,
+the explicit discovery request. Never duplicates a company already tracked, applied to, sourced,
 or excluded.
 
 > **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
@@ -139,7 +139,7 @@ matching `excluded_companies`.
 subagent per company (parallel `WebSearch`/`WebFetch`, no one-browser limit), each returning the
 verdict block (`{company, careers_url, ats, verdict: added|rejected|borderline, reason, roleSeen, confidence}`)
 using the gate below. The orchestrator holds the STEP 0 dedup set and owns the STEP 4
-confirm-first write — subagents only resolve + screen; they do not read AGENTS.md, re-derive a
+validated write — subagents only resolve + screen; they do not read AGENTS.md, re-derive a
 gate, or write any file. Degrade to inline sequential screening with no subagent primitive. See
 the **Delegation Contract** in AGENTS.md.
 
@@ -208,7 +208,7 @@ Do not add anything to source config yet.
 
 In conversational chat, follow the table with one typed proposal block for every NEW company that
 passed the supported-ATS gate. The app renders these as real Track company / Skip controls and owns
-the confirmed source-config write:
+the source-config write:
 
 ```careerrat:discovery
 {"kind":"company_proposal","name":"<company>","url":"https://<supported-ats-host>/<slug>","why":"<one short evidence-based reason>","confidence":"high"}
@@ -223,7 +223,8 @@ emit:
 {"kind":"discovery_complete","step":"discover-companies"}
 ```
 
-The app withholds the first-search button until every proposal is tracked or skipped. In a one-shot
+The app auto-adds validated high-confidence boards and withholds the first-search button only while
+ambiguous proposals remain undecided. In a one-shot
 CLI session, keep using STEP 4's CLI confirmation and write procedure instead.
 
 ---
@@ -238,19 +239,19 @@ clean-resolving canonical careers URL.
 
 **BORDERLINE / MEDIUM** — passes the STEP 2 gate but fails one or more high-confidence criteria
 (role relevance inferred not seen, comp-plausibility uncertain, slug resolved but board thin).
-Always confirm-first, regardless of any auto-add posture.
+Keep it reviewable instead of auto-adding it.
 
 Record each company's tier alongside its verdict; the tier drives STEP 4.
 
 ---
 
-## STEP 4 — Add companies (confirm-first by default; opt-in auto-add for high-confidence)
+## STEP 4 — Add validated companies; review ambiguous companies
 
 **External-agent / one-shot CLI runs only.** In conversational chat, this skill runs as an
 embedded session under the `chat` tool profile (`CHAT_RUNTIME_TOOLS`), which has no Bash —
 there is no shell to run `careerrat companies --add … --write` from. The STEP 3 Conversational
 web handoff already IS the write mechanism: each `company_proposal` block renders a real Track
-company / Skip control, and clicking it calls the confirm-first write server-side through the
+company / Skip control for ambiguous proposals, and clicking it calls the validated write server-side through the
 exact same `saveCompanyBoard`/source-config guards this step's CLI path uses. Skip this step's
 CLI commands, the `careerrat doctor` check, and the Activity Pulse CLI call entirely in chat
 mode — go straight to the **Required output block** below, using its chat-mode wording. Do not
@@ -260,16 +261,10 @@ whether the user actually tracked or skipped a proposal. Claiming a write here w
 run one violates the skill's Honesty Firewall. This step's CLI procedure below stays exactly as
 written for a one-shot, non-embedded (external-agent) run, where there is a real shell.
 
-**Default is confirm-first for everything.** Auto-add is active only when the user has explicitly
-opted in this session ("auto-add high-confidence companies" or equivalent).
-
-**Without opt-in (default):** present the STEP 3 table and wait for the user to pick which
-companies to add. Write nothing before that.
-
-**With opt-in:**
-
-- HIGH-CONFIDENCE companies: add without per-company confirmation; report each as it lands.
-- BORDERLINE / MEDIUM companies: always confirm-first, even with auto-add on.
+The explicit discovery request is the authorization. HIGH-CONFIDENCE companies add
+without per-item confirmation after the resolver, scanner, fit, compensation, capture,
+dedupe, and supported-ATS checks pass. BORDERLINE / MEDIUM and unsupported results stay
+reviewable. Rejected companies never write.
 
 For each company being added (auto or confirmed), use the companies helper — **never hand-edit
 SQLite source tables or `config/sourced-scan.json`**:
@@ -345,8 +340,8 @@ legacy `config/sourced-scan.json` rows otherwise. Hand off to `search-jobs` to s
 ## Final handoff
 
 End every run with the next agent task: `search-jobs` next. If no companies were
-added because confirmation is pending, tell the user that `search-jobs` can still
-run on broad sources, but the stronger handoff is to approve or revise the proposed
+added because ambiguous review is pending, tell the user that `search-jobs` can still
+run on broad sources, but the stronger handoff is to review the proposed
 companies first.
 
 ---
@@ -382,9 +377,10 @@ NEXT: awaiting confirmation
   this skill's prose. Every nominee derives from web-search results for the candidate's actual
   `domain`, `role_buckets`, and `keep_signals`. The same skill must serve a nurse, a driver, and
   an engineer by swapping the gate files.
-- **Confirm-first is the default.** Never write source config without explicit user approval,
-  unless the user opted into auto-add for high-confidence companies this session.
-- **Borderline/medium always confirm-first**, even with auto-add on.
+- **One authorization.** The explicit discovery request authorizes high-confidence
+  validated public ATS additions; do not ask for the same approval again.
+- **Borderline/medium stays reviewable.** Any company below the high-confidence bar
+  requires a user decision before being added.
 - **Dedup hard.** Never propose a company in the STEP 0 dedup set (tracked + applied + sourced)
   or in `excluded_companies`.
 - **Focus is not scope.** `company_preferences.examples`, manual seed lists, and currently tracked

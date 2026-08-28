@@ -57,6 +57,7 @@ import {
   skillChatThreadReleaseTurn,
   skillChatThreadSetTurnState,
 } from "../db/verbs.mjs";
+import { persistValidatedBoardSources } from "../discovery/board-source-persistence.mjs";
 import { parseSourceReviewOutput } from "../discovery/source-review-artifact.mjs";
 import { computeSetupProgress } from "../onboarding/setup-progress.mjs";
 import { loadAgentCandidateConfig } from "../profile/config-store.mjs";
@@ -377,9 +378,22 @@ function withChatAnswerMode(event) {
   };
 }
 
-function withSourceReviewArtifact(event, skill) {
+function withSourceReviewArtifact(event, skill, { repoRoot, env }) {
   if (skill !== "research-boards" || event?.type !== "assistant") return event;
   const parsed = parseSourceReviewOutput(assistantEventText(event));
+  const persisted = parsed.artifacts[0]
+    ? persistValidatedBoardSources({ repoRoot, env, artifact: parsed.artifacts[0] })
+    : null;
+  const artifact = persisted?.artifact || parsed.artifacts[0] || null;
+  const addedCount = persisted?.added?.length || 0;
+  const pendingCount = artifact
+    ? artifact.candidates.filter(
+        (candidate) => candidate.status === "proposed" && !candidate.decision
+      ).length
+    : 0;
+  const visibleText = addedCount
+    ? `Added ${addedCount} strong source${addedCount === 1 ? "" : "s"}. ${pendingCount} need${pendingCount === 1 ? "s" : ""} a closer look.`
+    : parsed.text;
   const content = Array.isArray(event.data?.message?.content)
     ? event.data.message.content.filter((block) => block?.type !== "text")
     : [];
@@ -387,10 +401,10 @@ function withSourceReviewArtifact(event, skill) {
     ...event,
     data: {
       ...event.data,
-      artifacts: parsed.artifacts,
+      artifacts: artifact ? [artifact] : [],
       message: {
         ...event.data?.message,
-        content: [...content, { type: "text", text: parsed.text }],
+        content: [...content, { type: "text", text: visibleText }],
       },
     },
   };
@@ -941,7 +955,7 @@ export function createChatRuntime({
       let evt = withChatAnswerMode(rawEvent);
       if (session.skill === "research-boards" && evt.type === "assistant") {
         if (!assistantEventText(evt).includes("```careerrat:discovery")) continue;
-        evt = withSourceReviewArtifact(evt, session.skill);
+        evt = withSourceReviewArtifact(evt, session.skill, { repoRoot, env });
         session.sourceReviewResponseSeen = true;
       }
       if (session.skill === "research-boards" && evt.type === "result") {

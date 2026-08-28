@@ -1,6 +1,6 @@
 // discovery-route.mjs — supervised app orchestration for the post-onboarding
 // discovery pipeline. This is deliberately not a hidden batch runner:
-// research-boards is a visible confirm-first chat. Company discovery stays on
+// research-boards is a visible validated-source chat. Company discovery stays on
 // the app-owned proposal path, and search-jobs stops at sourced/review state.
 
 import { WORKSPACE_THREAD_ID } from "../core/agent/workspace-thread.mjs";
@@ -37,7 +37,7 @@ export const DISCOVERY_CHAT_SKILLS = [
 
 const DISCOVERY_STEP_NOTES = {
   "research-boards":
-    "Run research-boards, propose useful boards, and stop at the skill's confirm-first write gate.",
+    "Run research-boards, add deterministically validated public boards, and leave only ambiguous sources for review.",
   "research-company":
     "Run research-company for the requested company and compose a cited workspace/research/<slug>.md artifact.",
   "research-comp":
@@ -113,7 +113,7 @@ export function buildDiscoveryKickoff({
       : null,
     `Pipeline order: ${DISCOVERY_PIPELINE.join(" -> ")}.`,
     DISCOVERY_STEP_NOTES[skill] || "Run only the current discovery step.",
-    "Keep confirm-first prompts visible. Do not auto-approve board or company writes.",
+    "The user's explicit discovery request authorizes deterministically validated public source writes. Keep only ambiguous or unsupported sources reviewable.",
     "Do not run evaluate-job, tailor-application, apply-job, fill forms, or submit applications from this handoff.",
     "If gate/apply setup is incomplete, stop with sourced or review items queued instead of guessing.",
   ]
@@ -459,8 +459,14 @@ export function mountDiscoveryRoutes({
     }
 
     try {
+      const discoveryBody = body?.trigger
+        ? body
+        : { ...(body && typeof body === "object" ? body : {}), requestedByUser: true };
       if (appOperations) {
-        const started = await startCompanyDiscoveryOperation({ appOperations, input: body });
+        const started = await startCompanyDiscoveryOperation({
+          appOperations,
+          input: discoveryBody,
+        });
         const {
           request: _request,
           ownerId: _ownerId,
@@ -478,12 +484,13 @@ export function mountDiscoveryRoutes({
       const result = await createCompanyProposalBatch({
         repoRoot,
         env,
-        body,
+        body: discoveryBody,
         fetchImpl,
         resolveCompanyBoard,
         scanCompaniesImpl,
         seedCall,
         now,
+        companyAtsUpsertImpl,
       });
       if (result.body) {
         sendJson(res, result.status || 500, result.body);
@@ -596,7 +603,7 @@ export function mountDiscoveryRoutes({
             type: "company.discover",
             entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
             input: {
-              request: "Continue post-onboarding discovery from approved job boards.",
+              request: "Continue post-onboarding discovery from validated job boards.",
             },
           },
         });

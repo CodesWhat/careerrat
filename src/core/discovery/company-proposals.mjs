@@ -3,6 +3,7 @@ import {
   companyBoardResolutionUpsert,
   companyProposalBatchPut,
 } from "../db/verbs/company-discovery.mjs";
+import { companyAtsUpsert as defaultCompanyAtsUpsert } from "../db/verbs/source-config.mjs";
 import { offersWithCapturedJobs as defaultOffersWithCapturedJobs } from "../scoring/sourced-persistence.mjs";
 import {
   buildLocationFilter,
@@ -63,6 +64,35 @@ function discoveryTriggerFromBody(body = {}) {
   const kind = String(body.trigger?.kind || "").trim();
   const id = String(body.trigger?.id || "").trim();
   return kind === "search-run" && id ? { kind, id: id.slice(0, 160) } : null;
+}
+
+function isExplicitDiscoveryRequest(body = {}) {
+  return body.requestedByUser === true || body.requested_by_user === true;
+}
+
+function canAutoAddProposal(proposal) {
+  return (
+    proposal?.classification === "supported_ats" &&
+    proposal?.confidenceTier === "high-confidence" &&
+    proposal?.proposedAction === "approve-supported-ats" &&
+    Boolean(String(proposal?.company?.name || "").trim()) &&
+    Boolean(String(proposal?.jobBoardUrl || "").trim())
+  );
+}
+
+function autoAddDecision({ proposal, sourceConfig, decidedAt }) {
+  return {
+    action: "approve-supported-ats",
+    status: "approved",
+    decidedAt,
+    decidedBy: "explicit-discovery",
+    sourceConfig: {
+      status: sourceConfig.status,
+      entry: sourceConfig.entry,
+      total: sourceConfig.total,
+    },
+    sourced: { created: 0, updated: 0, rows: 0 },
+  };
 }
 
 function scoringConfigFromContext(context = {}) {
@@ -194,6 +224,7 @@ export async function createCompanyProposalBatch({
   scanCompaniesImpl = scanCompanies,
   offersWithCapturedJobs = defaultOffersWithCapturedJobs,
   persistResolution = companyBoardResolutionUpsert,
+  companyAtsUpsertImpl = defaultCompanyAtsUpsert,
   buildSeedContext = buildCompanySeedContext,
   seedContext,
   generateSeeds = generateCompanySeeds,
@@ -291,19 +322,48 @@ export async function createCompanyProposalBatch({
     persistResolution({ repoRoot, env, resolution });
   }
 
+  const autoAdded = [];
+  let reviewProposals = proposals;
+  if (isExplicitDiscoveryRequest(body)) {
+    reviewProposals = [];
+    for (const proposal of proposals) {
+      if (!canAutoAddProposal(proposal)) {
+        reviewProposals.push(proposal);
+        continue;
+      }
+      const sourceConfig = companyAtsUpsertImpl({
+        repoRoot,
+        env,
+        entry: {
+          name: proposal.company.name,
+          careers_url: proposal.jobBoardUrl,
+          provider: proposal.atsProvider,
+        },
+      });
+      const decision = autoAddDecision({ proposal, sourceConfig, decidedAt: createdAt });
+      autoAdded.push({
+        ...proposal,
+        version: Number(proposal.version || 0) + 1,
+        decision,
+      });
+    }
+  }
+
   const batch = {
     batchId,
-    status: "pending",
+    status: reviewProposals.length ? "pending" : autoAdded.length ? "approved" : "complete",
     createdAt,
     version: 1,
     contextFingerprint: companyDiscoveryFingerprint(context),
     ...(trigger ? { trigger } : {}),
-    proposals,
+    proposals: reviewProposals,
+    ...(isExplicitDiscoveryRequest(body) ? { autoAdded } : {}),
     rejected,
     counts: {
       seeds: seeds.length,
-      proposals: proposals.length,
+      proposals: reviewProposals.length,
       rejected: rejected.length,
+      ...(isExplicitDiscoveryRequest(body) ? { autoAdded: autoAdded.length } : {}),
     },
   };
   companyProposalBatchPut({ repoRoot, env, batch });
@@ -311,7 +371,8 @@ export async function createCompanyProposalBatch({
   return {
     data: {
       batchId,
-      proposals,
+      proposals: reviewProposals,
+      ...(isExplicitDiscoveryRequest(body) ? { autoAdded } : {}),
       rejected,
       counts: batch.counts,
     },

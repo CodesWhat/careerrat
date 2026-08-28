@@ -253,7 +253,7 @@ export async function fillManualDomainHints({
     executionPlan,
     signal,
     system:
-      "You resolve official company domains for a confirm-first company-discovery workflow. Return only JSON matching the supplied schema; omit any company you cannot identify with confidence.",
+      "You resolve official company domains for a validated public-source discovery workflow. Return only JSON matching the supplied schema; omit any company you cannot identify with confidence.",
     messages: [
       {
         role: "user",
@@ -365,7 +365,7 @@ export async function generateCompanySeeds({
     executionPlan,
     signal,
     system:
-      "You generate company seed JSON for a confirm-first company-discovery proposal route. Return only JSON matching the supplied schema.",
+      "You generate company seed JSON for a validated public-source discovery route. Return only JSON matching the supplied schema.",
     messages: [
       {
         role: "user",

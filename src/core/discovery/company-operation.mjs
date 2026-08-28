@@ -117,11 +117,13 @@ export function parseCompanyDiscoveryOperationRequest(input = {}) {
     .trim()
     .slice(0, 500);
   const trigger = discoveryTrigger(input);
+  const requestedByUser = !trigger && input.requestedByUser === true;
   return {
     manualSeeds,
     requestedCount: requestedCount(input.requestedCount || input.requested_count),
     ...(request ? { discoveryRequest: request } : {}),
     ...(trigger ? { trigger } : {}),
+    ...(requestedByUser ? { requestedByUser: true } : {}),
   };
 }
 

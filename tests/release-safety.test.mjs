@@ -404,6 +404,19 @@ test("web discovery emits one structured board review that the app can validate 
   assert.match(companies, /"kind":"discovery_complete","step":"discover-companies"/);
 });
 
+test("explicit discovery requests do not require repeated approval for validated public sources", async () => {
+  const boards = await readText(".agents/skills/research-boards/SKILL.md");
+  const companies = await readText(".agents/skills/discover-companies/SKILL.md");
+
+  for (const skill of [boards, companies]) {
+    assert.match(skill, /the explicit discovery request is the authorization/i);
+    assert.match(skill, /high-confidence.*add.*without per-item confirmation/is);
+    assert.match(skill, /borderline.*review/i);
+  }
+  assert.doesNotMatch(boards, /confirm-first is the default/i);
+  assert.doesNotMatch(companies, /confirm-first is the default/i);
+});
+
 test("the app ships one fixed light visual mode", async () => {
   const index = await readText("apps/web/index.html");
   const foundation = await readText("apps/web/src/chat-first/app-foundation.css");

@@ -15,6 +15,7 @@ import {
   appUpsert,
   candidateConfigPatch,
   candidateSetupInitialize,
+  companyAtsUpsert,
   sourceConfigGet,
   sourceConfigPut,
   sourcedUpsertBatch,
@@ -177,8 +178,8 @@ function bootServer(repoRoot, opts = {}) {
     fetchImpl: opts.fetchImpl,
     now: opts.now || FIXED_NOW,
     runSkillStream: opts.runSkillStream,
-    companyAtsUpsert: opts.companyAtsUpsert,
-    sourcedUpsertBatch: opts.sourcedUpsertBatch,
+    companyAtsUpsertImpl: opts.companyAtsUpsert,
+    sourcedUpsertBatchImpl: opts.sourcedUpsertBatch,
     captureAndPersistOffersIfDb: opts.captureAndPersistOffersIfDb,
     writeTracker: opts.writeTracker,
     appOperations: opts.appOperations,
@@ -218,7 +219,10 @@ test("POST /api/discovery/company-proposals starts one durable background operat
   assert.deepEqual(calls, [
     {
       kind: "company.discovery",
-      input: { manualSeeds: [{ name: "Acme AI", domain_hint: "acme.example" }] },
+      input: {
+        manualSeeds: [{ name: "Acme AI", domain_hint: "acme.example" }],
+        requestedByUser: true,
+      },
     },
   ]);
 });
@@ -359,7 +363,7 @@ async function invokeJson(server, method, path, rawBody) {
   return { status: res.status, body };
 }
 
-test("POST /api/discovery/company-proposals creates a persisted manual-seed proposal batch without confirmed writes", async () => {
+test("POST /api/discovery/company-proposals auto-adds a validated manual-seed company board", async () => {
   const repoRoot = tempRepo();
   candidateSetupInitialize({ repoRoot });
   const calls = [];
@@ -402,7 +406,10 @@ test("POST /api/discovery/company-proposals creates a persisted manual-seed prop
       };
     },
     runSkillStream: forbidden("runSkillStream", calls),
-    companyAtsUpsert: forbidden("companyAtsUpsert", calls),
+    companyAtsUpsert: (args) => {
+      calls.push({ name: "companyAtsUpsert", args });
+      return companyAtsUpsert(args);
+    },
     sourcedUpsertBatch: forbidden("sourcedUpsertBatch", calls),
     captureAndPersistOffersIfDb: forbidden("captureAndPersistOffersIfDb", calls),
     writeTracker: forbidden("writeTracker", calls),
@@ -418,13 +425,15 @@ test("POST /api/discovery/company-proposals creates a persisted manual-seed prop
   assert.match(body.data.batchId, /^cpb_/);
   assert.deepEqual(body.data.counts, {
     seeds: 1,
-    proposals: 1,
+    proposals: 0,
     rejected: 0,
+    autoAdded: 1,
   });
   assert.deepEqual(body.data.rejected, []);
-  assert.equal(body.data.proposals.length, 1);
+  assert.equal(body.data.proposals.length, 0);
+  assert.equal(body.data.autoAdded.length, 1);
 
-  const proposal = body.data.proposals[0];
+  const proposal = body.data.autoAdded[0];
   assert.match(proposal.proposalId, /^cpp_/);
   assert.equal(proposal.company.name, "Acme AI");
   assert.equal(proposal.company.domain, "acme.example");
@@ -433,7 +442,8 @@ test("POST /api/discovery/company-proposals creates a persisted manual-seed prop
   assert.equal(proposal.confidenceTier, "high-confidence");
   assert.equal(proposal.proposedAction, "approve-supported-ats");
   assert.equal(proposal.roleSeen, "Applied AI Engineer");
-  assert.equal(proposal.version, 1);
+  assert.equal(proposal.version, 2);
+  assert.equal(proposal.decision.decidedBy, "explicit-discovery");
   assert.deepEqual(proposal.scanSummary, {
     status: "matching-roles-found",
     currentRoleCount: 1,
@@ -443,10 +453,10 @@ test("POST /api/discovery/company-proposals creates a persisted manual-seed prop
   });
 
   const { companyProposalBatchLatest } = await import("../src/core/db/verbs/company-discovery.mjs");
-  const latest = companyProposalBatchLatest({ repoRoot });
+  const latest = companyProposalBatchLatest({ repoRoot, status: null });
   assert.equal(latest.ok, true);
   assert.equal(latest.batch.batchId, body.data.batchId);
-  assert.equal(latest.batch.proposals[0].proposalId, proposal.proposalId);
+  assert.equal(latest.batch.autoAdded[0].proposalId, proposal.proposalId);
 
   assert.equal(chatRuntime.starts.length, 0);
   assert.equal(calls.filter((call) => call.name === "resolveCompanyBoard").length, 1);
@@ -457,7 +467,7 @@ test("POST /api/discovery/company-proposals creates a persisted manual-seed prop
   );
   assert.equal(
     calls.some((call) => call.name === "companyAtsUpsert"),
-    false
+    true
   );
   assert.equal(
     calls.some((call) => call.name === "sourcedUpsertBatch"),
@@ -471,10 +481,69 @@ test("POST /api/discovery/company-proposals creates a persisted manual-seed prop
     calls.some((call) => call.name === "writeTracker"),
     false
   );
-  assert.deepEqual(sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.tracked_companies, []);
+  assert.deepEqual(sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.tracked_companies, [
+    { name: "Acme AI", careers_url: "https://jobs.lever.co/acme", provider: "lever" },
+  ]);
   assert.equal(existsSync(userPath({ repoRoot }, "workspace/tracker.json")), false);
   assert.equal(existsSync(userPath({ repoRoot }, "workspace/tracker.html")), false);
   assert.equal(existsSync(userPath({ repoRoot }, "workspace/activity.jsonl")), false);
+});
+
+test("an explicit discovery request auto-adds a deterministically validated company board", async () => {
+  const repoRoot = tempRepo();
+  candidateSetupInitialize({ repoRoot });
+  const server = bootServer(repoRoot, {
+    resolveCompanyBoard: async ({ seed }) => ({
+      ok: true,
+      companyName: seed.name,
+      companyDomain: "acme.example",
+      careersUrl: "https://jobs.lever.co/acme",
+      jobBoardUrl: "https://jobs.lever.co/acme",
+      atsProvider: "lever",
+      apiUrl: "https://api.lever.co/v0/postings/acme",
+      confidence: "high",
+      provenance: [{ source: "manual-domain-hint", url: "https://acme.example" }],
+    }),
+    scanCompaniesImpl: async () => ({
+      offers: [
+        {
+          company: "Acme AI",
+          title: "Applied AI Engineer",
+          url: "https://jobs.lever.co/acme/ai-engineer",
+          location: "Remote",
+          comp: "$220,000 - $260,000",
+          bodyText: "Build agentic developer workflows and customer-facing AI prototypes.",
+          fit: "high",
+          score: 88,
+          gate: "likely-keep",
+          ratingReason: "matches keep signal",
+        },
+      ],
+      errors: [],
+    }),
+  });
+
+  const { status, body } = await postJson(server, "/api/discovery/company-proposals", {
+    manualSeeds: [{ name: "Acme AI", domain_hint: "acme.example" }],
+    requestedByUser: true,
+  });
+
+  assert.equal(status, 200);
+  assert.equal(body.ok, true);
+  assert.deepEqual(body.data.proposals, []);
+  assert.equal(body.data.autoAdded.length, 1);
+  assert.equal(body.data.autoAdded[0].company.name, "Acme AI");
+  assert.equal(body.data.autoAdded[0].decision.decidedBy, "explicit-discovery");
+  assert.deepEqual(body.data.counts, {
+    seeds: 1,
+    proposals: 0,
+    rejected: 0,
+    autoAdded: 1,
+  });
+  assert.deepEqual(sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.tracked_companies, [
+    { name: "Acme AI", careers_url: "https://jobs.lever.co/acme", provider: "lever" },
+  ]);
+  assert.equal(companyProposalBatchLatest({ repoRoot, status: null }).batch.status, "approved");
 });
 
 test("POST /api/discovery/company-proposals turns AI seeds into deterministic resolver/scanner proposals", async () => {
@@ -555,12 +624,13 @@ test("POST /api/discovery/company-proposals turns AI seeds into deterministic re
   assert.equal(body.ok, true);
   assert.deepEqual(body.data.counts, {
     seeds: 1,
-    proposals: 1,
+    proposals: 0,
     rejected: 0,
+    autoAdded: 1,
   });
-  assert.equal(body.data.proposals.length, 1);
-  assert.equal(body.data.proposals[0].company.name, "Seeded AI Co");
-  assert.equal(body.data.proposals[0].confidenceTier, "high-confidence");
+  assert.equal(body.data.proposals.length, 0);
+  assert.equal(body.data.autoAdded[0].company.name, "Seeded AI Co");
+  assert.equal(body.data.autoAdded[0].confidenceTier, "high-confidence");
   assert.equal(body.meta.ai.used, true);
   assert.equal(body.meta.ai.skill, "discover-companies");
   assert.equal(body.meta.ai.action, "seed-generate");
@@ -627,8 +697,8 @@ test("company proposal rescoring preserves worldwide remote scope in its candida
   });
 
   assert.equal(status, 200);
-  assert.equal(body.data.proposals.length, 1);
-  assert.equal(body.data.proposals[0].company.name, "Worldwide Remote Co");
+  assert.equal(body.data.proposals.length, 0);
+  assert.equal(body.data.autoAdded[0].company.name, "Worldwide Remote Co");
 });
 
 test("POST /api/discovery/company-proposals maps malformed JSON to 400", async () => {
@@ -693,7 +763,10 @@ test("POST /api/discovery/company-proposals returns the pinned high-confidence p
         errors: [],
       };
     },
-    companyAtsUpsert: forbidden("companyAtsUpsert", calls),
+    companyAtsUpsert: (args) => {
+      calls.push({ name: "companyAtsUpsert", args });
+      return companyAtsUpsert(args);
+    },
     sourcedUpsertBatch: forbidden("sourcedUpsertBatch", calls),
     captureAndPersistOffersIfDb: forbidden("captureAndPersistOffersIfDb", calls),
     writeTracker: forbidden("writeTracker", calls),
@@ -712,10 +785,13 @@ test("POST /api/discovery/company-proposals returns the pinned high-confidence p
 
   assert.equal(status, 200);
   assertNoCurrentCompLeak(body);
-  assert.equal(body.data.proposals.length, 1);
+  assert.equal(body.data.proposals.length, 0);
+  assert.equal(body.data.autoAdded.length, 1);
   assert.deepEqual(body.data.rejected, []);
-  const proposal = body.data.proposals[0];
-  assertProposalContract(proposal);
+  const proposal = body.data.autoAdded[0];
+  const { decision, ...proposalContract } = proposal;
+  assertProposalContract(proposalContract);
+  assert.equal(decision.decidedBy, "explicit-discovery");
   assert.equal(proposal.company.name, "Contract AI");
   assert.equal(proposal.company.domain, "contract.example");
   assert.equal(proposal.classification, "supported_ats");
@@ -735,7 +811,7 @@ test("POST /api/discovery/company-proposals returns the pinned high-confidence p
   assert.match(jdText, /Build agentic developer workflows/);
   assert.equal(
     calls.some((call) => call.name === "companyAtsUpsert"),
-    false
+    true
   );
   assert.equal(
     calls.some((call) => call.name === "sourcedUpsertBatch"),
@@ -1072,7 +1148,12 @@ test("VER-04 duplicate, excluded, in-play, and unsupported proposal states fail 
 
   assert.equal(status, 200);
   assert.equal(body.ok, true);
-  assert.deepEqual(body.data.counts, { seeds: 6, proposals: 1, rejected: 5 });
+  assert.deepEqual(body.data.counts, {
+    seeds: 6,
+    proposals: 1,
+    rejected: 5,
+    autoAdded: 0,
+  });
 
   const rejectedReasons = new Map(
     body.data.rejected.map((entry) => [entry.company.name, entry.rejectReasons])

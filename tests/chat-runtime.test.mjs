@@ -35,6 +35,7 @@ import {
   candidateEvidenceMerge,
   candidateSetupInitialize,
   skillChatThreadRead,
+  sourceConfigGet,
 } from "../src/core/db/verbs.mjs";
 
 const VERIFIED_CAPABILITIES = Object.freeze({
@@ -1151,13 +1152,23 @@ test("createChatRuntime: board research persists one validated review artifact i
 
     const stored = skillChatThreadRead({ repoRoot, env, skill: "research-boards" });
     assert.equal(stored.messages.length, 1);
-    assert.equal(stored.messages[0].text, "I found 6 useful sources. Nothing has been added yet.");
+    assert.equal(stored.messages[0].text, "Added 4 strong sources. 2 need a closer look.");
     assert.equal(stored.messages[0].artifacts.length, 1);
     assert.equal(stored.messages[0].artifacts[0].kind, "source_review");
     assert.equal(stored.messages[0].artifacts[0].candidates.length, 7);
     assert.equal(
       stored.messages[0].artifacts[0].candidates[6].rejectionReason,
       "no visible dated listing"
+    );
+    assert.equal(
+      stored.messages[0].artifacts[0].candidates.filter(
+        (candidate) => candidate.decision?.action === "save"
+      ).length,
+      4
+    );
+    assert.equal(
+      sourceConfigGet({ repoRoot, env, name: "search-sources" }).data.searches.length,
+      4
     );
     assert.doesNotMatch(JSON.stringify(stored), /BOARDS FOUND|\| # \| Board|careerrat:discovery/);
   } finally {

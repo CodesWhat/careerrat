@@ -7,6 +7,17 @@ const SOURCE_TYPES = new Set(["url-query", "rss", "browser"]);
 const SOURCE_STATUSES = new Set(["proposed", "rejected"]);
 const SOURCE_CONFIDENCE = new Set(["high", "borderline"]);
 
+function normalizeDecision(value) {
+  if (!value || !["save", "discard"].includes(value.action)) return null;
+  if (!["completed", "failed"].includes(value.status)) return null;
+  const resultText = cleanString(value.resultText, 1_000);
+  return {
+    action: value.action,
+    status: value.status,
+    ...(resultText ? { resultText } : {}),
+  };
+}
+
 function cleanString(value, max) {
   const text = typeof value === "string" ? value.trim() : "";
   return text && text.length <= max ? text : "";
@@ -44,7 +55,16 @@ function normalizeCandidate(value) {
   if (status === "proposed") {
     const confidence = cleanString(value?.confidence, 40);
     if (!SOURCE_CONFIDENCE.has(confidence) || value?.rejectionReason) return null;
-    return { label, url, sourceType, why, status, confidence };
+    const decision = normalizeDecision(value.decision);
+    return {
+      label,
+      url,
+      sourceType,
+      why,
+      status,
+      confidence,
+      ...(decision ? { decision } : {}),
+    };
   }
   const rejectionReason = cleanString(value?.rejectionReason, 1_000);
   if (!rejectionReason || value?.confidence) return null;
