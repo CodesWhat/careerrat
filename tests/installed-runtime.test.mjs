@@ -36,8 +36,8 @@ import {
   probeInstalledRuntime as probeInstalledRuntimeCore,
   RUNTIME_TOOL_PROFILE_UNSUPPORTED,
   readInstalledRuntimeScopedFile,
-  runInstalledRuntime,
-  runInstalledRuntimeStream,
+  runInstalledRuntime as runInstalledRuntimeCore,
+  runInstalledRuntimeStream as runInstalledRuntimeStreamCore,
   runtimeSearchDirectories,
   startInstalledRuntimeGuidedSetup,
   startInstalledRuntimeSignIn,
@@ -118,7 +118,36 @@ const VERIFIED_CAPABILITIES = Object.freeze({
 });
 
 function verifiedRuntime(runtime) {
-  return { ...runtime, capabilities: VERIFIED_CAPABILITIES };
+  return {
+    ...runtime,
+    realPath: runtime.realPath || runtime.path,
+    version: runtime.version || "fixture-version",
+    binaryFingerprint: runtime.binaryFingerprint || "f".repeat(64),
+    capabilities: VERIFIED_CAPABILITIES,
+  };
+}
+
+function fixtureRuntimeIdentity(runtime) {
+  return {
+    path: runtime.path,
+    realPath: runtime.realPath || runtime.path,
+    version: runtime.version || "fixture-version",
+    binaryFingerprint: runtime.binaryFingerprint || "f".repeat(64),
+  };
+}
+
+function runInstalledRuntime(options) {
+  return runInstalledRuntimeCore({
+    ...options,
+    runtimeIdentityImpl: options.runtimeIdentityImpl || fixtureRuntimeIdentity,
+  });
+}
+
+function runInstalledRuntimeStream(options) {
+  return runInstalledRuntimeStreamCore({
+    ...options,
+    runtimeIdentityImpl: options.runtimeIdentityImpl || fixtureRuntimeIdentity,
+  });
 }
 
 function executable(path) {
@@ -485,13 +514,19 @@ test("completion smoke uses the exact no-tool runtime boundary and caches only a
   const cache = new Map();
   const calls = [];
   const runtime = { id: "claude", name: "Claude Code", path: "/safe/claude", available: true };
+  const frozenIdentity = {
+    path: runtime.path,
+    realPath: runtime.path,
+    version: "2.1.241",
+    binaryFingerprint: "a".repeat(64),
+  };
   const options = {
     runtime,
     version: "2.1.241",
     cwd: "/safe/repo",
     env: { HOME: "/safe/home" },
     nowImpl: () => Date.parse("2026-08-27T16:00:00.000Z"),
-    runtimeFingerprintImpl: () => "120:200",
+    runtimeIdentityImpl: () => frozenIdentity,
     loadCompletionSmokeCacheImpl: ({ runtimeId }) => cache.get(runtimeId) || null,
     saveCompletionSmokeCacheImpl: ({ runtimeId, entry }) => cache.set(runtimeId, entry),
     async runInstalledRuntimeImpl(args) {
@@ -511,6 +546,15 @@ test("completion smoke uses the exact no-tool runtime boundary and caches only a
   assert.deepEqual(calls[0].tools, []);
   assert.equal(calls[0].skill, null);
   assert.equal(calls[0].repoRoot, null);
+  assert.deepEqual(
+    {
+      path: calls[0].runtime.path,
+      realPath: calls[0].runtime.realPath,
+      version: calls[0].runtime.version,
+      binaryFingerprint: calls[0].runtime.binaryFingerprint,
+    },
+    frozenIdentity
+  );
   assert.ok(calls[0].timeoutMs > 0 && calls[0].timeoutMs <= 30_000);
   assert.deepEqual(calls[0].outputSchema.required, ["receipt"]);
   assert.equal(JSON.stringify(calls[0]).includes("/safe/repo"), false);
@@ -529,7 +573,7 @@ test("completion smoke rejects a successful process without the exact parseable 
     runtime: { id: "codex", name: "Codex", path: "/safe/codex", available: true },
     version: "0.149.1",
     nowImpl: () => Date.parse("2026-08-27T16:00:00.000Z"),
-    runtimeFingerprintImpl: () => "120:200",
+    runtimeIdentityImpl: fixtureRuntimeIdentity,
     loadCompletionSmokeCacheImpl: () => null,
     saveCompletionSmokeCacheImpl: () => {},
     runInstalledRuntimeImpl: async () => ({ text: "CAREERRAT_COMPLETION_READY" }),
@@ -539,6 +583,26 @@ test("completion smoke rejects a successful process without the exact parseable 
   assert.equal(result.action, "retry");
   assert.equal(result.actionLabel, "Try again");
   assert.match(result.probeMessage, /didn't return a usable test reply/i);
+});
+
+test("completion smoke fails closed when the current executable identity cannot be read", async () => {
+  const { probeInstalledRuntimeCompletion } = await import("../src/core/ai/installed-runtimes.mjs");
+  let executed = false;
+  const result = await probeInstalledRuntimeCompletion({
+    runtime: { id: "codex", name: "Codex", path: "/safe/codex", available: true },
+    version: "0.149.1",
+    nowImpl: () => Date.parse("2026-08-27T16:00:00.000Z"),
+    runtimeIdentityImpl() {
+      throw new Error("unreadable executable");
+    },
+    runInstalledRuntimeImpl: async () => {
+      executed = true;
+      return { text: '{"receipt":"CAREERRAT_COMPLETION_READY"}' };
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(executed, false);
 });
 
 test("completion smoke rewrites its private cache with only supported bounded receipts", async () => {
@@ -565,7 +629,7 @@ test("completion smoke rewrites its private cache with only supported bounded re
       cwd: careerratHome,
       env: { CAREERRAT_HOME: careerratHome },
       nowImpl: () => Date.parse("2026-08-27T16:00:00.000Z"),
-      runtimeFingerprintImpl: () => "120:200",
+      runtimeIdentityImpl: fixtureRuntimeIdentity,
       runInstalledRuntimeImpl: async () => ({
         text: '{"receipt":"CAREERRAT_COMPLETION_READY"}',
       }),
@@ -976,6 +1040,107 @@ test("Unix direct executable identity keeps the existing raw-byte fingerprint", 
     assert.equal(identity.binaryFingerprint, createHash("sha256").update(bytes).digest("hex"));
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("one-shot execution rejects a same-path replacement before spawning it", async () => {
+  const root = tempRoot();
+  const executablePath = join(root, "claude");
+  writeFileSync(executablePath, "verified implementation", "utf8");
+  const frozenIdentity = installedRuntimeExecutionIdentity({
+    path: executablePath,
+    version: "2.1.241",
+  });
+  writeFileSync(executablePath, "replacement implementation", "utf8");
+  let spawned = false;
+
+  try {
+    await assert.rejects(
+      runInstalledRuntimeCore({
+        runtime: verifiedRuntime({ id: "claude", ...frozenIdentity }),
+        prompt: "hello",
+        spawnImpl() {
+          spawned = true;
+          return fakeInstalledChild({
+            stdout: JSON.stringify({ type: "result", subtype: "success", result: "unsafe" }),
+          });
+        },
+      }),
+      { code: "RUNTIME_EXECUTABLE_CHANGED" }
+    );
+    assert.equal(spawned, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("streaming execution rejects a same-path replacement before spawning it", async () => {
+  const root = tempRoot();
+  const executablePath = join(root, "claude");
+  writeFileSync(executablePath, "verified implementation", "utf8");
+  const frozenIdentity = installedRuntimeExecutionIdentity({
+    path: executablePath,
+    version: "2.1.241",
+  });
+  writeFileSync(executablePath, "replacement implementation", "utf8");
+  let spawned = false;
+
+  try {
+    await assert.rejects(
+      runInstalledRuntimeStreamCore({
+        runtime: verifiedRuntime({ id: "claude", ...frozenIdentity }),
+        prompt: "hello",
+        spawnImpl() {
+          spawned = true;
+          return fakeStreamingChild({ chunks: [] });
+        },
+      }),
+      { code: "RUNTIME_EXECUTABLE_CHANGED" }
+    );
+    assert.equal(spawned, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("tool execution keeps its frozen identity when the caller mutates the runtime object", async () => {
+  const repoRoot = tempRepoWithOneSkill("research-company");
+  const runtime = verifiedRuntime({ id: "claude", path: "/safe/claude" });
+  const replacementFingerprint = "b".repeat(64);
+  let identityChecks = 0;
+  let finalSpawned = false;
+
+  try {
+    await assert.rejects(
+      runInstalledRuntime({
+        runtime,
+        prompt: "research",
+        skill: "research-company",
+        repoRoot,
+        tools: ["WebSearch", "Skill"],
+        runtimeIdentityImpl(selected) {
+          identityChecks += 1;
+          const current = fixtureRuntimeIdentity(selected);
+          if (identityChecks === 1) {
+            runtime.binaryFingerprint = replacementFingerprint;
+            return current;
+          }
+          return { ...current, binaryFingerprint: replacementFingerprint };
+        },
+        spawnSyncImpl: verifiedClaudeVersion,
+        spawnImpl() {
+          finalSpawned = true;
+          return fakeInstalledChild({
+            stdout: JSON.stringify({ type: "result", subtype: "success", result: "unsafe" }),
+          });
+        },
+      }),
+      { code: "RUNTIME_EXECUTABLE_CHANGED" }
+    );
+    assert.equal(identityChecks, 2);
+    assert.equal(finalSpawned, false);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
   }
 });
 
@@ -2581,6 +2746,21 @@ test("buildInstalledRuntimeChildEnv retains only process/auth paths, locale, and
     ANTHROPIC_MODEL: "claude-sonnet",
     CLAUDE_CONFIG_DIR: "/Users/morgan/.config/claude",
   });
+});
+
+test("buildInstalledRuntimeChildEnv keeps Windows launcher path casing used by execution identity", () => {
+  assert.deepEqual(
+    buildInstalledRuntimeChildEnv({
+      env: {
+        Path: "C:\\Program Files\\nodejs",
+        ComSpec: "C:\\Windows\\System32\\cmd.exe",
+      },
+    }),
+    {
+      Path: "C:\\Program Files\\nodejs",
+      ComSpec: "C:\\Windows\\System32\\cmd.exe",
+    }
+  );
 });
 
 test("runInstalledRuntime scrubs server secrets from a completion-only Claude child", async () => {

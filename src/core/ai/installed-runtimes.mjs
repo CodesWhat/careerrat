@@ -105,6 +105,7 @@ export function sanitizeInstalledRuntimeCapabilityEvidence(runtimeId, capabiliti
 
 const INSTALLED_CHILD_ENV_KEYS = Object.freeze([
   "PATH",
+  "Path",
   "HOME",
   "USER",
   "LOGNAME",
@@ -131,6 +132,7 @@ const INSTALLED_CHILD_ENV_KEYS = Object.freeze([
   "WINDIR",
   "PATHEXT",
   "COMSPEC",
+  "ComSpec",
   "CAREERRAT_HOME",
   "CAREERRAT_INSTALLED_AI_MODEL",
   "ANTHROPIC_MODEL",
@@ -634,19 +636,21 @@ export function installedRuntimeExecutionIdentity(
     platform = process.platform,
     spawnSyncImpl = spawnSync,
     runtimeIdentityFilesImpl = runtimeProcessIdentityFiles,
+    requireCurrentExecutable = false,
   } = {}
 ) {
   const path = String(runtime?.path || "").trim();
   if (!path) return null;
-  const realPath = existingCanonicalPath(path) || String(runtime?.realPath || "").trim();
-  const resolvedFingerprint = realPath
-    ? runtimeBinaryFingerprint(realPath, { env, platform, runtimeIdentityFilesImpl })
+  const currentRealPath = existingCanonicalPath(path);
+  const realPath =
+    currentRealPath || (requireCurrentExecutable ? "" : String(runtime?.realPath || "").trim());
+  const resolvedFingerprint = currentRealPath
+    ? runtimeBinaryFingerprint(currentRealPath, { env, platform, runtimeIdentityFilesImpl })
     : null;
-  const requiresResolvedChain =
-    platform === "win32" && /\.(?:bat|cmd)$/i.test(String(realPath || path));
+  const requiresResolvedChain = platform === "win32" && /\.(?:bat|cmd)$/i.test(String(realPath));
   const binaryFingerprint =
     resolvedFingerprint ||
-    (requiresResolvedChain
+    (requireCurrentExecutable || requiresResolvedChain
       ? null
       : String(runtime?.binaryFingerprint || "")
           .trim()
@@ -677,6 +681,56 @@ export function installedRuntimeExecutionIdentity(
   }
   if (!realPath || !/^[a-f0-9]{64}$/.test(binaryFingerprint) || !version) return null;
   return { path, realPath, version, binaryFingerprint };
+}
+
+function assertInstalledRuntimeExecutionIdentity(
+  runtime,
+  {
+    env = process.env,
+    platform = process.platform,
+    runtimeIdentityImpl = installedRuntimeExecutionIdentity,
+  } = {}
+) {
+  const expected = {
+    path: String(runtime?.path || "").trim(),
+    realPath: String(runtime?.realPath || "").trim(),
+    version: String(runtime?.version || "").trim(),
+    binaryFingerprint: String(runtime?.binaryFingerprint || "")
+      .trim()
+      .toLowerCase(),
+  };
+  if (
+    !expected.path ||
+    !expected.realPath ||
+    !expected.version ||
+    !/^[a-f0-9]{64}$/.test(expected.binaryFingerprint)
+  ) {
+    throw runtimeError(
+      "The selected AI CLI has no complete verified execution identity. Re-check it in Settings.",
+      "RUNTIME_EXECUTION_IDENTITY_REQUIRED",
+      { runtimeId: runtime?.id || null }
+    );
+  }
+  let current = null;
+  try {
+    current = runtimeIdentityImpl(runtime, { env, platform, requireCurrentExecutable: true });
+  } catch {
+    current = null;
+  }
+  if (
+    !current ||
+    current.path !== expected.path ||
+    current.realPath !== expected.realPath ||
+    current.version !== expected.version ||
+    current.binaryFingerprint !== expected.binaryFingerprint
+  ) {
+    throw runtimeError(
+      "The selected AI CLI changed after CareerRat verified it. Start this work again.",
+      "RUNTIME_EXECUTABLE_CHANGED",
+      { runtimeId: runtime?.id || null }
+    );
+  }
+  return current;
 }
 
 function completionSmokeCachePath({ cwd, env }) {
@@ -786,7 +840,7 @@ export async function probeInstalledRuntimeCompletion({
   force = false,
   timeoutMs = COMPLETION_SMOKE_TIMEOUT_MS,
   nowImpl = Date.now,
-  runtimeFingerprintImpl = runtimeBinaryFingerprint,
+  runtimeIdentityImpl = installedRuntimeExecutionIdentity,
   loadCompletionSmokeCacheImpl = loadCompletionSmokeCache,
   saveCompletionSmokeCacheImpl = saveCompletionSmokeCache,
   runInstalledRuntimeImpl = runInstalledRuntime,
@@ -799,7 +853,16 @@ export async function probeInstalledRuntimeCompletion({
       entry: { ok: false, checkedAt: new Date(nowImpl()).toISOString() },
     });
   }
-  const binaryFingerprint = runtimeFingerprintImpl(runtime.path, { env, platform });
+  let executionIdentity = null;
+  try {
+    executionIdentity = runtimeIdentityImpl(
+      { ...runtime, version },
+      { env, platform, requireCurrentExecutable: true }
+    );
+  } catch {
+    executionIdentity = null;
+  }
+  const binaryFingerprint = executionIdentity?.binaryFingerprint;
   const nowMs = nowImpl();
   if (!binaryFingerprint) {
     return completionSmokeResult({
@@ -832,7 +895,7 @@ export async function probeInstalledRuntimeCompletion({
         ])
       );
       const result = await runInstalledRuntimeImpl({
-        runtime: { ...runtime, capabilities: capabilityEvidence },
+        runtime: { ...runtime, ...executionIdentity, capabilities: capabilityEvidence },
         prompt:
           "Return the exact CareerRat readiness receipt requested by the output schema. Do not use tools or inspect files.",
         outputSchema: COMPLETION_SMOKE_SCHEMA,
@@ -883,6 +946,7 @@ async function runInstalledRuntimeProbe(
     platform = process.platform,
     timeoutMs = 5000,
     signal,
+    beforeSpawn,
   } = {}
 ) {
   const options = {
@@ -893,6 +957,7 @@ async function runInstalledRuntimeProbe(
     stdio: ["ignore", "pipe", "pipe"],
   };
   if (platform !== "win32") {
+    beforeSpawn?.();
     try {
       return spawnSyncImpl(invocation.command, invocation.args, {
         ...options,
@@ -916,6 +981,7 @@ async function runInstalledRuntimeProbe(
   return new Promise((resolve) => {
     let child;
     try {
+      beforeSpawn?.();
       child = spawnImpl(invocation.command, invocation.args, {
         ...options,
         detached: false,
@@ -1007,6 +1073,7 @@ async function assertInstalledRuntimeBoundaryVersion(
     platform = process.platform,
     timeoutMs = 5000,
     signal,
+    beforeSpawn,
   } = {}
 ) {
   const definition = installedRuntimeDefinition(runtime?.id);
@@ -1024,8 +1091,15 @@ async function assertInstalledRuntimeBoundaryVersion(
     platform,
     timeoutMs,
     signal,
+    beforeSpawn,
   });
   if (result?.error?.code === "RUNTIME_CANCELLED") throw result.error;
+  if (
+    result?.error?.code === "RUNTIME_EXECUTABLE_CHANGED" ||
+    result?.error?.code === "RUNTIME_EXECUTION_IDENTITY_REQUIRED"
+  ) {
+    throw result.error;
+  }
   if (
     result?.status !== 0 ||
     !versionAtLeast(
@@ -2135,6 +2209,7 @@ export async function runInstalledRuntime({
   spawnSyncImpl = spawnSync,
   treeKillImpl = spawnSync,
   runAcpRuntimeImpl = runAcpRuntime,
+  runtimeIdentityImpl = installedRuntimeExecutionIdentity,
   platform = process.platform,
   onEvent,
   // A named skill always runs in materializeIsolatedSkillCwd()'s single-skill
@@ -2147,6 +2222,12 @@ export async function runInstalledRuntime({
   if (!runtime?.id || !runtime?.path) {
     throw runtimeError("No installed AI runtime is selected.", "RUNTIME_NOT_SELECTED");
   }
+  runtime = Object.freeze({
+    ...runtime,
+    ...(runtime.capabilities && typeof runtime.capabilities === "object"
+      ? { capabilities: Object.freeze({ ...runtime.capabilities }) }
+      : {}),
+  });
   if (signal?.aborted) {
     throw runtimeError("Installed AI request was cancelled.", "RUNTIME_CANCELLED");
   }
@@ -2157,6 +2238,12 @@ export async function runInstalledRuntime({
   const toolBearing = providerTools.length > 0;
   assertRuntimeCapabilities({ runtime, definition, skill, tools: providerTools, outputSchema });
   const childEnv = buildInstalledRuntimeChildEnv({ env });
+  const assertExecutionIdentity = () =>
+    assertInstalledRuntimeExecutionIdentity(runtime, {
+      env: childEnv,
+      platform,
+      runtimeIdentityImpl,
+    });
   if (toolBearing) {
     await assertInstalledRuntimeBoundaryVersion(runtime, {
       spawnImpl,
@@ -2165,6 +2252,7 @@ export async function runInstalledRuntime({
       env: childEnv,
       platform,
       signal,
+      beforeSpawn: assertExecutionIdentity,
     });
     if (signal?.aborted) {
       throw runtimeError("Installed AI request was cancelled.", "RUNTIME_CANCELLED");
@@ -2234,6 +2322,7 @@ export async function runInstalledRuntime({
         mcpServers,
         spawnImpl,
         platform,
+        beforeSpawn: assertExecutionIdentity,
       });
     }
     const invocation = buildInstalledRuntimeInvocation({
@@ -2261,6 +2350,7 @@ export async function runInstalledRuntime({
       platform,
     });
     const result = await new Promise((resolve, reject) => {
+      assertExecutionIdentity();
       let child;
       try {
         child = spawnImpl(processInvocation.command, processInvocation.args, {
@@ -2512,6 +2602,7 @@ export async function runInstalledRuntimeStream({
   spawnSyncImpl = spawnSync,
   treeKillImpl = spawnSync,
   runAcpRuntimeImpl = runAcpRuntime,
+  runtimeIdentityImpl = installedRuntimeExecutionIdentity,
   platform = process.platform,
   // Skill this call is running — same isolated-cwd semantics as
   // runInstalledRuntime's own skill/repoRoot params (see
@@ -2527,6 +2618,12 @@ export async function runInstalledRuntimeStream({
   if (!runtime?.id || !runtime?.path) {
     throw runtimeError("No installed AI runtime is selected.", "RUNTIME_NOT_SELECTED");
   }
+  runtime = Object.freeze({
+    ...runtime,
+    ...(runtime.capabilities && typeof runtime.capabilities === "object"
+      ? { capabilities: Object.freeze({ ...runtime.capabilities }) }
+      : {}),
+  });
   if (!supportsInstalledRuntimeStreaming(runtime.id)) {
     throw runtimeError(
       `${runtime.name || runtime.id} has no streaming output mode, so it cannot run a streaming ` +
@@ -2550,6 +2647,12 @@ export async function runInstalledRuntimeStream({
     streaming: true,
   });
   const childEnv = buildInstalledRuntimeChildEnv({ env });
+  const assertExecutionIdentity = () =>
+    assertInstalledRuntimeExecutionIdentity(runtime, {
+      env: childEnv,
+      platform,
+      runtimeIdentityImpl,
+    });
   if (providerTools.length > 0) {
     await assertInstalledRuntimeBoundaryVersion(runtime, {
       spawnImpl,
@@ -2558,6 +2661,7 @@ export async function runInstalledRuntimeStream({
       env: childEnv,
       platform,
       signal,
+      beforeSpawn: assertExecutionIdentity,
     });
     if (signal?.aborted) {
       throw runtimeError("Installed AI request was cancelled.", "RUNTIME_CANCELLED");
@@ -2616,6 +2720,7 @@ export async function runInstalledRuntimeStream({
         onMessage,
         spawnImpl,
         platform,
+        beforeSpawn: assertExecutionIdentity,
       });
     }
     const invocation = buildInstalledRuntimeInvocation({
@@ -2638,6 +2743,7 @@ export async function runInstalledRuntimeStream({
       platform,
     });
     const result = await new Promise((resolve, reject) => {
+      assertExecutionIdentity();
       let child;
       try {
         child = spawnImpl(processInvocation.command, processInvocation.args, {
