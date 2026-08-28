@@ -350,9 +350,7 @@ test("auth probe exposes only bounded readiness state, never CLI account output"
     {
       spawnSyncImpl(executablePath, args, options) {
         calls.push({ executablePath, args, options });
-        return args[0] === "--version"
-          ? { status: 0, stdout: "codex-cli 0.149.1", stderr: "" }
-          : { status: 0, stdout: "Logged in as morgan@example.com", stderr: "" };
+        return { status: 0, stdout: "Logged in as morgan@example.com", stderr: "" };
       },
     }
   );
@@ -374,13 +372,13 @@ test("auth probe exposes only bounded readiness state, never CLI account output"
     capabilityReason: null,
   });
   assert.equal(JSON.stringify(ready).includes("morgan@example.com"), false);
-  assert.equal(calls[1].executablePath, "/safe/codex");
+  assert.equal(calls[0].executablePath, "/safe/codex");
   assert.deepEqual(
     calls.map(({ args }) => args),
-    [["--version"], ["login", "status"]]
+    [["login", "status"]]
   );
-  assert.equal(calls[1].options.shell, false);
-  assert.ok(calls[1].options.timeout > 0);
+  assert.equal(calls[0].options.shell, false);
+  assert.ok(calls[0].options.timeout > 0);
 
   const signedOut = await probeInstalledRuntime(
     { id: "claude", path: "/safe/claude", available: true },
@@ -589,7 +587,7 @@ test("Windows readiness probes launch detected Claude and Codex npm shims throug
     );
 
     assert.equal(ready.ready, true);
-    assert.ok(calls.length >= 2);
+    assert.equal(calls.length, runtimeCase.id === "claude" ? 2 : 1);
     for (const call of calls) {
       assert.equal(call.command, comspec);
       assert.deepEqual(call.args.slice(0, 4), ["/d", "/s", "/v:off", "/c"]);
@@ -872,20 +870,22 @@ test("an empty ACP handshake proves protocol readiness without workflow capabili
   assert.equal(ready.capabilities.research, false);
 });
 
-test("Claude readiness fails closed below the verified CLI boundary version", async () => {
+test("Claude readiness keeps completion available below the tool boundary version", async () => {
   const calls = [];
-  const unsupported = await probeInstalledRuntime(
+  const ready = await probeInstalledRuntime(
     { id: "claude", path: "/safe/claude", available: true },
     {
       spawnSyncImpl(_path, args) {
         calls.push(args);
-        return { status: 0, stdout: "2.1.200 (Claude Code)", stderr: "" };
+        return args[0] === "--version"
+          ? { status: 0, stdout: "2.1.200 (Claude Code)", stderr: "" }
+          : { status: 0, stdout: "signed in", stderr: "" };
       },
     }
   );
-  assert.deepEqual(unsupported, {
-    status: "unsupported_capability",
-    ready: false,
+  assert.deepEqual(ready, {
+    status: "ready",
+    ready: true,
     action: null,
     capabilities: {
       completion: true,
@@ -900,38 +900,38 @@ test("Claude readiness fails closed below the verified CLI boundary version", as
     },
     capabilityReason: "Update Claude Code to 2.1.241 or newer for secure CareerRat tool runs.",
   });
-  assert.deepEqual(calls, [["--version"]]);
+  assert.deepEqual(calls, [["--version"], ["auth", "status"]]);
 });
 
-test("Codex readiness requires the CLI version that supports the completion capsule controls", async () => {
+test("Codex readiness depends on authentication rather than a complete-workflow version floor", async () => {
   const calls = [];
-  const unsupported = await probeInstalledRuntime(
+  const ready = await probeInstalledRuntime(
     { id: "codex", path: "/safe/codex", available: true },
     {
       spawnSyncImpl(_path, args) {
         calls.push(args);
-        return { status: 0, stdout: "codex-cli 0.148.0", stderr: "" };
+        return { status: 0, stdout: "logged in", stderr: "" };
       },
     }
   );
-  assert.deepEqual(unsupported, {
-    status: "unsupported_capability",
-    ready: false,
+  assert.deepEqual(ready, {
+    status: "ready",
+    ready: true,
     action: null,
     capabilities: {
-      completion: false,
-      structuredOutput: false,
-      appWorkflows: false,
-      exactRead: false,
-      publicWeb: false,
-      liveActivity: false,
-      resumable: false,
-      taskTools: false,
-      research: false,
+      completion: true,
+      structuredOutput: true,
+      appWorkflows: true,
+      exactRead: true,
+      publicWeb: true,
+      liveActivity: true,
+      resumable: true,
+      taskTools: true,
+      research: true,
     },
-    capabilityReason: "Update Codex to 0.149.1 or newer for the complete CareerRat workflow.",
+    capabilityReason: null,
   });
-  assert.deepEqual(calls, [["--version"]]);
+  assert.deepEqual(calls, [["login", "status"]]);
 });
 
 test("Skill-only Claude runs are completion-only and do not require the tool boundary version", async () => {
@@ -3257,6 +3257,36 @@ test("runInstalledRuntimeStream re-verifies Claude's boundary version before a c
   }
 });
 
+test("runInstalledRuntimeStream does not apply Claude's tool boundary to Skill-only work", async () => {
+  const repoRoot = tempRepoWithOneSkill("answer-question");
+  let spawned = false;
+  try {
+    const result = await runInstalledRuntimeStream({
+      runtime: verifiedRuntime({ id: "claude", name: "Claude Code", path: "/safe/claude" }),
+      prompt: "draft",
+      skill: "answer-question",
+      repoRoot,
+      tools: ["Skill"],
+      spawnSyncImpl: () => ({ status: 0, stdout: "2.1.200 (Claude Code)", stderr: "" }),
+      spawnImpl() {
+        spawned = true;
+        return fakeStreamingChild({
+          chunks: [
+            ndjson([
+              { type: "assistant", message: { content: [{ type: "text", text: "drafted" }] } },
+              { type: "result", subtype: "success", result: "drafted" },
+            ]),
+          ],
+        });
+      },
+    });
+    assert.equal(result.text, "drafted");
+    assert.equal(spawned, true);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("runInstalledRuntimeStream: a text-only turn calls onMessage once per NDJSON line, in order, and resolves the terminal result's text/usage/model/sessionId", async () => {
   const lines = [
     { type: "system", subtype: "init", session_id: "sess-1" },
@@ -3327,7 +3357,7 @@ test("runInstalledRuntimeStream scrubs server secrets while retaining HOME-based
         return fakeStreamingChild({ chunks: [ndjson([terminal])] });
       },
     });
-    assert.equal(seenEnvs.length, 2);
+    assert.equal(seenEnvs.length, 1);
     for (const childEnv of seenEnvs) {
       assert.equal(childEnv.HOME, "/Users/morgan");
       assert.equal(childEnv.PATH, "/usr/bin");

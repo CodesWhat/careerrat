@@ -26,7 +26,7 @@ import { resolveModelConfig } from "./ai-config.mjs";
 import { loadAIPreferences } from "./ai-preferences.mjs";
 import {
   detectInstalledRuntimes,
-  hasCompleteCareerRatCapabilities,
+  hasInstalledRuntimeCompletion,
   installedRuntimeCapabilities,
   runInstalledRuntime,
 } from "./installed-runtimes.mjs";
@@ -88,7 +88,7 @@ export function resolveAIRoute(
           available: runtime.available === true,
           capabilityEvidence,
         });
-        if (hasCompleteCareerRatCapabilities(capabilityState.capabilities, runtime.id)) {
+        if (hasInstalledRuntimeCompletion(capabilityState.capabilities, runtime.id)) {
           return {
             type: "installed",
             runtime: {
@@ -102,7 +102,7 @@ export function resolveAIRoute(
         return {
           type: "none",
           error:
-            `selected installed AI runtime "${runtime.id}" has no current capability ` +
+            `selected installed AI runtime "${runtime.id}" has no current completion capability ` +
             "verification; re-check it in Settings",
         };
       }

@@ -469,7 +469,7 @@ test("backend support and workflow capability rules follow the installed definit
     });
     const incompleteInventory = await request(incompleteServer, "GET", "/api/settings/ai-runtimes");
     const incompleteCodex = incompleteInventory.body.runtimes.find(({ id }) => id === "codex");
-    assert.equal(incompleteCodex.selectable, false);
+    assert.equal(incompleteCodex.selectable, true);
   } finally {
     if (previousSupported === undefined) delete supportDefinition.supported;
     else supportDefinition.supported = previousSupported;
@@ -479,8 +479,10 @@ test("backend support and workflow capability rules follow the installed definit
   }
 });
 
-test("selection rejects a ready supported runtime missing any full-workflow capability", async () => {
-  for (const missingCapability of Object.keys(VERIFIED_CAPABILITIES)) {
+test("selection accepts a completion-ready runtime with unrelated capabilities unverified", async () => {
+  for (const missingCapability of Object.keys(VERIFIED_CAPABILITIES).filter(
+    (capability) => capability !== "completion"
+  )) {
     const server = boot({
       inventory: INVENTORY,
       probes: {
@@ -499,13 +501,37 @@ test("selection rejects a ready supported runtime missing any full-workflow capa
       runtimeId: "codex",
     });
 
-    assert.equal(response.status, 409, `${missingCapability} must be required for selection`);
-    assert.equal(response.body.code, "RUNTIME_CAPABILITY_UNSUPPORTED");
+    assert.equal(response.status, 200, `${missingCapability} must not block selection`);
+    assert.equal(response.body.selectedId, "codex");
     assert.equal(
       loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }).runtimeId,
-      null
+      "codex"
     );
   }
+});
+
+test("selection still rejects a runtime without verified completion", async () => {
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {
+      claude: { status: "authentication_required", ready: false, action: "start_sign_in" },
+      codex: {
+        ...readyProbe(),
+        capabilities: { ...VERIFIED_CAPABILITIES, completion: false },
+      },
+    },
+  });
+
+  const response = await request(server, "POST", "/api/settings/ai-runtime/select", {
+    runtimeId: "codex",
+  });
+
+  assert.equal(response.status, 409);
+  assert.equal(response.body.code, "RUNTIME_CAPABILITY_UNSUPPORTED");
+  assert.equal(
+    loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }).runtimeId,
+    null
+  );
 });
 
 test("an unaccepted adapter remains diagnostic-only even after a successful full-capability probe", async () => {
@@ -681,7 +707,7 @@ test("ready Codex is selectable for the full CareerRat workflow", async () => {
   assert.equal(selected.body.selectedId, "codex");
 });
 
-test("a Codex probe below the completion boundary stays visible but unselectable", async () => {
+test("a Codex probe without completion evidence stays visible but unselectable", async () => {
   const server = boot({
     inventory: INVENTORY,
     probes: {

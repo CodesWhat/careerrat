@@ -324,8 +324,10 @@ test("resolveAIRoute: carries the selected runtime's verified capability evidenc
   }
 });
 
-test("resolveAIRoute: rejects a selected supported runtime missing any full-workflow capability", () => {
-  for (const missingCapability of Object.keys(VERIFIED_CAPABILITIES)) {
+test("resolveAIRoute: dispatches a completion-ready runtime with unrelated capabilities unverified", () => {
+  for (const missingCapability of Object.keys(VERIFIED_CAPABILITIES).filter(
+    (capability) => capability !== "completion"
+  )) {
     const root = tempRoot();
     try {
       const path = "/safe/codex";
@@ -351,11 +353,41 @@ test("resolveAIRoute: rejects a selected supported runtime missing any full-work
         }
       );
 
-      assert.equal(route.type, "none", `${missingCapability} must be required for dispatch`);
-      assert.match(route.error, /capability verification/i);
+      assert.equal(route.type, "installed", `${missingCapability} must not block dispatch`);
+      assert.equal(route.runtime.id, "codex");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  }
+});
+
+test("resolveAIRoute: rejects a selected runtime without verified completion", () => {
+  const root = tempRoot();
+  try {
+    const path = "/safe/codex";
+    writeInstalledRuntimeSelection({
+      repoRoot: root,
+      env: {},
+      runtimeId: "codex",
+      verification: {
+        path,
+        capabilities: { ...VERIFIED_CAPABILITIES, completion: false },
+        checkedAt: "2026-08-25T12:00:00.000Z",
+      },
+    });
+
+    const route = resolveAIRoute(
+      { CAREERRAT_DESKTOP_SHELL: "1", ANTHROPIC_API_KEY: "sk-ant-test" },
+      {
+        repoRoot: root,
+        runtimeInventory: [{ id: "codex", name: "Codex", path, available: true }],
+      }
+    );
+
+    assert.equal(route.type, "none");
+    assert.match(route.error, /completion capability verification/i);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

@@ -3,6 +3,7 @@ import {
   CLAUDE_NATIVE_INSTALL_COMMAND,
   detectInstalledRuntimes,
   hasCompleteCareerRatCapabilities,
+  hasInstalledRuntimeCompletion,
   installedRuntimeCapabilities,
   installedRuntimeSignInCommand,
   isSupportedInstalledRuntime,
@@ -62,6 +63,7 @@ function withProbeReadiness(runtime, probe) {
   });
   const supported = isSupportedInstalledRuntime(runtime.id);
   const complete = hasCompleteCareerRatCapabilities(capabilityState.capabilities, runtime.id);
+  const completionReady = hasInstalledRuntimeCompletion(capabilityState.capabilities, runtime.id);
   const capabilityReason = !supported
     ? "Detected for diagnostics. This runtime has not passed complete CareerRat acceptance yet."
     : complete
@@ -74,7 +76,7 @@ function withProbeReadiness(runtime, probe) {
     capabilities: capabilityState.capabilities,
     capabilitiesVerified: probe?.capabilities !== null && typeof probe?.capabilities === "object",
     capabilityTier: capabilityState.capabilityTier,
-    selectable: supported && runtime.available === true && probe?.ready === true && complete,
+    selectable: supported && runtime.available === true && probe?.ready === true && completionReady,
     capabilityReason,
   };
 }
@@ -359,7 +361,7 @@ export function mountInstalledRuntimeRoutes({
       });
       return;
     }
-    if (!hasCompleteCareerRatCapabilities(runtime.capabilities, runtime.id)) {
+    if (!hasInstalledRuntimeCompletion(runtime.capabilities, runtime.id)) {
       sendJson(res, 409, {
         ok: false,
         code: "RUNTIME_CAPABILITY_UNSUPPORTED",

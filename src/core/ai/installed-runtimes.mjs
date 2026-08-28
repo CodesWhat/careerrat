@@ -40,7 +40,6 @@ import { probeAcpRuntime, runAcpRuntime } from "./acp-runtime.mjs";
 import { runtimeProcessInvocation, scheduleRuntimeProcessKill } from "./runtime-process.mjs";
 
 const CLAUDE_BOUNDARY_MINIMUM_VERSION = "2.1.241";
-const CODEX_COMPLETION_MINIMUM_VERSION = "0.149.1";
 const UNVERIFIED_COMPLETION_REASON =
   "Detected, but this CLI has not passed the complete CareerRat workflow yet.";
 const SCOPED_TOOLS_SERVER_NAME = "careerrat_scoped_tools";
@@ -72,6 +71,10 @@ const NO_WORKFLOW_ACCEPTED_CAPABILITIES = Object.freeze(
 
 export function isSupportedInstalledRuntime(runtimeId) {
   return installedRuntimeDefinition(runtimeId)?.supported === true;
+}
+
+export function hasInstalledRuntimeCompletion(capabilities, runtimeId) {
+  return isSupportedInstalledRuntime(runtimeId) && capabilities?.completion === true;
 }
 
 export function hasCompleteCareerRatCapabilities(capabilities, runtimeId) {
@@ -173,7 +176,6 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     installUrl: "https://learn.chatgpt.com/docs/codex/cli",
     capabilities: FULL_WORKFLOW_ACCEPTED_CAPABILITIES,
     acceptedCapabilities: FULL_WORKFLOW_ACCEPTED_CAPABILITIES,
-    minimumCompletionVersion: CODEX_COMPLETION_MINIMUM_VERSION,
   },
   {
     id: "gemini",
@@ -965,41 +967,8 @@ export async function probeInstalledRuntime(
   if (!definition) return { status: "unsupported", ready: false, action: null };
   const childEnv = buildInstalledRuntimeChildEnv({ env });
   let runtimeVersion = null;
-
-  if (definition.minimumCompletionVersion) {
-    const versionInvocation = runtimeProcessInvocation(runtime.path, ["--version"], {
-      env: childEnv,
-      platform,
-    });
-    const versionResult = await runInstalledRuntimeProbe(versionInvocation, {
-      spawnImpl,
-      spawnSyncImpl,
-      treeKillImpl,
-      env: childEnv,
-      platform,
-      timeoutMs,
-    });
-    if (
-      versionResult?.status !== 0 ||
-      !versionAtLeast(
-        `${versionResult?.stdout || ""}\n${versionResult?.stderr || ""}`,
-        definition.minimumCompletionVersion
-      )
-    ) {
-      return {
-        status: "unsupported_capability",
-        ready: false,
-        action: null,
-        capabilities: installedRuntimeCapabilities(definition.id, {
-          capabilityEvidence: capabilityEvidenceForProbe(definition, { completion: false }),
-        }).capabilities,
-        capabilityReason: `Update ${definition.name} to ${definition.minimumCompletionVersion} or newer for the complete CareerRat workflow.`,
-      };
-    }
-    runtimeVersion = parseVersion(
-      `${versionResult?.stdout || ""}\n${versionResult?.stderr || ""}`
-    )?.join(".");
-  }
+  let capabilityOverrides = {};
+  let capabilityReason = null;
 
   if (definition.minimumBoundaryVersion) {
     const versionInvocation = runtimeProcessInvocation(runtime.path, ["--version"], {
@@ -1021,18 +990,11 @@ export async function probeInstalledRuntime(
         definition.minimumBoundaryVersion
       )
     ) {
-      return {
-        status: "unsupported_capability",
-        ready: false,
-        action: null,
-        capabilities: installedRuntimeCapabilities(definition.id, {
-          capabilityEvidence: capabilityEvidenceForProbe(definition, {
-            exactRead: false,
-            publicWeb: false,
-          }),
-        }).capabilities,
-        capabilityReason: `Update ${definition.name} to ${definition.minimumBoundaryVersion} or newer for secure CareerRat tool runs.`,
+      capabilityOverrides = {
+        exactRead: false,
+        publicWeb: false,
       };
+      capabilityReason = `Update ${definition.name} to ${definition.minimumBoundaryVersion} or newer for secure CareerRat tool runs.`;
     }
     runtimeVersion = parseVersion(
       `${versionResult?.stdout || ""}\n${versionResult?.stderr || ""}`
@@ -1050,14 +1012,17 @@ export async function probeInstalledRuntime(
       });
       const runtimeCapabilities = installedRuntimeCapabilities(definition.id, {
         capabilityEvidence:
-          definition.supported === true ? capabilityEvidenceForProbe(definition) : {},
+          definition.supported === true
+            ? capabilityEvidenceForProbe(definition, capabilityOverrides)
+            : {},
       }).capabilities;
       return {
         status: "ready",
         ready: true,
         action: null,
         capabilities: runtimeCapabilities,
-        capabilityReason: runtimeCapabilities.taskTools ? null : UNVERIFIED_COMPLETION_REASON,
+        capabilityReason:
+          capabilityReason || (runtimeCapabilities.taskTools ? null : UNVERIFIED_COMPLETION_REASON),
       };
     } catch (error) {
       if (error?.code === "RUNTIME_AUTH_REQUIRED") {
@@ -1112,18 +1077,20 @@ export async function probeInstalledRuntime(
       }
     }
     const runtimeCapabilities = installedRuntimeCapabilities(definition.id, {
-      capabilityEvidence: capabilityEvidenceForProbe(definition),
+      capabilityEvidence: capabilityEvidenceForProbe(definition, capabilityOverrides),
     }).capabilities;
     return {
       status: definition.authProbe.launchOnly ? "ready_unverified" : "ready",
       ready: true,
       action: null,
       capabilities: runtimeCapabilities,
-      capabilityReason: runtimeCapabilities.taskTools
-        ? null
-        : runtimeCapabilities.completion
-          ? "Ready for chat and drafting. Task tools and research are not verified for this CLI yet."
-          : UNVERIFIED_COMPLETION_REASON,
+      capabilityReason:
+        capabilityReason ||
+        (runtimeCapabilities.taskTools
+          ? null
+          : runtimeCapabilities.completion
+            ? "Ready for chat and drafting. Task tools and research are not verified for this CLI yet."
+            : UNVERIFIED_COMPLETION_REASON),
     };
   }
   return {
@@ -2484,7 +2451,7 @@ export async function runInstalledRuntimeStream({
     streaming: true,
   });
   const childEnv = buildInstalledRuntimeChildEnv({ env });
-  if (skill || tools.length > 0) {
+  if (providerTools.length > 0) {
     await assertInstalledRuntimeBoundaryVersion(runtime, {
       spawnImpl,
       spawnSyncImpl,
