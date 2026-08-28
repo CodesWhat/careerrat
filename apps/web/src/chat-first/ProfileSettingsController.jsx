@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import * as ReactRouter from "react-router-dom";
 import { inlineErrorMessage } from "../lib/errorCopy.js";
 import { profileSettingsApi } from "./api.js";
 import { useDesktopUpdate } from "./desktop-update.js";
@@ -9,6 +9,7 @@ import {
   buildProfileSettingsModel,
   permissionPatch,
   profileSectionSavePlan,
+  profileSettingsLocation,
   profileSettingsRoute,
 } from "./profile-settings-controller.js";
 
@@ -16,6 +17,7 @@ function buildSettingsModel(input = {}) {
   const model = buildProfileSettingsModel(input);
   return {
     ...model,
+    draftContext: normalizeDraftContext(input.onboard?.draftContext),
     aiPreferences: {
       quality: input.aiPreferences?.quality || "automatic",
       reasoning: input.aiPreferences?.reasoning || "automatic",
@@ -29,9 +31,18 @@ function buildSettingsModel(input = {}) {
   };
 }
 
-const EMPTY_MODEL = buildSettingsModel();
 const PROFILE_EDITOR_DRAFT_PREFIX = "careerrat:profile-editor-draft:";
-const PROFILE_EDITOR_DRAFT_LIMIT = 16_000;
+const SOURCE_DRAFT_PREFIX = "careerrat:source-draft:";
+const SETTINGS_DRAFT_LIMIT = 16_000;
+const FALLBACK_DRAFT_CONTEXT = Object.freeze({
+  owner: { workspaceId: "current-workspace", candidateId: "current-candidate" },
+  base: { revision: "current-candidate-content" },
+});
+const useDataRouterBlocker =
+  "useBlocker" in ReactRouter && typeof ReactRouter.useBlocker === "function"
+    ? ReactRouter.useBlocker
+    : () => null;
+const EMPTY_MODEL = buildSettingsModel();
 
 function profileEditorValues(editor) {
   return Object.fromEntries(
@@ -46,42 +57,107 @@ function profileEditorValuesMatch(editor, left, right) {
   return (editor?.fields || []).every((field) => Object.is(left?.[field.id], right?.[field.id]));
 }
 
-function profileEditorDraftKey(section) {
-  return typeof section === "string" && section ? `${PROFILE_EDITOR_DRAFT_PREFIX}${section}` : null;
+function normalizeDraftContext(context) {
+  const workspaceId = String(context?.owner?.workspaceId || "").trim();
+  const candidateId = String(context?.owner?.candidateId || "").trim();
+  const revision = String(
+    context?.base?.revision ||
+      [context?.base?.version, context?.base?.lastUpdatedAt]
+        .filter((value) => value != null)
+        .join(":")
+  ).trim();
+  if (!workspaceId || !candidateId || !revision) return FALLBACK_DRAFT_CONTEXT;
+  return { owner: { workspaceId, candidateId }, base: { revision } };
 }
 
-function readProfileEditorDraft(section) {
-  const key = profileEditorDraftKey(section);
+function draftContextId(context) {
+  return `${context.owner.workspaceId}:${context.owner.candidateId}:${context.base.revision}`;
+}
+
+function draftOwnerId(context) {
+  return `${context.owner.workspaceId}:${context.owner.candidateId}`;
+}
+
+function storedDraftKey(prefix, context, scope = "") {
+  return `${prefix}${draftOwnerId(context)}${scope ? `:${scope}` : ""}`;
+}
+
+function sameDraftContext(left, right) {
+  return draftContextId(left) === draftContextId(right);
+}
+
+function removeStoredDraft(key) {
   if (!key) return null;
-  try {
-    const raw = globalThis.localStorage?.getItem(key);
-    if (!raw || raw.length > PROFILE_EDITOR_DRAFT_LIMIT) return null;
-    const values = JSON.parse(raw);
-    return values && typeof values === "object" && !Array.isArray(values) ? values : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeProfileEditorDraft(section, values) {
-  const key = profileEditorDraftKey(section);
-  if (!key) return;
-  try {
-    const raw = JSON.stringify(values);
-    if (raw.length <= PROFILE_EDITOR_DRAFT_LIMIT) globalThis.localStorage?.setItem(key, raw);
-  } catch {
-    // The in-memory draft still protects the active editor when storage is unavailable.
-  }
-}
-
-function clearProfileEditorDraft(section) {
-  const key = profileEditorDraftKey(section);
-  if (!key) return;
   try {
     globalThis.localStorage?.removeItem(key);
   } catch {
-    // The route can still close after its in-memory draft is cleared.
+    // The in-memory draft can still be cleared when storage is unavailable.
   }
+  return null;
+}
+
+function readStoredDraft(key, context) {
+  if (!key) return null;
+  try {
+    const raw = globalThis.localStorage?.getItem(key);
+    if (!raw) return null;
+    if (raw.length > SETTINGS_DRAFT_LIMIT) return removeStoredDraft(key);
+    const draft = JSON.parse(raw);
+    if (
+      !draft ||
+      typeof draft !== "object" ||
+      !sameDraftContext(normalizeDraftContext(draft), context) ||
+      !Number.isFinite(Date.parse(draft.savedAt))
+    ) {
+      return removeStoredDraft(key);
+    }
+    return draft.value;
+  } catch {
+    return removeStoredDraft(key);
+  }
+}
+
+function writeStoredDraft(key, context, value) {
+  if (!key) return false;
+  let raw;
+  try {
+    raw = JSON.stringify({ ...context, savedAt: new Date().toISOString(), value });
+  } catch {
+    removeStoredDraft(key);
+    return false;
+  }
+  if (raw.length > SETTINGS_DRAFT_LIMIT) {
+    removeStoredDraft(key);
+    return false;
+  }
+  try {
+    globalThis.localStorage?.setItem(key, raw);
+    return true;
+  } catch {
+    removeStoredDraft(key);
+    return false;
+  }
+}
+
+function profileEditorDraftKey(section, context) {
+  return typeof section === "string" && section
+    ? storedDraftKey(PROFILE_EDITOR_DRAFT_PREFIX, context, section)
+    : null;
+}
+
+function sourceDraftKey(context) {
+  return storedDraftKey(SOURCE_DRAFT_PREFIX, context);
+}
+
+function settingsLocationUrl(location) {
+  return `${location?.pathname || "/settings"}${location?.search || ""}`;
+}
+
+function canonicalSettingsLocationUrl(location) {
+  const pathname = location?.pathname || "/settings";
+  return pathname === "/settings"
+    ? profileSettingsLocation(location?.search || "").route
+    : settingsLocationUrl(location);
 }
 
 export function profileSettingsErrorMessage(error, fallback) {
@@ -89,56 +165,139 @@ export function profileSettingsErrorMessage(error, fallback) {
 }
 
 export function ProfileSettingsController({ api = profileSettingsApi }) {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const foregroundParams = new URLSearchParams(location.search || "");
-  const activeTab = foregroundParams.get("tab") === "settings" ? "settings" : "profile";
-  const activePanel = foregroundParams.get("panel");
+  const navigate = ReactRouter.useNavigate();
+  const location = ReactRouter.useLocation();
+  const currentRoute = profileSettingsLocation(location.search);
+  const currentLocationUrl = currentRoute.route;
+  const actualLocationUrl = settingsLocationUrl(location);
+  const [acceptedLocationUrl, setAcceptedLocationUrl] = useState(currentLocationUrl);
   const [model, setModel] = useState(EMPTY_MODEL);
   const [error, setError] = useState(null);
-  const enginePickerOpen = foregroundParams.get("panel") === "engine";
   const [enginePickerBusy, setEnginePickerBusy] = useState(false);
   const [engineSignInId, setEngineSignInId] = useState(null);
-  const sourceDialogOpen = activePanel === "source";
   const [sourceDialogBusy, setSourceDialogBusy] = useState(false);
-  const [sourceDraft, setSourceDraft] = useState("");
-  const technicalDetailsOpen = activePanel === "technical";
+  const [sourceDraftState, setSourceDraftState] = useState({ contextId: null, value: "" });
   const [browserProviderBusy, setBrowserProviderBusy] = useState(false);
   const [publicSyncBusy, setPublicSyncBusy] = useState(false);
   const [aiPreferencesBusy, setAiPreferencesBusy] = useState(false);
   const [aiPreferencesStatus, setAiPreferencesStatus] = useState("");
-  const editingSection = activePanel === "editor" ? foregroundParams.get("section") : null;
-  const [editorDrafts, setEditorDrafts] = useState({});
+  const [editorDraftState, setEditorDraftState] = useState({ contextId: null, values: {} });
   const [editorBusy, setEditorBusy] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState(null);
+  const permittedNavigationRef = useRef(null);
   const desktopUpdate = useDesktopUpdate();
+  const draftContext = normalizeDraftContext(model.draftContext);
+  const contextId = draftContextId(draftContext);
+  const acceptedRoute = profileSettingsLocation(
+    new URL(acceptedLocationUrl, "http://careerrat.local").search
+  );
+  const acceptedEditingSection = acceptedRoute.panel === "editor" ? acceptedRoute.section : null;
+  const acceptedEditor = acceptedEditingSection
+    ? model.profile?.editors?.[acceptedEditingSection]
+    : null;
+  const acceptedDefaultValues = profileEditorValues(acceptedEditor);
+  const editorDrafts = editorDraftState.contextId === contextId ? editorDraftState.values : {};
+  const acceptedEditorValues = acceptedEditingSection
+    ? (editorDrafts[acceptedEditingSection] ??
+      readStoredDraft(profileEditorDraftKey(acceptedEditingSection, draftContext), draftContext))
+    : null;
+  const acceptedVisibleEditorValues = acceptedEditorValues ?? acceptedDefaultValues;
+  const editorDirty = Boolean(
+    acceptedEditor &&
+      !profileEditorValuesMatch(acceptedEditor, acceptedVisibleEditorValues, acceptedDefaultValues)
+  );
+  const sourceDraft =
+    sourceDraftState.contextId === contextId
+      ? sourceDraftState.value
+      : (readStoredDraft(sourceDraftKey(draftContext), draftContext) ?? "");
+  const sourceDirty = acceptedRoute.panel === "source" && sourceDraft !== "";
+  const dirtyKind = editorDirty ? "profile" : sourceDirty ? "source" : null;
+  const shouldBlockDestination = (destination) => {
+    if (!dirtyKind) return false;
+    return canonicalSettingsLocationUrl(destination) !== acceptedLocationUrl;
+  };
+  const blocker = useDataRouterBlocker(({ nextLocation }) => {
+    const nextLocationUrl = canonicalSettingsLocationUrl(nextLocation);
+    if (permittedNavigationRef.current === nextLocationUrl) {
+      permittedNavigationRef.current = null;
+      return false;
+    }
+    return shouldBlockDestination(nextLocation);
+  });
+  const fallbackHistoryNavigation =
+    currentLocationUrl !== acceptedLocationUrl && shouldBlockDestination(location)
+      ? {
+          kind: "committed",
+          to: currentLocationUrl,
+          options: {},
+          origin: acceptedLocationUrl,
+        }
+      : null;
+  const blockedHistoryNavigation =
+    blocker?.state === "blocked"
+      ? {
+          kind: "blocker",
+          to: profileSettingsRoute({
+            ...profileSettingsLocation(blocker.location?.search || ""),
+          }),
+          options: {},
+          origin: acceptedLocationUrl,
+        }
+      : null;
+  const activeNavigation =
+    pendingNavigation || blockedHistoryNavigation || fallbackHistoryNavigation;
+  const displayedRoute = fallbackHistoryNavigation ? acceptedRoute : currentRoute;
+  const activeTab = displayedRoute.activeTab;
+  const activePanel = displayedRoute.panel;
+  const editingSection = activePanel === "editor" ? displayedRoute.section : null;
   const profileEditor = editingSection ? model.profile?.editors?.[editingSection] : null;
   const defaultEditorValues = profileEditorValues(profileEditor);
   const editorValues = editingSection
-    ? (editorDrafts[editingSection] ?? readProfileEditorDraft(editingSection))
+    ? (editorDrafts[editingSection] ??
+      readStoredDraft(profileEditorDraftKey(editingSection, draftContext), draftContext))
     : null;
-  const visibleEditorValues = editorValues || defaultEditorValues;
-  const editorDirty = Boolean(
-    profileEditor &&
-      !profileEditorValuesMatch(profileEditor, visibleEditorValues, defaultEditorValues)
-  );
+  const visibleEditorValues = editorValues ?? defaultEditorValues;
+  const draftDirty = Boolean(dirtyKind);
+  const enginePickerOpen = activePanel === "engine" && !activeNavigation;
+  const sourceDialogOpen = activePanel === "source" && !activeNavigation;
+  const technicalDetailsOpen = activePanel === "technical" && !activeNavigation;
 
   useEffect(() => {
-    if (!editorDirty || typeof globalThis.addEventListener !== "function") return undefined;
+    if (!draftDirty || typeof globalThis.addEventListener !== "function") return undefined;
     const protectDraft = (event) => {
       event.preventDefault();
       event.returnValue = "";
     };
     globalThis.addEventListener("beforeunload", protectDraft);
     return () => globalThis.removeEventListener?.("beforeunload", protectDraft);
-  }, [editorDirty]);
+  }, [draftDirty]);
+
+  useEffect(() => {
+    if (draftDirty || actualLocationUrl === currentLocationUrl) return;
+    navigate(currentLocationUrl, { replace: true });
+  }, [actualLocationUrl, currentLocationUrl, draftDirty, navigate]);
+
+  useEffect(() => {
+    if (fallbackHistoryNavigation || acceptedLocationUrl === currentLocationUrl) return;
+    setAcceptedLocationUrl(currentLocationUrl);
+  }, [acceptedLocationUrl, currentLocationUrl, fallbackHistoryNavigation]);
 
   function requestNavigation(to, options = {}, force = false) {
-    if (editorDirty && !force) {
-      setPendingNavigation({ to, options });
+    const destination = new URL(to, "http://careerrat.local");
+    if (!force && shouldBlockDestination(destination)) {
+      setPendingNavigation({ kind: "requested", to, options, origin: acceptedLocationUrl });
       return false;
     }
-    navigate(to, options);
+    if (!force) {
+      navigate(to, options);
+      return true;
+    }
+    permittedNavigationRef.current = canonicalSettingsLocationUrl(destination);
+    try {
+      navigate(to, options);
+    } finally {
+      permittedNavigationRef.current = null;
+    }
     return true;
   }
 
@@ -218,31 +377,50 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
     navigateForeground({ tab: "profile", panel: "editor", section });
   }
 
+  function clearEditorDraft(section) {
+    removeStoredDraft(profileEditorDraftKey(section, draftContext));
+    setEditorDraftState((current) => {
+      const values = current.contextId === contextId ? { ...current.values } : {};
+      delete values[section];
+      return { contextId, values };
+    });
+  }
+
+  function clearSourceDraft() {
+    removeStoredDraft(sourceDraftKey(draftContext));
+    setSourceDraftState({ contextId, value: "" });
+  }
+
   function closeEditor() {
     if (editorBusy) return;
     if (!navigateForeground({ tab: "profile" }, { replace: true })) return;
-    clearProfileEditorDraft(editingSection);
-    setEditorDrafts((current) => {
-      const next = { ...current };
-      delete next[editingSection];
-      return next;
-    });
+    clearEditorDraft(editingSection);
   }
 
   function keepEditing() {
+    const navigation = activeNavigation;
     setPendingNavigation(null);
+    if (navigation?.kind === "blocker") blocker.reset();
+    if (navigation?.kind === "committed") {
+      navigate(navigation.origin, { replace: true });
+    }
   }
 
   function discardEditor() {
-    if (!pendingNavigation) return;
-    clearProfileEditorDraft(editingSection);
-    setEditorDrafts((current) => {
-      const next = { ...current };
-      delete next[editingSection];
-      return next;
-    });
+    const navigation = activeNavigation;
+    if (!navigation) return;
+    if (dirtyKind === "profile") clearEditorDraft(acceptedEditingSection);
+    if (dirtyKind === "source") clearSourceDraft();
     setPendingNavigation(null);
-    requestNavigation(pendingNavigation.to, pendingNavigation.options, true);
+    if (navigation.kind === "blocker") {
+      blocker.proceed();
+      return;
+    }
+    if (navigation.kind === "committed") {
+      setAcceptedLocationUrl(navigation.to);
+      return;
+    }
+    requestNavigation(navigation.to, navigation.options, true);
   }
 
   async function saveEditor() {
@@ -259,12 +437,7 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
         }
       }
       await load();
-      clearProfileEditorDraft(editingSection);
-      setEditorDrafts((current) => {
-        const next = { ...current };
-        delete next[editingSection];
-        return next;
-      });
+      clearEditorDraft(editingSection);
       setPendingNavigation(null);
       navigateForeground({ tab: "profile" }, { replace: true }, true);
     } catch (cause) {
@@ -421,8 +594,8 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
     try {
       await api.addBoardSource(url.href);
       await load();
-      setSourceDraft("");
-      setSourceDialogOpen(false);
+      clearSourceDraft();
+      navigateForeground({ tab: "settings" }, { replace: true }, true);
     } catch (cause) {
       setError(
         profileSettingsErrorMessage(
@@ -497,7 +670,10 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
         sourceDialogBusy={sourceDialogBusy}
         sourceDraft={sourceDraft}
         onCloseSourceDialog={() => setSourceDialogOpen(false)}
-        onSourceDraftChange={setSourceDraft}
+        onSourceDraftChange={(value) => {
+          writeStoredDraft(sourceDraftKey(draftContext), draftContext, value);
+          setSourceDraftState({ contextId, value });
+        }}
         onSubmitSource={submitSource}
         technicalDetailsOpen={technicalDetailsOpen}
         browserProviderBusy={browserProviderBusy}
@@ -506,29 +682,42 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
         profileEditor={profileEditor}
         editorValues={visibleEditorValues}
         editorBusy={editorBusy}
-        discardEditorOpen={Boolean(pendingNavigation)}
+        discardEditorOpen={Boolean(activeNavigation)}
         onEditorChange={(id, value) => {
-          setEditorDrafts((current) => {
+          setEditorDraftState((current) => {
+            const currentValues = current.contextId === contextId ? current.values : {};
             const values = {
-              ...(current[editingSection] ||
-                readProfileEditorDraft(editingSection) ||
+              ...(currentValues[editingSection] ||
+                readStoredDraft(
+                  profileEditorDraftKey(editingSection, draftContext),
+                  draftContext
+                ) ||
                 defaultEditorValues),
               [id]: value,
             };
-            writeProfileEditorDraft(editingSection, values);
-            return { ...current, [editingSection]: values };
+            writeStoredDraft(
+              profileEditorDraftKey(editingSection, draftContext),
+              draftContext,
+              values
+            );
+            return {
+              contextId,
+              values: { ...currentValues, [editingSection]: values },
+            };
           });
         }}
         onSaveEditor={saveEditor}
         onAskAgent={(section) => {
-          if (editorDirty) {
+          if (draftDirty) {
             setPendingNavigation({
+              kind: "requested",
               to: "/",
               options: {
                 state: {
                   composerDraft: `I need to update my ${String(section || editingSection).replaceAll("-", " ")}.`,
                 },
               },
+              origin: acceptedLocationUrl,
             });
             return;
           }

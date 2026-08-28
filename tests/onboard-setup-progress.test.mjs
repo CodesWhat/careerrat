@@ -485,6 +485,54 @@ async function getDirect(routes, path) {
 }
 
 describe("GET /api/onboard/state — setupProgress", () => {
+  it("returns an opaque stable draft owner and a canonical candidate-content revision", async () => {
+    const repoRoot = buildTempRoot();
+    const routes = mountDirectRoutes(repoRoot);
+    try {
+      await postDirect(routes, "/api/onboard/init", {});
+
+      const first = (await getDirect(routes, "/api/onboard/state")).body.draftContext;
+      const repeated = (await getDirect(routes, "/api/onboard/state")).body.draftContext;
+      assert.equal(typeof first?.owner?.workspaceId, "string");
+      assert.ok(first.owner.workspaceId.length >= 16);
+      assert.equal(typeof first?.owner?.candidateId, "string");
+      assert.ok(first.owner.candidateId.length >= 16);
+      assert.equal(typeof first?.base?.revision, "string");
+      assert.ok(first.base.revision.length >= 16);
+      assert.deepEqual(repeated, first);
+
+      const alternateRoutes = mountDirectRoutes(repoRoot, {
+        CAREERRAT_HOME: join(repoRoot, "alternate-private-home"),
+      });
+      await postDirect(alternateRoutes, "/api/onboard/init", {});
+      const alternate = (await getDirect(alternateRoutes, "/api/onboard/state")).body.draftContext;
+      assert.notEqual(
+        alternate.owner.workspaceId,
+        first.owner.workspaceId,
+        "separate active data roots served by one installed package must not share drafts"
+      );
+
+      await postDirect(routes, "/api/onboard/candidate/profile", {
+        data: {
+          candidate: {
+            full_name: "Ada Candidate",
+            email: "ada.private@example.test",
+          },
+        },
+      });
+      const changed = (await getDirect(routes, "/api/onboard/state")).body.draftContext;
+
+      assert.deepEqual(changed.owner, first.owner);
+      assert.notEqual(changed.base.revision, first.base.revision);
+      const exposedIdentity = JSON.stringify(changed.owner);
+      assert.doesNotMatch(exposedIdentity, /ada|@|example\.test/i);
+      assert.equal(exposedIdentity.includes(repoRoot), false);
+      assert.equal(exposedIdentity.includes(tmpdir()), false);
+    } finally {
+      closeAll();
+    }
+  });
+
   it("file-fallback mode: template example content never marks a step done on a fresh workspace", async () => {
     // Before POST /api/onboard/init, GET /api/onboard/state's file-fallback
     // read path (readBaseDoc) falls back to the TEMPLATE default for any

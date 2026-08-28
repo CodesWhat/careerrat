@@ -106,7 +106,7 @@ import {
   collapseUnansweredOnboardingPrompts,
   onboardingMessageIsInternal,
 } from "../core/onboarding/transcript-cleanup.mjs";
-import { displayPath, userPath } from "../core/paths/workspace.mjs";
+import { displayPath, privateDataRoot, userPath } from "../core/paths/workspace.mjs";
 import {
   cloneCandidateDefault,
   isCandidateDefault,
@@ -244,6 +244,40 @@ const DEFAULT_PUBLIC_SYNC_PREFERENCE = Object.freeze({
   source: "default",
   updatedAt: null,
 });
+
+function canonicalDraftValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalDraftValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .filter((key) => value[key] !== undefined)
+      .map((key) => [key, canonicalDraftValue(value[key])])
+  );
+}
+
+function draftDigest(label, value) {
+  return createHash("sha256")
+    .update(`careerrat:${label}:v1\0`)
+    .update(typeof value === "string" ? value : JSON.stringify(canonicalDraftValue(value)))
+    .digest("hex");
+}
+
+function onboardDraftContext(pathCtx, data) {
+  const workspaceId = draftDigest("workspace", privateDataRoot(pathCtx));
+  const candidateData = Object.fromEntries(
+    SETTINGS_DATA_FILES.map((name) => [name, data?.[name] ?? null])
+  );
+  return {
+    owner: {
+      workspaceId,
+      candidateId: draftDigest("candidate", `${workspaceId}:primary`),
+    },
+    base: {
+      revision: draftDigest("candidate-content", candidateData),
+    },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Pure helpers
@@ -1447,6 +1481,7 @@ export function mountOnboardRoutes({
         };
         sendJson(res, 200, {
           ok: true,
+          draftContext: onboardDraftContext(pathCtx, stateData),
           files: dbCandidateFiles(repoRoot, pathCtx, config),
           data: stateData,
           deepIngest,
@@ -1532,6 +1567,7 @@ export function mountOnboardRoutes({
 
     sendJson(res, 200, {
       ok: true,
+      draftContext: onboardDraftContext(pathCtx, data),
       files,
       data,
       sourceResumePresent: fallbackSourceResumePresent,

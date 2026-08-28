@@ -3,6 +3,54 @@ import { ArrowLeftIcon } from "./chat-first-icons.jsx";
 import { runtimeIsSupported, runtimePresentation } from "./first-run-controller.js";
 import { RuntimeIcon } from "./RuntimeIcon.jsx";
 
+const SETTINGS_DIALOG_FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const SETTINGS_DIALOG_RETURN_FOCUS = Symbol("settings-dialog-return-focus");
+
+export function restoreSettingsDialogFocus(element, elementId = element?.id) {
+  const document = globalThis.document;
+  const target =
+    element?.isConnected === true
+      ? element
+      : elementId
+        ? document?.getElementById?.(elementId)
+        : null;
+  const openDialog = document?.querySelector?.('[role="dialog"]');
+  if (openDialog && !openDialog.contains?.(target)) return;
+  target?.focus?.();
+}
+
+export function handleSettingsDialogKeyDown({
+  event,
+  dialog,
+  activeElement = globalThis.document?.activeElement,
+  onClose,
+}) {
+  if (event?.key === "Escape") {
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    event.stopImmediatePropagation?.();
+    onClose?.();
+    return;
+  }
+  if (event?.key !== "Tab" || !dialog) return;
+  const focusable = Array.from(dialog.querySelectorAll?.(SETTINGS_DIALOG_FOCUSABLE) || []);
+  if (!focusable.length) {
+    event.preventDefault?.();
+    dialog.focus?.();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable.at(-1);
+  if (event.shiftKey && (!dialog.contains(activeElement) || activeElement === first)) {
+    event.preventDefault?.();
+    last.focus?.();
+  } else if (!event.shiftKey && (!dialog.contains(activeElement) || activeElement === last)) {
+    event.preventDefault?.();
+    first.focus?.();
+  }
+}
+
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -478,12 +526,47 @@ function AIPreferencesCard({ agentName, preferences, busy, status, onChange }) {
 }
 
 function SettingsDialog({ title, children, onClose }) {
+  const focusBeforeRender = globalThis.document?.activeElement || null;
+  let dialogNode = null;
+  const close = () => onClose?.();
   return (
     <div className="cf-settings-dialog__cover">
-      <section className="cf-settings-dialog" role="dialog" aria-modal="true" aria-label={title}>
+      <section
+        className="cf-settings-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+        ref={(node) => {
+          if (node) {
+            dialogNode = node;
+            if (!node[SETTINGS_DIALOG_RETURN_FOCUS]) {
+              node[SETTINGS_DIALOG_RETURN_FOCUS] = {
+                element: focusBeforeRender,
+                id: focusBeforeRender?.id || null,
+              };
+              globalThis.queueMicrotask?.(() => {
+                if (!node.isConnected) return;
+                const initial = node.querySelector?.(SETTINGS_DIALOG_FOCUSABLE);
+                (initial || node).focus?.();
+              });
+            }
+            return;
+          }
+          const closedDialog = dialogNode;
+          globalThis.queueMicrotask?.(() => {
+            if (closedDialog?.isConnected) return;
+            const previous = closedDialog?.[SETTINGS_DIALOG_RETURN_FOCUS];
+            restoreSettingsDialogFocus(previous?.element, previous?.id);
+          });
+        }}
+        onKeyDown={(event) =>
+          handleSettingsDialogKeyDown({ event, dialog: event.currentTarget, onClose: close })
+        }
+      >
         <header>
           <strong>{title}</strong>
-          <button type="button" aria-label={`Close ${title}`} onClick={onClose}>
+          <button type="button" aria-label={`Close ${title}`} onClick={close}>
             ×
           </button>
         </header>

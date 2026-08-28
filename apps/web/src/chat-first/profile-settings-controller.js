@@ -2,17 +2,50 @@ import { UserFacingError } from "../lib/errorCopy.js";
 import { runtimePresentation } from "./first-run-controller.js";
 import { buildLocationPolicy } from "./location-policy.js";
 
-const SETTINGS_PANELS = new Set(["engine", "source", "technical", "editor"]);
+const SETTINGS_PANELS = new Set(["engine", "source", "technical"]);
+const PROFILE_PANEL = "editor";
 
 export function profileSettingsRoute({ tab = "profile", panel = null, section = null } = {}) {
+  const cleanSection = String(section || "").trim();
+  const cleanPanel = SETTINGS_PANELS.has(panel)
+    ? panel
+    : panel === PROFILE_PANEL && cleanSection
+      ? PROFILE_PANEL
+      : cleanSection === "sources"
+        ? "source"
+        : null;
+  const owningTab = SETTINGS_PANELS.has(cleanPanel)
+    ? "settings"
+    : cleanPanel === PROFILE_PANEL
+      ? "profile"
+      : tab === "settings"
+        ? "settings"
+        : "profile";
   const params = new URLSearchParams();
-  if (tab === "settings") params.set("tab", "settings");
-  if (SETTINGS_PANELS.has(panel)) params.set("panel", panel);
-  if (panel === "editor" && String(section || "").trim()) {
-    params.set("section", String(section).trim());
+  if (owningTab === "settings") params.set("tab", "settings");
+  if (cleanPanel) params.set("panel", cleanPanel);
+  if (cleanPanel === PROFILE_PANEL) {
+    params.set("section", cleanSection);
   }
   const search = params.toString();
   return `/settings${search ? `?${search}` : ""}`;
+}
+
+export function profileSettingsLocation(search = "") {
+  const params = new URLSearchParams(search);
+  const route = profileSettingsRoute({
+    tab: params.get("tab"),
+    panel: params.get("panel"),
+    section: params.get("section"),
+  });
+  const canonical = new URL(route, "http://careerrat.local");
+  const canonicalParams = canonical.searchParams;
+  return {
+    route,
+    activeTab: canonicalParams.get("tab") === "settings" ? "settings" : "profile",
+    panel: canonicalParams.get("panel"),
+    section: canonicalParams.get("panel") === PROFILE_PANEL ? canonicalParams.get("section") : null,
+  };
 }
 
 function list(value) {

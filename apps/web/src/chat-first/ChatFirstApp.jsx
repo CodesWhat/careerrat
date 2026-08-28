@@ -620,6 +620,10 @@ export function dispatchChatFirstMessageIntent(
   return null;
 }
 
+export function settingsIntentNavigator(navigate) {
+  return (section) => navigate(profileSettingsRoute({ tab: "settings", section }));
+}
+
 export function revealSourcedTarget(id, { dispatch, setQuery, setBrowserFilters } = {}) {
   const targetId = String(id || "").trim();
   if (!targetId) return null;
@@ -3142,7 +3146,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         return result;
       },
       openSourced: (id) => revealSourcedTarget(id, { dispatch, setQuery, setBrowserFilters }),
-      openSettings: () => navigate(profileSettingsRoute({ tab: "settings" })),
+      openSettings: settingsIntentNavigator(navigate),
       runWorkspaceIntent: (typedIntent) => {
         if (
           typedIntent?.type === "job.prepare-submit" &&
@@ -3612,7 +3616,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       setEngineDown(runtimeState ? engineUnavailable(runtimeState) : false);
       setTechnicalOpen(false);
     },
-    openSettings: () => navigate(profileSettingsRoute({ tab: "settings" })),
+    openSettings: settingsIntentNavigator(navigate),
     showTechnical: () => setTechnicalOpen((current) => !current),
   };
 

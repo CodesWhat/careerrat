@@ -381,6 +381,76 @@ describe("ProfileSettings", () => {
     expect(onDiscardEditor).toHaveBeenCalledOnce();
   });
 
+  it("gives every Settings dialog Escape, contained focus, and focus restoration", async () => {
+    const { ProfileSettings, handleSettingsDialogKeyDown, restoreSettingsDialogFocus } =
+      await loadProfile();
+    expect.soft(handleSettingsDialogKeyDown).toBeTypeOf("function");
+    expect.soft(restoreSettingsDialogFocus).toBeTypeOf("function");
+    if (
+      typeof handleSettingsDialogKeyDown !== "function" ||
+      typeof restoreSettingsDialogFocus !== "function"
+    ) {
+      return;
+    }
+
+    const onClose = vi.fn();
+    const escapeEvent = {
+      key: "Escape",
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+      stopImmediatePropagation: vi.fn(),
+    };
+    handleSettingsDialogKeyDown({ event: escapeEvent, onClose });
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(escapeEvent.preventDefault).toHaveBeenCalledOnce();
+    expect(escapeEvent.stopImmediatePropagation).toHaveBeenCalledOnce();
+
+    const first = { focus: vi.fn() };
+    const last = { focus: vi.fn() };
+    const dialog = {
+      querySelectorAll: () => [first, last],
+      contains: (element) => element === first || element === last,
+    };
+    const forward = { key: "Tab", shiftKey: false, preventDefault: vi.fn() };
+    handleSettingsDialogKeyDown({ event: forward, dialog, activeElement: last });
+    expect(forward.preventDefault).toHaveBeenCalledOnce();
+    expect(first.focus).toHaveBeenCalledOnce();
+
+    const backward = { key: "Tab", shiftKey: true, preventDefault: vi.fn() };
+    handleSettingsDialogKeyDown({ event: backward, dialog, activeElement: first });
+    expect(backward.preventDefault).toHaveBeenCalledOnce();
+    expect(last.focus).toHaveBeenCalledOnce();
+
+    const trigger = { isConnected: true, focus: vi.fn() };
+    const replacementEditorField = { isConnected: true, focus: vi.fn() };
+    const openDialog = { contains: (element) => element === replacementEditorField };
+    vi.stubGlobal("document", {
+      getElementById: (id) => (id === "editor-field" ? replacementEditorField : null),
+      querySelector: () => openDialog,
+    });
+    restoreSettingsDialogFocus(trigger);
+    restoreSettingsDialogFocus({ isConnected: false }, "editor-field");
+    expect(trigger.focus).not.toHaveBeenCalled();
+    expect(replacementEditorField.focus).toHaveBeenCalledOnce();
+
+    globalThis.document.querySelector = () => null;
+    restoreSettingsDialogFocus(trigger);
+    expect(trigger.focus).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
+
+    const html = renderToStaticMarkup(
+      <ProfileSettings
+        activeTab="settings"
+        permissions={PERMISSIONS}
+        sourceDialogOpen
+        sourceDraft="https://jobs.example.test/search"
+        onCloseSourceDialog={() => undefined}
+      />
+    );
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain('tabindex="-1"');
+  });
+
   it("renders settings in plain language and keeps every submit gated", async () => {
     const { ProfileSettings } = await loadProfile();
     const html = renderToStaticMarkup(

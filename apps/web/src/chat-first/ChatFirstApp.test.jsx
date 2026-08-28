@@ -987,10 +987,13 @@ describe("ChatFirstAppView", () => {
   });
 
   it("routes new-shell navigation intents without sending retired href actions to the API", async () => {
-    const { dispatchChatFirstMessageIntent } = await import("./ChatFirstApp.jsx");
+    const { dispatchChatFirstMessageIntent, settingsIntentNavigator } = await import(
+      "./ChatFirstApp.jsx"
+    );
     const openJob = vi.fn();
     const openBrowser = vi.fn();
-    const openSettings = vi.fn();
+    const navigateSettings = vi.fn();
+    const openSettings = settingsIntentNavigator(navigateSettings);
     const openArtifact = vi.fn();
     const openSourced = vi.fn();
     const runWorkspaceIntent = vi.fn();
@@ -1058,7 +1061,7 @@ describe("ChatFirstAppView", () => {
       "files",
       "schedule",
     ]);
-    expect(openSettings).toHaveBeenCalledWith("sources");
+    expect(navigateSettings).toHaveBeenCalledWith("/settings?tab=settings&panel=source");
     expect(openArtifact).toHaveBeenCalledWith(
       { type: "application", id: "app-1" },
       "interview-dossier"

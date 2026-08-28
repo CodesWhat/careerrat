@@ -19,6 +19,14 @@ describe("profile settings controller mapping", () => {
     );
   });
 
+  it("routes a Settings sources intent to the exact source panel", async () => {
+    const { profileSettingsRoute } = await import("./profile-settings-controller.js");
+
+    expect(profileSettingsRoute({ tab: "settings", section: "sources" })).toBe(
+      "/settings?tab=settings&panel=source"
+    );
+  });
+
   it("treats an older completed quick-facts location as confirmed when the explicit flag is absent", () => {
     const model = buildProfileSettingsModel({
       onboard: {
