@@ -133,7 +133,6 @@ function laneStatusCopy(lane) {
     const status = {
       cancelled: "stopped",
       "not-configured": "not set up",
-      "not-consented": "not available",
       unavailable: "not available",
     }[lane.reason];
     return status ? `${label}: ${status}` : null;

@@ -804,8 +804,8 @@ describe("ChatFirstAppView", () => {
     const runAiLane = vi.fn(async () => ({ ok: true }));
     const runCoordinator = vi.fn(async (options) => {
       expect(options.capabilities).toEqual({
-        deterministic: { configured: true, executable: true, consented: true },
-        aiWeb: { configured: true, executable: true, consented: true },
+        deterministic: { configured: true, executable: true },
+        aiWeb: { configured: true, executable: true },
       });
       await options.runDeterministic({ signal: controller.signal, onLaneState: vi.fn() });
       await options.runAiWeb({ signal: controller.signal, onLaneState: vi.fn() });

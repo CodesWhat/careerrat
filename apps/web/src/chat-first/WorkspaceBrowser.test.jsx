@@ -380,7 +380,6 @@ describe("WorkspaceBrowser", () => {
                 label: "AI web search",
                 configured: true,
                 executable: true,
-                consented: true,
                 status: "running",
               },
             },
@@ -510,7 +509,7 @@ describe("WorkspaceBrowser", () => {
             aiWeb: {
               label: "AI web search",
               status: "skipped",
-              reason: "not-consented",
+              reason: "unavailable",
             },
             backup: {
               label: "Backup search",
@@ -540,7 +539,6 @@ describe("WorkspaceBrowser", () => {
     expect(html).not.toContain("Internal lane");
     expect(html).not.toContain("skipped");
     expect(html).not.toContain("not-configured");
-    expect(html).not.toContain("not-consented");
     expect(html).not.toContain("provider_route_disabled");
   });
 

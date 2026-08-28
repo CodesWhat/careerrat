@@ -524,7 +524,6 @@ export async function runChatFirstJobSearch({
     ai: {
       configured: aiConfigured,
       executable: aiConfigured,
-      consented: aiConfigured,
     },
   });
 

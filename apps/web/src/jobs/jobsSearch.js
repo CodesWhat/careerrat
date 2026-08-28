@@ -29,34 +29,29 @@ export function jobSearchCapabilities({ sourceStatus, ai } = {}) {
     deterministic: {
       configured: enabledSearches > 0 || enabledCompanies > 0,
       executable: deterministicAttempts > 0,
-      consented: true,
     },
     aiWeb: {
       configured: ai?.configured === true,
       executable: ai?.executable === true,
-      consented: ai?.consented === true,
     },
   };
 }
 
 function skippedReason(capability) {
   if (!capability.configured) return "not-configured";
-  if (!capability.consented) return "not-consented";
   return "unavailable";
 }
 
 function initialLaneState(id, capability = {}) {
   const configured = capability.configured === true;
   const executable = capability.executable === true;
-  const consented = capability.consented !== false;
-  const runnable = configured && executable && consented;
+  const runnable = configured && executable;
   return {
     label: SEARCH_LANES[id].label,
     configured,
     executable,
-    consented,
     status: runnable ? "running" : "skipped",
-    ...(!runnable ? { reason: skippedReason({ configured, executable, consented }) } : {}),
+    ...(!runnable ? { reason: skippedReason({ configured, executable }) } : {}),
   };
 }
 

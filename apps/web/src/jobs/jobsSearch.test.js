@@ -711,7 +711,7 @@ describe("runAiWebSearchLane", () => {
 describe("runCoordinatedJobSearch", () => {
   const capabilities = {
     deterministic: { configured: true, executable: true },
-    aiWeb: { configured: true, executable: true, consented: true },
+    aiWeb: { configured: true, executable: true },
   };
 
   it("starts every executable lane from one action and refetches once after both finish", async () => {
@@ -933,7 +933,7 @@ describe("runCoordinatedJobSearch", () => {
     expect(states.at(-1).summary).toBe("2 search lanes finished · 2 new");
   });
 
-  it("skips unavailable or unconsented lanes without invoking them", async () => {
+  it("skips unavailable lanes without invoking them", async () => {
     const runDeterministic = vi.fn();
     const runAiWeb = vi.fn();
     const refetch = vi.fn();
@@ -942,7 +942,7 @@ describe("runCoordinatedJobSearch", () => {
     const result = await runCoordinatedJobSearch({
       capabilities: {
         deterministic: { configured: true, executable: false },
-        aiWeb: { configured: true, executable: true, consented: false },
+        aiWeb: { configured: true, executable: false },
       },
       runDeterministic,
       runAiWeb,
@@ -962,8 +962,7 @@ describe("runCoordinatedJobSearch", () => {
         deterministic: { configured: true, executable: false, status: "skipped" },
         aiWeb: {
           configured: true,
-          executable: true,
-          consented: false,
+          executable: false,
           status: "skipped",
         },
       },
@@ -1153,18 +1152,18 @@ describe("jobSearchCapabilities", () => {
           enabledTrackedCompanies: 0,
           deterministicSources: { attempted: 0 },
         },
-        ai: { configured: true, executable: true, consented: true },
+        ai: { configured: true, executable: true },
       })
     ).toEqual({
-      deterministic: { configured: true, executable: false, consented: true },
-      aiWeb: { configured: true, executable: true, consented: true },
+      deterministic: { configured: true, executable: false },
+      aiWeb: { configured: true, executable: true },
     });
   });
 
   it("fails closed when source or AI capability state is unavailable", () => {
     expect(jobSearchCapabilities()).toEqual({
-      deterministic: { configured: false, executable: false, consented: true },
-      aiWeb: { configured: false, executable: false, consented: false },
+      deterministic: { configured: false, executable: false },
+      aiWeb: { configured: false, executable: false },
     });
   });
 });
