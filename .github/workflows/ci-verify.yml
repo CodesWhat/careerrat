@@ -297,30 +297,8 @@ jobs:
   # Knip (unused files/exports/dependencies, see knip.json). This job IS in the
   # required_status_checks ruleset, so a red run blocks the merge.
   #
-  # --max-issues ratchets against the current genuine backlog so the gate
-  # catches NEW dead code without blocking on existing debt. Lower it as debt
-  # is cleaned. Never raise it: raising it is how a ratchet stops being one.
-  #
-  # 12 as of 2026-08-21, down from 170 (44 after #135, 32 after #142 deleted 12
-  # stale api.js wrappers, 30 once #141 wired the two that were kept, 12 once
-  # refactor/knip-long-tail de-exported/removed 18 src/-only findings). The
-  # remainder is not a to-do list: it is 4 fontsource packages loaded by raw
-  # file path through next/font/local (invisible to knip, and removing them
-  # silently breaks the typeface); SAFE_EXTERNAL_PROTOCOLS (apps/desktop) and
-  # postSSE (apps/web), both outside this pass's src/-only scope; portalQuirks
-  # (src/core/apply/form-fill.mjs), called directly by the apply-job skill
-  # (.agents/skills/apply-job/SKILL.md) with no JS importer for knip to find;
-  # resolveCompFloor/scoreFit (src/core/evaluate/gate.mjs) and CLAIM_FIELDS
-  # (src/core/profile/evidence-writer.mjs), held for the coaching-loop
-  # feature whose evidence path runs through that module. (The interview
-  # packet helpers once held here turned out to be same-file-called shipped
-  # code with a stray export keyword; de-exported like their fifteen
-  # siblings.)
-  #
-  # Getting to 0 therefore means teaching knip about those references, not
-  # deleting them: tag the intentional ones and configure knip to exclude the
-  # tag. Anyone who closes the gap by deleting instead has made the number
-  # prettier and the product worse.
+  # The dead-code ratchet is zero. Intentional non-import references are modeled
+  # in knip.json, so any new unused file, export, or dependency blocks the merge.
   knip:
     name: knip
     runs-on: ubuntu-latest
@@ -343,4 +321,4 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Knip check
-        run: npx knip --no-progress --max-issues=10
+        run: npx knip --no-progress --max-issues=0
