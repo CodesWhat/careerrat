@@ -56,9 +56,11 @@ setup-searches -> research-boards -> discover-companies -> search-jobs
 ```
 
 If `doctor` says the next discovery step is `setup-searches`, `research-boards`, or
-`discover-companies`, stop and run that owning skill first unless the user explicitly
-overrides and asks for a partial sweep. If source config is missing or has no enabled
-entries, stop and run `setup-searches` first:
+`discover-companies`, run that owning skill first during an automatic pipeline handoff.
+When the user explicitly asked to search and at least one enabled source exists, their
+request already authorizes a partial sweep of the configured sources. Run it without a
+second override question. If source config is missing or has no enabled entries, stop and
+run `setup-searches` first because there is nothing runnable yet:
 
 > **Available portals:** the baseline auto-seeds domain-appropriate sources, and
 > `careerrat searches --providers` lists all 77 public deterministic adapters.
@@ -83,11 +85,13 @@ keeps medium fits in review), not which plausible roles are discovered. Before a
 multi-source sweep, run:
 
 ```
-careerrat modes allows search:sweep:broad
+careerrat modes allows search:sweep:broad --explicit
 ```
 
-If it returns `downshift`, run fewer enabled sources or a narrower recency window and state
-that lean usage mode caused the downshift. If it returns `run`, proceed normally.
+Use `--explicit` when the user asked for this search. Their request authorizes this one
+run and must not trigger another override question or change their saved usage mode. For
+an automatic or background sweep, omit `--explicit`. If the verdict is `downshift`, run
+fewer enabled sources or a narrower recency window. If it is `run`, proceed normally.
 
 ## STEP 1 — Full sweep
 

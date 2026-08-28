@@ -47,11 +47,14 @@ Run `careerrat doctor` and confirm it exits clean. If it fails, stop and report.
 Check usage mode:
 
 ```
-careerrat modes allows research:boards
+careerrat modes allows research:boards --explicit
 ```
 
-If it returns `skip`, an explicit user request to run board discovery is already the
-override. Continue without asking again. For an automatic/background handoff, stop.
+Use `--explicit` when the user asked for board discovery. Their request authorizes this
+one run and must not trigger another override question or change their saved usage mode.
+For an automatic or background handoff, omit `--explicit`; stop if that verdict is
+`skip`. If the explicit verdict is `downshift`, run a smaller pass. If it is `run`,
+continue normally.
 
 Read candidate context through DB-first accessors/compat exports and read source
 config with `careerrat searches --json`. Extract:

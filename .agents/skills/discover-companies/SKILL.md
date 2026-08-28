@@ -71,12 +71,14 @@ Run `careerrat doctor` and confirm it exits clean. If it fails, stop and report.
 Check usage mode:
 
 ```
-careerrat modes allows research:companies
+careerrat modes allows research:companies --explicit
 ```
 
-If it returns `skip` / `downshift`, treat company discovery as discretionary: explain that
-lean usage mode downshifts it and either run a smaller pass (fewer queries) or proceed only
-on an explicit override. If it returns `run`, continue.
+Use `--explicit` when the user asked for company discovery. Their request authorizes this
+one run and must not trigger another override question or change their saved usage mode.
+For an automatic or background handoff, omit `--explicit`; stop if that verdict is
+`skip`. If the explicit verdict is `downshift`, run a smaller pass with fewer queries. If
+it is `run`, continue normally.
 
 Read the input files above. Extract:
 

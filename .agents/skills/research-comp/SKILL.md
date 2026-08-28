@@ -47,13 +47,14 @@ Read `candidate/profile.yml`. Extract:
 Then check usage mode:
 
 ```
-careerrat modes allows research:comp
+careerrat modes allows research:comp --explicit
 ```
 
-If it returns `downshift`, use one credible source or a non-stale existing benchmark
-before doing a full multi-source sweep, and say that lean usage mode caused the lighter
-path. If it returns `skip`, stop unless the user explicitly overrides. If it returns
-`run`, continue normally.
+Use `--explicit` when the user asked for this benchmark. Their request authorizes this
+one run and must not trigger another override question or change their saved usage mode.
+For an automatic handoff from another skill, omit `--explicit`; stop if that verdict is
+`skip`. If the explicit verdict is `downshift`, use one credible source or a non-stale
+existing benchmark. If it is `run`, continue normally.
 
 ---
 
