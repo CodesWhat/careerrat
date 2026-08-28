@@ -540,6 +540,8 @@ test("New York home accepts every NYC borough without admitting nearby non-NYC p
       offer("queens", "Queens Corp", "Queens, New York, USA"),
       offer("bronx", "Bronx Corp", "Bronx, New York, USA"),
       offer("staten-island", "Staten Island Corp", "Staten Island, New York, USA"),
+      offer("nyc-country-label", "NYC Country Label Corp", "New York, USA"),
+      offer("new-york-state", "New York State Corp", "New York State, USA"),
       offer("jersey-city", "Jersey City Corp", "Jersey City, NJ"),
       offer("newark", "Newark Corp", "Newark, NJ"),
       offer("yonkers", "Yonkers Corp", "Yonkers, NY"),
@@ -552,12 +554,14 @@ test("New York home accepts every NYC borough without admitting nearby non-NYC p
     "Bronx Corp",
     "Brooklyn Corp",
     "Manhattan Corp",
+    "NYC Country Label Corp",
     "Queens Corp",
     "Staten Island Corp",
   ]);
   assert.deepEqual(result.filteredLocation.map((row) => row.company).sort(), [
     "Jersey City Corp",
     "Long Island Corp",
+    "New York State Corp",
     "Newark Corp",
     "Yonkers Corp",
   ]);

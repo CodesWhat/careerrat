@@ -494,6 +494,11 @@ const NEW_YORK_CITY_POSTAL_RANGES = Object.freeze([
   [11201, 11256],
   [11351, 11697],
 ]);
+const NEW_YORK_CITY_COUNTRY_LABELS = new Set([
+  "new york usa",
+  "new york united states",
+  "new york united states of america",
+]);
 const SAN_FRANCISCO_BAY_AREA_ALIASES = new Set([
   "bay area",
   "sf bay area",
@@ -524,6 +529,7 @@ function normalizePlace(value) {
   if (/(?:^| )new york(?: |$)/.test(normalized) && /\b\d{5}(?: \d{4})?\b/.test(normalized)) {
     return hasNewYorkCityPostalCode(normalized) ? "new york city" : normalized;
   }
+  if (NEW_YORK_CITY_COUNTRY_LABELS.has(normalized)) return "new york city";
   if (placeContainsAlias(normalized, NEW_YORK_CITY_ALIASES)) return "new york city";
   if (placeContainsAlias(normalized, SAN_FRANCISCO_BAY_AREA_ALIASES)) {
     return "san francisco bay area";

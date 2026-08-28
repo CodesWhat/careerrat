@@ -852,6 +852,80 @@ test("runAiWebSearch partitions all five explicit bar titles across two bounded 
   }
 });
 
+test("runAiWebSearch keeps oversized multi-title hints atomic and location-scoped", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: false,
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  const titles = [
+    "Assistant Bar Manager",
+    "Bar Operations Lead",
+    "Lead Bartender",
+    "Head Bartender",
+    "Operations Manager, Food & Beverage",
+    "General Manager",
+  ];
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Hospitality leadership", titles }],
+      fit_bands: { fit_floor: 0 },
+    },
+  });
+  saveSearchPrompts({
+    repoRoot,
+    prompts: [
+      {
+        id: "p1",
+        text: `Find ${titles.join(", ")} openings in New York City.`,
+      },
+    ],
+  });
+  const inputs = [];
+
+  await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      emitAssistantJson(onEvent, {
+        roles: [],
+        queries_run: [{ prompt_id: "p1", query: "hospitality leadership", status: "completed" }],
+      });
+      return { ok: true };
+    },
+  });
+
+  const hints = inputs[0].search_plan.query_hints;
+  assert.equal(hints.length, 4);
+  for (const { query } of hints) {
+    assert.ok(query.length <= 100, query);
+    assert.equal((query.match(/"/g) || []).length % 2, 0, query);
+    assert.equal((query.match(/\(/g) || []).length, (query.match(/\)/g) || []).length, query);
+    assert.match(query, /"New York, NY"/);
+    for (const quotedTerm of query.match(/"[^"]+"/g) || []) {
+      assert.doesNotMatch(quotedTerm, /\bOR\b/, query);
+    }
+  }
+  for (const title of titles) {
+    assert.ok(
+      hints.some(({ query }) => query.includes(`"${title}"`)),
+      `${title}: ${JSON.stringify(hints)}`
+    );
+  }
+});
+
 test("runAiWebSearch drops optional clauses before clipping one whole configured title", async () => {
   const repoRoot = repo({ prompts: 1 });
   const title =

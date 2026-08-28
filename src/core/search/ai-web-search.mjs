@@ -930,6 +930,16 @@ function boundedSearchQuery(titles, locationClause, sourceClause = "") {
   if (withoutSource.length <= MAX_SEARCH_QUERY_LENGTH) return withoutSource;
   const titlesOnly = searchTitleClause(titles);
   if (titlesOnly.length <= MAX_SEARCH_QUERY_LENGTH) return titlesOnly;
+  if (titles.length > 1) {
+    const compactTitles = [];
+    for (const title of titles) {
+      const candidate = [...compactTitles, title];
+      if (searchQuery(candidate, locationClause).length > MAX_SEARCH_QUERY_LENGTH) break;
+      compactTitles.push(title);
+    }
+    if (compactTitles.length) return searchQuery(compactTitles, locationClause);
+    return boundedSearchQuery([titles[0]], locationClause);
+  }
   return boundedFallbackQuery(titles.join(" OR "), "");
 }
 
@@ -972,18 +982,23 @@ function directSourceClause(
 }
 
 function partitionSearchTitles(titles, locationClause) {
-  if (titles.length <= 1) return [titles, titles];
-  for (let split = titles.length - 1; split >= 1; split -= 1) {
-    const broadTitles = titles.slice(0, split);
-    const directTitles = titles.slice(split);
+  if (titles.length <= 1) return [titles];
+  const groups = [];
+  let current = [];
+  for (const title of titles) {
+    const candidate = [...current, title];
     if (
-      searchQuery(broadTitles, locationClause, "careers").length <= MAX_SEARCH_QUERY_LENGTH &&
-      searchQuery(directTitles, locationClause, "careers").length <= MAX_SEARCH_QUERY_LENGTH
+      current.length > 0 &&
+      searchQuery(candidate, locationClause, "careers").length > MAX_SEARCH_QUERY_LENGTH
     ) {
-      return [broadTitles, directTitles];
+      groups.push(current);
+      current = [title];
+    } else {
+      current = candidate;
     }
   }
-  return [[titles[0]], titles.slice(1)];
+  if (current.length) groups.push(current);
+  return groups;
 }
 
 function buildSearchQueryHints(
@@ -1014,7 +1029,7 @@ function buildSearchQueryHints(
       },
     ];
   }
-  const [broadTitles, directTitles] = partitionSearchTitles(titles, locationClause);
+  const titleGroups = partitionSearchTitles(titles, locationClause);
   const sourceHint = (hintTitles, directFirst) => {
     const sourceClause = directSourceClause(
       hintTitles,
@@ -1032,6 +1047,15 @@ function buildSearchQueryHints(
     };
   };
   if (titles.length >= 3) {
+    if (titleGroups.length > 2) {
+      const hints = titleGroups.slice(0, 4).map((hintTitles) => sourceHint(hintTitles, true));
+      for (const hintTitles of titleGroups) {
+        if (hints.length >= 4) break;
+        hints.push({ kind: initialKind, query: boundedSearchQuery(hintTitles, locationClause) });
+      }
+      return hints;
+    }
+    const [broadTitles, directTitles = broadTitles] = titleGroups;
     return [
       { kind: initialKind, query: boundedSearchQuery(broadTitles, locationClause) },
       { kind: initialKind, query: boundedSearchQuery(directTitles, locationClause) },
@@ -1039,6 +1063,7 @@ function buildSearchQueryHints(
       sourceHint(directTitles, false),
     ];
   }
+  const [broadTitles, directTitles = broadTitles] = titleGroups;
   return [
     { kind: initialKind, query: boundedSearchQuery(broadTitles, locationClause) },
     sourceHint(directTitles, false),
