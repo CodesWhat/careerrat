@@ -131,6 +131,20 @@ function canonicalRecoveryRejectionReason(offer, { config }) {
   return null;
 }
 
+function fitFloorRecoveryRejectionReason(offer, fitFloor) {
+  return offerMeetsFitFloor(offer, fitFloor)
+    ? null
+    : `The canonical fit score is below the saved presentation floor of ${fitFloor}.`;
+}
+
+function matchingCanonicalCandidateIndex(candidates, offer) {
+  return candidates.findIndex((candidate) => {
+    const candidateKeys = new Set();
+    addPostingIdentity(candidateKeys, candidate);
+    return postingIdentityIsSeen(offer, candidateKeys);
+  });
+}
+
 // Sourced-row `gate` for an AI-web-search survivor. This mode's `candidate`
 // context (buildSearchPromptContext) never carries company-history or
 // application-limit data (see the SKILL.md section's own note), so unlike
@@ -1049,10 +1063,6 @@ export async function runAiWebSearch({
         ...(hydrated?.url && hydrated.url !== offer.url ? { canonicalUrl: hydrated.url } : {}),
         ...(hydrated?.bodyFetchReason ? { error: hydrated.bodyFetchReason } : {}),
       });
-      if (isReceiptOnly) {
-        receiptPromptIds.add(promptId);
-        continue;
-      }
       if (!bodyText || hydrated?.bodyFetchStatus === "unavailable") {
         const reason = hydrated?.bodyFetchReason || "The job description could not be read.";
         captureFailures.push({
@@ -1069,20 +1079,42 @@ export async function runAiWebSearch({
       const canonicalKey = normalizeCompanyRoleKey(hydrated.company, hydrated.title);
       const canonicalReq = extractReqId(hydrated.url);
       const canonicalOffer = { ...hydrated, key: canonicalKey, reqId: canonicalReq.id };
-      const canonicalDuplicate = postingIdentityIsSeen(canonicalOffer, seenPostingKeys);
-      if (canonicalDuplicate) {
-        duplicates += 1;
-        canonicalPromptIds.add(promptId);
-        continue;
-      }
-      addPostingIdentity(seenPostingKeys, canonicalOffer);
-      canonicalCandidates.push(canonicalOffer);
       const recoveryRejection = canonicalRecoveryRejectionReason(canonicalOffer, { config });
       if (recoveryRejection) {
+        if (!isReceiptOnly) canonicalCandidates.push(canonicalOffer);
         if (!rejectionsByPrompt.has(promptId)) rejectionsByPrompt.set(promptId, []);
         rejectionsByPrompt.get(promptId).push({ offer: canonicalOffer, reason: recoveryRejection });
         continue;
       }
+
+      const canonicalDuplicate = postingIdentityIsSeen(canonicalOffer, seenPostingKeys);
+      const fitFloorRejection = fitFloorRecoveryRejectionReason(canonicalOffer, fitFloor);
+      if (fitFloorRejection) {
+        if (!canonicalDuplicate) {
+          addPostingIdentity(seenPostingKeys, canonicalOffer);
+          canonicalCandidates.push(canonicalOffer);
+        }
+        if (!rejectionsByPrompt.has(promptId)) rejectionsByPrompt.set(promptId, []);
+        rejectionsByPrompt.get(promptId).push({ offer: canonicalOffer, reason: fitFloorRejection });
+        continue;
+      }
+
+      if (canonicalDuplicate) {
+        if (!isReceiptOnly) duplicates += 1;
+        const existingIndex = matchingCanonicalCandidateIndex(canonicalCandidates, canonicalOffer);
+        if (
+          existingIndex >= 0 &&
+          !offerMeetsFitFloor(canonicalCandidates[existingIndex], fitFloor)
+        ) {
+          canonicalCandidates[existingIndex] = canonicalOffer;
+        }
+        if (isReceiptOnly) receiptPromptIds.add(promptId);
+        else canonicalPromptIds.add(promptId);
+        continue;
+      }
+
+      addPostingIdentity(seenPostingKeys, canonicalOffer);
+      canonicalCandidates.push(canonicalOffer);
       canonicalPromptIds.add(promptId);
     }
 

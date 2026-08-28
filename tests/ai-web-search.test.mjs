@@ -1914,6 +1914,220 @@ test("runAiWebSearch lets recovery replace a third-party URL with a canonical di
   assert.equal(result.offers[0]?.url, directUrl);
 });
 
+test("runAiWebSearch lets a later canonical occurrence qualify after an earlier hard-gate rejection", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: false,
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Hospitality operations", titles: ["Bar Manager"] }],
+      fit_bands: { fit_floor: 65 },
+    },
+  });
+  const canonicalUrl = "https://job-boards.greenhouse.io/hospitality/jobs/556677";
+  const outsideSourceUrl = "https://outside.example/jobs/bar-manager";
+  const localSourceUrl = "https://local.example/jobs/bar-manager";
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: assistantJson({
+      roles: [
+        role({
+          company: "Hospitality Group",
+          title: "Bar Manager",
+          url: outsideSourceUrl,
+          location: "San Francisco, CA",
+        }),
+        role({
+          company: "Hospitality Group",
+          title: "Bar Manager",
+          url: localSourceUrl,
+          location: "New York, NY",
+        }),
+      ],
+      queries_run: [{ prompt_id: "p1", query: "NYC bar manager jobs", status: "completed" }],
+    }),
+    resolveJobUrlImpl: async (url) =>
+      specificResolution(canonicalUrl, {
+        company: "Hospitality Group",
+        title: "Bar Manager",
+        location: url === outsideSourceUrl ? "San Francisco, CA" : "New York, NY",
+        bodyText: fullJd("Active bar manager posting"),
+        liveness: { result: "active", reason: "visible apply control" },
+      }),
+  });
+
+  assert.equal(result.new, 1, JSON.stringify(result));
+  assert.equal(result.presented, 1, JSON.stringify(result));
+  assert.deepEqual(result.reasonCounts, { location: 1 });
+  const [saved] = readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search");
+  assert.equal(saved.link, canonicalUrl);
+  assert.equal(saved.loc, "New York, NY");
+});
+
+test("runAiWebSearch does not let a rejected preliminary duplicate satisfy prompt coverage", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      location: {
+        home: "New York, NY",
+        remote: false,
+        hybrid: true,
+        onsite: true,
+        relocation: [],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Hospitality operations", titles: ["Bar Manager"] }],
+      fit_bands: { fit_floor: 65 },
+    },
+  });
+  const rejectedUrl = "https://stale.example/jobs/bar-manager";
+  const replacementUrl = "https://active.example/jobs/bar-manager";
+  const inputs = [];
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      const freshnessRecovery =
+        typeof input === "string" && input.includes("canonical checker rejected");
+      emitAssistantJson(onEvent, {
+        roles: freshnessRecovery
+          ? [
+              role({
+                company: "Active Hospitality",
+                title: "Bar Manager",
+                url: replacementUrl,
+                location: "New York, NY",
+              }),
+            ]
+          : inputs.length === 1
+            ? [
+                role({
+                  company: "Stale Hospitality",
+                  title: "Bar Manager",
+                  url: rejectedUrl,
+                  location: "San Francisco, CA",
+                }),
+                role({
+                  company: "Stale Hospitality",
+                  title: "Bar Manager",
+                  url: rejectedUrl,
+                  location: "San Francisco, CA",
+                }),
+              ]
+            : [],
+        queries_run: [{ prompt_id: "p1", query: `bar manager query ${inputs.length}` }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: async (url) =>
+      specificResolution(url, {
+        company: url === rejectedUrl ? "Stale Hospitality" : "Active Hospitality",
+        title: "Bar Manager",
+        location: url === rejectedUrl ? "San Francisco, CA" : "New York, NY",
+        bodyText: fullJd("Active bar manager posting"),
+        liveness: { result: "active", reason: "visible apply control" },
+      }),
+  });
+
+  assert.ok(
+    inputs.some(
+      (input) => typeof input === "string" && input.includes("canonical checker rejected")
+    ),
+    "the rejected duplicate must leave its prompt eligible for freshness recovery"
+  );
+  assert.equal(result.new, 1, JSON.stringify(result));
+  assert.equal(result.presented, 1, JSON.stringify(result));
+  assert.deepEqual(
+    readDbScannerRows({ repoRoot })
+      .filter((row) => row.source === "ai-web-search")
+      .map((row) => row.link),
+    [replacementUrl]
+  );
+});
+
+test("runAiWebSearch does not count a below-fit-floor canonical result as prompt coverage", async () => {
+  const repoRoot = repo({ prompts: 1 });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Platform", titles: ["Platform Engineer"] }],
+      fit_bands: { fit_floor: 65 },
+    },
+  });
+  const belowFloorUrl = "https://jobs.example.test/below-fit-floor";
+  const qualifiedUrl = "https://jobs.example.test/qualified-fit";
+  const inputs = [];
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: async ({ input, onEvent }) => {
+      inputs.push(input);
+      const freshnessRecovery =
+        typeof input === "string" && input.includes("canonical checker rejected");
+      emitAssistantJson(onEvent, {
+        roles: freshnessRecovery
+          ? [
+              role({
+                company: "Qualified Co",
+                title: "Platform Engineer",
+                url: qualifiedUrl,
+                fit_score: 88,
+              }),
+            ]
+          : inputs.length === 1
+            ? [
+                role({
+                  company: "Below Floor Co",
+                  title: "Platform Engineer",
+                  url: belowFloorUrl,
+                  fit_score: 64,
+                  fit_bucket: "stretch",
+                }),
+              ]
+            : [],
+        queries_run: [{ prompt_id: "p1", query: `platform query ${inputs.length}` }],
+      });
+      return { ok: true };
+    },
+    resolveJobUrlImpl: canonicalResolver(),
+  });
+
+  assert.ok(
+    inputs.some(
+      (input) => typeof input === "string" && input.includes("canonical checker rejected")
+    ),
+    "below-floor results must leave the prompt eligible for a qualified replacement"
+  );
+  assert.equal(result.new, 2, JSON.stringify(result));
+  assert.ok(
+    result.offers.some((offer) => offer.url === qualifiedUrl),
+    JSON.stringify(result)
+  );
+});
+
 test("runAiWebSearch sends recovery candidates through the existing hard gates", async () => {
   const repoRoot = repo({ prompts: 1 });
   candidateConfigPatch({
@@ -2022,9 +2236,9 @@ test("runAiWebSearch sends recovery candidates through the existing hard gates",
     },
   });
 
-  assert.equal(calls, 5);
+  assert.equal(calls, 6, "below-fit-floor recovery does not satisfy prompt coverage");
   assert.deepEqual(hydrated.sort(), [belowFloorUrl, expiredUrl, lowFitUrl, outsideUrl].sort());
-  assert.equal(result.invalid, 2);
+  assert.equal(result.invalid, 4);
   assert.deepEqual(result.reasonCounts, { location: 1, salary: 1 });
   assert.equal(result.new, 1, JSON.stringify(result));
   assert.equal(result.presented, 0, JSON.stringify(result));
