@@ -32,6 +32,7 @@ export function pendingSourceLoginRequests(config) {
   const requests = [];
   for (const source of searchList(config)) {
     if (source?.enabled !== false || source.source_type !== "browser") continue;
+    if (source.login_skipped === true) continue;
     const url = sourceUrl(source);
     if (!url) continue;
     const identity = sourceIdentity(source, url);

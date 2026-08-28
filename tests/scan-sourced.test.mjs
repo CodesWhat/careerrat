@@ -2463,6 +2463,70 @@ test("runSourcedScan preflights the exact disabled authenticated source instead 
   }
 });
 
+test("runSourcedScan asks about each disabled login source while continuing enabled sources", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({
+      repoRoot,
+      name: "sourced-scan",
+      data: { title_filter: { positive: [], negative: [] }, tracked_companies: [] },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "Example RSS",
+            source_type: "rss",
+            label: "Public jobs",
+            rssUrl: "https://example.test/jobs.xml",
+            enabled: true,
+          },
+          {
+            provider: "indeed.com",
+            source_type: "browser",
+            auth: true,
+            platform: "indeed",
+            label: "Indeed NYC operations",
+            url: "https://www.indeed.com/jobs?q=operations&l=New%20York%2C%20NY",
+            enabled: false,
+          },
+        ],
+      },
+    });
+    let captures = 0;
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: true,
+      fetchImpl: async () =>
+        new Response('<?xml version="1.0"?><rss><channel></channel></rss>', { status: 200 }),
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      captureBrowserSourceImpl: async () => {
+        captures += 1;
+        throw new Error("a disabled source must not open before Yes");
+      },
+    });
+
+    assert.equal(captures, 0);
+    assert.deepEqual(summary.errors, []);
+    assert.deepEqual(summary.loginRequests, [
+      {
+        platform: "indeed",
+        label: "Indeed",
+        sourceLabel: "Indeed NYC operations",
+        url: "https://www.indeed.com/jobs?q=operations&l=New%20York%2C%20NY",
+        prompt: "Do you want to log into Indeed so I can use it?",
+      },
+    ]);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("explicit config mode in a DB workspace captures output without mutating DB product state", async () => {
   const repoRoot = tempRepo();
   try {

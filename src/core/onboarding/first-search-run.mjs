@@ -47,12 +47,6 @@ const COMPANY_BOARD_BACKFILL_TIMEOUT_MS = 3000;
 const COMPANY_BOARD_AI_HINT_TIMEOUT_MS = 8000;
 const COMPANY_BOARD_AI_HINT_MAX_NAMES = 20;
 
-const NO_DETERMINISTIC_SOURCES = Object.freeze({
-  code: "NO_DETERMINISTIC_SOURCES",
-  message: "No enabled job sources are ready yet.",
-  action: "Add or enable a job source, then retry the search.",
-});
-
 const STATUS_LABELS = Object.freeze({
   not_started: "Not started",
   running: "Running",
@@ -368,10 +362,6 @@ function supportedAtsCompanies(sourcedScan = {}) {
   });
 }
 
-function sourceSetupError() {
-  return { ...NO_DETERMINISTIC_SOURCES };
-}
-
 function trackedCompanyNames(candidateConfig) {
   const seen = new Set();
   const names = [];
@@ -671,23 +661,10 @@ async function startSearchRun({
     },
   });
 
-  let run = start.run;
-  if (
-    start.reused !== true &&
-    deterministicSources.attempted < 1 &&
-    Number(deterministicSources.pendingLogins || 0) < 1
-  ) {
-    run = sourcingRunFail({
-      ...pathCtx,
-      id: start.run.id,
-      error: sourceSetupError(),
-    }).run;
-  }
-
   return {
     ok: true,
     reused: start.reused === true,
-    run: mapSourcingRunForUi(run),
+    run: mapSourcingRunForUi(start.run),
     sources: {
       searches: Array.isArray(prepared.searchSources?.searches)
         ? prepared.searchSources.searches.length
@@ -905,20 +882,6 @@ export async function runFirstSearchInBackground({
       searchSources,
       sourcedScan,
     });
-    if (deterministicSources.attempted < 1 && Number(deterministicSources.pendingLogins || 0) < 1) {
-      if (!settle) {
-        return {
-          settlement: { status: "failed", error: sourceSetupError() },
-          value: null,
-        };
-      }
-      return sourcingRunFail({
-        ...pathCtx,
-        id: runId,
-        error: sourceSetupError(),
-      }).run;
-    }
-
     // Progress is best-effort telemetry. A failed progress write (e.g. the run
     // was concurrently failed or retried, flipping it out of RUNNING) must never
     // abort the scan or block completion — partial results are already persisted

@@ -38,6 +38,10 @@
           "url": { "type": "string" },
           "rssUrl": { "type": "string" },
           "enabled": { "type": "boolean" },
+          "login_skipped": {
+            "type": "boolean",
+            "description": "True after the user answers No to the point-of-use login question. A later explicit enable clears it."
+          },
           "lastRunAt": { "type": "string" },
           "recency": {
             "type": "object",

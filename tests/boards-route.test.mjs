@@ -626,6 +626,53 @@ test("source login toggles one exact URL when saved labels are duplicated", () =
   );
 });
 
+test("source login No persists a skip and a later enable makes the source askable again", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const sourceUrl = "https://www.indeed.com/jobs?q=operations";
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "indeed.com",
+          source_type: "browser",
+          auth: true,
+          platform: "indeed",
+          label: "Indeed operations",
+          url: sourceUrl,
+          enabled: false,
+        },
+      ],
+    },
+  });
+
+  const skipped = setSearchSourceEnabled({
+    repoRoot,
+    selector: "Indeed operations",
+    sourceUrl,
+    enabled: false,
+    loginDecision: "no",
+  });
+  assert.equal(skipped.changed, true);
+  assert.equal(skipped.source.loginSkipped, true);
+  assert.equal(
+    sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches[0].login_skipped,
+    true
+  );
+
+  setSearchSourceEnabled({
+    repoRoot,
+    selector: "Indeed operations",
+    sourceUrl,
+    enabled: true,
+  });
+  const enabled = sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches[0];
+  assert.equal(enabled.enabled, true);
+  assert.equal(enabled.login_skipped, undefined);
+});
+
 test("source login toggles reject a stale URL instead of mutating by label", () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });

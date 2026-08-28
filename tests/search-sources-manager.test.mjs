@@ -256,6 +256,26 @@ test("browser source add and login preflight reject a known site label on anothe
   );
 });
 
+test("login preflight keeps a durable No quiet on later searches", () => {
+  assert.deepEqual(
+    pendingSourceLoginRequests({
+      searches: [
+        {
+          provider: "indeed.com",
+          platform: "indeed",
+          source_type: "browser",
+          auth: true,
+          label: "Indeed saved search",
+          url: "https://www.indeed.com/jobs?q=operations",
+          enabled: false,
+          login_skipped: true,
+        },
+      ],
+    }),
+    []
+  );
+});
+
 // ---------------------------------------------------------------------------
 // setEnabled — immutability and selector types
 // ---------------------------------------------------------------------------

@@ -107,7 +107,10 @@ function readIndex(body, length) {
 }
 
 function searchLegitimacy(search) {
-  if (search?.auth === true) return search?.enabled === false ? "login-needed" : "supported";
+  if (search?.auth === true) {
+    if (search?.login_skipped === true) return "supported";
+    return search?.enabled === false ? "login-needed" : "supported";
+  }
   if (search?.source_type === "rss" || search?.rssUrl) return "supported";
   if (["ats", "board"].includes(search?.source_type) && isBoardProviderSupported(search.provider)) {
     return "supported";
@@ -134,6 +137,7 @@ function maintenanceView(pathCtx) {
       }),
       auth: search.auth === true,
       platform: search.platform || null,
+      ...(search.login_skipped === true ? { loginSkipped: true } : {}),
     })),
     companies: (companyConfig.tracked_companies || []).map((company, index) => ({
       index,
@@ -293,11 +297,15 @@ export function setSearchSourceEnabled({
   selector,
   sourceUrl,
   enabled,
+  loginDecision,
 } = {}) {
   const pathCtx = { repoRoot, env };
   const normalizedSelector = sourceSelectorKey(selector);
   if (!normalizedSelector) badRequest("source selector is required");
   if (typeof enabled !== "boolean") badRequest("source enabled state must be boolean");
+  if (loginDecision != null && !new Set(["yes", "no"]).has(loginDecision)) {
+    badRequest("source login decision must be yes or no");
+  }
   const current = readDbSearchSources(pathCtx);
   const model = maintenanceView(pathCtx);
   let matches = [];
@@ -335,9 +343,12 @@ export function setSearchSourceEnabled({
       ? requireBrowserSourceIdentity(existing, existing.url)
       : null;
   const normalized = identity ? { ...userOwned, platform: identity.platform } : userOwned;
+  if (enabled || loginDecision === "yes") delete normalized.login_skipped;
+  if (loginDecision === "no") normalized.login_skipped = true;
   const changed =
     existing.enabled !== enabled ||
     existing.enabled_reason != null ||
+    existing.login_skipped !== normalized.login_skipped ||
     (identity && existing.platform !== identity.platform);
   searches[match.index] = { ...normalized, enabled };
   const nextModel = changed

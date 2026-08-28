@@ -717,7 +717,7 @@ test("countDeterministicSources counts generated query-only HiringCafe searches"
   });
 });
 
-test("failed first-search can retry as fresh work after deterministic source setup is fixed", async () => {
+test("first-search starts honestly when source healing still leaves no deterministic sources", async () => {
   const repoRoot = tempRepo();
   markSearchReady(repoRoot, { domain: "operations" });
   candidateConfigPatch({
@@ -727,39 +727,11 @@ test("failed first-search can retry as fresh work after deterministic source set
   });
   seedNoDeterministicSources(repoRoot);
 
-  const failed = await startFirstSearchRun({ repoRoot, env: {} });
-  assert.equal(failed.reused, false);
-  assert.equal(failed.run.status, "failed");
-  assert.equal(failed.run.error.code, "NO_DETERMINISTIC_SOURCES");
-
-  sourceConfigPut({
-    repoRoot,
-    name: "search-sources",
-    data: {
-      title_filter: {},
-      location_filter: null,
-      searches: [
-        {
-          label: "Fixed RSS",
-          source_type: "rss",
-          rssUrl: "https://example.test/jobs.xml",
-          enabled: true,
-        },
-      ],
-      tracked_companies: [],
-      source_catalog: {},
-    },
-  });
-
-  const retry = await startFirstSearchRun({
-    repoRoot,
-    env: {},
-    retryFailed: true,
-  });
-  assert.equal(retry.reused, false);
-  assert.equal(retry.run.status, "running");
-  assert.notEqual(retry.run.id, failed.run.id);
-  assert.equal(retry.run.metadata.retryOf, failed.run.id);
+  const started = await startFirstSearchRun({ repoRoot, env: {} });
+  assert.equal(started.reused, false);
+  assert.equal(started.run.status, "running");
+  assert.equal(started.run.error, null);
+  assert.equal(started.sources.deterministicSources.attempted, 0);
 });
 
 test("first-search completion is reused only while targeting and source inputs are unchanged", async () => {

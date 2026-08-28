@@ -2574,22 +2574,26 @@ test("typing No answers a pending source-login question and continues other sour
     }),
   });
   const searches = [];
+  const sourceChanges = [];
 
   const result = await runWorkspaceAgentTurn({
     repoRoot,
     env: {},
     text: "No",
-    setSearchSourceEnabledImpl: ({ enabled }) => ({
-      changed: false,
-      source: {
-        label: "Indeed search",
-        target: sourceUrl,
-        sourceType: "browser",
-        enabled,
-        auth: true,
-        platform: "indeed",
-      },
-    }),
+    setSearchSourceEnabledImpl: (input) => {
+      sourceChanges.push(input);
+      return {
+        changed: true,
+        source: {
+          label: "Indeed search",
+          target: sourceUrl,
+          sourceType: "browser",
+          enabled: input.enabled,
+          auth: true,
+          platform: "indeed",
+        },
+      };
+    },
     startManualSearchImpl: async (input) => {
       searches.push(input);
       return { run: { id: "search-after-typed-no", status: "running" } };
@@ -2599,6 +2603,16 @@ test("typing No answers a pending source-login question and continues other sour
     },
   });
 
+  assert.deepEqual(sourceChanges, [
+    {
+      repoRoot,
+      env: {},
+      selector: "Indeed search",
+      sourceUrl: "https://www.indeed.com/jobs?q=operations",
+      enabled: false,
+      loginDecision: "no",
+    },
+  ]);
   assert.equal(searches.length, 1);
   assert.equal(searches[0].repoRoot, repoRoot);
   assert.deepEqual(searches[0].env, {});
@@ -2924,6 +2938,7 @@ test("No keeps the authenticated source disabled and continues the rest of the s
       selector: "Indeed search",
       sourceUrl: "https://www.indeed.com/jobs?q=operations",
       enabled: false,
+      loginDecision: "no",
     },
   ]);
   assert.equal(browserCalls, 0);

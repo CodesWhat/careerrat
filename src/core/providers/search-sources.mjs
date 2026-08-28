@@ -429,6 +429,7 @@ export function listSearches(config) {
     enabled: s.enabled,
     lastRunAt: s.recency?.lastRunAt ?? null,
     ...(s.auth ? { auth: true, platform: s.platform ?? null } : {}),
+    ...(s.login_skipped === true ? { login_skipped: true } : {}),
   }));
 }
 

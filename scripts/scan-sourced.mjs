@@ -459,9 +459,7 @@ export async function runSourcedScan({
   }
   const sourceTasks = searchSourceTasks(searchSources);
   const totalSources = companies.length + sourceTasks.length;
-  if (totalSources === 0) {
-    scanned.loginRequests.push(...pendingSourceLoginRequests(searchSources));
-  }
+  scanned.loginRequests.push(...pendingSourceLoginRequests(searchSources));
   let completedSources = 0;
   let progressFoundCount = 0;
   let progressErrorCount = scanned.errors.length;
