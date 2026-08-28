@@ -2216,6 +2216,22 @@ for (const transient of [
     label: "successful runtime turn with no assistant response",
     respond: async () => ({ ok: true }),
   },
+  {
+    label: "candidate-safe unavailable assistant response",
+    respond: async ({ onEvent }) => {
+      onEvent({
+        type: "assistant",
+        data: {
+          message: {
+            content: [
+              { type: "text", text: "Search response was unavailable in the authorized runtime." },
+            ],
+          },
+        },
+      });
+      return { ok: true };
+    },
+  },
 ]) {
   test(`runAiWebSearch retries one transient ${transient.label} on the frozen execution plan`, async () => {
     const repoRoot = repo({ prompts: 1 });

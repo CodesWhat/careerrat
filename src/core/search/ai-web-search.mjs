@@ -329,7 +329,8 @@ function isTransientAuthorizedRuntimeResponse({ runtimeResult, rawText }) {
     }
     return TRANSIENT_AUTHORIZED_RUNTIME_RESPONSE.test(String(runtimeResult.error || "").trim());
   }
-  return !String(rawText || "").trim();
+  const assistantText = String(rawText || "").trim();
+  return !assistantText || TRANSIENT_AUTHORIZED_RUNTIME_RESPONSE.test(assistantText);
 }
 
 function safeToolError(content) {
