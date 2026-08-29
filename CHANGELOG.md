@@ -4,6 +4,29 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.7] - 2026-08-29
+
+0.16.6 was tagged but never published: no release assets, no npm publish, no
+cask update. Everything listed under 0.16.6 ships here, plus the fixes below.
+
+### Fixed
+
+- Documentation describes the data layout a new install actually gets. Profile
+  and workspace files live under `.careerrat/`, not beside the repo's own
+  files, and the older top-level layout is called out as what an existing
+  install has.
+- The workspace visual test pins a ready engine instead of asking the host
+  which AI CLIs are installed, so it passes on a machine that has none.
+
+### Changed
+
+- Release evidence records an AI runtime's path relative to the home directory
+  instead of an absolute one, so a receipt committed to the public repository
+  cannot publish the generating machine's account name.
+- The live-search evidence generator withholds rows from companies on the
+  personal-sentinel list before it counts them, so a public posting that
+  happens to match one cannot trip the release-safety guard.
+
 ## [0.16.6] - 2026-08-28
 
 ### Changed
