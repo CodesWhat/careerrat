@@ -35,6 +35,26 @@ test("findUserDataLeaks catches candidate/workspace entries regardless of case",
   ]);
 });
 
+test("findUserDataLeaks catches a leaked .careerrat/ data root", () => {
+  // Since the data root moved, candidate/, workspace/, config/, internal/ and the
+  // sqlite db all nest under .careerrat/, so a tarball carrying any of them shows up
+  // only under that one prefix and the two bare legacy prefixes would never see it.
+  const leaks = findUserDataLeaks([
+    ".careerrat/candidate/resume.json",
+    ".careerrat/workspace/tracker.json",
+    ".CareerRat/internal/ai.env",
+    "./.careerrat/db/careerrat.sqlite",
+    "careerrat-data/notes.md",
+    "src/index.mjs",
+  ]);
+  assert.deepEqual(leaks, [
+    ".careerrat/candidate/resume.json",
+    ".careerrat/workspace/tracker.json",
+    ".CareerRat/internal/ai.env",
+    "./.careerrat/db/careerrat.sqlite",
+  ]);
+});
+
 test("findUserDataLeaks still exempts workspace/.gitkeep regardless of case", () => {
   const leaks = findUserDataLeaks([
     "workspace/.gitkeep",

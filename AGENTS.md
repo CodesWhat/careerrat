@@ -30,6 +30,51 @@ what the user is already seeing on screen. Speak for substance instead: question
 findings, results, and the teach-as-you-go concept explanations above, which stay
 exactly as they are.
 
+## Path Resolution
+
+Every bare path in this router and in every skill, `candidate/...`, `workspace/...`,
+`config/<generated file>`, `.internal/...`, is a symbolic name, not a literal
+filesystem path relative to the repo root. Resolve it before treating it as a real
+location:
+
+- **Legacy layout.** If `candidate/` (or `workspace/`, `.internal/`, one of the
+  generated `config/` files below) already exists directly at the repo root, that
+  segment stays exactly where it is. Read or write the bare path as written.
+- **Default layout.** Otherwise, that segment lives under the CareerRat data root:
+  `.careerrat/<segment>` for a git checkout, `~/.careerrat/<segment>` for an npm
+  install (global, local, or `npx`). Prefix the bare path with the data root
+  instead of treating it as repo-root-relative.
+- **`.internal/` loses its dot under the data root.** It is the one segment whose
+  resolved name differs from its bare name: `.internal/ai.env` resolves to
+  `<data root>/internal/ai.env`, not `<data root>/.internal/ai.env`. The dot is
+  what marks it hidden at the repo root, and the data root is already hidden.
+  `candidate/`, `workspace/` and `config/` all keep their names as written. Only
+  the legacy layout reads `.internal/` with the dot, because there it really is a
+  top-level `.internal/` directory.
+- **`CAREERRAT_HOME` override.** If set, it replaces the data root above verbatim
+  and nothing is probed at the repo root.
+- **`config/` is split.** Only four generated files move with the rule above:
+  `search-sources.yml`, `search-sources.json`, `sourced-scan.json`, `ai.json`.
+  Everything else under `config/` (schemas, `*.example.yml`) ships with the
+  package and always stays at the repo root.
+
+`candidate/`, `workspace/`, `.internal/`, and the four generated `config/` files
+each resolve independently. A given install can have a legacy top-level
+`candidate/` while `workspace/` already moved to the data root, or the reverse;
+don't assume one implies the other.
+
+**Resolve once per session, don't guess.** Run `careerrat doctor` (already part of
+the cold-start flow below): its `User data root: <path>` line is the data root
+from the rule above, and every path it lists under "User setup missing" is
+already shown resolved for whatever layout is actually on disk. For a path
+`doctor` doesn't surface, check directly: `ls candidate` (or `workspace`,
+`.internal`) at the repo root tells you which layout is active for that segment.
+
+This is the same resolution `src/core/paths/workspace.mjs` performs in code
+(`userPath()` / `resolveUserPaths()`). This router and every skill use the bare
+symbolic form throughout on purpose; resolve it by this rule rather than expecting
+a literal path or a restatement per instance.
+
 ## Getting Started (cold start)
 
 When a user pulls the repo fresh and says something like "familiarize yourself and
@@ -156,12 +201,9 @@ tarball extract so your `candidate/` and `workspace/` data are never touched.
 
 ## Local AI Key Storage
 
-The onboarding key step writes BYOK credentials through `src/core/ai/ai-env.mjs`.
-Path resolution follows the active CareerRat home: with `CAREERRAT_HOME` set,
-the file is `<CAREERRAT_HOME>/internal/ai.env`
-(no dot); in legacy repo-root mode it
-is `.internal/ai.env`. The value is chmod `0600`, loaded at server boot, and
-never echoed back by the API.
+The onboarding key step writes BYOK credentials through `src/core/ai/ai-env.mjs`
+to `.internal/ai.env` (see Path Resolution above for how that resolves). The
+value is chmod `0600`, loaded at server boot, and never echoed back by the API.
 
 ## Dashboard Dev Server Contract
 
@@ -211,8 +253,8 @@ renders from these files.
 ### Tracker Write Contract (hard — binds every writing skill)
 
 DB workspaces (`careerrat data status` exits 0) use the **Data Write Contract**
-below instead — this section governs legacy JSON-only workspaces (no
-`.careerrat/db/careerrat.db` yet).
+below instead. This section governs legacy JSON-only workspaces (no
+`db/careerrat.db` under the data root yet, see Path Resolution).
 
 `workspace/tracker.json` is the **single source of truth** for the dashboard.
 Every skill that mutates it — `apply-job`, `evaluate-job`, `tailor-application`,
@@ -308,10 +350,11 @@ contract — there is no code interceptor for them, by design.
 ### Data Write Contract (DB workspaces)
 
 Mode detection: run `careerrat data status`. **Exit 0 (a database exists at
-`.careerrat/db/careerrat.db`)** — every tracker-visible mutation goes through
-`careerrat data <verb>`; never hand-edit `tracker.json`/`activity.jsonl` with the
-Edit tool, they are generated files in this mode. **Nonzero exit (no database
-yet)** — the Tracker Write Contract above applies unchanged. A workspace only
+`db/careerrat.db` under the data root, see Path Resolution)**: every
+tracker-visible mutation goes through `careerrat data <verb>`; never hand-edit
+`tracker.json`/`activity.jsonl` with the Edit tool, they are generated files in
+this mode. **Nonzero exit (no database yet)**: the Tracker Write Contract above
+applies unchanged. A workspace only
 enters DB mode via an explicit `careerrat data import` (legacy migrate) or
 `careerrat data init` (fresh) — never trigger that migration yourself as a side
 effect of another skill.
@@ -1249,8 +1292,8 @@ session is user-initiated with the agent in the loop.
 logins. The default `auto` provider uses Orca's supervised browser inside an Orca
 workspace, otherwise the Chrome extension (Claude-in-Chrome / Codex); a
 **Playwright persistent profile** the user signs into once per platform remains the
-fallback (`~/.careerrat/board-profiles/<platform>` — the
-`scripts/capture-board-snapshot.mjs` model). Write skill prose tool-agnostically — "use
+fallback (`<data root>/board-profiles/<platform>`, data root per Path Resolution,
+the `scripts/capture-board-snapshot.mjs` model). Write skill prose tool-agnostically — "use
 the session browser," never an MCP namespace or vendor tool name. See
 `src/core/automation/session.mjs` and `docs/BROWSER.md`.
 

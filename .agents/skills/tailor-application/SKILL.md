@@ -5,7 +5,7 @@ description: Generate finished, honest role-specific resumes, cover letters, sho
 
 # tailor-application
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section. Bare `candidate/`, `workspace/`, `config/`, and `.internal/` paths below are symbolic; resolve them per AGENTS.md's Path Resolution rule.
 
 ## STEP 0 — Prerequisites: gate check
 
@@ -13,6 +13,7 @@ Read the current session context for the `evaluate-job` output block. Confirm it
 contains `GATE: KEEP` or `GATE: REVIEW` for this role.
 
 - If the gate output is present, echo the full block:
+
   ```
   GATE: KEEP|REVIEW - <reason>
   FIT: <band> <score> - <why>
@@ -20,6 +21,7 @@ contains `GATE: KEEP` or `GATE: REVIEW` for this role.
   COMP ANCHOR: <expected salary to state> - <rationale>
   ACTION: <action>
   ```
+
 - If the gate output is missing, run `evaluate-job` now before proceeding.
 - If `FIT` is stretch (score < `candidate/targeting.yml#fit_bands.med_min`, default
   65), warn: "FIT is stretch — tailoring will require stronger narrative framing.
@@ -52,12 +54,15 @@ analysis defaults only when both are absent. Record the resolved family (e.g. `f
 ## STEP 2 — Load learning context
 
 Run:
+
 ```
 careerrat learnings read "<role>"
 ```
+
 The helper classifies the role-family from `targeting.yml` and prints the learning file to stdout. If no file exists for this family it prints a skip note to stderr and exits 0 — a missing file is normal, never an error.
 
 When present, extract and note:
+
 - Positioning that has landed well for this track
 - Bullet phrasings that resonate with reviewers
 - Keywords that appear to match
@@ -124,6 +129,7 @@ Rules (all non-negotiable):
 **Always produce a cover letter whenever the application accepts one.** It is a second
 keyword-matching surface for the ATS and a free chance to reinforce fit, so it is the
 default, not an optional extra. Produce one when **any** of the following is true:
+
 - The application form has a cover-letter field — **required OR optional** (an optional
   field still means it accepts one; fill it)
 - The application is sent by email or as an attachment, so a cover letter can ride along
@@ -194,6 +200,7 @@ hand off to `email-comms` instead.
 ## STEP 7 — Placeholder lint
 
 Run:
+
 ```
 node src/cli/lint-placeholders.mjs workspace/tailored/
 ```
@@ -258,10 +265,12 @@ Read `candidate/profile.yml#candidate.toolchain` (set at onboarding via
 > STEP 11b for any PDF you intend to upload.
 
 **a. `pandoc`:**
+
 ```
 pandoc "workspace/tailored/<Company> — <Role>.md" -o "workspace/tailored/<Company> — <Role>.docx"
 soffice --headless --convert-to pdf "workspace/tailored/<Company> — <Role>.docx"
 ```
+
 `soffice` is the optional PDF-conversion companion; if it is not installed, mark
 the artifact as `.docx` upload and skip the PDF step.
 
@@ -273,9 +282,11 @@ fails, fix the source and rebuild.
 For PDF, prefer STEP 11b (`careerrat export … --pdf`) — `soffice` opens a raw
 `.md` as plain text and will not render Markdown structure reliably. Use
 LibreOffice only as a last-resort fallback when the bundled export can't run:
+
 ```
 soffice --headless --convert-to pdf "workspace/tailored/<Company> — <Role>.md"
 ```
+
 If you do fall back to this, eyeball the `.pdf` before marking it the upload
 artifact (1–2 pages, correct font, all black, ASCII, hyphen bullets).
 
@@ -325,9 +336,11 @@ inform keyword and narrative choices. If the session has already reached this po
 without the check, run it now as a final review.
 
 If the role-family has prior tracked applications, run:
+
 ```
 npm run analyze:outcomes -- --summary
 ```
+
 Scan for rejection patterns in this family or fit band. If a known reject signal
 appears in the current resume framing, flag it and offer to adjust before handing
 off.
@@ -378,6 +391,7 @@ truth; Downloads is a convenience copy for quick access. Plain-text artifacts
 ## STEP 12 — Hand off
 
 Confirm final artifact locations:
+
 ```
 workspace/tailored/<Company> — <Role>.md
 workspace/tailored/<Company> — <Role>.docx   (if built)

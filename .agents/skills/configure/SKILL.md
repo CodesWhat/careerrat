@@ -5,7 +5,7 @@ description: Show current settings and route changes to the validated CLI or own
 
 # configure
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section. Bare `candidate/`, `workspace/`, `config/`, and `.internal/` paths below are symbolic; resolve them per AGENTS.md's Path Resolution rule.
 
 > **Agent voice.** Read candidate modes through the shared DB-first accessor (`modes.agent_voice`, default `standard`) before producing settings summaries. Apply the register from AGENTS.md#mode-switches. `exec-summary` = changed setting + confirmation in one line; `standard` = current state + change + confirmation as short bullets; `verbose` = full settings matrix. To change `agent_voice` itself: `careerrat modes set agent_voice <value> --write`.
 
@@ -113,7 +113,7 @@ For `ingest-profile`-owned settings: tell the user which step to target. `ingest
 The session browser is the Layer 3 interactive provider (`docs/BROWSER.md`). Two options:
 
 - **Extension (recommended default):** Claude-in-Chrome or equivalent. It already holds the user's logins and password store, so authenticated portals just work. No credentials are stored by CareerRat.
-- **Playwright (fallback):** A persistent profile at `~/.careerrat/board-profiles/<platform>`. The user signs in once per platform; the session persists across runs.
+- **Playwright (fallback):** A persistent profile at `<data root>/board-profiles/<platform>` (data root per AGENTS.md's Path Resolution rule). The user signs in once per platform; the session persists across runs.
 
 Switch the provider with:
 

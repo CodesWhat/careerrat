@@ -92,6 +92,15 @@ function tempRepoWithSkill(skillNames = "test-skill") {
   }
   // A second skill dir with no SKILL.md — must never be discovered.
   mkdirSync(join(repoRoot, ".agents/skills/not-a-skill"), { recursive: true });
+  // Legacy top-level candidate/workspace markers — resolveUserPaths only
+  // anchors candidateDir/workspaceDir at these repoRoot-relative paths when
+  // it finds pre-existing legacy data here (workspace.mjs's
+  // legacyCandidate/legacyWorkspace checks); without them a fresh fixture
+  // reads as a brand-new install and anchors under repoRoot/.careerrat
+  // instead, which is what these tests' repoRoot-relative paths assume.
+  mkdirSync(join(repoRoot, "candidate"), { recursive: true });
+  mkdirSync(join(repoRoot, "workspace"), { recursive: true });
+  writeFileSync(join(repoRoot, "workspace", "settings.json"), "{}", "utf8");
   return repoRoot;
 }
 

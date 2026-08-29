@@ -108,6 +108,9 @@ export function fetchTarball(spec) {
 // Privacy guard: tarball entries that carry user data (candidate/ or non-scaffold
 // workspace/). A non-empty result means the published package leaked — refuse to install.
 //
+// ".careerrat/" is checked as well as the two bare legacy prefixes: since the data
+// root moved, candidate/, workspace/, config/, internal/ and the sqlite db all nest
+// under it, so a tarball carrying any of them shows up only under that one prefix.
 // Matching is case-insensitive and normalizes path separators/leading "./" before
 // testing, because CareerRat ships on case-insensitive filesystems (APFS, NTFS) where
 // "Candidate/x" and "candidate/x" are the same real path, and a case-sensitive or
@@ -121,6 +124,7 @@ export function findUserDataLeaks(entries) {
       .toLowerCase();
     return (
       /^candidate\//.test(normalized) ||
+      /^\.careerrat\//.test(normalized) ||
       (/^workspace\//.test(normalized) && !/\.gitkeep$/.test(normalized))
     );
   });

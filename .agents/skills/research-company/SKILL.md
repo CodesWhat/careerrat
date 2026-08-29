@@ -19,7 +19,7 @@ before an interview or application evaluation. Also use it automatically when
 `interview-prep` or `evaluate-job` needs company context and no non-stale artifact
 exists yet.
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section. Bare `candidate/`, `workspace/`, `config/`, and `.internal/` paths below are symbolic; resolve them per AGENTS.md's Path Resolution rule.
 
 > **Agent voice.** Read `candidate/modes.yml#agent_voice` (default `standard`) before producing the research summary presented to the user. Apply the register from AGENTS.md#mode-switches. The `workspace/research/<slug>.md` artifact is always written in full — register governs the **in-chat summary**: `exec-summary` = 3–5 bullet signals + file path; `standard` = short section-per-axis bullets + file path; `technical` = signal analysis + sourcing notes; `verbose` = full artifact mirrored in chat.
 
