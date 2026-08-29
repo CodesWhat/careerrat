@@ -74,6 +74,17 @@ function exactIdentitySet(receipt, rowIdentities) {
   return actual;
 }
 
+// Receipts are committed to a public repo, so an absolute path under the
+// generating machine's home directory would publish that account name. The
+// binaryFingerprint is what actually identifies the executable; the path is
+// context, and it stays just as readable rooted at ~.
+function homeRelativePath(value) {
+  const raw = String(value || "").trim();
+  const home = String(process.env.HOME || "").replace(/\/+$/, "");
+  if (!home || !raw.startsWith(`${home}/`)) return raw;
+  return `~${raw.slice(home.length)}`;
+}
+
 function rowIdentity({ runtimeId, fixtureId, company, role, location, source }) {
   return createHash("sha256")
     .update(
@@ -261,8 +272,8 @@ export function buildLiveSearchReceipt({
     providerFallback: providerFallback === true,
     runtime: {
       id: runtimeId,
-      path: String(runtimeVerification?.path || "").trim(),
-      realPath: String(runtimeVerification?.realPath || "").trim(),
+      path: homeRelativePath(runtimeVerification?.path),
+      realPath: homeRelativePath(runtimeVerification?.realPath),
       version: String(runtimeVerification?.version || "").trim(),
       binaryFingerprint: String(runtimeVerification?.binaryFingerprint || "")
         .trim()
